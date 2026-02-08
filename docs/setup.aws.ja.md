@@ -1,0 +1,93 @@
+# passwd-sso AWS セットアップ (ECS/Fargate + RDS)
+
+本ガイドは本番向けの AWS 構成例です:
+- App: ECS/Fargate (Next.js)
+- DB: Amazon RDS for PostgreSQL
+- SSO ブリッジ: SAML Jackson (ECS/Fargate)
+- Secrets: AWS Secrets Manager
+
+## 構成
+
+- `app` サービス (Next.js)
+- `jackson` サービス (SAML Jackson)
+- `db` は RDS (PostgreSQL)
+
+## 前提
+
+- VPC とサブネットを作成済み
+- ECS クラスタ (Fargate)
+- RDS PostgreSQL
+- Secrets Manager
+- 公開する場合は ALB を使用
+
+## シークレット
+
+Secrets Manager に保存:
+- `DATABASE_URL`
+- `AUTH_SECRET`
+- `AUTH_GOOGLE_ID`
+- `AUTH_GOOGLE_SECRET`
+- `AUTH_JACKSON_ID`
+- `AUTH_JACKSON_SECRET`
+- `ORG_MASTER_KEY`
+
+任意:
+- `GOOGLE_WORKSPACE_DOMAIN`
+- `SAML_PROVIDER_NAME`
+
+生成:
+```
+openssl rand -base64 32  # AUTH_SECRET
+openssl rand -hex 32     # ORG_MASTER_KEY
+```
+
+## RDS (PostgreSQL)
+
+- PostgreSQL 16 を推奨
+- バックアップや Multi-AZ は要件に合わせて設定
+- `DATABASE_URL` 例:
+```
+postgresql://USER:PASSWORD@HOST:PORT/DBNAME
+```
+
+## ECS/Fargate サービス
+
+### app サービス
+
+環境変数:
+- `DATABASE_URL` (RDS)
+- `AUTH_URL` (アプリの公開 URL)
+- `AUTH_SECRET`
+- `AUTH_GOOGLE_ID`
+- `AUTH_GOOGLE_SECRET`
+- `GOOGLE_WORKSPACE_DOMAIN` (任意)
+- `JACKSON_URL` (内部 or 公開 URL)
+- `AUTH_JACKSON_ID`
+- `AUTH_JACKSON_SECRET`
+- `SAML_PROVIDER_NAME`
+- `ORG_MASTER_KEY`
+
+### jackson サービス
+
+環境変数 (例):
+- `JACKSON_API_KEYS`
+- `DB_ENGINE=sql`
+- `DB_TYPE=postgres`
+- `DB_URL` (RDS)
+- `NEXTAUTH_URL` (jackson の公開 URL)
+- `EXTERNAL_URL` (jackson の公開 URL)
+- `NEXTAUTH_SECRET` (AUTH_SECRET と同一)
+- `NEXTAUTH_ACL=*`
+
+## マイグレーション
+
+一時タスクで実行:
+```
+npx prisma migrate deploy
+```
+
+## 補足
+
+- ALB + HTTPS (ACM 証明書) を推奨
+- `jackson` は可能ならアクセス制限
+- シークレットはタスク定義/コードに埋め込まない
