@@ -93,13 +93,18 @@ Edit `.env.local` and fill in:
 | `ORG_MASTER_KEY` | Org vault master key — `openssl rand -hex 32` |
 | `REDIS_URL` | (Optional) Redis URL for rate limiting |
 
+> **Redis is optional.** If `REDIS_URL` is not set, the app runs without Redis and rate limiting on vault unlock is disabled. For single-instance deployments, you can omit Redis entirely.
+
 ### 3. Start services
 
 **Development** (PostgreSQL + SAML Jackson + Next.js dev server):
 
 ```bash
-# Start PostgreSQL, SAML Jackson, and Redis
+# Start all services (with Redis for rate limiting)
 docker compose -f docker-compose.yml -f docker-compose.override.yml up -d db jackson redis
+
+# Or without Redis (single-instance / minimal setup)
+docker compose -f docker-compose.yml -f docker-compose.override.yml up -d db jackson
 
 # Run database migrations
 npm run db:migrate

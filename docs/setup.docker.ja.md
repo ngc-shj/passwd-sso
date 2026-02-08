@@ -92,7 +92,9 @@ cp .env.example .env.local
 | `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret | Jackson 管理画面で取得 |
 | `SAML_PROVIDER_NAME` | SAML IdP のログイン画面表示名 | 例: `HENNGE`, `Okta`, `Azure AD` |
 | `ORG_MASTER_KEY` | 組織用暗号化のマスターキー (256bit, hex) | `openssl rand -hex 32` |
-| `REDIS_URL` | 共有レート制限用の Redis URL | 例: `redis://host:6379` |
+| `REDIS_URL` | （任意）共有レート制限用の Redis URL | 例: `redis://host:6379` |
+
+> **Redis はオプションです。** `REDIS_URL` が未設定の場合、Redis なしで動作し、Vault アンロックのレート制限は無効になります。単一インスタンスで運用する場合は Redis を省略できます。
 
 ### 3. PostgreSQL の起動
 

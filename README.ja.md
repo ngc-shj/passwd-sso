@@ -93,13 +93,18 @@ cp .env.example .env.local
 | `ORG_MASTER_KEY` | 組織 Vault マスターキー — `openssl rand -hex 32` |
 | `REDIS_URL` | （任意）レート制限用 Redis URL |
 
+> **Redis はオプションです。** `REDIS_URL` が未設定の場合、Redis なしで動作し、Vault アンロックのレート制限は無効になります。単一インスタンスで運用する場合は Redis を省略できます。
+
 ### 3. サービスの起動
 
 **開発環境**（PostgreSQL + SAML Jackson + Next.js 開発サーバー）:
 
 ```bash
-# PostgreSQL、SAML Jackson、Redis を起動
+# 全サービスを起動（Redis でレート制限あり）
 docker compose -f docker-compose.yml -f docker-compose.override.yml up -d db jackson redis
+
+# Redis なしで起動（単一インスタンス / 最小構成）
+docker compose -f docker-compose.yml -f docker-compose.override.yml up -d db jackson
 
 # データベースマイグレーション
 npm run db:migrate

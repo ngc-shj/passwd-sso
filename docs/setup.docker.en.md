@@ -93,7 +93,9 @@ Edit `.env.local` and set the following values:
 | `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret | From Jackson admin panel |
 | `SAML_PROVIDER_NAME` | SAML IdP display name on sign-in page | e.g., `HENNGE`, `Okta`, `Azure AD` |
 | `ORG_MASTER_KEY` | Master key for organization vault encryption (256-bit hex) | `openssl rand -hex 32` |
-| `REDIS_URL` | Redis URL for shared rate limiting | e.g., `redis://host:6379` |
+| `REDIS_URL` | (Optional) Redis URL for shared rate limiting | e.g., `redis://host:6379` |
+
+> **Redis is optional.** If `REDIS_URL` is not set, the app runs without Redis and rate limiting on vault unlock is disabled. For single-instance deployments, you can safely omit Redis.
 
 ### 3. Start PostgreSQL
 
