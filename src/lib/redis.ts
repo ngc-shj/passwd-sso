@@ -1,6 +1,6 @@
-import { createClient, type RedisClientType } from "redis";
+import { createClient } from "redis";
 
-type RedisClient = RedisClientType;
+type RedisClient = ReturnType<typeof createClient>;
 
 const globalForRedis = globalThis as unknown as {
   redisClient?: RedisClient;
