@@ -293,6 +293,7 @@
     "inviteRole": "Role",
     "inviteSend": "Send Invitation",
     "invited": "Invitation sent",
+    "invitedWithLink": "Invitation sent. Invite URL copied to clipboard.",
     "inviteFailed": "Failed to send invitation",
     "alreadyMember": "User is already a member",
     "alreadyInvited": "Invitation already sent",

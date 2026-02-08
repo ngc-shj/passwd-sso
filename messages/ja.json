@@ -293,6 +293,7 @@
     "inviteRole": "ロール",
     "inviteSend": "招待を送信",
     "invited": "招待を送信しました",
+    "invitedWithLink": "招待を送信しました。招待URLをクリップボードにコピーしました。",
     "inviteFailed": "招待の送信に失敗しました",
     "alreadyMember": "このユーザーは既にメンバーです",
     "alreadyInvited": "既に招待済みです",

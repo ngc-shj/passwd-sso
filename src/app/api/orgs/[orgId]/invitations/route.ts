@@ -40,6 +40,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       id: inv.id,
       email: inv.email,
       role: inv.role,
+      token: inv.token,
       status: inv.status,
       expiresAt: inv.expiresAt,
       invitedBy: inv.invitedBy,

@@ -32,7 +32,8 @@ import {
   AvatarFallback,
   AvatarImage,
 } from "@/components/ui/avatar";
-import { Loader2, UserPlus, Trash2, X } from "lucide-react";
+import { CopyButton } from "@/components/passwords/copy-button";
+import { Loader2, UserPlus, Trash2, X, LinkIcon } from "lucide-react";
 import { toast } from "sonner";
 
 interface OrgInfo {
@@ -57,6 +58,7 @@ interface Invitation {
   id: string;
   email: string;
   role: string;
+  token: string;
   expiresAt: string;
   invitedBy: { name: string | null };
 }
@@ -174,7 +176,10 @@ export default function OrgSettingsPage({
         return;
       }
       if (!res.ok) throw new Error("Failed");
-      toast.success(t("invited"));
+      const data = await res.json();
+      const inviteUrl = `${window.location.origin}/dashboard/orgs/invite/${data.token}`;
+      await navigator.clipboard.writeText(inviteUrl);
+      toast.success(t("invitedWithLink"));
       setInvEmail("");
       fetchAll();
     } catch {
@@ -420,6 +425,11 @@ export default function OrgSettingsPage({
                           </p>
                         </div>
                         <OrgRoleBadge role={inv.role} />
+                        <CopyButton
+                          getValue={() =>
+                            `${window.location.origin}/dashboard/orgs/invite/${inv.token}`
+                          }
+                        />
                         <Button
                           variant="ghost"
                           size="icon"
