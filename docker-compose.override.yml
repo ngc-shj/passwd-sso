@@ -9,3 +9,7 @@ services:
   jackson:
     ports:
       - "5225:5225"
+
+  redis:
+    ports:
+      - "6379:6379"

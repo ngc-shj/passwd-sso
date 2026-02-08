@@ -61,8 +61,23 @@ services:
       - internal
     # Do NOT expose port 5225 to host in production
 
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
 volumes:
   postgres_data:
+  redis_data:
 
 networks:
   internal:

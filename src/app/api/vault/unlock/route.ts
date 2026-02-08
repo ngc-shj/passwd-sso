@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getRedis } from "@/lib/redis";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -13,6 +14,45 @@ const unlockSchema = z.object({
 const RATE_WINDOW_MS = 5 * 60 * 1000;
 const RATE_MAX = 5;
 const rate = new Map<string, { resetAt: number; count: number }>();
+
+async function checkRateLimit(key: string): Promise<boolean> {
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const windowSec = Math.floor(RATE_WINDOW_MS / 1000);
+      const count = await redis.incr(key);
+      if (count === 1) {
+        await redis.expire(key, windowSec);
+      }
+      return count <= RATE_MAX;
+    } catch {
+      // Fallback to in-memory on Redis errors
+    }
+  }
+
+  const now = Date.now();
+  const entry = rate.get(key);
+  if (!entry || entry.resetAt < now) {
+    rate.set(key, { resetAt: now + RATE_WINDOW_MS, count: 1 });
+    return true;
+  }
+  if (entry.count >= RATE_MAX) return false;
+  entry.count += 1;
+  return true;
+}
+
+async function clearRateLimit(key: string) {
+  const redis = getRedis();
+  if (redis) {
+    try {
+      await redis.del(key);
+      return;
+    } catch {
+      // Fallback to in-memory on Redis errors
+    }
+  }
+  rate.delete(key);
+}
 
 /**
  * POST /api/vault/unlock
@@ -26,22 +66,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const now = Date.now();
   const ip =
     request.headers.get("x-forwarded-for") ??
     request.headers.get("x-real-ip") ??
     "unknown";
-  const rateKey = `${session.user.id}:${ip}`;
-  const entry = rate.get(rateKey);
-  if (!entry || entry.resetAt < now) {
-    rate.set(rateKey, { resetAt: now + RATE_WINDOW_MS, count: 1 });
-  } else if (entry.count >= RATE_MAX) {
+  const rateKey = `rl:vault_unlock:${session.user.id}:${ip}`;
+  if (!(await checkRateLimit(rateKey))) {
     return NextResponse.json(
       { error: "Rate limit exceeded" },
       { status: 429 }
     );
-  } else {
-    entry.count += 1;
   }
 
   const body = await request.json();
@@ -84,7 +118,7 @@ export async function POST(request: Request) {
   }
 
   // Reset failure counter on success
-  rate.delete(rateKey);
+  await clearRateLimit(rateKey);
 
   // Fetch verification artifact
   const vaultKey = await prisma.vaultKey.findUnique({
