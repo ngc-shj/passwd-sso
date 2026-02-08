@@ -56,7 +56,8 @@ async function handleApiAuth(request: NextRequest) {
   if (
     pathname.startsWith("/api/passwords") ||
     pathname.startsWith("/api/tags") ||
-    pathname.startsWith("/api/watchtower")
+    pathname.startsWith("/api/watchtower") ||
+    pathname.startsWith("/api/orgs")
   ) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {

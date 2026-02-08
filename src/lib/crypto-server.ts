@@ -1,0 +1,120 @@
+/**
+ * Server-side cryptography module for organization vault.
+ *
+ * Key hierarchy:
+ *   ORG_MASTER_KEY (env, 256-bit hex)
+ *     -> AES-256-GCM wrap -> per-org key (Organization.encryptedOrgKey)
+ *       -> AES-256-GCM -> OrgPasswordEntry.encryptedBlob / encryptedOverview
+ *
+ * Uses node:crypto (NOT Web Crypto API — this runs server-side only).
+ */
+
+import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+
+const ALGORITHM = "aes-256-gcm";
+const IV_LENGTH = 12; // 96 bits, recommended for GCM
+const KEY_LENGTH = 32; // 256 bits
+const AUTH_TAG_LENGTH = 16; // 128 bits
+
+export interface ServerEncryptedData {
+  ciphertext: string; // hex
+  iv: string; // hex (24 chars)
+  authTag: string; // hex (32 chars)
+}
+
+// ─── Master Key ──────────────────────────────────────────────────
+
+function getMasterKey(): Buffer {
+  const hex = process.env.ORG_MASTER_KEY;
+  if (!hex || hex.length !== 64) {
+    throw new Error(
+      "ORG_MASTER_KEY must be a 64-char hex string (256 bits)"
+    );
+  }
+  return Buffer.from(hex, "hex");
+}
+
+// ─── Per-Org Key Management ─────────────────────────────────────
+
+/** Generate a random 256-bit organization key. */
+export function generateOrgKey(): Buffer {
+  return randomBytes(KEY_LENGTH);
+}
+
+/** Wrap (encrypt) an org key with the master key. */
+export function wrapOrgKey(orgKey: Buffer): ServerEncryptedData {
+  const masterKey = getMasterKey();
+  const iv = randomBytes(IV_LENGTH);
+  const cipher = createCipheriv(ALGORITHM, masterKey, iv, {
+    authTagLength: AUTH_TAG_LENGTH,
+  });
+
+  const ciphertext = Buffer.concat([cipher.update(orgKey), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+
+  return {
+    ciphertext: ciphertext.toString("hex"),
+    iv: iv.toString("hex"),
+    authTag: authTag.toString("hex"),
+  };
+}
+
+/** Unwrap (decrypt) an org key using the master key. */
+export function unwrapOrgKey(wrapped: ServerEncryptedData): Buffer {
+  const masterKey = getMasterKey();
+  const iv = Buffer.from(wrapped.iv, "hex");
+  const authTag = Buffer.from(wrapped.authTag, "hex");
+  const ciphertext = Buffer.from(wrapped.ciphertext, "hex");
+
+  const decipher = createDecipheriv(ALGORITHM, masterKey, iv, {
+    authTagLength: AUTH_TAG_LENGTH,
+  });
+  decipher.setAuthTag(authTag);
+
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
+
+// ─── Data Encryption / Decryption ───────────────────────────────
+
+/** Encrypt plaintext JSON with an org key (AES-256-GCM). */
+export function encryptServerData(
+  plaintext: string,
+  orgKey: Buffer
+): ServerEncryptedData {
+  const iv = randomBytes(IV_LENGTH);
+  const cipher = createCipheriv(ALGORITHM, orgKey, iv, {
+    authTagLength: AUTH_TAG_LENGTH,
+  });
+
+  const ciphertext = Buffer.concat([
+    cipher.update(plaintext, "utf8"),
+    cipher.final(),
+  ]);
+  const authTag = cipher.getAuthTag();
+
+  return {
+    ciphertext: ciphertext.toString("hex"),
+    iv: iv.toString("hex"),
+    authTag: authTag.toString("hex"),
+  };
+}
+
+/** Decrypt ciphertext with an org key (AES-256-GCM). */
+export function decryptServerData(
+  encrypted: ServerEncryptedData,
+  orgKey: Buffer
+): string {
+  const iv = Buffer.from(encrypted.iv, "hex");
+  const authTag = Buffer.from(encrypted.authTag, "hex");
+  const ciphertext = Buffer.from(encrypted.ciphertext, "hex");
+
+  const decipher = createDecipheriv(ALGORITHM, orgKey, iv, {
+    authTagLength: AUTH_TAG_LENGTH,
+  });
+  decipher.setAuthTag(authTag);
+
+  return Buffer.concat([
+    decipher.update(ciphertext),
+    decipher.final(),
+  ]).toString("utf8");
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, type RefObject } from "react";
+import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { KeyRound, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,22 +12,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { SignOutButton } from "@/components/auth/signout-button";
-import { SearchBar } from "./search-bar";
 import { LanguageSwitcher } from "./language-switcher";
 
 interface HeaderProps {
   onMenuToggle: () => void;
-  searchQuery: string;
-  onSearchChange: (query: string) => void;
-  searchRef?: RefObject<HTMLInputElement | null>;
 }
 
-export function Header({
-  onMenuToggle,
-  searchQuery,
-  onSearchChange,
-  searchRef,
-}: HeaderProps) {
+export function Header({ onMenuToggle }: HeaderProps) {
   const { data: session } = useSession();
   const [mounted, setMounted] = useState(false);
 
@@ -52,9 +43,7 @@ export function Header({
           <span className="hidden sm:inline">passwd-sso</span>
         </div>
 
-        <div className="flex-1 max-w-md mx-auto">
-          <SearchBar ref={searchRef} value={searchQuery} onChange={onSearchChange} />
-        </div>
+        <div className="flex-1" />
 
         {mounted && <LanguageSwitcher />}
 

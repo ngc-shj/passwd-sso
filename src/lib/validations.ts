@@ -60,9 +60,75 @@ export const generatePassphraseSchema = z.object({
   includeNumber: z.boolean().default(false),
 });
 
+// ─── Organization Schemas ──────────────────────────────────
+
+const slugRegex = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
+
+export const createOrgSchema = z.object({
+  name: z.string().min(1).max(100).trim(),
+  slug: z
+    .string()
+    .min(2)
+    .max(50)
+    .regex(slugRegex, "Slug must be lowercase alphanumeric with hyphens"),
+  description: z.string().max(500).trim().optional(),
+});
+
+export const updateOrgSchema = z.object({
+  name: z.string().min(1).max(100).trim().optional(),
+  description: z.string().max(500).trim().optional().or(z.literal("")),
+});
+
+export const inviteSchema = z.object({
+  email: z.string().email(),
+  role: z.enum(["ADMIN", "MEMBER", "VIEWER"]).default("MEMBER"),
+});
+
+export const updateMemberRoleSchema = z.object({
+  role: z.enum(["ADMIN", "MEMBER", "VIEWER"]),
+});
+
+export const createOrgPasswordSchema = z.object({
+  title: z.string().min(1).max(200).trim(),
+  username: z.string().max(200).optional().or(z.literal("")),
+  password: z.string().min(1),
+  url: z.string().max(2000).optional().or(z.literal("")),
+  notes: z.string().max(10000).optional().or(z.literal("")),
+  tagIds: z.array(z.string().cuid()).optional(),
+});
+
+export const updateOrgPasswordSchema = z.object({
+  title: z.string().min(1).max(200).trim().optional(),
+  username: z.string().max(200).optional().or(z.literal("")),
+  password: z.string().min(1).optional(),
+  url: z.string().max(2000).optional().or(z.literal("")),
+  notes: z.string().max(10000).optional().or(z.literal("")),
+  tagIds: z.array(z.string().cuid()).optional(),
+  isFavorite: z.boolean().optional(),
+  isArchived: z.boolean().optional(),
+});
+
+export const createOrgTagSchema = z.object({
+  name: z.string().min(1).max(50).trim(),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional()
+    .or(z.literal("")),
+});
+
+// ─── Type Exports ──────────────────────────────────────────
+
 export type GeneratePasswordInput = z.infer<typeof generatePasswordSchema>;
 export type GeneratePassphraseInput = z.infer<typeof generatePassphraseSchema>;
 export type CreateE2EPasswordInput = z.infer<typeof createE2EPasswordSchema>;
 export type UpdateE2EPasswordInput = z.infer<typeof updateE2EPasswordSchema>;
 export type CreateTagInput = z.infer<typeof createTagSchema>;
 export type UpdateTagInput = z.infer<typeof updateTagSchema>;
+export type CreateOrgInput = z.infer<typeof createOrgSchema>;
+export type UpdateOrgInput = z.infer<typeof updateOrgSchema>;
+export type InviteInput = z.infer<typeof inviteSchema>;
+export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
+export type CreateOrgPasswordInput = z.infer<typeof createOrgPasswordSchema>;
+export type UpdateOrgPasswordInput = z.infer<typeof updateOrgPasswordSchema>;
+export type CreateOrgTagInput = z.infer<typeof createOrgTagSchema>;

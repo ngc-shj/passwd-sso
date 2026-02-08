@@ -75,6 +75,12 @@ model User {
   tags       Tag[]
   vaultKeys  VaultKey[]
 
+  // Organization relations
+  orgMemberships      OrgMember[]
+  orgInvitations      OrgInvitation[]
+  createdOrgPasswords OrgPasswordEntry[] @relation("orgPasswordCreator")
+  updatedOrgPasswords OrgPasswordEntry[] @relation("orgPasswordUpdater")
+
   @@map("users")
 }
 
@@ -134,4 +140,128 @@ model PasswordEntry {
 
   @@index([userId])
   @@map("password_entries")
+}
+
+// ─── Organization Models ────────────────────────────────────────
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?  @db.Text
+
+  // Server-side encryption: per-org key wrapped by ORG_MASTER_KEY
+  encryptedOrgKey String @map("encrypted_org_key") @db.Text
+  orgKeyIv        String @map("org_key_iv") @db.VarChar(24)
+  orgKeyAuthTag   String @map("org_key_auth_tag") @db.VarChar(32)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  members     OrgMember[]
+  passwords   OrgPasswordEntry[]
+  tags        OrgTag[]
+  invitations OrgInvitation[]
+
+  @@map("organizations")
+}
+
+model OrgMember {
+  id     String  @id @default(cuid())
+  orgId  String  @map("org_id")
+  userId String  @map("user_id")
+  role   OrgRole @default(MEMBER)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@map("org_members")
+}
+
+model OrgPasswordEntry {
+  id String @id @default(cuid())
+
+  // Server-side encrypted fields (encrypted with per-org key)
+  encryptedBlob String @map("encrypted_blob") @db.Text
+  blobIv        String @map("blob_iv") @db.VarChar(24)
+  blobAuthTag   String @map("blob_auth_tag") @db.VarChar(32)
+
+  encryptedOverview String @map("encrypted_overview") @db.Text
+  overviewIv        String @map("overview_iv") @db.VarChar(24)
+  overviewAuthTag   String @map("overview_auth_tag") @db.VarChar(32)
+
+  // Metadata (unencrypted)
+  isFavorite Boolean   @default(false) @map("is_favorite")
+  isArchived Boolean   @default(false) @map("is_archived")
+  deletedAt  DateTime? @map("deleted_at")
+
+  orgId       String @map("org_id")
+  createdById String @map("created_by_id")
+  updatedById String @map("updated_by_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy User         @relation("orgPasswordCreator", fields: [createdById], references: [id])
+  updatedBy User         @relation("orgPasswordUpdater", fields: [updatedById], references: [id])
+  tags      OrgTag[]
+
+  @@index([orgId])
+  @@map("org_password_entries")
+}
+
+model OrgTag {
+  id    String  @id @default(cuid())
+  name  String
+  color String?
+
+  orgId String @map("org_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  org       Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  passwords OrgPasswordEntry[]
+
+  @@unique([name, orgId])
+  @@map("org_tags")
+}
+
+model OrgInvitation {
+  id        String           @id @default(cuid())
+  orgId     String           @map("org_id")
+  email     String
+  role      OrgRole          @default(MEMBER)
+  status    InvitationStatus @default(PENDING)
+  token     String           @unique
+  expiresAt DateTime         @map("expires_at")
+
+  invitedById String @map("invited_by_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  invitedBy User         @relation(fields: [invitedById], references: [id])
+
+  @@map("org_invitations")
 }

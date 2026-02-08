@@ -2,6 +2,6 @@
 
 import { PasswordDashboard } from "@/components/passwords/password-dashboard";
 
-export default function DashboardPage() {
-  return <PasswordDashboard view="all" />;
+export default function TrashPage() {
+  return <PasswordDashboard view="trash" />;
 }
