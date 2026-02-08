@@ -17,7 +17,9 @@ SSO 認証とエンドツーエンド暗号化を備えたセルフホスト型�
 - **キーボードショートカット** - `/ or Cmd+K` 検索、`n` 新規、`?` ヘルプ、`Esc` クリア
 - **多言語対応** - 日本語・英語（next-intl）
 - **ダークモード** - ライト / ダーク / システム（next-themes）
-- **セルフホスト** - Docker Compose（PostgreSQL + SAML Jackson）
+- **組織 Vault** - チームでのパスワード共有（サーバーサイド AES-256-GCM 暗号化、RBAC: Owner/Admin/Member/Viewer）
+- **レート制限** - Redis による Vault アンロック試行制限
+- **セルフホスト** - Docker Compose（PostgreSQL + SAML Jackson + Redis）
 
 ## 技術スタック
 
@@ -30,24 +32,28 @@ SSO 認証とエンドツーエンド暗号化を備えたセルフホスト型�
 | 認証 | Auth.js v5（データベースセッション） |
 | SAML ブリッジ | BoxyHQ SAML Jackson（Docker） |
 | UI | Tailwind CSS 4 + shadcn/ui + Radix UI |
-| 暗号化 | Web Crypto API（クライアントサイド） |
+| 暗号化 | Web Crypto API（クライアントサイド）+ AES-256-GCM（サーバーサイド: 組織 Vault） |
+| キャッシュ / レート制限 | Redis 7 |
 
 ## アーキテクチャ
 
 ```
 ブラウザ (Web Crypto API)
-  │  ← AES-256-GCM 暗号化/復号
+  │  ← 個人 Vault: AES-256-GCM E2E 暗号化/復号
   ▼
 Next.js アプリ (SSR / API Routes)
-  │  ← Auth.js セッション、ルート保護
+  │  ← Auth.js セッション、ルート保護、RBAC
+  │  ← 組織 Vault: サーバーサイド AES-256-GCM 暗号化/復号
   ▼
-PostgreSQL ← Prisma 7
+PostgreSQL ← Prisma 7          Redis ← レート制限
   │
   ▼
 SAML Jackson (Docker) ← SAML 2.0 IdP (HENNGE, Okta, Azure AD 等)
 ```
 
-すべてのパスワードデータは**クライアントサイドで暗号化**されてからサーバーに送信されます。サーバーは暗号文のみを保存し、復号はユーザーのマスターパスフレーズから導出された鍵を使ってブラウザ内でのみ行われます。
+**個人 Vault** — すべてのパスワードデータは**クライアントサイドで暗号化**されてからサーバーに送信されます。サーバーは暗号文のみを保存し、復号はユーザーのマスターパスフレーズから導出された鍵を使ってブラウザ内でのみ行われます。
+
+**組織 Vault** — 共有パスワードは**サーバーサイドで暗号化**されます（組織ごとの鍵を `ORG_MASTER_KEY` でラップ）。個別の鍵交換なしにチームメンバー間で即座にパスワードを共有できます。
 
 ## セットアップ
 
@@ -84,14 +90,16 @@ cp .env.example .env.local
 | `AUTH_JACKSON_ID` | Jackson OIDC クライアント ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC クライアントシークレット |
 | `SAML_PROVIDER_NAME` | サインインページの表示名（例: "HENNGE"） |
+| `ORG_MASTER_KEY` | 組織 Vault マスターキー — `openssl rand -hex 32` |
+| `REDIS_URL` | （任意）レート制限用 Redis URL |
 
 ### 3. サービスの起動
 
 **開発環境**（PostgreSQL + SAML Jackson + Next.js 開発サーバー）:
 
 ```bash
-# PostgreSQL と SAML Jackson を起動
-docker compose -f docker-compose.yml -f docker-compose.override.yml up -d db jackson
+# PostgreSQL、SAML Jackson、Redis を起動
+docker compose -f docker-compose.yml -f docker-compose.override.yml up -d db jackson redis
 
 # データベースマイグレーション
 npm run db:migrate
@@ -134,19 +142,23 @@ docker compose up -d
 src/
 ├── app/[locale]/
 │   ├── page.tsx              # ランディング / サインイン
-│   ├── dashboard/page.tsx    # メインの Vault UI
+│   ├── dashboard/            # 個人 Vault、組織 Vault、Watchtower 等
 │   └── auth/                 # 認証ページ
 ├── components/
 │   ├── layout/               # Header, Sidebar, SearchBar
 │   ├── passwords/            # PasswordList, PasswordForm, Generator 等
+│   ├── org/                  # 組織 Vault UI（一覧、フォーム、設定、招待）
 │   ├── tags/                 # TagInput, TagBadge
 │   ├── auth/                 # SignOutButton
 │   └── ui/                   # shadcn/ui コンポーネント
 ├── lib/
-│   ├── crypto-client.ts      # クライアントサイド E2E 暗号化
+│   ├── crypto-client.ts      # クライアントサイド E2E 暗号化（個人 Vault）
+│   ├── crypto-server.ts      # サーバーサイド暗号化（組織 Vault）
+│   ├── org-auth.ts           # 組織 RBAC 認可ヘルパー
 │   ├── vault-context.tsx     # Vault ロック/アンロック状態
 │   ├── password-generator.ts # サーバーサイド安全生成
 │   ├── prisma.ts             # Prisma シングルトン
+│   ├── redis.ts              # Redis クライアント（レート制限）
 │   └── validations.ts        # Zod スキーマ
 └── i18n/                     # next-intl ルーティング
 ```
@@ -160,6 +172,14 @@ src/
 - **セッションセキュリティ** - データベースセッション（JWT ではない）、8 時間タイムアウト + 1 時間延長
 - **自動ロック** - 15 分無操作または 5 分タブ非表示で Vault をロック
 - **クリップボードクリア** - コピーしたパスワードは 30 秒後に自動消去
+- **組織 Vault** - サーバーサイド AES-256-GCM（組織ごとの鍵を `ORG_MASTER_KEY` でラップ）
+- **RBAC** - Owner / Admin / Member / Viewer のロールベースアクセス制御
+- **レート制限** - Redis による Vault アンロック試行制限（15 分間に 5 回まで）
+
+## デプロイガイド
+
+- [Docker Compose セットアップ（日本語）](docs/setup.ja.md) / [English](docs/setup.en.md)
+- [AWS デプロイ（日本語）](docs/setup.aws.ja.md) / [English](docs/setup.aws.en.md)
 
 ## ライセンス
 

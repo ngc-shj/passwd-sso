@@ -17,7 +17,9 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Keyboard Shortcuts** - `/ or Cmd+K` search, `n` new, `?` help, `Esc` clear
 - **i18n** - English and Japanese (next-intl)
 - **Dark Mode** - Light / dark / system (next-themes)
-- **Self-Hosted** - Docker Compose with PostgreSQL and SAML Jackson
+- **Organization Vault** - Team password sharing with server-side AES-256-GCM encryption and RBAC (Owner/Admin/Member/Viewer)
+- **Rate Limiting** - Redis-backed vault unlock rate limiting
+- **Self-Hosted** - Docker Compose with PostgreSQL, SAML Jackson, and Redis
 
 ## Tech Stack
 
@@ -30,24 +32,28 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 | Auth | Auth.js v5 (database sessions) |
 | SAML Bridge | BoxyHQ SAML Jackson (Docker) |
 | UI | Tailwind CSS 4 + shadcn/ui + Radix UI |
-| Encryption | Web Crypto API (client-side) |
+| Encryption | Web Crypto API (client-side) + AES-256-GCM (server-side for org vault) |
+| Cache / Rate Limit | Redis 7 |
 
 ## Architecture
 
 ```
 Browser (Web Crypto API)
-  │  ← AES-256-GCM encrypt/decrypt
+  │  ← Personal vault: AES-256-GCM E2E encrypt/decrypt
   ▼
 Next.js App (SSR / API Routes)
-  │  ← Auth.js sessions, route protection
+  │  ← Auth.js sessions, route protection, RBAC
+  │  ← Org vault: server-side AES-256-GCM encrypt/decrypt
   ▼
-PostgreSQL ← Prisma 7
+PostgreSQL ← Prisma 7          Redis ← rate limiting
   │
   ▼
 SAML Jackson (Docker) ← SAML 2.0 IdP (HENNGE, Okta, Azure AD, etc.)
 ```
 
-All password data is encrypted **client-side** before being sent to the server. The server stores only ciphertext. Decryption happens exclusively in the browser using a key derived from the user's master passphrase.
+**Personal vault** — All password data is encrypted **client-side** before being sent to the server. The server stores only ciphertext. Decryption happens exclusively in the browser using a key derived from the user's master passphrase.
+
+**Organization vault** — Shared passwords are encrypted **server-side** with per-org keys (wrapped by `ORG_MASTER_KEY`). This enables instant sharing across team members without requiring individual key exchange.
 
 ## Getting Started
 
@@ -84,14 +90,16 @@ Edit `.env.local` and fill in:
 | `AUTH_JACKSON_ID` | Jackson OIDC client ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC client secret |
 | `SAML_PROVIDER_NAME` | Display name on sign-in page (e.g., "HENNGE") |
+| `ORG_MASTER_KEY` | Org vault master key — `openssl rand -hex 32` |
+| `REDIS_URL` | (Optional) Redis URL for rate limiting |
 
 ### 3. Start services
 
 **Development** (PostgreSQL + SAML Jackson + Next.js dev server):
 
 ```bash
-# Start PostgreSQL and SAML Jackson
-docker compose -f docker-compose.yml -f docker-compose.override.yml up -d db jackson
+# Start PostgreSQL, SAML Jackson, and Redis
+docker compose -f docker-compose.yml -f docker-compose.override.yml up -d db jackson redis
 
 # Run database migrations
 npm run db:migrate
@@ -134,19 +142,23 @@ docker compose up -d
 src/
 ├── app/[locale]/
 │   ├── page.tsx              # Landing / Sign-in
-│   ├── dashboard/page.tsx    # Main vault UI
+│   ├── dashboard/            # Personal vault, org vault, watchtower, etc.
 │   └── auth/                 # Auth pages
 ├── components/
 │   ├── layout/               # Header, Sidebar, SearchBar
 │   ├── passwords/            # PasswordList, PasswordForm, Generator, etc.
+│   ├── org/                  # Org vault UI (list, form, settings, invitations)
 │   ├── tags/                 # TagInput, TagBadge
 │   ├── auth/                 # SignOutButton
 │   └── ui/                   # shadcn/ui components
 ├── lib/
-│   ├── crypto-client.ts      # Client-side E2E encryption
+│   ├── crypto-client.ts      # Client-side E2E encryption (personal vault)
+│   ├── crypto-server.ts      # Server-side encryption (org vault)
+│   ├── org-auth.ts           # Org RBAC authorization helpers
 │   ├── vault-context.tsx     # Vault lock/unlock state
 │   ├── password-generator.ts # Server-side secure generation
 │   ├── prisma.ts             # Prisma singleton
+│   ├── redis.ts              # Redis client (rate limiting)
 │   └── validations.ts        # Zod schemas
 └── i18n/                     # next-intl routing
 ```
@@ -160,6 +172,14 @@ src/
 - **Session security** - Database sessions (not JWT), 8-hour timeout with 1-hour extension
 - **Auto-lock** - Vault locks after 15 min idle or 5 min tab hidden
 - **Clipboard clear** - Copied passwords auto-clear after 30 seconds
+- **Organization vault** - Server-side AES-256-GCM with per-org keys wrapped by `ORG_MASTER_KEY`
+- **RBAC** - Owner / Admin / Member / Viewer role-based access control for organizations
+- **Rate limiting** - Redis-backed rate limiting on vault unlock (5 attempts per 15 min)
+
+## Deployment Guides
+
+- [Docker Compose Setup (English)](docs/setup.en.md) / [日本語](docs/setup.ja.md)
+- [AWS Deployment (English)](docs/setup.aws.en.md) / [日本語](docs/setup.aws.ja.md)
 
 ## License
 
