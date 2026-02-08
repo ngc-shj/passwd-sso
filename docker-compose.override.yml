@@ -1,0 +1,11 @@
+# Development overrides - automatically merged with docker-compose.yml
+# This file exposes ports for local development.
+# Do NOT use in production.
+services:
+  db:
+    ports:
+      - "5432:5432"
+
+  jackson:
+    ports:
+      - "5225:5225"

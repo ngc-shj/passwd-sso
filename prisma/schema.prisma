@@ -1,0 +1,137 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Auth.js Required Models ────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ─── Application Models ─────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Vault (E2E encryption) fields
+  vaultSetupAt             DateTime? @map("vault_setup_at")
+  accountSalt              String?   @map("account_salt") @db.VarChar(64)
+  encryptedSecretKey       String?   @map("encrypted_secret_key") @db.Text
+  secretKeyIv              String?   @map("secret_key_iv") @db.VarChar(24)
+  secretKeyAuthTag         String?   @map("secret_key_auth_tag") @db.VarChar(32)
+  masterPasswordServerHash String?   @map("master_password_server_hash") @db.Text
+  masterPasswordServerSalt String?   @map("master_password_server_salt") @db.VarChar(64)
+  keyVersion               Int       @default(0) @map("key_version")
+
+  accounts   Account[]
+  sessions   Session[]
+  passwords  PasswordEntry[]
+  tags       Tag[]
+  vaultKeys  VaultKey[]
+
+  @@map("users")
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  name      String
+  color     String?
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  passwords PasswordEntry[]
+
+  @@unique([name, userId])
+  @@map("tags")
+}
+
+model VaultKey {
+  id                     String   @id @default(cuid())
+  userId                 String   @map("user_id")
+  version                Int
+  verificationCiphertext String   @map("verification_ciphertext") @db.Text
+  verificationIv         String   @map("verification_iv") @db.VarChar(24)
+  verificationAuthTag    String   @map("verification_auth_tag") @db.VarChar(32)
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, version])
+  @@map("vault_keys")
+}
+
+model PasswordEntry {
+  id                String   @id @default(cuid())
+
+  // E2E encrypted fields (all data encrypted client-side)
+  encryptedBlob     String   @map("encrypted_blob") @db.Text
+  blobIv            String   @map("blob_iv") @db.VarChar(24)
+  blobAuthTag       String   @map("blob_auth_tag") @db.VarChar(32)
+  encryptedOverview String   @map("encrypted_overview") @db.Text
+  overviewIv        String   @map("overview_iv") @db.VarChar(24)
+  overviewAuthTag   String   @map("overview_auth_tag") @db.VarChar(32)
+  keyVersion        Int      @map("key_version")
+
+  // Metadata (unencrypted)
+  isFavorite        Boolean  @default(false) @map("is_favorite")
+  isArchived        Boolean  @default(false) @map("is_archived")
+  deletedAt         DateTime? @map("deleted_at")
+
+  userId            String   @map("user_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  tags Tag[]
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_entries")
+}

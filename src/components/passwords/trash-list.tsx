@@ -1,0 +1,212 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { useTranslations } from "next-intl";
+import { useVault } from "@/lib/vault-context";
+import { decryptData, type EncryptedData } from "@/lib/crypto-client";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Trash2, Loader2, RotateCcw } from "lucide-react";
+import { toast } from "sonner";
+
+interface TrashEntry {
+  id: string;
+  title: string;
+  username: string | null;
+  deletedAt: string;
+}
+
+interface TrashListProps {
+  refreshKey: number;
+}
+
+export function TrashList({ refreshKey }: TrashListProps) {
+  const t = useTranslations("Trash");
+  const tl = useTranslations("PasswordList");
+  const { encryptionKey } = useVault();
+  const [entries, setEntries] = useState<TrashEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchTrash = useCallback(async () => {
+    if (!encryptionKey) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/passwords?trash=true");
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const decrypted: TrashEntry[] = [];
+      for (const entry of data) {
+        if (!entry.encryptedOverview) continue;
+        try {
+          const overview = JSON.parse(
+            await decryptData(
+              entry.encryptedOverview as EncryptedData,
+              encryptionKey
+            )
+          );
+          decrypted.push({
+            id: entry.id,
+            title: overview.title,
+            username: overview.username,
+            deletedAt: entry.deletedAt,
+          });
+        } catch {
+          // Skip entries that fail to decrypt
+        }
+      }
+      setEntries(decrypted);
+    } catch {
+      // Network error
+    } finally {
+      setLoading(false);
+    }
+  }, [encryptionKey]);
+
+  useEffect(() => {
+    fetchTrash();
+  }, [fetchTrash, refreshKey]);
+
+  const handleRestore = async (id: string) => {
+    try {
+      const res = await fetch(`/api/passwords/${id}/restore`, { method: "POST" });
+      if (res.ok) {
+        toast.success(t("restored"));
+        setEntries((prev) => prev.filter((e) => e.id !== id));
+      } else {
+        toast.error(t("failedAction"));
+      }
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
+  const handleDeletePermanently = async (id: string) => {
+    try {
+      const res = await fetch(`/api/passwords/${id}?permanent=true`, { method: "DELETE" });
+      if (res.ok) {
+        toast.success(t("deletedPermanently"));
+        setEntries((prev) => prev.filter((e) => e.id !== id));
+      } else {
+        toast.error(t("failedAction"));
+      }
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
+  const handleEmptyTrash = async () => {
+    try {
+      for (const entry of entries) {
+        await fetch(`/api/passwords/${entry.id}?permanent=true`, { method: "DELETE" });
+      }
+      toast.success(t("emptyTrashSuccess"));
+      setEntries([]);
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (entries.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <Trash2 className="h-12 w-12 text-muted-foreground/50 mb-4" />
+        <p className="text-muted-foreground">{tl("noTrash")}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">{t("description")}</p>
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button variant="destructive" size="sm">
+              {t("emptyTrash")}
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t("emptyTrash")}</DialogTitle>
+              <DialogDescription>{t("emptyTrashConfirm")}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="destructive" onClick={handleEmptyTrash}>
+                {t("emptyTrash")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <div className="space-y-2">
+        {entries.map((entry) => (
+          <Card key={entry.id}>
+            <CardContent className="flex items-center gap-4 p-4">
+              <div className="flex-1 min-w-0">
+                <p className="font-medium truncate">{entry.title}</p>
+                {entry.username && (
+                  <p className="text-sm text-muted-foreground truncate">
+                    {entry.username}
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleRestore(entry.id)}
+                >
+                  <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                  {t("restore")}
+                </Button>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button variant="destructive" size="sm">
+                      <Trash2 className="h-3.5 w-3.5 mr-1" />
+                      {t("deletePermanently")}
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>{t("deletePermanently")}</DialogTitle>
+                      <DialogDescription>
+                        {t("deleteConfirm", { title: entry.title })}
+                      </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                      <Button
+                        variant="destructive"
+                        onClick={() => handleDeletePermanently(entry.id)}
+                      >
+                        {t("deletePermanently")}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}

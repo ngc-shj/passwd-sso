@@ -1,0 +1,16 @@
+name,login_uri,login_username,login_password,notes
+GitHub,https://github.com,dev@example.com,Gh$9xKp!mR2vL@7n,Personal account
+AWS Console,https://aws.amazon.com,admin@example.com,Aw&4zQr#tN8wB!5j,Production environment
+Google Workspace,https://workspace.google.com,tanaka@example.com,Gw*6yHs%dM3cF!2k,Company workspace
+Slack,https://slack.com,tanaka@example.com,Sl!7uJt^fP4eA@9m,Engineering team
+Jira,https://example.atlassian.net,tanaka@example.com,Jr#5wKu&gQ6rD!3n,Project management
+Docker Hub,https://hub.docker.com,devops@example.com,Dk$8xLv!hR7sE@4p,Container registry
+npm,https://www.npmjs.com,dev@example.com,Np&3zMw#iS9tF!6q,Package registry
+Vercel,https://vercel.com,dev@example.com,Vc*2yNx%jT5uG!8r,Deployment platform
+Figma,https://www.figma.com,design@example.com,Fg!9uPy^kU6vH@1s,Design tools
+Notion,https://www.notion.so,tanaka@example.com,Nt#4wQz&lV7wI!5t,Team wiki
+PostgreSQL (Production),https://db.example.com,db_admin,Pg$6xRa!mW8xJ@2u,Primary database
+Redis Cloud,https://app.redislabs.com,devops@example.com,Rd&1zSb#nX9yK!7v,Cache server
+Stripe,https://dashboard.stripe.com,billing@example.com,St*5yTc%oY3zL!4w,Payment processing
+Cloudflare,https://dash.cloudflare.com,admin@example.com,Cf!8uUd^pZ4aM@6x,DNS and CDN
+1Password (old),https://my.1password.com,tanaka@example.com,Op#2wVe&qA5bN!9y,Previous password manager

@@ -1,0 +1,69 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.local
+    environment:
+      - DATABASE_URL=postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
+      - JACKSON_URL=http://jackson:5225
+    depends_on:
+      db:
+        condition: service_healthy
+      jackson:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: passwd_user
+      POSTGRES_PASSWORD: passwd_pass
+      POSTGRES_DB: passwd_sso
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U passwd_user -d passwd_sso"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+    # Do NOT expose port 5432 to host in production
+
+  jackson:
+    image: boxyhq/jackson:latest
+    environment:
+      JACKSON_API_KEYS: ${JACKSON_API_KEY:-secret}
+      DB_ENGINE: sql
+      DB_TYPE: postgres
+      DB_URL: postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
+      NEXTAUTH_URL: http://localhost:5225
+      EXTERNAL_URL: http://localhost:5225
+      NEXTAUTH_SECRET: ${AUTH_SECRET:-secret}
+      NEXTAUTH_ACL: "*"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5225/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+    # Do NOT expose port 5225 to host in production
+
+volumes:
+  postgres_data:
+
+networks:
+  internal:
+    driver: bridge
