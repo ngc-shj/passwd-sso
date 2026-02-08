@@ -92,6 +92,7 @@ Edit `.env.local` and set the following values:
 | `AUTH_JACKSON_ID` | Jackson OIDC Client ID | From Jackson admin panel |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret | From Jackson admin panel |
 | `SAML_PROVIDER_NAME` | SAML IdP display name on sign-in page | e.g., `HENNGE`, `Okta`, `Azure AD` |
+| `ORG_MASTER_KEY` | Master key for organization vault encryption (256-bit hex) | `openssl rand -hex 32` |
 
 ### 3. Start PostgreSQL
 
@@ -224,6 +225,7 @@ npm start
 - **IV**: Randomly generated per record (96-bit). Identical passwords produce different ciphertexts
 - **AuthTag**: GCM authentication tag (128-bit). Used for tamper detection
 - **Encrypted Fields**: `encryptedBlob`, `encryptedOverview` (each with its own IV/AuthTag)
+ - **Organization vault**: Server-side encryption uses `ORG_MASTER_KEY` to wrap per-organization keys. Store this value in a secret manager in production.
 
 ### API Security
 

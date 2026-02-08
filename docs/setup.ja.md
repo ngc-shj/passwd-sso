@@ -91,6 +91,7 @@ cp .env.example .env.local
 | `AUTH_JACKSON_ID` | Jackson OIDC Client ID | Jackson 管理画面で取得 |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret | Jackson 管理画面で取得 |
 | `SAML_PROVIDER_NAME` | SAML IdP のログイン画面表示名 | 例: `HENNGE`, `Okta`, `Azure AD` |
+| `ORG_MASTER_KEY` | 組織用暗号化のマスターキー (256bit, hex) | `openssl rand -hex 32` |
 
 ### 3. PostgreSQL の起動
 
@@ -223,6 +224,7 @@ npm start
 - **IV**: レコードごとにランダム生成 (96bit)。同一パスワードでも暗号文は毎回異なる
 - **AuthTag**: GCM 認証タグ (128bit)。改ざん検知に使用
 - **対象フィールド**: `encryptedBlob`, `encryptedOverview`（それぞれ個別の IV/AuthTag を持つ）
+- **組織用暗号化**: サーバ側で `ORG_MASTER_KEY` を使って組織ごとの鍵をラップする。運用時はシークレットマネージャで管理する。
 
 ### API セキュリティ
 
