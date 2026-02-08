@@ -337,6 +337,7 @@
     "ownershipTransferred": "オーナー権限を譲渡しました",
     "organizationFavorites": "組織のお気に入り",
     "organizationArchive": "組織のアーカイブ",
-    "organizationTrash": "組織のゴミ箱"
+    "organizationTrash": "組織のゴミ箱",
+    "backToOrg": "{name} に戻る"
   }
 }

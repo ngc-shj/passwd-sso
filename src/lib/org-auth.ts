@@ -98,7 +98,8 @@ export async function getOrgMembership(userId: string, orgId: string) {
 export async function requireOrgMember(userId: string, orgId: string) {
   const membership = await getOrgMembership(userId, orgId);
   if (!membership) {
-    throw new OrgAuthError("Not a member of this organization", 403);
+    // Hide org existence from non-members
+    throw new OrgAuthError("Not found", 404);
   }
   return membership;
 }
@@ -114,7 +115,7 @@ export async function requireOrgPermission(
 ) {
   const membership = await requireOrgMember(userId, orgId);
   if (!hasOrgPermission(membership.role, permission)) {
-    throw new OrgAuthError("Insufficient permissions", 403);
+    throw new OrgAuthError("Forbidden", 403);
   }
   return membership;
 }

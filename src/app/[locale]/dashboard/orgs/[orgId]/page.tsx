@@ -45,6 +45,7 @@ export default function OrgDashboardPage({
   const [org, setOrg] = useState<OrgInfo | null>(null);
   const [passwords, setPasswords] = useState<OrgPasswordEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -60,11 +61,23 @@ export default function OrgDashboardPage({
     totp?: { secret: string; algorithm?: "SHA1" | "SHA256" | "SHA512"; digits?: number; period?: number } | null;
   } | null>(null);
 
-  const fetchOrg = () => {
-    fetch(`/api/orgs/${orgId}`)
-      .then((res) => res.json())
-      .then(setOrg)
-      .catch(() => {});
+  const fetchOrg = async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/orgs/${orgId}`);
+      if (!res.ok) {
+        setOrg(null);
+        setLoadError(true);
+        return false;
+      }
+      const data = await res.json();
+      setOrg(data);
+      setLoadError(false);
+      return true;
+    } catch {
+      setOrg(null);
+      setLoadError(true);
+      return false;
+    }
   };
 
   const fetchPasswords = useCallback(() => {
@@ -79,8 +92,12 @@ export default function OrgDashboardPage({
   }, [orgId]);
 
   useEffect(() => {
-    fetchOrg();
-    fetchPasswords();
+    setLoadError(false);
+    (async () => {
+      const ok = await fetchOrg();
+      if (ok) fetchPasswords();
+      else setLoading(false);
+    })();
   }, [orgId, fetchPasswords]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const canCreate =
@@ -192,6 +209,26 @@ export default function OrgDashboardPage({
       p.urlHost?.toLowerCase().includes(q)
     );
   });
+
+  if (loadError) {
+    return (
+      <div className="p-4 md:p-6">
+        <div className="mx-auto max-w-3xl">
+          <div className="flex flex-col items-start gap-3">
+            <h1 className="text-xl font-semibold">{t("forbidden")}</h1>
+            <p className="text-sm text-muted-foreground">
+              {t("noOrgsDesc")}
+            </p>
+            <Button variant="ghost" asChild>
+              <Link href="/dashboard/orgs">
+                {t("manage")}
+              </Link>
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 md:p-6">

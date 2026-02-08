@@ -39,11 +39,10 @@ export default function AcceptInvitePage({
       });
 
       if (!res.ok) {
-        const data = await res.json();
         if (res.status === 410) {
           setError(t("inviteExpired"));
-        } else if (res.status === 403) {
-          setError(data.error);
+        } else if (res.status === 403 || res.status === 404) {
+          setError(t("inviteInvalid"));
         } else {
           setError(t("acceptFailed"));
         }

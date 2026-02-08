@@ -337,6 +337,7 @@
     "ownershipTransferred": "Ownership transferred",
     "organizationFavorites": "Organization Favorites",
     "organizationArchive": "Organization Archive",
-    "organizationTrash": "Organization Trash"
+    "organizationTrash": "Organization Trash",
+    "backToOrg": "Back to {name}"
   }
 }

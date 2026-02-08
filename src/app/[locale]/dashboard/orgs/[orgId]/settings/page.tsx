@@ -74,6 +74,7 @@ export default function OrgSettingsPage({
   const router = useRouter();
 
   const [org, setOrg] = useState<OrgInfo | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [name, setName] = useState("");
@@ -96,13 +97,20 @@ export default function OrgSettingsPage({
 
   const fetchAll = () => {
     fetch(`/api/orgs/${orgId}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("Forbidden");
+        return r.json();
+      })
       .then((d) => {
         setOrg(d);
         setName(d.name);
         setDescription(d.description ?? "");
+        setLoadError(false);
       })
-      .catch(() => {});
+      .catch(() => {
+        setOrg(null);
+        setLoadError(true);
+      });
 
     fetch(`/api/orgs/${orgId}/members`)
       .then((r) => r.json())
@@ -120,6 +128,8 @@ export default function OrgSettingsPage({
   };
 
   useEffect(() => {
+    setOrg(null);
+    setLoadError(false);
     fetchAll();
   }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -247,6 +257,25 @@ export default function OrgSettingsPage({
   };
 
   if (!org) {
+    if (loadError) {
+      return (
+        <div className="p-4 md:p-6">
+          <div className="mx-auto max-w-2xl">
+            <div className="flex flex-col items-start gap-3">
+              <h1 className="text-xl font-semibold">{t("forbidden")}</h1>
+              <p className="text-sm text-muted-foreground">
+                {t("noOrgsDesc")}
+              </p>
+              <Button variant="ghost" asChild>
+                <Link href="/dashboard/orgs">
+                  {tOrg("manage")}
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex items-center justify-center h-full">
         <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -257,15 +286,23 @@ export default function OrgSettingsPage({
   return (
     <div className="p-4 md:p-6">
       <div className="mx-auto max-w-2xl">
-        <div className="flex items-center gap-3 mb-6">
-          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" asChild>
-            <Link href={`/dashboard/orgs/${orgId}`}>
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
-          <h1 className="text-xl font-semibold">
-            {org.name} - {t("settings")}
-          </h1>
+        <div className="flex flex-col gap-2 mb-6">
+          <div className="flex flex-col items-start gap-2 min-w-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-2 text-muted-foreground hover:text-foreground"
+              asChild
+            >
+              <Link href={`/dashboard/orgs/${orgId}`}>
+                <ArrowLeft className="h-4 w-4" />
+                {t("backToOrg", { name: org.name })}
+              </Link>
+            </Button>
+            <h1 className="text-xl font-semibold truncate">
+              {org.name} - {t("settings")}
+            </h1>
+          </div>
         </div>
 
         {/* General Settings */}
@@ -278,6 +315,16 @@ export default function OrgSettingsPage({
                 <Input value={name} onChange={(e) => setName(e.target.value)} />
               </div>
               <div className="space-y-2">
+                <Label>{t("slug")}</Label>
+                <div className="flex items-center gap-2">
+                  <Input value={org.slug} readOnly />
+                  <CopyButton getValue={() => org.slug} />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("slugHelp")}
+                </p>
+              </div>
+              <div className="space-y-2">
                 <Label>{t("description")}</Label>
                 <Textarea
                   value={description}
@@ -285,10 +332,15 @@ export default function OrgSettingsPage({
                   rows={3}
                 />
               </div>
-              <Button onClick={handleUpdateOrg} disabled={saving || !name.trim()}>
-                {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {t("updateOrg")}
-              </Button>
+              {isAdmin && (
+                <Button
+                  onClick={handleUpdateOrg}
+                  disabled={saving || !name.trim()}
+                >
+                  {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  {t("updateOrg")}
+                </Button>
+              )}
             </div>
           </section>
         )}
