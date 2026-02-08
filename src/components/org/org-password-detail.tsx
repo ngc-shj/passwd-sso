@@ -7,10 +7,21 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/passwords/copy-button";
+import { TOTPField, type TOTPEntry } from "@/components/passwords/totp-field";
+import { cn } from "@/lib/utils";
+import { getTagColorClass } from "@/lib/dynamic-styles";
 import { Eye, EyeOff, ExternalLink } from "lucide-react";
+
+interface CustomField {
+  label: string;
+  value: string;
+  type: "text" | "hidden" | "url";
+}
 
 interface OrgPasswordDetailProps {
   orgId: string;
@@ -26,6 +37,9 @@ interface PasswordData {
   password: string;
   url: string | null;
   notes: string | null;
+  customFields: CustomField[];
+  totp: TOTPEntry | null;
+  tags: { id: string; name: string; color: string | null }[];
   createdBy: { name: string | null };
   updatedBy: { name: string | null };
   createdAt: string;
@@ -39,14 +53,19 @@ export function OrgPasswordDetail({
   onOpenChange,
 }: OrgPasswordDetailProps) {
   const t = useTranslations("PasswordDetail");
+  const tf = useTranslations("PasswordForm");
   const [data, setData] = useState<PasswordData | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [hiddenFieldsVisible, setHiddenFieldsVisible] = useState<Set<number>>(
+    new Set()
+  );
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!open || !passwordId) return;
     setLoading(true);
     setShowPassword(false);
+    setHiddenFieldsVisible(new Set());
 
     fetch(`/api/orgs/${orgId}/passwords/${passwordId}`)
       .then((res) => {
@@ -65,11 +84,26 @@ export function OrgPasswordDetail({
     return () => clearTimeout(timer);
   }, [showPassword]);
 
+  const toggleHiddenField = (idx: number) => {
+    setHiddenFieldsVisible((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) {
+        next.delete(idx);
+      } else {
+        next.add(idx);
+      }
+      return next;
+    });
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{data?.title ?? "..."}</DialogTitle>
+          <DialogDescription className="sr-only">
+            {data?.title ?? "..."}
+          </DialogDescription>
         </DialogHeader>
 
         {loading ? (
@@ -96,7 +130,9 @@ export function OrgPasswordDetail({
               </p>
               <div className="flex items-center gap-2">
                 <p className="text-sm flex-1 font-mono">
-                  {showPassword ? data.password : "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"}
+                  {showPassword
+                    ? data.password
+                    : "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"}
                 </p>
                 <Button
                   variant="ghost"
@@ -118,6 +154,11 @@ export function OrgPasswordDetail({
                 </p>
               )}
             </div>
+
+            {/* TOTP */}
+            {data.totp && (
+              <TOTPField mode="display" totp={data.totp} />
+            )}
 
             {data.url && (
               <div>
@@ -144,6 +185,90 @@ export function OrgPasswordDetail({
                   {t("notes")}
                 </p>
                 <p className="text-sm whitespace-pre-wrap">{data.notes}</p>
+              </div>
+            )}
+
+            {/* Custom Fields */}
+            {data.customFields.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground font-medium">
+                  {tf("customFields")}
+                </p>
+                {data.customFields.map((field, idx) => (
+                  <div key={idx}>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {field.label}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      {field.type === "hidden" ? (
+                        <>
+                          <p className="text-sm flex-1 font-mono">
+                            {hiddenFieldsVisible.has(idx)
+                              ? field.value
+                              : "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"}
+                          </p>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => toggleHiddenField(idx)}
+                          >
+                            {hiddenFieldsVisible.has(idx) ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </>
+                      ) : field.type === "url" ? (
+                        <>
+                          <p className="text-sm flex-1 truncate">
+                            {field.value}
+                          </p>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() =>
+                              window.open(field.value, "_blank")
+                            }
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </Button>
+                        </>
+                      ) : (
+                        <p className="text-sm flex-1">{field.value}</p>
+                      )}
+                      <CopyButton getValue={() => field.value} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Tags */}
+            {data.tags.length > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">
+                  {tf("tags")}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {data.tags.map((tag) => {
+                    const colorClass = getTagColorClass(tag.color);
+                    return (
+                      <Badge
+                        key={tag.id}
+                        variant="secondary"
+                        className={cn(
+                          colorClass && "tag-color",
+                          colorClass
+                        )}
+                      >
+                        {tag.name}
+                      </Badge>
+                    );
+                  })}
+                </div>
               </div>
             )}
 

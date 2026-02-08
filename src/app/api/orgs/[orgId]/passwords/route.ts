@@ -63,15 +63,21 @@ export async function GET(req: NextRequest, { params }: Params) {
       ...(archivedOnly
         ? { isArchived: true }
         : trashOnly ? {} : { isArchived: false }),
-      ...(favoritesOnly ? { isFavorite: true } : {}),
+      ...(favoritesOnly
+        ? { favorites: { some: { userId: session.user.id } } }
+        : {}),
       ...(tagId ? { tags: { some: { id: tagId } } } : {}),
     },
     include: {
       tags: { select: { id: true, name: true, color: true } },
       createdBy: { select: { id: true, name: true, image: true } },
       updatedBy: { select: { id: true, name: true } },
+      favorites: {
+        where: { userId: session.user.id },
+        select: { id: true },
+      },
     },
-    orderBy: [{ isFavorite: "desc" }, { updatedAt: "desc" }],
+    orderBy: { updatedAt: "desc" },
   });
 
   // Auto-purge items deleted more than 30 days ago
@@ -85,7 +91,23 @@ export async function GET(req: NextRequest, { params }: Params) {
     }).catch(() => {});
   }
 
-  const entries = passwords.map((entry) => {
+  interface OrgPasswordListEntry {
+    id: string;
+    title: string;
+    username: string | null;
+    urlHost: string | null;
+    isFavorite: boolean;
+    isArchived: boolean;
+    tags: { id: string; name: string; color: string | null }[];
+    createdBy: { id: string; name: string | null; image: string | null };
+    updatedBy: { id: string; name: string | null };
+    createdAt: Date;
+    updatedAt: Date;
+    deletedAt: Date | null;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const entries: OrgPasswordListEntry[] = passwords.map((entry: any) => {
     const overview = JSON.parse(
       decryptServerData(
         {
@@ -102,7 +124,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       title: overview.title,
       username: overview.username,
       urlHost: overview.urlHost,
-      isFavorite: entry.isFavorite,
+      isFavorite: entry.favorites.length > 0,
       isArchived: entry.isArchived,
       tags: entry.tags,
       createdBy: entry.createdBy,
@@ -111,6 +133,12 @@ export async function GET(req: NextRequest, { params }: Params) {
       updatedAt: entry.updatedAt,
       deletedAt: entry.deletedAt,
     };
+  });
+
+  // Sort: favorites first, then by updatedAt desc
+  entries.sort((a, b) => {
+    if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
+    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
   });
 
   return NextResponse.json(entries);
@@ -149,7 +177,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  const { title, username, password, url, notes, tagIds } = parsed.data;
+  const { title, username, password, url, notes, tagIds, customFields, totp } = parsed.data;
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
@@ -185,6 +213,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     password,
     url: url || null,
     notes: notes || null,
+    ...(customFields?.length ? { customFields } : {}),
+    ...(totp ? { totp } : {}),
   });
 
   const overviewBlob = JSON.stringify({

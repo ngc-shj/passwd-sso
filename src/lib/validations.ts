@@ -85,7 +85,20 @@ export const inviteSchema = z.object({
 });
 
 export const updateMemberRoleSchema = z.object({
-  role: z.enum(["ADMIN", "MEMBER", "VIEWER"]),
+  role: z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"]),
+});
+
+const orgCustomFieldSchema = z.object({
+  label: z.string().min(1).max(100),
+  value: z.string().max(10000),
+  type: z.enum(["text", "hidden", "url"]),
+});
+
+const orgTotpSchema = z.object({
+  secret: z.string().min(1),
+  algorithm: z.enum(["SHA1", "SHA256", "SHA512"]).optional(),
+  digits: z.number().int().min(6).max(8).optional(),
+  period: z.number().int().min(15).max(60).optional(),
 });
 
 export const createOrgPasswordSchema = z.object({
@@ -95,6 +108,8 @@ export const createOrgPasswordSchema = z.object({
   url: z.string().max(2000).optional().or(z.literal("")),
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
+  customFields: z.array(orgCustomFieldSchema).optional(),
+  totp: orgTotpSchema.optional().nullable(),
 });
 
 export const updateOrgPasswordSchema = z.object({
@@ -104,7 +119,8 @@ export const updateOrgPasswordSchema = z.object({
   url: z.string().max(2000).optional().or(z.literal("")),
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
-  isFavorite: z.boolean().optional(),
+  customFields: z.array(orgCustomFieldSchema).optional(),
+  totp: orgTotpSchema.optional().nullable(),
   isArchived: z.boolean().optional(),
 });
 

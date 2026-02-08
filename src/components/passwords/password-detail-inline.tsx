@@ -44,7 +44,7 @@ export interface InlineDetailData {
 
 interface PasswordDetailInlineProps {
   data: InlineDetailData;
-  onEdit: () => void;
+  onEdit?: () => void;
 }
 
 const REVEAL_TIMEOUT = 30_000;
@@ -256,10 +256,12 @@ export function PasswordDetailInline({ data, onEdit }: PasswordDetailInlineProps
             )}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={onEdit}>
-          <Edit className="h-4 w-4 mr-1" />
-          {tc("edit")}
-        </Button>
+        {onEdit && (
+          <Button variant="outline" size="sm" onClick={onEdit}>
+            <Edit className="h-4 w-4 mr-1" />
+            {tc("edit")}
+          </Button>
+        )}
       </div>
     </div>
   );

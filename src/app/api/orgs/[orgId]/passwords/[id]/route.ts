@@ -59,6 +59,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
       tags: { select: { id: true, name: true, color: true } },
       createdBy: { select: { id: true, name: true, image: true } },
       updatedBy: { select: { id: true, name: true } },
+      favorites: {
+        where: { userId: session.user.id },
+        select: { id: true },
+      },
     },
   });
 
@@ -85,7 +89,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
     password: blob.password,
     url: blob.url,
     notes: blob.notes,
-    isFavorite: entry.isFavorite,
+    customFields: blob.customFields ?? [],
+    totp: blob.totp ?? null,
+    isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,
     tags: entry.tags,
     createdBy: entry.createdBy,
@@ -174,9 +180,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
     )
   );
 
-  const { tagIds, isFavorite, isArchived, ...fieldUpdates } = parsed.data;
+  const { tagIds, isArchived, customFields, totp, ...fieldUpdates } = parsed.data;
 
-  const updatedBlob = {
+  const updatedBlob: Record<string, unknown> = {
     title: fieldUpdates.title ?? currentBlob.title,
     username:
       fieldUpdates.username !== undefined
@@ -193,10 +199,24 @@ export async function PUT(req: NextRequest, { params }: Params) {
         : currentBlob.notes,
   };
 
+  // Update custom fields if provided
+  if (customFields !== undefined) {
+    updatedBlob.customFields = customFields?.length ? customFields : undefined;
+  } else if (currentBlob.customFields) {
+    updatedBlob.customFields = currentBlob.customFields;
+  }
+
+  // Update TOTP if provided
+  if (totp !== undefined) {
+    updatedBlob.totp = totp ?? undefined;
+  } else if (currentBlob.totp) {
+    updatedBlob.totp = currentBlob.totp;
+  }
+
   let urlHost: string | null = null;
   if (updatedBlob.url) {
     try {
-      urlHost = new URL(updatedBlob.url).hostname;
+      urlHost = new URL(updatedBlob.url as string).hostname;
     } catch {
       /* invalid url */
     }
@@ -224,7 +244,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updatedById: session.user.id,
   };
 
-  if (isFavorite !== undefined) updateData.isFavorite = isFavorite;
+  // isFavorite is now per-user via /favorite endpoint
   if (isArchived !== undefined) updateData.isArchived = isArchived;
   if (tagIds !== undefined) {
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };

@@ -41,7 +41,55 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Member not found" }, { status: 404 });
   }
 
-  // Cannot change OWNER role (unless actor is also OWNER)
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const parsed = updateMemberRoleSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+
+  // Owner transfer: only OWNER can promote someone to OWNER
+  if (parsed.data.role === "OWNER") {
+    if (actorMembership.role !== "OWNER") {
+      return NextResponse.json(
+        { error: "Only the owner can transfer ownership" },
+        { status: 403 }
+      );
+    }
+
+    // Transfer: promote target to OWNER, demote self to ADMIN
+    await prisma.orgMember.update({
+      where: { id: actorMembership.id },
+      data: { role: "ADMIN" },
+    });
+
+    const updated = await prisma.orgMember.update({
+      where: { id: memberId },
+      data: { role: "OWNER" },
+      include: {
+        user: { select: { id: true, name: true, email: true, image: true } },
+      },
+    });
+
+    return NextResponse.json({
+      id: updated.id,
+      userId: updated.userId,
+      role: updated.role,
+      name: updated.user.name,
+      email: updated.user.email,
+      image: updated.user.image,
+    });
+  }
+
+  // Cannot change OWNER role (unless transferring ownership above)
   if (target.role === "OWNER") {
     return NextResponse.json(
       { error: "Cannot change the owner's role" },
@@ -57,21 +105,6 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json(
       { error: "Cannot change role of a member at or above your level" },
       { status: 403 }
-    );
-  }
-
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-
-  const parsed = updateMemberRoleSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.flatten() },
-      { status: 400 }
     );
   }
 

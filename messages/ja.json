@@ -329,6 +329,14 @@
     "inviteExpired": "この招待は期限切れです",
     "inviteInvalid": "無効な招待です",
     "networkError": "ネットワークエラー",
-    "forbidden": "この操作を行う権限がありません"
+    "forbidden": "この操作を行う権限がありません",
+    "transferOwnership": "オーナー権限の譲渡",
+    "transferOwnershipDesc": "オーナー権限を他のメンバーに譲渡します。あなたは管理者に降格されます。",
+    "transferOwnershipConfirm": "{name} にオーナー権限を譲渡しますか？あなたは管理者になり、この操作は自分で元に戻せません。",
+    "transferButton": "譲渡",
+    "ownershipTransferred": "オーナー権限を譲渡しました",
+    "organizationFavorites": "組織のお気に入り",
+    "organizationArchive": "組織のアーカイブ",
+    "organizationTrash": "組織のゴミ箱"
   }
 }

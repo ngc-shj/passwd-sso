@@ -61,6 +61,17 @@ interface PasswordCardProps {
   onDelete: (id: string) => void;
   onToggleExpand: (id: string) => void;
   onRefresh: () => void;
+  // Optional: data providers for org mode (skip E2E decryption)
+  getPassword?: () => Promise<string>;
+  getDetail?: () => Promise<InlineDetailData>;
+  getUrl?: () => Promise<string | null>;
+  // Optional: custom edit handler (e.g. org edit dialog)
+  onEditClick?: () => void;
+  // Optional: RBAC permission control
+  canEdit?: boolean;
+  canDelete?: boolean;
+  // Optional: additional info display
+  createdBy?: string | null;
 }
 
 interface VaultEntryFull {
@@ -91,7 +102,15 @@ export function PasswordCard({
   onDelete,
   onToggleExpand,
   onRefresh,
+  getPassword: getPasswordProp,
+  getDetail: getDetailProp,
+  getUrl: getUrlProp,
+  onEditClick,
+  canEdit = true,
+  canDelete = true,
+  createdBy,
 }: PasswordCardProps) {
+  const isOrgMode = !!getPasswordProp;
   const t = useTranslations("PasswordCard");
   const tc = useTranslations("Common");
   const tCopy = useTranslations("CopyButton");
@@ -114,6 +133,7 @@ export function PasswordCard({
   };
 
   const fetchPassword = async (): Promise<string> => {
+    if (getPasswordProp) return getPasswordProp();
     const { entry } = await fetchDecryptedEntry();
     return entry.password;
   };
@@ -125,26 +145,39 @@ export function PasswordCard({
     let cancelled = false;
     setDetailLoading(true);
 
-    fetchDecryptedEntry()
-      .then(({ entry, raw }) => {
-        if (cancelled) return;
-        setDetailData({
-          id,
-          password: entry.password,
-          url: entry.url,
-          urlHost,
-          notes: entry.notes,
-          customFields: entry.customFields ?? [],
-          passwordHistory: entry.passwordHistory ?? [],
-          totp: entry.totp,
-          createdAt: raw.createdAt as string,
-          updatedAt: raw.updatedAt as string,
+    if (getDetailProp) {
+      // Org mode: use provided data fetcher
+      getDetailProp()
+        .then((detail) => {
+          if (!cancelled) setDetailData(detail);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setDetailLoading(false);
         });
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setDetailLoading(false);
-      });
+    } else {
+      // Personal mode: E2E decrypt
+      fetchDecryptedEntry()
+        .then(({ entry, raw }) => {
+          if (cancelled) return;
+          setDetailData({
+            id,
+            password: entry.password,
+            url: entry.url,
+            urlHost,
+            notes: entry.notes,
+            customFields: entry.customFields ?? [],
+            passwordHistory: entry.passwordHistory ?? [],
+            totp: entry.totp,
+            createdAt: raw.createdAt as string,
+            updatedAt: raw.updatedAt as string,
+          });
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setDetailLoading(false);
+        });
+    }
 
     return () => {
       cancelled = true;
@@ -167,8 +200,8 @@ export function PasswordCard({
 
   const handleCopyPassword = async () => {
     try {
-      const { entry } = await fetchDecryptedEntry();
-      await navigator.clipboard.writeText(entry.password);
+      const pw = await fetchPassword();
+      await navigator.clipboard.writeText(pw);
       toast.success(tCopy("copied"));
       setTimeout(async () => {
         try {
@@ -182,9 +215,12 @@ export function PasswordCard({
 
   const handleOpenUrl = async () => {
     try {
-      const { entry } = await fetchDecryptedEntry();
-      if (entry.url) {
-        window.open(entry.url, "_blank", "noopener,noreferrer");
+      if (getUrlProp) {
+        const url = await getUrlProp();
+        if (url) window.open(url, "_blank", "noopener,noreferrer");
+      } else {
+        const { entry } = await fetchDecryptedEntry();
+        if (entry.url) window.open(entry.url, "_blank", "noopener,noreferrer");
       }
     } catch {
       toast.error(t("networkError"));
@@ -238,6 +274,11 @@ export function PasswordCard({
                   {urlHost}
                 </span>
               )}
+              {createdBy && (
+                <span className="truncate text-xs">
+                  {createdBy}
+                </span>
+              )}
             </div>
           </div>
           {tags.length > 0 && (
@@ -272,37 +313,48 @@ export function PasswordCard({
                   {t("openUrl")}
                 </DropdownMenuItem>
               )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={() => setEditDialogOpen(true)}
-              >
-                <Edit className="h-4 w-4" />
-                {t("edit")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() => {
-                  onToggleArchive(id, isArchived);
-                  toast.success(isArchived ? t("unarchived") : t("archived"));
-                }}
-              >
-                {isArchived ? (
-                  <ArchiveRestore className="h-4 w-4" />
-                ) : (
-                  <Archive className="h-4 w-4" />
-                )}
-                {isArchived ? t("unarchive") : t("archive")}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onSelect={(e) => {
-                  e.preventDefault();
-                  setDeleteDialogOpen(true);
-                }}
-              >
-                <Trash2 className="h-4 w-4" />
-                {t("delete")}
-              </DropdownMenuItem>
+              {canEdit && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      if (onEditClick) onEditClick();
+                      else setEditDialogOpen(true);
+                    }}
+                  >
+                    <Edit className="h-4 w-4" />
+                    {t("edit")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      onToggleArchive(id, isArchived);
+                      toast.success(isArchived ? t("unarchived") : t("archived"));
+                    }}
+                  >
+                    {isArchived ? (
+                      <ArchiveRestore className="h-4 w-4" />
+                    ) : (
+                      <Archive className="h-4 w-4" />
+                    )}
+                    {isArchived ? t("unarchive") : t("archive")}
+                  </DropdownMenuItem>
+                </>
+              )}
+              {canDelete && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      setDeleteDialogOpen(true);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {t("delete")}
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </CardContent>
@@ -314,20 +366,28 @@ export function PasswordCard({
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           ) : detailData ? (
-            <PasswordDetailInline data={detailData} onEdit={() => setEditDialogOpen(true)} />
+            <PasswordDetailInline
+              data={detailData}
+              onEdit={canEdit ? () => {
+                if (onEditClick) onEditClick();
+                else setEditDialogOpen(true);
+              } : undefined}
+            />
           ) : null
         )}
       </Card>
 
-      <PasswordEditDialog
-        id={id}
-        open={editDialogOpen}
-        onOpenChange={setEditDialogOpen}
-        onSaved={() => {
-          setDetailData(null);
-          onRefresh();
-        }}
-      />
+      {!isOrgMode && (
+        <PasswordEditDialog
+          id={id}
+          open={editDialogOpen}
+          onOpenChange={setEditDialogOpen}
+          onSaved={() => {
+            setDetailData(null);
+            onRefresh();
+          }}
+        />
+      )}
 
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>

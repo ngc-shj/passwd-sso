@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, useCallback, use } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
-import { OrgPasswordCard } from "@/components/org/org-password-card";
+import { PasswordCard } from "@/components/passwords/password-card";
+import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { OrgPasswordForm } from "@/components/org/org-password-form";
-import { OrgPasswordDetail } from "@/components/org/org-password-detail";
 import { OrgRoleBadge } from "@/components/org/org-role-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,7 +47,7 @@ export default function OrgDashboardPage({
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [formOpen, setFormOpen] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editData, setEditData] = useState<{
     id: string;
     title: string;
@@ -55,6 +55,9 @@ export default function OrgDashboardPage({
     password: string;
     url: string | null;
     notes: string | null;
+    tags?: { id: string; name: string; color: string | null }[];
+    customFields?: { label: string; value: string; type: "text" | "hidden" | "url" }[];
+    totp?: { secret: string; algorithm?: "SHA1" | "SHA256" | "SHA512"; digits?: number; period?: number } | null;
   } | null>(null);
 
   const fetchOrg = () => {
@@ -64,7 +67,7 @@ export default function OrgDashboardPage({
       .catch(() => {});
   };
 
-  const fetchPasswords = () => {
+  const fetchPasswords = useCallback(() => {
     setLoading(true);
     fetch(`/api/orgs/${orgId}/passwords`)
       .then((res) => res.json())
@@ -73,27 +76,57 @@ export default function OrgDashboardPage({
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  };
+  }, [orgId]);
 
   useEffect(() => {
     fetchOrg();
     fetchPasswords();
-  }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [orgId, fetchPasswords]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const canCreate =
     org?.role === "OWNER" || org?.role === "ADMIN" || org?.role === "MEMBER";
-  const canDelete = org?.role === "OWNER" || org?.role === "ADMIN";
-  const canEdit = canCreate;
+  const canDeletePerm = org?.role === "OWNER" || org?.role === "ADMIN";
+  const canEditPerm = canCreate;
+
+  const handleToggleFavorite = async (id: string, current: boolean) => {
+    // Optimistic update
+    setPasswords((prev) =>
+      prev.map((e) => (e.id === id ? { ...e, isFavorite: !current } : e))
+    );
+    try {
+      const res = await fetch(`/api/orgs/${orgId}/passwords/${id}/favorite`, {
+        method: "POST",
+      });
+      if (!res.ok) fetchPasswords();
+    } catch {
+      fetchPasswords();
+    }
+  };
+
+  const handleToggleArchive = async (id: string, current: boolean) => {
+    setPasswords((prev) => prev.filter((e) => e.id !== id));
+    try {
+      const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isArchived: !current }),
+      });
+      if (!res.ok) fetchPasswords();
+    } catch {
+      fetchPasswords();
+    }
+  };
 
   const handleDelete = async (id: string) => {
+    setPasswords((prev) => prev.filter((e) => e.id !== id));
     try {
       const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`, {
         method: "DELETE",
       });
-      if (!res.ok) throw new Error("Failed");
-      fetchPasswords();
+      if (!res.ok) fetchPasswords();
     } catch {
       toast.error(t("networkError"));
+      fetchPasswords();
     }
   };
 
@@ -108,6 +141,47 @@ export default function OrgDashboardPage({
       toast.error(t("networkError"));
     }
   };
+
+  const createDetailFetcher = useCallback(
+    (id: string) => async (): Promise<InlineDetailData> => {
+      const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`);
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
+      return {
+        id: data.id,
+        password: data.password,
+        url: data.url,
+        urlHost: null,
+        notes: data.notes,
+        customFields: data.customFields ?? [],
+        passwordHistory: [],
+        totp: data.totp ?? undefined,
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
+      };
+    },
+    [orgId]
+  );
+
+  const createPasswordFetcher = useCallback(
+    (id: string) => async (): Promise<string> => {
+      const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`);
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
+      return data.password;
+    },
+    [orgId]
+  );
+
+  const createUrlFetcher = useCallback(
+    (id: string) => async (): Promise<string | null> => {
+      const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`);
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
+      return data.url;
+    },
+    [orgId]
+  );
 
   const filtered = passwords.filter((p) => {
     if (!searchQuery) return true;
@@ -177,15 +251,37 @@ export default function OrgDashboardPage({
         ) : (
           <div className="space-y-2">
             {filtered.map((entry) => (
-              <OrgPasswordCard
+              <PasswordCard
                 key={entry.id}
-                entry={entry}
-                orgId={orgId}
-                canEdit={canEdit}
-                canDelete={canDelete}
-                onClick={() => setDetailId(entry.id)}
-                onEdit={() => handleEdit(entry.id)}
-                onDelete={() => handleDelete(entry.id)}
+                id={entry.id}
+                title={entry.title}
+                username={entry.username}
+                urlHost={entry.urlHost}
+                tags={entry.tags}
+                isFavorite={entry.isFavorite}
+                isArchived={entry.isArchived}
+                expanded={expandedId === entry.id}
+                onToggleFavorite={handleToggleFavorite}
+                onToggleArchive={handleToggleArchive}
+                onDelete={handleDelete}
+                onToggleExpand={(id) =>
+                  setExpandedId((prev) => (prev === id ? null : id))
+                }
+                onRefresh={() => {
+                  fetchPasswords();
+                  setExpandedId(null);
+                }}
+                getPassword={createPasswordFetcher(entry.id)}
+                getDetail={createDetailFetcher(entry.id)}
+                getUrl={createUrlFetcher(entry.id)}
+                onEditClick={() => handleEdit(entry.id)}
+                canEdit={canEditPerm}
+                canDelete={canDeletePerm}
+                createdBy={
+                  entry.createdBy.name
+                    ? t("createdBy", { name: entry.createdBy.name })
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -196,17 +292,11 @@ export default function OrgDashboardPage({
         orgId={orgId}
         open={formOpen}
         onOpenChange={setFormOpen}
-        onSaved={fetchPasswords}
-        editData={editData}
-      />
-
-      <OrgPasswordDetail
-        orgId={orgId}
-        passwordId={detailId}
-        open={!!detailId}
-        onOpenChange={(v) => {
-          if (!v) setDetailId(null);
+        onSaved={() => {
+          fetchPasswords();
+          setExpandedId(null);
         }}
+        editData={editData}
       />
     </div>
   );

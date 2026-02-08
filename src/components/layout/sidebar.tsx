@@ -146,26 +146,6 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         </div>
       </div>
 
-      <Separator />
-
-      <div>
-        <SectionLabel>{t("security")}</SectionLabel>
-        <div className="space-y-1">
-          <Button
-            variant={isWatchtower ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard/watchtower" onClick={() => onOpenChange(false)}>
-              <Shield className="h-4 w-4" />
-              {t("watchtower")}
-            </Link>
-          </Button>
-        </div>
-      </div>
-
-      <Separator />
-
       <div>
         <SectionLabel icon={<Building2 className="h-3 w-3" />}>
           {tOrg("organizations")}
@@ -241,6 +221,24 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
           </div>
         </>
       )}
+
+      <Separator />
+
+      <div>
+        <SectionLabel>{t("security")}</SectionLabel>
+        <div className="space-y-1">
+          <Button
+            variant={isWatchtower ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link href="/dashboard/watchtower" onClick={() => onOpenChange(false)}>
+              <Shield className="h-4 w-4" />
+              {t("watchtower")}
+            </Link>
+          </Button>
+        </div>
+      </div>
 
       <Separator />
 

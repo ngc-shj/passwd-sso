@@ -5,6 +5,9 @@ import { useTranslations } from "next-intl";
 import { SearchBar } from "@/components/layout/search-bar";
 import { PasswordList, type SortOption } from "@/components/passwords/password-list";
 import { TrashList } from "@/components/passwords/trash-list";
+import { OrgFavoritesList } from "@/components/org/org-favorites-list";
+import { OrgArchivedList } from "@/components/org/org-archived-list";
+import { OrgTrashList } from "@/components/org/org-trash-list";
 import { PasswordNewDialog } from "@/components/passwords/password-new-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -161,17 +164,34 @@ export function PasswordDashboard({ view, tagId }: PasswordDashboardProps) {
         </div>
 
         {isTrash ? (
-          <TrashList refreshKey={refreshKey} />
+          <>
+            <TrashList refreshKey={refreshKey} />
+            <OrgTrashList refreshKey={refreshKey} />
+          </>
         ) : (
-          <PasswordList
-            searchQuery={searchQuery}
-            tagId={tagId ?? null}
-            refreshKey={refreshKey}
-            favoritesOnly={isFavorites}
-            archivedOnly={isArchive}
-            sortBy={sortBy}
-            onDataChange={handleDataChange}
-          />
+          <>
+            <PasswordList
+              searchQuery={searchQuery}
+              tagId={tagId ?? null}
+              refreshKey={refreshKey}
+              favoritesOnly={isFavorites}
+              archivedOnly={isArchive}
+              sortBy={sortBy}
+              onDataChange={handleDataChange}
+            />
+            {isFavorites && (
+              <OrgFavoritesList
+                searchQuery={searchQuery}
+                refreshKey={refreshKey}
+              />
+            )}
+            {isArchive && (
+              <OrgArchivedList
+                searchQuery={searchQuery}
+                refreshKey={refreshKey}
+              />
+            )}
+          </>
         )}
       </div>
 

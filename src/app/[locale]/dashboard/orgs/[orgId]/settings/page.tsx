@@ -33,7 +33,8 @@ import {
   AvatarImage,
 } from "@/components/ui/avatar";
 import { CopyButton } from "@/components/passwords/copy-button";
-import { Loader2, UserPlus, Trash2, X, LinkIcon } from "lucide-react";
+import { Link } from "@/i18n/navigation";
+import { ArrowLeft, Loader2, UserPlus, Trash2, X, LinkIcon, Crown } from "lucide-react";
 import { toast } from "sonner";
 
 interface OrgInfo {
@@ -216,6 +217,22 @@ export default function OrgSettingsPage({
     }
   };
 
+  const handleTransferOwnership = async (memberId: string) => {
+    try {
+      const res = await fetch(`/api/orgs/${orgId}/members/${memberId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "OWNER" }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      toast.success(t("ownershipTransferred"));
+      window.dispatchEvent(new CustomEvent("org-data-changed"));
+      fetchAll();
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
   const handleRemoveMember = async (memberId: string) => {
     try {
       const res = await fetch(`/api/orgs/${orgId}/members/${memberId}`, {
@@ -240,9 +257,16 @@ export default function OrgSettingsPage({
   return (
     <div className="p-4 md:p-6">
       <div className="mx-auto max-w-2xl">
-        <h1 className="text-xl font-semibold mb-6">
-          {org.name} - {t("settings")}
-        </h1>
+        <div className="flex items-center gap-3 mb-6">
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" asChild>
+            <Link href={`/dashboard/orgs/${orgId}`}>
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+          <h1 className="text-xl font-semibold">
+            {org.name} - {t("settings")}
+          </h1>
+        </div>
 
         {/* General Settings */}
         {isAdmin && (
@@ -358,6 +382,75 @@ export default function OrgSettingsPage({
             ))}
           </div>
         </section>
+
+        {/* Transfer Ownership */}
+        {isOwner && members.filter((m) => m.role !== "OWNER").length > 0 && (
+          <>
+            <Separator className="my-6" />
+            <section className="space-y-4">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Crown className="h-5 w-5" />
+                {t("transferOwnership")}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {t("transferOwnershipDesc")}
+              </p>
+              <div className="space-y-2">
+                {members
+                  .filter((m) => m.role !== "OWNER")
+                  .map((m) => (
+                    <div
+                      key={m.id}
+                      className="flex items-center gap-3 rounded-lg border p-3"
+                    >
+                      <Avatar className="h-8 w-8">
+                        <AvatarImage src={m.image ?? undefined} />
+                        <AvatarFallback>
+                          {(m.name ?? m.email ?? "?").charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">
+                          {m.name ?? m.email}
+                        </p>
+                        <OrgRoleBadge role={m.role} />
+                      </div>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="outline" size="sm">
+                            <Crown className="h-3.5 w-3.5 mr-1" />
+                            {t("transferButton")}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>
+                              {t("transferOwnership")}
+                            </AlertDialogTitle>
+                            <AlertDialogDescription>
+                              {t("transferOwnershipConfirm", {
+                                name: m.name ?? m.email ?? "",
+                              })}
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>
+                              {t("cancelInvitation")}
+                            </AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() => handleTransferOwnership(m.id)}
+                            >
+                              {t("transferButton")}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  ))}
+              </div>
+            </section>
+          </>
+        )}
 
         {/* Invite */}
         {isAdmin && (
