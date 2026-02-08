@@ -178,7 +178,7 @@ src/
 
 ## Deployment Guides
 
-- [Docker Compose Setup (English)](docs/setup.en.md) / [日本語](docs/setup.ja.md)
+- [Docker Compose Setup (English)](docs/setup.docker.en.md) / [日本語](docs/setup.docker.ja.md)
 - [AWS Deployment (English)](docs/setup.aws.en.md) / [日本語](docs/setup.aws.ja.md)
 
 ## License

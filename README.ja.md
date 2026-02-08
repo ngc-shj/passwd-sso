@@ -178,7 +178,7 @@ src/
 
 ## デプロイガイド
 
-- [Docker Compose セットアップ（日本語）](docs/setup.ja.md) / [English](docs/setup.en.md)
+- [Docker Compose セットアップ（日本語）](docs/setup.docker.ja.md) / [English](docs/setup.docker.en.md)
 - [AWS デプロイ（日本語）](docs/setup.aws.ja.md) / [English](docs/setup.aws.en.md)
 
 ## ライセンス

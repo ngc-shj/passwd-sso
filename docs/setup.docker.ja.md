@@ -317,6 +317,8 @@ passwd-sso/
 │       ├── prisma.ts           # Prisma クライアント
 │       └── validations.ts      # Zod スキーマ
 └── docs/
-    ├── setup.ja.md             # 本ドキュメント (日本語)
-    └── setup.en.md             # 本ドキュメント (English)
+    ├── setup.docker.ja.md      # 本ドキュメント (日本語)
+    ├── setup.docker.en.md      # 本ドキュメント (English)
+    ├── setup.aws.ja.md         # AWS デプロイガイド (日本語)
+    └── setup.aws.en.md         # AWS デプロイガイド (English)
 ```
