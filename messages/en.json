@@ -41,7 +41,8 @@
     "import": "Import",
     "archive": "Archive",
     "newItem": "New Item",
-    "newSecureNote": "Secure Note"
+    "newSecureNote": "Secure Note",
+    "newCreditCard": "Credit Card"
   },
   "PasswordList": {
     "noMatch": "No items match your search.",
@@ -105,6 +106,35 @@
     "failedToSave": "Failed to save",
     "networkError": "Network error"
   },
+  "CreditCardForm": {
+    "newCard": "New Credit Card",
+    "editCard": "Edit Credit Card",
+    "title": "Title *",
+    "titlePlaceholder": "e.g., Personal Visa, Company Card",
+    "cardholderName": "Cardholder Name",
+    "cardholderNamePlaceholder": "e.g., TARO YAMADA",
+    "cardNumber": "Card Number",
+    "cardNumberPlaceholder": "e.g., 4111 1111 1111 1111",
+    "cardNumberDetectedBrand": "Detected: {brand}",
+    "cardNumberLengthHint": "Expected {lengths} digits.",
+    "cardNumberLengthHintGeneric": "Expected 12-19 digits.",
+    "cardNumberInvalidLength": "Invalid length. Expected {lengths} digits.",
+    "cardNumberInvalidLuhn": "Card number checksum is invalid.",
+    "brand": "Brand",
+    "brandPlaceholder": "Select brand",
+    "expiryMonth": "Month",
+    "expiryYear": "Year",
+    "expiry": "Expiration",
+    "cvv": "CVV",
+    "cvvPlaceholder": "e.g., 123",
+    "notes": "Notes",
+    "notesPlaceholder": "Optional notes...",
+    "tags": "Tags",
+    "saved": "Credit card saved",
+    "updated": "Credit card updated",
+    "failedToSave": "Failed to save",
+    "networkError": "Network error"
+  },
   "PasswordDetail": {
     "username": "Username",
     "password": "Password",
@@ -126,7 +156,12 @@
     "archived": "Archived",
     "unarchived": "Unarchived",
     "passwordHistory": "Password History",
-    "content": "Content"
+    "content": "Content",
+    "cardholderName": "Cardholder Name",
+    "cardNumber": "Card Number",
+    "brand": "Brand",
+    "expiry": "Expiration",
+    "cvv": "CVV"
   },
   "PasswordGenerator": {
     "use": "Use",
@@ -159,7 +194,10 @@
     "networkError": "Network error",
     "moreActions": "More actions",
     "copyContent": "Copy Content",
-    "secureNote": "Secure Note"
+    "secureNote": "Secure Note",
+    "copyCardNumber": "Copy Card Number",
+    "copyCvv": "Copy CVV",
+    "creditCard": "Credit Card"
   },
   "CopyButton": {
     "copied": "Copied! (clears in 30s)",
@@ -208,9 +246,9 @@
   },
   "Import": {
     "title": "Import Passwords",
-    "description": "Import passwords from a CSV file exported from another password manager.",
-    "supportedFormats": "Supported formats: Bitwarden, 1Password, Chrome",
-    "selectFile": "Select a CSV file to import",
+    "description": "Import passwords from a CSV or JSON file exported from another password manager.",
+    "supportedFormats": "Supported formats: Bitwarden (CSV/JSON), 1Password, Chrome",
+    "selectFile": "Select a CSV or JSON file to import",
     "detectedFormat": "Detected format",
     "unknownFormat": "Format could not be auto-detected. Results may vary.",
     "colTitle": "Title",
@@ -219,6 +257,7 @@
     "colUrl": "URL",
     "typeLogin": "Login",
     "typeNote": "Note",
+    "typeCard": "Card",
     "entryCount": "{count} entries found",
     "importButton": "Import {count} entries",
     "importing": "Importing {current} of {total}...",
@@ -339,6 +378,7 @@
     "allPasswords": "All Passwords",
     "noPasswords": "No passwords in this organization.",
     "newSecureNote": "Secure Note",
+    "newCreditCard": "Credit Card",
     "noPasswordsDesc": "Click \"New Password\" to add the first entry.",
     "createdBy": "Created by {name}",
     "updatedBy": "Updated by {name}",

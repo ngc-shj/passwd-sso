@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/passwords/copy-button";
 import { TOTPField, type TOTPEntry } from "@/components/passwords/totp-field";
+import { formatCardNumber } from "@/lib/credit-card";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { Eye, EyeOff, ExternalLink } from "lucide-react";
@@ -32,7 +33,7 @@ interface OrgPasswordDetailProps {
 
 interface PasswordData {
   id: string;
-  entryType?: "LOGIN" | "SECURE_NOTE";
+  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
   title: string;
   username: string | null;
   password: string;
@@ -41,6 +42,12 @@ interface PasswordData {
   notes: string | null;
   customFields: CustomField[];
   totp: TOTPEntry | null;
+  cardholderName?: string | null;
+  cardNumber?: string | null;
+  brand?: string | null;
+  expiryMonth?: string | null;
+  expiryYear?: string | null;
+  cvv?: string | null;
   tags: { id: string; name: string; color: string | null }[];
   createdBy: { name: string | null };
   updatedBy: { name: string | null };
@@ -58,6 +65,8 @@ export function OrgPasswordDetail({
   const tf = useTranslations("PasswordForm");
   const [data, setData] = useState<PasswordData | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [showCardNumber, setShowCardNumber] = useState(false);
+  const [showCvv, setShowCvv] = useState(false);
   const [hiddenFieldsVisible, setHiddenFieldsVisible] = useState<Set<number>>(
     new Set()
   );
@@ -67,6 +76,8 @@ export function OrgPasswordDetail({
     if (!open || !passwordId) return;
     setLoading(true);
     setShowPassword(false);
+    setShowCardNumber(false);
+    setShowCvv(false);
     setHiddenFieldsVisible(new Set());
 
     fetch(`/api/orgs/${orgId}/passwords/${passwordId}`)
@@ -114,7 +125,102 @@ export function OrgPasswordDetail({
           </div>
         ) : data ? (
           <div className="space-y-4">
-            {data.entryType === "SECURE_NOTE" ? (
+            {data.entryType === "CREDIT_CARD" ? (
+              <>
+                {/* Card Number */}
+                {data.cardNumber && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {t("cardNumber")}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm flex-1 font-mono">
+                        {showCardNumber
+                          ? formatCardNumber(data.cardNumber, data.brand)
+                          : "•••• •••• •••• " + (data.cardNumber.slice(-4) || "••••")}
+                      </p>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => setShowCardNumber(!showCardNumber)}
+                      >
+                        {showCardNumber ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                      <CopyButton getValue={() => data.cardNumber ?? ""} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Cardholder Name */}
+                {data.cardholderName && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {t("cardholderName")}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm flex-1">{data.cardholderName}</p>
+                      <CopyButton getValue={() => data.cardholderName ?? ""} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Brand */}
+                {data.brand && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {t("brand")}
+                    </p>
+                    <p className="text-sm">{data.brand}</p>
+                  </div>
+                )}
+
+                {/* Expiry */}
+                {(data.expiryMonth || data.expiryYear) && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {t("expiry")}
+                    </p>
+                    <p className="text-sm">
+                      {data.expiryMonth ?? "--"}/{data.expiryYear ?? "----"}
+                    </p>
+                  </div>
+                )}
+
+                {/* CVV */}
+                {data.cvv && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {t("cvv")}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm flex-1 font-mono">
+                        {showCvv ? data.cvv : "•••"}
+                      </p>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => setShowCvv(!showCvv)}
+                      >
+                        {showCvv ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                      <CopyButton getValue={() => data.cvv ?? ""} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Notes */}
+                {data.notes && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {t("notes")}
+                    </p>
+                    <p className="text-sm whitespace-pre-wrap">{data.notes}</p>
+                  </div>
+                )}
+              </>
+            ) : data.entryType === "SECURE_NOTE" ? (
               /* Secure Note: show content */
               <div>
                 <p className="text-xs text-muted-foreground mb-1">

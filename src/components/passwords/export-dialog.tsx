@@ -19,7 +19,7 @@ import { Download, Loader2, AlertTriangle } from "lucide-react";
 type ExportFormat = "csv" | "json";
 
 interface DecryptedExport {
-  entryType: "LOGIN" | "SECURE_NOTE";
+  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
   title: string;
   username: string | null;
   password: string;
@@ -27,6 +27,12 @@ interface DecryptedExport {
   url: string | null;
   notes: string | null;
   totp: string | null;
+  cardholderName: string | null;
+  cardNumber: string | null;
+  brand: string | null;
+  expiryMonth: string | null;
+  expiryYear: string | null;
+  cvv: string | null;
 }
 
 interface ExportDialogProps {
@@ -66,6 +72,12 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
             url: parsed.url ?? null,
             notes: parsed.notes ?? null,
             totp: parsed.totp?.secret ?? null,
+            cardholderName: parsed.cardholderName ?? null,
+            cardNumber: parsed.cardNumber ?? null,
+            brand: parsed.brand ?? null,
+            expiryMonth: parsed.expiryMonth ?? null,
+            expiryYear: parsed.expiryYear ?? null,
+            cvv: parsed.cvv ?? null,
           });
         } catch {
           // Skip entries that fail to decrypt
@@ -88,18 +100,20 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
         };
         const rows = entries.map((e) => {
           const isNote = e.entryType === "SECURE_NOTE";
+          const isCard = e.entryType === "CREDIT_CARD";
+          const type = isCard ? "card" : isNote ? "securenote" : "login";
           return [
             "", // folder
             "", // favorite
-            isNote ? "securenote" : "login", // type
+            type,
             escapeCsv(e.title),
             escapeCsv(isNote ? e.content : e.notes), // notes column
             "", // fields
             "", // reprompt
-            isNote ? "" : escapeCsv(e.url),
-            isNote ? "" : escapeCsv(e.username),
-            isNote ? "" : escapeCsv(e.password),
-            isNote ? "" : escapeCsv(e.totp),
+            isNote || isCard ? "" : escapeCsv(e.url),
+            isNote || isCard ? "" : escapeCsv(e.username),
+            isNote || isCard ? "" : escapeCsv(e.password),
+            isNote || isCard ? "" : escapeCsv(e.totp),
           ].join(",");
         });
         const csvContent = [header, ...rows].join("\n");
@@ -110,6 +124,21 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
           {
             exportedAt: new Date().toISOString(),
             entries: entries.map((e) => {
+              if (e.entryType === "CREDIT_CARD") {
+                return {
+                  type: "card",
+                  name: e.title,
+                  card: {
+                    cardholderName: e.cardholderName,
+                    brand: e.brand,
+                    number: e.cardNumber,
+                    expMonth: e.expiryMonth,
+                    expYear: e.expiryYear,
+                    code: e.cvv,
+                  },
+                  notes: e.notes,
+                };
+              }
               if (e.entryType === "SECURE_NOTE") {
                 return {
                   type: "securenote",

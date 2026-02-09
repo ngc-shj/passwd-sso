@@ -113,6 +113,53 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     expect(json.isFavorite).toBe(false);
   });
 
+  it("returns CREDIT_CARD with card fields", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "CREDIT_CARD",
+      encryptedBlob: "blob-cipher",
+      blobIv: "blob-iv",
+      blobAuthTag: "blob-tag",
+      isArchived: false,
+      org: orgKeyData,
+      tags: [],
+      createdBy: { id: "u1", name: "User", image: null },
+      updatedBy: { id: "u1", name: "User" },
+      favorites: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({
+        title: "My Visa",
+        cardholderName: "John Doe",
+        cardNumber: "4111111111111111",
+        brand: "Visa",
+        expiryMonth: "12",
+        expiryYear: "2028",
+        cvv: "123",
+        notes: "Personal card",
+      })
+    );
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.entryType).toBe("CREDIT_CARD");
+    expect(json.title).toBe("My Visa");
+    expect(json.cardholderName).toBe("John Doe");
+    expect(json.cardNumber).toBe("4111111111111111");
+    expect(json.brand).toBe("Visa");
+    expect(json.expiryMonth).toBe("12");
+    expect(json.expiryYear).toBe("2028");
+    expect(json.cvv).toBe("123");
+    expect(json.notes).toBe("Personal card");
+  });
+
   it("returns SECURE_NOTE with content instead of password", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
@@ -214,6 +261,47 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     expect(res.status).toBe(200);
     expect(json.title).toBe("Updated");
     expect(mockEncryptServerData).toHaveBeenCalledTimes(2); // blob + overview
+  });
+
+  it("updates CREDIT_CARD entry with re-encryption", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "CREDIT_CARD",
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({
+        title: "Old Card",
+        cardholderName: "John",
+        cardNumber: "4111111111111111",
+        brand: "Visa",
+        expiryMonth: "12",
+        expiryYear: "2028",
+        cvv: "123",
+        notes: null,
+      })
+    );
+    mockPrismaOrgPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      tags: [],
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { title: "Updated Card", brand: "Mastercard" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.title).toBe("Updated Card");
+    expect(mockEncryptServerData).toHaveBeenCalledTimes(2);
   });
 });
 

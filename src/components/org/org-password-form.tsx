@@ -37,6 +37,16 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  CARD_BRANDS,
+  detectCardBrand,
+  formatCardNumber,
+  getAllowedLengths,
+  getCardNumberValidation,
+  getMaxLength,
+  normalizeCardBrand,
+  normalizeCardNumber,
+} from "@/lib/credit-card";
 
 export type CustomFieldType = "text" | "hidden" | "url";
 
@@ -51,10 +61,10 @@ interface OrgPasswordFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
-  entryType?: "LOGIN" | "SECURE_NOTE";
+  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
   editData?: {
     id: string;
-    entryType?: "LOGIN" | "SECURE_NOTE";
+    entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
     title: string;
     username: string | null;
     password: string;
@@ -64,6 +74,12 @@ interface OrgPasswordFormProps {
     tags?: OrgTagData[];
     customFields?: CustomField[];
     totp?: TOTPEntry | null;
+    cardholderName?: string | null;
+    cardNumber?: string | null;
+    brand?: string | null;
+    expiryMonth?: string | null;
+    expiryYear?: string | null;
+    cvv?: string | null;
   } | null;
 }
 
@@ -77,12 +93,17 @@ export function OrgPasswordForm({
 }: OrgPasswordFormProps) {
   const t = useTranslations("PasswordForm");
   const tn = useTranslations("SecureNoteForm");
+  const tcc = useTranslations("CreditCardForm");
   const tc = useTranslations("Common");
   const [saving, setSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showGenerator, setShowGenerator] = useState(false);
+  const [showCardNumber, setShowCardNumber] = useState(false);
+  const [showCvv, setShowCvv] = useState(false);
 
-  const isNote = (editData?.entryType ?? entryTypeProp) === "SECURE_NOTE";
+  const effectiveEntryType = editData?.entryType ?? entryTypeProp;
+  const isNote = effectiveEntryType === "SECURE_NOTE";
+  const isCreditCard = effectiveEntryType === "CREDIT_CARD";
 
   const [title, setTitle] = useState(editData?.title ?? "");
   const [username, setUsername] = useState(editData?.username ?? "");
@@ -103,6 +124,17 @@ export function OrgPasswordForm({
     editData?.totp ?? null
   );
   const [showTotpInput, setShowTotpInput] = useState(!!editData?.totp);
+  const [cardholderName, setCardholderName] = useState(editData?.cardholderName ?? "");
+  const [cardNumber, setCardNumber] = useState(
+    formatCardNumber(editData?.cardNumber ?? "", editData?.brand ?? "")
+  );
+  const [brand, setBrand] = useState(editData?.brand ?? "");
+  const [brandSource, setBrandSource] = useState<"auto" | "manual">(
+    editData?.brand ? "manual" : "auto"
+  );
+  const [expiryMonth, setExpiryMonth] = useState(editData?.expiryMonth ?? "");
+  const [expiryYear, setExpiryYear] = useState(editData?.expiryYear ?? "");
+  const [cvv, setCvv] = useState(editData?.cvv ?? "");
 
   const isEdit = !!editData;
 
@@ -119,6 +151,13 @@ export function OrgPasswordForm({
       setCustomFields(editData.customFields ?? []);
       setTotp(editData.totp ?? null);
       setShowTotpInput(!!editData.totp);
+      setCardholderName(editData.cardholderName ?? "");
+      setCardNumber(formatCardNumber(editData.cardNumber ?? "", editData.brand ?? ""));
+      setBrand(editData.brand ?? "");
+      setBrandSource(editData.brand ? "manual" : "auto");
+      setExpiryMonth(editData.expiryMonth ?? "");
+      setExpiryYear(editData.expiryYear ?? "");
+      setCvv(editData.cvv ?? "");
     }
   }, [open, editData]);
 
@@ -136,6 +175,15 @@ export function OrgPasswordForm({
       setShowTotpInput(false);
       setShowPassword(false);
       setShowGenerator(false);
+      setCardholderName("");
+      setCardNumber("");
+      setBrand("");
+      setBrandSource("auto");
+      setExpiryMonth("");
+      setExpiryYear("");
+      setCvv("");
+      setShowCardNumber(false);
+      setShowCvv(false);
       setSaving(false);
     } else if (editData) {
       setTitle(editData.title);
@@ -148,12 +196,56 @@ export function OrgPasswordForm({
       setCustomFields(editData.customFields ?? []);
       setTotp(editData.totp ?? null);
       setShowTotpInput(!!editData.totp);
+      setCardholderName(editData.cardholderName ?? "");
+      setCardNumber(formatCardNumber(editData.cardNumber ?? "", editData.brand ?? ""));
+      setBrand(editData.brand ?? "");
+      setBrandSource(editData.brand ? "manual" : "auto");
+      setExpiryMonth(editData.expiryMonth ?? "");
+      setExpiryYear(editData.expiryYear ?? "");
+      setCvv(editData.cvv ?? "");
     }
     onOpenChange(v);
   };
 
+  const cardValidation = getCardNumberValidation(cardNumber, brand);
+  const allowedLengths = getAllowedLengths(cardValidation.effectiveBrand);
+  const lengthHint = allowedLengths
+    ? allowedLengths.join("/")
+    : "12-19";
+  const maxDigits = getMaxLength(cardValidation.effectiveBrand || cardValidation.detectedBrand);
+  const maxInputLength =
+    cardValidation.effectiveBrand === "American Express"
+      ? maxDigits + 2
+      : maxDigits + Math.floor((maxDigits - 1) / 4);
+  const showLengthError = cardValidation.digits.length > 0 && !cardValidation.lengthValid;
+  const showLuhnError =
+    cardValidation.digits.length > 0 &&
+    cardValidation.lengthValid &&
+    !cardValidation.luhnValid;
+  const cardNumberValid =
+    cardValidation.digits.length === 0 ||
+    (cardValidation.lengthValid && cardValidation.luhnValid);
+  const hasBrandHint = Boolean(cardValidation.effectiveBrand && cardValidation.effectiveBrand !== "Other");
+
+  const handleCardNumberChange = (value: string) => {
+    const digits = normalizeCardNumber(value);
+    const detected = detectCardBrand(digits);
+    const nextBrand =
+      brandSource === "manual" ? brand : (detected || "");
+    const formatted = formatCardNumber(digits, nextBrand || detected);
+
+    setCardNumber(formatted);
+
+    if (brandSource === "auto") {
+      setBrand(detected);
+    }
+  };
+
   const handleSubmit = async () => {
-    if (isNote) {
+    if (isCreditCard) {
+      if (!title.trim()) return;
+      if (!cardNumberValid) return;
+    } else if (isNote) {
       if (!title.trim()) return;
     } else {
       if (!title.trim() || !password) return;
@@ -167,7 +259,20 @@ export function OrgPasswordForm({
 
       let body: Record<string, unknown>;
 
-      if (isNote) {
+      if (isCreditCard) {
+        body = {
+          entryType: "CREDIT_CARD",
+          title: title.trim(),
+          cardholderName: cardholderName.trim() || undefined,
+          cardNumber: normalizeCardNumber(cardNumber) || undefined,
+          brand: normalizeCardBrand(brand) || undefined,
+          expiryMonth: expiryMonth || undefined,
+          expiryYear: expiryYear || undefined,
+          cvv: cvv || undefined,
+          notes: notes.trim() || undefined,
+          tagIds: selectedTags.map((t) => t.id),
+        };
+      } else if (isNote) {
         body = {
           entryType: "SECURE_NOTE",
           title: title.trim(),
@@ -219,29 +324,210 @@ export function OrgPasswordForm({
       <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {isNote
-              ? (isEdit ? tn("editNote") : tn("newNote"))
-              : (isEdit ? t("editPassword") : t("newPassword"))}
+            {isCreditCard
+              ? (isEdit ? tcc("editCard") : tcc("newCard"))
+              : isNote
+                ? (isEdit ? tn("editNote") : tn("newNote"))
+                : (isEdit ? t("editPassword") : t("newPassword"))}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            {isNote
-              ? (isEdit ? tn("editNote") : tn("newNote"))
-              : (isEdit ? t("editPassword") : t("newPassword"))}
+            {isCreditCard
+              ? (isEdit ? tcc("editCard") : tcc("newCard"))
+              : isNote
+                ? (isEdit ? tn("editNote") : tn("newNote"))
+                : (isEdit ? t("editPassword") : t("newPassword"))}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           {/* Title */}
           <div className="space-y-2">
-            <Label>{isNote ? tn("title") : t("title")}</Label>
+            <Label>{isCreditCard ? tcc("title") : isNote ? tn("title") : t("title")}</Label>
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder={isNote ? tn("titlePlaceholder") : t("titlePlaceholder")}
+              placeholder={isCreditCard ? tcc("titlePlaceholder") : isNote ? tn("titlePlaceholder") : t("titlePlaceholder")}
             />
           </div>
 
-          {isNote ? (
+          {isCreditCard ? (
+            <>
+              {/* Cardholder Name */}
+              <div className="space-y-2">
+                <Label>{tcc("cardholderName")}</Label>
+                <Input
+                  value={cardholderName}
+                  onChange={(e) => setCardholderName(e.target.value)}
+                  placeholder={tcc("cardholderNamePlaceholder")}
+                  autoComplete="off"
+                />
+              </div>
+
+              {/* Brand */}
+              <div className="space-y-2">
+                <Label>{tcc("brand")}</Label>
+                <Select
+                  value={brand}
+                  onValueChange={(value) => {
+                    setBrand(value);
+                    setBrandSource("manual");
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={tcc("brandPlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CARD_BRANDS.map((b) => (
+                      <SelectItem key={b} value={b}>
+                        {b}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Card Number */}
+              <div className="space-y-2">
+                <Label>{tcc("cardNumber")}</Label>
+                <div className="relative">
+                  <Input
+                    type={showCardNumber ? "text" : "password"}
+                    value={cardNumber}
+                    onChange={(e) => handleCardNumberChange(e.target.value)}
+                    placeholder={tcc("cardNumberPlaceholder")}
+                    autoComplete="off"
+                    inputMode="numeric"
+                    maxLength={maxInputLength}
+                    aria-invalid={showLengthError || showLuhnError}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                    onClick={() => setShowCardNumber(!showCardNumber)}
+                  >
+                    {showCardNumber ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+                {cardValidation.detectedBrand && (
+                  <p className="text-xs text-muted-foreground">
+                    {tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })}
+                  </p>
+                )}
+                {!hasBrandHint && cardValidation.digits.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {tcc("cardNumberLengthHintGeneric")}
+                  </p>
+                )}
+                {hasBrandHint && (
+                  <p className="text-xs text-muted-foreground">
+                    {tcc("cardNumberLengthHint", { lengths: lengthHint })}
+                  </p>
+                )}
+                {showLengthError && (
+                  <p className="text-xs text-destructive">
+                    {tcc("cardNumberInvalidLength", { lengths: lengthHint })}
+                  </p>
+                )}
+                {!showLengthError && showLuhnError && (
+                  <p className="text-xs text-destructive">
+                    {tcc("cardNumberInvalidLuhn")}
+                  </p>
+                )}
+              </div>
+
+              {/* Expiry */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>{tcc("expiry")}</Label>
+                  <div className="flex gap-2">
+                    <Select value={expiryMonth} onValueChange={setExpiryMonth}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder={tcc("expiryMonth")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 12 }, (_, i) =>
+                          String(i + 1).padStart(2, "0")
+                        ).map((m) => (
+                          <SelectItem key={m} value={m}>
+                            {m}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={expiryYear} onValueChange={setExpiryYear}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder={tcc("expiryYear")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 15 }, (_, i) =>
+                          String(new Date().getFullYear() + i)
+                        ).map((y) => (
+                          <SelectItem key={y} value={y}>
+                            {y}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* CVV */}
+                <div className="space-y-2">
+                  <Label>{tcc("cvv")}</Label>
+                  <div className="relative">
+                    <Input
+                      type={showCvv ? "text" : "password"}
+                      value={cvv}
+                      onChange={(e) => setCvv(e.target.value)}
+                      placeholder={tcc("cvvPlaceholder")}
+                      autoComplete="off"
+                      maxLength={4}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                      onClick={() => setShowCvv(!showCvv)}
+                    >
+                      {showCvv ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-2">
+                <Label>{tcc("notes")}</Label>
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder={tcc("notesPlaceholder")}
+                  rows={3}
+                />
+              </div>
+
+              {/* Tags */}
+              <div className="space-y-2">
+                <Label>{tcc("tags")}</Label>
+                <OrgTagInput
+                  orgId={orgId}
+                  selectedTags={selectedTags}
+                  onChange={setSelectedTags}
+                />
+              </div>
+            </>
+          ) : isNote ? (
             <>
               {/* Content (Secure Note) */}
               <div className="space-y-2">
@@ -494,7 +780,12 @@ export function OrgPasswordForm({
         <div className="flex gap-2 pt-2">
           <Button
             onClick={handleSubmit}
-            disabled={saving || !title.trim() || (!isNote && !password)}
+            disabled={
+              saving ||
+              !title.trim() ||
+              (!isNote && !isCreditCard && !password) ||
+              (isCreditCard && !cardNumberValid)
+            }
           >
             {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             {isEdit ? tc("update") : tc("save")}

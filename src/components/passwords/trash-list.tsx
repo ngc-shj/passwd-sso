@@ -15,15 +15,17 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Trash2, Loader2, RotateCcw, FileText } from "lucide-react";
+import { Trash2, Loader2, RotateCcw, FileText, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 
 interface TrashEntry {
   id: string;
-  entryType: "LOGIN" | "SECURE_NOTE";
+  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
   title: string;
   username: string | null;
   snippet: string | null;
+  brand: string | null;
+  lastFour: string | null;
   deletedAt: string;
 }
 
@@ -62,6 +64,8 @@ export function TrashList({ refreshKey }: TrashListProps) {
             title: overview.title,
             username: overview.username ?? null,
             snippet: overview.snippet ?? null,
+            brand: overview.brand ?? null,
+            lastFour: overview.lastFour ?? null,
             deletedAt: entry.deletedAt,
           });
         } catch {
@@ -165,12 +169,20 @@ export function TrashList({ refreshKey }: TrashListProps) {
         {entries.map((entry) => (
           <Card key={entry.id}>
             <CardContent className="flex items-center gap-4 p-4">
-              {entry.entryType === "SECURE_NOTE" && (
+              {entry.entryType === "CREDIT_CARD" ? (
+                <CreditCard className="h-4 w-4 shrink-0 text-muted-foreground" />
+              ) : entry.entryType === "SECURE_NOTE" ? (
                 <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-              )}
+              ) : null}
               <div className="flex-1 min-w-0">
                 <p className="font-medium truncate">{entry.title}</p>
-                {entry.entryType === "SECURE_NOTE" ? (
+                {entry.entryType === "CREDIT_CARD" ? (
+                  (entry.brand || entry.lastFour) && (
+                    <p className="text-sm text-muted-foreground truncate">
+                      {entry.brand}{entry.brand && entry.lastFour ? " " : ""}{entry.lastFour ? `•••• ${entry.lastFour}` : ""}
+                    </p>
+                  )
+                ) : entry.entryType === "SECURE_NOTE" ? (
                   entry.snippet && (
                     <p className="text-sm text-muted-foreground truncate">
                       {entry.snippet}

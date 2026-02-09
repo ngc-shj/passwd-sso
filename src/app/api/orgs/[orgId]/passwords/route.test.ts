@@ -246,4 +246,90 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it("creates CREDIT_CARD entry (201)", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.create.mockResolvedValue({
+      id: "new-card",
+      tags: [],
+      createdAt: now,
+    });
+
+    const cardBody = {
+      entryType: "CREDIT_CARD",
+      title: "My Card",
+      cardholderName: "John Doe",
+      cardNumber: "4111111111111111",
+      brand: "Visa",
+      expiryMonth: "12",
+      expiryYear: "2028",
+      cvv: "123",
+    };
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: cardBody }),
+      createParams({ orgId: ORG_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(201);
+    expect(json.id).toBe("new-card");
+    expect(json.title).toBe("My Card");
+    expect(mockEncryptServerData).toHaveBeenCalledTimes(2); // blob + overview
+  });
+
+  it("returns 400 when CREDIT_CARD has no title", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+
+    const cardBody = {
+      entryType: "CREDIT_CARD",
+      title: "",
+      cardNumber: "4111111111111111",
+    };
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: cardBody }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns CREDIT_CARD entries with brand and lastFour in GET", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek",
+      orgKeyIv: "iv",
+      orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
+      {
+        id: "pw-card",
+        entryType: "CREDIT_CARD",
+        encryptedOverview: "cipher",
+        overviewIv: "iv",
+        overviewAuthTag: "tag",
+        isArchived: false,
+        favorites: [],
+        tags: [],
+        createdBy: { id: "u1", name: "User", image: null },
+        updatedBy: { id: "u1", name: "User" },
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      },
+    ]);
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({ title: "My Visa", brand: "Visa", lastFour: "1111", cardholderName: "John" })
+    );
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createParams({ orgId: ORG_ID }),
+    );
+    const json = await res.json();
+    expect(json[0].entryType).toBe("CREDIT_CARD");
+    expect(json[0].title).toBe("My Visa");
+    expect(json[0].brand).toBe("Visa");
+    expect(json[0].lastFour).toBe("1111");
+  });
 });

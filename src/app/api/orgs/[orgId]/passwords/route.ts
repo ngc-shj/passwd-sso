@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { createOrgPasswordSchema, createOrgSecureNoteSchema } from "@/lib/validations";
+import { createOrgPasswordSchema, createOrgSecureNoteSchema, createOrgCreditCardSchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import {
   unwrapOrgKey,
@@ -98,6 +98,9 @@ export async function GET(req: NextRequest, { params }: Params) {
     username: string | null;
     urlHost: string | null;
     snippet: string | null;
+    brand: string | null;
+    lastFour: string | null;
+    cardholderName: string | null;
     isFavorite: boolean;
     isArchived: boolean;
     tags: { id: string; name: string; color: string | null }[];
@@ -128,6 +131,9 @@ export async function GET(req: NextRequest, { params }: Params) {
       username: overview.username ?? null,
       urlHost: overview.urlHost ?? null,
       snippet: overview.snippet ?? null,
+      brand: overview.brand ?? null,
+      lastFour: overview.lastFour ?? null,
+      cardholderName: overview.cardholderName ?? null,
       isFavorite: entry.favorites.length > 0,
       isArchived: entry.isArchived,
       tags: entry.tags,
@@ -173,9 +179,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Check if this is a secure note or a login entry
+  // Check entry type
   const rawBody = body as Record<string, unknown>;
   const isSecureNote = rawBody.entryType === "SECURE_NOTE";
+  const isCreditCard = rawBody.entryType === "CREDIT_CARD";
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
@@ -198,7 +205,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   let fullBlob: string;
   let overviewBlob: string;
-  let entryType: "LOGIN" | "SECURE_NOTE" = "LOGIN";
+  let entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" = "LOGIN";
   let tagIds: string[] | undefined;
   let responseTitle: string;
   let responseUsername: string | null = null;
@@ -221,6 +228,37 @@ export async function POST(req: NextRequest, { params }: Params) {
     const snippet = content.slice(0, 100);
     fullBlob = JSON.stringify({ title, content });
     overviewBlob = JSON.stringify({ title, snippet });
+  } else if (isCreditCard) {
+    const parsed = createOrgCreditCardSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const { title, cardholderName, cardNumber, brand, expiryMonth, expiryYear, cvv, notes } = parsed.data;
+    tagIds = parsed.data.tagIds;
+    entryType = "CREDIT_CARD";
+    responseTitle = title;
+
+    const lastFour = cardNumber ? cardNumber.slice(-4) : null;
+    fullBlob = JSON.stringify({
+      title,
+      cardholderName: cardholderName || null,
+      cardNumber: cardNumber || null,
+      brand: brand || null,
+      expiryMonth: expiryMonth || null,
+      expiryYear: expiryYear || null,
+      cvv: cvv || null,
+      notes: notes || null,
+    });
+    overviewBlob = JSON.stringify({
+      title,
+      cardholderName: cardholderName || null,
+      brand: brand || null,
+      lastFour,
+    });
   } else {
     const parsed = createOrgPasswordSchema.safeParse(body);
     if (!parsed.success) {

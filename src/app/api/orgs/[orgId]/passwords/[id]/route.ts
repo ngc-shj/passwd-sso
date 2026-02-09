@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { updateOrgPasswordSchema, updateOrgSecureNoteSchema } from "@/lib/validations";
+import { updateOrgPasswordSchema, updateOrgSecureNoteSchema, updateOrgCreditCardSchema } from "@/lib/validations";
 import {
   requireOrgPermission,
   requireOrgMember,
@@ -99,6 +99,19 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({
       ...common,
       content: blob.content,
+    });
+  }
+
+  if (entry.entryType === "CREDIT_CARD") {
+    return NextResponse.json({
+      ...common,
+      cardholderName: blob.cardholderName ?? null,
+      cardNumber: blob.cardNumber ?? null,
+      brand: blob.brand ?? null,
+      expiryMonth: blob.expiryMonth ?? null,
+      expiryYear: blob.expiryYear ?? null,
+      cvv: blob.cvv ?? null,
+      notes: blob.notes ?? null,
     });
   }
 
@@ -211,6 +224,61 @@ export async function PUT(req: NextRequest, { params }: Params) {
     const snippet = updatedBlob.content.slice(0, 100);
     updatedBlobStr = JSON.stringify(updatedBlob);
     overviewBlobStr = JSON.stringify({ title: updatedBlob.title, snippet });
+  } else if (entry.entryType === "CREDIT_CARD") {
+    const parsed = updateOrgCreditCardSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    tagIds = parsed.data.tagIds;
+    isArchived = parsed.data.isArchived;
+
+    const updatedBlob = {
+      title: parsed.data.title ?? currentBlob.title,
+      cardholderName:
+        parsed.data.cardholderName !== undefined
+          ? parsed.data.cardholderName || null
+          : currentBlob.cardholderName,
+      cardNumber:
+        parsed.data.cardNumber !== undefined
+          ? parsed.data.cardNumber || null
+          : currentBlob.cardNumber,
+      brand:
+        parsed.data.brand !== undefined
+          ? parsed.data.brand || null
+          : currentBlob.brand,
+      expiryMonth:
+        parsed.data.expiryMonth !== undefined
+          ? parsed.data.expiryMonth || null
+          : currentBlob.expiryMonth,
+      expiryYear:
+        parsed.data.expiryYear !== undefined
+          ? parsed.data.expiryYear || null
+          : currentBlob.expiryYear,
+      cvv:
+        parsed.data.cvv !== undefined
+          ? parsed.data.cvv || null
+          : currentBlob.cvv,
+      notes:
+        parsed.data.notes !== undefined
+          ? parsed.data.notes || null
+          : currentBlob.notes,
+    };
+    responseTitle = updatedBlob.title;
+
+    const lastFour = updatedBlob.cardNumber
+      ? updatedBlob.cardNumber.slice(-4)
+      : null;
+    updatedBlobStr = JSON.stringify(updatedBlob);
+    overviewBlobStr = JSON.stringify({
+      title: updatedBlob.title,
+      cardholderName: updatedBlob.cardholderName,
+      brand: updatedBlob.brand,
+      lastFour,
+    });
   } else {
     const parsed = updateOrgPasswordSchema.safeParse(body);
     if (!parsed.success) {

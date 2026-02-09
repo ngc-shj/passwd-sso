@@ -166,4 +166,35 @@ describe("POST /api/passwords", () => {
     expect(res.status).toBe(201);
     expect(json.entryType).toBe("SECURE_NOTE");
   });
+
+  it("creates CREDIT_CARD entry (201)", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-card",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      entryType: "CREDIT_CARD",
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: { ...validBody, entryType: "CREDIT_CARD" },
+    }));
+    const json = await res.json();
+    expect(res.status).toBe(201);
+    expect(json.entryType).toBe("CREDIT_CARD");
+  });
+
+  it("returns CREDIT_CARD entryType in GET", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([
+      { ...mockEntry, id: "pw-card", entryType: "CREDIT_CARD" },
+    ]);
+    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    const json = await res.json();
+    expect(json[0].entryType).toBe("CREDIT_CARD");
+  });
 });

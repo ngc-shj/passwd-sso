@@ -16,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, Settings, KeyRound, Search, FileText } from "lucide-react";
+import { Plus, Settings, KeyRound, Search, FileText, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 
 interface OrgInfo {
@@ -30,11 +30,14 @@ interface OrgInfo {
 
 interface OrgPasswordEntry {
   id: string;
-  entryType: "LOGIN" | "SECURE_NOTE";
+  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
   title: string;
   username: string | null;
   urlHost: string | null;
   snippet: string | null;
+  brand: string | null;
+  lastFour: string | null;
+  cardholderName: string | null;
   isFavorite: boolean;
   isArchived: boolean;
   tags: { id: string; name: string; color: string | null }[];
@@ -60,10 +63,10 @@ export default function OrgDashboardPage({
   const [searchQuery, setSearchQuery] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [newEntryType, setNewEntryType] = useState<"LOGIN" | "SECURE_NOTE">("LOGIN");
+  const [newEntryType, setNewEntryType] = useState<"LOGIN" | "SECURE_NOTE" | "CREDIT_CARD">("LOGIN");
   const [editData, setEditData] = useState<{
     id: string;
-    entryType?: "LOGIN" | "SECURE_NOTE";
+    entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
     title: string;
     username: string | null;
     password: string;
@@ -73,6 +76,12 @@ export default function OrgDashboardPage({
     tags?: { id: string; name: string; color: string | null }[];
     customFields?: { label: string; value: string; type: "text" | "hidden" | "url" }[];
     totp?: { secret: string; algorithm?: "SHA1" | "SHA256" | "SHA512"; digits?: number; period?: number } | null;
+    cardholderName?: string | null;
+    cardNumber?: string | null;
+    brand?: string | null;
+    expiryMonth?: string | null;
+    expiryYear?: string | null;
+    cvv?: string | null;
   } | null>(null);
 
   const fetchOrg = async (): Promise<boolean> => {
@@ -177,7 +186,7 @@ export default function OrgDashboardPage({
   };
 
   const createDetailFetcher = useCallback(
-    (id: string, eType?: "LOGIN" | "SECURE_NOTE") => async (): Promise<InlineDetailData> => {
+    (id: string, eType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD") => async (): Promise<InlineDetailData> => {
       const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`);
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
@@ -192,6 +201,12 @@ export default function OrgDashboardPage({
         customFields: data.customFields ?? [],
         passwordHistory: [],
         totp: data.totp ?? undefined,
+        cardholderName: data.cardholderName ?? undefined,
+        cardNumber: data.cardNumber ?? undefined,
+        brand: data.brand ?? undefined,
+        expiryMonth: data.expiryMonth ?? undefined,
+        expiryYear: data.expiryYear ?? undefined,
+        cvv: data.cvv ?? undefined,
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
       };
@@ -226,7 +241,10 @@ export default function OrgDashboardPage({
       p.title.toLowerCase().includes(q) ||
       p.username?.toLowerCase().includes(q) ||
       p.urlHost?.toLowerCase().includes(q) ||
-      p.snippet?.toLowerCase().includes(q)
+      p.snippet?.toLowerCase().includes(q) ||
+      p.brand?.toLowerCase().includes(q) ||
+      p.lastFour?.includes(q) ||
+      p.cardholderName?.toLowerCase().includes(q)
     );
   });
 
@@ -283,6 +301,10 @@ export default function OrgDashboardPage({
                     <FileText className="h-4 w-4 mr-2" />
                     {t("newSecureNote")}
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType("CREDIT_CARD"); setFormOpen(true); }}>
+                    <CreditCard className="h-4 w-4 mr-2" />
+                    {t("newCreditCard")}
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -324,6 +346,9 @@ export default function OrgDashboardPage({
                 username={entry.username}
                 urlHost={entry.urlHost}
                 snippet={entry.snippet}
+                brand={entry.brand}
+                lastFour={entry.lastFour}
+                cardholderName={entry.cardholderName}
                 tags={entry.tags}
                 isFavorite={entry.isFavorite}
                 isArchived={entry.isArchived}

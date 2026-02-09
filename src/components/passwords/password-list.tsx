@@ -12,16 +12,22 @@ interface DecryptedOverview {
   username?: string | null;
   urlHost?: string | null;
   snippet?: string | null;
+  brand?: string | null;
+  lastFour?: string | null;
+  cardholderName?: string | null;
   tags: Array<{ name: string; color: string | null }>;
 }
 
 interface DisplayEntry {
   id: string;
-  entryType: "LOGIN" | "SECURE_NOTE";
+  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
   title: string;
   username: string | null;
   urlHost: string | null;
   snippet: string | null;
+  brand: string | null;
+  lastFour: string | null;
+  cardholderName: string | null;
   tags: Array<{ name: string; color: string | null }>;
   isFavorite: boolean;
   isArchived: boolean;
@@ -92,7 +98,10 @@ export function PasswordList({
               overview.title.toLowerCase().includes(q) ||
               (overview.username?.toLowerCase().includes(q) ?? false) ||
               (overview.urlHost?.toLowerCase().includes(q) ?? false) ||
-              (overview.snippet?.toLowerCase().includes(q) ?? false);
+              (overview.snippet?.toLowerCase().includes(q) ?? false) ||
+              (overview.brand?.toLowerCase().includes(q) ?? false) ||
+              (overview.lastFour?.includes(q) ?? false) ||
+              (overview.cardholderName?.toLowerCase().includes(q) ?? false);
             if (!matches) continue;
           }
 
@@ -103,6 +112,9 @@ export function PasswordList({
             username: overview.username ?? null,
             urlHost: overview.urlHost ?? null,
             snippet: overview.snippet ?? null,
+            brand: overview.brand ?? null,
+            lastFour: overview.lastFour ?? null,
+            cardholderName: overview.cardholderName ?? null,
             tags: overview.tags ?? [],
             isFavorite: entry.isFavorite ?? false,
             isArchived: entry.isArchived ?? false,
@@ -239,6 +251,9 @@ export function PasswordList({
           username={entry.username}
           urlHost={entry.urlHost}
           snippet={entry.snippet}
+          brand={entry.brand}
+          lastFour={entry.lastFour}
+          cardholderName={entry.cardholderName}
           tags={entry.tags}
           isFavorite={entry.isFavorite}
           isArchived={entry.isArchived}

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CopyButton } from "./copy-button";
 import { Favicon } from "./favicon";
 import { TOTPField, type TOTPEntry } from "./totp-field";
+import { formatCardNumber } from "@/lib/credit-card";
 import {
   Edit,
   Eye,
@@ -31,7 +32,7 @@ interface CustomField {
 
 export interface InlineDetailData {
   id: string;
-  entryType?: "LOGIN" | "SECURE_NOTE";
+  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
   password: string;
   content?: string;
   url: string | null;
@@ -40,6 +41,12 @@ export interface InlineDetailData {
   customFields: CustomField[];
   passwordHistory: PasswordHistoryEntry[];
   totp?: TOTPEntry;
+  cardholderName?: string | null;
+  cardNumber?: string | null;
+  brand?: string | null;
+  expiryMonth?: string | null;
+  expiryYear?: string | null;
+  cvv?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -64,16 +71,115 @@ export function PasswordDetailInline({ data, onEdit }: PasswordDetailInlineProps
     new Set()
   );
 
+  const [showCardNumber, setShowCardNumber] = useState(false);
+  const [showCvv, setShowCvv] = useState(false);
+
   const handleReveal = useCallback(() => {
     setShowPassword(true);
     setTimeout(() => setShowPassword(false), REVEAL_TIMEOUT);
   }, []);
 
+  const handleRevealCardNumber = useCallback(() => {
+    setShowCardNumber(true);
+    setTimeout(() => setShowCardNumber(false), REVEAL_TIMEOUT);
+  }, []);
+
+  const handleRevealCvv = useCallback(() => {
+    setShowCvv(true);
+    setTimeout(() => setShowCvv(false), REVEAL_TIMEOUT);
+  }, []);
+
   const isNote = data.entryType === "SECURE_NOTE";
+  const isCreditCard = data.entryType === "CREDIT_CARD";
 
   return (
     <div className="space-y-4 border-t pt-4 px-4 pb-4">
-      {isNote ? (
+      {isCreditCard ? (
+        <>
+          {/* Card Number */}
+          {data.cardNumber && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("cardNumber")}</label>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm">
+                  {showCardNumber
+                    ? formatCardNumber(data.cardNumber, data.brand)
+                    : "•••• •••• •••• " + (data.cardNumber.slice(-4) || "••••")}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={showCardNumber ? () => setShowCardNumber(false) : handleRevealCardNumber}
+                >
+                  {showCardNumber ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <CopyButton getValue={() => data.cardNumber ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Cardholder Name */}
+          {data.cardholderName && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("cardholderName")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{data.cardholderName}</span>
+                <CopyButton getValue={() => data.cardholderName ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Brand */}
+          {data.brand && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("brand")}</label>
+              <span className="text-sm">{data.brand}</span>
+            </div>
+          )}
+
+          {/* Expiry */}
+          {(data.expiryMonth || data.expiryYear) && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("expiry")}</label>
+              <span className="text-sm">
+                {data.expiryMonth ?? "--"}/{data.expiryYear ?? "----"}
+              </span>
+            </div>
+          )}
+
+          {/* CVV */}
+          {data.cvv && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("cvv")}</label>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm">
+                  {showCvv ? data.cvv : "•••"}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={showCvv ? () => setShowCvv(false) : handleRevealCvv}
+                >
+                  {showCvv ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <CopyButton getValue={() => data.cvv ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Notes */}
+          {data.notes && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("notes")}</label>
+              <p className="text-sm whitespace-pre-wrap rounded-md bg-muted p-3">
+                {data.notes}
+              </p>
+            </div>
+          )}
+        </>
+      ) : isNote ? (
         /* Secure Note Content */
         <div className="space-y-1">
           <label className="text-sm text-muted-foreground">{t("content")}</label>

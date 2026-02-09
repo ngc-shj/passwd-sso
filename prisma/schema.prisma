@@ -149,6 +149,7 @@ model PasswordEntry {
 enum EntryType {
   LOGIN
   SECURE_NOTE
+  CREDIT_CARD
 }
 
 enum OrgRole {

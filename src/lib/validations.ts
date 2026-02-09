@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  getCardNumberValidation,
+  getMinLength,
+  normalizeCardNumber,
+} from "@/lib/credit-card";
 
 export const generatePasswordSchema = z.object({
   length: z.number().int().min(8).max(128).default(16),
@@ -17,7 +22,7 @@ const encryptedFieldSchema = z.object({
   authTag: z.string().length(32), // 16 bytes hex
 });
 
-export const entryTypeSchema = z.enum(["LOGIN", "SECURE_NOTE"]);
+export const entryTypeSchema = z.enum(["LOGIN", "SECURE_NOTE", "CREDIT_CARD"]);
 
 export const createE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema,
@@ -142,6 +147,112 @@ export const updateOrgSecureNoteSchema = z.object({
   isArchived: z.boolean().optional(),
 });
 
+export const createOrgCreditCardSchema = z.object({
+  entryType: z.literal("CREDIT_CARD"),
+  title: z.string().min(1).max(200).trim(),
+  cardholderName: z.string().max(200).optional().or(z.literal("")),
+  cardNumber: z.string().max(30).optional().or(z.literal("")),
+  brand: z.string().max(50).optional().or(z.literal("")),
+  expiryMonth: z.string().max(2).optional().or(z.literal("")),
+  expiryYear: z.string().max(4).optional().or(z.literal("")),
+  cvv: z.string().max(10).optional().or(z.literal("")),
+  notes: z.string().max(10000).optional().or(z.literal("")),
+  tagIds: z.array(z.string().cuid()).optional(),
+}).superRefine((data, ctx) => {
+  if (!data.cardNumber) return;
+
+  if (/[^\d\s]/.test(data.cardNumber)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["cardNumber"],
+      message: "Card number must contain only digits",
+    });
+    return;
+  }
+
+  const digits = normalizeCardNumber(data.cardNumber);
+  if (!digits) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["cardNumber"],
+      message: "Card number must contain digits",
+    });
+    return;
+  }
+
+  const { lengthValid, luhnValid } = getCardNumberValidation(digits, data.brand);
+  if (!lengthValid) {
+    const minLength = getMinLength(data.brand);
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["cardNumber"],
+      message: `Card number must be at least ${minLength} digits and match brand length`,
+    });
+    return;
+  }
+
+  if (!luhnValid) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["cardNumber"],
+      message: "Card number failed checksum validation",
+    });
+  }
+});
+
+export const updateOrgCreditCardSchema = z.object({
+  title: z.string().min(1).max(200).trim().optional(),
+  cardholderName: z.string().max(200).optional().or(z.literal("")),
+  cardNumber: z.string().max(30).optional().or(z.literal("")),
+  brand: z.string().max(50).optional().or(z.literal("")),
+  expiryMonth: z.string().max(2).optional().or(z.literal("")),
+  expiryYear: z.string().max(4).optional().or(z.literal("")),
+  cvv: z.string().max(10).optional().or(z.literal("")),
+  notes: z.string().max(10000).optional().or(z.literal("")),
+  tagIds: z.array(z.string().cuid()).optional(),
+  isArchived: z.boolean().optional(),
+}).superRefine((data, ctx) => {
+  if (!data.cardNumber) return;
+
+  if (/[^\d\s]/.test(data.cardNumber)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["cardNumber"],
+      message: "Card number must contain only digits",
+    });
+    return;
+  }
+
+  const digits = normalizeCardNumber(data.cardNumber);
+  if (!digits) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["cardNumber"],
+      message: "Card number must contain digits",
+    });
+    return;
+  }
+
+  const { lengthValid, luhnValid } = getCardNumberValidation(digits, data.brand);
+  if (!lengthValid) {
+    const minLength = getMinLength(data.brand);
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["cardNumber"],
+      message: `Card number must be at least ${minLength} digits and match brand length`,
+    });
+    return;
+  }
+
+  if (!luhnValid) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["cardNumber"],
+      message: "Card number failed checksum validation",
+    });
+  }
+});
+
 export const createOrgTagSchema = z.object({
   name: z.string().min(1).max(50).trim(),
   color: z
@@ -167,4 +278,6 @@ export type CreateOrgPasswordInput = z.infer<typeof createOrgPasswordSchema>;
 export type UpdateOrgPasswordInput = z.infer<typeof updateOrgPasswordSchema>;
 export type CreateOrgSecureNoteInput = z.infer<typeof createOrgSecureNoteSchema>;
 export type UpdateOrgSecureNoteInput = z.infer<typeof updateOrgSecureNoteSchema>;
+export type CreateOrgCreditCardInput = z.infer<typeof createOrgCreditCardSchema>;
+export type UpdateOrgCreditCardInput = z.infer<typeof updateOrgCreditCardSchema>;
 export type CreateOrgTagInput = z.infer<typeof createOrgTagSchema>;

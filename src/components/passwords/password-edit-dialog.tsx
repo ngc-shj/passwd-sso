@@ -11,6 +11,7 @@ import {
   type TOTPEntry,
 } from "./password-form";
 import { SecureNoteForm } from "./secure-note-form";
+import { CreditCardForm } from "./credit-card-form";
 import type { TagData } from "@/components/tags/tag-input";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import {
@@ -33,11 +34,17 @@ interface VaultEntryFull {
   passwordHistory?: PasswordHistoryEntry[];
   customFields?: CustomField[];
   totp?: TOTPEntry;
+  cardholderName?: string | null;
+  cardNumber?: string | null;
+  brand?: string | null;
+  expiryMonth?: string | null;
+  expiryYear?: string | null;
+  cvv?: string | null;
 }
 
 interface FormData {
   id: string;
-  entryType: "LOGIN" | "SECURE_NOTE";
+  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
   title: string;
   username: string;
   password: string;
@@ -49,6 +56,12 @@ interface FormData {
   passwordHistory?: PasswordHistoryEntry[];
   customFields?: CustomField[];
   totp?: TOTPEntry;
+  cardholderName?: string | null;
+  cardNumber?: string | null;
+  brand?: string | null;
+  expiryMonth?: string | null;
+  expiryYear?: string | null;
+  cvv?: string | null;
 }
 
 interface PasswordEditDialogProps {
@@ -66,6 +79,7 @@ export function PasswordEditDialog({
 }: PasswordEditDialogProps) {
   const t = useTranslations("PasswordForm");
   const tn = useTranslations("SecureNoteForm");
+  const tcc = useTranslations("CreditCardForm");
   const td = useTranslations("PasswordDetail");
   const { encryptionKey } = useVault();
   const [data, setData] = useState<FormData | null>(null);
@@ -112,6 +126,12 @@ export function PasswordEditDialog({
           passwordHistory: entry.passwordHistory,
           customFields: entry.customFields,
           totp: entry.totp,
+          cardholderName: entry.cardholderName,
+          cardNumber: entry.cardNumber,
+          brand: entry.brand,
+          expiryMonth: entry.expiryMonth,
+          expiryYear: entry.expiryYear,
+          cvv: entry.cvv,
         });
       } catch (e) {
         if (!cancelled) {
@@ -132,14 +152,19 @@ export function PasswordEditDialog({
   };
 
   const isNote = data?.entryType === "SECURE_NOTE";
+  const isCreditCard = data?.entryType === "CREDIT_CARD";
+
+  const dialogTitle = isCreditCard
+    ? tcc("editCard")
+    : isNote
+      ? tn("editNote")
+      : t("editPassword");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>
-            {isNote ? tn("editNote") : t("editPassword")}
-          </DialogTitle>
+          <DialogTitle>{dialogTitle}</DialogTitle>
         </DialogHeader>
         {error ? (
           <p className="text-muted-foreground text-center py-8">{error}</p>
@@ -147,6 +172,24 @@ export function PasswordEditDialog({
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
+        ) : isCreditCard ? (
+          <CreditCardForm
+            mode="edit"
+            variant="dialog"
+            initialData={{
+              id: data.id,
+              title: data.title,
+              cardholderName: data.cardholderName ?? null,
+              cardNumber: data.cardNumber ?? null,
+              brand: data.brand ?? null,
+              expiryMonth: data.expiryMonth ?? null,
+              expiryYear: data.expiryYear ?? null,
+              cvv: data.cvv ?? null,
+              notes: data.notes,
+              tags: data.tags,
+            }}
+            onSaved={handleSaved}
+          />
         ) : isNote ? (
           <SecureNoteForm
             mode="edit"

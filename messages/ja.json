@@ -41,7 +41,8 @@
     "import": "インポート",
     "archive": "アーカイブ",
     "newItem": "新規アイテム",
-    "newSecureNote": "セキュアノート"
+    "newSecureNote": "セキュアノート",
+    "newCreditCard": "クレジットカード"
   },
   "PasswordList": {
     "noMatch": "検索に一致するアイテムがありません。",
@@ -105,6 +106,35 @@
     "failedToSave": "保存に失敗しました",
     "networkError": "ネットワークエラー"
   },
+  "CreditCardForm": {
+    "newCard": "新規クレジットカード",
+    "editCard": "クレジットカードを編集",
+    "title": "タイトル *",
+    "titlePlaceholder": "例: 個人Visa, 会社カード",
+    "cardholderName": "カード名義人",
+    "cardholderNamePlaceholder": "例: ヤマダ タロウ",
+    "cardNumber": "カード番号",
+    "cardNumberPlaceholder": "例: 4111 1111 1111 1111",
+    "cardNumberDetectedBrand": "検出: {brand}",
+    "cardNumberLengthHint": "桁数: {lengths}桁",
+    "cardNumberLengthHintGeneric": "桁数: 12〜19桁",
+    "cardNumberInvalidLength": "桁数が不正です。{lengths}桁のいずれかを入力してください。",
+    "cardNumberInvalidLuhn": "チェックディジットが不正です。",
+    "brand": "ブランド",
+    "brandPlaceholder": "ブランドを選択",
+    "expiryMonth": "月",
+    "expiryYear": "年",
+    "expiry": "有効期限",
+    "cvv": "CVV",
+    "cvvPlaceholder": "例: 123",
+    "notes": "メモ",
+    "notesPlaceholder": "任意のメモ...",
+    "tags": "タグ",
+    "saved": "クレジットカードを保存しました",
+    "updated": "クレジットカードを更新しました",
+    "failedToSave": "保存に失敗しました",
+    "networkError": "ネットワークエラー"
+  },
   "PasswordDetail": {
     "username": "ユーザー名",
     "password": "パスワード",
@@ -126,7 +156,12 @@
     "archived": "アーカイブしました",
     "unarchived": "アーカイブを解除しました",
     "passwordHistory": "パスワード履歴",
-    "content": "内容"
+    "content": "内容",
+    "cardholderName": "カード名義人",
+    "cardNumber": "カード番号",
+    "brand": "ブランド",
+    "expiry": "有効期限",
+    "cvv": "CVV"
   },
   "PasswordGenerator": {
     "use": "使用",
@@ -159,7 +194,10 @@
     "networkError": "ネットワークエラー",
     "moreActions": "その他のアクション",
     "copyContent": "内容をコピー",
-    "secureNote": "セキュアノート"
+    "secureNote": "セキュアノート",
+    "copyCardNumber": "カード番号をコピー",
+    "copyCvv": "CVVをコピー",
+    "creditCard": "クレジットカード"
   },
   "CopyButton": {
     "copied": "コピーしました！（30秒後にクリア）",
@@ -208,9 +246,9 @@
   },
   "Import": {
     "title": "パスワードのインポート",
-    "description": "他のパスワードマネージャーからエクスポートした CSV ファイルを取り込みます。",
-    "supportedFormats": "対応形式: Bitwarden, 1Password, Chrome",
-    "selectFile": "インポートする CSV ファイルを選択",
+    "description": "他のパスワードマネージャーからエクスポートした CSV または JSON ファイルを取り込みます。",
+    "supportedFormats": "対応形式: Bitwarden (CSV/JSON), 1Password, Chrome",
+    "selectFile": "インポートする CSV または JSON ファイルを選択",
     "detectedFormat": "検出された形式",
     "unknownFormat": "形式を自動検出できませんでした。結果が正しくない場合があります。",
     "colTitle": "タイトル",
@@ -219,6 +257,7 @@
     "colUrl": "URL",
     "typeLogin": "ログイン",
     "typeNote": "ノート",
+    "typeCard": "カード",
     "entryCount": "{count} 件のエントリーが見つかりました",
     "importButton": "{count} 件をインポート",
     "importing": "{current} / {total} をインポート中...",
@@ -339,6 +378,7 @@
     "allPasswords": "すべてのパスワード",
     "noPasswords": "この組織にはパスワードがありません。",
     "newSecureNote": "セキュアノート",
+    "newCreditCard": "クレジットカード",
     "noPasswordsDesc": "「新規パスワード」をクリックして最初のエントリを追加してください。",
     "createdBy": "{name} が作成",
     "updatedBy": "{name} が更新",
