@@ -22,6 +22,11 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
     return handleApiAuth(request);
   }
 
+  // Public share pages — skip i18n and auth
+  if (pathname.startsWith("/s/")) {
+    return applySecurityHeaders(NextResponse.next(), options);
+  }
+
   // Run next-intl middleware (locale detection, prefix redirect)
   const intlResponse = intlMiddleware(request);
 
@@ -58,7 +63,8 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith("/api/tags") ||
     pathname.startsWith("/api/watchtower") ||
     pathname.startsWith("/api/orgs") ||
-    pathname.startsWith("/api/audit-logs")
+    pathname.startsWith("/api/audit-logs") ||
+    pathname.startsWith("/api/share-links")
   ) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {
@@ -151,5 +157,6 @@ export const config = {
     // API auth-protected routes
     "/api/passwords/:path*",
     "/api/tags/:path*",
+    "/api/share-links/:path*",
   ],
 };

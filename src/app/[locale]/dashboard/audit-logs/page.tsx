@@ -26,6 +26,8 @@ import {
   ShieldCheck,
   ScrollText,
   Loader2,
+  Link as LinkIcon,
+  Link2Off,
 } from "lucide-react";
 
 interface AuditLogItem {
@@ -50,6 +52,8 @@ const ACTION_ICONS: Record<string, React.ReactNode> = {
   ORG_MEMBER_INVITE: <UserPlus className="h-4 w-4" />,
   ORG_MEMBER_REMOVE: <UserMinus className="h-4 w-4" />,
   ORG_ROLE_UPDATE: <ShieldCheck className="h-4 w-4" />,
+  SHARE_CREATE: <LinkIcon className="h-4 w-4" />,
+  SHARE_REVOKE: <Link2Off className="h-4 w-4" />,
 };
 
 const ACTIONS = [
@@ -63,6 +67,8 @@ const ACTIONS = [
   "ORG_MEMBER_INVITE",
   "ORG_MEMBER_REMOVE",
   "ORG_ROLE_UPDATE",
+  "SHARE_CREATE",
+  "SHARE_REVOKE",
 ] as const;
 
 export default function AuditLogsPage() {

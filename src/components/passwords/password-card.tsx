@@ -45,10 +45,12 @@ import {
   FileText,
   CreditCard,
   IdCard,
+  Link as LinkIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
+import { ShareDialog } from "@/components/share/share-dialog";
 
 interface PasswordCardProps {
   id: string;
@@ -82,6 +84,8 @@ interface PasswordCardProps {
   canDelete?: boolean;
   // Optional: additional info display
   createdBy?: string | null;
+  // Optional: org context for share dialog
+  orgId?: string;
 }
 
 interface VaultEntryFull {
@@ -142,6 +146,7 @@ export function PasswordCard({
   canEdit = true,
   canDelete = true,
   createdBy,
+  orgId,
 }: PasswordCardProps) {
   const isOrgMode = !!getPasswordProp;
   const isNote = entryType === "SECURE_NOTE";
@@ -153,6 +158,8 @@ export function PasswordCard({
   const { encryptionKey } = useVault();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareData, setShareData] = useState<Record<string, unknown> | undefined>(undefined);
   const [detailData, setDetailData] = useState<InlineDetailData | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -500,6 +507,26 @@ export function PasswordCard({
                   )}
                 </>
               )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={async () => {
+                  if (!isOrgMode) {
+                    // Personal: decrypt entry data, strip TOTP
+                    try {
+                      const { entry } = await fetchDecryptedEntry();
+                      const { totp: _t, passwordHistory: _ph, tags: _tags, ...safe } = entry;
+                      setShareData(safe as Record<string, unknown>);
+                    } catch {
+                      toast.error(t("networkError"));
+                      return;
+                    }
+                  }
+                  setShareDialogOpen(true);
+                }}
+              >
+                <LinkIcon className="h-4 w-4" />
+                {t("share")}
+              </DropdownMenuItem>
               {canEdit && (
                 <>
                   <DropdownMenuSeparator />
@@ -575,6 +602,14 @@ export function PasswordCard({
           }}
         />
       )}
+
+      <ShareDialog
+        open={shareDialogOpen}
+        onOpenChange={setShareDialogOpen}
+        passwordEntryId={isOrgMode ? undefined : id}
+        orgPasswordEntryId={isOrgMode ? id : undefined}
+        decryptedData={shareData}
+      />
 
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>

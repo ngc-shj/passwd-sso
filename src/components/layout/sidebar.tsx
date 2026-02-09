@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
-import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, ScrollText } from "lucide-react";
+import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, ScrollText, Link as LinkIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { ExportDialog } from "@/components/passwords/export-dialog";
@@ -70,6 +70,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const activeOrgTagId = activeOrgId ? searchParams.get("tag") : null;
   const activeOrgTypeFilter = activeOrgId ? searchParams.get("type") : null;
   const isOrgsManage = cleanPath === "/dashboard/orgs";
+  const isShareLinks = cleanPath === "/dashboard/share-links";
 
   const fetchData = () => {
     fetch("/api/tags")
@@ -402,6 +403,16 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
             <Link href="/dashboard/watchtower" onClick={() => onOpenChange(false)}>
               <Shield className="h-4 w-4" />
               {t("watchtower")}
+            </Link>
+          </Button>
+          <Button
+            variant={isShareLinks ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link href="/dashboard/share-links" onClick={() => onOpenChange(false)}>
+              <LinkIcon className="h-4 w-4" />
+              {t("shareLinks")}
             </Link>
           </Button>
           <SectionLabel icon={<ScrollText className="h-3 w-3" />}>

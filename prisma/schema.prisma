@@ -82,6 +82,7 @@ model User {
   updatedOrgPasswords OrgPasswordEntry[]    @relation("orgPasswordUpdater")
   orgPasswordFavorites OrgPasswordFavorite[]
   auditLogs            AuditLog[]
+  passwordShares       PasswordShare[]
 
   @@map("users")
 }
@@ -138,8 +139,9 @@ model PasswordEntry {
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
-  tags Tag[]
-  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tags   Tag[]
+  user   User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shares PasswordShare[]   @relation("personalShares")
 
   @@index([userId])
   @@map("password_entries")
@@ -236,6 +238,7 @@ model OrgPasswordEntry {
   updatedBy User                   @relation("orgPasswordUpdater", fields: [updatedById], references: [id])
   tags      OrgTag[]
   favorites OrgPasswordFavorite[]
+  shares    PasswordShare[]       @relation("orgShares")
 
   @@index([orgId])
   @@map("org_password_entries")
@@ -292,6 +295,49 @@ model OrgInvitation {
   @@map("org_invitations")
 }
 
+// ─── Share Link Models ─────────────────────────────────────────
+
+model PasswordShare {
+  id              String    @id @default(cuid())
+  tokenHash       String    @unique @map("token_hash") @db.VarChar(64)
+  entryType       EntryType @map("entry_type")
+  encryptedData   String    @map("encrypted_data") @db.Text
+  dataIv          String    @map("data_iv") @db.VarChar(24)
+  dataAuthTag     String    @map("data_auth_tag") @db.VarChar(32)
+  expiresAt       DateTime  @map("expires_at")
+  maxViews        Int?      @map("max_views")
+  viewCount       Int       @default(0) @map("view_count")
+  revokedAt       DateTime? @map("revoked_at")
+  createdById     String    @map("created_by_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  passwordEntryId    String?          @map("password_entry_id")
+  orgPasswordEntryId String?          @map("org_password_entry_id")
+
+  createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  passwordEntry    PasswordEntry?    @relation("personalShares", fields: [passwordEntryId], references: [id], onDelete: SetNull)
+  orgPasswordEntry OrgPasswordEntry? @relation("orgShares", fields: [orgPasswordEntryId], references: [id], onDelete: SetNull)
+  accessLogs       ShareAccessLog[]
+
+  @@index([passwordEntryId])
+  @@index([orgPasswordEntryId])
+  @@index([expiresAt])
+  @@map("password_shares")
+}
+
+model ShareAccessLog {
+  id        String   @id @default(cuid())
+  shareId   String   @map("share_id")
+  ip        String?  @db.VarChar(45)
+  userAgent String?  @map("user_agent") @db.VarChar(512)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  share PasswordShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
+
+  @@index([shareId, createdAt])
+  @@map("share_access_logs")
+}
+
 // ─── Audit Log Models ──────────────────────────────────────────
 
 enum AuditAction {
@@ -305,6 +351,8 @@ enum AuditAction {
   ORG_MEMBER_INVITE
   ORG_MEMBER_REMOVE
   ORG_ROLE_UPDATE
+  SHARE_CREATE
+  SHARE_REVOKE
 }
 
 enum AuditScope {

@@ -9,7 +9,12 @@
  * Uses node:crypto (NOT Web Crypto API — this runs server-side only).
  */
 
-import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+import {
+  randomBytes,
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+} from "node:crypto";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12; // 96 bits, recommended for GCM
@@ -117,4 +122,28 @@ export function decryptServerData(
     decipher.update(ciphertext),
     decipher.final(),
   ]).toString("utf8");
+}
+
+// ─── Share Link Helpers ─────────────────────────────────────────
+
+/** Generate a 32-byte random token as hex (64 chars). */
+export function generateShareToken(): string {
+  return randomBytes(32).toString("hex");
+}
+
+/** SHA-256 hash of a share token (hex output, 64 chars). */
+export function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/** Encrypt share data with the master key directly (AES-256-GCM). */
+export function encryptShareData(plaintext: string): ServerEncryptedData {
+  const masterKey = getMasterKey();
+  return encryptServerData(plaintext, masterKey);
+}
+
+/** Decrypt share data with the master key directly (AES-256-GCM). */
+export function decryptShareData(encrypted: ServerEncryptedData): string {
+  const masterKey = getMasterKey();
+  return decryptServerData(encrypted, masterKey);
 }

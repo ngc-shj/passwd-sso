@@ -14,6 +14,8 @@ const VALID_ACTIONS: AuditAction[] = [
   "ORG_MEMBER_INVITE",
   "ORG_MEMBER_REMOVE",
   "ORG_ROLE_UPDATE",
+  "SHARE_CREATE",
+  "SHARE_REVOKE",
 ];
 
 // GET /api/audit-logs — Personal audit logs (cursor-based pagination)

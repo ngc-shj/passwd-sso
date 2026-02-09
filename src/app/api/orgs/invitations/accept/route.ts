@@ -1,12 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { createRateLimiter } from "@/lib/rate-limit";
+
+const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 
 // POST /api/orgs/invitations/accept — Accept an invitation by token
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!(await acceptLimiter.check(`rl:invite_accept:${session.user.id}`))) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded" },
+      { status: 429 }
+    );
   }
 
   let body: unknown;

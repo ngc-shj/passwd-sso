@@ -67,7 +67,9 @@ export function extractRequestMeta(req: NextRequest): {
   userAgent: string | null;
 } {
   const forwarded = req.headers.get("x-forwarded-for");
-  const ip = forwarded ? forwarded.split(",")[0].trim() : null;
+  const ip = forwarded
+    ? forwarded.split(",")[0].trim()
+    : req.headers.get("x-real-ip") ?? null;
   const userAgent = req.headers.get("user-agent");
   return { ip, userAgent };
 }

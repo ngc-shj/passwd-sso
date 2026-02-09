@@ -333,6 +333,54 @@ export const createOrgTagSchema = z.object({
     .or(z.literal("")),
 });
 
+// ─── Share Link Schemas ───────────────────────────────────
+
+const shareDataSchema = z.object({
+  title: z.string().min(1).max(200),
+  username: z.string().max(200).optional(),
+  password: z.string().optional(),
+  url: z.string().max(2000).optional(),
+  notes: z.string().max(10000).optional(),
+  customFields: z.array(z.object({
+    label: z.string().max(100),
+    value: z.string().max(10000),
+    type: z.enum(["text", "hidden", "url"]),
+  })).optional(),
+  // SECURE_NOTE
+  content: z.string().max(50000).optional(),
+  // CREDIT_CARD
+  cardholderName: z.string().max(200).optional(),
+  cardNumber: z.string().max(30).optional(),
+  brand: z.string().max(50).optional(),
+  expiryMonth: z.string().max(2).optional(),
+  expiryYear: z.string().max(4).optional(),
+  cvv: z.string().max(10).optional(),
+  // IDENTITY
+  fullName: z.string().max(200).optional(),
+  address: z.string().max(500).optional(),
+  phone: z.string().max(50).optional(),
+  email: z.string().max(200).optional(),
+  dateOfBirth: z.string().optional(),
+  nationality: z.string().max(100).optional(),
+  idNumber: z.string().max(100).optional(),
+  issueDate: z.string().optional(),
+  expiryDate: z.string().optional(),
+});
+
+export const createShareLinkSchema = z.object({
+  passwordEntryId: z.string().cuid().optional(),
+  orgPasswordEntryId: z.string().cuid().optional(),
+  data: shareDataSchema.optional(),
+  expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
+  maxViews: z.number().int().min(1).max(100).optional(),
+}).refine(
+  (d) => (d.passwordEntryId ? !d.orgPasswordEntryId : !!d.orgPasswordEntryId),
+  { message: "Exactly one of passwordEntryId or orgPasswordEntryId is required" }
+).refine(
+  (d) => (d.passwordEntryId ? !!d.data : true),
+  { message: "data is required for personal entries" }
+);
+
 // ─── Type Exports ──────────────────────────────────────────
 
 export type GeneratePasswordInput = z.infer<typeof generatePasswordSchema>;
@@ -354,3 +402,4 @@ export type UpdateOrgCreditCardInput = z.infer<typeof updateOrgCreditCardSchema>
 export type CreateOrgIdentityInput = z.infer<typeof createOrgIdentitySchema>;
 export type UpdateOrgIdentityInput = z.infer<typeof updateOrgIdentitySchema>;
 export type CreateOrgTagInput = z.infer<typeof createOrgTagSchema>;
+export type CreateShareLinkInput = z.infer<typeof createShareLinkSchema>;

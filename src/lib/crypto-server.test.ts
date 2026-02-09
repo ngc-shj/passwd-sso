@@ -5,6 +5,10 @@ import {
   unwrapOrgKey,
   encryptServerData,
   decryptServerData,
+  generateShareToken,
+  hashToken,
+  encryptShareData,
+  decryptShareData,
 } from "./crypto-server";
 
 describe("crypto-server", () => {
@@ -147,6 +151,62 @@ describe("crypto-server", () => {
       );
 
       process.env.ORG_MASTER_KEY = saved;
+    });
+  });
+
+  describe("generateShareToken", () => {
+    it("returns a 64-char hex string", () => {
+      const token = generateShareToken();
+      expect(token).toHaveLength(64);
+      expect(/^[0-9a-f]{64}$/.test(token)).toBe(true);
+    });
+
+    it("generates unique tokens", () => {
+      const t1 = generateShareToken();
+      const t2 = generateShareToken();
+      expect(t1).not.toBe(t2);
+    });
+  });
+
+  describe("hashToken", () => {
+    it("returns a 64-char hex string (SHA-256)", () => {
+      const hash = hashToken("test-token");
+      expect(hash).toHaveLength(64);
+      expect(/^[0-9a-f]{64}$/.test(hash)).toBe(true);
+    });
+
+    it("is deterministic", () => {
+      const h1 = hashToken("same-input");
+      const h2 = hashToken("same-input");
+      expect(h1).toBe(h2);
+    });
+
+    it("different inputs produce different hashes", () => {
+      const h1 = hashToken("input-a");
+      const h2 = hashToken("input-b");
+      expect(h1).not.toBe(h2);
+    });
+  });
+
+  describe("encryptShareData / decryptShareData", () => {
+    it("roundtrips correctly", () => {
+      const plaintext = JSON.stringify({ title: "Shared", password: "abc" });
+      const encrypted = encryptShareData(plaintext);
+      const decrypted = decryptShareData(encrypted);
+      expect(decrypted).toBe(plaintext);
+    });
+
+    it("handles unicode content", () => {
+      const plaintext = "共有データ 🔗";
+      const encrypted = encryptShareData(plaintext);
+      const decrypted = decryptShareData(encrypted);
+      expect(decrypted).toBe(plaintext);
+    });
+
+    it("produces different ciphertexts for same plaintext", () => {
+      const e1 = encryptShareData("same");
+      const e2 = encryptShareData("same");
+      expect(e1.ciphertext).not.toBe(e2.ciphertext);
     });
   });
 });

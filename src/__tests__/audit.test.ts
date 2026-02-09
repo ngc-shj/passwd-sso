@@ -139,7 +139,22 @@ describe("extractRequestMeta", () => {
     expect(result.userAgent).toBe("Mozilla/5.0");
   });
 
-  it("returns null IP when no x-forwarded-for", () => {
+  it("falls back to x-real-ip when no x-forwarded-for", () => {
+    const req = new Request("http://localhost/api/test", {
+      headers: {
+        "x-real-ip": "198.51.100.10",
+        "user-agent": "TestAgent",
+      },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = extractRequestMeta(req as any);
+
+    expect(result.ip).toBe("198.51.100.10");
+    expect(result.userAgent).toBe("TestAgent");
+  });
+
+  it("returns null IP when no proxy headers", () => {
     const req = new Request("http://localhost/api/test", {
       headers: {
         "user-agent": "TestAgent",

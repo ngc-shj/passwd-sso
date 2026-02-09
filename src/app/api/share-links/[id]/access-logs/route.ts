@@ -1,0 +1,48 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/auth";
+import { prisma } from "@/lib/prisma";
+
+type Params = { params: Promise<{ id: string }> };
+
+// GET /api/share-links/[id]/access-logs — List access logs for a share link
+export async function GET(req: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id } = await params;
+
+  // Verify the share link belongs to the current user
+  const share = await prisma.passwordShare.findUnique({
+    where: { id },
+    select: { createdById: true },
+  });
+
+  if (!share || share.createdById !== session.user.id) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const { searchParams } = new URL(req.url);
+  const cursor = searchParams.get("cursor");
+  const limit = 50;
+
+  const logs = await prisma.shareAccessLog.findMany({
+    where: { shareId: id },
+    orderBy: { createdAt: "desc" },
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    select: {
+      id: true,
+      ip: true,
+      userAgent: true,
+      createdAt: true,
+    },
+  });
+
+  const hasMore = logs.length > limit;
+  const items = hasMore ? logs.slice(0, limit) : logs;
+  const nextCursor = hasMore ? items[items.length - 1].id : null;
+
+  return NextResponse.json({ items, nextCursor });
+}

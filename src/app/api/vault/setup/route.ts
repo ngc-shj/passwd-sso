@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { createHash, randomBytes } from "crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { createRateLimiter } from "@/lib/rate-limit";
 import { z } from "zod";
 
 export const runtime = "nodejs";
+
+const setupLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 5 });
 
 const setupSchema = z.object({
   encryptedSecretKey: z.string().min(1),
@@ -28,6 +31,13 @@ export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!(await setupLimiter.check(`rl:vault_setup:${session.user.id}`))) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded" },
+      { status: 429 }
+    );
   }
 
   // Prevent re-setup

@@ -17,6 +17,8 @@ const VALID_ACTIONS: AuditAction[] = [
   "ORG_MEMBER_INVITE",
   "ORG_MEMBER_REMOVE",
   "ORG_ROLE_UPDATE",
+  "SHARE_CREATE",
+  "SHARE_REVOKE",
 ];
 
 // GET /api/orgs/[orgId]/audit-logs — Org audit logs (ADMIN/OWNER only)

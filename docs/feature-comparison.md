@@ -105,7 +105,7 @@
 
 | 機能 | passwd-sso | 1Password | Bitwarden | 備考 |
 |---|---|---|---|---|
-| 期限付きリンク共有 | --- | 1P | --- | |
+| 期限付きリンク共有 | Done | 1P | --- | アクセスログ + rate-limit |
 | 組織 / チーム Vault | Done | Both | Both | サーバーサイド暗号化 (AES-256-GCM) |
 | ロールベースアクセス制御 | Done | Both | Both | OWNER/ADMIN/MEMBER/VIEWER |
 | ゲストアカウント | --- | 1P | --- | |
@@ -184,7 +184,7 @@
 |---|---|---|
 | ~~3-1~~ | ~~組織 / チーム Vault~~ | ~~実装済み (サーバーサイド AES-256-GCM)~~ |
 | ~~3-2~~ | ~~ロールベースアクセス制御~~ | ~~実装済み (OWNER/ADMIN/MEMBER/VIEWER)~~ |
-| 3-3 | 期限付きリンク共有 | パスワードの安全な共有 |
+| ~~3-3~~ | ~~期限付きリンク共有~~ | ~~実装済み (アクセスログ, rate-limit, 管理ページ)~~ |
 | ~~3-4~~ | ~~監査ログ / イベントログ~~ | ~~実装済み (Personal + Org, ADMIN/OWNER 閲覧, cursor pagination)~~ |
 | 3-5 | Webhook / API 連携 | 自動化・外部システム連携 |
 | 3-6 | SCIM プロビジョニング | エンタープライズ IdP 連携 |
