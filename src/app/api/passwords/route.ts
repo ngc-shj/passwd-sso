@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createE2EPasswordSchema } from "@/lib/validations";
+import type { EntryType } from "@prisma/client";
 
 // GET /api/passwords - List passwords (returns encrypted overviews)
 export async function GET(req: NextRequest) {
@@ -12,7 +13,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const tagId = searchParams.get("tag");
-  const entryType = searchParams.get("type");
+  const entryType = searchParams.get("type") as EntryType | null;
   const includeBlob = searchParams.get("include") === "blob";
   const favoritesOnly = searchParams.get("favorites") === "true";
   const trashOnly = searchParams.get("trash") === "true";

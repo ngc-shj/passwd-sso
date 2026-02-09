@@ -24,14 +24,14 @@ export interface EncryptedData {
 
 // ─── Utility ────────────────────────────────────────────────────
 
-function hexEncode(buf: ArrayBuffer | Uint8Array): string {
+export function hexEncode(buf: ArrayBuffer | Uint8Array): string {
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
 
-function hexDecode(hex: string): Uint8Array {
+export function hexDecode(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {
     bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);

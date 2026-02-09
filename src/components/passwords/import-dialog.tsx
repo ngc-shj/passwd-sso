@@ -5,6 +5,11 @@ import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { encryptData } from "@/lib/crypto-client";
 import {
+  isEncryptedExport,
+  decryptExport,
+  type EncryptedExportFile,
+} from "@/lib/export-crypto";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -14,7 +19,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Upload, Loader2, FileUp, CheckCircle2, AlertCircle } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Upload, Loader2, FileUp, CheckCircle2, AlertCircle, Lock } from "lucide-react";
 import { toast } from "sonner";
 
 // ─── CSV Parsing ────────────────────────────────────────────
@@ -333,6 +340,10 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [done, setDone] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [encryptedFile, setEncryptedFile] = useState<EncryptedExportFile | null>(null);
+  const [decryptPassword, setDecryptPassword] = useState("");
+  const [decrypting, setDecrypting] = useState(false);
+  const [decryptError, setDecryptError] = useState("");
 
   const reset = () => {
     setEntries([]);
@@ -341,7 +352,23 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
     setProgress({ current: 0, total: 0 });
     setDone(false);
     setDragOver(false);
+    setEncryptedFile(null);
+    setDecryptPassword("");
+    setDecrypting(false);
+    setDecryptError("");
     if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const parseContent = (text: string, isJson: boolean) => {
+    if (isJson) {
+      const result = parseJson(text);
+      setEntries(result.entries);
+      setFormat(result.format);
+    } else {
+      const result = parseCsv(text);
+      setEntries(result.entries);
+      setFormat(result.format);
+    }
   };
 
   const loadFile = (file: File) => {
@@ -350,16 +377,42 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
       const text = ev.target?.result as string;
 
       if (file.name.endsWith(".json")) {
-        const result = parseJson(text);
-        setEntries(result.entries);
-        setFormat(result.format);
+        // Check if it's an encrypted export
+        try {
+          const parsed = JSON.parse(text);
+          if (isEncryptedExport(parsed)) {
+            setEncryptedFile(parsed);
+            return;
+          }
+        } catch {
+          // Not valid JSON, fall through to regular parsing
+        }
+        parseContent(text, true);
       } else {
-        const result = parseCsv(text);
-        setEntries(result.entries);
-        setFormat(result.format);
+        parseContent(text, false);
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleDecrypt = async () => {
+    if (!encryptedFile) return;
+    setDecrypting(true);
+    setDecryptError("");
+
+    try {
+      const { plaintext, format: originalFormat } = await decryptExport(
+        encryptedFile,
+        decryptPassword
+      );
+      parseContent(plaintext, originalFormat === "json");
+      setEncryptedFile(null);
+      setDecryptPassword("");
+    } catch {
+      setDecryptError(t("decryptionFailed"));
+    } finally {
+      setDecrypting(false);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -524,6 +577,59 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
               {t("importedCount", { count: progress.total })}
             </p>
             <Button onClick={() => setOpen(false)}>{t("close")}</Button>
+          </div>
+        ) : encryptedFile ? (
+          // Decryption step
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 rounded-md border border-blue-500/30 bg-blue-500/10 p-3">
+              <Lock className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                {t("encryptedFileDetected")}
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="decrypt-password" className="text-sm">
+                {t("decryptPassword")}
+              </Label>
+              <Input
+                id="decrypt-password"
+                type="password"
+                value={decryptPassword}
+                onChange={(e) => {
+                  setDecryptPassword(e.target.value);
+                  setDecryptError("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && decryptPassword) handleDecrypt();
+                }}
+                autoComplete="off"
+                autoFocus
+              />
+            </div>
+            {decryptError && (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3">
+                <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                <p className="text-xs text-destructive">
+                  {decryptError}
+                </p>
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={reset} disabled={decrypting}>
+                {t("back")}
+              </Button>
+              <Button
+                onClick={handleDecrypt}
+                disabled={decrypting || !decryptPassword}
+              >
+                {decrypting ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Lock className="h-4 w-4 mr-2" />
+                )}
+                {decrypting ? t("decrypting") : t("decryptButton")}
+              </Button>
+            </DialogFooter>
           </div>
         ) : entries.length === 0 ? (
           // File selection step

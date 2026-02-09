@@ -311,14 +311,28 @@
     "importing": "Importing {current} of {total}...",
     "importedCount": "{count} passwords imported",
     "back": "Back",
-    "close": "Close"
+    "close": "Close",
+    "encryptedFileDetected": "This file is password-protected.",
+    "decryptPassword": "Enter the password used to encrypt this file",
+    "decryptButton": "Decrypt",
+    "decrypting": "Decrypting...",
+    "decryptionFailed": "Decryption failed. Please check the password and try again."
   },
   "Export": {
     "title": "Export Passwords",
     "description": "Download all your passwords in an unencrypted file.",
     "warning": "The exported file will contain all your passwords in plain text. Store it securely and delete it when no longer needed.",
     "exportCsv": "Export CSV",
-    "exportJson": "Export JSON"
+    "exportJson": "Export JSON",
+    "passwordProtect": "Password protect",
+    "passwordProtectDesc": "Encrypt the exported file with a password",
+    "exportPassword": "Export password",
+    "confirmPassword": "Confirm password",
+    "passwordMismatch": "Passwords do not match",
+    "passwordTooShort": "Password must be at least 8 characters",
+    "encryptedWarning": "The exported file will be encrypted. If you forget the password, the data cannot be recovered.",
+    "includeOrgs": "Include organization entries",
+    "includeOrgsDesc": "Also export passwords from organizations you belong to"
   },
   "Watchtower": {
     "title": "Watchtower",

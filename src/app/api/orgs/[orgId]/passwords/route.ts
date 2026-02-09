@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createOrgPasswordSchema, createOrgSecureNoteSchema, createOrgCreditCardSchema, createOrgIdentitySchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
+import type { EntryType } from "@prisma/client";
 import {
   unwrapOrgKey,
   encryptServerData,
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const { searchParams } = new URL(req.url);
   const tagId = searchParams.get("tag");
-  const entryType = searchParams.get("type");
+  const entryType = searchParams.get("type") as EntryType | null;
   const favoritesOnly = searchParams.get("favorites") === "true";
   const trashOnly = searchParams.get("trash") === "true";
   const archivedOnly = searchParams.get("archived") === "true";
