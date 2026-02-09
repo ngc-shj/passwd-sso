@@ -295,6 +295,60 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 400 when CREDIT_CARD has non-digit characters in cardNumber", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+
+    const cardBody = {
+      entryType: "CREDIT_CARD",
+      title: "Bad Card",
+      cardNumber: "4111-1111-1111-1111",
+      brand: "Visa",
+    };
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: cardBody }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when CREDIT_CARD fails Luhn check", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+
+    const cardBody = {
+      entryType: "CREDIT_CARD",
+      title: "Bad Card",
+      cardNumber: "4111111111111112",
+      brand: "Visa",
+    };
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: cardBody }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when CREDIT_CARD length mismatches brand", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+
+    const cardBody = {
+      entryType: "CREDIT_CARD",
+      title: "Bad Card",
+      cardNumber: "4111111111111111",
+      brand: "American Express",
+    };
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: cardBody }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("returns CREDIT_CARD entries with brand and lastFour in GET", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
       encryptedOrgKey: "ek",

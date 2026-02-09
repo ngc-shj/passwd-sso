@@ -303,6 +303,69 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     expect(json.title).toBe("Updated Card");
     expect(mockEncryptServerData).toHaveBeenCalledTimes(2);
   });
+
+  it("returns 400 when updating CREDIT_CARD with non-digit cardNumber", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "CREDIT_CARD",
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { cardNumber: "4111-1111-1111-1111" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when updating CREDIT_CARD with invalid Luhn", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "CREDIT_CARD",
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { cardNumber: "4111111111111112", brand: "Visa" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when updating CREDIT_CARD with length mismatch", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "CREDIT_CARD",
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { cardNumber: "4111111111111111", brand: "American Express" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
 });
 
 describe("DELETE /api/orgs/[orgId]/passwords/[id]", () => {
