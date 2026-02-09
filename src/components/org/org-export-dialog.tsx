@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { useVault } from "@/lib/vault-context";
-import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { encryptExport } from "@/lib/export-crypto";
 import {
   Dialog,
@@ -18,11 +16,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react";
+import { Download, Loader2, AlertTriangle, Lock } from "lucide-react";
 
 type ExportFormat = "csv" | "json";
 
-interface DecryptedExport {
+interface OrgExportEntry {
   entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
   title: string;
   username: string | null;
@@ -48,27 +46,25 @@ interface DecryptedExport {
   expiryDate: string | null;
 }
 
-interface ExportDialogProps {
+interface OrgExportDialogProps {
+  orgId: string;
   trigger: React.ReactNode;
 }
 
-export function ExportDialog({ trigger }: ExportDialogProps) {
+export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
   const t = useTranslations("Export");
-  const { encryptionKey } = useVault();
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [passwordProtect, setPasswordProtect] = useState(false);
   const [exportPassword, setExportPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
-  const [includeOrgs, setIncludeOrgs] = useState(false);
 
   const resetState = () => {
     setPasswordProtect(false);
     setExportPassword("");
     setConfirmPassword("");
     setPasswordError("");
-    setIncludeOrgs(false);
   };
 
   const validatePassword = (): boolean => {
@@ -86,106 +82,51 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
   };
 
   const handleExport = async (format: ExportFormat) => {
-    if (!encryptionKey) return;
     if (!validatePassword()) return;
     setExporting(true);
 
     try {
-      // 1. Fetch personal entries (E2E encrypted, decrypt client-side)
-      const res = await fetch("/api/passwords?include=blob");
-      if (!res.ok) throw new Error("Failed to fetch");
-      const rawEntries = await res.json();
+      // Fetch list of all org passwords (overview only)
+      const listRes = await fetch(`/api/orgs/${orgId}/passwords`);
+      if (!listRes.ok) throw new Error("Failed to fetch list");
+      const list: { id: string; entryType: string }[] = await listRes.json();
 
-      const entries: DecryptedExport[] = [];
-      for (const raw of rawEntries) {
-        if (!raw.encryptedBlob) continue;
+      // Fetch full details for each entry
+      const entries: OrgExportEntry[] = [];
+      for (const item of list) {
         try {
-          const plaintext = await decryptData(
-            raw.encryptedBlob as EncryptedData,
-            encryptionKey
-          );
-          const parsed = JSON.parse(plaintext);
+          const res = await fetch(`/api/orgs/${orgId}/passwords/${item.id}`);
+          if (!res.ok) continue;
+          const data = await res.json();
+
           entries.push({
-            entryType: raw.entryType ?? "LOGIN",
-            title: parsed.title ?? "",
-            username: parsed.username ?? null,
-            password: parsed.password ?? "",
-            content: parsed.content ?? null,
-            url: parsed.url ?? null,
-            notes: parsed.notes ?? null,
-            totp: parsed.totp?.secret ?? null,
-            cardholderName: parsed.cardholderName ?? null,
-            cardNumber: parsed.cardNumber ?? null,
-            brand: parsed.brand ?? null,
-            expiryMonth: parsed.expiryMonth ?? null,
-            expiryYear: parsed.expiryYear ?? null,
-            cvv: parsed.cvv ?? null,
-            fullName: parsed.fullName ?? null,
-            address: parsed.address ?? null,
-            phone: parsed.phone ?? null,
-            email: parsed.email ?? null,
-            dateOfBirth: parsed.dateOfBirth ?? null,
-            nationality: parsed.nationality ?? null,
-            idNumber: parsed.idNumber ?? null,
-            issueDate: parsed.issueDate ?? null,
-            expiryDate: parsed.expiryDate ?? null,
+            entryType: data.entryType ?? "LOGIN",
+            title: data.title ?? "",
+            username: data.username ?? null,
+            password: data.password ?? "",
+            content: data.content ?? null,
+            url: data.url ?? null,
+            notes: data.notes ?? null,
+            totp: data.totp?.secret ?? null,
+            cardholderName: data.cardholderName ?? null,
+            cardNumber: data.cardNumber ?? null,
+            brand: data.brand ?? null,
+            expiryMonth: data.expiryMonth ?? null,
+            expiryYear: data.expiryYear ?? null,
+            cvv: data.cvv ?? null,
+            fullName: data.fullName ?? null,
+            address: data.address ?? null,
+            phone: data.phone ?? null,
+            email: data.email ?? null,
+            dateOfBirth: data.dateOfBirth ?? null,
+            nationality: data.nationality ?? null,
+            idNumber: data.idNumber ?? null,
+            issueDate: data.issueDate ?? null,
+            expiryDate: data.expiryDate ?? null,
           });
         } catch {
-          // Skip entries that fail to decrypt
+          // Skip entries that fail to fetch
         }
-      }
-
-      // 2. Fetch org entries (server-side decrypted via detail API)
-      if (includeOrgs) try {
-        const orgsRes = await fetch("/api/orgs");
-        if (orgsRes.ok) {
-          const orgs: { id: string }[] = await orgsRes.json();
-          for (const org of orgs) {
-            try {
-              const listRes = await fetch(`/api/orgs/${org.id}/passwords`);
-              if (!listRes.ok) continue;
-              const list: { id: string; entryType: string }[] = await listRes.json();
-              for (const item of list) {
-                try {
-                  const detailRes = await fetch(`/api/orgs/${org.id}/passwords/${item.id}`);
-                  if (!detailRes.ok) continue;
-                  const data = await detailRes.json();
-                  entries.push({
-                    entryType: data.entryType ?? "LOGIN",
-                    title: data.title ?? "",
-                    username: data.username ?? null,
-                    password: data.password ?? "",
-                    content: data.content ?? null,
-                    url: data.url ?? null,
-                    notes: data.notes ?? null,
-                    totp: data.totp?.secret ?? null,
-                    cardholderName: data.cardholderName ?? null,
-                    cardNumber: data.cardNumber ?? null,
-                    brand: data.brand ?? null,
-                    expiryMonth: data.expiryMonth ?? null,
-                    expiryYear: data.expiryYear ?? null,
-                    cvv: data.cvv ?? null,
-                    fullName: data.fullName ?? null,
-                    address: data.address ?? null,
-                    phone: data.phone ?? null,
-                    email: data.email ?? null,
-                    dateOfBirth: data.dateOfBirth ?? null,
-                    nationality: data.nationality ?? null,
-                    idNumber: data.idNumber ?? null,
-                    issueDate: data.issueDate ?? null,
-                    expiryDate: data.expiryDate ?? null,
-                  });
-                } catch {
-                  // Skip entries that fail to fetch
-                }
-              }
-            } catch {
-              // Skip orgs that fail to fetch
-            }
-          }
-        }
-      } catch {
-        // Org fetch failed — continue with personal entries only
       }
 
       const content = formatExportContent(entries, format);
@@ -197,14 +138,13 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
         const encrypted = await encryptExport(content, exportPassword, format);
         const encryptedJson = JSON.stringify(encrypted, null, 2);
         blob = new Blob([encryptedJson], { type: "application/json" });
-        filename = `passwd-sso-export-${formatDate()}.encrypted.json`;
+        filename = `passwd-sso-org-export-${formatDate()}.encrypted.json`;
       } else {
         const mimeType = format === "csv" ? "text/csv;charset=utf-8" : "application/json";
         blob = new Blob([content], { type: mimeType });
-        filename = `passwd-sso-export-${formatDate()}.${format}`;
+        filename = `passwd-sso-org-export-${formatDate()}.${format}`;
       }
 
-      // Trigger download
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -247,32 +187,13 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Building2 className="h-4 w-4 text-muted-foreground" />
-              <div>
-                <Label htmlFor="include-orgs" className="text-sm font-medium">
-                  {t("includeOrgs")}
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  {t("includeOrgsDesc")}
-                </p>
-              </div>
-            </div>
-            <Switch
-              id="include-orgs"
-              checked={includeOrgs}
-              onCheckedChange={setIncludeOrgs}
-            />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
               <Lock className="h-4 w-4 text-muted-foreground" />
-              <Label htmlFor="password-protect" className="text-sm font-medium">
+              <Label htmlFor="org-password-protect" className="text-sm font-medium">
                 {t("passwordProtect")}
               </Label>
             </div>
             <Switch
-              id="password-protect"
+              id="org-password-protect"
               checked={passwordProtect}
               onCheckedChange={(checked) => {
                 setPasswordProtect(checked);
@@ -294,11 +215,11 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
           {passwordProtect && (
             <div className="space-y-3">
               <div className="space-y-1.5">
-                <Label htmlFor="export-password" className="text-sm">
+                <Label htmlFor="org-export-password" className="text-sm">
                   {t("exportPassword")}
                 </Label>
                 <Input
-                  id="export-password"
+                  id="org-export-password"
                   type="password"
                   value={exportPassword}
                   onChange={(e) => {
@@ -309,11 +230,11 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="confirm-password" className="text-sm">
+                <Label htmlFor="org-confirm-password" className="text-sm">
                   {t("confirmPassword")}
                 </Label>
                 <Input
-                  id="confirm-password"
+                  id="org-confirm-password"
                   type="password"
                   value={confirmPassword}
                   onChange={(e) => {
@@ -363,14 +284,14 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
 
 // ─── Formatting helpers ─────────────────────────────────────
 
-function formatExportContent(entries: DecryptedExport[], format: ExportFormat): string {
+function formatExportContent(entries: OrgExportEntry[], format: ExportFormat): string {
   if (format === "csv") {
     return formatCsv(entries);
   }
   return formatJson(entries);
 }
 
-function formatCsv(entries: DecryptedExport[]): string {
+function formatCsv(entries: OrgExportEntry[]): string {
   const header =
     "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp";
   const escapeCsv = (val: string | null) => {
@@ -403,7 +324,7 @@ function formatCsv(entries: DecryptedExport[]): string {
   return [header, ...rows].join("\n");
 }
 
-function formatJson(entries: DecryptedExport[]): string {
+function formatJson(entries: OrgExportEntry[]): string {
   return JSON.stringify(
     {
       exportedAt: new Date().toISOString(),

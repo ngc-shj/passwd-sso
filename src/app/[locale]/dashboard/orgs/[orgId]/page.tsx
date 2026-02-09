@@ -16,7 +16,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, Settings, KeyRound, Search, FileText, CreditCard, IdCard } from "lucide-react";
+import { OrgExportDialog } from "@/components/org/org-export-dialog";
+import { Plus, Settings, KeyRound, Search, FileText, CreditCard, IdCard, Download } from "lucide-react";
 import { toast } from "sonner";
 
 interface OrgInfo {
@@ -302,6 +303,16 @@ export default function OrgDashboardPage({
             {org && <OrgRoleBadge role={org.role} />}
           </div>
           <div className="flex items-center gap-2">
+            {(org?.role === "OWNER" || org?.role === "ADMIN") && (
+              <OrgExportDialog
+                orgId={orgId}
+                trigger={
+                  <Button variant="ghost" size="icon">
+                    <Download className="h-4 w-4" />
+                  </Button>
+                }
+              />
+            )}
             {(org?.role === "OWNER" || org?.role === "ADMIN") && (
               <Button variant="ghost" size="icon" asChild>
                 <Link href={`/dashboard/orgs/${orgId}/settings`}>

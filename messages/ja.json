@@ -311,14 +311,28 @@
     "importing": "{current} / {total} をインポート中...",
     "importedCount": "{count} 件のパスワードをインポートしました",
     "back": "戻る",
-    "close": "閉じる"
+    "close": "閉じる",
+    "encryptedFileDetected": "このファイルはパスワードで保護されています。",
+    "decryptPassword": "暗号化時に設定したパスワードを入力してください",
+    "decryptButton": "復号する",
+    "decrypting": "復号中...",
+    "decryptionFailed": "復号に失敗しました。パスワードを確認して再度お試しください。"
   },
   "Export": {
     "title": "パスワードのエクスポート",
     "description": "すべてのパスワードを暗号化されていないファイルとしてダウンロードします。",
     "warning": "エクスポートされたファイルにはすべてのパスワードが平文で含まれます。安全に保管し、不要になったら削除してください。",
     "exportCsv": "CSV でエクスポート",
-    "exportJson": "JSON でエクスポート"
+    "exportJson": "JSON でエクスポート",
+    "passwordProtect": "パスワード保護",
+    "passwordProtectDesc": "エクスポートファイルをパスワードで暗号化します",
+    "exportPassword": "エクスポート用パスワード",
+    "confirmPassword": "パスワードの確認",
+    "passwordMismatch": "パスワードが一致しません",
+    "passwordTooShort": "パスワードは8文字以上で入力してください",
+    "encryptedWarning": "エクスポートファイルは暗号化されます。パスワードを忘れるとデータを復元できません。",
+    "includeOrgs": "組織のエントリーを含める",
+    "includeOrgsDesc": "所属する組織のパスワードもエクスポートします"
   },
   "Watchtower": {
     "title": "Watchtower",
