@@ -1,0 +1,175 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
+
+const { mockAuth, mockPrismaOrgInvitation, mockPrismaUser, mockPrismaOrgMember, mockRequireOrgPermission, OrgAuthError } = vi.hoisted(() => {
+  class _OrgAuthError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = "OrgAuthError";
+      this.status = status;
+    }
+  }
+  return {
+    mockAuth: vi.fn(),
+    mockPrismaOrgInvitation: {
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
+    },
+    mockPrismaUser: { findUnique: vi.fn() },
+    mockPrismaOrgMember: { findUnique: vi.fn() },
+    mockRequireOrgPermission: vi.fn(),
+    OrgAuthError: _OrgAuthError,
+  };
+});
+
+vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    orgInvitation: mockPrismaOrgInvitation,
+    user: mockPrismaUser,
+    orgMember: mockPrismaOrgMember,
+  },
+}));
+vi.mock("@/lib/org-auth", () => ({
+  requireOrgPermission: mockRequireOrgPermission,
+  OrgAuthError,
+}));
+
+import { GET, POST } from "./route";
+
+const ORG_ID = "org-123";
+const now = new Date("2025-01-01T00:00:00Z");
+
+describe("GET /api/orgs/[orgId]/invitations", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockRequireOrgPermission.mockResolvedValue({ role: "ADMIN" });
+  });
+
+  it("returns 401 when unauthenticated", async () => {
+    mockAuth.mockResolvedValue(null);
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 403 when lacking invite permission", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("Forbidden", 403));
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("returns list of pending invitations", async () => {
+    mockPrismaOrgInvitation.findMany.mockResolvedValue([
+      {
+        id: "inv-1",
+        email: "user@test.com",
+        role: "MEMBER",
+        token: "abc123",
+        status: "PENDING",
+        expiresAt: now,
+        createdAt: now,
+        invitedBy: { id: "u1", name: "Admin", email: "admin@test.com" },
+      },
+    ]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`),
+      createParams({ orgId: ORG_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json).toHaveLength(1);
+    expect(json[0].email).toBe("user@test.com");
+  });
+});
+
+describe("POST /api/orgs/[orgId]/invitations", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockRequireOrgPermission.mockResolvedValue({ role: "ADMIN" });
+    mockPrismaUser.findUnique.mockResolvedValue(null);
+    mockPrismaOrgInvitation.findFirst.mockResolvedValue(null);
+  });
+
+  it("returns 401 when unauthenticated", async () => {
+    mockAuth.mockResolvedValue(null);
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`, {
+        body: { email: "new@test.com", role: "MEMBER" },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 400 on invalid body", async () => {
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`, {
+        body: { email: "invalid" },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 409 when user is already a member", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ id: "existing-user" });
+    mockPrismaOrgMember.findUnique.mockResolvedValue({ id: "existing-member" });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`, {
+        body: { email: "existing@test.com", role: "MEMBER" },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("User is already a member");
+  });
+
+  it("returns 409 when invitation already pending", async () => {
+    mockPrismaOrgInvitation.findFirst.mockResolvedValue({ id: "existing-inv" });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`, {
+        body: { email: "pending@test.com", role: "MEMBER" },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("Invitation already sent");
+  });
+
+  it("creates invitation successfully (201)", async () => {
+    mockPrismaOrgInvitation.create.mockResolvedValue({
+      id: "new-inv",
+      email: "new@test.com",
+      role: "MEMBER",
+      token: "generated-token",
+      expiresAt: now,
+      createdAt: now,
+    });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`, {
+        body: { email: "new@test.com", role: "MEMBER" },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(201);
+    expect(json.email).toBe("new@test.com");
+    expect(json.token).toBeDefined();
+  });
+});

@@ -1,0 +1,88 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
+
+const { mockAuth, mockPrismaOrgMember, mockRequireOrgMember, OrgAuthError } = vi.hoisted(() => {
+  class _OrgAuthError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = "OrgAuthError";
+      this.status = status;
+    }
+  }
+  return {
+    mockAuth: vi.fn(),
+    mockPrismaOrgMember: { findMany: vi.fn() },
+    mockRequireOrgMember: vi.fn(),
+    OrgAuthError: _OrgAuthError,
+  };
+});
+
+vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/prisma", () => ({
+  prisma: { orgMember: mockPrismaOrgMember },
+}));
+vi.mock("@/lib/org-auth", () => ({
+  requireOrgMember: mockRequireOrgMember,
+  OrgAuthError,
+}));
+
+import { GET } from "./route";
+
+const ORG_ID = "org-123";
+const now = new Date("2025-01-01T00:00:00Z");
+
+describe("GET /api/orgs/[orgId]/members", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockRequireOrgMember.mockResolvedValue({ role: "OWNER" });
+  });
+
+  it("returns 401 when unauthenticated", async () => {
+    mockAuth.mockResolvedValue(null);
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/members`),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 404 when not a member", async () => {
+    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("Not found", 404));
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/members`),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("returns list of members", async () => {
+    mockPrismaOrgMember.findMany.mockResolvedValue([
+      {
+        id: "m1",
+        userId: "u1",
+        role: "OWNER",
+        createdAt: now,
+        user: { id: "u1", name: "Owner", email: "owner@test.com", image: null },
+      },
+      {
+        id: "m2",
+        userId: "u2",
+        role: "MEMBER",
+        createdAt: now,
+        user: { id: "u2", name: "Member", email: "member@test.com", image: null },
+      },
+    ]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/members`),
+      createParams({ orgId: ORG_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json).toHaveLength(2);
+    expect(json[0].role).toBe("OWNER");
+    expect(json[1].role).toBe("MEMBER");
+  });
+});
