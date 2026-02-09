@@ -418,7 +418,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                 {t("auditLogPersonal")}
               </Link>
             </Button>
-            {orgs.map((org) => (
+            {orgs.filter((org) => org.role === "OWNER" || org.role === "ADMIN").map((org) => (
               <Button
                 key={org.id}
                 variant={activeAuditOrgId === org.id ? "secondary" : "ghost"}
