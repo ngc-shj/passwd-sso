@@ -3,6 +3,7 @@
 本ガイドは本番向けの AWS 構成例です:
 - App: ECS/Fargate (Next.js)
 - DB: Amazon RDS for PostgreSQL
+- Cache: Amazon ElastiCache for Redis
 - SSO ブリッジ: SAML Jackson (ECS/Fargate)
 - Secrets: AWS Secrets Manager
 
@@ -11,12 +12,54 @@
 - `app` サービス (Next.js)
 - `jackson` サービス (SAML Jackson)
 - `db` は RDS (PostgreSQL)
+- `redis` は ElastiCache (Redis)
+
+## システム構成図 (AA)
+
+```
+              +----------------------+
+              |   Users / Clients    |
+              +----------+-----------+
+                         |
+                         v
+                 +---------------+
+                 |  ALB (HTTPS)  |
+                 +-------+-------+
+                         |
+            +------------+-------------+
+            |                          |
+            v                          v
+   +-----------------+       +-----------------+
+   |  app (Next.js)  |       | jackson (SAML)  |
+   |  ECS/Fargate    |       | ECS/Fargate     |
+   +--------+--------+       +--------+--------+
+            |                         |
+            |                         |
+            v                         v
+   +-----------------+       +-----------------+
+   | RDS (Postgres)  |<------+ RDS (Postgres)  |
+   +-----------------+       +-----------------+
+            |
+            v
+   +-----------------+
+   | ElastiCache     |
+   | (Redis)         |
+   +-----------------+
+
+   +-----------------+
+   | Secrets Manager |
+   +--------+--------+
+            |
+            v
+     (Task env vars)
+```
 
 ## 前提
 
 - VPC とサブネットを作成済み
 - ECS クラスタ (Fargate)
 - RDS PostgreSQL
+- ElastiCache Redis
 - Secrets Manager
 - 公開する場合は ALB を使用
 
@@ -30,6 +73,7 @@ Secrets Manager に保存:
 - `AUTH_JACKSON_ID`
 - `AUTH_JACKSON_SECRET`
 - `ORG_MASTER_KEY`
+- `REDIS_URL`
 
 任意:
 - `GOOGLE_WORKSPACE_DOMAIN`
@@ -66,6 +110,7 @@ postgresql://USER:PASSWORD@HOST:PORT/DBNAME
 - `AUTH_JACKSON_SECRET`
 - `SAML_PROVIDER_NAME`
 - `ORG_MASTER_KEY`
+- `REDIS_URL`
 
 ### jackson サービス
 
@@ -90,4 +135,5 @@ npx prisma migrate deploy
 
 - ALB + HTTPS (ACM 証明書) を推奨
 - `jackson` は可能ならアクセス制限
+- Redis は RDS とは別の ElastiCache クラスタで運用
 - シークレットはタスク定義/コードに埋め込まない

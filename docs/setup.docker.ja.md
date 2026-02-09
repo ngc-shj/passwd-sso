@@ -92,6 +92,9 @@ cp .env.example .env.local
 | `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret | Jackson 管理画面で取得 |
 | `SAML_PROVIDER_NAME` | SAML IdP のログイン画面表示名 | 例: `HENNGE`, `Okta`, `Azure AD` |
 | `ORG_MASTER_KEY` | 組織用暗号化のマスターキー (256bit, hex) | `openssl rand -hex 32` |
+| `REDIS_URL` | （任意）共有レート制限用の Redis URL | 例: `redis://host:6379` |
+
+> **Redis はオプションです。** `REDIS_URL` が未設定の場合、Redis なしで動作し、Vault アンロックのレート制限は無効になります。単一インスタンスで運用する場合は Redis を省略できます。
 
 ### 3. PostgreSQL の起動
 
@@ -225,6 +228,7 @@ npm start
 - **AuthTag**: GCM 認証タグ (128bit)。改ざん検知に使用
 - **対象フィールド**: `encryptedBlob`, `encryptedOverview`（それぞれ個別の IV/AuthTag を持つ）
 - **組織用暗号化**: サーバ側で `ORG_MASTER_KEY` を使って組織ごとの鍵をラップする。運用時はシークレットマネージャで管理する。
+- **レート制限**: 本番では Redis (`REDIS_URL`) による共有レート制限を推奨。
 
 ### API セキュリティ
 
@@ -315,6 +319,8 @@ passwd-sso/
 │       ├── prisma.ts           # Prisma クライアント
 │       └── validations.ts      # Zod スキーマ
 └── docs/
-    ├── setup.ja.md             # 本ドキュメント (日本語)
-    └── setup.en.md             # 本ドキュメント (English)
+    ├── setup.docker.ja.md      # 本ドキュメント (日本語)
+    ├── setup.docker.en.md      # 本ドキュメント (English)
+    ├── setup.aws.ja.md         # AWS デプロイガイド (日本語)
+    └── setup.aws.en.md         # AWS デプロイガイド (English)
 ```

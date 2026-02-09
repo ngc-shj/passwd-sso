@@ -268,7 +268,7 @@ export default function OrgSettingsPage({
               </p>
               <Button variant="ghost" asChild>
                 <Link href="/dashboard/orgs">
-                  {tOrg("manage")}
+                  {t("manage")}
                 </Link>
               </Button>
             </div>

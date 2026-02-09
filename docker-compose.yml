@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        DATABASE_URL: postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
     ports:
       - "3000:3000"
     env_file:
@@ -10,10 +12,13 @@ services:
     environment:
       - DATABASE_URL=postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
       - JACKSON_URL=http://jackson:5225
+      - REDIS_URL=redis://redis:6379
     depends_on:
       db:
         condition: service_healthy
       jackson:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -52,17 +57,37 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5225/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"const http=require('http');const os=require('os');http.get('http://'+os.hostname()+':5225/api/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\"",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
     restart: unless-stopped
     networks:
       - internal
     # Do NOT expose port 5225 to host in production
 
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
 volumes:
   postgres_data:
+  redis_data:
 
 networks:
   internal:
