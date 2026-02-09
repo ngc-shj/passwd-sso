@@ -9,7 +9,7 @@ import { Building2 } from "lucide-react";
 
 interface OrgArchivedEntry {
   id: string;
-  entryType: "LOGIN" | "SECURE_NOTE";
+  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
   orgId: string;
   orgName: string;
   role: string;
@@ -17,6 +17,11 @@ interface OrgArchivedEntry {
   username: string | null;
   urlHost: string | null;
   snippet: string | null;
+  brand: string | null;
+  lastFour: string | null;
+  cardholderName: string | null;
+  fullName: string | null;
+  idNumberLast4: string | null;
   isFavorite: boolean;
   isArchived: boolean;
   tags: { id: string; name: string; color: string | null }[];
@@ -146,6 +151,21 @@ export function OrgArchivedList({ searchQuery, refreshKey }: OrgArchivedListProp
           customFields: data.customFields ?? [],
           passwordHistory: [],
           totp: data.totp ?? undefined,
+          brand: data.brand ?? null,
+          cardholderName: data.cardholderName ?? null,
+          cardNumber: data.cardNumber ?? null,
+          expiryMonth: data.expiryMonth ?? null,
+          expiryYear: data.expiryYear ?? null,
+          cvv: data.cvv ?? null,
+          fullName: data.fullName ?? null,
+          address: data.address ?? null,
+          phone: data.phone ?? null,
+          email: data.email ?? null,
+          dateOfBirth: data.dateOfBirth ?? null,
+          nationality: data.nationality ?? null,
+          idNumber: data.idNumber ?? null,
+          issueDate: data.issueDate ?? null,
+          expiryDate: data.expiryDate ?? null,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         };
@@ -183,6 +203,11 @@ export function OrgArchivedList({ searchQuery, refreshKey }: OrgArchivedListProp
       p.username?.toLowerCase().includes(q) ||
       p.urlHost?.toLowerCase().includes(q) ||
       p.snippet?.toLowerCase().includes(q) ||
+      p.fullName?.toLowerCase().includes(q) ||
+      p.idNumberLast4?.includes(q) ||
+      p.brand?.toLowerCase().includes(q) ||
+      p.lastFour?.includes(q) ||
+      p.cardholderName?.toLowerCase().includes(q) ||
       p.orgName.toLowerCase().includes(q)
     );
   });
@@ -207,6 +232,11 @@ export function OrgArchivedList({ searchQuery, refreshKey }: OrgArchivedListProp
             username={entry.username}
             urlHost={entry.urlHost}
             snippet={entry.snippet}
+            brand={entry.brand}
+            lastFour={entry.lastFour}
+            cardholderName={entry.cardholderName}
+            fullName={entry.fullName}
+            idNumberLast4={entry.idNumberLast4}
             tags={entry.tags}
             isFavorite={entry.isFavorite}
             isArchived={entry.isArchived}

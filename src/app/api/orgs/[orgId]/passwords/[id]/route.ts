@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { updateOrgPasswordSchema, updateOrgSecureNoteSchema, updateOrgCreditCardSchema } from "@/lib/validations";
+import { updateOrgPasswordSchema, updateOrgSecureNoteSchema, updateOrgCreditCardSchema, updateOrgIdentitySchema } from "@/lib/validations";
 import {
   requireOrgPermission,
   requireOrgMember,
@@ -111,6 +111,22 @@ export async function GET(_req: NextRequest, { params }: Params) {
       expiryMonth: blob.expiryMonth ?? null,
       expiryYear: blob.expiryYear ?? null,
       cvv: blob.cvv ?? null,
+      notes: blob.notes ?? null,
+    });
+  }
+
+  if (entry.entryType === "IDENTITY") {
+    return NextResponse.json({
+      ...common,
+      fullName: blob.fullName ?? null,
+      address: blob.address ?? null,
+      phone: blob.phone ?? null,
+      email: blob.email ?? null,
+      dateOfBirth: blob.dateOfBirth ?? null,
+      nationality: blob.nationality ?? null,
+      idNumber: blob.idNumber ?? null,
+      issueDate: blob.issueDate ?? null,
+      expiryDate: blob.expiryDate ?? null,
       notes: blob.notes ?? null,
     });
   }
@@ -278,6 +294,58 @@ export async function PUT(req: NextRequest, { params }: Params) {
       cardholderName: updatedBlob.cardholderName,
       brand: updatedBlob.brand,
       lastFour,
+    });
+  } else if (entry.entryType === "IDENTITY") {
+    const parsed = updateOrgIdentitySchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    tagIds = parsed.data.tagIds;
+    isArchived = parsed.data.isArchived;
+
+    const mergeField = (field: string) =>
+      (parsed.data as Record<string, unknown>)[field] !== undefined
+        ? (parsed.data as Record<string, unknown>)[field] || null
+        : currentBlob[field];
+
+    const updatedBlob = {
+      title: parsed.data.title ?? currentBlob.title,
+      fullName: mergeField("fullName"),
+      address: mergeField("address"),
+      phone: mergeField("phone"),
+      email: mergeField("email"),
+      dateOfBirth: mergeField("dateOfBirth"),
+      nationality: mergeField("nationality"),
+      idNumber: mergeField("idNumber"),
+      issueDate: mergeField("issueDate"),
+      expiryDate: mergeField("expiryDate"),
+      notes: mergeField("notes"),
+    };
+    responseTitle = updatedBlob.title;
+
+    if (
+      updatedBlob.issueDate &&
+      updatedBlob.expiryDate &&
+      (updatedBlob.issueDate as string) >= (updatedBlob.expiryDate as string)
+    ) {
+      return NextResponse.json(
+        { error: "Expiry date must be after issue date" },
+        { status: 400 }
+      );
+    }
+
+    const idNumberLast4 = updatedBlob.idNumber
+      ? (updatedBlob.idNumber as string).slice(-4)
+      : null;
+    updatedBlobStr = JSON.stringify(updatedBlob);
+    overviewBlobStr = JSON.stringify({
+      title: updatedBlob.title,
+      fullName: updatedBlob.fullName,
+      idNumberLast4,
     });
   } else {
     const parsed = updateOrgPasswordSchema.safeParse(body);

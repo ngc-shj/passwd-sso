@@ -20,7 +20,7 @@ import { toast } from "sonner";
 // ─── CSV Parsing ────────────────────────────────────────────
 
 interface ParsedEntry {
-  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
+  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
   title: string;
   username: string;
   password: string;
@@ -33,6 +33,15 @@ interface ParsedEntry {
   expiryMonth: string;
   expiryYear: string;
   cvv: string;
+  fullName: string;
+  address: string;
+  phone: string;
+  email: string;
+  dateOfBirth: string;
+  nationality: string;
+  idNumber: string;
+  issueDate: string;
+  expiryDate: string;
 }
 
 type CsvFormat = "bitwarden" | "onepassword" | "chrome" | "unknown";
@@ -108,16 +117,22 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
     const rowType = (row["type"] ?? "").toLowerCase();
     const isNote = rowType === "securenote" || rowType === "note";
     const isCard = rowType === "card";
+    const isIdentity = rowType === "identity";
 
     const cardDefaults = {
       cardholderName: "", cardNumber: "", brand: "",
       expiryMonth: "", expiryYear: "", cvv: "",
     };
+    const identityDefaults = {
+      fullName: "", address: "", phone: "", email: "",
+      dateOfBirth: "", nationality: "", idNumber: "",
+      issueDate: "", expiryDate: "",
+    };
 
     switch (format) {
       case "bitwarden":
         entry = {
-          entryType: isCard ? "CREDIT_CARD" : isNote ? "SECURE_NOTE" : "LOGIN",
+          entryType: isIdentity ? "IDENTITY" : isCard ? "CREDIT_CARD" : isNote ? "SECURE_NOTE" : "LOGIN",
           title: row["name"] ?? "",
           username: row["login_username"] ?? "",
           password: row["login_password"] ?? "",
@@ -125,6 +140,7 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
           url: row["login_uri"] ?? "",
           notes: isNote ? "" : (row["notes"] ?? ""),
           ...cardDefaults,
+          ...identityDefaults,
         };
         break;
       case "chrome":
@@ -137,11 +153,12 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
           url: row["url"] ?? "",
           notes: row["note"] ?? "",
           ...cardDefaults,
+          ...identityDefaults,
         };
         break;
       case "onepassword":
         entry = {
-          entryType: isCard ? "CREDIT_CARD" : isNote ? "SECURE_NOTE" : "LOGIN",
+          entryType: isIdentity ? "IDENTITY" : isCard ? "CREDIT_CARD" : isNote ? "SECURE_NOTE" : "LOGIN",
           title: row["title"] ?? "",
           username: row["username"] ?? "",
           password: row["password"] ?? "",
@@ -149,11 +166,12 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
           url: row["url"] ?? row["urls"] ?? "",
           notes: isNote ? "" : (row["notes"] ?? ""),
           ...cardDefaults,
+          ...identityDefaults,
         };
         break;
       default:
         entry = {
-          entryType: isCard ? "CREDIT_CARD" : isNote ? "SECURE_NOTE" : "LOGIN",
+          entryType: isIdentity ? "IDENTITY" : isCard ? "CREDIT_CARD" : isNote ? "SECURE_NOTE" : "LOGIN",
           title: row["name"] ?? row["title"] ?? fields[0] ?? "",
           username: row["username"] ?? row["login_username"] ?? fields[1] ?? "",
           password: row["password"] ?? row["login_password"] ?? fields[2] ?? "",
@@ -161,10 +179,11 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
           url: row["url"] ?? row["login_uri"] ?? "",
           notes: isNote ? "" : (row["notes"] ?? ""),
           ...cardDefaults,
+          ...identityDefaults,
         };
     }
 
-    // Login entries need title+password, notes/cards need title only
+    // Login entries need title+password, notes/cards/identities need title only
     const valid = entry.entryType === "LOGIN"
       ? !!entry.title && !!entry.password
       : !!entry.title;
@@ -195,6 +214,37 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
         cardholderName: "", cardNumber: "", brand: "",
         expiryMonth: "", expiryYear: "", cvv: "",
       };
+      const identityDefaults = {
+        fullName: "", address: "", phone: "", email: "",
+        dateOfBirth: "", nationality: "", idNumber: "",
+        issueDate: "", expiryDate: "",
+      };
+
+      // Bitwarden JSON: type=4 or type="identity"
+      if (type === 4 || type === "identity") {
+        const identity = item.identity ?? {};
+        const entry: ParsedEntry = {
+          entryType: "IDENTITY",
+          title: item.name ?? "",
+          username: "", password: "", content: "",
+          url: "",
+          notes: item.notes ?? "",
+          ...cardDefaults,
+          fullName: identity.fullName ?? identity.firstName
+            ? `${identity.firstName ?? ""} ${identity.lastName ?? ""}`.trim()
+            : "",
+          address: identity.address ?? identity.address1 ?? "",
+          phone: identity.phone ?? "",
+          email: identity.email ?? "",
+          dateOfBirth: identity.dateOfBirth ?? "",
+          nationality: identity.nationality ?? "",
+          idNumber: identity.idNumber ?? identity.ssn ?? identity.passportNumber ?? "",
+          issueDate: identity.issueDate ?? "",
+          expiryDate: identity.expiryDate ?? "",
+        };
+        if (entry.title) entries.push(entry);
+        continue;
+      }
 
       // Bitwarden JSON: type=3 or type="card"
       if (type === 3 || type === "card") {
@@ -211,6 +261,7 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
           expiryMonth: card.expMonth ?? "",
           expiryYear: card.expYear ?? "",
           cvv: card.code ?? "",
+          ...identityDefaults,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -226,6 +277,7 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
           url: "",
           notes: "",
           ...cardDefaults,
+          ...identityDefaults,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -243,6 +295,7 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
         url: uris[0]?.uri ?? "",
         notes: item.notes ?? "",
         ...cardDefaults,
+        ...identityDefaults,
       };
       if (entry.title && entry.password) entries.push(entry);
     }
@@ -335,10 +388,33 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
       try {
         const isNote = entry.entryType === "SECURE_NOTE";
         const isCard = entry.entryType === "CREDIT_CARD";
+        const isIdentity = entry.entryType === "IDENTITY";
         let fullBlob: string;
         let overviewBlob: string;
 
-        if (isCard) {
+        if (isIdentity) {
+          const idNumberLast4 = entry.idNumber ? entry.idNumber.slice(-4) : null;
+          fullBlob = JSON.stringify({
+            title: entry.title,
+            fullName: entry.fullName || null,
+            address: entry.address || null,
+            phone: entry.phone || null,
+            email: entry.email || null,
+            dateOfBirth: entry.dateOfBirth || null,
+            nationality: entry.nationality || null,
+            idNumber: entry.idNumber || null,
+            issueDate: entry.issueDate || null,
+            expiryDate: entry.expiryDate || null,
+            notes: entry.notes || null,
+            tags: [],
+          });
+          overviewBlob = JSON.stringify({
+            title: entry.title,
+            fullName: entry.fullName || null,
+            idNumberLast4,
+            tags: [],
+          });
+        } else if (isCard) {
           const lastFour = entry.cardNumber
             ? entry.cardNumber.replace(/\s/g, "").slice(-4)
             : null;
@@ -505,11 +581,13 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
                     <tr key={i}>
                       <td className="px-2 py-1 truncate max-w-[120px]">{entry.title}</td>
                       <td className="px-2 py-1 text-muted-foreground">
-                        {entry.entryType === "CREDIT_CARD"
-                          ? t("typeCard")
-                          : entry.entryType === "SECURE_NOTE"
-                            ? t("typeNote")
-                            : t("typeLogin")}
+                        {entry.entryType === "IDENTITY"
+                          ? t("typeIdentity")
+                          : entry.entryType === "CREDIT_CARD"
+                            ? t("typeCard")
+                            : entry.entryType === "SECURE_NOTE"
+                              ? t("typeNote")
+                              : t("typeLogin")}
                       </td>
                       <td className="px-2 py-1 truncate max-w-[120px]">
                         {entry.entryType === "LOGIN" ? entry.username : "—"}

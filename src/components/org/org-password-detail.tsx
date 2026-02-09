@@ -33,7 +33,7 @@ interface OrgPasswordDetailProps {
 
 interface PasswordData {
   id: string;
-  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
+  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
   title: string;
   username: string | null;
   password: string;
@@ -48,6 +48,15 @@ interface PasswordData {
   expiryMonth?: string | null;
   expiryYear?: string | null;
   cvv?: string | null;
+  fullName?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  dateOfBirth?: string | null;
+  nationality?: string | null;
+  idNumber?: string | null;
+  issueDate?: string | null;
+  expiryDate?: string | null;
   tags: { id: string; name: string; color: string | null }[];
   createdBy: { name: string | null };
   updatedBy: { name: string | null };
@@ -67,6 +76,7 @@ export function OrgPasswordDetail({
   const [showPassword, setShowPassword] = useState(false);
   const [showCardNumber, setShowCardNumber] = useState(false);
   const [showCvv, setShowCvv] = useState(false);
+  const [showIdNumber, setShowIdNumber] = useState(false);
   const [hiddenFieldsVisible, setHiddenFieldsVisible] = useState<Set<number>>(
     new Set()
   );
@@ -78,6 +88,7 @@ export function OrgPasswordDetail({
     setShowPassword(false);
     setShowCardNumber(false);
     setShowCvv(false);
+    setShowIdNumber(false);
     setHiddenFieldsVisible(new Set());
 
     fetch(`/api/orgs/${orgId}/passwords/${passwordId}`)
@@ -125,7 +136,114 @@ export function OrgPasswordDetail({
           </div>
         ) : data ? (
           <div className="space-y-4">
-            {data.entryType === "CREDIT_CARD" ? (
+            {data.entryType === "IDENTITY" ? (
+              <>
+                {/* Full Name */}
+                {data.fullName && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">{t("fullName")}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm flex-1">{data.fullName}</p>
+                      <CopyButton getValue={() => data.fullName ?? ""} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Address */}
+                {data.address && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">{t("address")}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm flex-1 whitespace-pre-wrap">{data.address}</p>
+                      <CopyButton getValue={() => data.address ?? ""} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Phone */}
+                {data.phone && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">{t("phone")}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm flex-1">{data.phone}</p>
+                      <CopyButton getValue={() => data.phone ?? ""} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Email */}
+                {data.email && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">{t("email")}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm flex-1">{data.email}</p>
+                      <CopyButton getValue={() => data.email ?? ""} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Date of Birth */}
+                {data.dateOfBirth && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">{t("dateOfBirth")}</p>
+                    <p className="text-sm">{data.dateOfBirth}</p>
+                  </div>
+                )}
+
+                {/* Nationality */}
+                {data.nationality && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">{t("nationality")}</p>
+                    <p className="text-sm">{data.nationality}</p>
+                  </div>
+                )}
+
+                {/* ID Number */}
+                {data.idNumber && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">{t("idNumber")}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm flex-1 font-mono">
+                        {showIdNumber ? data.idNumber : "••••••••"}
+                      </p>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => setShowIdNumber(!showIdNumber)}
+                      >
+                        {showIdNumber ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                      <CopyButton getValue={() => data.idNumber ?? ""} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Issue Date */}
+                {data.issueDate && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">{t("issueDate")}</p>
+                    <p className="text-sm">{data.issueDate}</p>
+                  </div>
+                )}
+
+                {/* Expiry Date */}
+                {data.expiryDate && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">{t("expiryDate")}</p>
+                    <p className="text-sm">{data.expiryDate}</p>
+                  </div>
+                )}
+
+                {/* Notes */}
+                {data.notes && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">{t("notes")}</p>
+                    <p className="text-sm whitespace-pre-wrap">{data.notes}</p>
+                  </div>
+                )}
+              </>
+            ) : data.entryType === "CREDIT_CARD" ? (
               <>
                 {/* Card Number */}
                 {data.cardNumber && (

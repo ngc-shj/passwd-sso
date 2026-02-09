@@ -22,7 +22,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, ArrowUpDown, KeyRound, FileText, CreditCard } from "lucide-react";
+import { Plus, ArrowUpDown, KeyRound, FileText, CreditCard, IdCard } from "lucide-react";
 
 type VaultView = "all" | "favorites" | "archive" | "trash";
 
@@ -39,7 +39,7 @@ export function PasswordDashboard({ view, tagId }: PasswordDashboardProps) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [sortBy, setSortBy] = useState<SortOption>("updatedAt");
   const [newDialogOpen, setNewDialogOpen] = useState(false);
-  const [newEntryType, setNewEntryType] = useState<"LOGIN" | "SECURE_NOTE" | "CREDIT_CARD">("LOGIN");
+  const [newEntryType, setNewEntryType] = useState<"LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY">("LOGIN");
   const [helpOpen, setHelpOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -171,6 +171,10 @@ export function PasswordDashboard({ view, tagId }: PasswordDashboardProps) {
                   <DropdownMenuItem onClick={() => { setNewEntryType("CREDIT_CARD"); setNewDialogOpen(true); }}>
                     <CreditCard className="h-4 w-4 mr-2" />
                     {t("newCreditCard")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setNewEntryType("IDENTITY"); setNewDialogOpen(true); }}>
+                    <IdCard className="h-4 w-4 mr-2" />
+                    {t("newIdentity")}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

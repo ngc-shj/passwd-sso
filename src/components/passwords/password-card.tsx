@@ -44,6 +44,7 @@ import {
   Loader2,
   FileText,
   CreditCard,
+  IdCard,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useVault } from "@/lib/vault-context";
@@ -51,7 +52,7 @@ import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 
 interface PasswordCardProps {
   id: string;
-  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
+  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
   title: string;
   username: string | null;
   urlHost: string | null;
@@ -59,6 +60,8 @@ interface PasswordCardProps {
   brand?: string | null;
   lastFour?: string | null;
   cardholderName?: string | null;
+  fullName?: string | null;
+  idNumberLast4?: string | null;
   tags: Array<{ name: string; color: string | null }>;
   isFavorite: boolean;
   isArchived: boolean;
@@ -98,6 +101,15 @@ interface VaultEntryFull {
   expiryMonth?: string | null;
   expiryYear?: string | null;
   cvv?: string | null;
+  fullName?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  dateOfBirth?: string | null;
+  nationality?: string | null;
+  idNumber?: string | null;
+  issueDate?: string | null;
+  expiryDate?: string | null;
 }
 
 const CLIPBOARD_CLEAR_DELAY = 30_000;
@@ -112,6 +124,8 @@ export function PasswordCard({
   brand,
   lastFour,
   cardholderName,
+  fullName,
+  idNumberLast4,
   tags,
   isFavorite,
   isArchived,
@@ -132,6 +146,7 @@ export function PasswordCard({
   const isOrgMode = !!getPasswordProp;
   const isNote = entryType === "SECURE_NOTE";
   const isCreditCard = entryType === "CREDIT_CARD";
+  const isIdentity = entryType === "IDENTITY";
   const t = useTranslations("PasswordCard");
   const tc = useTranslations("Common");
   const tCopy = useTranslations("CopyButton");
@@ -162,6 +177,15 @@ export function PasswordCard({
   const fetchContent = async (): Promise<string> => {
     const { entry } = await fetchDecryptedEntry();
     return entry.content ?? "";
+  };
+
+  const fetchIdentityField = async (field: "idNumber"): Promise<string> => {
+    if (getDetailProp) {
+      const detail = await getDetailProp();
+      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
+    }
+    const { entry } = await fetchDecryptedEntry();
+    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
   };
 
   const fetchCardField = async (field: "cardNumber" | "cvv"): Promise<string> => {
@@ -212,6 +236,15 @@ export function PasswordCard({
             expiryMonth: entry.expiryMonth,
             expiryYear: entry.expiryYear,
             cvv: entry.cvv,
+            fullName: entry.fullName,
+            address: entry.address,
+            phone: entry.phone,
+            email: entry.email,
+            dateOfBirth: entry.dateOfBirth,
+            nationality: entry.nationality,
+            idNumber: entry.idNumber,
+            issueDate: entry.issueDate,
+            expiryDate: entry.expiryDate,
             createdAt: raw.createdAt as string,
             updatedAt: raw.updatedAt as string,
           });
@@ -299,6 +332,20 @@ export function PasswordCard({
     }
   };
 
+  const handleCopyIdNumber = async () => {
+    try {
+      const num = await fetchIdentityField("idNumber");
+      if (!num) return;
+      await navigator.clipboard.writeText(num);
+      toast.success(tCopy("copied"));
+      setTimeout(async () => {
+        try { await navigator.clipboard.writeText(""); } catch {}
+      }, CLIPBOARD_CLEAR_DELAY);
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
   const handleOpenUrl = async () => {
     try {
       if (getUrlProp) {
@@ -340,7 +387,9 @@ export function PasswordCard({
               className={`h-4 w-4 ${isFavorite ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground"}`}
             />
           </Button>
-          {isCreditCard ? (
+          {isIdentity ? (
+            <IdCard className="h-5 w-5 shrink-0 text-muted-foreground" />
+          ) : isCreditCard ? (
             <CreditCard className="h-5 w-5 shrink-0 text-muted-foreground" />
           ) : isNote ? (
             <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
@@ -355,7 +404,12 @@ export function PasswordCard({
               {title}
             </button>
             <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
-              {isCreditCard ? (
+              {isIdentity ? (
+                <>
+                  {fullName && <span className="truncate">{fullName}</span>}
+                  {idNumberLast4 && <span className="truncate">•••• {idNumberLast4}</span>}
+                </>
+              ) : isCreditCard ? (
                 <>
                   {brand && <span className="truncate">{brand}</span>}
                   {lastFour && <span className="truncate">•••• {lastFour}</span>}
@@ -394,8 +448,9 @@ export function PasswordCard({
               ))}
             </div>
           )}
-          {!isNote && !isCreditCard && <CopyButton getValue={fetchPassword} />}
+          {!isNote && !isCreditCard && !isIdentity && <CopyButton getValue={fetchPassword} />}
           {isCreditCard && <CopyButton getValue={() => fetchCardField("cardNumber")} />}
+          {isIdentity && <CopyButton getValue={() => fetchIdentityField("idNumber")} />}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0">
@@ -404,7 +459,12 @@ export function PasswordCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              {isCreditCard ? (
+              {isIdentity ? (
+                <DropdownMenuItem onSelect={handleCopyIdNumber}>
+                  <Copy className="h-4 w-4" />
+                  {t("copyIdNumber")}
+                </DropdownMenuItem>
+              ) : isCreditCard ? (
                 <>
                   <DropdownMenuItem onSelect={handleCopyCardNumber}>
                     <Copy className="h-4 w-4" />
