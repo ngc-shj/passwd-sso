@@ -43,7 +43,12 @@
     "newItem": "新規アイテム",
     "newSecureNote": "セキュアノート",
     "newCreditCard": "クレジットカード",
-    "newIdentity": "ID情報"
+    "newIdentity": "ID情報",
+    "categories": "カテゴリ",
+    "catLogin": "ログイン",
+    "catSecureNote": "セキュアノート",
+    "catCreditCard": "クレジットカード",
+    "catIdentity": "ID情報"
   },
   "PasswordList": {
     "noMatch": "検索に一致するアイテムがありません。",

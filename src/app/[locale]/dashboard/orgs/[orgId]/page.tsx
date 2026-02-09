@@ -57,6 +57,7 @@ export default function OrgDashboardPage({
   const { orgId } = use(params);
   const searchParams = useSearchParams();
   const activeTagId = searchParams.get("tag");
+  const activeEntryType = searchParams.get("type");
   const t = useTranslations("Org");
   const [org, setOrg] = useState<OrgInfo | null>(null);
   const [passwords, setPasswords] = useState<OrgPasswordEntry[]>([]);
@@ -116,9 +117,11 @@ export default function OrgDashboardPage({
 
   const fetchPasswords = useCallback(() => {
     setLoading(true);
-    const url = activeTagId
-      ? `/api/orgs/${orgId}/passwords?tag=${activeTagId}`
-      : `/api/orgs/${orgId}/passwords`;
+    const params = new URLSearchParams();
+    if (activeTagId) params.set("tag", activeTagId);
+    if (activeEntryType) params.set("type", activeEntryType);
+    const qs = params.toString();
+    const url = `/api/orgs/${orgId}/passwords${qs ? `?${qs}` : ""}`;
     fetch(url)
       .then((res) => res.json())
       .then((data) => {
@@ -126,7 +129,7 @@ export default function OrgDashboardPage({
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [orgId, activeTagId]);
+  }, [orgId, activeTagId, activeEntryType]);
 
   useEffect(() => {
     setLoadError(false);

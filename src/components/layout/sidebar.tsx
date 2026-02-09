@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
-import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings } from "lucide-react";
+import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings, KeyRound, FileText, CreditCard, IdCard } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { ExportDialog } from "@/components/passwords/export-dialog";
@@ -53,7 +53,8 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const cleanPath = pathname.replace(/^\/(ja|en)/, "");
 
   // Active state detection (all path-based)
-  const isVaultAll = cleanPath === "/dashboard";
+  const activeTypeFilter = cleanPath === "/dashboard" ? searchParams.get("type") : null;
+  const isVaultAll = cleanPath === "/dashboard" && !activeTypeFilter;
   const isVaultFavorites = cleanPath === "/dashboard/favorites";
   const isVaultArchive = cleanPath === "/dashboard/archive";
   const isVaultTrash = cleanPath === "/dashboard/trash";
@@ -63,6 +64,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const orgMatch = cleanPath.match(/^\/dashboard\/orgs\/([^/]+)/);
   const activeOrgId = orgMatch ? orgMatch[1] : null;
   const activeOrgTagId = activeOrgId ? searchParams.get("tag") : null;
+  const activeOrgTypeFilter = activeOrgId ? searchParams.get("type") : null;
   const isOrgsManage = cleanPath === "/dashboard/orgs";
 
   const fetchData = () => {
@@ -173,25 +175,120 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       </div>
 
       <div>
+        <SectionLabel>{t("categories")}</SectionLabel>
+        <div className="space-y-1">
+          <Button
+            variant={activeTypeFilter === "LOGIN" ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link href="/dashboard?type=LOGIN" onClick={() => onOpenChange(false)}>
+              <KeyRound className="h-4 w-4" />
+              {t("catLogin")}
+            </Link>
+          </Button>
+          <Button
+            variant={activeTypeFilter === "SECURE_NOTE" ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link href="/dashboard?type=SECURE_NOTE" onClick={() => onOpenChange(false)}>
+              <FileText className="h-4 w-4" />
+              {t("catSecureNote")}
+            </Link>
+          </Button>
+          <Button
+            variant={activeTypeFilter === "CREDIT_CARD" ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link href="/dashboard?type=CREDIT_CARD" onClick={() => onOpenChange(false)}>
+              <CreditCard className="h-4 w-4" />
+              {t("catCreditCard")}
+            </Link>
+          </Button>
+          <Button
+            variant={activeTypeFilter === "IDENTITY" ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link href="/dashboard?type=IDENTITY" onClick={() => onOpenChange(false)}>
+              <IdCard className="h-4 w-4" />
+              {t("catIdentity")}
+            </Link>
+          </Button>
+        </div>
+      </div>
+
+      <div>
         <SectionLabel icon={<Building2 className="h-3 w-3" />}>
           {tOrg("organizations")}
         </SectionLabel>
         <div className="space-y-1">
           {orgs.map((org) => (
-            <Button
-              key={org.id}
-              variant={activeOrgId === org.id ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link
-                href={`/dashboard/orgs/${org.id}`}
-                onClick={() => onOpenChange(false)}
+            <div key={org.id}>
+              <Button
+                variant={activeOrgId === org.id && !activeOrgTypeFilter ? "secondary" : "ghost"}
+                className="w-full justify-start gap-2"
+                asChild
               >
-                <Building2 className="h-4 w-4" />
-                <span className="truncate">{org.name}</span>
-              </Link>
-            </Button>
+                <Link
+                  href={`/dashboard/orgs/${org.id}`}
+                  onClick={() => onOpenChange(false)}
+                >
+                  <Building2 className="h-4 w-4" />
+                  <span className="truncate">{org.name}</span>
+                </Link>
+              </Button>
+              {activeOrgId === org.id && (
+                <div className="ml-6 space-y-0.5">
+                  <Button
+                    variant={activeOrgTypeFilter === "LOGIN" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="w-full justify-start gap-2 h-8"
+                    asChild
+                  >
+                    <Link href={`/dashboard/orgs/${org.id}?type=LOGIN`} onClick={() => onOpenChange(false)}>
+                      <KeyRound className="h-3.5 w-3.5" />
+                      {t("catLogin")}
+                    </Link>
+                  </Button>
+                  <Button
+                    variant={activeOrgTypeFilter === "SECURE_NOTE" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="w-full justify-start gap-2 h-8"
+                    asChild
+                  >
+                    <Link href={`/dashboard/orgs/${org.id}?type=SECURE_NOTE`} onClick={() => onOpenChange(false)}>
+                      <FileText className="h-3.5 w-3.5" />
+                      {t("catSecureNote")}
+                    </Link>
+                  </Button>
+                  <Button
+                    variant={activeOrgTypeFilter === "CREDIT_CARD" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="w-full justify-start gap-2 h-8"
+                    asChild
+                  >
+                    <Link href={`/dashboard/orgs/${org.id}?type=CREDIT_CARD`} onClick={() => onOpenChange(false)}>
+                      <CreditCard className="h-3.5 w-3.5" />
+                      {t("catCreditCard")}
+                    </Link>
+                  </Button>
+                  <Button
+                    variant={activeOrgTypeFilter === "IDENTITY" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="w-full justify-start gap-2 h-8"
+                    asChild
+                  >
+                    <Link href={`/dashboard/orgs/${org.id}?type=IDENTITY`} onClick={() => onOpenChange(false)}>
+                      <IdCard className="h-3.5 w-3.5" />
+                      {t("catIdentity")}
+                    </Link>
+                  </Button>
+                </div>
+              )}
+            </div>
           ))}
           <Button
             variant={isOrgsManage ? "secondary" : "ghost"}

@@ -44,6 +44,7 @@ export type SortOption = "updatedAt" | "createdAt" | "title";
 interface PasswordListProps {
   searchQuery: string;
   tagId: string | null;
+  entryType?: string | null;
   refreshKey: number;
   favoritesOnly?: boolean;
   archivedOnly?: boolean;
@@ -54,6 +55,7 @@ interface PasswordListProps {
 export function PasswordList({
   searchQuery,
   tagId,
+  entryType,
   refreshKey,
   favoritesOnly = false,
   archivedOnly = false,
@@ -76,6 +78,7 @@ export function PasswordList({
     try {
       const params = new URLSearchParams();
       if (tagId) params.set("tag", tagId);
+      if (entryType) params.set("type", entryType);
       if (favoritesOnly) params.set("favorites", "true");
       if (archivedOnly) params.set("archived", "true");
 
@@ -156,7 +159,7 @@ export function PasswordList({
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, tagId, encryptionKey, favoritesOnly, archivedOnly, sortBy]);
+  }, [searchQuery, tagId, entryType, encryptionKey, favoritesOnly, archivedOnly, sortBy]);
 
   useEffect(() => {
     fetchPasswords();

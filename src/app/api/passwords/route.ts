@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const tagId = searchParams.get("tag");
+  const entryType = searchParams.get("type");
   const includeBlob = searchParams.get("include") === "blob";
   const favoritesOnly = searchParams.get("favorites") === "true";
   const trashOnly = searchParams.get("trash") === "true";
@@ -28,6 +29,7 @@ export async function GET(req: NextRequest) {
         : trashOnly ? {} : { isArchived: false }),
       ...(favoritesOnly ? { isFavorite: true } : {}),
       ...(tagId ? { tags: { some: { id: tagId } } } : {}),
+      ...(entryType ? { entryType } : {}),
     },
     include: { tags: { select: { id: true } } },
     orderBy: [{ isFavorite: "desc" }, { updatedAt: "desc" }],

@@ -43,7 +43,12 @@
     "newItem": "New Item",
     "newSecureNote": "Secure Note",
     "newCreditCard": "Credit Card",
-    "newIdentity": "Identity"
+    "newIdentity": "Identity",
+    "categories": "Categories",
+    "catLogin": "Logins",
+    "catSecureNote": "Secure Notes",
+    "catCreditCard": "Credit Cards",
+    "catIdentity": "Identities"
   },
   "PasswordList": {
     "noMatch": "No items match your search.",
