@@ -12,6 +12,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
       - JACKSON_URL=http://jackson:5225
+      - REDIS_URL=redis://redis:6379
     depends_on:
       db:
         condition: service_healthy
