@@ -23,7 +23,7 @@ const { mockAuth, mockPrismaOrgPasswordEntry, mockRequireOrgPermission, OrgAuthE
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { orgPasswordEntry: mockPrismaOrgPasswordEntry },
+  prisma: { orgPasswordEntry: mockPrismaOrgPasswordEntry, auditLog: { create: vi.fn().mockResolvedValue({}) } },
 }));
 vi.mock("@/lib/org-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,

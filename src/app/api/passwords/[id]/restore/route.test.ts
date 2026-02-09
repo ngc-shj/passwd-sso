@@ -10,7 +10,7 @@ const { mockAuth, mockPrismaPasswordEntry } = vi.hoisted(() => ({
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { passwordEntry: mockPrismaPasswordEntry },
+  prisma: { passwordEntry: mockPrismaPasswordEntry, auditLog: { create: vi.fn().mockResolvedValue({}) } },
 }));
 
 import { POST } from "./route";

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createOrgPasswordSchema, createOrgSecureNoteSchema, createOrgCreditCardSchema, createOrgIdentitySchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import type { EntryType } from "@prisma/client";
@@ -363,6 +364,16 @@ export async function POST(req: NextRequest, { params }: Params) {
     include: {
       tags: { select: { id: true, name: true, color: true } },
     },
+  });
+
+  logAudit({
+    scope: "ORG",
+    action: "ENTRY_CREATE",
+    userId: session.user.id,
+    orgId,
+    targetType: "OrgPasswordEntry",
+    targetId: entry.id,
+    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import type { EntryType } from "@prisma/client";
 
@@ -117,6 +118,15 @@ export async function POST(req: NextRequest) {
         : {}),
     },
     include: { tags: { select: { id: true } } },
+  });
+
+  logAudit({
+    scope: "PERSONAL",
+    action: "ENTRY_CREATE",
+    userId: session.user.id,
+    targetType: "PasswordEntry",
+    targetId: entry.id,
+    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(

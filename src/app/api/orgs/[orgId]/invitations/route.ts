@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { inviteSchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 
@@ -125,6 +126,17 @@ export async function POST(req: NextRequest, { params }: Params) {
       expiresAt,
       invitedById: session.user.id,
     },
+  });
+
+  logAudit({
+    scope: "ORG",
+    action: "ORG_MEMBER_INVITE",
+    userId: session.user.id,
+    orgId,
+    targetType: "OrgInvitation",
+    targetId: invitation.id,
+    metadata: { email, role },
+    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(

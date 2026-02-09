@@ -31,6 +31,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     organization: mockPrismaOrganization,
     orgPasswordEntry: mockPrismaOrgPasswordEntry,
+    auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
 vi.mock("@/lib/org-auth", () => ({

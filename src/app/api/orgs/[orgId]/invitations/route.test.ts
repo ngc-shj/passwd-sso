@@ -30,6 +30,7 @@ vi.mock("@/lib/prisma", () => ({
     orgInvitation: mockPrismaOrgInvitation,
     user: mockPrismaUser,
     orgMember: mockPrismaOrgMember,
+    auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
 vi.mock("@/lib/org-auth", () => ({

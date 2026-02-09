@@ -81,6 +81,7 @@ model User {
   createdOrgPasswords OrgPasswordEntry[]    @relation("orgPasswordCreator")
   updatedOrgPasswords OrgPasswordEntry[]    @relation("orgPasswordUpdater")
   orgPasswordFavorites OrgPasswordFavorite[]
+  auditLogs            AuditLog[]
 
   @@map("users")
 }
@@ -185,6 +186,7 @@ model Organization {
   passwords   OrgPasswordEntry[]
   tags        OrgTag[]
   invitations OrgInvitation[]
+  auditLogs   AuditLog[]
 
   @@map("organizations")
 }
@@ -288,4 +290,46 @@ model OrgInvitation {
   invitedBy User         @relation(fields: [invitedById], references: [id])
 
   @@map("org_invitations")
+}
+
+// ─── Audit Log Models ──────────────────────────────────────────
+
+enum AuditAction {
+  AUTH_LOGIN
+  AUTH_LOGOUT
+  ENTRY_CREATE
+  ENTRY_UPDATE
+  ENTRY_DELETE
+  ENTRY_RESTORE
+  ENTRY_EXPORT
+  ORG_MEMBER_INVITE
+  ORG_MEMBER_REMOVE
+  ORG_ROLE_UPDATE
+}
+
+enum AuditScope {
+  PERSONAL
+  ORG
+}
+
+model AuditLog {
+  id         String      @id @default(cuid())
+  scope      AuditScope
+  action     AuditAction
+  userId     String      @map("user_id")
+  orgId      String?     @map("org_id")
+  targetType String?     @map("target_type")
+  targetId   String?     @map("target_id")
+  metadata   Json?
+  ip         String?     @db.VarChar(45)
+  userAgent  String?     @map("user_agent") @db.VarChar(512)
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  user User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([action])
+  @@map("audit_logs")
 }

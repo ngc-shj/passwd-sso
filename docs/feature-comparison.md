@@ -149,7 +149,7 @@
 | Prisma ORM | Done | --- | --- | |
 | Next.js (SSR/RSC) | Done | --- | --- | |
 | API (REST) | Done | Both | Both | |
-| 監査ログ / イベントログ | --- | Both | Both | |
+| 監査ログ / イベントログ | Done | Both | Both | Personal + Org スコープ, cursor pagination |
 | Webhook | --- | --- | BW | |
 | SCIM プロビジョニング | --- | Both | Both | |
 
@@ -185,7 +185,7 @@
 | ~~3-1~~ | ~~組織 / チーム Vault~~ | ~~実装済み (サーバーサイド AES-256-GCM)~~ |
 | ~~3-2~~ | ~~ロールベースアクセス制御~~ | ~~実装済み (OWNER/ADMIN/MEMBER/VIEWER)~~ |
 | 3-3 | 期限付きリンク共有 | パスワードの安全な共有 |
-| 3-4 | 監査ログ / イベントログ | コンプライアンス対応 |
+| ~~3-4~~ | ~~監査ログ / イベントログ~~ | ~~実装済み (Personal + Org, ADMIN/OWNER 閲覧, cursor pagination)~~ |
 | 3-5 | Webhook / API 連携 | 自動化・外部システム連携 |
 | 3-6 | SCIM プロビジョニング | エンタープライズ IdP 連携 |
 | 3-7 | パスキー / WebAuthn | 次世代認証 |

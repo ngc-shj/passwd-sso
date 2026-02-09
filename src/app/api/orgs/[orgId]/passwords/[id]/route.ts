@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateOrgPasswordSchema, updateOrgSecureNoteSchema, updateOrgCreditCardSchema, updateOrgIdentitySchema } from "@/lib/validations";
 import {
   requireOrgPermission,
@@ -434,6 +435,16 @@ export async function PUT(req: NextRequest, { params }: Params) {
     },
   });
 
+  logAudit({
+    scope: "ORG",
+    action: "ENTRY_UPDATE",
+    userId: session.user.id,
+    orgId,
+    targetType: "OrgPasswordEntry",
+    targetId: id,
+    ...extractRequestMeta(req),
+  });
+
   return NextResponse.json({
     id: updated.id,
     entryType: updated.entryType,
@@ -480,6 +491,17 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       data: { deletedAt: new Date() },
     });
   }
+
+  logAudit({
+    scope: "ORG",
+    action: "ENTRY_DELETE",
+    userId: session.user.id,
+    orgId,
+    targetType: "OrgPasswordEntry",
+    targetId: id,
+    metadata: { permanent },
+    ...extractRequestMeta(req),
+  });
 
   return NextResponse.json({ success: true });
 }

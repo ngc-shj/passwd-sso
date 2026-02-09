@@ -25,7 +25,7 @@ const { mockAuth, mockPrismaOrgMember, mockRequireOrgPermission, mockIsRoleAbove
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { orgMember: mockPrismaOrgMember },
+  prisma: { orgMember: mockPrismaOrgMember, auditLog: { create: vi.fn().mockResolvedValue({}) } },
 }));
 vi.mock("@/lib/org-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,

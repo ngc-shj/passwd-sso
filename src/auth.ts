@@ -1,6 +1,7 @@
 import NextAuth from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
+import { logAudit } from "@/lib/audit";
 import authConfig from "./auth.config";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -18,6 +19,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async session({ session, user }) {
       session.user.id = user.id;
       return session;
+    },
+  },
+  events: {
+    async signIn({ user }) {
+      if (user.id) {
+        logAudit({
+          scope: "PERSONAL",
+          action: "AUTH_LOGIN",
+          userId: user.id,
+        });
+      }
     },
   },
 });

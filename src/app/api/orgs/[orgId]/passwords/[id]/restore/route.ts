@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 
 type Params = { params: Promise<{ orgId: string; id: string }> };
 
 // POST /api/orgs/[orgId]/passwords/[id]/restore — Restore from trash
-export async function POST(_req: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -41,6 +42,16 @@ export async function POST(_req: NextRequest, { params }: Params) {
   await prisma.orgPasswordEntry.update({
     where: { id },
     data: { deletedAt: null },
+  });
+
+  logAudit({
+    scope: "ORG",
+    action: "ENTRY_RESTORE",
+    userId: session.user.id,
+    orgId,
+    targetType: "OrgPasswordEntry",
+    targetId: id,
+    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

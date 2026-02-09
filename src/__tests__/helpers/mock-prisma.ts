@@ -46,7 +46,7 @@ export function createMockPrisma() {
       if (!modelCache.has(prop)) {
         const methods: Record<string, ReturnType<typeof vi.fn>> = {};
         for (const method of MODEL_METHODS) {
-          methods[method] = vi.fn();
+          methods[method] = vi.fn().mockResolvedValue(undefined);
         }
         modelCache.set(prop, methods);
       }

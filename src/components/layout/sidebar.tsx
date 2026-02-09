@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
-import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings, KeyRound, FileText, CreditCard, IdCard } from "lucide-react";
+import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, ScrollText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { ExportDialog } from "@/components/passwords/export-dialog";
@@ -59,10 +59,14 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const isVaultArchive = cleanPath === "/dashboard/archive";
   const isVaultTrash = cleanPath === "/dashboard/trash";
   const isWatchtower = cleanPath === "/dashboard/watchtower";
+  const isAuditLog = cleanPath === "/dashboard/audit-logs" || cleanPath.endsWith("/audit-logs");
+  const isPersonalAuditLog = cleanPath === "/dashboard/audit-logs";
+  const auditOrgMatch = cleanPath.match(/^\/dashboard\/orgs\/([^/]+)\/audit-logs$/);
+  const activeAuditOrgId = auditOrgMatch ? auditOrgMatch[1] : null;
   const tagMatch = cleanPath.match(/^\/dashboard\/tags\/([^/]+)/);
   const activeTagId = tagMatch ? tagMatch[1] : null;
   const orgMatch = cleanPath.match(/^\/dashboard\/orgs\/([^/]+)/);
-  const activeOrgId = orgMatch ? orgMatch[1] : null;
+  const activeOrgId = orgMatch && !isAuditLog ? orgMatch[1] : null;
   const activeOrgTagId = activeOrgId ? searchParams.get("tag") : null;
   const activeOrgTypeFilter = activeOrgId ? searchParams.get("type") : null;
   const isOrgsManage = cleanPath === "/dashboard/orgs";
@@ -400,6 +404,37 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
               {t("watchtower")}
             </Link>
           </Button>
+          <SectionLabel icon={<ScrollText className="h-3 w-3" />}>
+            {t("auditLog")}
+          </SectionLabel>
+          <div className="space-y-1">
+            <Button
+              variant={isPersonalAuditLog ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard/audit-logs" onClick={() => onOpenChange(false)}>
+                <FolderOpen className="h-4 w-4" />
+                {t("auditLogPersonal")}
+              </Link>
+            </Button>
+            {orgs.map((org) => (
+              <Button
+                key={org.id}
+                variant={activeAuditOrgId === org.id ? "secondary" : "ghost"}
+                className="w-full justify-start gap-2"
+                asChild
+              >
+                <Link
+                  href={`/dashboard/orgs/${org.id}/audit-logs`}
+                  onClick={() => onOpenChange(false)}
+                >
+                  <Building2 className="h-4 w-4" />
+                  <span className="truncate">{org.name}</span>
+                </Link>
+              </Button>
+            ))}
+          </div>
         </div>
       </div>
 

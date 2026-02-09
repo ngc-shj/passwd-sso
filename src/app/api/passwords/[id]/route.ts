@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
 
 // GET /api/passwords/[id] - Get password detail (returns encrypted blob)
@@ -116,6 +117,15 @@ export async function PUT(
     include: { tags: { select: { id: true } } },
   });
 
+  logAudit({
+    scope: "PERSONAL",
+    action: "ENTRY_UPDATE",
+    userId: session.user.id,
+    targetType: "PasswordEntry",
+    targetId: id,
+    ...extractRequestMeta(req),
+  });
+
   return NextResponse.json({
     id: updated.id,
     encryptedOverview: {
@@ -165,6 +175,16 @@ export async function DELETE(
       data: { deletedAt: new Date() },
     });
   }
+
+  logAudit({
+    scope: "PERSONAL",
+    action: "ENTRY_DELETE",
+    userId: session.user.id,
+    targetType: "PasswordEntry",
+    targetId: id,
+    metadata: { permanent },
+    ...extractRequestMeta(req),
+  });
 
   return NextResponse.json({ success: true });
 }

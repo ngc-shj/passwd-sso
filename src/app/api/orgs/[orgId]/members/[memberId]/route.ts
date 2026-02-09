@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateMemberRoleSchema } from "@/lib/validations";
 import {
   requireOrgPermission,
@@ -79,6 +80,17 @@ export async function PUT(req: NextRequest, { params }: Params) {
       },
     });
 
+    logAudit({
+      scope: "ORG",
+      action: "ORG_ROLE_UPDATE",
+      userId: session.user.id,
+      orgId,
+      targetType: "OrgMember",
+      targetId: memberId,
+      metadata: { newRole: "OWNER", previousRole: target.role, transfer: true },
+      ...extractRequestMeta(req),
+    });
+
     return NextResponse.json({
       id: updated.id,
       userId: updated.userId,
@@ -116,6 +128,17 @@ export async function PUT(req: NextRequest, { params }: Params) {
     },
   });
 
+  logAudit({
+    scope: "ORG",
+    action: "ORG_ROLE_UPDATE",
+    userId: session.user.id,
+    orgId,
+    targetType: "OrgMember",
+    targetId: memberId,
+    metadata: { newRole: parsed.data.role, previousRole: target.role },
+    ...extractRequestMeta(req),
+  });
+
   return NextResponse.json({
     id: updated.id,
     userId: updated.userId,
@@ -127,7 +150,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 }
 
 // DELETE /api/orgs/[orgId]/members/[memberId] — Remove member
-export async function DELETE(_req: NextRequest, { params }: Params) {
+export async function DELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -175,6 +198,17 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   }
 
   await prisma.orgMember.delete({ where: { id: memberId } });
+
+  logAudit({
+    scope: "ORG",
+    action: "ORG_MEMBER_REMOVE",
+    userId: session.user.id,
+    orgId,
+    targetType: "OrgMember",
+    targetId: memberId,
+    metadata: { removedUserId: target.userId, removedRole: target.role },
+    ...extractRequestMeta(req),
+  });
 
   return NextResponse.json({ success: true });
 }
