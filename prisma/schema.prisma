@@ -150,6 +150,7 @@ enum EntryType {
   LOGIN
   SECURE_NOTE
   CREDIT_CARD
+  IDENTITY
 }
 
 enum OrgRole {

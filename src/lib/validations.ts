@@ -22,7 +22,7 @@ const encryptedFieldSchema = z.object({
   authTag: z.string().length(32), // 16 bytes hex
 });
 
-export const entryTypeSchema = z.enum(["LOGIN", "SECURE_NOTE", "CREDIT_CARD"]);
+export const entryTypeSchema = z.enum(["LOGIN", "SECURE_NOTE", "CREDIT_CARD", "IDENTITY"]);
 
 export const createE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema,
@@ -253,6 +253,77 @@ export const updateOrgCreditCardSchema = z.object({
   }
 });
 
+const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal(""));
+const phoneSchema = z.string().max(50).regex(/^[0-9+\-\s()]*$/).optional().or(z.literal(""));
+
+export const createOrgIdentitySchema = z.object({
+  entryType: z.literal("IDENTITY"),
+  title: z.string().min(1).max(200).trim(),
+  fullName: z.string().max(200).optional().or(z.literal("")),
+  address: z.string().max(500).optional().or(z.literal("")),
+  phone: phoneSchema,
+  email: z.string().email().max(200).optional().or(z.literal("")),
+  dateOfBirth: dateSchema,
+  nationality: z.string().max(100).optional().or(z.literal("")),
+  idNumber: z.string().max(100).optional().or(z.literal("")),
+  issueDate: dateSchema,
+  expiryDate: dateSchema,
+  notes: z.string().max(10000).optional().or(z.literal("")),
+  tagIds: z.array(z.string().cuid()).optional(),
+}).superRefine((data, ctx) => {
+  if (data.dateOfBirth) {
+    const today = new Date().toISOString().slice(0, 10);
+    if (data.dateOfBirth > today) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["dateOfBirth"],
+        message: "Date of birth must be in the past",
+      });
+    }
+  }
+  if (data.issueDate && data.expiryDate && data.issueDate >= data.expiryDate) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["expiryDate"],
+      message: "Expiry date must be after issue date",
+    });
+  }
+});
+
+export const updateOrgIdentitySchema = z.object({
+  title: z.string().min(1).max(200).trim().optional(),
+  fullName: z.string().max(200).optional().or(z.literal("")),
+  address: z.string().max(500).optional().or(z.literal("")),
+  phone: phoneSchema,
+  email: z.string().email().max(200).optional().or(z.literal("")),
+  dateOfBirth: dateSchema,
+  nationality: z.string().max(100).optional().or(z.literal("")),
+  idNumber: z.string().max(100).optional().or(z.literal("")),
+  issueDate: dateSchema,
+  expiryDate: dateSchema,
+  notes: z.string().max(10000).optional().or(z.literal("")),
+  tagIds: z.array(z.string().cuid()).optional(),
+  isArchived: z.boolean().optional(),
+}).superRefine((data, ctx) => {
+  if (data.dateOfBirth) {
+    const today = new Date().toISOString().slice(0, 10);
+    if (data.dateOfBirth > today) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["dateOfBirth"],
+        message: "Date of birth must be in the past",
+      });
+    }
+  }
+  if (data.issueDate && data.expiryDate && data.issueDate >= data.expiryDate) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["expiryDate"],
+      message: "Expiry date must be after issue date",
+    });
+  }
+});
+
 export const createOrgTagSchema = z.object({
   name: z.string().min(1).max(50).trim(),
   color: z
@@ -280,4 +351,6 @@ export type CreateOrgSecureNoteInput = z.infer<typeof createOrgSecureNoteSchema>
 export type UpdateOrgSecureNoteInput = z.infer<typeof updateOrgSecureNoteSchema>;
 export type CreateOrgCreditCardInput = z.infer<typeof createOrgCreditCardSchema>;
 export type UpdateOrgCreditCardInput = z.infer<typeof updateOrgCreditCardSchema>;
+export type CreateOrgIdentityInput = z.infer<typeof createOrgIdentitySchema>;
+export type UpdateOrgIdentityInput = z.infer<typeof updateOrgIdentitySchema>;
 export type CreateOrgTagInput = z.infer<typeof createOrgTagSchema>;

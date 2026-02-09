@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { createOrgPasswordSchema, createOrgSecureNoteSchema, createOrgCreditCardSchema } from "@/lib/validations";
+import { createOrgPasswordSchema, createOrgSecureNoteSchema, createOrgCreditCardSchema, createOrgIdentitySchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import {
   unwrapOrgKey,
@@ -101,6 +101,8 @@ export async function GET(req: NextRequest, { params }: Params) {
     brand: string | null;
     lastFour: string | null;
     cardholderName: string | null;
+    fullName: string | null;
+    idNumberLast4: string | null;
     isFavorite: boolean;
     isArchived: boolean;
     tags: { id: string; name: string; color: string | null }[];
@@ -134,6 +136,8 @@ export async function GET(req: NextRequest, { params }: Params) {
       brand: overview.brand ?? null,
       lastFour: overview.lastFour ?? null,
       cardholderName: overview.cardholderName ?? null,
+      fullName: overview.fullName ?? null,
+      idNumberLast4: overview.idNumberLast4 ?? null,
       isFavorite: entry.favorites.length > 0,
       isArchived: entry.isArchived,
       tags: entry.tags,
@@ -183,6 +187,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const rawBody = body as Record<string, unknown>;
   const isSecureNote = rawBody.entryType === "SECURE_NOTE";
   const isCreditCard = rawBody.entryType === "CREDIT_CARD";
+  const isIdentity = rawBody.entryType === "IDENTITY";
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
@@ -205,7 +210,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   let fullBlob: string;
   let overviewBlob: string;
-  let entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" = "LOGIN";
+  let entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" = "LOGIN";
   let tagIds: string[] | undefined;
   let responseTitle: string;
   let responseUsername: string | null = null;
@@ -258,6 +263,39 @@ export async function POST(req: NextRequest, { params }: Params) {
       cardholderName: cardholderName || null,
       brand: brand || null,
       lastFour,
+    });
+  } else if (isIdentity) {
+    const parsed = createOrgIdentitySchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const { title, fullName, address, phone, email, dateOfBirth, nationality, idNumber, issueDate, expiryDate, notes } = parsed.data;
+    tagIds = parsed.data.tagIds;
+    entryType = "IDENTITY";
+    responseTitle = title;
+
+    const idNumberLast4 = idNumber ? idNumber.slice(-4) : null;
+    fullBlob = JSON.stringify({
+      title,
+      fullName: fullName || null,
+      address: address || null,
+      phone: phone || null,
+      email: email || null,
+      dateOfBirth: dateOfBirth || null,
+      nationality: nationality || null,
+      idNumber: idNumber || null,
+      issueDate: issueDate || null,
+      expiryDate: expiryDate || null,
+      notes: notes || null,
+    });
+    overviewBlob = JSON.stringify({
+      title,
+      fullName: fullName || null,
+      idNumberLast4,
     });
   } else {
     const parsed = createOrgPasswordSchema.safeParse(body);

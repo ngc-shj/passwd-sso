@@ -15,12 +15,14 @@ interface DecryptedOverview {
   brand?: string | null;
   lastFour?: string | null;
   cardholderName?: string | null;
+  fullName?: string | null;
+  idNumberLast4?: string | null;
   tags: Array<{ name: string; color: string | null }>;
 }
 
 interface DisplayEntry {
   id: string;
-  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
+  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
   title: string;
   username: string | null;
   urlHost: string | null;
@@ -28,6 +30,8 @@ interface DisplayEntry {
   brand: string | null;
   lastFour: string | null;
   cardholderName: string | null;
+  fullName: string | null;
+  idNumberLast4: string | null;
   tags: Array<{ name: string; color: string | null }>;
   isFavorite: boolean;
   isArchived: boolean;
@@ -101,7 +105,9 @@ export function PasswordList({
               (overview.snippet?.toLowerCase().includes(q) ?? false) ||
               (overview.brand?.toLowerCase().includes(q) ?? false) ||
               (overview.lastFour?.includes(q) ?? false) ||
-              (overview.cardholderName?.toLowerCase().includes(q) ?? false);
+              (overview.cardholderName?.toLowerCase().includes(q) ?? false) ||
+              (overview.fullName?.toLowerCase().includes(q) ?? false) ||
+              (overview.idNumberLast4?.includes(q) ?? false);
             if (!matches) continue;
           }
 
@@ -115,6 +121,8 @@ export function PasswordList({
             brand: overview.brand ?? null,
             lastFour: overview.lastFour ?? null,
             cardholderName: overview.cardholderName ?? null,
+            fullName: overview.fullName ?? null,
+            idNumberLast4: overview.idNumberLast4 ?? null,
             tags: overview.tags ?? [],
             isFavorite: entry.isFavorite ?? false,
             isArchived: entry.isArchived ?? false,
@@ -254,6 +262,8 @@ export function PasswordList({
           brand={entry.brand}
           lastFour={entry.lastFour}
           cardholderName={entry.cardholderName}
+          fullName={entry.fullName}
+          idNumberLast4={entry.idNumberLast4}
           tags={entry.tags}
           isFavorite={entry.isFavorite}
           isArchived={entry.isArchived}

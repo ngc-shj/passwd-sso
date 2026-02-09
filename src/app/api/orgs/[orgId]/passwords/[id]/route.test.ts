@@ -160,6 +160,59 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     expect(json.notes).toBe("Personal card");
   });
 
+  it("returns IDENTITY with identity fields", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "IDENTITY",
+      encryptedBlob: "blob-cipher",
+      blobIv: "blob-iv",
+      blobAuthTag: "blob-tag",
+      isArchived: false,
+      org: orgKeyData,
+      tags: [],
+      createdBy: { id: "u1", name: "User", image: null },
+      updatedBy: { id: "u1", name: "User" },
+      favorites: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({
+        title: "My Passport",
+        fullName: "John Doe",
+        address: "123 Main St",
+        phone: "+81-90-1234-5678",
+        email: "john@example.com",
+        dateOfBirth: "1990-01-15",
+        nationality: "Japan",
+        idNumber: "AB1234567",
+        issueDate: "2020-01-01",
+        expiryDate: "2030-01-01",
+        notes: "Keep safe",
+      })
+    );
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.entryType).toBe("IDENTITY");
+    expect(json.title).toBe("My Passport");
+    expect(json.fullName).toBe("John Doe");
+    expect(json.address).toBe("123 Main St");
+    expect(json.phone).toBe("+81-90-1234-5678");
+    expect(json.email).toBe("john@example.com");
+    expect(json.dateOfBirth).toBe("1990-01-15");
+    expect(json.nationality).toBe("Japan");
+    expect(json.idNumber).toBe("AB1234567");
+    expect(json.issueDate).toBe("2020-01-01");
+    expect(json.expiryDate).toBe("2030-01-01");
+    expect(json.notes).toBe("Keep safe");
+  });
+
   it("returns SECURE_NOTE with content instead of password", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
@@ -302,6 +355,141 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     expect(res.status).toBe(200);
     expect(json.title).toBe("Updated Card");
     expect(mockEncryptServerData).toHaveBeenCalledTimes(2);
+  });
+
+  it("updates IDENTITY entry with re-encryption", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "IDENTITY",
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({
+        title: "Old ID",
+        fullName: "John Doe",
+        idNumber: "AB1234567",
+        notes: null,
+      })
+    );
+    mockPrismaOrgPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      tags: [],
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { title: "Updated ID", fullName: "Jane Doe" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.title).toBe("Updated ID");
+    expect(mockEncryptServerData).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 400 when updating IDENTITY with invalid phone", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "IDENTITY",
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { phone: "abc-invalid!" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when updating IDENTITY with invalid email", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "IDENTITY",
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { email: "not-an-email" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when updating IDENTITY with expiryDate before issueDate", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "IDENTITY",
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({
+        title: "My ID",
+        issueDate: "2025-01-01",
+        expiryDate: "2030-01-01",
+      })
+    );
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { expiryDate: "2024-06-01" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when updating IDENTITY with issueDate after existing expiryDate", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "IDENTITY",
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({
+        title: "My ID",
+        issueDate: "2025-01-01",
+        expiryDate: "2026-01-01",
+      })
+    );
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { issueDate: "2027-01-01" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(400);
   });
 
   it("returns 400 when updating CREDIT_CARD with non-digit cardNumber", async () => {

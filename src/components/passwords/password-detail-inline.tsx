@@ -32,7 +32,7 @@ interface CustomField {
 
 export interface InlineDetailData {
   id: string;
-  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
+  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
   password: string;
   content?: string;
   url: string | null;
@@ -47,6 +47,15 @@ export interface InlineDetailData {
   expiryMonth?: string | null;
   expiryYear?: string | null;
   cvv?: string | null;
+  fullName?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  dateOfBirth?: string | null;
+  nationality?: string | null;
+  idNumber?: string | null;
+  issueDate?: string | null;
+  expiryDate?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -73,6 +82,7 @@ export function PasswordDetailInline({ data, onEdit }: PasswordDetailInlineProps
 
   const [showCardNumber, setShowCardNumber] = useState(false);
   const [showCvv, setShowCvv] = useState(false);
+  const [showIdNumber, setShowIdNumber] = useState(false);
 
   const handleReveal = useCallback(() => {
     setShowPassword(true);
@@ -89,12 +99,127 @@ export function PasswordDetailInline({ data, onEdit }: PasswordDetailInlineProps
     setTimeout(() => setShowCvv(false), REVEAL_TIMEOUT);
   }, []);
 
+  const handleRevealIdNumber = useCallback(() => {
+    setShowIdNumber(true);
+    setTimeout(() => setShowIdNumber(false), REVEAL_TIMEOUT);
+  }, []);
+
   const isNote = data.entryType === "SECURE_NOTE";
   const isCreditCard = data.entryType === "CREDIT_CARD";
+  const isIdentity = data.entryType === "IDENTITY";
 
   return (
     <div className="space-y-4 border-t pt-4 px-4 pb-4">
-      {isCreditCard ? (
+      {isIdentity ? (
+        <>
+          {/* Full Name */}
+          {data.fullName && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("fullName")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{data.fullName}</span>
+                <CopyButton getValue={() => data.fullName ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Address */}
+          {data.address && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("address")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm whitespace-pre-wrap">{data.address}</span>
+                <CopyButton getValue={() => data.address ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Phone */}
+          {data.phone && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("phone")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{data.phone}</span>
+                <CopyButton getValue={() => data.phone ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Email */}
+          {data.email && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("email")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{data.email}</span>
+                <CopyButton getValue={() => data.email ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Date of Birth */}
+          {data.dateOfBirth && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("dateOfBirth")}</label>
+              <span className="text-sm">{data.dateOfBirth}</span>
+            </div>
+          )}
+
+          {/* Nationality */}
+          {data.nationality && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("nationality")}</label>
+              <span className="text-sm">{data.nationality}</span>
+            </div>
+          )}
+
+          {/* ID Number */}
+          {data.idNumber && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("idNumber")}</label>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm">
+                  {showIdNumber ? data.idNumber : "••••••••"}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={showIdNumber ? () => setShowIdNumber(false) : handleRevealIdNumber}
+                >
+                  {showIdNumber ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <CopyButton getValue={() => data.idNumber ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Issue Date */}
+          {data.issueDate && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("issueDate")}</label>
+              <span className="text-sm">{data.issueDate}</span>
+            </div>
+          )}
+
+          {/* Expiry Date */}
+          {data.expiryDate && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("expiryDate")}</label>
+              <span className="text-sm">{data.expiryDate}</span>
+            </div>
+          )}
+
+          {/* Notes */}
+          {data.notes && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("notes")}</label>
+              <p className="text-sm whitespace-pre-wrap rounded-md bg-muted p-3">
+                {data.notes}
+              </p>
+            </div>
+          )}
+        </>
+      ) : isCreditCard ? (
         <>
           {/* Card Number */}
           {data.cardNumber && (

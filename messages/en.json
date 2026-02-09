@@ -42,7 +42,8 @@
     "archive": "Archive",
     "newItem": "New Item",
     "newSecureNote": "Secure Note",
-    "newCreditCard": "Credit Card"
+    "newCreditCard": "Credit Card",
+    "newIdentity": "Identity"
   },
   "PasswordList": {
     "noMatch": "No items match your search.",
@@ -135,6 +136,36 @@
     "failedToSave": "Failed to save",
     "networkError": "Network error"
   },
+  "IdentityForm": {
+    "newIdentity": "New Identity",
+    "editIdentity": "Edit Identity",
+    "title": "Title *",
+    "titlePlaceholder": "e.g., Driver's License, Passport",
+    "fullName": "Full Name",
+    "fullNamePlaceholder": "e.g., Taro Yamada",
+    "address": "Address",
+    "addressPlaceholder": "e.g., 1-1-1 Chiyoda, Chiyoda-ku, Tokyo",
+    "phone": "Phone",
+    "phonePlaceholder": "e.g., 090-1234-5678",
+    "email": "Email",
+    "emailPlaceholder": "e.g., user@example.com",
+    "dateOfBirth": "Date of Birth",
+    "nationality": "Nationality",
+    "nationalityPlaceholder": "e.g., Japanese",
+    "idNumber": "ID Number",
+    "idNumberPlaceholder": "e.g., A12345678",
+    "issueDate": "Issue Date",
+    "expiryDate": "Expiry Date",
+    "notes": "Notes",
+    "notesPlaceholder": "Optional notes...",
+    "tags": "Tags",
+    "saved": "Identity saved",
+    "updated": "Identity updated",
+    "failedToSave": "Failed to save",
+    "networkError": "Network error",
+    "expiryBeforeIssue": "Expiry date must be after issue date",
+    "dobFuture": "Date of birth must be in the past"
+  },
   "PasswordDetail": {
     "username": "Username",
     "password": "Password",
@@ -161,7 +192,16 @@
     "cardNumber": "Card Number",
     "brand": "Brand",
     "expiry": "Expiration",
-    "cvv": "CVV"
+    "cvv": "CVV",
+    "fullName": "Full Name",
+    "address": "Address",
+    "phone": "Phone",
+    "email": "Email",
+    "dateOfBirth": "Date of Birth",
+    "nationality": "Nationality",
+    "idNumber": "ID Number",
+    "issueDate": "Issue Date",
+    "expiryDate": "Expiry Date"
   },
   "PasswordGenerator": {
     "use": "Use",
@@ -197,7 +237,9 @@
     "secureNote": "Secure Note",
     "copyCardNumber": "Copy Card Number",
     "copyCvv": "Copy CVV",
-    "creditCard": "Credit Card"
+    "creditCard": "Credit Card",
+    "copyIdNumber": "Copy ID Number",
+    "identity": "Identity"
   },
   "CopyButton": {
     "copied": "Copied! (clears in 30s)",
@@ -258,6 +300,7 @@
     "typeLogin": "Login",
     "typeNote": "Note",
     "typeCard": "Card",
+    "typeIdentity": "Identity",
     "entryCount": "{count} entries found",
     "importButton": "Import {count} entries",
     "importing": "Importing {current} of {total}...",
@@ -379,6 +422,7 @@
     "noPasswords": "No passwords in this organization.",
     "newSecureNote": "Secure Note",
     "newCreditCard": "Credit Card",
+    "newIdentity": "Identity",
     "noPasswordsDesc": "Click \"New Password\" to add the first entry.",
     "createdBy": "Created by {name}",
     "updatedBy": "Updated by {name}",

@@ -42,7 +42,8 @@
     "archive": "アーカイブ",
     "newItem": "新規アイテム",
     "newSecureNote": "セキュアノート",
-    "newCreditCard": "クレジットカード"
+    "newCreditCard": "クレジットカード",
+    "newIdentity": "ID情報"
   },
   "PasswordList": {
     "noMatch": "検索に一致するアイテムがありません。",
@@ -135,6 +136,36 @@
     "failedToSave": "保存に失敗しました",
     "networkError": "ネットワークエラー"
   },
+  "IdentityForm": {
+    "newIdentity": "新規ID情報",
+    "editIdentity": "ID情報を編集",
+    "title": "タイトル *",
+    "titlePlaceholder": "例: 運転免許証, パスポート",
+    "fullName": "氏名",
+    "fullNamePlaceholder": "例: 山田 太郎",
+    "address": "住所",
+    "addressPlaceholder": "例: 東京都千代田区千代田1-1-1",
+    "phone": "電話番号",
+    "phonePlaceholder": "例: 090-1234-5678",
+    "email": "メールアドレス",
+    "emailPlaceholder": "例: user@example.com",
+    "dateOfBirth": "生年月日",
+    "nationality": "国籍",
+    "nationalityPlaceholder": "例: 日本",
+    "idNumber": "ID番号",
+    "idNumberPlaceholder": "例: A12345678",
+    "issueDate": "発行日",
+    "expiryDate": "有効期限",
+    "notes": "メモ",
+    "notesPlaceholder": "任意のメモ...",
+    "tags": "タグ",
+    "saved": "ID情報を保存しました",
+    "updated": "ID情報を更新しました",
+    "failedToSave": "保存に失敗しました",
+    "networkError": "ネットワークエラー",
+    "expiryBeforeIssue": "有効期限は発行日より後の日付を指定してください",
+    "dobFuture": "生年月日は過去の日付を指定してください"
+  },
   "PasswordDetail": {
     "username": "ユーザー名",
     "password": "パスワード",
@@ -161,7 +192,16 @@
     "cardNumber": "カード番号",
     "brand": "ブランド",
     "expiry": "有効期限",
-    "cvv": "CVV"
+    "cvv": "CVV",
+    "fullName": "氏名",
+    "address": "住所",
+    "phone": "電話番号",
+    "email": "メールアドレス",
+    "dateOfBirth": "生年月日",
+    "nationality": "国籍",
+    "idNumber": "ID番号",
+    "issueDate": "発行日",
+    "expiryDate": "有効期限"
   },
   "PasswordGenerator": {
     "use": "使用",
@@ -197,7 +237,9 @@
     "secureNote": "セキュアノート",
     "copyCardNumber": "カード番号をコピー",
     "copyCvv": "CVVをコピー",
-    "creditCard": "クレジットカード"
+    "creditCard": "クレジットカード",
+    "copyIdNumber": "ID番号をコピー",
+    "identity": "ID情報"
   },
   "CopyButton": {
     "copied": "コピーしました！（30秒後にクリア）",
@@ -258,6 +300,7 @@
     "typeLogin": "ログイン",
     "typeNote": "ノート",
     "typeCard": "カード",
+    "typeIdentity": "ID情報",
     "entryCount": "{count} 件のエントリーが見つかりました",
     "importButton": "{count} 件をインポート",
     "importing": "{current} / {total} をインポート中...",
@@ -379,6 +422,7 @@
     "noPasswords": "この組織にはパスワードがありません。",
     "newSecureNote": "セキュアノート",
     "newCreditCard": "クレジットカード",
+    "newIdentity": "ID情報",
     "noPasswordsDesc": "「新規パスワード」をクリックして最初のエントリを追加してください。",
     "createdBy": "{name} が作成",
     "updatedBy": "{name} が更新",

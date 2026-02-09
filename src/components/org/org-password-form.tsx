@@ -61,10 +61,10 @@ interface OrgPasswordFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
-  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
+  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
   editData?: {
     id: string;
-    entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD";
+    entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
     title: string;
     username: string | null;
     password: string;
@@ -80,6 +80,15 @@ interface OrgPasswordFormProps {
     expiryMonth?: string | null;
     expiryYear?: string | null;
     cvv?: string | null;
+    fullName?: string | null;
+    address?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    dateOfBirth?: string | null;
+    nationality?: string | null;
+    idNumber?: string | null;
+    issueDate?: string | null;
+    expiryDate?: string | null;
   } | null;
 }
 
@@ -94,6 +103,7 @@ export function OrgPasswordForm({
   const t = useTranslations("PasswordForm");
   const tn = useTranslations("SecureNoteForm");
   const tcc = useTranslations("CreditCardForm");
+  const ti = useTranslations("IdentityForm");
   const tc = useTranslations("Common");
   const [saving, setSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -104,6 +114,7 @@ export function OrgPasswordForm({
   const effectiveEntryType = editData?.entryType ?? entryTypeProp;
   const isNote = effectiveEntryType === "SECURE_NOTE";
   const isCreditCard = effectiveEntryType === "CREDIT_CARD";
+  const isIdentity = effectiveEntryType === "IDENTITY";
 
   const [title, setTitle] = useState(editData?.title ?? "");
   const [username, setUsername] = useState(editData?.username ?? "");
@@ -135,6 +146,18 @@ export function OrgPasswordForm({
   const [expiryMonth, setExpiryMonth] = useState(editData?.expiryMonth ?? "");
   const [expiryYear, setExpiryYear] = useState(editData?.expiryYear ?? "");
   const [cvv, setCvv] = useState(editData?.cvv ?? "");
+  const [fullName, setFullName] = useState(editData?.fullName ?? "");
+  const [address, setAddress] = useState(editData?.address ?? "");
+  const [phone, setPhone] = useState(editData?.phone ?? "");
+  const [email, setEmail] = useState(editData?.email ?? "");
+  const [dateOfBirth, setDateOfBirth] = useState(editData?.dateOfBirth ?? "");
+  const [nationality, setNationality] = useState(editData?.nationality ?? "");
+  const [idNumber, setIdNumber] = useState(editData?.idNumber ?? "");
+  const [issueDate, setIssueDate] = useState(editData?.issueDate ?? "");
+  const [expiryDate, setExpiryDate] = useState(editData?.expiryDate ?? "");
+  const [showIdNumber, setShowIdNumber] = useState(false);
+  const [dobError, setDobError] = useState<string | null>(null);
+  const [expiryError, setExpiryError] = useState<string | null>(null);
 
   const isEdit = !!editData;
 
@@ -158,6 +181,15 @@ export function OrgPasswordForm({
       setExpiryMonth(editData.expiryMonth ?? "");
       setExpiryYear(editData.expiryYear ?? "");
       setCvv(editData.cvv ?? "");
+      setFullName(editData.fullName ?? "");
+      setAddress(editData.address ?? "");
+      setPhone(editData.phone ?? "");
+      setEmail(editData.email ?? "");
+      setDateOfBirth(editData.dateOfBirth ?? "");
+      setNationality(editData.nationality ?? "");
+      setIdNumber(editData.idNumber ?? "");
+      setIssueDate(editData.issueDate ?? "");
+      setExpiryDate(editData.expiryDate ?? "");
     }
   }, [open, editData]);
 
@@ -184,6 +216,16 @@ export function OrgPasswordForm({
       setCvv("");
       setShowCardNumber(false);
       setShowCvv(false);
+      setFullName("");
+      setAddress("");
+      setPhone("");
+      setEmail("");
+      setDateOfBirth("");
+      setNationality("");
+      setIdNumber("");
+      setIssueDate("");
+      setExpiryDate("");
+      setShowIdNumber(false);
       setSaving(false);
     } else if (editData) {
       setTitle(editData.title);
@@ -203,6 +245,15 @@ export function OrgPasswordForm({
       setExpiryMonth(editData.expiryMonth ?? "");
       setExpiryYear(editData.expiryYear ?? "");
       setCvv(editData.cvv ?? "");
+      setFullName(editData.fullName ?? "");
+      setAddress(editData.address ?? "");
+      setPhone(editData.phone ?? "");
+      setEmail(editData.email ?? "");
+      setDateOfBirth(editData.dateOfBirth ?? "");
+      setNationality(editData.nationality ?? "");
+      setIdNumber(editData.idNumber ?? "");
+      setIssueDate(editData.issueDate ?? "");
+      setExpiryDate(editData.expiryDate ?? "");
     }
     onOpenChange(v);
   };
@@ -245,6 +296,22 @@ export function OrgPasswordForm({
     if (isCreditCard) {
       if (!title.trim()) return;
       if (!cardNumberValid) return;
+    } else if (isIdentity) {
+      if (!title.trim()) return;
+      let hasDateError = false;
+      if (dateOfBirth && dateOfBirth > new Date().toISOString().slice(0, 10)) {
+        setDobError(ti("dobFuture"));
+        hasDateError = true;
+      } else {
+        setDobError(null);
+      }
+      if (issueDate && expiryDate && issueDate >= expiryDate) {
+        setExpiryError(ti("expiryBeforeIssue"));
+        hasDateError = true;
+      } else {
+        setExpiryError(null);
+      }
+      if (hasDateError) return;
     } else if (isNote) {
       if (!title.trim()) return;
     } else {
@@ -259,7 +326,23 @@ export function OrgPasswordForm({
 
       let body: Record<string, unknown>;
 
-      if (isCreditCard) {
+      if (isIdentity) {
+        body = {
+          entryType: "IDENTITY",
+          title: title.trim(),
+          fullName: fullName.trim() || undefined,
+          address: address.trim() || undefined,
+          phone: phone.trim() || undefined,
+          email: email.trim() || undefined,
+          dateOfBirth: dateOfBirth || undefined,
+          nationality: nationality.trim() || undefined,
+          idNumber: idNumber.trim() || undefined,
+          issueDate: issueDate || undefined,
+          expiryDate: expiryDate || undefined,
+          notes: notes.trim() || undefined,
+          tagIds: selectedTags.map((t) => t.id),
+        };
+      } else if (isCreditCard) {
         body = {
           entryType: "CREDIT_CARD",
           title: title.trim(),
@@ -324,33 +407,190 @@ export function OrgPasswordForm({
       <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {isCreditCard
-              ? (isEdit ? tcc("editCard") : tcc("newCard"))
-              : isNote
-                ? (isEdit ? tn("editNote") : tn("newNote"))
-                : (isEdit ? t("editPassword") : t("newPassword"))}
+            {isIdentity
+              ? (isEdit ? ti("editIdentity") : ti("newIdentity"))
+              : isCreditCard
+                ? (isEdit ? tcc("editCard") : tcc("newCard"))
+                : isNote
+                  ? (isEdit ? tn("editNote") : tn("newNote"))
+                  : (isEdit ? t("editPassword") : t("newPassword"))}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            {isCreditCard
-              ? (isEdit ? tcc("editCard") : tcc("newCard"))
-              : isNote
-                ? (isEdit ? tn("editNote") : tn("newNote"))
-                : (isEdit ? t("editPassword") : t("newPassword"))}
+            {isIdentity
+              ? (isEdit ? ti("editIdentity") : ti("newIdentity"))
+              : isCreditCard
+                ? (isEdit ? tcc("editCard") : tcc("newCard"))
+                : isNote
+                  ? (isEdit ? tn("editNote") : tn("newNote"))
+                  : (isEdit ? t("editPassword") : t("newPassword"))}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           {/* Title */}
           <div className="space-y-2">
-            <Label>{isCreditCard ? tcc("title") : isNote ? tn("title") : t("title")}</Label>
+            <Label>{isIdentity ? ti("title") : isCreditCard ? tcc("title") : isNote ? tn("title") : t("title")}</Label>
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder={isCreditCard ? tcc("titlePlaceholder") : isNote ? tn("titlePlaceholder") : t("titlePlaceholder")}
+              placeholder={isIdentity ? ti("titlePlaceholder") : isCreditCard ? tcc("titlePlaceholder") : isNote ? tn("titlePlaceholder") : t("titlePlaceholder")}
             />
           </div>
 
-          {isCreditCard ? (
+          {isIdentity ? (
+            <>
+              {/* Full Name */}
+              <div className="space-y-2">
+                <Label>{ti("fullName")}</Label>
+                <Input
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder={ti("fullNamePlaceholder")}
+                  autoComplete="off"
+                />
+              </div>
+
+              {/* Address */}
+              <div className="space-y-2">
+                <Label>{ti("address")}</Label>
+                <Textarea
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder={ti("addressPlaceholder")}
+                  rows={2}
+                  autoComplete="off"
+                />
+              </div>
+
+              {/* Phone & Email */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>{ti("phone")}</Label>
+                  <Input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder={ti("phonePlaceholder")}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{ti("email")}</Label>
+                  <Input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder={ti("emailPlaceholder")}
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+
+              {/* Date of Birth & Nationality */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>{ti("dateOfBirth")}</Label>
+                  <Input
+                    type="date"
+                    value={dateOfBirth}
+                    onChange={(e) => {
+                      setDateOfBirth(e.target.value);
+                      setDobError(null);
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{ti("nationality")}</Label>
+                  <Input
+                    value={nationality}
+                    onChange={(e) => setNationality(e.target.value)}
+                    placeholder={ti("nationalityPlaceholder")}
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+              {dobError && (
+                <p className="text-sm text-destructive">{dobError}</p>
+              )}
+
+              {/* ID Number */}
+              <div className="space-y-2">
+                <Label>{ti("idNumber")}</Label>
+                <div className="relative">
+                  <Input
+                    type={showIdNumber ? "text" : "password"}
+                    value={idNumber}
+                    onChange={(e) => setIdNumber(e.target.value)}
+                    placeholder={ti("idNumberPlaceholder")}
+                    autoComplete="off"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                    onClick={() => setShowIdNumber(!showIdNumber)}
+                  >
+                    {showIdNumber ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Issue Date & Expiry Date */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>{ti("issueDate")}</Label>
+                  <Input
+                    type="date"
+                    value={issueDate}
+                    onChange={(e) => {
+                      setIssueDate(e.target.value);
+                      setExpiryError(null);
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{ti("expiryDate")}</Label>
+                  <Input
+                    type="date"
+                    value={expiryDate}
+                    onChange={(e) => {
+                      setExpiryDate(e.target.value);
+                      setExpiryError(null);
+                    }}
+                  />
+                </div>
+              </div>
+              {expiryError && (
+                <p className="text-sm text-destructive">{expiryError}</p>
+              )}
+
+              {/* Notes */}
+              <div className="space-y-2">
+                <Label>{ti("notes")}</Label>
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder={ti("notesPlaceholder")}
+                  rows={3}
+                />
+              </div>
+
+              {/* Tags */}
+              <div className="space-y-2">
+                <Label>{ti("tags")}</Label>
+                <OrgTagInput
+                  orgId={orgId}
+                  selectedTags={selectedTags}
+                  onChange={setSelectedTags}
+                />
+              </div>
+            </>
+          ) : isCreditCard ? (
             <>
               {/* Cardholder Name */}
               <div className="space-y-2">
@@ -783,7 +1023,7 @@ export function OrgPasswordForm({
             disabled={
               saving ||
               !title.trim() ||
-              (!isNote && !isCreditCard && !password) ||
+              (!isNote && !isCreditCard && !isIdentity && !password) ||
               (isCreditCard && !cardNumberValid)
             }
           >

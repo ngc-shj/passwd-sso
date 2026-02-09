@@ -80,6 +80,8 @@ export async function GET() {
       brand: overview.brand ?? null,
       lastFour: overview.lastFour ?? null,
       cardholderName: overview.cardholderName ?? null,
+      fullName: overview.fullName ?? null,
+      idNumberLast4: overview.idNumberLast4 ?? null,
       isFavorite: true,
       isArchived: entry.isArchived,
       tags: entry.tags,
