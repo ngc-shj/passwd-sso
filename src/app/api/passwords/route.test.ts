@@ -94,6 +94,95 @@ describe("GET /api/passwords", () => {
     const json = await res.json();
     expect(json).toEqual([]);
   });
+
+  it("filters by entryType when type query param is provided", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      searchParams: { type: "CREDIT_CARD" },
+    }));
+    expect(mockPrismaPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ entryType: "CREDIT_CARD" }),
+      })
+    );
+  });
+
+  it("does not filter by entryType when type param is absent", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    const call = mockPrismaPasswordEntry.findMany.mock.calls[0][0];
+    expect(call.where).not.toHaveProperty("entryType");
+  });
+
+  it("filters by trash when trash=true", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      searchParams: { trash: "true" },
+    }));
+    expect(mockPrismaPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ deletedAt: { not: null } }),
+      })
+    );
+  });
+
+  it("excludes deleted items by default", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    expect(mockPrismaPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ deletedAt: null }),
+      })
+    );
+  });
+
+  it("filters by archived when archived=true", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      searchParams: { archived: "true" },
+    }));
+    expect(mockPrismaPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ isArchived: true }),
+      })
+    );
+  });
+
+  it("excludes archived items by default", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    expect(mockPrismaPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ isArchived: false }),
+      })
+    );
+  });
+
+  it("filters by favorites when favorites=true", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      searchParams: { favorites: "true" },
+    }));
+    expect(mockPrismaPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ isFavorite: true }),
+      })
+    );
+  });
+
+  it("filters by tag when tag param is provided", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      searchParams: { tag: "tag-123" },
+    }));
+    expect(mockPrismaPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tags: { some: { id: "tag-123" } },
+        }),
+      })
+    );
+  });
 });
 
 describe("POST /api/passwords", () => {

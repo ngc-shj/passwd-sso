@@ -114,6 +114,168 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     expect(json[0].isFavorite).toBe(true);
   });
 
+  it("filters by entryType when type query param is provided", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek",
+      orgKeyIv: "iv",
+      orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+        searchParams: { type: "SECURE_NOTE" },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ entryType: "SECURE_NOTE" }),
+      })
+    );
+  });
+
+  it("does not filter by entryType when type param is absent", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek",
+      orgKeyIv: "iv",
+      orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createParams({ orgId: ORG_ID }),
+    );
+    const call = mockPrismaOrgPasswordEntry.findMany.mock.calls[0][0];
+    expect(call.where).not.toHaveProperty("entryType");
+  });
+
+  it("returns 403 when user lacks permission", async () => {
+    mockRequireOrgPermission.mockRejectedValue(
+      new OrgAuthError("Forbidden", 403)
+    );
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("filters by trash when trash=true", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+        searchParams: { trash: "true" },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ deletedAt: { not: null } }),
+      })
+    );
+  });
+
+  it("excludes deleted items by default", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ deletedAt: null }),
+      })
+    );
+  });
+
+  it("filters by archived when archived=true", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+        searchParams: { archived: "true" },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ isArchived: true }),
+      })
+    );
+  });
+
+  it("excludes archived items by default", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ isArchived: false }),
+      })
+    );
+  });
+
+  it("filters by favorites when favorites=true", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+        searchParams: { favorites: "true" },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          favorites: { some: { userId: "test-user-id" } },
+        }),
+      })
+    );
+  });
+
+  it("filters by tag when tag param is provided", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+        searchParams: { tag: "tag-456" },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tags: { some: { id: "tag-456" } },
+        }),
+      })
+    );
+  });
+
   it("returns SECURE_NOTE entries with snippet", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
       encryptedOrgKey: "ek",
