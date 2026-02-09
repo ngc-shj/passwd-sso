@@ -75,7 +75,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns decrypted overview list", async () => {
+  it("returns decrypted overview list with entryType", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
       encryptedOrgKey: "ek",
       orgKeyIv: "iv",
@@ -84,6 +84,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {
         id: "pw-1",
+        entryType: "LOGIN",
         encryptedOverview: "cipher",
         overviewIv: "iv",
         overviewAuthTag: "tag",
@@ -109,7 +110,45 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].title).toBe("Test");
+    expect(json[0].entryType).toBe("LOGIN");
     expect(json[0].isFavorite).toBe(true);
+  });
+
+  it("returns SECURE_NOTE entries with snippet", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek",
+      orgKeyIv: "iv",
+      orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
+      {
+        id: "pw-note",
+        entryType: "SECURE_NOTE",
+        encryptedOverview: "cipher",
+        overviewIv: "iv",
+        overviewAuthTag: "tag",
+        isArchived: false,
+        favorites: [],
+        tags: [],
+        createdBy: { id: "u1", name: "User", image: null },
+        updatedBy: { id: "u1", name: "User" },
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      },
+    ]);
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({ title: "My Note", snippet: "Some secret content..." })
+    );
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createParams({ orgId: ORG_ID }),
+    );
+    const json = await res.json();
+    expect(json[0].entryType).toBe("SECURE_NOTE");
+    expect(json[0].title).toBe("My Note");
+    expect(json[0].snippet).toBe("Some secret content...");
   });
 });
 
@@ -163,5 +202,48 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
     expect(json.id).toBe("new-pw");
     expect(json.title).toBe("My Password");
     expect(mockEncryptServerData).toHaveBeenCalledTimes(2); // blob + overview
+  });
+
+  it("creates SECURE_NOTE entry (201)", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.create.mockResolvedValue({
+      id: "new-note",
+      tags: [],
+      createdAt: now,
+    });
+
+    const noteBody = {
+      entryType: "SECURE_NOTE",
+      title: "My Note",
+      content: "Secret content here",
+    };
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: noteBody }),
+      createParams({ orgId: ORG_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(201);
+    expect(json.id).toBe("new-note");
+    expect(json.title).toBe("My Note");
+    expect(mockEncryptServerData).toHaveBeenCalledTimes(2); // blob + overview
+  });
+
+  it("returns 400 when SECURE_NOTE has no title", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+
+    const noteBody = {
+      entryType: "SECURE_NOTE",
+      title: "",
+      content: "Some content",
+    };
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: noteBody }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(400);
   });
 });

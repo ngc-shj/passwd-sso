@@ -42,6 +42,7 @@ import {
   ChevronRight,
   ChevronDown,
   Loader2,
+  FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useVault } from "@/lib/vault-context";
@@ -49,9 +50,11 @@ import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 
 interface PasswordCardProps {
   id: string;
+  entryType?: "LOGIN" | "SECURE_NOTE";
   title: string;
   username: string | null;
   urlHost: string | null;
+  snippet?: string | null;
   tags: Array<{ name: string; color: string | null }>;
   isFavorite: boolean;
   isArchived: boolean;
@@ -76,10 +79,11 @@ interface PasswordCardProps {
 
 interface VaultEntryFull {
   title: string;
-  username: string | null;
-  password: string;
-  url: string | null;
-  notes: string | null;
+  username?: string | null;
+  password?: string;
+  url?: string | null;
+  notes?: string | null;
+  content?: string;
   tags: Array<{ name: string; color: string | null }>;
   customFields?: Array<{ label: string; value: string; type: "text" | "hidden" | "url" }>;
   passwordHistory?: Array<{ password: string; changedAt: string }>;
@@ -90,9 +94,11 @@ const CLIPBOARD_CLEAR_DELAY = 30_000;
 
 export function PasswordCard({
   id,
+  entryType = "LOGIN",
   title,
   username,
   urlHost,
+  snippet,
   tags,
   isFavorite,
   isArchived,
@@ -111,6 +117,7 @@ export function PasswordCard({
   createdBy,
 }: PasswordCardProps) {
   const isOrgMode = !!getPasswordProp;
+  const isNote = entryType === "SECURE_NOTE";
   const t = useTranslations("PasswordCard");
   const tc = useTranslations("Common");
   const tCopy = useTranslations("CopyButton");
@@ -135,7 +142,12 @@ export function PasswordCard({
   const fetchPassword = async (): Promise<string> => {
     if (getPasswordProp) return getPasswordProp();
     const { entry } = await fetchDecryptedEntry();
-    return entry.password;
+    return entry.password ?? "";
+  };
+
+  const fetchContent = async (): Promise<string> => {
+    const { entry } = await fetchDecryptedEntry();
+    return entry.content ?? "";
   };
 
   // Fetch detail data when expanded
@@ -162,10 +174,12 @@ export function PasswordCard({
           if (cancelled) return;
           setDetailData({
             id,
-            password: entry.password,
-            url: entry.url,
+            entryType,
+            password: entry.password ?? "",
+            content: entry.content,
+            url: entry.url ?? null,
             urlHost,
-            notes: entry.notes,
+            notes: entry.notes ?? null,
             customFields: entry.customFields ?? [],
             passwordHistory: entry.passwordHistory ?? [],
             totp: entry.totp,
@@ -184,6 +198,21 @@ export function PasswordCard({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded]);
+
+  const handleCopyContent = async () => {
+    try {
+      const content = await fetchContent();
+      await navigator.clipboard.writeText(content);
+      toast.success(tCopy("copied"));
+      setTimeout(async () => {
+        try {
+          await navigator.clipboard.writeText("");
+        } catch {}
+      }, CLIPBOARD_CLEAR_DELAY);
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
 
   const handleCopyUsername = async () => {
     if (!username) return;
@@ -254,7 +283,11 @@ export function PasswordCard({
               className={`h-4 w-4 ${isFavorite ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground"}`}
             />
           </Button>
-          <Favicon host={urlHost} size={20} className="shrink-0" />
+          {isNote ? (
+            <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
+          ) : (
+            <Favicon host={urlHost} size={20} className="shrink-0" />
+          )}
           <div className="flex-1 min-w-0">
             <button
               className="font-medium hover:underline truncate block text-left"
@@ -263,16 +296,24 @@ export function PasswordCard({
               {title}
             </button>
             <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
-              {username && (
-                <span className="flex items-center gap-1 truncate">
-                  <User className="h-3 w-3 shrink-0" />
-                  {username}
-                </span>
-              )}
-              {urlHost && (
-                <span className="truncate">
-                  {urlHost}
-                </span>
+              {isNote ? (
+                snippet && (
+                  <span className="truncate">{snippet}</span>
+                )
+              ) : (
+                <>
+                  {username && (
+                    <span className="flex items-center gap-1 truncate">
+                      <User className="h-3 w-3 shrink-0" />
+                      {username}
+                    </span>
+                  )}
+                  {urlHost && (
+                    <span className="truncate">
+                      {urlHost}
+                    </span>
+                  )}
+                </>
               )}
               {createdBy && (
                 <span className="truncate text-xs">
@@ -288,7 +329,7 @@ export function PasswordCard({
               ))}
             </div>
           )}
-          <CopyButton getValue={fetchPassword} />
+          {!isNote && <CopyButton getValue={fetchPassword} />}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0">
@@ -297,21 +338,30 @@ export function PasswordCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              {username && (
-                <DropdownMenuItem onSelect={handleCopyUsername}>
-                  <User className="h-4 w-4" />
-                  {t("copyUsername")}
+              {isNote ? (
+                <DropdownMenuItem onSelect={handleCopyContent}>
+                  <Copy className="h-4 w-4" />
+                  {t("copyContent")}
                 </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onSelect={handleCopyPassword}>
-                <Copy className="h-4 w-4" />
-                {t("copyPassword")}
-              </DropdownMenuItem>
-              {urlHost && (
-                <DropdownMenuItem onSelect={handleOpenUrl}>
-                  <ExternalLink className="h-4 w-4" />
-                  {t("openUrl")}
-                </DropdownMenuItem>
+              ) : (
+                <>
+                  {username && (
+                    <DropdownMenuItem onSelect={handleCopyUsername}>
+                      <User className="h-4 w-4" />
+                      {t("copyUsername")}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onSelect={handleCopyPassword}>
+                    <Copy className="h-4 w-4" />
+                    {t("copyPassword")}
+                  </DropdownMenuItem>
+                  {urlHost && (
+                    <DropdownMenuItem onSelect={handleOpenUrl}>
+                      <ExternalLink className="h-4 w-4" />
+                      {t("openUrl")}
+                    </DropdownMenuItem>
+                  )}
+                </>
               )}
               {canEdit && (
                 <>

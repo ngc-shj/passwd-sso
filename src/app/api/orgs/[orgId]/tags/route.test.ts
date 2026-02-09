@@ -66,6 +66,31 @@ describe("GET /api/orgs/[orgId]/tags", () => {
     expect(res.status).toBe(200);
     expect(json[0].count).toBe(5);
   });
+
+  it("excludes archived and deleted entries from count", async () => {
+    mockPrismaOrgTag.findMany.mockResolvedValue([
+      { id: "t1", name: "Work", color: null, _count: { passwords: 3 } },
+    ]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/tags`),
+      createParams({ orgId: ORG_ID }),
+    );
+
+    expect(mockPrismaOrgTag.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: {
+          _count: {
+            select: {
+              passwords: {
+                where: { deletedAt: null, isArchived: false },
+              },
+            },
+          },
+        },
+      }),
+    );
+  });
 });
 
 describe("POST /api/orgs/[orgId]/tags", () => {

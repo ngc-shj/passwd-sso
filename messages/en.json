@@ -39,15 +39,17 @@
     "sortCreated": "Recently Created",
     "export": "Export",
     "import": "Import",
-    "archive": "Archive"
+    "archive": "Archive",
+    "newItem": "New Item",
+    "newSecureNote": "Secure Note"
   },
   "PasswordList": {
-    "noMatch": "No passwords match your search.",
-    "noPasswords": "No passwords saved yet.",
+    "noMatch": "No items match your search.",
+    "noPasswords": "No items saved yet.",
     "noFavorites": "No favorites yet.",
     "noArchive": "No archived items.",
     "noTrash": "Trash is empty.",
-    "addFirst": "Click \"New Password\" to add your first entry."
+    "addFirst": "Click \"New Item\" to add your first entry."
   },
   "Trash": {
     "title": "Trash",
@@ -90,6 +92,19 @@
     "totp": "Authenticator (TOTP)",
     "addTotp": "Add TOTP"
   },
+  "SecureNoteForm": {
+    "newNote": "New Secure Note",
+    "editNote": "Edit Secure Note",
+    "title": "Title *",
+    "titlePlaceholder": "e.g., API Key, License, Recovery Codes",
+    "content": "Content *",
+    "contentPlaceholder": "Enter your secure note...",
+    "tags": "Tags",
+    "saved": "Secure note saved",
+    "updated": "Secure note updated",
+    "failedToSave": "Failed to save",
+    "networkError": "Network error"
+  },
   "PasswordDetail": {
     "username": "Username",
     "password": "Password",
@@ -110,7 +125,8 @@
     "unarchive": "Unarchive",
     "archived": "Archived",
     "unarchived": "Unarchived",
-    "passwordHistory": "Password History"
+    "passwordHistory": "Password History",
+    "content": "Content"
   },
   "PasswordGenerator": {
     "use": "Use",
@@ -141,14 +157,16 @@
     "archived": "Archived",
     "unarchived": "Unarchived",
     "networkError": "Network error",
-    "moreActions": "More actions"
+    "moreActions": "More actions",
+    "copyContent": "Copy Content",
+    "secureNote": "Secure Note"
   },
   "CopyButton": {
     "copied": "Copied! (clears in 30s)",
     "copy": "Copy to clipboard"
   },
   "SearchBar": {
-    "placeholder": "Search passwords..."
+    "placeholder": "Search items..."
   },
   "NotFound": {
     "title": "Page not found",
@@ -196,8 +214,11 @@
     "detectedFormat": "Detected format",
     "unknownFormat": "Format could not be auto-detected. Results may vary.",
     "colTitle": "Title",
+    "colType": "Type",
     "colUsername": "Username",
     "colUrl": "URL",
+    "typeLogin": "Login",
+    "typeNote": "Note",
     "entryCount": "{count} entries found",
     "importButton": "Import {count} entries",
     "importing": "Importing {current} of {total}...",
@@ -313,9 +334,11 @@
     "roleViewer": "Viewer",
     "you": "(you)",
     "passwords": "Passwords",
+    "newItem": "New Item",
     "newPassword": "New Password",
     "allPasswords": "All Passwords",
     "noPasswords": "No passwords in this organization.",
+    "newSecureNote": "Secure Note",
     "noPasswordsDesc": "Click \"New Password\" to add the first entry.",
     "createdBy": "Created by {name}",
     "updatedBy": "Updated by {name}",
@@ -338,6 +361,7 @@
     "organizationFavorites": "Organization Favorites",
     "organizationArchive": "Organization Archive",
     "organizationTrash": "Organization Trash",
-    "backToOrg": "Back to {name}"
+    "backToOrg": "Back to {name}",
+    "tags": "Tags"
   }
 }

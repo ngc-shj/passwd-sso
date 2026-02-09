@@ -13,16 +13,18 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Building2, Trash2, RotateCcw } from "lucide-react";
+import { Building2, Trash2, RotateCcw, FileText } from "lucide-react";
 import { toast } from "sonner";
 
 interface OrgTrashEntry {
   id: string;
+  entryType: "LOGIN" | "SECURE_NOTE";
   orgId: string;
   orgName: string;
   role: string;
   title: string;
   username: string | null;
+  snippet: string | null;
   deletedAt: string;
 }
 
@@ -102,13 +104,24 @@ export function OrgTrashList({ refreshKey }: OrgTrashListProps) {
         {entries.map((entry) => (
           <Card key={entry.id}>
             <CardContent className="flex items-center gap-4 p-4">
+              {entry.entryType === "SECURE_NOTE" && (
+                <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+              )}
               <div className="flex-1 min-w-0">
                 <p className="font-medium truncate">{entry.title}</p>
                 <div className="flex items-center gap-2 mt-0.5">
-                  {entry.username && (
-                    <p className="text-sm text-muted-foreground truncate">
-                      {entry.username}
-                    </p>
+                  {entry.entryType === "SECURE_NOTE" ? (
+                    entry.snippet && (
+                      <p className="text-sm text-muted-foreground truncate">
+                        {entry.snippet}
+                      </p>
+                    )
+                  ) : (
+                    entry.username && (
+                      <p className="text-sm text-muted-foreground truncate">
+                        {entry.username}
+                      </p>
+                    )
                   )}
                   <span className="text-xs text-muted-foreground">
                     {entry.orgName}

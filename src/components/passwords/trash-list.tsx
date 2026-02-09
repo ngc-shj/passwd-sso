@@ -15,13 +15,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Trash2, Loader2, RotateCcw } from "lucide-react";
+import { Trash2, Loader2, RotateCcw, FileText } from "lucide-react";
 import { toast } from "sonner";
 
 interface TrashEntry {
   id: string;
+  entryType: "LOGIN" | "SECURE_NOTE";
   title: string;
   username: string | null;
+  snippet: string | null;
   deletedAt: string;
 }
 
@@ -56,8 +58,10 @@ export function TrashList({ refreshKey }: TrashListProps) {
           );
           decrypted.push({
             id: entry.id,
+            entryType: entry.entryType ?? "LOGIN",
             title: overview.title,
-            username: overview.username,
+            username: overview.username ?? null,
+            snippet: overview.snippet ?? null,
             deletedAt: entry.deletedAt,
           });
         } catch {
@@ -161,12 +165,23 @@ export function TrashList({ refreshKey }: TrashListProps) {
         {entries.map((entry) => (
           <Card key={entry.id}>
             <CardContent className="flex items-center gap-4 p-4">
+              {entry.entryType === "SECURE_NOTE" && (
+                <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+              )}
               <div className="flex-1 min-w-0">
                 <p className="font-medium truncate">{entry.title}</p>
-                {entry.username && (
-                  <p className="text-sm text-muted-foreground truncate">
-                    {entry.username}
-                  </p>
+                {entry.entryType === "SECURE_NOTE" ? (
+                  entry.snippet && (
+                    <p className="text-sm text-muted-foreground truncate">
+                      {entry.snippet}
+                    </p>
+                  )
+                ) : (
+                  entry.username && (
+                    <p className="text-sm text-muted-foreground truncate">
+                      {entry.username}
+                    </p>
+                  )
                 )}
               </div>
               <div className="flex gap-2 shrink-0">

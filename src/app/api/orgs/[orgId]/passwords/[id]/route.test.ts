@@ -85,6 +85,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
       orgId: ORG_ID,
+      entryType: "LOGIN",
       encryptedBlob: "blob-cipher",
       blobIv: "blob-iv",
       blobAuthTag: "blob-tag",
@@ -110,6 +111,38 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     expect(json.title).toBe("My PW");
     expect(json.password).toBe("secret");
     expect(json.isFavorite).toBe(false);
+  });
+
+  it("returns SECURE_NOTE with content instead of password", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "SECURE_NOTE",
+      encryptedBlob: "blob-cipher",
+      blobIv: "blob-iv",
+      blobAuthTag: "blob-tag",
+      isArchived: false,
+      org: orgKeyData,
+      tags: [],
+      createdBy: { id: "u1", name: "User", image: null },
+      updatedBy: { id: "u1", name: "User" },
+      favorites: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({ title: "My Note", content: "Secret content here" })
+    );
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.title).toBe("My Note");
+    expect(json.content).toBe("Secret content here");
+    expect(json.entryType).toBe("SECURE_NOTE");
   });
 });
 

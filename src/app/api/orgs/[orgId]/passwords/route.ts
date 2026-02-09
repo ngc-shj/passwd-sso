@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { createOrgPasswordSchema } from "@/lib/validations";
+import { createOrgPasswordSchema, createOrgSecureNoteSchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import {
   unwrapOrgKey,
@@ -93,9 +93,11 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   interface OrgPasswordListEntry {
     id: string;
+    entryType: string;
     title: string;
     username: string | null;
     urlHost: string | null;
+    snippet: string | null;
     isFavorite: boolean;
     isArchived: boolean;
     tags: { id: string; name: string; color: string | null }[];
@@ -121,9 +123,11 @@ export async function GET(req: NextRequest, { params }: Params) {
 
     return {
       id: entry.id,
+      entryType: entry.entryType,
       title: overview.title,
-      username: overview.username,
-      urlHost: overview.urlHost,
+      username: overview.username ?? null,
+      urlHost: overview.urlHost ?? null,
+      snippet: overview.snippet ?? null,
       isFavorite: entry.favorites.length > 0,
       isArchived: entry.isArchived,
       tags: entry.tags,
@@ -169,15 +173,9 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const parsed = createOrgPasswordSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
-
-  const { title, username, password, url, notes, tagIds, customFields, totp } = parsed.data;
+  // Check if this is a secure note or a login entry
+  const rawBody = body as Record<string, unknown>;
+  const isSecureNote = rawBody.entryType === "SECURE_NOTE";
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
@@ -198,30 +196,71 @@ export async function POST(req: NextRequest, { params }: Params) {
     authTag: org.orgKeyAuthTag,
   });
 
-  let urlHost: string | null = null;
-  if (url) {
-    try {
-      urlHost = new URL(url).hostname;
-    } catch {
-      /* invalid url */
+  let fullBlob: string;
+  let overviewBlob: string;
+  let entryType: "LOGIN" | "SECURE_NOTE" = "LOGIN";
+  let tagIds: string[] | undefined;
+  let responseTitle: string;
+  let responseUsername: string | null = null;
+  let responseUrlHost: string | null = null;
+
+  if (isSecureNote) {
+    const parsed = createOrgSecureNoteSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.flatten() },
+        { status: 400 }
+      );
     }
+
+    const { title, content } = parsed.data;
+    tagIds = parsed.data.tagIds;
+    entryType = "SECURE_NOTE";
+    responseTitle = title;
+
+    const snippet = content.slice(0, 100);
+    fullBlob = JSON.stringify({ title, content });
+    overviewBlob = JSON.stringify({ title, snippet });
+  } else {
+    const parsed = createOrgPasswordSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const { title, username, password, url, notes, customFields, totp } = parsed.data;
+    tagIds = parsed.data.tagIds;
+    responseTitle = title;
+    responseUsername = username || null;
+
+    let urlHost: string | null = null;
+    if (url) {
+      try {
+        urlHost = new URL(url).hostname;
+      } catch {
+        /* invalid url */
+      }
+    }
+    responseUrlHost = urlHost;
+
+    fullBlob = JSON.stringify({
+      title,
+      username: username || null,
+      password,
+      url: url || null,
+      notes: notes || null,
+      ...(customFields?.length ? { customFields } : {}),
+      ...(totp ? { totp } : {}),
+    });
+
+    overviewBlob = JSON.stringify({
+      title,
+      username: username || null,
+      urlHost,
+    });
   }
-
-  const fullBlob = JSON.stringify({
-    title,
-    username: username || null,
-    password,
-    url: url || null,
-    notes: notes || null,
-    ...(customFields?.length ? { customFields } : {}),
-    ...(totp ? { totp } : {}),
-  });
-
-  const overviewBlob = JSON.stringify({
-    title,
-    username: username || null,
-    urlHost,
-  });
 
   const encryptedBlob = encryptServerData(fullBlob, orgKey);
   const encryptedOverview = encryptServerData(overviewBlob, orgKey);
@@ -234,6 +273,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       encryptedOverview: encryptedOverview.ciphertext,
       overviewIv: encryptedOverview.iv,
       overviewAuthTag: encryptedOverview.authTag,
+      entryType,
       orgId,
       createdById: session.user.id,
       updatedById: session.user.id,
@@ -249,9 +289,10 @@ export async function POST(req: NextRequest, { params }: Params) {
   return NextResponse.json(
     {
       id: entry.id,
-      title,
-      username: username || null,
-      urlHost,
+      entryType: entry.entryType,
+      title: responseTitle,
+      username: responseUsername,
+      urlHost: responseUrlHost,
       tags: entry.tags,
       createdAt: entry.createdAt,
     },

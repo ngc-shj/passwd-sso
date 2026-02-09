@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { updateOrgPasswordSchema } from "@/lib/validations";
+import { updateOrgPasswordSchema, updateOrgSecureNoteSchema } from "@/lib/validations";
 import {
   requireOrgPermission,
   requireOrgMember,
@@ -82,15 +82,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
     )
   );
 
-  return NextResponse.json({
+  const common = {
     id: entry.id,
+    entryType: entry.entryType,
     title: blob.title,
-    username: blob.username,
-    password: blob.password,
-    url: blob.url,
-    notes: blob.notes,
-    customFields: blob.customFields ?? [],
-    totp: blob.totp ?? null,
     isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,
     tags: entry.tags,
@@ -98,6 +93,23 @@ export async function GET(_req: NextRequest, { params }: Params) {
     updatedBy: entry.updatedBy,
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
+  };
+
+  if (entry.entryType === "SECURE_NOTE") {
+    return NextResponse.json({
+      ...common,
+      content: blob.content,
+    });
+  }
+
+  return NextResponse.json({
+    ...common,
+    username: blob.username,
+    password: blob.password,
+    url: blob.url,
+    notes: blob.notes,
+    customFields: blob.customFields ?? [],
+    totp: blob.totp ?? null,
   });
 }
 
@@ -158,14 +170,6 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const parsed = updateOrgPasswordSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
-
   const orgKey = getOrgKey(entry.org);
 
   // Decrypt current blob and merge updates
@@ -180,59 +184,96 @@ export async function PUT(req: NextRequest, { params }: Params) {
     )
   );
 
-  const { tagIds, isArchived, customFields, totp, ...fieldUpdates } = parsed.data;
+  let updatedBlobStr: string;
+  let overviewBlobStr: string;
+  let tagIds: string[] | undefined;
+  let isArchived: boolean | undefined;
+  let responseTitle: string;
 
-  const updatedBlob: Record<string, unknown> = {
-    title: fieldUpdates.title ?? currentBlob.title,
-    username:
-      fieldUpdates.username !== undefined
-        ? fieldUpdates.username || null
-        : currentBlob.username,
-    password: fieldUpdates.password ?? currentBlob.password,
-    url:
-      fieldUpdates.url !== undefined
-        ? fieldUpdates.url || null
-        : currentBlob.url,
-    notes:
-      fieldUpdates.notes !== undefined
-        ? fieldUpdates.notes || null
-        : currentBlob.notes,
-  };
-
-  // Update custom fields if provided
-  if (customFields !== undefined) {
-    updatedBlob.customFields = customFields?.length ? customFields : undefined;
-  } else if (currentBlob.customFields) {
-    updatedBlob.customFields = currentBlob.customFields;
-  }
-
-  // Update TOTP if provided
-  if (totp !== undefined) {
-    updatedBlob.totp = totp ?? undefined;
-  } else if (currentBlob.totp) {
-    updatedBlob.totp = currentBlob.totp;
-  }
-
-  let urlHost: string | null = null;
-  if (updatedBlob.url) {
-    try {
-      urlHost = new URL(updatedBlob.url as string).hostname;
-    } catch {
-      /* invalid url */
+  if (entry.entryType === "SECURE_NOTE") {
+    const parsed = updateOrgSecureNoteSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.flatten() },
+        { status: 400 }
+      );
     }
+
+    tagIds = parsed.data.tagIds;
+    isArchived = parsed.data.isArchived;
+
+    const updatedBlob = {
+      title: parsed.data.title ?? currentBlob.title,
+      content: parsed.data.content ?? currentBlob.content,
+    };
+    responseTitle = updatedBlob.title;
+
+    const snippet = updatedBlob.content.slice(0, 100);
+    updatedBlobStr = JSON.stringify(updatedBlob);
+    overviewBlobStr = JSON.stringify({ title: updatedBlob.title, snippet });
+  } else {
+    const parsed = updateOrgPasswordSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const { customFields, totp, ...fieldUpdates } = parsed.data;
+    tagIds = parsed.data.tagIds;
+    isArchived = parsed.data.isArchived;
+
+    const updatedBlob: Record<string, unknown> = {
+      title: fieldUpdates.title ?? currentBlob.title,
+      username:
+        fieldUpdates.username !== undefined
+          ? fieldUpdates.username || null
+          : currentBlob.username,
+      password: fieldUpdates.password ?? currentBlob.password,
+      url:
+        fieldUpdates.url !== undefined
+          ? fieldUpdates.url || null
+          : currentBlob.url,
+      notes:
+        fieldUpdates.notes !== undefined
+          ? fieldUpdates.notes || null
+          : currentBlob.notes,
+    };
+
+    if (customFields !== undefined) {
+      updatedBlob.customFields = customFields?.length ? customFields : undefined;
+    } else if (currentBlob.customFields) {
+      updatedBlob.customFields = currentBlob.customFields;
+    }
+
+    if (totp !== undefined) {
+      updatedBlob.totp = totp ?? undefined;
+    } else if (currentBlob.totp) {
+      updatedBlob.totp = currentBlob.totp;
+    }
+
+    responseTitle = updatedBlob.title as string;
+
+    let urlHost: string | null = null;
+    if (updatedBlob.url) {
+      try {
+        urlHost = new URL(updatedBlob.url as string).hostname;
+      } catch {
+        /* invalid url */
+      }
+    }
+
+    updatedBlobStr = JSON.stringify(updatedBlob);
+    overviewBlobStr = JSON.stringify({
+      title: updatedBlob.title,
+      username: updatedBlob.username,
+      urlHost,
+    });
   }
 
-  const overviewBlob = JSON.stringify({
-    title: updatedBlob.title,
-    username: updatedBlob.username,
-    urlHost,
-  });
-
-  const encryptedBlob = encryptServerData(
-    JSON.stringify(updatedBlob),
-    orgKey
-  );
-  const encryptedOverview = encryptServerData(overviewBlob, orgKey);
+  const encryptedBlob = encryptServerData(updatedBlobStr, orgKey);
+  const encryptedOverview = encryptServerData(overviewBlobStr, orgKey);
 
   const updateData: Record<string, unknown> = {
     encryptedBlob: encryptedBlob.ciphertext,
@@ -244,7 +285,6 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updatedById: session.user.id,
   };
 
-  // isFavorite is now per-user via /favorite endpoint
   if (isArchived !== undefined) updateData.isArchived = isArchived;
   if (tagIds !== undefined) {
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
@@ -260,9 +300,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({
     id: updated.id,
-    title: updatedBlob.title,
-    username: updatedBlob.username,
-    urlHost,
+    entryType: updated.entryType,
+    title: responseTitle,
     tags: updated.tags,
     updatedAt: updated.updatedAt,
   });

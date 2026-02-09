@@ -29,6 +29,7 @@ const ownedEntry = {
   overviewIv: "overview-iv",
   overviewAuthTag: "overview-tag",
   keyVersion: 1,
+  entryType: "LOGIN",
   isFavorite: false,
   isArchived: false,
   tags: [{ id: "t1" }],
@@ -69,7 +70,7 @@ describe("GET /api/passwords/[id]", () => {
     expect(res.status).toBe(403);
   });
 
-  it("returns password entry with encrypted data", async () => {
+  it("returns password entry with encrypted data and entryType", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
@@ -78,12 +79,27 @@ describe("GET /api/passwords/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.id).toBe(PW_ID);
+    expect(json.entryType).toBe("LOGIN");
     expect(json.encryptedBlob).toEqual({
       ciphertext: "blob-cipher",
       iv: "blob-iv",
       authTag: "blob-tag",
     });
     expect(json.tagIds).toEqual(["t1"]);
+  });
+
+  it("returns SECURE_NOTE entryType", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({
+      ...ownedEntry,
+      entryType: "SECURE_NOTE",
+    });
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.entryType).toBe("SECURE_NOTE");
   });
 });
 

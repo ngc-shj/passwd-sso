@@ -20,9 +20,11 @@ import { toast } from "sonner";
 // ─── CSV Parsing ────────────────────────────────────────────
 
 interface ParsedEntry {
+  entryType: "LOGIN" | "SECURE_NOTE";
   title: string;
   username: string;
   password: string;
+  content: string;
   url: string;
   notes: string;
 }
@@ -97,46 +99,57 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
 
     let entry: ParsedEntry;
 
+    const rowType = (row["type"] ?? "").toLowerCase();
+    const isNote = rowType === "securenote" || rowType === "note";
+
     switch (format) {
       case "bitwarden":
         entry = {
+          entryType: isNote ? "SECURE_NOTE" : "LOGIN",
           title: row["name"] ?? "",
           username: row["login_username"] ?? "",
           password: row["login_password"] ?? "",
+          content: isNote ? (row["notes"] ?? "") : "",
           url: row["login_uri"] ?? "",
-          notes: row["notes"] ?? "",
+          notes: isNote ? "" : (row["notes"] ?? ""),
         };
         break;
       case "chrome":
         entry = {
+          entryType: "LOGIN",
           title: row["name"] ?? "",
           username: row["username"] ?? "",
           password: row["password"] ?? "",
+          content: "",
           url: row["url"] ?? "",
           notes: row["note"] ?? "",
         };
         break;
       case "onepassword":
         entry = {
+          entryType: isNote ? "SECURE_NOTE" : "LOGIN",
           title: row["title"] ?? "",
           username: row["username"] ?? "",
           password: row["password"] ?? "",
+          content: isNote ? (row["notes"] ?? "") : "",
           url: row["url"] ?? row["urls"] ?? "",
-          notes: row["notes"] ?? "",
+          notes: isNote ? "" : (row["notes"] ?? ""),
         };
         break;
       default:
-        // Best effort: try common column names
         entry = {
+          entryType: isNote ? "SECURE_NOTE" : "LOGIN",
           title: row["name"] ?? row["title"] ?? fields[0] ?? "",
           username: row["username"] ?? row["login_username"] ?? fields[1] ?? "",
           password: row["password"] ?? row["login_password"] ?? fields[2] ?? "",
+          content: isNote ? (row["notes"] ?? "") : "",
           url: row["url"] ?? row["login_uri"] ?? "",
-          notes: row["notes"] ?? "",
+          notes: isNote ? "" : (row["notes"] ?? ""),
         };
     }
 
-    if (entry.title && entry.password) {
+    // Login entries need title+password, notes need title only
+    if (entry.entryType === "SECURE_NOTE" ? !!entry.title : (!!entry.title && !!entry.password)) {
       entries.push(entry);
     }
   }
@@ -217,31 +230,46 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
       setProgress({ current: i + 1, total: entries.length });
 
       try {
-        let urlHost: string | null = null;
-        if (entry.url) {
-          try {
-            urlHost = new URL(entry.url).hostname;
-          } catch {
-            /* invalid url */
+        const isNote = entry.entryType === "SECURE_NOTE";
+        let fullBlob: string;
+        let overviewBlob: string;
+
+        if (isNote) {
+          fullBlob = JSON.stringify({
+            title: entry.title,
+            content: entry.content || "",
+            tags: [],
+          });
+          overviewBlob = JSON.stringify({
+            title: entry.title,
+            snippet: (entry.content || "").slice(0, 100),
+            tags: [],
+          });
+        } else {
+          let urlHost: string | null = null;
+          if (entry.url) {
+            try {
+              urlHost = new URL(entry.url).hostname;
+            } catch {
+              /* invalid url */
+            }
           }
+          fullBlob = JSON.stringify({
+            title: entry.title,
+            username: entry.username || null,
+            password: entry.password,
+            url: entry.url || null,
+            notes: entry.notes || null,
+            tags: [],
+            generatorSettings: null,
+          });
+          overviewBlob = JSON.stringify({
+            title: entry.title,
+            username: entry.username || null,
+            urlHost,
+            tags: [],
+          });
         }
-
-        const fullBlob = JSON.stringify({
-          title: entry.title,
-          username: entry.username || null,
-          password: entry.password,
-          url: entry.url || null,
-          notes: entry.notes || null,
-          tags: [],
-          generatorSettings: null,
-        });
-
-        const overviewBlob = JSON.stringify({
-          title: entry.title,
-          username: entry.username || null,
-          urlHost,
-          tags: [],
-        });
 
         const encryptedBlob = await encryptData(fullBlob, encryptionKey);
         const encryptedOverview = await encryptData(overviewBlob, encryptionKey);
@@ -252,6 +280,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
           body: JSON.stringify({
             encryptedBlob,
             encryptedOverview,
+            entryType: entry.entryType,
             keyVersion: 1,
           }),
         });
@@ -341,16 +370,20 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
                 <thead className="sticky top-0 bg-muted">
                   <tr>
                     <th className="px-2 py-1 text-left font-medium">{t("colTitle")}</th>
+                    <th className="px-2 py-1 text-left font-medium">{t("colType")}</th>
                     <th className="px-2 py-1 text-left font-medium">{t("colUsername")}</th>
-                    <th className="px-2 py-1 text-left font-medium">{t("colUrl")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {entries.map((entry, i) => (
                     <tr key={i}>
                       <td className="px-2 py-1 truncate max-w-[120px]">{entry.title}</td>
-                      <td className="px-2 py-1 truncate max-w-[120px]">{entry.username}</td>
-                      <td className="px-2 py-1 truncate max-w-[120px]">{entry.url}</td>
+                      <td className="px-2 py-1 text-muted-foreground">
+                        {entry.entryType === "SECURE_NOTE" ? t("typeNote") : t("typeLogin")}
+                      </td>
+                      <td className="px-2 py-1 truncate max-w-[120px]">
+                        {entry.entryType === "SECURE_NOTE" ? "—" : entry.username}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

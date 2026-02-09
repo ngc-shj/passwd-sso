@@ -47,7 +47,7 @@ describe("GET /api/orgs/trash", () => {
     expect(json).toEqual([]);
   });
 
-  it("returns trashed entries with decrypted overviews", async () => {
+  it("returns trashed entries with decrypted overviews and entryType", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
     const deletedAt = new Date("2025-01-02T00:00:00Z");
     mockPrismaOrgMember.findMany.mockResolvedValue([
@@ -57,6 +57,7 @@ describe("GET /api/orgs/trash", () => {
       {
         id: "pw-1",
         orgId: "org-1",
+        entryType: "LOGIN",
         isArchived: false,
         deletedAt,
         encryptedOverview: "cipher",
@@ -80,6 +81,7 @@ describe("GET /api/orgs/trash", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].title).toBe("Trashed PW");
+    expect(json[0].entryType).toBe("LOGIN");
     expect(json[0].deletedAt).toBeDefined();
   });
 });

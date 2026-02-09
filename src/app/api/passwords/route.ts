@@ -62,6 +62,7 @@ export async function GET(req: NextRequest) {
         }
       : {}),
     keyVersion: entry.keyVersion,
+    entryType: entry.entryType,
     isFavorite: entry.isFavorite,
     isArchived: entry.isArchived,
     tagIds: entry.tags.map((t) => t.id),
@@ -95,7 +96,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { encryptedBlob, encryptedOverview, keyVersion, tagIds } = parsed.data;
+  const { encryptedBlob, encryptedOverview, keyVersion, tagIds, entryType } = parsed.data;
 
   const entry = await prisma.passwordEntry.create({
     data: {
@@ -106,6 +107,7 @@ export async function POST(req: NextRequest) {
       overviewIv: encryptedOverview.iv,
       overviewAuthTag: encryptedOverview.authTag,
       keyVersion,
+      entryType,
       userId: session.user.id,
       ...(tagIds?.length
         ? { tags: { connect: tagIds.map((id) => ({ id })) } }
@@ -123,6 +125,7 @@ export async function POST(req: NextRequest) {
         authTag: entry.overviewAuthTag,
       },
       keyVersion: entry.keyVersion,
+      entryType: entry.entryType,
       tagIds: entry.tags.map((t) => t.id),
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,

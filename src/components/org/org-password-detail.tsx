@@ -32,9 +32,11 @@ interface OrgPasswordDetailProps {
 
 interface PasswordData {
   id: string;
+  entryType?: "LOGIN" | "SECURE_NOTE";
   title: string;
   username: string | null;
   password: string;
+  content?: string;
   url: string | null;
   notes: string | null;
   customFields: CustomField[];
@@ -112,138 +114,155 @@ export function OrgPasswordDetail({
           </div>
         ) : data ? (
           <div className="space-y-4">
-            {data.username && (
+            {data.entryType === "SECURE_NOTE" ? (
+              /* Secure Note: show content */
               <div>
                 <p className="text-xs text-muted-foreground mb-1">
-                  {t("username")}
+                  {t("content")}
                 </p>
-                <div className="flex items-center gap-2">
-                  <p className="text-sm flex-1 font-mono">{data.username}</p>
-                  <CopyButton getValue={() => data.username!} />
+                <div className="flex items-start gap-2">
+                  <p className="flex-1 text-sm whitespace-pre-wrap font-mono rounded-md bg-muted p-3 max-h-96 overflow-y-auto">
+                    {data.content}
+                  </p>
+                  <CopyButton getValue={() => data.content ?? ""} />
                 </div>
               </div>
-            )}
-
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">
-                {t("password")}
-              </p>
-              <div className="flex items-center gap-2">
-                <p className="text-sm flex-1 font-mono">
-                  {showPassword
-                    ? data.password
-                    : "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"}
-                </p>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </Button>
-                <CopyButton getValue={() => data.password} />
-              </div>
-              {showPassword && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  {t("autoHide")}
-                </p>
-              )}
-            </div>
-
-            {/* TOTP */}
-            {data.totp && (
-              <TOTPField mode="display" totp={data.totp} />
-            )}
-
-            {data.url && (
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">
-                  {t("url")}
-                </p>
-                <div className="flex items-center gap-2">
-                  <p className="text-sm flex-1 truncate">{data.url}</p>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => window.open(data.url!, "_blank")}
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {data.notes && (
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">
-                  {t("notes")}
-                </p>
-                <p className="text-sm whitespace-pre-wrap">{data.notes}</p>
-              </div>
-            )}
-
-            {/* Custom Fields */}
-            {data.customFields.length > 0 && (
-              <div className="space-y-3">
-                <p className="text-xs text-muted-foreground font-medium">
-                  {tf("customFields")}
-                </p>
-                {data.customFields.map((field, idx) => (
-                  <div key={idx}>
+            ) : (
+              <>
+                {data.username && (
+                  <div>
                     <p className="text-xs text-muted-foreground mb-1">
-                      {field.label}
+                      {t("username")}
                     </p>
                     <div className="flex items-center gap-2">
-                      {field.type === "hidden" ? (
-                        <>
-                          <p className="text-sm flex-1 font-mono">
-                            {hiddenFieldsVisible.has(idx)
-                              ? field.value
-                              : "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"}
-                          </p>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => toggleHiddenField(idx)}
-                          >
-                            {hiddenFieldsVisible.has(idx) ? (
-                              <EyeOff className="h-4 w-4" />
-                            ) : (
-                              <Eye className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </>
-                      ) : field.type === "url" ? (
-                        <>
-                          <p className="text-sm flex-1 truncate">
-                            {field.value}
-                          </p>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() =>
-                              window.open(field.value, "_blank")
-                            }
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                          </Button>
-                        </>
-                      ) : (
-                        <p className="text-sm flex-1">{field.value}</p>
-                      )}
-                      <CopyButton getValue={() => field.value} />
+                      <p className="text-sm flex-1 font-mono">{data.username}</p>
+                      <CopyButton getValue={() => data.username!} />
                     </div>
                   </div>
-                ))}
-              </div>
+                )}
+
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    {t("password")}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm flex-1 font-mono">
+                      {showPassword
+                        ? data.password
+                        : "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"}
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
+                    <CopyButton getValue={() => data.password} />
+                  </div>
+                  {showPassword && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {t("autoHide")}
+                    </p>
+                  )}
+                </div>
+
+                {/* TOTP */}
+                {data.totp && (
+                  <TOTPField mode="display" totp={data.totp} />
+                )}
+
+                {data.url && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {t("url")}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm flex-1 truncate">{data.url}</p>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => window.open(data.url!, "_blank")}
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {data.notes && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {t("notes")}
+                    </p>
+                    <p className="text-sm whitespace-pre-wrap">{data.notes}</p>
+                  </div>
+                )}
+
+                {/* Custom Fields */}
+                {data.customFields.length > 0 && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground font-medium">
+                      {tf("customFields")}
+                    </p>
+                    {data.customFields.map((field, idx) => (
+                      <div key={idx}>
+                        <p className="text-xs text-muted-foreground mb-1">
+                          {field.label}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          {field.type === "hidden" ? (
+                            <>
+                              <p className="text-sm flex-1 font-mono">
+                                {hiddenFieldsVisible.has(idx)
+                                  ? field.value
+                                  : "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"}
+                              </p>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => toggleHiddenField(idx)}
+                              >
+                                {hiddenFieldsVisible.has(idx) ? (
+                                  <EyeOff className="h-4 w-4" />
+                                ) : (
+                                  <Eye className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </>
+                          ) : field.type === "url" ? (
+                            <>
+                              <p className="text-sm flex-1 truncate">
+                                {field.value}
+                              </p>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() =>
+                                  window.open(field.value, "_blank")
+                                }
+                              >
+                                <ExternalLink className="h-4 w-4" />
+                              </Button>
+                            </>
+                          ) : (
+                            <p className="text-sm flex-1">{field.value}</p>
+                          )}
+                          <CopyButton getValue={() => field.value} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
 
             {/* Tags */}

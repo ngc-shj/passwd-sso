@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, use } from "react";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { PasswordCard } from "@/components/passwords/password-card";
@@ -9,7 +10,13 @@ import { OrgPasswordForm } from "@/components/org/org-password-form";
 import { OrgRoleBadge } from "@/components/org/org-role-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Settings, KeyRound, Search } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Plus, Settings, KeyRound, Search, FileText } from "lucide-react";
 import { toast } from "sonner";
 
 interface OrgInfo {
@@ -23,9 +30,11 @@ interface OrgInfo {
 
 interface OrgPasswordEntry {
   id: string;
+  entryType: "LOGIN" | "SECURE_NOTE";
   title: string;
   username: string | null;
   urlHost: string | null;
+  snippet: string | null;
   isFavorite: boolean;
   isArchived: boolean;
   tags: { id: string; name: string; color: string | null }[];
@@ -41,6 +50,8 @@ export default function OrgDashboardPage({
   params: Promise<{ orgId: string }>;
 }) {
   const { orgId } = use(params);
+  const searchParams = useSearchParams();
+  const activeTagId = searchParams.get("tag");
   const t = useTranslations("Org");
   const [org, setOrg] = useState<OrgInfo | null>(null);
   const [passwords, setPasswords] = useState<OrgPasswordEntry[]>([]);
@@ -49,11 +60,14 @@ export default function OrgDashboardPage({
   const [searchQuery, setSearchQuery] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [newEntryType, setNewEntryType] = useState<"LOGIN" | "SECURE_NOTE">("LOGIN");
   const [editData, setEditData] = useState<{
     id: string;
+    entryType?: "LOGIN" | "SECURE_NOTE";
     title: string;
     username: string | null;
     password: string;
+    content?: string;
     url: string | null;
     notes: string | null;
     tags?: { id: string; name: string; color: string | null }[];
@@ -82,14 +96,17 @@ export default function OrgDashboardPage({
 
   const fetchPasswords = useCallback(() => {
     setLoading(true);
-    fetch(`/api/orgs/${orgId}/passwords`)
+    const url = activeTagId
+      ? `/api/orgs/${orgId}/passwords?tag=${activeTagId}`
+      : `/api/orgs/${orgId}/passwords`;
+    fetch(url)
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data)) setPasswords(data);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [orgId]);
+  }, [orgId, activeTagId]);
 
   useEffect(() => {
     setLoadError(false);
@@ -160,16 +177,18 @@ export default function OrgDashboardPage({
   };
 
   const createDetailFetcher = useCallback(
-    (id: string) => async (): Promise<InlineDetailData> => {
+    (id: string, eType?: "LOGIN" | "SECURE_NOTE") => async (): Promise<InlineDetailData> => {
       const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`);
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       return {
         id: data.id,
-        password: data.password,
-        url: data.url,
+        entryType: eType,
+        password: data.password ?? "",
+        content: data.content,
+        url: data.url ?? null,
         urlHost: null,
-        notes: data.notes,
+        notes: data.notes ?? null,
         customFields: data.customFields ?? [],
         passwordHistory: [],
         totp: data.totp ?? undefined,
@@ -185,7 +204,7 @@ export default function OrgDashboardPage({
       const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`);
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
-      return data.password;
+      return data.password ?? data.content ?? "";
     },
     [orgId]
   );
@@ -206,7 +225,8 @@ export default function OrgDashboardPage({
     return (
       p.title.toLowerCase().includes(q) ||
       p.username?.toLowerCase().includes(q) ||
-      p.urlHost?.toLowerCase().includes(q)
+      p.urlHost?.toLowerCase().includes(q) ||
+      p.snippet?.toLowerCase().includes(q)
     );
   });
 
@@ -247,16 +267,24 @@ export default function OrgDashboardPage({
               </Button>
             )}
             {canCreate && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  setEditData(null);
-                  setFormOpen(true);
-                }}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                {t("newPassword")}
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm">
+                    <Plus className="h-4 w-4 mr-2" />
+                    {t("newItem")}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType("LOGIN"); setFormOpen(true); }}>
+                    <KeyRound className="h-4 w-4 mr-2" />
+                    {t("newPassword")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType("SECURE_NOTE"); setFormOpen(true); }}>
+                    <FileText className="h-4 w-4 mr-2" />
+                    {t("newSecureNote")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
         </div>
@@ -291,9 +319,11 @@ export default function OrgDashboardPage({
               <PasswordCard
                 key={entry.id}
                 id={entry.id}
+                entryType={entry.entryType}
                 title={entry.title}
                 username={entry.username}
                 urlHost={entry.urlHost}
+                snippet={entry.snippet}
                 tags={entry.tags}
                 isFavorite={entry.isFavorite}
                 isArchived={entry.isArchived}
@@ -309,7 +339,7 @@ export default function OrgDashboardPage({
                   setExpandedId(null);
                 }}
                 getPassword={createPasswordFetcher(entry.id)}
-                getDetail={createDetailFetcher(entry.id)}
+                getDetail={createDetailFetcher(entry.id, entry.entryType)}
                 getUrl={createUrlFetcher(entry.id)}
                 onEditClick={() => handleEdit(entry.id)}
                 canEdit={canEditPerm}
@@ -334,6 +364,7 @@ export default function OrgDashboardPage({
           setExpandedId(null);
         }}
         editData={editData}
+        entryType={editData?.entryType ?? newEntryType}
       />
     </div>
   );

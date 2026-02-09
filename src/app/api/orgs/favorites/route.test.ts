@@ -48,7 +48,7 @@ describe("GET /api/orgs/favorites", () => {
     expect(json).toEqual([]);
   });
 
-  it("returns favorited entries with decrypted overviews", async () => {
+  it("returns favorited entries with decrypted overviews and entryType", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
     mockPrismaOrgMember.findMany.mockResolvedValue([
       { orgId: "org-1", role: "MEMBER" },
@@ -58,6 +58,7 @@ describe("GET /api/orgs/favorites", () => {
         orgPasswordEntry: {
           id: "pw-1",
           orgId: "org-1",
+          entryType: "LOGIN",
           deletedAt: null,
           isArchived: false,
           encryptedOverview: "cipher",
@@ -81,6 +82,7 @@ describe("GET /api/orgs/favorites", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].title).toBe("Fav PW");
+    expect(json[0].entryType).toBe("LOGIN");
     expect(json[0].isFavorite).toBe(true);
   });
 });

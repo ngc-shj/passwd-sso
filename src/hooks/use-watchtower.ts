@@ -94,11 +94,12 @@ export function useWatchtower() {
         return;
       }
 
-      // Step 2: Decrypt all entries
+      // Step 2: Decrypt all entries (skip SECURE_NOTE — no password to analyze)
       setProgress({ current: 1, total: 4, step: "decrypting" });
       const entries: DecryptedEntry[] = [];
       for (const raw of rawEntries) {
         if (!raw.encryptedBlob) continue;
+        if (raw.entryType === "SECURE_NOTE") continue;
         try {
           const plaintext = await decryptData(
             raw.encryptedBlob as EncryptedData,

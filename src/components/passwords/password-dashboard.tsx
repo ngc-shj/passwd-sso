@@ -22,7 +22,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, ArrowUpDown } from "lucide-react";
+import { Plus, ArrowUpDown, KeyRound, FileText } from "lucide-react";
 
 type VaultView = "all" | "favorites" | "archive" | "trash";
 
@@ -39,6 +39,7 @@ export function PasswordDashboard({ view, tagId }: PasswordDashboardProps) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [sortBy, setSortBy] = useState<SortOption>("updatedAt");
   const [newDialogOpen, setNewDialogOpen] = useState(false);
+  const [newEntryType, setNewEntryType] = useState<"LOGIN" | "SECURE_NOTE">("LOGIN");
   const [helpOpen, setHelpOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -151,10 +152,24 @@ export function PasswordDashboard({ view, tagId }: PasswordDashboardProps) {
               </DropdownMenu>
             )}
             {!isTrash && !isArchive && (
-              <Button onClick={() => setNewDialogOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                {t("newPassword")}
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button>
+                    <Plus className="h-4 w-4 mr-2" />
+                    {t("newItem")}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => { setNewEntryType("LOGIN"); setNewDialogOpen(true); }}>
+                    <KeyRound className="h-4 w-4 mr-2" />
+                    {t("newPassword")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setNewEntryType("SECURE_NOTE"); setNewDialogOpen(true); }}>
+                    <FileText className="h-4 w-4 mr-2" />
+                    {t("newSecureNote")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
         </div>
@@ -199,6 +214,7 @@ export function PasswordDashboard({ view, tagId }: PasswordDashboardProps) {
         open={newDialogOpen}
         onOpenChange={setNewDialogOpen}
         onSaved={handleDataChange}
+        entryType={newEntryType}
       />
 
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>

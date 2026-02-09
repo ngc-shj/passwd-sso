@@ -17,11 +17,14 @@ const encryptedFieldSchema = z.object({
   authTag: z.string().length(32), // 16 bytes hex
 });
 
+export const entryTypeSchema = z.enum(["LOGIN", "SECURE_NOTE"]);
+
 export const createE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
   keyVersion: z.number().int().min(1),
   tagIds: z.array(z.string().cuid()).optional(),
+  entryType: entryTypeSchema.optional().default("LOGIN"),
 });
 
 export const updateE2EPasswordSchema = z.object({
@@ -31,6 +34,7 @@ export const updateE2EPasswordSchema = z.object({
   tagIds: z.array(z.string().cuid()).optional(),
   isFavorite: z.boolean().optional(),
   isArchived: z.boolean().optional(),
+  entryType: entryTypeSchema.optional(),
 });
 
 // ─── Tag Schemas ────────────────────────────────────────────
@@ -124,6 +128,20 @@ export const updateOrgPasswordSchema = z.object({
   isArchived: z.boolean().optional(),
 });
 
+export const createOrgSecureNoteSchema = z.object({
+  entryType: z.literal("SECURE_NOTE"),
+  title: z.string().min(1).max(200).trim(),
+  content: z.string().max(50000),
+  tagIds: z.array(z.string().cuid()).optional(),
+});
+
+export const updateOrgSecureNoteSchema = z.object({
+  title: z.string().min(1).max(200).trim().optional(),
+  content: z.string().max(50000).optional(),
+  tagIds: z.array(z.string().cuid()).optional(),
+  isArchived: z.boolean().optional(),
+});
+
 export const createOrgTagSchema = z.object({
   name: z.string().min(1).max(50).trim(),
   color: z
@@ -147,4 +165,6 @@ export type InviteInput = z.infer<typeof inviteSchema>;
 export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
 export type CreateOrgPasswordInput = z.infer<typeof createOrgPasswordSchema>;
 export type UpdateOrgPasswordInput = z.infer<typeof updateOrgPasswordSchema>;
+export type CreateOrgSecureNoteInput = z.infer<typeof createOrgSecureNoteSchema>;
+export type UpdateOrgSecureNoteInput = z.infer<typeof updateOrgSecureNoteSchema>;
 export type CreateOrgTagInput = z.infer<typeof createOrgTagSchema>;

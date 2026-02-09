@@ -74,12 +74,14 @@ export async function GET() {
 
     return {
       id: entry.id,
+      entryType: entry.entryType,
       orgId: entry.org.id,
       orgName: entry.org.name,
       role: roleMap.get(entry.orgId),
       title: overview.title,
-      username: overview.username,
-      urlHost: overview.urlHost,
+      username: overview.username ?? null,
+      urlHost: overview.urlHost ?? null,
+      snippet: overview.snippet ?? null,
       isFavorite: entry.favorites.length > 0,
       isArchived: entry.isArchived,
       deletedAt: entry.deletedAt,

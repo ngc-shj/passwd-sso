@@ -27,6 +27,7 @@ const mockEntry = {
   blobIv: "blob-iv",
   blobAuthTag: "blob-tag",
   keyVersion: 1,
+  entryType: "LOGIN",
   isFavorite: false,
   isArchived: false,
   tags: [{ id: "t1" }],
@@ -48,7 +49,7 @@ describe("GET /api/passwords", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns password entries with encrypted overviews", async () => {
+  it("returns password entries with encrypted overviews and entryType", async () => {
     mockPrismaPasswordEntry.findMany.mockResolvedValue([mockEntry]);
     const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
     const json = await res.json();
@@ -59,9 +60,19 @@ describe("GET /api/passwords", () => {
       iv: "overview-iv",
       authTag: "overview-tag",
     });
+    expect(json[0].entryType).toBe("LOGIN");
     expect(json[0].tagIds).toEqual(["t1"]);
     // Should not include blob by default
     expect(json[0].encryptedBlob).toBeUndefined();
+  });
+
+  it("returns SECURE_NOTE entryType", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([
+      { ...mockEntry, id: "pw-note", entryType: "SECURE_NOTE" },
+    ]);
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    const json = await res.json();
+    expect(json[0].entryType).toBe("SECURE_NOTE");
   });
 
   it("includes blob when include=blob", async () => {
@@ -119,6 +130,7 @@ describe("POST /api/passwords", () => {
       overviewIv: "c".repeat(24),
       overviewAuthTag: "d".repeat(32),
       keyVersion: 1,
+      entryType: "LOGIN",
       tags: [],
       createdAt: now,
       updatedAt: now,
@@ -130,6 +142,28 @@ describe("POST /api/passwords", () => {
     const json = await res.json();
     expect(res.status).toBe(201);
     expect(json.id).toBe("new-pw");
+    expect(json.entryType).toBe("LOGIN");
     expect(json.tagIds).toEqual([]);
+  });
+
+  it("creates SECURE_NOTE entry (201)", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-note",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      entryType: "SECURE_NOTE",
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: { ...validBody, entryType: "SECURE_NOTE" },
+    }));
+    const json = await res.json();
+    expect(res.status).toBe(201);
+    expect(json.entryType).toBe("SECURE_NOTE");
   });
 });

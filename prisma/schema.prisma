@@ -126,6 +126,7 @@ model PasswordEntry {
   overviewIv        String   @map("overview_iv") @db.VarChar(24)
   overviewAuthTag   String   @map("overview_auth_tag") @db.VarChar(32)
   keyVersion        Int      @map("key_version")
+  entryType         EntryType @default(LOGIN) @map("entry_type")
 
   // Metadata (unencrypted)
   isFavorite        Boolean  @default(false) @map("is_favorite")
@@ -144,6 +145,11 @@ model PasswordEntry {
 }
 
 // ─── Organization Models ────────────────────────────────────────
+
+enum EntryType {
+  LOGIN
+  SECURE_NOTE
+}
 
 enum OrgRole {
   OWNER
@@ -208,6 +214,7 @@ model OrgPasswordEntry {
   encryptedOverview String @map("encrypted_overview") @db.Text
   overviewIv        String @map("overview_iv") @db.VarChar(24)
   overviewAuthTag   String @map("overview_auth_tag") @db.VarChar(32)
+  entryType         EntryType @default(LOGIN) @map("entry_type")
 
   // Metadata (unencrypted)
   isArchived Boolean   @default(false) @map("is_archived")

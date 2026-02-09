@@ -39,15 +39,17 @@
     "sortCreated": "作成日順",
     "export": "エクスポート",
     "import": "インポート",
-    "archive": "アーカイブ"
+    "archive": "アーカイブ",
+    "newItem": "新規アイテム",
+    "newSecureNote": "セキュアノート"
   },
   "PasswordList": {
-    "noMatch": "検索に一致するパスワードがありません。",
-    "noPasswords": "保存されたパスワードはまだありません。",
+    "noMatch": "検索に一致するアイテムがありません。",
+    "noPasswords": "保存されたアイテムはまだありません。",
     "noFavorites": "お気に入りはまだありません。",
     "noArchive": "アーカイブされたアイテムはありません。",
     "noTrash": "ゴミ箱は空です。",
-    "addFirst": "「新規パスワード」をクリックして最初のエントリを追加してください。"
+    "addFirst": "「新規アイテム」をクリックして最初のエントリを追加してください。"
   },
   "Trash": {
     "title": "ゴミ箱",
@@ -90,6 +92,19 @@
     "totp": "認証コード (TOTP)",
     "addTotp": "TOTP を追加"
   },
+  "SecureNoteForm": {
+    "newNote": "新規セキュアノート",
+    "editNote": "セキュアノートを編集",
+    "title": "タイトル *",
+    "titlePlaceholder": "例: APIキー, ライセンスキー, リカバリコード",
+    "content": "内容 *",
+    "contentPlaceholder": "セキュアノートを入力...",
+    "tags": "タグ",
+    "saved": "セキュアノートを保存しました",
+    "updated": "セキュアノートを更新しました",
+    "failedToSave": "保存に失敗しました",
+    "networkError": "ネットワークエラー"
+  },
   "PasswordDetail": {
     "username": "ユーザー名",
     "password": "パスワード",
@@ -110,7 +125,8 @@
     "unarchive": "アーカイブ解除",
     "archived": "アーカイブしました",
     "unarchived": "アーカイブを解除しました",
-    "passwordHistory": "パスワード履歴"
+    "passwordHistory": "パスワード履歴",
+    "content": "内容"
   },
   "PasswordGenerator": {
     "use": "使用",
@@ -141,14 +157,16 @@
     "archived": "アーカイブしました",
     "unarchived": "アーカイブを解除しました",
     "networkError": "ネットワークエラー",
-    "moreActions": "その他のアクション"
+    "moreActions": "その他のアクション",
+    "copyContent": "内容をコピー",
+    "secureNote": "セキュアノート"
   },
   "CopyButton": {
     "copied": "コピーしました！（30秒後にクリア）",
     "copy": "クリップボードにコピー"
   },
   "SearchBar": {
-    "placeholder": "パスワードを検索..."
+    "placeholder": "アイテムを検索..."
   },
   "NotFound": {
     "title": "ページが見つかりません",
@@ -196,8 +214,11 @@
     "detectedFormat": "検出された形式",
     "unknownFormat": "形式を自動検出できませんでした。結果が正しくない場合があります。",
     "colTitle": "タイトル",
+    "colType": "タイプ",
     "colUsername": "ユーザー名",
     "colUrl": "URL",
+    "typeLogin": "ログイン",
+    "typeNote": "ノート",
     "entryCount": "{count} 件のエントリーが見つかりました",
     "importButton": "{count} 件をインポート",
     "importing": "{current} / {total} をインポート中...",
@@ -313,9 +334,11 @@
     "roleViewer": "閲覧者",
     "you": "（あなた）",
     "passwords": "パスワード",
+    "newItem": "新規アイテム",
     "newPassword": "新規パスワード",
     "allPasswords": "すべてのパスワード",
     "noPasswords": "この組織にはパスワードがありません。",
+    "newSecureNote": "セキュアノート",
     "noPasswordsDesc": "「新規パスワード」をクリックして最初のエントリを追加してください。",
     "createdBy": "{name} が作成",
     "updatedBy": "{name} が更新",
@@ -338,6 +361,7 @@
     "organizationFavorites": "組織のお気に入り",
     "organizationArchive": "組織のアーカイブ",
     "organizationTrash": "組織のゴミ箱",
-    "backToOrg": "{name} に戻る"
+    "backToOrg": "{name} に戻る",
+    "tags": "タグ"
   }
 }

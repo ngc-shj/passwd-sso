@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,12 @@ interface TagItem {
   passwordCount: number;
 }
 
+interface OrgTagGroup {
+  orgId: string;
+  orgName: string;
+  tags: { id: string; name: string; color: string | null; count: number }[];
+}
+
 interface OrgItem {
   id: string;
   name: string;
@@ -38,8 +44,10 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const tOrg = useTranslations("Org");
   const [tags, setTags] = useState<TagItem[]>([]);
   const [orgs, setOrgs] = useState<OrgItem[]>([]);
+  const [orgTagGroups, setOrgTagGroups] = useState<OrgTagGroup[]>([]);
 
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   // Strip locale prefix for route matching
   const cleanPath = pathname.replace(/^\/(ja|en)/, "");
@@ -54,6 +62,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const activeTagId = tagMatch ? tagMatch[1] : null;
   const orgMatch = cleanPath.match(/^\/dashboard\/orgs\/([^/]+)/);
   const activeOrgId = orgMatch ? orgMatch[1] : null;
+  const activeOrgTagId = activeOrgId ? searchParams.get("tag") : null;
   const isOrgsManage = cleanPath === "/dashboard/orgs";
 
   const fetchData = () => {
@@ -72,8 +81,25 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         if (!res.ok) throw new Error("Failed to fetch orgs");
         return res.json();
       })
-      .then((data) => {
-        if (Array.isArray(data)) setOrgs(data);
+      .then(async (data) => {
+        if (!Array.isArray(data)) return;
+        setOrgs(data);
+
+        // Fetch tags for all orgs in parallel
+        const groups: OrgTagGroup[] = [];
+        await Promise.all(
+          data.map(async (org: OrgItem) => {
+            try {
+              const res = await fetch(`/api/orgs/${org.id}/tags`);
+              if (!res.ok) return;
+              const tags = await res.json();
+              if (Array.isArray(tags) && tags.length > 0) {
+                groups.push({ orgId: org.id, orgName: org.name, tags });
+              }
+            } catch { /* ignore */ }
+          })
+        );
+        setOrgTagGroups(groups);
       })
       .catch(() => {});
   };
@@ -180,7 +206,8 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         </div>
       </div>
 
-      {tags.filter((t) => t.passwordCount > 0).length > 0 && (
+
+      {(tags.filter((tg) => tg.passwordCount > 0).length > 0 || orgTagGroups.length > 0) && (
         <>
           <Separator />
           <div>
@@ -188,7 +215,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
               {t("organize")}
             </SectionLabel>
             <div className="space-y-1">
-              {tags.filter((t) => t.passwordCount > 0).map((tag) => {
+              {tags.filter((tg) => tg.passwordCount > 0).map((tag) => {
                 const colorClass = getTagColorClass(tag.color);
                 return (
                   <Button
@@ -219,6 +246,45 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
               })}
             </div>
           </div>
+
+          {orgTagGroups.map((group) => (
+            <div key={group.orgId}>
+              <SectionLabel icon={<Building2 className="h-3 w-3" />}>
+                {group.orgName}
+              </SectionLabel>
+              <div className="space-y-1">
+                {group.tags.map((tag) => {
+                  const colorClass = getTagColorClass(tag.color);
+                  return (
+                    <Button
+                      key={tag.id}
+                      variant={activeOrgTagId === tag.id ? "secondary" : "ghost"}
+                      className="w-full justify-start gap-2"
+                      asChild
+                    >
+                      <Link
+                        href={`/dashboard/orgs/${group.orgId}?tag=${tag.id}`}
+                        onClick={() => onOpenChange(false)}
+                      >
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "h-3 w-3 rounded-full p-0",
+                            colorClass && "tag-color-bg",
+                            colorClass
+                          )}
+                        />
+                        {tag.name}
+                        <span className="ml-auto text-xs text-muted-foreground">
+                          {tag.count}
+                        </span>
+                      </Link>
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </>
       )}
 

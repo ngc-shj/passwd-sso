@@ -19,9 +19,11 @@ import { Download, Loader2, AlertTriangle } from "lucide-react";
 type ExportFormat = "csv" | "json";
 
 interface DecryptedExport {
+  entryType: "LOGIN" | "SECURE_NOTE";
   title: string;
   username: string | null;
   password: string;
+  content: string | null;
   url: string | null;
   notes: string | null;
   totp: string | null;
@@ -56,9 +58,11 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
           );
           const parsed = JSON.parse(plaintext);
           entries.push({
+            entryType: raw.entryType ?? "LOGIN",
             title: parsed.title ?? "",
             username: parsed.username ?? null,
             password: parsed.password ?? "",
+            content: parsed.content ?? null,
             url: parsed.url ?? null,
             notes: parsed.notes ?? null,
             totp: parsed.totp?.secret ?? null,
@@ -75,26 +79,27 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
         // Bitwarden-compatible CSV format
         const header =
           "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp";
+        const escapeCsv = (val: string | null) => {
+          if (!val) return "";
+          if (val.includes(",") || val.includes('"') || val.includes("\n")) {
+            return `"${val.replace(/"/g, '""')}"`;
+          }
+          return val;
+        };
         const rows = entries.map((e) => {
-          const escapeCsv = (val: string | null) => {
-            if (!val) return "";
-            if (val.includes(",") || val.includes('"') || val.includes("\n")) {
-              return `"${val.replace(/"/g, '""')}"`;
-            }
-            return val;
-          };
+          const isNote = e.entryType === "SECURE_NOTE";
           return [
             "", // folder
             "", // favorite
-            "login", // type
+            isNote ? "securenote" : "login", // type
             escapeCsv(e.title),
-            escapeCsv(e.notes),
+            escapeCsv(isNote ? e.content : e.notes), // notes column
             "", // fields
             "", // reprompt
-            escapeCsv(e.url),
-            escapeCsv(e.username),
-            escapeCsv(e.password),
-            escapeCsv(e.totp),
+            isNote ? "" : escapeCsv(e.url),
+            isNote ? "" : escapeCsv(e.username),
+            isNote ? "" : escapeCsv(e.password),
+            isNote ? "" : escapeCsv(e.totp),
           ].join(",");
         });
         const csvContent = [header, ...rows].join("\n");
@@ -104,17 +109,26 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
         const jsonContent = JSON.stringify(
           {
             exportedAt: new Date().toISOString(),
-            entries: entries.map((e) => ({
-              type: "login",
-              name: e.title,
-              login: {
-                username: e.username,
-                password: e.password,
-                uris: e.url ? [{ uri: e.url }] : [],
-                totp: e.totp,
-              },
-              notes: e.notes,
-            })),
+            entries: entries.map((e) => {
+              if (e.entryType === "SECURE_NOTE") {
+                return {
+                  type: "securenote",
+                  name: e.title,
+                  notes: e.content,
+                };
+              }
+              return {
+                type: "login",
+                name: e.title,
+                login: {
+                  username: e.username,
+                  password: e.password,
+                  uris: e.url ? [{ uri: e.url }] : [],
+                  totp: e.totp,
+                },
+                notes: e.notes,
+              };
+            }),
           },
           null,
           2

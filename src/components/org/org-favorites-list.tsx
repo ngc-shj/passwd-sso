@@ -9,12 +9,14 @@ import { Building2 } from "lucide-react";
 
 interface OrgFavoriteEntry {
   id: string;
+  entryType: "LOGIN" | "SECURE_NOTE";
   orgId: string;
   orgName: string;
   role: string;
   title: string;
   username: string | null;
   urlHost: string | null;
+  snippet: string | null;
   isFavorite: boolean;
   isArchived: boolean;
   tags: { id: string; name: string; color: string | null }[];
@@ -135,10 +137,12 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
         const data = await res.json();
         return {
           id: data.id,
-          password: data.password,
-          url: data.url,
+          entryType: entry.entryType,
+          password: data.password ?? "",
+          content: data.content,
+          url: data.url ?? null,
           urlHost: null,
-          notes: data.notes,
+          notes: data.notes ?? null,
           customFields: data.customFields ?? [],
           passwordHistory: [],
           totp: data.totp ?? undefined,
@@ -157,7 +161,7 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
         );
         if (!res.ok) throw new Error("Failed");
         const data = await res.json();
-        return data.password;
+        return data.password ?? data.content ?? "";
       },
     []
   );
@@ -183,6 +187,7 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
       p.title.toLowerCase().includes(q) ||
       p.username?.toLowerCase().includes(q) ||
       p.urlHost?.toLowerCase().includes(q) ||
+      p.snippet?.toLowerCase().includes(q) ||
       p.orgName.toLowerCase().includes(q)
     );
   });
@@ -202,9 +207,11 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
           <PasswordCard
             key={entry.id}
             id={entry.id}
+            entryType={entry.entryType}
             title={entry.title}
             username={entry.username}
             urlHost={entry.urlHost}
+            snippet={entry.snippet}
             tags={entry.tags}
             isFavorite={entry.isFavorite}
             isArchived={entry.isArchived}

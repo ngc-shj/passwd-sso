@@ -10,6 +10,7 @@ import {
   type CustomField,
   type TOTPEntry,
 } from "./password-form";
+import { SecureNoteForm } from "./secure-note-form";
 import type { TagData } from "@/components/tags/tag-input";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import {
@@ -22,10 +23,11 @@ import { Loader2 } from "lucide-react";
 
 interface VaultEntryFull {
   title: string;
-  username: string | null;
-  password: string;
-  url: string | null;
-  notes: string | null;
+  username?: string | null;
+  password?: string;
+  content?: string;
+  url?: string | null;
+  notes?: string | null;
   tags: Array<{ name: string; color: string | null }>;
   generatorSettings?: GeneratorSettings;
   passwordHistory?: PasswordHistoryEntry[];
@@ -35,9 +37,11 @@ interface VaultEntryFull {
 
 interface FormData {
   id: string;
+  entryType: "LOGIN" | "SECURE_NOTE";
   title: string;
   username: string;
   password: string;
+  content: string;
   url: string;
   notes: string;
   tags: TagData[];
@@ -61,6 +65,7 @@ export function PasswordEditDialog({
   onSaved,
 }: PasswordEditDialogProps) {
   const t = useTranslations("PasswordForm");
+  const tn = useTranslations("SecureNoteForm");
   const td = useTranslations("PasswordDetail");
   const { encryptionKey } = useVault();
   const [data, setData] = useState<FormData | null>(null);
@@ -95,9 +100,11 @@ export function PasswordEditDialog({
         if (cancelled) return;
         setData({
           id: raw.id,
+          entryType: raw.entryType ?? "LOGIN",
           title: entry.title,
           username: entry.username ?? "",
-          password: entry.password,
+          password: entry.password ?? "",
+          content: entry.content ?? "",
           url: entry.url ?? "",
           notes: entry.notes ?? "",
           tags: resolvedTags,
@@ -124,11 +131,15 @@ export function PasswordEditDialog({
     onSaved();
   };
 
+  const isNote = data?.entryType === "SECURE_NOTE";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{t("editPassword")}</DialogTitle>
+          <DialogTitle>
+            {isNote ? tn("editNote") : t("editPassword")}
+          </DialogTitle>
         </DialogHeader>
         {error ? (
           <p className="text-muted-foreground text-center py-8">{error}</p>
@@ -136,6 +147,18 @@ export function PasswordEditDialog({
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
+        ) : isNote ? (
+          <SecureNoteForm
+            mode="edit"
+            variant="dialog"
+            initialData={{
+              id: data.id,
+              title: data.title,
+              content: data.content,
+              tags: data.tags,
+            }}
+            onSaved={handleSaved}
+          />
         ) : (
           <PasswordForm
             mode="edit"

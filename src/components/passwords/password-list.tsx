@@ -9,16 +9,19 @@ import { Archive, KeyRound, Loader2, Star } from "lucide-react";
 
 interface DecryptedOverview {
   title: string;
-  username: string | null;
-  urlHost: string | null;
+  username?: string | null;
+  urlHost?: string | null;
+  snippet?: string | null;
   tags: Array<{ name: string; color: string | null }>;
 }
 
 interface DisplayEntry {
   id: string;
+  entryType: "LOGIN" | "SECURE_NOTE";
   title: string;
   username: string | null;
   urlHost: string | null;
+  snippet: string | null;
   tags: Array<{ name: string; color: string | null }>;
   isFavorite: boolean;
   isArchived: boolean;
@@ -88,15 +91,18 @@ export function PasswordList({
             const matches =
               overview.title.toLowerCase().includes(q) ||
               (overview.username?.toLowerCase().includes(q) ?? false) ||
-              (overview.urlHost?.toLowerCase().includes(q) ?? false);
+              (overview.urlHost?.toLowerCase().includes(q) ?? false) ||
+              (overview.snippet?.toLowerCase().includes(q) ?? false);
             if (!matches) continue;
           }
 
           decrypted.push({
             id: entry.id,
+            entryType: entry.entryType ?? "LOGIN",
             title: overview.title,
-            username: overview.username,
-            urlHost: overview.urlHost,
+            username: overview.username ?? null,
+            urlHost: overview.urlHost ?? null,
+            snippet: overview.snippet ?? null,
             tags: overview.tags ?? [],
             isFavorite: entry.isFavorite ?? false,
             isArchived: entry.isArchived ?? false,
@@ -228,9 +234,11 @@ export function PasswordList({
         <PasswordCard
           key={entry.id}
           id={entry.id}
+          entryType={entry.entryType}
           title={entry.title}
           username={entry.username}
           urlHost={entry.urlHost}
+          snippet={entry.snippet}
           tags={entry.tags}
           isFavorite={entry.isFavorite}
           isArchived={entry.isArchived}

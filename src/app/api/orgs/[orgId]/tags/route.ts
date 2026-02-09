@@ -31,7 +31,15 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const tags = await prisma.orgTag.findMany({
     where: { orgId },
     orderBy: { name: "asc" },
-    include: { _count: { select: { passwords: true } } },
+    include: {
+      _count: {
+        select: {
+          passwords: {
+            where: { deletedAt: null, isArchived: false },
+          },
+        },
+      },
+    },
   });
 
   return NextResponse.json(
