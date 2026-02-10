@@ -149,14 +149,3 @@ function applySecurityHeaders(
 
   return response;
 }
-
-export const config = {
-  matcher: [
-    // Match all paths except static assets and Next.js internals
-    "/((?!_next|_vercel|.*\\..*).*)",
-    // API auth-protected routes
-    "/api/passwords/:path*",
-    "/api/tags/:path*",
-    "/api/share-links/:path*",
-  ],
-};

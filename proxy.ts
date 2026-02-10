@@ -1,21 +1,24 @@
 import type { NextRequest } from "next/server";
-import { proxy } from "./src/proxy";
+import { proxy as handleProxy } from "./src/proxy";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const nonce = generateNonce();
   const cspHeader = buildCspHeader(nonce);
 
-  return proxy(request, { cspHeader, nonce });
+  return handleProxy(request, { cspHeader, nonce });
 }
 
 export const config = {
   matcher: [
     // Match all paths except static assets and Next.js internals
     "/((?!_next|_vercel|.*\\..*).*)",
-    // API auth-protected routes
+    // API auth-protected routes (explicit for clarity, already covered by catch-all above)
     "/api/passwords/:path*",
     "/api/tags/:path*",
     "/api/watchtower/:path*",
+    "/api/orgs/:path*",
+    "/api/audit-logs/:path*",
+    "/api/share-links/:path*",
   ],
 };
 

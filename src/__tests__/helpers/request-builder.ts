@@ -3,6 +3,8 @@
  * in Next.js App Router route handler tests.
  */
 
+import { NextRequest } from "next/server";
+
 export function createRequest(
   method: string,
   url: string = "http://localhost:3000/api/test",
@@ -11,7 +13,7 @@ export function createRequest(
     headers?: Record<string, string>;
     searchParams?: Record<string, string>;
   } = {}
-): Request {
+): NextRequest {
   const { body, headers = {}, searchParams = {} } = options;
 
   const urlObj = new URL(url);
@@ -31,7 +33,7 @@ export function createRequest(
     init.body = JSON.stringify(body);
   }
 
-  return new Request(urlObj.toString(), init);
+  return new NextRequest(urlObj.toString(), init as ConstructorParameters<typeof NextRequest>[1]);
 }
 
 /** Parse a Response to { status, json } */

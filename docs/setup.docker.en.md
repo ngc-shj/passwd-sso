@@ -233,7 +233,7 @@ npm start
 
 ### API Security
 
-- All password APIs require authentication (protected by middleware)
+- All password APIs require authentication (protected by proxy)
 - List API returns encrypted overview data only (client decrypts)
 - Detail view decrypts client-side using the in-memory vault key
 - Ownership check: Access to another user's passwords returns 403 Forbidden
@@ -253,7 +253,7 @@ Configured in `next.config.ts`:
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: strict-origin-when-cross-origin`
 
-Configured in middleware:
+Configured in proxy:
 - `Content-Security-Policy` with per-request nonce
 - CSP reporting to `/api/csp-report`
 - `CSP_MODE` can be set to `dev` (allows `style-src 'unsafe-inline'`) or `strict` (nonce-only)
@@ -301,7 +301,7 @@ passwd-sso/
 ├── src/
 │   ├── auth.ts                 # Auth.js config (Prisma Adapter)
 │   ├── auth.config.ts          # Auth.js config (Edge-safe)
-│   ├── middleware.ts           # Route protection
+│   ├── proxy.ts               # Route protection (proxy logic)
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── auth/[...nextauth]/  # Auth endpoint

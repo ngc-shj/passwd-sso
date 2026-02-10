@@ -2,11 +2,8 @@
 FROM node:20-alpine AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
-ARG DATABASE_URL
-ENV DATABASE_URL=$DATABASE_URL
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
-RUN npx prisma generate || true
 
 # Stage 2: Build the application
 FROM node:20-alpine AS builder
@@ -16,7 +13,7 @@ ENV DATABASE_URL=$DATABASE_URL
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npx prisma generate
-RUN npx next build --webpack
+RUN npx next build
 
 # Stage 3: Production image
 FROM node:20-alpine AS runner

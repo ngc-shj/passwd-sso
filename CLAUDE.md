@@ -26,7 +26,7 @@ Docker (dev): `docker compose -f docker-compose.yml -f docker-compose.override.y
 - Auth.js v5 (beta.30) with database session strategy (not JWT)
 - Providers: Google OIDC + SAML 2.0 via BoxyHQ SAML Jackson (Docker container, NOT npm)
 - Jackson exposes an OIDC interface; Auth.js connects as a standard OIDC provider
-- Route protection handled in `src/proxy.ts` (Next.js 16 proxy pattern, not deprecated middleware.ts)
+- Route protection: `proxy.ts` (root, entry point + CSP) → `src/proxy.ts` (Next.js 16 proxy pattern)
 - Protected routes: `/dashboard/*`, `/api/passwords/*`, `/api/tags/*`
 - Session cookie: `authjs.session-token` (dev) or `__Secure-authjs.session-token` (prod)
 
@@ -78,7 +78,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 ### Next.js 16
 
 - Route handler `params` must be awaited: `const { id } = await params`
-- Proxy pattern in `src/proxy.ts` (not middleware.ts)
+- Proxy pattern: `proxy.ts` (root) + `src/proxy.ts` (logic)
 - Standalone output for Docker deployment
 
 ### Validation

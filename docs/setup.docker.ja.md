@@ -232,7 +232,7 @@ npm start
 
 ### API セキュリティ
 
-- 全パスワード API は認証必須 (middleware で保護)
+- 全パスワード API は認証必須 (proxy で保護)
 - 一覧 API は暗号化された概要のみ返却（クライアントで復号）
 - 詳細表示はクライアント側で復号（メモリ上の vault key を使用）
 - 所有者チェック: 他ユーザーのパスワードへのアクセスは 403 Forbidden
@@ -252,7 +252,7 @@ npm start
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: strict-origin-when-cross-origin`
 
-middleware で以下を設定:
+proxy で以下を設定:
 - `Content-Security-Policy` (リクエスト毎の nonce)
 - `/api/csp-report` への CSP レポート送信
 - `CSP_MODE` で `dev` (style-src に `unsafe-inline`) / `strict` (nonceのみ) を切り替え
@@ -300,7 +300,7 @@ passwd-sso/
 ├── src/
 │   ├── auth.ts                 # Auth.js 設定 (Prisma Adapter)
 │   ├── auth.config.ts          # Auth.js 設定 (Edge 用)
-│   ├── middleware.ts           # ルート保護
+│   ├── proxy.ts               # ルート保護 (proxy ロジック)
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── auth/[...nextauth]/  # 認証エンドポイント
