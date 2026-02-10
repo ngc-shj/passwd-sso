@@ -22,7 +22,7 @@ const encryptedFieldSchema = z.object({
   authTag: z.string().length(32), // 16 bytes hex
 });
 
-export const entryTypeSchema = z.enum(["LOGIN", "SECURE_NOTE", "CREDIT_CARD", "IDENTITY"]);
+export const entryTypeSchema = z.enum(["LOGIN", "SECURE_NOTE", "CREDIT_CARD", "IDENTITY", "PASSKEY"]);
 
 export const createE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema,
@@ -355,6 +355,12 @@ const shareDataSchema = z.object({
   expiryMonth: z.string().max(2).optional(),
   expiryYear: z.string().max(4).optional(),
   cvv: z.string().max(10).optional(),
+  // PASSKEY
+  relyingPartyId: z.string().max(200).optional(),
+  relyingPartyName: z.string().max(200).optional(),
+  credentialId: z.string().max(500).optional(),
+  creationDate: z.string().optional(),
+  deviceInfo: z.string().max(200).optional(),
   // IDENTITY
   fullName: z.string().max(200).optional(),
   address: z.string().max(500).optional(),

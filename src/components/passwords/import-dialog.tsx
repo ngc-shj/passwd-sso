@@ -27,7 +27,7 @@ import { toast } from "sonner";
 // ─── CSV Parsing ────────────────────────────────────────────
 
 interface ParsedEntry {
-  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
   title: string;
   username: string;
   password: string;
@@ -49,6 +49,11 @@ interface ParsedEntry {
   idNumber: string;
   issueDate: string;
   expiryDate: string;
+  relyingPartyId: string;
+  relyingPartyName: string;
+  credentialId: string;
+  creationDate: string;
+  deviceInfo: string;
 }
 
 type CsvFormat = "bitwarden" | "onepassword" | "chrome" | "unknown";
@@ -135,6 +140,10 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
       dateOfBirth: "", nationality: "", idNumber: "",
       issueDate: "", expiryDate: "",
     };
+    const passkeyDefaults = {
+      relyingPartyId: "", relyingPartyName: "",
+      credentialId: "", creationDate: "", deviceInfo: "",
+    };
 
     switch (format) {
       case "bitwarden":
@@ -148,6 +157,7 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
           notes: isNote ? "" : (row["notes"] ?? ""),
           ...cardDefaults,
           ...identityDefaults,
+          ...passkeyDefaults,
         };
         break;
       case "chrome":
@@ -161,6 +171,7 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
           notes: row["note"] ?? "",
           ...cardDefaults,
           ...identityDefaults,
+          ...passkeyDefaults,
         };
         break;
       case "onepassword":
@@ -174,6 +185,7 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
           notes: isNote ? "" : (row["notes"] ?? ""),
           ...cardDefaults,
           ...identityDefaults,
+          ...passkeyDefaults,
         };
         break;
       default:
@@ -187,10 +199,11 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
           notes: isNote ? "" : (row["notes"] ?? ""),
           ...cardDefaults,
           ...identityDefaults,
+          ...passkeyDefaults,
         };
     }
 
-    // Login entries need title+password, notes/cards/identities need title only
+    // Login entries need title+password, notes/cards/identities/passkeys need title only
     const valid = entry.entryType === "LOGIN"
       ? !!entry.title && !!entry.password
       : !!entry.title;
@@ -226,6 +239,31 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
         dateOfBirth: "", nationality: "", idNumber: "",
         issueDate: "", expiryDate: "",
       };
+      const passkeyDefaults = {
+        relyingPartyId: "", relyingPartyName: "",
+        credentialId: "", creationDate: "", deviceInfo: "",
+      };
+
+      // JSON: type="passkey"
+      if (type === "passkey") {
+        const passkey = item.passkey ?? {};
+        const entry: ParsedEntry = {
+          entryType: "PASSKEY",
+          title: item.name ?? "",
+          username: passkey.username ?? "", password: "", content: "",
+          url: "",
+          notes: item.notes ?? "",
+          ...cardDefaults,
+          ...identityDefaults,
+          relyingPartyId: passkey.relyingPartyId ?? "",
+          relyingPartyName: passkey.relyingPartyName ?? "",
+          credentialId: passkey.credentialId ?? "",
+          creationDate: passkey.creationDate ?? "",
+          deviceInfo: passkey.deviceInfo ?? "",
+        };
+        if (entry.title) entries.push(entry);
+        continue;
+      }
 
       // Bitwarden JSON: type=4 or type="identity"
       if (type === 4 || type === "identity") {
@@ -237,6 +275,7 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
           url: "",
           notes: item.notes ?? "",
           ...cardDefaults,
+          ...passkeyDefaults,
           fullName: identity.fullName ?? identity.firstName
             ? `${identity.firstName ?? ""} ${identity.lastName ?? ""}`.trim()
             : "",
@@ -269,6 +308,7 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
           expiryYear: card.expYear ?? "",
           cvv: card.code ?? "",
           ...identityDefaults,
+          ...passkeyDefaults,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -285,6 +325,7 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
           notes: "",
           ...cardDefaults,
           ...identityDefaults,
+          ...passkeyDefaults,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -303,6 +344,7 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
         notes: item.notes ?? "",
         ...cardDefaults,
         ...identityDefaults,
+        ...passkeyDefaults,
       };
       if (entry.title && entry.password) entries.push(entry);
     }
@@ -442,10 +484,29 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
         const isNote = entry.entryType === "SECURE_NOTE";
         const isCard = entry.entryType === "CREDIT_CARD";
         const isIdentity = entry.entryType === "IDENTITY";
+        const isPasskey = entry.entryType === "PASSKEY";
         let fullBlob: string;
         let overviewBlob: string;
 
-        if (isIdentity) {
+        if (isPasskey) {
+          fullBlob = JSON.stringify({
+            title: entry.title,
+            relyingPartyId: entry.relyingPartyId || null,
+            relyingPartyName: entry.relyingPartyName || null,
+            username: entry.username || null,
+            credentialId: entry.credentialId || null,
+            creationDate: entry.creationDate || null,
+            deviceInfo: entry.deviceInfo || null,
+            notes: entry.notes || null,
+            tags: [],
+          });
+          overviewBlob = JSON.stringify({
+            title: entry.title,
+            relyingPartyId: entry.relyingPartyId || null,
+            username: entry.username || null,
+            tags: [],
+          });
+        } else if (isIdentity) {
           const idNumberLast4 = entry.idNumber ? entry.idNumber.slice(-4) : null;
           fullBlob = JSON.stringify({
             title: entry.title,
@@ -687,13 +748,15 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
                     <tr key={i}>
                       <td className="px-2 py-1 truncate max-w-[120px]">{entry.title}</td>
                       <td className="px-2 py-1 text-muted-foreground">
-                        {entry.entryType === "IDENTITY"
-                          ? t("typeIdentity")
-                          : entry.entryType === "CREDIT_CARD"
-                            ? t("typeCard")
-                            : entry.entryType === "SECURE_NOTE"
-                              ? t("typeNote")
-                              : t("typeLogin")}
+                        {entry.entryType === "PASSKEY"
+                          ? t("typePasskey")
+                          : entry.entryType === "IDENTITY"
+                            ? t("typeIdentity")
+                            : entry.entryType === "CREDIT_CARD"
+                              ? t("typeCard")
+                              : entry.entryType === "SECURE_NOTE"
+                                ? t("typeNote")
+                                : t("typeLogin")}
                       </td>
                       <td className="px-2 py-1 truncate max-w-[120px]">
                         {entry.entryType === "LOGIN" ? entry.username : "—"}

@@ -61,10 +61,10 @@ interface OrgPasswordFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
-  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
   editData?: {
     id: string;
-    entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+    entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
     title: string;
     username: string | null;
     password: string;
@@ -89,6 +89,11 @@ interface OrgPasswordFormProps {
     idNumber?: string | null;
     issueDate?: string | null;
     expiryDate?: string | null;
+    relyingPartyId?: string | null;
+    relyingPartyName?: string | null;
+    credentialId?: string | null;
+    creationDate?: string | null;
+    deviceInfo?: string | null;
   } | null;
 }
 
@@ -104,6 +109,7 @@ export function OrgPasswordForm({
   const tn = useTranslations("SecureNoteForm");
   const tcc = useTranslations("CreditCardForm");
   const ti = useTranslations("IdentityForm");
+  const tpk = useTranslations("PasskeyForm");
   const tc = useTranslations("Common");
   const [saving, setSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -115,6 +121,7 @@ export function OrgPasswordForm({
   const isNote = effectiveEntryType === "SECURE_NOTE";
   const isCreditCard = effectiveEntryType === "CREDIT_CARD";
   const isIdentity = effectiveEntryType === "IDENTITY";
+  const isPasskey = effectiveEntryType === "PASSKEY";
 
   const [title, setTitle] = useState(editData?.title ?? "");
   const [username, setUsername] = useState(editData?.username ?? "");
@@ -158,6 +165,12 @@ export function OrgPasswordForm({
   const [showIdNumber, setShowIdNumber] = useState(false);
   const [dobError, setDobError] = useState<string | null>(null);
   const [expiryError, setExpiryError] = useState<string | null>(null);
+  const [relyingPartyId, setRelyingPartyId] = useState(editData?.relyingPartyId ?? "");
+  const [relyingPartyName, setRelyingPartyName] = useState(editData?.relyingPartyName ?? "");
+  const [credentialId, setCredentialId] = useState(editData?.credentialId ?? "");
+  const [creationDate, setCreationDate] = useState(editData?.creationDate ?? "");
+  const [deviceInfo, setDeviceInfo] = useState(editData?.deviceInfo ?? "");
+  const [showCredentialId, setShowCredentialId] = useState(false);
 
   const isEdit = !!editData;
 
@@ -190,6 +203,11 @@ export function OrgPasswordForm({
       setIdNumber(editData.idNumber ?? "");
       setIssueDate(editData.issueDate ?? "");
       setExpiryDate(editData.expiryDate ?? "");
+      setRelyingPartyId(editData.relyingPartyId ?? "");
+      setRelyingPartyName(editData.relyingPartyName ?? "");
+      setCredentialId(editData.credentialId ?? "");
+      setCreationDate(editData.creationDate ?? "");
+      setDeviceInfo(editData.deviceInfo ?? "");
     }
   }, [open, editData]);
 
@@ -226,6 +244,12 @@ export function OrgPasswordForm({
       setIssueDate("");
       setExpiryDate("");
       setShowIdNumber(false);
+      setRelyingPartyId("");
+      setRelyingPartyName("");
+      setCredentialId("");
+      setCreationDate("");
+      setDeviceInfo("");
+      setShowCredentialId(false);
       setSaving(false);
     } else if (editData) {
       setTitle(editData.title);
@@ -254,6 +278,11 @@ export function OrgPasswordForm({
       setIdNumber(editData.idNumber ?? "");
       setIssueDate(editData.issueDate ?? "");
       setExpiryDate(editData.expiryDate ?? "");
+      setRelyingPartyId(editData.relyingPartyId ?? "");
+      setRelyingPartyName(editData.relyingPartyName ?? "");
+      setCredentialId(editData.credentialId ?? "");
+      setCreationDate(editData.creationDate ?? "");
+      setDeviceInfo(editData.deviceInfo ?? "");
     }
     onOpenChange(v);
   };
@@ -293,7 +322,9 @@ export function OrgPasswordForm({
   };
 
   const handleSubmit = async () => {
-    if (isCreditCard) {
+    if (isPasskey) {
+      if (!title.trim() || !relyingPartyId.trim()) return;
+    } else if (isCreditCard) {
       if (!title.trim()) return;
       if (!cardNumberValid) return;
     } else if (isIdentity) {
@@ -326,7 +357,20 @@ export function OrgPasswordForm({
 
       let body: Record<string, unknown>;
 
-      if (isIdentity) {
+      if (isPasskey) {
+        body = {
+          entryType: "PASSKEY",
+          title: title.trim(),
+          relyingPartyId: relyingPartyId.trim(),
+          relyingPartyName: relyingPartyName.trim() || undefined,
+          username: username.trim() || undefined,
+          credentialId: credentialId.trim() || undefined,
+          creationDate: creationDate || undefined,
+          deviceInfo: deviceInfo.trim() || undefined,
+          notes: notes.trim() || undefined,
+          tagIds: selectedTags.map((t) => t.id),
+        };
+      } else if (isIdentity) {
         body = {
           entryType: "IDENTITY",
           title: title.trim(),
@@ -407,37 +451,145 @@ export function OrgPasswordForm({
       <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {isIdentity
-              ? (isEdit ? ti("editIdentity") : ti("newIdentity"))
-              : isCreditCard
-                ? (isEdit ? tcc("editCard") : tcc("newCard"))
-                : isNote
-                  ? (isEdit ? tn("editNote") : tn("newNote"))
-                  : (isEdit ? t("editPassword") : t("newPassword"))}
+            {isPasskey
+              ? (isEdit ? tpk("editPasskey") : tpk("newPasskey"))
+              : isIdentity
+                ? (isEdit ? ti("editIdentity") : ti("newIdentity"))
+                : isCreditCard
+                  ? (isEdit ? tcc("editCard") : tcc("newCard"))
+                  : isNote
+                    ? (isEdit ? tn("editNote") : tn("newNote"))
+                    : (isEdit ? t("editPassword") : t("newPassword"))}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            {isIdentity
-              ? (isEdit ? ti("editIdentity") : ti("newIdentity"))
-              : isCreditCard
-                ? (isEdit ? tcc("editCard") : tcc("newCard"))
-                : isNote
-                  ? (isEdit ? tn("editNote") : tn("newNote"))
-                  : (isEdit ? t("editPassword") : t("newPassword"))}
+            {isPasskey
+              ? (isEdit ? tpk("editPasskey") : tpk("newPasskey"))
+              : isIdentity
+                ? (isEdit ? ti("editIdentity") : ti("newIdentity"))
+                : isCreditCard
+                  ? (isEdit ? tcc("editCard") : tcc("newCard"))
+                  : isNote
+                    ? (isEdit ? tn("editNote") : tn("newNote"))
+                    : (isEdit ? t("editPassword") : t("newPassword"))}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           {/* Title */}
           <div className="space-y-2">
-            <Label>{isIdentity ? ti("title") : isCreditCard ? tcc("title") : isNote ? tn("title") : t("title")}</Label>
+            <Label>{isPasskey ? tpk("title") : isIdentity ? ti("title") : isCreditCard ? tcc("title") : isNote ? tn("title") : t("title")}</Label>
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder={isIdentity ? ti("titlePlaceholder") : isCreditCard ? tcc("titlePlaceholder") : isNote ? tn("titlePlaceholder") : t("titlePlaceholder")}
+              placeholder={isPasskey ? tpk("titlePlaceholder") : isIdentity ? ti("titlePlaceholder") : isCreditCard ? tcc("titlePlaceholder") : isNote ? tn("titlePlaceholder") : t("titlePlaceholder")}
             />
           </div>
 
-          {isIdentity ? (
+          {isPasskey ? (
+            <>
+              {/* Relying Party ID */}
+              <div className="space-y-2">
+                <Label>{tpk("relyingPartyId")}</Label>
+                <Input
+                  value={relyingPartyId}
+                  onChange={(e) => setRelyingPartyId(e.target.value)}
+                  placeholder={tpk("relyingPartyIdPlaceholder")}
+                  autoComplete="off"
+                />
+              </div>
+
+              {/* Relying Party Name */}
+              <div className="space-y-2">
+                <Label>{tpk("relyingPartyName")}</Label>
+                <Input
+                  value={relyingPartyName}
+                  onChange={(e) => setRelyingPartyName(e.target.value)}
+                  placeholder={tpk("relyingPartyNamePlaceholder")}
+                  autoComplete="off"
+                />
+              </div>
+
+              {/* Username */}
+              <div className="space-y-2">
+                <Label>{tpk("username")}</Label>
+                <Input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder={tpk("usernamePlaceholder")}
+                  autoComplete="off"
+                />
+              </div>
+
+              {/* Credential ID */}
+              <div className="space-y-2">
+                <Label>{tpk("credentialId")}</Label>
+                <div className="relative">
+                  <Input
+                    type={showCredentialId ? "text" : "password"}
+                    value={credentialId}
+                    onChange={(e) => setCredentialId(e.target.value)}
+                    placeholder={tpk("credentialIdPlaceholder")}
+                    autoComplete="off"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                    onClick={() => setShowCredentialId(!showCredentialId)}
+                  >
+                    {showCredentialId ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Creation Date & Device Info */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>{tpk("creationDate")}</Label>
+                  <Input
+                    type="date"
+                    value={creationDate}
+                    onChange={(e) => setCreationDate(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{tpk("deviceInfo")}</Label>
+                  <Input
+                    value={deviceInfo}
+                    onChange={(e) => setDeviceInfo(e.target.value)}
+                    placeholder={tpk("deviceInfoPlaceholder")}
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-2">
+                <Label>{tpk("notes")}</Label>
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder={tpk("notesPlaceholder")}
+                  rows={3}
+                />
+              </div>
+
+              {/* Tags */}
+              <div className="space-y-2">
+                <Label>{tpk("tags")}</Label>
+                <OrgTagInput
+                  orgId={orgId}
+                  selectedTags={selectedTags}
+                  onChange={setSelectedTags}
+                />
+              </div>
+            </>
+          ) : isIdentity ? (
             <>
               {/* Full Name */}
               <div className="space-y-2">
@@ -1023,7 +1175,8 @@ export function OrgPasswordForm({
             disabled={
               saving ||
               !title.trim() ||
-              (!isNote && !isCreditCard && !isIdentity && !password) ||
+              (isPasskey && !relyingPartyId.trim()) ||
+              (!isNote && !isCreditCard && !isIdentity && !isPasskey && !password) ||
               (isCreditCard && !cardNumberValid)
             }
           >

@@ -5,6 +5,7 @@ import { PasswordForm } from "./password-form";
 import { SecureNoteForm } from "./secure-note-form";
 import { CreditCardForm } from "./credit-card-form";
 import { IdentityForm } from "./identity-form";
+import { PasskeyForm } from "./passkey-form";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +17,7 @@ interface PasswordNewDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
-  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
 }
 
 export function PasswordNewDialog({
@@ -29,6 +30,7 @@ export function PasswordNewDialog({
   const tn = useTranslations("SecureNoteForm");
   const tcc = useTranslations("CreditCardForm");
   const ti = useTranslations("IdentityForm");
+  const tpk = useTranslations("PasskeyForm");
 
   const handleSaved = () => {
     onOpenChange(false);
@@ -38,10 +40,13 @@ export function PasswordNewDialog({
   const isNote = entryType === "SECURE_NOTE";
   const isCreditCard = entryType === "CREDIT_CARD";
   const isIdentity = entryType === "IDENTITY";
+  const isPasskey = entryType === "PASSKEY";
 
-  const dialogTitle = isIdentity
-    ? ti("newIdentity")
-    : isCreditCard
+  const dialogTitle = isPasskey
+    ? tpk("newPasskey")
+    : isIdentity
+      ? ti("newIdentity")
+      : isCreditCard
       ? tcc("newCard")
       : isNote
         ? tn("newNote")
@@ -53,7 +58,13 @@ export function PasswordNewDialog({
         <DialogHeader>
           <DialogTitle>{dialogTitle}</DialogTitle>
         </DialogHeader>
-        {isIdentity ? (
+        {isPasskey ? (
+          <PasskeyForm
+            mode="create"
+            variant="dialog"
+            onSaved={handleSaved}
+          />
+        ) : isIdentity ? (
           <IdentityForm
             mode="create"
             variant="dialog"

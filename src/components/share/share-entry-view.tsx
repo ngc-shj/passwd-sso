@@ -14,6 +14,7 @@ import {
   StickyNote,
   CreditCard,
   UserSquare,
+  Fingerprint,
 } from "lucide-react";
 
 const REVEAL_TIMEOUT = 30_000;
@@ -23,6 +24,7 @@ const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
   SECURE_NOTE: <StickyNote className="h-5 w-5" />,
   CREDIT_CARD: <CreditCard className="h-5 w-5" />,
   IDENTITY: <UserSquare className="h-5 w-5" />,
+  PASSKEY: <Fingerprint className="h-5 w-5" />,
 };
 
 interface ShareEntryViewProps {
@@ -232,6 +234,18 @@ export function ShareEntryView({
     </>
   );
 
+  const renderPasskeyFields = () => (
+    <>
+      {renderField(t("relyingPartyId"), data.relyingPartyId)}
+      {renderField(t("relyingPartyName"), data.relyingPartyName)}
+      {renderField(t("username"), data.username)}
+      {renderSensitiveField(t("credentialId"), data.credentialId, "credentialId")}
+      {renderField(t("creationDate"), data.creationDate)}
+      {renderField(t("deviceInfo"), data.deviceInfo)}
+      {renderNotes(data.notes)}
+    </>
+  );
+
   const renderFields = () => {
     switch (entryType) {
       case "SECURE_NOTE":
@@ -240,6 +254,8 @@ export function ShareEntryView({
         return renderCreditCardFields();
       case "IDENTITY":
         return renderIdentityFields();
+      case "PASSKEY":
+        return renderPasskeyFields();
       default:
         return renderLoginFields();
     }

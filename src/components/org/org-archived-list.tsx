@@ -166,6 +166,12 @@ export function OrgArchivedList({ searchQuery, refreshKey }: OrgArchivedListProp
           idNumber: data.idNumber ?? null,
           issueDate: data.issueDate ?? null,
           expiryDate: data.expiryDate ?? null,
+          relyingPartyId: data.relyingPartyId ?? null,
+          relyingPartyName: data.relyingPartyName ?? null,
+          username: data.username ?? null,
+          credentialId: data.credentialId ?? null,
+          creationDate: data.creationDate ?? null,
+          deviceInfo: data.deviceInfo ?? null,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         };

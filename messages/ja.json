@@ -51,6 +51,8 @@
     "catSecureNote": "セキュアノート",
     "catCreditCard": "クレジットカード",
     "catIdentity": "ID情報",
+    "catPasskey": "パスキー",
+    "newPasskey": "パスキー",
     "shareLinks": "共有リンク"
   },
   "ShareLinks": {
@@ -156,6 +158,30 @@
     "failedToSave": "保存に失敗しました",
     "networkError": "ネットワークエラー"
   },
+  "PasskeyForm": {
+    "newPasskey": "新規パスキー",
+    "editPasskey": "パスキーを編集",
+    "title": "タイトル *",
+    "titlePlaceholder": "例: GitHub Passkey, Google アカウント",
+    "relyingPartyId": "リライングパーティID *",
+    "relyingPartyIdPlaceholder": "例: github.com",
+    "relyingPartyName": "リライングパーティ名",
+    "relyingPartyNamePlaceholder": "例: GitHub",
+    "username": "ユーザー名",
+    "usernamePlaceholder": "例: user@example.com",
+    "credentialId": "クレデンシャルID",
+    "credentialIdPlaceholder": "Base64url クレデンシャルID",
+    "creationDate": "作成日",
+    "deviceInfo": "デバイス / 認証器",
+    "deviceInfoPlaceholder": "例: iPhone 15, YubiKey 5",
+    "notes": "メモ",
+    "notesPlaceholder": "任意のメモ...",
+    "tags": "タグ",
+    "saved": "パスキーを保存しました",
+    "updated": "パスキーを更新しました",
+    "failedToSave": "保存に失敗しました",
+    "networkError": "ネットワークエラー"
+  },
   "IdentityForm": {
     "newIdentity": "新規ID情報",
     "editIdentity": "ID情報を編集",
@@ -221,7 +247,12 @@
     "nationality": "国籍",
     "idNumber": "ID番号",
     "issueDate": "発行日",
-    "expiryDate": "有効期限"
+    "expiryDate": "有効期限",
+    "relyingPartyId": "リライングパーティID",
+    "relyingPartyName": "リライングパーティ名",
+    "credentialId": "クレデンシャルID",
+    "creationDate": "作成日",
+    "deviceInfo": "デバイス情報"
   },
   "PasswordGenerator": {
     "use": "使用",
@@ -260,6 +291,8 @@
     "creditCard": "クレジットカード",
     "copyIdNumber": "ID番号をコピー",
     "identity": "ID情報",
+    "copyCredentialId": "クレデンシャルIDをコピー",
+    "passkey": "パスキー",
     "share": "リンクで共有"
   },
   "CopyButton": {
@@ -322,6 +355,7 @@
     "typeNote": "ノート",
     "typeCard": "カード",
     "typeIdentity": "ID情報",
+    "typePasskey": "パスキー",
     "entryCount": "{count} 件のエントリーが見つかりました",
     "importButton": "{count} 件をインポート",
     "importing": "{current} / {total} をインポート中...",
@@ -458,6 +492,7 @@
     "newSecureNote": "セキュアノート",
     "newCreditCard": "クレジットカード",
     "newIdentity": "ID情報",
+    "newPasskey": "パスキー",
     "noPasswordsDesc": "「新規パスワード」をクリックして最初のエントリを追加してください。",
     "createdBy": "{name} が作成",
     "updatedBy": "{name} が更新",
@@ -564,6 +599,11 @@
     "error_revoked_desc": "この共有リンクはオーナーによって取り消されました。",
     "error_maxViews_title": "閲覧上限に達しました",
     "error_maxViews_desc": "この共有リンクは最大閲覧回数に達しました。",
+    "relyingPartyId": "リライングパーティID",
+    "relyingPartyName": "リライングパーティ名",
+    "credentialId": "クレデンシャルID",
+    "creationDate": "作成日",
+    "deviceInfo": "デバイス情報",
     "error_rateLimited_title": "リクエストが多すぎます",
     "error_rateLimited_desc": "リクエストが多すぎます。しばらく待ってから再度お試しください。",
     "accessLogs": "アクセスログ",

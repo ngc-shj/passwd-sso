@@ -116,13 +116,13 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
         createAndAddTag();
       }
     }
-    if (e.key === "Escape") {
+    if (e.key === "Escape" && showDropdown) {
       setShowDropdown(false);
     }
   };
 
   return (
-    <div ref={containerRef} className="space-y-2">
+    <div ref={containerRef} className="space-y-2" data-escape-guard={showDropdown || undefined}>
       {/* Selected tags */}
       {selectedTags.length > 0 && (
         <div className="flex flex-wrap gap-1.5">

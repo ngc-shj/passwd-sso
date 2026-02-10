@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
-import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, ScrollText, Link as LinkIcon } from "lucide-react";
+import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, Fingerprint, ScrollText, Link as LinkIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { ExportDialog } from "@/components/passwords/export-dialog";
@@ -222,6 +222,16 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
               {t("catIdentity")}
             </Link>
           </Button>
+          <Button
+            variant={activeTypeFilter === "PASSKEY" ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link href="/dashboard?type=PASSKEY" onClick={() => onOpenChange(false)}>
+              <Fingerprint className="h-4 w-4" />
+              {t("catPasskey")}
+            </Link>
+          </Button>
         </div>
       </div>
 
@@ -289,6 +299,17 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                     <Link href={`/dashboard/orgs/${org.id}?type=IDENTITY`} onClick={() => onOpenChange(false)}>
                       <IdCard className="h-3.5 w-3.5" />
                       {t("catIdentity")}
+                    </Link>
+                  </Button>
+                  <Button
+                    variant={activeOrgTypeFilter === "PASSKEY" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="w-full justify-start gap-2 h-8"
+                    asChild
+                  >
+                    <Link href={`/dashboard/orgs/${org.id}?type=PASSKEY`} onClick={() => onOpenChange(false)}>
+                      <Fingerprint className="h-3.5 w-3.5" />
+                      {t("catPasskey")}
                     </Link>
                   </Button>
                 </div>

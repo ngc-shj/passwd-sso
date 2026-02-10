@@ -45,6 +45,7 @@ import {
   FileText,
   CreditCard,
   IdCard,
+  Fingerprint,
   Link as LinkIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -54,7 +55,7 @@ import { ShareDialog } from "@/components/share/share-dialog";
 
 interface PasswordCardProps {
   id: string;
-  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
   title: string;
   username: string | null;
   urlHost: string | null;
@@ -64,6 +65,7 @@ interface PasswordCardProps {
   cardholderName?: string | null;
   fullName?: string | null;
   idNumberLast4?: string | null;
+  relyingPartyId?: string | null;
   tags: Array<{ name: string; color: string | null }>;
   isFavorite: boolean;
   isArchived: boolean;
@@ -114,6 +116,11 @@ interface VaultEntryFull {
   idNumber?: string | null;
   issueDate?: string | null;
   expiryDate?: string | null;
+  relyingPartyId?: string | null;
+  relyingPartyName?: string | null;
+  credentialId?: string | null;
+  creationDate?: string | null;
+  deviceInfo?: string | null;
 }
 
 const CLIPBOARD_CLEAR_DELAY = 30_000;
@@ -130,6 +137,7 @@ export function PasswordCard({
   cardholderName,
   fullName,
   idNumberLast4,
+  relyingPartyId,
   tags,
   isFavorite,
   isArchived,
@@ -152,6 +160,7 @@ export function PasswordCard({
   const isNote = entryType === "SECURE_NOTE";
   const isCreditCard = entryType === "CREDIT_CARD";
   const isIdentity = entryType === "IDENTITY";
+  const isPasskey = entryType === "PASSKEY";
   const t = useTranslations("PasswordCard");
   const tc = useTranslations("Common");
   const tCopy = useTranslations("CopyButton");
@@ -252,6 +261,12 @@ export function PasswordCard({
             idNumber: entry.idNumber,
             issueDate: entry.issueDate,
             expiryDate: entry.expiryDate,
+            relyingPartyId: entry.relyingPartyId,
+            relyingPartyName: entry.relyingPartyName,
+            username: entry.username,
+            credentialId: entry.credentialId,
+            creationDate: entry.creationDate,
+            deviceInfo: entry.deviceInfo,
             createdAt: raw.createdAt as string,
             updatedAt: raw.updatedAt as string,
           });
@@ -339,6 +354,29 @@ export function PasswordCard({
     }
   };
 
+  const fetchPasskeyField = async (field: "credentialId" | "username"): Promise<string> => {
+    if (getDetailProp) {
+      const detail = await getDetailProp();
+      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
+    }
+    const { entry } = await fetchDecryptedEntry();
+    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+  };
+
+  const handleCopyCredentialId = async () => {
+    try {
+      const cid = await fetchPasskeyField("credentialId");
+      if (!cid) return;
+      await navigator.clipboard.writeText(cid);
+      toast.success(tCopy("copied"));
+      setTimeout(async () => {
+        try { await navigator.clipboard.writeText(""); } catch {}
+      }, CLIPBOARD_CLEAR_DELAY);
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
   const handleCopyIdNumber = async () => {
     try {
       const num = await fetchIdentityField("idNumber");
@@ -394,7 +432,9 @@ export function PasswordCard({
               className={`h-4 w-4 ${isFavorite ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground"}`}
             />
           </Button>
-          {isIdentity ? (
+          {isPasskey ? (
+            <Fingerprint className="h-5 w-5 shrink-0 text-muted-foreground" />
+          ) : isIdentity ? (
             <IdCard className="h-5 w-5 shrink-0 text-muted-foreground" />
           ) : isCreditCard ? (
             <CreditCard className="h-5 w-5 shrink-0 text-muted-foreground" />
@@ -411,7 +451,17 @@ export function PasswordCard({
               {title}
             </button>
             <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
-              {isIdentity ? (
+              {isPasskey ? (
+                <>
+                  {relyingPartyId && <span className="truncate">{relyingPartyId}</span>}
+                  {username && (
+                    <span className="flex items-center gap-1 truncate">
+                      <User className="h-3 w-3 shrink-0" />
+                      {username}
+                    </span>
+                  )}
+                </>
+              ) : isIdentity ? (
                 <>
                   {fullName && <span className="truncate">{fullName}</span>}
                   {idNumberLast4 && <span className="truncate">•••• {idNumberLast4}</span>}
@@ -455,9 +505,10 @@ export function PasswordCard({
               ))}
             </div>
           )}
-          {!isNote && !isCreditCard && !isIdentity && <CopyButton getValue={fetchPassword} />}
+          {!isNote && !isCreditCard && !isIdentity && !isPasskey && <CopyButton getValue={fetchPassword} />}
           {isCreditCard && <CopyButton getValue={() => fetchCardField("cardNumber")} />}
           {isIdentity && <CopyButton getValue={() => fetchIdentityField("idNumber")} />}
+          {isPasskey && <CopyButton getValue={() => fetchPasskeyField("credentialId")} />}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0">
@@ -466,7 +517,20 @@ export function PasswordCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              {isIdentity ? (
+              {isPasskey ? (
+                <>
+                  {username && (
+                    <DropdownMenuItem onSelect={handleCopyUsername}>
+                      <User className="h-4 w-4" />
+                      {t("copyUsername")}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onSelect={handleCopyCredentialId}>
+                    <Copy className="h-4 w-4" />
+                    {t("copyCredentialId")}
+                  </DropdownMenuItem>
+                </>
+              ) : isIdentity ? (
                 <DropdownMenuItem onSelect={handleCopyIdNumber}>
                   <Copy className="h-4 w-4" />
                   {t("copyIdNumber")}

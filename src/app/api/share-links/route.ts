@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     parsed.data;
 
   let plaintext: string;
-  let entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+  let entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
 
   if (passwordEntryId) {
     // Personal entry — verify ownership

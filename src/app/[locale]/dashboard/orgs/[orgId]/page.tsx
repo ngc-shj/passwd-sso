@@ -17,7 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { OrgExportDialog } from "@/components/org/org-export-dialog";
-import { Plus, Settings, KeyRound, Search, FileText, CreditCard, IdCard, Download } from "lucide-react";
+import { Plus, Settings, KeyRound, Search, FileText, CreditCard, IdCard, Fingerprint, Download } from "lucide-react";
 import { toast } from "sonner";
 
 interface OrgInfo {
@@ -31,7 +31,7 @@ interface OrgInfo {
 
 interface OrgPasswordEntry {
   id: string;
-  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
   title: string;
   username: string | null;
   urlHost: string | null;
@@ -41,6 +41,7 @@ interface OrgPasswordEntry {
   cardholderName: string | null;
   fullName: string | null;
   idNumberLast4: string | null;
+  relyingPartyId: string | null;
   isFavorite: boolean;
   isArchived: boolean;
   tags: { id: string; name: string; color: string | null }[];
@@ -67,10 +68,10 @@ export default function OrgDashboardPage({
   const [searchQuery, setSearchQuery] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [newEntryType, setNewEntryType] = useState<"LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY">("LOGIN");
+  const [newEntryType, setNewEntryType] = useState<"LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY">("LOGIN");
   const [editData, setEditData] = useState<{
     id: string;
-    entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+    entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
     title: string;
     username: string | null;
     password: string;
@@ -95,6 +96,11 @@ export default function OrgDashboardPage({
     idNumber?: string | null;
     issueDate?: string | null;
     expiryDate?: string | null;
+    relyingPartyId?: string | null;
+    relyingPartyName?: string | null;
+    credentialId?: string | null;
+    creationDate?: string | null;
+    deviceInfo?: string | null;
   } | null>(null);
 
   const fetchOrg = async (): Promise<boolean> => {
@@ -201,7 +207,7 @@ export default function OrgDashboardPage({
   };
 
   const createDetailFetcher = useCallback(
-    (id: string, eType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY") => async (): Promise<InlineDetailData> => {
+    (id: string, eType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY") => async (): Promise<InlineDetailData> => {
       const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`);
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
@@ -231,6 +237,12 @@ export default function OrgDashboardPage({
         idNumber: data.idNumber ?? undefined,
         issueDate: data.issueDate ?? undefined,
         expiryDate: data.expiryDate ?? undefined,
+        relyingPartyId: data.relyingPartyId ?? undefined,
+        relyingPartyName: data.relyingPartyName ?? undefined,
+        username: data.username ?? undefined,
+        credentialId: data.credentialId ?? undefined,
+        creationDate: data.creationDate ?? undefined,
+        deviceInfo: data.deviceInfo ?? undefined,
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
       };
@@ -270,7 +282,8 @@ export default function OrgDashboardPage({
       p.lastFour?.includes(q) ||
       p.cardholderName?.toLowerCase().includes(q) ||
       p.fullName?.toLowerCase().includes(q) ||
-      p.idNumberLast4?.includes(q)
+      p.idNumberLast4?.includes(q) ||
+      p.relyingPartyId?.toLowerCase().includes(q)
     );
   });
 
@@ -345,6 +358,10 @@ export default function OrgDashboardPage({
                     <IdCard className="h-4 w-4 mr-2" />
                     {t("newIdentity")}
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType("PASSKEY"); setFormOpen(true); }}>
+                    <Fingerprint className="h-4 w-4 mr-2" />
+                    {t("newPasskey")}
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -391,6 +408,7 @@ export default function OrgDashboardPage({
                 cardholderName={entry.cardholderName}
                 fullName={entry.fullName}
                 idNumberLast4={entry.idNumberLast4}
+                relyingPartyId={entry.relyingPartyId}
                 tags={entry.tags}
                 isFavorite={entry.isFavorite}
                 isArchived={entry.isArchived}

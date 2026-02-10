@@ -51,6 +51,8 @@
     "catSecureNote": "Secure Notes",
     "catCreditCard": "Credit Cards",
     "catIdentity": "Identities",
+    "catPasskey": "Passkeys",
+    "newPasskey": "Passkey",
     "shareLinks": "Share Links"
   },
   "ShareLinks": {
@@ -156,6 +158,30 @@
     "failedToSave": "Failed to save",
     "networkError": "Network error"
   },
+  "PasskeyForm": {
+    "newPasskey": "New Passkey",
+    "editPasskey": "Edit Passkey",
+    "title": "Title *",
+    "titlePlaceholder": "e.g., GitHub Passkey, Google Account",
+    "relyingPartyId": "Relying Party ID *",
+    "relyingPartyIdPlaceholder": "e.g., github.com",
+    "relyingPartyName": "Relying Party Name",
+    "relyingPartyNamePlaceholder": "e.g., GitHub",
+    "username": "Username",
+    "usernamePlaceholder": "e.g., user@example.com",
+    "credentialId": "Credential ID",
+    "credentialIdPlaceholder": "Base64url credential ID",
+    "creationDate": "Creation Date",
+    "deviceInfo": "Device / Authenticator",
+    "deviceInfoPlaceholder": "e.g., iPhone 15, YubiKey 5",
+    "notes": "Notes",
+    "notesPlaceholder": "Optional notes...",
+    "tags": "Tags",
+    "saved": "Passkey saved",
+    "updated": "Passkey updated",
+    "failedToSave": "Failed to save",
+    "networkError": "Network error"
+  },
   "IdentityForm": {
     "newIdentity": "New Identity",
     "editIdentity": "Edit Identity",
@@ -221,7 +247,12 @@
     "nationality": "Nationality",
     "idNumber": "ID Number",
     "issueDate": "Issue Date",
-    "expiryDate": "Expiry Date"
+    "expiryDate": "Expiry Date",
+    "relyingPartyId": "Relying Party ID",
+    "relyingPartyName": "Relying Party Name",
+    "credentialId": "Credential ID",
+    "creationDate": "Creation Date",
+    "deviceInfo": "Device Info"
   },
   "PasswordGenerator": {
     "use": "Use",
@@ -260,6 +291,8 @@
     "creditCard": "Credit Card",
     "copyIdNumber": "Copy ID Number",
     "identity": "Identity",
+    "copyCredentialId": "Copy Credential ID",
+    "passkey": "Passkey",
     "share": "Share Link"
   },
   "CopyButton": {
@@ -322,6 +355,7 @@
     "typeNote": "Note",
     "typeCard": "Card",
     "typeIdentity": "Identity",
+    "typePasskey": "Passkey",
     "entryCount": "{count} entries found",
     "importButton": "Import {count} entries",
     "importing": "Importing {current} of {total}...",
@@ -458,6 +492,7 @@
     "newSecureNote": "Secure Note",
     "newCreditCard": "Credit Card",
     "newIdentity": "Identity",
+    "newPasskey": "Passkey",
     "noPasswordsDesc": "Click \"New Password\" to add the first entry.",
     "createdBy": "Created by {name}",
     "updatedBy": "Updated by {name}",
@@ -564,6 +599,11 @@
     "error_revoked_desc": "This share link has been revoked by the owner.",
     "error_maxViews_title": "View Limit Reached",
     "error_maxViews_desc": "This share link has reached its maximum number of views.",
+    "relyingPartyId": "Relying Party ID",
+    "relyingPartyName": "Relying Party Name",
+    "credentialId": "Credential ID",
+    "creationDate": "Creation Date",
+    "deviceInfo": "Device Info",
     "error_rateLimited_title": "Too Many Requests",
     "error_rateLimited_desc": "You have made too many requests. Please wait a moment and try again.",
     "accessLogs": "Access Logs",

@@ -13,6 +13,7 @@ import {
 import { SecureNoteForm } from "./secure-note-form";
 import { CreditCardForm } from "./credit-card-form";
 import { IdentityForm } from "./identity-form";
+import { PasskeyForm } from "./passkey-form";
 import type { TagData } from "@/components/tags/tag-input";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import {
@@ -50,11 +51,16 @@ interface VaultEntryFull {
   idNumber?: string | null;
   issueDate?: string | null;
   expiryDate?: string | null;
+  relyingPartyId?: string | null;
+  relyingPartyName?: string | null;
+  credentialId?: string | null;
+  creationDate?: string | null;
+  deviceInfo?: string | null;
 }
 
 interface FormData {
   id: string;
-  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
   title: string;
   username: string;
   password: string;
@@ -81,6 +87,11 @@ interface FormData {
   idNumber?: string | null;
   issueDate?: string | null;
   expiryDate?: string | null;
+  relyingPartyId?: string | null;
+  relyingPartyName?: string | null;
+  credentialId?: string | null;
+  creationDate?: string | null;
+  deviceInfo?: string | null;
 }
 
 interface PasswordEditDialogProps {
@@ -100,6 +111,7 @@ export function PasswordEditDialog({
   const tn = useTranslations("SecureNoteForm");
   const tcc = useTranslations("CreditCardForm");
   const ti = useTranslations("IdentityForm");
+  const tpk = useTranslations("PasskeyForm");
   const td = useTranslations("PasswordDetail");
   const { encryptionKey } = useVault();
   const [data, setData] = useState<FormData | null>(null);
@@ -161,6 +173,11 @@ export function PasswordEditDialog({
           idNumber: entry.idNumber,
           issueDate: entry.issueDate,
           expiryDate: entry.expiryDate,
+          relyingPartyId: entry.relyingPartyId,
+          relyingPartyName: entry.relyingPartyName,
+          credentialId: entry.credentialId,
+          creationDate: entry.creationDate,
+          deviceInfo: entry.deviceInfo,
         });
       } catch (e) {
         if (!cancelled) {
@@ -183,10 +200,13 @@ export function PasswordEditDialog({
   const isNote = data?.entryType === "SECURE_NOTE";
   const isCreditCard = data?.entryType === "CREDIT_CARD";
   const isIdentity = data?.entryType === "IDENTITY";
+  const isPasskey = data?.entryType === "PASSKEY";
 
-  const dialogTitle = isIdentity
-    ? ti("editIdentity")
-    : isCreditCard
+  const dialogTitle = isPasskey
+    ? tpk("editPasskey")
+    : isIdentity
+      ? ti("editIdentity")
+      : isCreditCard
       ? tcc("editCard")
       : isNote
         ? tn("editNote")
@@ -204,6 +224,24 @@ export function PasswordEditDialog({
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
+        ) : isPasskey ? (
+          <PasskeyForm
+            mode="edit"
+            variant="dialog"
+            initialData={{
+              id: data.id,
+              title: data.title,
+              relyingPartyId: data.relyingPartyId ?? null,
+              relyingPartyName: data.relyingPartyName ?? null,
+              username: data.username || null,
+              credentialId: data.credentialId ?? null,
+              creationDate: data.creationDate ?? null,
+              deviceInfo: data.deviceInfo ?? null,
+              notes: data.notes || null,
+              tags: data.tags,
+            }}
+            onSaved={handleSaved}
+          />
         ) : isIdentity ? (
           <IdentityForm
             mode="edit"

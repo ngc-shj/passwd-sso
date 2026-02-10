@@ -154,6 +154,7 @@ enum EntryType {
   SECURE_NOTE
   CREDIT_CARD
   IDENTITY
+  PASSKEY
 }
 
 enum OrgRole {

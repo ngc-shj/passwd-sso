@@ -23,7 +23,7 @@ import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react"
 type ExportFormat = "csv" | "json";
 
 interface DecryptedExport {
-  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
   title: string;
   username: string | null;
   password: string;
@@ -46,6 +46,11 @@ interface DecryptedExport {
   idNumber: string | null;
   issueDate: string | null;
   expiryDate: string | null;
+  relyingPartyId: string | null;
+  relyingPartyName: string | null;
+  credentialId: string | null;
+  creationDate: string | null;
+  deviceInfo: string | null;
 }
 
 interface ExportDialogProps {
@@ -129,6 +134,11 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
             idNumber: parsed.idNumber ?? null,
             issueDate: parsed.issueDate ?? null,
             expiryDate: parsed.expiryDate ?? null,
+            relyingPartyId: parsed.relyingPartyId ?? null,
+            relyingPartyName: parsed.relyingPartyName ?? null,
+            credentialId: parsed.credentialId ?? null,
+            creationDate: parsed.creationDate ?? null,
+            deviceInfo: parsed.deviceInfo ?? null,
           });
         } catch {
           // Skip entries that fail to decrypt
@@ -174,6 +184,11 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
                     idNumber: data.idNumber ?? null,
                     issueDate: data.issueDate ?? null,
                     expiryDate: data.expiryDate ?? null,
+                    relyingPartyId: data.relyingPartyId ?? null,
+                    relyingPartyName: data.relyingPartyName ?? null,
+                    credentialId: data.credentialId ?? null,
+                    creationDate: data.creationDate ?? null,
+                    deviceInfo: data.deviceInfo ?? null,
                   });
                 } catch {
                   // Skip entries that fail to fetch
@@ -384,8 +399,9 @@ function formatCsv(entries: DecryptedExport[]): string {
     const isNote = e.entryType === "SECURE_NOTE";
     const isCard = e.entryType === "CREDIT_CARD";
     const isIdentity = e.entryType === "IDENTITY";
-    const type = isIdentity ? "identity" : isCard ? "card" : isNote ? "securenote" : "login";
-    const isLogin = !isNote && !isCard && !isIdentity;
+    const isPasskey = e.entryType === "PASSKEY";
+    const type = isPasskey ? "passkey" : isIdentity ? "identity" : isCard ? "card" : isNote ? "securenote" : "login";
+    const isLogin = !isNote && !isCard && !isIdentity && !isPasskey;
     return [
       "", // folder
       "", // favorite
@@ -408,6 +424,21 @@ function formatJson(entries: DecryptedExport[]): string {
     {
       exportedAt: new Date().toISOString(),
       entries: entries.map((e) => {
+        if (e.entryType === "PASSKEY") {
+          return {
+            type: "passkey",
+            name: e.title,
+            passkey: {
+              relyingPartyId: e.relyingPartyId,
+              relyingPartyName: e.relyingPartyName,
+              username: e.username,
+              credentialId: e.credentialId,
+              creationDate: e.creationDate,
+              deviceInfo: e.deviceInfo,
+            },
+            notes: e.notes,
+          };
+        }
         if (e.entryType === "IDENTITY") {
           return {
             type: "identity",

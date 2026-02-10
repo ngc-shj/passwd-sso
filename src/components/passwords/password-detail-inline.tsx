@@ -32,7 +32,7 @@ interface CustomField {
 
 export interface InlineDetailData {
   id: string;
-  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
   password: string;
   content?: string;
   url: string | null;
@@ -56,6 +56,12 @@ export interface InlineDetailData {
   idNumber?: string | null;
   issueDate?: string | null;
   expiryDate?: string | null;
+  relyingPartyId?: string | null;
+  relyingPartyName?: string | null;
+  username?: string | null;
+  credentialId?: string | null;
+  creationDate?: string | null;
+  deviceInfo?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -83,6 +89,7 @@ export function PasswordDetailInline({ data, onEdit }: PasswordDetailInlineProps
   const [showCardNumber, setShowCardNumber] = useState(false);
   const [showCvv, setShowCvv] = useState(false);
   const [showIdNumber, setShowIdNumber] = useState(false);
+  const [showCredentialId, setShowCredentialId] = useState(false);
 
   const handleReveal = useCallback(() => {
     setShowPassword(true);
@@ -107,10 +114,95 @@ export function PasswordDetailInline({ data, onEdit }: PasswordDetailInlineProps
   const isNote = data.entryType === "SECURE_NOTE";
   const isCreditCard = data.entryType === "CREDIT_CARD";
   const isIdentity = data.entryType === "IDENTITY";
+  const isPasskey = data.entryType === "PASSKEY";
+
+  const handleRevealCredentialId = useCallback(() => {
+    setShowCredentialId(true);
+    setTimeout(() => setShowCredentialId(false), REVEAL_TIMEOUT);
+  }, []);
 
   return (
     <div className="space-y-4 border-t pt-4 px-4 pb-4">
-      {isIdentity ? (
+      {isPasskey ? (
+        <>
+          {/* Relying Party ID */}
+          {data.relyingPartyId && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("relyingPartyId")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{data.relyingPartyId}</span>
+                <CopyButton getValue={() => data.relyingPartyId ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Relying Party Name */}
+          {data.relyingPartyName && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("relyingPartyName")}</label>
+              <span className="text-sm">{data.relyingPartyName}</span>
+            </div>
+          )}
+
+          {/* Username */}
+          {data.username && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("username")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{data.username}</span>
+                <CopyButton getValue={() => data.username ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Credential ID */}
+          {data.credentialId && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("credentialId")}</label>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm break-all">
+                  {showCredentialId ? data.credentialId : "••••••••"}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={showCredentialId ? () => setShowCredentialId(false) : handleRevealCredentialId}
+                >
+                  {showCredentialId ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <CopyButton getValue={() => data.credentialId ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Creation Date */}
+          {data.creationDate && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("creationDate")}</label>
+              <span className="text-sm">{data.creationDate}</span>
+            </div>
+          )}
+
+          {/* Device Info */}
+          {data.deviceInfo && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("deviceInfo")}</label>
+              <span className="text-sm">{data.deviceInfo}</span>
+            </div>
+          )}
+
+          {/* Notes */}
+          {data.notes && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("notes")}</label>
+              <p className="text-sm whitespace-pre-wrap rounded-md bg-muted p-3">
+                {data.notes}
+              </p>
+            </div>
+          )}
+        </>
+      ) : isIdentity ? (
         <>
           {/* Full Name */}
           {data.fullName && (
