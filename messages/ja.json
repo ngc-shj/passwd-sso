@@ -613,5 +613,22 @@
     "ipAddress": "IPアドレス",
     "noAccessLogs": "アクセスログはまだありません",
     "loadMoreLogs": "さらに読み込む"
+  },
+  "Attachments": {
+    "title": "添付ファイル",
+    "upload": "アップロード",
+    "download": "ダウンロード",
+    "noAttachments": "添付ファイルはありません",
+    "uploaded": "アップロードしました",
+    "deleted": "削除しました",
+    "uploadError": "アップロードに失敗しました",
+    "downloadError": "ダウンロードに失敗しました",
+    "deleteError": "削除に失敗しました",
+    "confirmDeleteTitle": "添付ファイルの削除",
+    "confirmDeleteDescription": "「{filename}」を削除してもよろしいですか？この操作は元に戻せません。",
+    "fileTooLarge": "ファイルサイズが上限（{max}）を超えています",
+    "tooManyFiles": "添付ファイルは最大{max}件までです",
+    "invalidExtension": "許可されていない拡張子です。許可: {allowed}",
+    "invalidContentType": "許可されていないファイル形式です"
   }
 }

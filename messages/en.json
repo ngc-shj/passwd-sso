@@ -613,5 +613,22 @@
     "ipAddress": "IP Address",
     "noAccessLogs": "No access logs yet",
     "loadMoreLogs": "Load more"
+  },
+  "Attachments": {
+    "title": "Attachments",
+    "upload": "Upload",
+    "download": "Download",
+    "noAttachments": "No attachments",
+    "uploaded": "Uploaded successfully",
+    "deleted": "Deleted successfully",
+    "uploadError": "Upload failed",
+    "downloadError": "Download failed",
+    "deleteError": "Delete failed",
+    "confirmDeleteTitle": "Delete Attachment",
+    "confirmDeleteDescription": "Are you sure you want to delete \"{filename}\"? This action cannot be undone.",
+    "fileTooLarge": "File size exceeds the limit ({max})",
+    "tooManyFiles": "Maximum {max} attachments per entry",
+    "invalidExtension": "File extension not allowed. Allowed: {allowed}",
+    "invalidContentType": "File type not allowed"
   }
 }

@@ -213,7 +213,14 @@ export function PasswordCard({
     return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
   };
 
-  // Fetch detail data when expanded
+  // Clear cached detail when collapsed so re-expand fetches fresh data
+  useEffect(() => {
+    if (!expanded) {
+      setDetailData(null);
+    }
+  }, [expanded]);
+
+  // Fetch detail data when expanded and no cached data
   useEffect(() => {
     if (!expanded || detailData) return;
 
@@ -281,7 +288,7 @@ export function PasswordCard({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded]);
+  }, [expanded, detailData]);
 
   const handleCopyContent = async () => {
     try {
@@ -650,6 +657,7 @@ export function PasswordCard({
                 if (onEditClick) onEditClick();
                 else setEditDialogOpen(true);
               } : undefined}
+              orgId={orgId}
             />
           ) : null
         )}

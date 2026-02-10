@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useTranslations, useLocale } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "./copy-button";
 import { Favicon } from "./favicon";
 import { TOTPField, type TOTPEntry } from "./totp-field";
+import { AttachmentSection, type AttachmentMeta } from "./attachment-section";
+import { OrgAttachmentSection, type OrgAttachmentMeta } from "@/components/org/org-attachment-section";
 import { formatCardNumber } from "@/lib/credit-card";
 import {
   Edit,
@@ -69,11 +71,12 @@ export interface InlineDetailData {
 interface PasswordDetailInlineProps {
   data: InlineDetailData;
   onEdit?: () => void;
+  orgId?: string;
 }
 
 const REVEAL_TIMEOUT = 30_000;
 
-export function PasswordDetailInline({ data, onEdit }: PasswordDetailInlineProps) {
+export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInlineProps) {
   const t = useTranslations("PasswordDetail");
   const tc = useTranslations("Common");
   const locale = useLocale();
@@ -90,6 +93,34 @@ export function PasswordDetailInline({ data, onEdit }: PasswordDetailInlineProps
   const [showCvv, setShowCvv] = useState(false);
   const [showIdNumber, setShowIdNumber] = useState(false);
   const [showCredentialId, setShowCredentialId] = useState(false);
+
+  // Attachment state
+  const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
+  const [orgAttachments, setOrgAttachments] = useState<OrgAttachmentMeta[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAttachments() {
+      try {
+        const url = orgId
+          ? `/api/orgs/${orgId}/passwords/${data.id}/attachments`
+          : `/api/passwords/${data.id}/attachments`;
+        const res = await fetch(url);
+        if (res.ok && !cancelled) {
+          const loaded = await res.json();
+          if (orgId) {
+            setOrgAttachments(loaded);
+          } else {
+            setAttachments(loaded);
+          }
+        }
+      } catch {
+        // silently fail — attachments are optional
+      }
+    }
+    loadAttachments();
+    return () => { cancelled = true; };
+  }, [data.id, orgId]);
 
   const handleReveal = useCallback(() => {
     setShowPassword(true);
@@ -580,6 +611,24 @@ export function PasswordDetailInline({ data, onEdit }: PasswordDetailInlineProps
             </div>
           )}
         </>
+      )}
+
+      {/* Attachments */}
+      {orgId ? (
+        <OrgAttachmentSection
+          orgId={orgId}
+          entryId={data.id}
+          attachments={orgAttachments}
+          onAttachmentsChange={setOrgAttachments}
+          readOnly={!onEdit}
+        />
+      ) : (
+        <AttachmentSection
+          entryId={data.id}
+          attachments={attachments}
+          onAttachmentsChange={setAttachments}
+          readOnly={!onEdit}
+        />
       )}
 
       {/* Timestamps + Edit */}

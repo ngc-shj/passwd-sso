@@ -14,6 +14,20 @@ export const generatePasswordSchema = z.object({
   excludeAmbiguous: z.boolean().default(false),
 });
 
+// ─── Attachment Constants ────────────────────────────────────
+
+export const ALLOWED_EXTENSIONS = ["pdf", "png", "jpg", "jpeg", "txt", "csv"] as const;
+export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+export const MAX_ATTACHMENTS_PER_ENTRY = 20;
+
+export const ALLOWED_CONTENT_TYPES = [
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "text/plain",
+  "text/csv",
+] as const;
+
 // ─── E2E Encrypted Entry Schemas ─────────────────────────────
 
 const encryptedFieldSchema = z.object({

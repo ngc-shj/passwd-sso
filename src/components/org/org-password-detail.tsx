@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/passwords/copy-button";
 import { TOTPField, type TOTPEntry } from "@/components/passwords/totp-field";
+import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
 import { formatCardNumber } from "@/lib/credit-card";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
@@ -81,6 +82,7 @@ export function OrgPasswordDetail({
     new Set()
   );
   const [loading, setLoading] = useState(false);
+  const [attachments, setAttachments] = useState<OrgAttachmentMeta[]>([]);
 
   useEffect(() => {
     if (!open || !passwordId) return;
@@ -90,13 +92,22 @@ export function OrgPasswordDetail({
     setShowCvv(false);
     setShowIdNumber(false);
     setHiddenFieldsVisible(new Set());
+    setAttachments([]);
 
-    fetch(`/api/orgs/${orgId}/passwords/${passwordId}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Not found");
-        return res.json();
+    Promise.all([
+      fetch(`/api/orgs/${orgId}/passwords/${passwordId}`)
+        .then((res) => {
+          if (!res.ok) throw new Error("Not found");
+          return res.json();
+        }),
+      fetch(`/api/orgs/${orgId}/passwords/${passwordId}/attachments`)
+        .then((res) => (res.ok ? res.json() : []))
+        .catch(() => []),
+    ])
+      .then(([entryData, attachData]) => {
+        setData(entryData);
+        setAttachments(attachData);
       })
-      .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
   }, [open, passwordId, orgId]);
@@ -514,6 +525,17 @@ export function OrgPasswordDetail({
                 </div>
               </div>
             )}
+
+            {/* Attachments */}
+            <div className="border-t pt-3">
+              <OrgAttachmentSection
+                orgId={orgId}
+                entryId={data.id}
+                attachments={attachments}
+                onAttachmentsChange={setAttachments}
+                readOnly
+              />
+            </div>
 
             <div className="border-t pt-3 space-y-1 text-xs text-muted-foreground">
               <p>

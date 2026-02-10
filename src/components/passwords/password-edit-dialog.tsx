@@ -14,6 +14,7 @@ import { SecureNoteForm } from "./secure-note-form";
 import { CreditCardForm } from "./credit-card-form";
 import { IdentityForm } from "./identity-form";
 import { PasskeyForm } from "./passkey-form";
+import { AttachmentSection, type AttachmentMeta } from "./attachment-section";
 import type { TagData } from "@/components/tags/tag-input";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import {
@@ -116,11 +117,13 @@ export function PasswordEditDialog({
   const { encryptionKey } = useVault();
   const [data, setData] = useState<FormData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
 
   useEffect(() => {
     if (!open || !encryptionKey) {
       setData(null);
       setError(null);
+      setAttachments([]);
       return;
     }
 
@@ -138,10 +141,16 @@ export function PasswordEditDialog({
         );
         const entry: VaultEntryFull = JSON.parse(plaintext);
 
-        const tagsRes = await fetch("/api/tags");
+        const [tagsRes, attachRes] = await Promise.all([
+          fetch("/api/tags"),
+          fetch(`/api/passwords/${id}/attachments`),
+        ]);
         const allTags: TagData[] = tagsRes.ok ? await tagsRes.json() : [];
         const tagIdsSet = new Set<string>(raw.tagIds ?? []);
         const resolvedTags = allTags.filter((t) => tagIdsSet.has(t.id));
+        if (attachRes.ok && !cancelled) {
+          setAttachments(await attachRes.json());
+        }
 
         if (cancelled) return;
         setData({
@@ -300,6 +309,16 @@ export function PasswordEditDialog({
             initialData={data}
             onSaved={handleSaved}
           />
+        )}
+        {data && (
+          <div className="border-t pt-4 mt-2">
+            <AttachmentSection
+              entryId={id}
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
+              keyVersion={undefined}
+            />
+          </div>
         )}
       </DialogContent>
     </Dialog>

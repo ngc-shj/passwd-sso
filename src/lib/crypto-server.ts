@@ -124,6 +124,53 @@ export function decryptServerData(
   ]).toString("utf8");
 }
 
+// ─── Binary Data Encryption / Decryption (for file attachments) ─
+
+export interface ServerEncryptedBinary {
+  ciphertext: Buffer;
+  iv: string; // hex
+  authTag: string; // hex
+}
+
+/** Encrypt binary data (Buffer) with an org key (AES-256-GCM). */
+export function encryptServerBinary(
+  data: Buffer,
+  orgKey: Buffer
+): ServerEncryptedBinary {
+  const iv = randomBytes(IV_LENGTH);
+  const cipher = createCipheriv(ALGORITHM, orgKey, iv, {
+    authTagLength: AUTH_TAG_LENGTH,
+  });
+
+  const ciphertext = Buffer.concat([cipher.update(data), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+
+  return {
+    ciphertext,
+    iv: iv.toString("hex"),
+    authTag: authTag.toString("hex"),
+  };
+}
+
+/** Decrypt binary data with an org key (AES-256-GCM). */
+export function decryptServerBinary(
+  encrypted: ServerEncryptedBinary,
+  orgKey: Buffer
+): Buffer {
+  const iv = Buffer.from(encrypted.iv, "hex");
+  const authTag = Buffer.from(encrypted.authTag, "hex");
+
+  const decipher = createDecipheriv(ALGORITHM, orgKey, iv, {
+    authTagLength: AUTH_TAG_LENGTH,
+  });
+  decipher.setAuthTag(authTag);
+
+  return Buffer.concat([
+    decipher.update(encrypted.ciphertext),
+    decipher.final(),
+  ]);
+}
+
 // ─── Share Link Helpers ─────────────────────────────────────────
 
 /** Generate a 32-byte random token as hex (64 chars). */

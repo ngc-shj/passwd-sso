@@ -23,6 +23,7 @@ import {
 import { PasswordGenerator } from "@/components/passwords/password-generator";
 import { TOTPField, type TOTPEntry } from "@/components/passwords/totp-field";
 import { OrgTagInput, type OrgTagData } from "./org-tag-input";
+import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
 import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
@@ -171,6 +172,7 @@ export function OrgPasswordForm({
   const [creationDate, setCreationDate] = useState(editData?.creationDate ?? "");
   const [deviceInfo, setDeviceInfo] = useState(editData?.deviceInfo ?? "");
   const [showCredentialId, setShowCredentialId] = useState(false);
+  const [attachments, setAttachments] = useState<OrgAttachmentMeta[]>([]);
 
   const isEdit = !!editData;
 
@@ -208,8 +210,14 @@ export function OrgPasswordForm({
       setCredentialId(editData.credentialId ?? "");
       setCreationDate(editData.creationDate ?? "");
       setDeviceInfo(editData.deviceInfo ?? "");
+
+      // Load attachments for edit mode
+      fetch(`/api/orgs/${orgId}/passwords/${editData.id}/attachments`)
+        .then((res) => (res.ok ? res.json() : []))
+        .then((loaded: OrgAttachmentMeta[]) => setAttachments(loaded))
+        .catch(() => setAttachments([]));
     }
-  }, [open, editData]);
+  }, [open, editData, orgId]);
 
   const handleOpenChange = (v: boolean) => {
     if (!v) {
@@ -250,6 +258,7 @@ export function OrgPasswordForm({
       setCreationDate("");
       setDeviceInfo("");
       setShowCredentialId(false);
+      setAttachments([]);
       setSaving(false);
     } else if (editData) {
       setTitle(editData.title);
@@ -1190,6 +1199,18 @@ export function OrgPasswordForm({
             {tc("cancel")}
           </Button>
         </div>
+
+        {/* Attachments (edit mode only) */}
+        {isEdit && editData && (
+          <div className="border-t pt-4">
+            <OrgAttachmentSection
+              orgId={orgId}
+              entryId={editData.id}
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
+            />
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

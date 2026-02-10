@@ -83,6 +83,7 @@ model User {
   orgPasswordFavorites OrgPasswordFavorite[]
   auditLogs            AuditLog[]
   passwordShares       PasswordShare[]
+  attachments          Attachment[]
 
   @@map("users")
 }
@@ -139,9 +140,10 @@ model PasswordEntry {
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
-  tags   Tag[]
-  user   User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  shares PasswordShare[]   @relation("personalShares")
+  tags        Tag[]
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shares      PasswordShare[]   @relation("personalShares")
+  attachments Attachment[]
 
   @@index([userId])
   @@map("password_entries")
@@ -237,9 +239,10 @@ model OrgPasswordEntry {
   org       Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
   createdBy User                   @relation("orgPasswordCreator", fields: [createdById], references: [id])
   updatedBy User                   @relation("orgPasswordUpdater", fields: [updatedById], references: [id])
-  tags      OrgTag[]
-  favorites OrgPasswordFavorite[]
-  shares    PasswordShare[]       @relation("orgShares")
+  tags        OrgTag[]
+  favorites   OrgPasswordFavorite[]
+  shares      PasswordShare[]       @relation("orgShares")
+  attachments Attachment[]
 
   @@index([orgId])
   @@map("org_password_entries")
@@ -349,6 +352,8 @@ enum AuditAction {
   ENTRY_DELETE
   ENTRY_RESTORE
   ENTRY_EXPORT
+  ATTACHMENT_UPLOAD
+  ATTACHMENT_DELETE
   ORG_MEMBER_INVITE
   ORG_MEMBER_REMOVE
   ORG_ROLE_UPDATE
@@ -381,4 +386,30 @@ model AuditLog {
   @@index([orgId, createdAt])
   @@index([action])
   @@map("audit_logs")
+}
+
+// ─── Attachment Models ──────────────────────────────────────────
+
+model Attachment {
+  id            String   @id @default(cuid())
+  filename      String   @db.VarChar(255)
+  contentType   String   @map("content_type") @db.VarChar(100)
+  sizeBytes     Int      @map("size_bytes")
+  encryptedData Bytes    @map("encrypted_data")
+  iv            String   @db.VarChar(24)
+  authTag       String   @map("auth_tag") @db.VarChar(32)
+  keyVersion    Int?     @map("key_version")
+
+  passwordEntryId    String? @map("password_entry_id")
+  orgPasswordEntryId String? @map("org_password_entry_id")
+  createdById        String  @map("created_by_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  passwordEntry    PasswordEntry?    @relation(fields: [passwordEntryId], references: [id], onDelete: Cascade)
+  orgPasswordEntry OrgPasswordEntry? @relation(fields: [orgPasswordEntryId], references: [id], onDelete: Cascade)
+  createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([passwordEntryId])
+  @@index([orgPasswordEntryId])
+  @@map("attachments")
 }

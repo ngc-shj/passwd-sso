@@ -22,6 +22,12 @@ export interface EncryptedData {
   authTag: string; // hex
 }
 
+export interface EncryptedBinary {
+  ciphertext: Uint8Array;
+  iv: string; // hex
+  authTag: string; // hex
+}
+
 // ─── Utility ────────────────────────────────────────────────────
 
 export function hexEncode(buf: ArrayBuffer | Uint8Array): string {
@@ -306,4 +312,54 @@ export async function decryptData(
     toArrayBuffer(combined)
   );
   return textDecode(decrypted);
+}
+
+// ─── Binary E2E Encryption (for file attachments) ───────────────
+
+/**
+ * Encrypt binary data (ArrayBuffer) with AES-256-GCM.
+ * Returns raw Uint8Array ciphertext instead of hex — more efficient for large files.
+ */
+export async function encryptBinary(
+  data: ArrayBuffer,
+  key: CryptoKey
+): Promise<EncryptedBinary> {
+  const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: toArrayBuffer(iv) },
+    key,
+    data
+  );
+
+  const encryptedBytes = new Uint8Array(encrypted);
+  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - 16);
+  const authTag = encryptedBytes.slice(encryptedBytes.length - 16);
+
+  return {
+    ciphertext,
+    iv: hexEncode(iv),
+    authTag: hexEncode(authTag),
+  };
+}
+
+/**
+ * Decrypt binary data (EncryptedBinary) with AES-256-GCM.
+ * Accepts raw Uint8Array ciphertext — reverse of encryptBinary.
+ */
+export async function decryptBinary(
+  encrypted: EncryptedBinary,
+  key: CryptoKey
+): Promise<ArrayBuffer> {
+  const iv = hexDecode(encrypted.iv);
+  const authTag = hexDecode(encrypted.authTag);
+
+  const combined = new Uint8Array(encrypted.ciphertext.length + authTag.length);
+  combined.set(encrypted.ciphertext);
+  combined.set(authTag, encrypted.ciphertext.length);
+
+  return crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: toArrayBuffer(iv) },
+    key,
+    toArrayBuffer(combined)
+  );
 }
