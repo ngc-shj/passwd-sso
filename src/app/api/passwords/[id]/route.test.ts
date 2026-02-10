@@ -101,6 +101,20 @@ describe("GET /api/passwords/[id]", () => {
     expect(res.status).toBe(200);
     expect(json.entryType).toBe("SECURE_NOTE");
   });
+
+  it("returns PASSKEY entryType", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({
+      ...ownedEntry,
+      entryType: "PASSKEY",
+    });
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.entryType).toBe("PASSKEY");
+  });
 });
 
 describe("PUT /api/passwords/[id]", () => {
@@ -258,5 +272,24 @@ describe("DELETE /api/passwords/[id]", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockPrismaPasswordEntry.delete).toHaveBeenCalledWith({ where: { id: PW_ID } });
+  });
+
+  it("soft deletes PASSKEY entry", async () => {
+    const passkeyEntry = { ...ownedEntry, entryType: "PASSKEY" };
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(passkeyEntry);
+    mockPrismaPasswordEntry.update.mockResolvedValue({});
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(mockPrismaPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { deletedAt: expect.any(Date) },
+      }),
+    );
   });
 });

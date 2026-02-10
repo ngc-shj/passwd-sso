@@ -1,7 +1,14 @@
+import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { proxy as handleProxy } from "./src/proxy";
 
 export function proxy(request: NextRequest) {
+  // Guard: skip Next.js internals that the matcher regex may not exclude
+  const { pathname } = request.nextUrl;
+  if (pathname.startsWith("/_next") || pathname.startsWith("/_vercel")) {
+    return NextResponse.next();
+  }
+
   const nonce = generateNonce();
   const cspHeader = buildCspHeader(nonce);
 

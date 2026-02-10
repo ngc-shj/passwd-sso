@@ -317,4 +317,47 @@ describe("POST /api/passwords", () => {
     const json = await res.json();
     expect(json[0].entryType).toBe("IDENTITY");
   });
+
+  it("creates PASSKEY entry (201)", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-passkey",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      entryType: "PASSKEY",
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: { ...validBody, entryType: "PASSKEY" },
+    }));
+    const json = await res.json();
+    expect(res.status).toBe(201);
+    expect(json.entryType).toBe("PASSKEY");
+  });
+
+  it("returns PASSKEY entryType in GET", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([
+      { ...mockEntry, id: "pw-passkey", entryType: "PASSKEY" },
+    ]);
+    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    const json = await res.json();
+    expect(json[0].entryType).toBe("PASSKEY");
+  });
+
+  it("filters by entryType PASSKEY", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      searchParams: { type: "PASSKEY" },
+    }));
+    expect(mockPrismaPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ entryType: "PASSKEY" }),
+      })
+    );
+  });
 });
