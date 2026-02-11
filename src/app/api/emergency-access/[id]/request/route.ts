@@ -1,0 +1,68 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/auth";
+import { prisma } from "@/lib/prisma";
+import { canTransition } from "@/lib/emergency-access-state";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { createRateLimiter } from "@/lib/rate-limit";
+
+const requestLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 3 });
+
+// POST /api/emergency-access/[id]/request — Grantee requests emergency access
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!(await requestLimiter.check(`rl:ea_request:${session.user.id}`))) {
+    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+  }
+
+  const { id } = await params;
+
+  const grant = await prisma.emergencyAccessGrant.findUnique({
+    where: { id },
+  });
+
+  if (!grant || grant.granteeId !== session.user.id) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  if (!canTransition(grant.status, "REQUESTED")) {
+    return NextResponse.json(
+      { error: `Cannot request access in ${grant.status} status` },
+      { status: 400 }
+    );
+  }
+
+  const now = new Date();
+  const waitExpiresAt = new Date(now.getTime() + grant.waitDays * 24 * 60 * 60 * 1000);
+
+  await prisma.emergencyAccessGrant.update({
+    where: { id },
+    data: {
+      status: "REQUESTED",
+      requestedAt: now,
+      waitExpiresAt,
+    },
+  });
+
+  logAudit({
+    scope: "PERSONAL",
+    action: "EMERGENCY_ACCESS_REQUEST",
+    userId: session.user.id,
+    targetType: "EmergencyAccessGrant",
+    targetId: id,
+    metadata: { ownerId: grant.ownerId, waitDays: grant.waitDays },
+    ...extractRequestMeta(req),
+  });
+
+  return NextResponse.json({
+    status: "REQUESTED",
+    requestedAt: now.toISOString(),
+    waitExpiresAt: waitExpiresAt.toISOString(),
+  });
+}

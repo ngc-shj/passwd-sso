@@ -64,7 +64,8 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith("/api/watchtower") ||
     pathname.startsWith("/api/orgs") ||
     pathname.startsWith("/api/audit-logs") ||
-    pathname.startsWith("/api/share-links")
+    pathname.startsWith("/api/share-links") ||
+    pathname.startsWith("/api/emergency-access")
   ) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {

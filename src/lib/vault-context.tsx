@@ -23,6 +23,7 @@ import {
   verifyKey,
   type EncryptedData,
 } from "./crypto-client";
+import { createKeyEscrow } from "./crypto-emergency";
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -56,6 +57,40 @@ function hexEncode(buf: Uint8Array): string {
   return Array.from(buf)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+// ─── Emergency Access Auto-Confirm ──────────────────────────
+
+async function confirmPendingEmergencyGrants(secretKey: Uint8Array, ownerId: string): Promise<void> {
+  try {
+    const res = await fetch("/api/emergency-access/pending-confirmations");
+    if (!res.ok) return;
+    const grants: Array<{
+      id: string;
+      granteeId: string;
+      granteePublicKey: string;
+    }> = await res.json();
+
+    for (const grant of grants) {
+      try {
+        const escrow = await createKeyEscrow(secretKey, grant.granteePublicKey, {
+          grantId: grant.id,
+          ownerId,
+          granteeId: grant.granteeId,
+        });
+        await fetch(`/api/emergency-access/${grant.id}/confirm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(escrow),
+        });
+      } catch {
+        // Skip individual grant failures
+      }
+    }
+  } finally {
+    // Zero the copy after use
+    secretKey.fill(0);
+  }
 }
 
 // ─── Provider ───────────────────────────────────────────────────
@@ -250,7 +285,17 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ authHash }),
       });
 
-      // 6. Store encryption key in memory and clear sensitive data
+      // 6. Auto-confirm pending emergency access grants (fire-and-forget)
+      // Copy secretKey since the original will be zeroed below
+      const secretKeyCopy = new Uint8Array(secretKey);
+      const userId = session?.user?.id;
+      if (userId) {
+        confirmPendingEmergencyGrants(secretKeyCopy, userId).catch(() => {
+          // Silently ignore — emergency access confirmation is best-effort
+        });
+      }
+
+      // 7. Store encryption key in memory and clear sensitive data
       secretKey.fill(0);
       setEncryptionKey(encKey);
       setVaultStatus("unlocked");
