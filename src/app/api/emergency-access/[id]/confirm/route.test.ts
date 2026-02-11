@@ -17,6 +17,10 @@ vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(),
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
 }));
+vi.mock("@/lib/crypto-emergency", () => ({
+  SUPPORTED_WRAP_VERSIONS: new Set([1]),
+  SUPPORTED_KEY_ALGORITHMS: { 1: ["ECDH-P256"] },
+}));
 
 import { POST } from "./route";
 
@@ -27,6 +31,7 @@ const validBody = {
   secretKeyAuthTag: "112233445566778899aabbccddeeff00",
   hkdfSalt: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   wrapVersion: 1,
+  keyVersion: 1,
 };
 
 describe("POST /api/emergency-access/[id]/confirm", () => {
@@ -38,6 +43,7 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
       ownerId: "owner-1",
       granteeId: "grantee-1",
       status: "ACCEPTED",
+      keyAlgorithm: "ECDH-P256",
     });
     mockPrismaGrant.update.mockResolvedValue({});
   });
@@ -74,6 +80,7 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
       id: "grant-1",
       ownerId: "owner-1",
       status: "IDLE",
+      keyAlgorithm: "ECDH-P256",
     });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/confirm", { body: validBody }),
@@ -82,7 +89,34 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
     expect(res.status).toBe(400);
   });
 
-  it("confirms key escrow successfully", async () => {
+  it("returns 400 for unsupported wrapVersion", async () => {
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/emergency-access/grant-1/confirm", {
+        body: { ...validBody, wrapVersion: 999 },
+      }),
+      createParams({ id: "grant-1" })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when keyAlgorithm is incompatible with wrapVersion", async () => {
+    mockPrismaGrant.findUnique.mockResolvedValue({
+      id: "grant-1",
+      ownerId: "owner-1",
+      granteeId: "grantee-1",
+      status: "ACCEPTED",
+      keyAlgorithm: "UNKNOWN-ALG",
+    });
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/emergency-access/grant-1/confirm", { body: validBody }),
+      createParams({ id: "grant-1" })
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("keyAlgorithm");
+  });
+
+  it("confirms key escrow successfully with keyVersion", async () => {
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/confirm", { body: validBody }),
       createParams({ id: "grant-1" })
@@ -92,7 +126,11 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
     expect(json.status).toBe("IDLE");
     expect(mockPrismaGrant.update).toHaveBeenCalledWith({
       where: { id: "grant-1" },
-      data: expect.objectContaining({ status: "IDLE" }),
+      data: expect.objectContaining({
+        status: "IDLE",
+        keyVersion: 1,
+        wrapVersion: 1,
+      }),
     });
   });
 
@@ -102,6 +140,7 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
       ownerId: "owner-1",
       granteeId: "grantee-1",
       status: "STALE",
+      keyAlgorithm: "ECDH-P256",
     });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/confirm", { body: validBody }),

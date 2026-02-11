@@ -450,7 +450,7 @@ model EmergencyAccessGrant {
   status       EmergencyAccessStatus @default(PENDING)
   waitDays     Int                   @map("wait_days")
 
-  token          String   @unique
+  tokenHash      String   @unique @map("token_hash") @db.VarChar(64)
   tokenExpiresAt DateTime @map("token_expires_at")
 
   // ECDH key exchange fields
@@ -462,6 +462,7 @@ model EmergencyAccessGrant {
   secretKeyAuthTag        String? @map("secret_key_auth_tag") @db.VarChar(32)
   hkdfSalt                String? @map("hkdf_salt") @db.VarChar(64)
   wrapVersion             Int     @default(1) @map("wrap_version")
+  keyVersion              Int?    @map("key_version")
 
   // ML-KEM fields (v2 PQC hybrid, nullable until migration)
   kemCiphertext  String? @map("kem_ciphertext") @db.Text

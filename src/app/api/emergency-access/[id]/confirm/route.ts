@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { confirmEmergencyGrantSchema } from "@/lib/validations";
 import { canTransition } from "@/lib/emergency-access-state";
+import { SUPPORTED_KEY_ALGORITHMS } from "@/lib/crypto-emergency";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 
 // POST /api/emergency-access/[id]/confirm — Owner performs key escrow
@@ -44,7 +45,16 @@ export async function POST(
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { ownerEphemeralPublicKey, encryptedSecretKey, secretKeyIv, secretKeyAuthTag, hkdfSalt, wrapVersion } = parsed.data;
+  const { ownerEphemeralPublicKey, encryptedSecretKey, secretKeyIv, secretKeyAuthTag, hkdfSalt, wrapVersion, keyVersion } = parsed.data;
+
+  // Validate keyAlgorithm is compatible with wrapVersion
+  const allowedAlgorithms = SUPPORTED_KEY_ALGORITHMS[wrapVersion];
+  if (!allowedAlgorithms?.includes(grant.keyAlgorithm)) {
+    return NextResponse.json(
+      { error: `keyAlgorithm '${grant.keyAlgorithm}' is not compatible with wrapVersion ${wrapVersion}` },
+      { status: 400 }
+    );
+  }
 
   await prisma.emergencyAccessGrant.update({
     where: { id },
@@ -56,6 +66,7 @@ export async function POST(
       secretKeyAuthTag,
       hkdfSalt,
       wrapVersion,
+      keyVersion,
     },
   });
 
@@ -65,7 +76,7 @@ export async function POST(
     userId: session.user.id,
     targetType: "EmergencyAccessGrant",
     targetId: id,
-    metadata: { granteeId: grant.granteeId },
+    metadata: { granteeId: grant.granteeId, wrapVersion, keyVersion },
     ...extractRequestMeta(req),
   });
 

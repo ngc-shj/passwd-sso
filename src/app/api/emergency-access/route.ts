@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createEmergencyGrantSchema } from "@/lib/validations";
-import { generateShareToken } from "@/lib/crypto-server";
+import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
       ownerId: session.user.id,
       granteeEmail,
       waitDays,
-      token,
+      tokenHash: hashToken(token),
       tokenExpiresAt,
     },
   });
@@ -80,9 +80,10 @@ export async function POST(req: NextRequest) {
     ...extractRequestMeta(req),
   });
 
+  // Return plaintext token only at creation time; DB stores only the hash
   return NextResponse.json({
     id: grant.id,
-    token: grant.token,
+    token,
     status: grant.status,
     granteeEmail: grant.granteeEmail,
     waitDays: grant.waitDays,
@@ -128,8 +129,7 @@ export async function GET() {
     waitExpiresAt: g.waitExpiresAt?.toISOString() ?? null,
     revokedAt: g.revokedAt?.toISOString() ?? null,
     createdAt: g.createdAt.toISOString(),
-    // Include token only for owner's PENDING grants
-    token: g.ownerId === session.user!.id && g.status === "PENDING" ? g.token : undefined,
+    // Token hash is never exposed — plaintext token only returned at creation time
     owner: g.owner,
     grantee: g.grantee,
   }));

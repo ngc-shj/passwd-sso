@@ -34,6 +34,7 @@ const activatedGrant = {
   secretKeyAuthTag: "112233445566778899aabbccddeeff00",
   hkdfSalt: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   wrapVersion: 1,
+  keyVersion: 1,
   keyAlgorithm: "ECDH-P256",
   granteeKeyPair: {
     encryptedPrivateKey: "ccdd",
@@ -128,6 +129,7 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     expect(json.encryptedSecretKey).toBeTruthy();
     expect(json.hkdfSalt).toBeTruthy();
     expect(json.wrapVersion).toBe(1);
+    expect(json.keyVersion).toBe(1);
     expect(json.granteeKeyPair).toBeTruthy();
   });
 });

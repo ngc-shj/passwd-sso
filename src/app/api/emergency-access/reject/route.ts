@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { rejectEmergencyGrantSchema } from "@/lib/validations";
+import { hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 
 // POST /api/emergency-access/reject — Reject an emergency access invitation
@@ -23,8 +24,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
+  // Hash the token for DB lookup (DB stores only the hash)
   const grant = await prisma.emergencyAccessGrant.findUnique({
-    where: { token: parsed.data.token },
+    where: { tokenHash: hashToken(parsed.data.token) },
   });
 
   if (!grant) {

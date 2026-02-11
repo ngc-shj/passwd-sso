@@ -63,7 +63,7 @@ function hexEncode(buf: Uint8Array): string {
 
 // ─── Emergency Access Auto-Confirm ──────────────────────────
 
-async function confirmPendingEmergencyGrants(secretKey: Uint8Array, ownerId: string): Promise<void> {
+async function confirmPendingEmergencyGrants(secretKey: Uint8Array, ownerId: string, keyVersion: number): Promise<void> {
   const res = await fetch("/api/emergency-access/pending-confirmations");
   if (!res.ok) return;
   const grants: Array<{
@@ -78,6 +78,7 @@ async function confirmPendingEmergencyGrants(secretKey: Uint8Array, ownerId: str
         grantId: grant.id,
         ownerId,
         granteeId: grant.granteeId,
+        keyVersion,
       });
       await fetch(`/api/emergency-access/${grant.id}/confirm`, {
         method: "POST",
@@ -97,6 +98,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [vaultStatus, setVaultStatus] = useState<VaultStatus>("loading");
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
   const secretKeyRef = useRef<Uint8Array | null>(null);
+  const keyVersionRef = useRef<number>(0);
   const lastActivityRef = useRef(Date.now());
   const hiddenAtRef = useRef<number | null>(null);
 
@@ -201,7 +203,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     const run = () => {
       if (inFlight || !secretKeyRef.current) return;
       inFlight = true;
-      confirmPendingEmergencyGrants(secretKeyRef.current, userId)
+      confirmPendingEmergencyGrants(secretKeyRef.current, userId, keyVersionRef.current)
         .catch(() => {})
         .finally(() => { inFlight = false; });
     };
@@ -334,14 +336,15 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ authHash }),
       });
 
-      // 6. Store secretKey for periodic EA auto-confirm, zero the local copy
+      // 6. Store secretKey and keyVersion for periodic EA auto-confirm, zero the local copy
       secretKeyRef.current = new Uint8Array(secretKey);
+      keyVersionRef.current = vaultData.keyVersion ?? 1;
       secretKey.fill(0);
 
       // 7. Auto-confirm pending emergency access grants (fire-and-forget)
       const userId = session?.user?.id;
       if (userId && secretKeyRef.current) {
-        confirmPendingEmergencyGrants(secretKeyRef.current, userId).catch(() => {
+        confirmPendingEmergencyGrants(secretKeyRef.current, userId, keyVersionRef.current).catch(() => {
           // Silently ignore — emergency access confirmation is best-effort
         });
       }

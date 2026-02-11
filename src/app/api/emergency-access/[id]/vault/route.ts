@@ -77,6 +77,7 @@ export async function GET(
     secretKeyAuthTag: grant.secretKeyAuthTag,
     hkdfSalt: grant.hkdfSalt,
     wrapVersion: grant.wrapVersion,
+    keyVersion: grant.keyVersion,
     keyAlgorithm: grant.keyAlgorithm,
     granteeKeyPair: {
       encryptedPrivateKey: grant.granteeKeyPair.encryptedPrivateKey,

@@ -13,6 +13,9 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { emergencyAccessGrant: mockPrismaGrant },
 }));
+vi.mock("@/lib/crypto-server", () => ({
+  hashToken: (t: string) => `hashed-${t}`,
+}));
 vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(),
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
@@ -82,6 +85,15 @@ describe("POST /api/emergency-access/reject", () => {
       body: { token: "tok" },
     }));
     expect(res.status).toBe(403);
+  });
+
+  it("looks up grant by tokenHash", async () => {
+    await POST(createRequest("POST", "http://localhost/api/emergency-access/reject", {
+      body: { token: "tok" },
+    }));
+    expect(mockPrismaGrant.findUnique).toHaveBeenCalledWith({
+      where: { tokenHash: "hashed-tok" },
+    });
   });
 
   it("rejects invitation successfully", async () => {

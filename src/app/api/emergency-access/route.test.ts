@@ -17,6 +17,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/crypto-server", () => ({
   generateShareToken: () => "mock-token-hex",
+  hashToken: (t: string) => `hashed-${t}`,
 }));
 vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(),
@@ -35,7 +36,6 @@ describe("POST /api/emergency-access", () => {
     mockPrismaGrant.findFirst.mockResolvedValue(null);
     mockPrismaGrant.create.mockResolvedValue({
       id: "grant-1",
-      token: "mock-token-hex",
       status: "PENDING",
       granteeEmail: "grantee@test.com",
       waitDays: 7,
@@ -90,16 +90,23 @@ describe("POST /api/emergency-access", () => {
     expect(res.status).toBe(409);
   });
 
-  it("creates grant successfully", async () => {
+  it("creates grant with hashed token and returns plaintext token", async () => {
     const res = await POST(createRequest("POST", "http://localhost/api/emergency-access", {
       body: { granteeEmail: "grantee@test.com", waitDays: 7 },
     }));
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.id).toBe("grant-1");
-    expect(json.token).toBe("mock-token-hex");
+    expect(json.token).toBe("mock-token-hex"); // plaintext token in response
     expect(json.status).toBe("PENDING");
-    expect(mockPrismaGrant.create).toHaveBeenCalledTimes(1);
+    // DB stores hashed token
+    expect(mockPrismaGrant.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tokenHash: "hashed-mock-token-hex",
+        }),
+      })
+    );
   });
 });
 
@@ -115,7 +122,7 @@ describe("GET /api/emergency-access", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns grant list", async () => {
+  it("returns grant list without token hash", async () => {
     mockPrismaGrant.findMany.mockResolvedValue([
       {
         id: "grant-1",
@@ -125,7 +132,7 @@ describe("GET /api/emergency-access", () => {
         status: "PENDING",
         waitDays: 7,
         keyAlgorithm: "ECDH-P256",
-        token: "tok",
+        tokenHash: "hashed-tok",
         requestedAt: null,
         activatedAt: null,
         waitExpiresAt: null,
@@ -141,33 +148,8 @@ describe("GET /api/emergency-access", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].id).toBe("grant-1");
-    expect(json[0].token).toBe("tok"); // owner sees token for PENDING
-  });
-
-  it("hides token for non-owner grants", async () => {
-    mockPrismaGrant.findMany.mockResolvedValue([
-      {
-        id: "grant-2",
-        ownerId: "other-owner",
-        granteeId: "user-1",
-        granteeEmail: "user@test.com",
-        status: "IDLE",
-        waitDays: 7,
-        keyAlgorithm: "ECDH-P256",
-        token: "secret-tok",
-        requestedAt: null,
-        activatedAt: null,
-        waitExpiresAt: null,
-        revokedAt: null,
-        createdAt: new Date("2025-01-01"),
-        owner: { id: "other-owner", name: "Other", email: "other@test.com", image: null },
-        grantee: { id: "user-1", name: "User", email: "user@test.com", image: null },
-      },
-    ]);
-
-    const res = await GET();
-    const json = await res.json();
-    expect(res.status).toBe(200);
+    // Token hash is never exposed in GET
     expect(json[0].token).toBeUndefined();
+    expect(json[0].tokenHash).toBeUndefined();
   });
 });

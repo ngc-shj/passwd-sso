@@ -4,6 +4,7 @@ import {
   getMinLength,
   normalizeCardNumber,
 } from "@/lib/credit-card";
+import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
 
 export const generatePasswordSchema = z.object({
   length: z.number().int().min(8).max(128).default(16),
@@ -46,7 +47,10 @@ export const createE2EPasswordSchema = z.object({
   aadVersion: z.number().int().min(0).max(1).optional().default(0),
   tagIds: z.array(z.string().cuid()).optional(),
   entryType: entryTypeSchema.optional().default("LOGIN"),
-});
+}).refine(
+  (d) => (d.aadVersion ?? 0) < 1 || !!d.id,
+  { message: "id is required when aadVersion >= 1", path: ["id"] }
+);
 
 export const updateE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema.optional(),
@@ -433,7 +437,11 @@ export const confirmEmergencyGrantSchema = z.object({
   secretKeyIv: z.string().length(24),
   secretKeyAuthTag: z.string().length(32),
   hkdfSalt: z.string().length(64),
-  wrapVersion: z.number().int().min(1),
+  wrapVersion: z.number().int().refine(
+    (v) => SUPPORTED_WRAP_VERSIONS.has(v),
+    { message: `wrapVersion must be one of: ${[...SUPPORTED_WRAP_VERSIONS].join(", ")}` }
+  ),
+  keyVersion: z.number().int().min(1),
 });
 
 export const revokeEmergencyGrantSchema = z.object({

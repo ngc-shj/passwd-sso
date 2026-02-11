@@ -73,9 +73,20 @@ describe("createE2EPasswordSchema", () => {
     expect(result.aadVersion).toBe(0);
   });
 
-  it("accepts aadVersion=1", () => {
-    const result = createE2EPasswordSchema.parse({ ...validBase, aadVersion: 1 });
+  it("accepts aadVersion=1 with id", () => {
+    const result = createE2EPasswordSchema.parse({
+      ...validBase,
+      aadVersion: 1,
+      id: "550e8400-e29b-41d4-a716-446655440000",
+    });
     expect(result.aadVersion).toBe(1);
+    expect(result.id).toBe("550e8400-e29b-41d4-a716-446655440000");
+  });
+
+  it("rejects aadVersion=1 without id", () => {
+    expect(() =>
+      createE2EPasswordSchema.parse({ ...validBase, aadVersion: 1 }),
+    ).toThrow("id is required when aadVersion >= 1");
   });
 
   it("rejects aadVersion=2 (out of range)", () => {

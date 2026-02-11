@@ -16,10 +16,11 @@ import {
 } from "./crypto-emergency";
 import { deriveEncryptionKey, hexDecode } from "./crypto-client";
 
-const TEST_CTX: Omit<WrapContext, "wrapVersion" | "keyVersion"> = {
+const TEST_CTX: Omit<WrapContext, "wrapVersion"> = {
   grantId: "test-grant-id-123",
   ownerId: "owner-user-001",
   granteeId: "grantee-user-002",
+  keyVersion: 1,
 };
 
 function makeWrapCtx(overrides?: Partial<WrapContext>): WrapContext {
@@ -278,10 +279,11 @@ describe("crypto-emergency", () => {
 
   describe("full emergency access crypto flow", () => {
     it("simulates the complete flow from invitation to vault access", async () => {
-      const fullFlowCtx: Omit<WrapContext, "wrapVersion" | "keyVersion"> = {
+      const fullFlowCtx: Omit<WrapContext, "wrapVersion"> = {
         grantId: "full-flow-grant-001",
         ownerId: "full-flow-owner",
         granteeId: "full-flow-grantee",
+        keyVersion: 1,
       };
 
       // 1. Owner has a vault with a secretKey
