@@ -25,6 +25,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";
+import { ENTRY_TYPE } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
 
 interface VaultEntryFull {
   title: string;
@@ -62,7 +64,7 @@ interface VaultEntryFull {
 
 interface FormData {
   id: string;
-  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
+  entryType: EntryTypeValue;
   title: string;
   username: string;
   password: string;
@@ -160,7 +162,7 @@ export function PasswordEditDialog({
         if (cancelled) return;
         setData({
           id: raw.id,
-          entryType: raw.entryType ?? "LOGIN",
+          entryType: raw.entryType ?? ENTRY_TYPE.LOGIN,
           title: entry.title,
           username: entry.username ?? "",
           password: entry.password ?? "",
@@ -211,10 +213,10 @@ export function PasswordEditDialog({
     onSaved();
   };
 
-  const isNote = data?.entryType === "SECURE_NOTE";
-  const isCreditCard = data?.entryType === "CREDIT_CARD";
-  const isIdentity = data?.entryType === "IDENTITY";
-  const isPasskey = data?.entryType === "PASSKEY";
+  const isNote = data?.entryType === ENTRY_TYPE.SECURE_NOTE;
+  const isCreditCard = data?.entryType === ENTRY_TYPE.CREDIT_CARD;
+  const isIdentity = data?.entryType === ENTRY_TYPE.IDENTITY;
+  const isPasskey = data?.entryType === ENTRY_TYPE.PASSKEY;
 
   const dialogTitle = isPasskey
     ? tpk("editPasskey")

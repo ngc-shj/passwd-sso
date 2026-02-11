@@ -22,6 +22,7 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 import { POST } from "./route";
+import { EA_STATUS } from "@/lib/constants";
 
 describe("POST /api/emergency-access/[id]/request", () => {
   beforeEach(() => {
@@ -31,7 +32,7 @@ describe("POST /api/emergency-access/[id]/request", () => {
       id: "grant-1",
       ownerId: "owner-1",
       granteeId: "grantee-1",
-      status: "IDLE",
+      status: EA_STATUS.IDLE,
       waitDays: 7,
     });
     mockPrismaGrant.update.mockResolvedValue({});
@@ -59,7 +60,7 @@ describe("POST /api/emergency-access/[id]/request", () => {
     mockPrismaGrant.findUnique.mockResolvedValue({
       id: "grant-1",
       granteeId: "grantee-1",
-      status: "PENDING",
+      status: EA_STATUS.PENDING,
       waitDays: 7,
     });
     const res = await POST(
@@ -76,12 +77,12 @@ describe("POST /api/emergency-access/[id]/request", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.status).toBe("REQUESTED");
+    expect(json.status).toBe(EA_STATUS.REQUESTED);
     expect(json.waitExpiresAt).toBeTruthy();
     expect(mockPrismaGrant.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "grant-1" },
-        data: expect.objectContaining({ status: "REQUESTED" }),
+        data: expect.objectContaining({ status: EA_STATUS.REQUESTED }),
       })
     );
   });
@@ -90,7 +91,7 @@ describe("POST /api/emergency-access/[id]/request", () => {
     mockPrismaGrant.findUnique.mockResolvedValue({
       id: "grant-1",
       granteeId: "grantee-1",
-      status: "STALE",
+      status: EA_STATUS.STALE,
       waitDays: 7,
     });
     const res = await POST(

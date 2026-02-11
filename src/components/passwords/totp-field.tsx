@@ -7,10 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CopyButton } from "./copy-button";
 import { X, ShieldCheck } from "lucide-react";
+import { TOTP_ALGORITHM } from "@/lib/constants";
+import type { TotpAlgorithm } from "@/lib/constants";
 
 export interface TOTPEntry {
   secret: string;
-  algorithm?: "SHA1" | "SHA256" | "SHA512";
+  algorithm?: TotpAlgorithm;
   digits?: number;
   period?: number;
 }
@@ -56,7 +58,7 @@ function parseOtpauthUri(input: string): TOTPEntry | null {
 function createTOTP(entry: TOTPEntry): TOTP {
   return new TOTP({
     secret: Secret.fromBase32(entry.secret),
-    algorithm: entry.algorithm ?? "SHA1",
+    algorithm: entry.algorithm ?? TOTP_ALGORITHM.SHA1,
     digits: entry.digits ?? 6,
     period: entry.period ?? 30,
   });

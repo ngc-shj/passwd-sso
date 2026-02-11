@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { STALE_ELIGIBLE_STATUSES } from "@/lib/emergency-access-state";
+import { EA_STATUS } from "@/lib/constants";
 
 /**
  * Mark all escrow-holding grants as STALE when the owner's keyVersion changes.
@@ -16,7 +17,7 @@ export async function markGrantsStaleForOwner(ownerId: string, newKeyVersion: nu
         { keyVersion: null },
       ],
     },
-    data: { status: "STALE" },
+    data: { status: EA_STATUS.STALE },
   });
   return result.count;
 }

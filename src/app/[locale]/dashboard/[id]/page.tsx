@@ -9,6 +9,7 @@ import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { PasswordDetail } from "@/components/passwords/password-detail";
 import type { TOTPEntry } from "@/components/passwords/totp-field";
 import { Loader2 } from "lucide-react";
+import type { CustomFieldType } from "@/lib/constants";
 
 interface PasswordHistoryEntry {
   password: string;
@@ -18,7 +19,7 @@ interface PasswordHistoryEntry {
 interface CustomField {
   label: string;
   value: string;
-  type: "text" | "hidden" | "url";
+  type: CustomFieldType;
 }
 
 interface VaultEntryFull {

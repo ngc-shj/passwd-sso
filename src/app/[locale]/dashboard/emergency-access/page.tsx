@@ -6,15 +6,14 @@ import { useSession } from "next-auth/react";
 import { HeartPulse, Users, Shield } from "lucide-react";
 import { CreateGrantDialog } from "@/components/emergency-access/create-grant-dialog";
 import { GrantCard } from "@/components/emergency-access/grant-card";
-
-type GrantStatus = "PENDING" | "ACCEPTED" | "IDLE" | "REQUESTED" | "ACTIVATED" | "REVOKED" | "REJECTED";
+import type { EaStatusValue } from "@/lib/constants";
 
 interface Grant {
   id: string;
   ownerId: string;
   granteeId: string | null;
   granteeEmail: string;
-  status: GrantStatus;
+  status: EaStatusValue;
   waitDays: number;
   token?: string;
   requestedAt: string | null;

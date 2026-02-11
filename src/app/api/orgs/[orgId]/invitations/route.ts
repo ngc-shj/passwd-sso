@@ -6,6 +6,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { inviteSchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { INVITATION_STATUS } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string }> };
 
@@ -28,7 +29,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 
   const invitations = await prisma.orgInvitation.findMany({
-    where: { orgId, status: "PENDING" },
+    where: { orgId, status: INVITATION_STATUS.PENDING },
     include: {
       invitedBy: {
         select: { id: true, name: true, email: true },
@@ -106,7 +107,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // Check for existing pending invitation
   const existingInv = await prisma.orgInvitation.findFirst({
-    where: { orgId, email, status: "PENDING" },
+    where: { orgId, email, status: INVITATION_STATUS.PENDING },
   });
   if (existingInv) {
     return NextResponse.json(

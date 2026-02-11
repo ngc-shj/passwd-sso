@@ -20,6 +20,8 @@ import { toast } from "sonner";
 import { Copy, ShieldOff, ShieldAlert, ShieldCheck, ShieldX, KeyRound, Lock, Loader2 } from "lucide-react";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
+import { VAULT_STATUS, EA_STATUS } from "@/lib/constants";
+import type { EaStatusValue } from "@/lib/constants";
 import {
   generateECDHKeyPair,
   exportPublicKey,
@@ -28,14 +30,12 @@ import {
 } from "@/lib/crypto-emergency";
 import { eaErrorToI18nKey } from "@/lib/api-error-codes";
 
-type GrantStatus = "PENDING" | "ACCEPTED" | "IDLE" | "STALE" | "REQUESTED" | "ACTIVATED" | "REVOKED" | "REJECTED";
-
 interface Grant {
   id: string;
   ownerId: string;
   granteeId: string | null;
   granteeEmail: string;
-  status: GrantStatus;
+  status: EaStatusValue;
   waitDays: number;
   token?: string;
   requestedAt: string | null;
@@ -51,15 +51,15 @@ interface GrantCardProps {
   onRefresh: () => void;
 }
 
-const statusColors: Record<GrantStatus, string> = {
-  PENDING: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400",
-  ACCEPTED: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  IDLE: "bg-green-500/10 text-green-700 dark:text-green-400",
-  STALE: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  REQUESTED: "bg-orange-500/10 text-orange-700 dark:text-orange-400",
-  ACTIVATED: "bg-red-500/10 text-red-700 dark:text-red-400",
-  REVOKED: "bg-gray-500/10 text-gray-500",
-  REJECTED: "bg-gray-500/10 text-gray-500",
+const statusColors: Record<EaStatusValue, string> = {
+  [EA_STATUS.PENDING]: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400",
+  [EA_STATUS.ACCEPTED]: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
+  [EA_STATUS.IDLE]: "bg-green-500/10 text-green-700 dark:text-green-400",
+  [EA_STATUS.STALE]: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  [EA_STATUS.REQUESTED]: "bg-orange-500/10 text-orange-700 dark:text-orange-400",
+  [EA_STATUS.ACTIVATED]: "bg-red-500/10 text-red-700 dark:text-red-400",
+  [EA_STATUS.REVOKED]: "bg-gray-500/10 text-gray-500",
+  [EA_STATUS.REJECTED]: "bg-gray-500/10 text-gray-500",
 };
 
 function getTimeRemaining(waitExpiresAt: string): string {
@@ -78,7 +78,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
   const [accepting, setAccepting] = useState(false);
   const isOwner = grant.ownerId === currentUserId;
   const waitExpired =
-    grant.status === "REQUESTED" &&
+    grant.status === EA_STATUS.REQUESTED &&
     !!grant.waitExpiresAt &&
     new Date(grant.waitExpiresAt) <= new Date();
   const displayName = isOwner
@@ -203,7 +203,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
 
   const translateApiError = (error: unknown) => t(eaErrorToI18nKey(error));
 
-  const vaultLocked = vaultStatus !== "unlocked";
+  const vaultLocked = vaultStatus !== VAULT_STATUS.UNLOCKED;
 
   return (
     <Card>
@@ -217,7 +217,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
           </div>
           <p className="text-xs text-muted-foreground">
             {t("waitDays")}: {grant.waitDays}{t("waitDaysUnit")}
-            {grant.status === "REQUESTED" && grant.waitExpiresAt && (
+            {grant.status === EA_STATUS.REQUESTED && grant.waitExpiresAt && (
               <> &middot; {t("waitingPeriod", { remaining: getTimeRemaining(grant.waitExpiresAt) })}</>
             )}
           </p>
@@ -225,13 +225,13 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
 
         <div className="flex items-center gap-1">
           {/* Owner actions */}
-          {isOwner && grant.status === "PENDING" && grant.token && (
+          {isOwner && grant.status === EA_STATUS.PENDING && grant.token && (
             <Button variant="ghost" size="icon" onClick={handleCopyLink} title={t("copyLink")}>
               <Copy className="h-4 w-4" />
             </Button>
           )}
 
-          {isOwner && grant.status === "REQUESTED" && (
+          {isOwner && grant.status === EA_STATUS.REQUESTED && (
             <>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
@@ -280,7 +280,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
             </>
           )}
 
-          {isOwner && !["REVOKED", "REJECTED"].includes(grant.status) && (
+          {isOwner && !([EA_STATUS.REVOKED, EA_STATUS.REJECTED] as EaStatusValue[]).includes(grant.status) && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="ghost" size="icon" title={t("revoke")}>
@@ -305,7 +305,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
           )}
 
           {/* Grantee actions */}
-          {!isOwner && grant.status === "PENDING" && (
+          {!isOwner && grant.status === EA_STATUS.PENDING && (
             <div className="flex items-center gap-1">
               {vaultLocked && (
                 <span title={t("vaultUnlockRequired")}>
@@ -350,7 +350,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
             </div>
           )}
 
-          {!isOwner && grant.status === "IDLE" && (
+          {!isOwner && grant.status === EA_STATUS.IDLE && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="outline" size="sm">
@@ -378,7 +378,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
             </AlertDialog>
           )}
 
-          {!isOwner && (grant.status === "ACTIVATED" || waitExpired) && (
+          {!isOwner && (grant.status === EA_STATUS.ACTIVATED || waitExpired) && (
             <Button
               size="sm"
               onClick={() => router.push(`/dashboard/emergency-access/${grant.id}/vault`)}

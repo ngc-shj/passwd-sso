@@ -5,6 +5,7 @@ import { revokeEmergencyGrantSchema } from "@/lib/validations";
 import { canTransition } from "@/lib/emergency-access-state";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { EA_STATUS } from "@/lib/constants";
 
 // POST /api/emergency-access/[id]/revoke — Owner revokes or rejects request
 export async function POST(
@@ -42,7 +43,7 @@ export async function POST(
 
   if (permanent) {
     // Full revoke
-    if (!canTransition(grant.status, "REVOKED")) {
+    if (!canTransition(grant.status, EA_STATUS.REVOKED)) {
       return NextResponse.json(
         { error: API_ERROR.INVALID_STATUS },
         { status: 400 }
@@ -52,7 +53,7 @@ export async function POST(
     await prisma.emergencyAccessGrant.update({
       where: { id },
       data: {
-        status: "REVOKED",
+        status: EA_STATUS.REVOKED,
         revokedAt: new Date(),
         // Clear crypto data (defense in depth)
         encryptedSecretKey: null,
@@ -73,10 +74,10 @@ export async function POST(
       ...extractRequestMeta(req),
     });
 
-    return NextResponse.json({ status: "REVOKED" });
+    return NextResponse.json({ status: EA_STATUS.REVOKED });
   } else {
     // Reject request only (revert to IDLE)
-    if (!canTransition(grant.status, "IDLE")) {
+    if (!canTransition(grant.status, EA_STATUS.IDLE)) {
       return NextResponse.json(
         { error: API_ERROR.INVALID_STATUS },
         { status: 400 }
@@ -86,7 +87,7 @@ export async function POST(
     await prisma.emergencyAccessGrant.update({
       where: { id },
       data: {
-        status: "IDLE",
+        status: EA_STATUS.IDLE,
         requestedAt: null,
         waitExpiresAt: null,
       },
@@ -102,6 +103,6 @@ export async function POST(
       ...extractRequestMeta(req),
     });
 
-    return NextResponse.json({ status: "IDLE" });
+    return NextResponse.json({ status: EA_STATUS.IDLE });
   }
 }

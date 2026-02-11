@@ -31,6 +31,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { DELETE } from "./route";
+import { ORG_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-123";
 const INV_ID = "inv-456";
@@ -39,7 +40,7 @@ describe("DELETE /api/orgs/[orgId]/invitations/[invId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: "ADMIN" });
+    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
   });
 
   it("returns 401 when unauthenticated", async () => {

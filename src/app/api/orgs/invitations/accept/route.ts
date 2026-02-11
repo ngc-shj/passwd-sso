@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { INVITATION_STATUS } from "@/lib/constants";
 
 const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (invitation.status !== "PENDING") {
+  if (invitation.status !== INVITATION_STATUS.PENDING) {
     return NextResponse.json(
       { error: API_ERROR.INVITATION_ALREADY_USED },
       { status: 410 }
@@ -54,7 +55,7 @@ export async function POST(req: NextRequest) {
   if (invitation.expiresAt < new Date()) {
     await prisma.orgInvitation.update({
       where: { id: invitation.id },
-      data: { status: "EXPIRED" },
+      data: { status: INVITATION_STATUS.EXPIRED },
     });
     return NextResponse.json(
       { error: API_ERROR.INVITATION_EXPIRED },
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest) {
   if (existingMember) {
     await prisma.orgInvitation.update({
       where: { id: invitation.id },
-      data: { status: "ACCEPTED" },
+      data: { status: INVITATION_STATUS.ACCEPTED },
     });
     return NextResponse.json({
       org: invitation.org,
@@ -102,7 +103,7 @@ export async function POST(req: NextRequest) {
     }),
     prisma.orgInvitation.update({
       where: { id: invitation.id },
-      data: { status: "ACCEPTED" },
+      data: { status: INVITATION_STATUS.ACCEPTED },
     }),
   ]);
 

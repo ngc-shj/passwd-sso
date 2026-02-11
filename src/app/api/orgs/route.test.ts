@@ -25,6 +25,7 @@ vi.mock("@/lib/crypto-server", () => ({
 }));
 
 import { GET, POST } from "./route";
+import { ORG_ROLE } from "@/lib/constants";
 
 const now = new Date("2025-01-01T00:00:00Z");
 
@@ -43,11 +44,11 @@ describe("GET /api/orgs", () => {
   it("returns list of orgs with role", async () => {
     mockPrismaOrgMember.findMany.mockResolvedValue([
       {
-        role: "OWNER",
+        role: ORG_ROLE.OWNER,
         org: { id: "org-1", name: "My Org", slug: "my-org", description: null, createdAt: now },
       },
       {
-        role: "MEMBER",
+        role: ORG_ROLE.MEMBER,
         org: { id: "org-2", name: "Other", slug: "other", description: "desc", createdAt: now },
       },
     ]);
@@ -56,8 +57,8 @@ describe("GET /api/orgs", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toHaveLength(2);
-    expect(json[0].role).toBe("OWNER");
-    expect(json[1].role).toBe("MEMBER");
+    expect(json[0].role).toBe(ORG_ROLE.OWNER);
+    expect(json[1].role).toBe(ORG_ROLE.MEMBER);
   });
 
   it("returns empty array when user has no orgs", async () => {
@@ -117,14 +118,14 @@ describe("POST /api/orgs", () => {
     const json = await res.json();
     expect(res.status).toBe(201);
     expect(json.id).toBe("new-org-id");
-    expect(json.role).toBe("OWNER");
+    expect(json.role).toBe(ORG_ROLE.OWNER);
     expect(mockPrismaOrganization.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           encryptedOrgKey: "wrapped-cipher",
           orgKeyIv: "wrapped-iv",
           orgKeyAuthTag: "wrapped-tag",
-          members: { create: { userId: "test-user-id", role: "OWNER" } },
+          members: { create: { userId: "test-user-id", role: ORG_ROLE.OWNER } },
         }),
       }),
     );

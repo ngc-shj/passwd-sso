@@ -25,10 +25,11 @@ import {
   type EncryptedData,
 } from "./crypto-client";
 import { createKeyEscrow } from "./crypto-emergency";
+import { VAULT_STATUS } from "@/lib/constants";
+import type { VaultStatus } from "@/lib/constants";
 
-// ─── Types ──────────────────────────────────────────────────────
-
-export type VaultStatus = "loading" | "locked" | "unlocked" | "setup-required";
+// Re-export so existing consumers can keep importing from vault-context
+export type { VaultStatus };
 
 interface VaultContextValue {
   status: VaultStatus;
@@ -97,7 +98,7 @@ async function confirmPendingEmergencyGrants(secretKey: Uint8Array, ownerId: str
 
 export function VaultProvider({ children }: { children: ReactNode }) {
   const { data: session, status: sessionStatus } = useSession();
-  const [vaultStatus, setVaultStatus] = useState<VaultStatus>("loading");
+  const [vaultStatus, setVaultStatus] = useState<VaultStatus>(VAULT_STATUS.LOADING);
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
   const secretKeyRef = useRef<Uint8Array | null>(null);
   const keyVersionRef = useRef<number>(0);
@@ -110,7 +111,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (sessionStatus !== "authenticated" || !session?.user) {
       if (sessionStatus === "unauthenticated") {
-        setVaultStatus("locked");
+        setVaultStatus(VAULT_STATUS.LOCKED);
       }
       return;
     }
@@ -119,17 +120,17 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       try {
         const res = await fetch("/api/vault/status");
         if (!res.ok) {
-          setVaultStatus((prev) => prev === "unlocked" ? prev : "locked");
+          setVaultStatus((prev) => prev === VAULT_STATUS.UNLOCKED ? prev : VAULT_STATUS.LOCKED);
           return;
         }
         const data = await res.json();
         setVaultStatus((prev) => {
           // Never overwrite "unlocked" — only the lock timer should do that
-          if (prev === "unlocked") return prev;
-          return data.setupRequired ? "setup-required" : "locked";
+          if (prev === VAULT_STATUS.UNLOCKED) return prev;
+          return data.setupRequired ? VAULT_STATUS.SETUP_REQUIRED : VAULT_STATUS.LOCKED;
         });
       } catch {
-        setVaultStatus((prev) => prev === "unlocked" ? prev : "locked");
+        setVaultStatus((prev) => prev === VAULT_STATUS.UNLOCKED ? prev : VAULT_STATUS.LOCKED);
       }
     }
 
@@ -145,12 +146,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     }
     setEncryptionKey(null);
     setVaultStatus((prev) =>
-      prev === "unlocked" ? "locked" : prev
+      prev === VAULT_STATUS.UNLOCKED ? VAULT_STATUS.LOCKED : prev
     );
   }, []);
 
   useEffect(() => {
-    if (vaultStatus !== "unlocked") return;
+    if (vaultStatus !== VAULT_STATUS.UNLOCKED) return;
 
     const updateActivity = () => {
       lastActivityRef.current = Date.now();
@@ -209,7 +210,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // ─── Periodic EA auto-confirm ────────────────────────────────
 
   useEffect(() => {
-    if (vaultStatus !== "unlocked" || !session?.user?.id) return;
+    if (vaultStatus !== VAULT_STATUS.UNLOCKED || !session?.user?.id) return;
 
     const userId = session.user.id;
     let inFlight = false;
@@ -302,7 +303,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     // 9. Store encryption key and accountSalt in memory
     accountSaltRef.current = accountSalt;
     setEncryptionKey(encKey);
-    setVaultStatus("unlocked");
+    setVaultStatus(VAULT_STATUS.UNLOCKED);
     lastActivityRef.current = Date.now();
   }, []);
 
@@ -381,7 +382,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       // 8. Store encryption key in memory
       setEncryptionKey(encKey);
-      setVaultStatus("unlocked");
+      setVaultStatus(VAULT_STATUS.UNLOCKED);
       lastActivityRef.current = Date.now();
 
       return true;

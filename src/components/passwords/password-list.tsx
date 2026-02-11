@@ -7,6 +7,8 @@ import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { PasswordCard } from "./password-card";
 import { Archive, KeyRound, Loader2, Star } from "lucide-react";
+import type { EntryTypeValue } from "@/lib/constants";
+import { ENTRY_TYPE } from "@/lib/constants";
 
 interface DecryptedOverview {
   title: string;
@@ -24,7 +26,7 @@ interface DecryptedOverview {
 
 interface DisplayEntry {
   id: string;
-  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
+  entryType: EntryTypeValue;
   title: string;
   username: string | null;
   urlHost: string | null;
@@ -124,7 +126,7 @@ export function PasswordList({
 
           decrypted.push({
             id: entry.id,
-            entryType: entry.entryType ?? "LOGIN",
+            entryType: entry.entryType ?? ENTRY_TYPE.LOGIN,
             title: overview.title,
             username: overview.username ?? null,
             urlHost: overview.urlHost ?? null,

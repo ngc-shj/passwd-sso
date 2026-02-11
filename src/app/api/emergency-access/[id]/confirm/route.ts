@@ -6,6 +6,7 @@ import { canTransition } from "@/lib/emergency-access-state";
 import { SUPPORTED_KEY_ALGORITHMS } from "@/lib/crypto-emergency";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { EA_STATUS } from "@/lib/constants";
 
 // POST /api/emergency-access/[id]/confirm — Owner performs key escrow
 export async function POST(
@@ -27,7 +28,7 @@ export async function POST(
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  if (!canTransition(grant.status, "IDLE")) {
+  if (!canTransition(grant.status, EA_STATUS.IDLE)) {
     return NextResponse.json(
       { error: API_ERROR.INVALID_STATUS },
       { status: 400 }
@@ -73,7 +74,7 @@ export async function POST(
   await prisma.emergencyAccessGrant.update({
     where: { id },
     data: {
-      status: "IDLE",
+      status: EA_STATUS.IDLE,
       ownerEphemeralPublicKey,
       encryptedSecretKey,
       secretKeyIv,
@@ -94,5 +95,5 @@ export async function POST(
     ...extractRequestMeta(req),
   });
 
-  return NextResponse.json({ status: "IDLE", keyVersion: serverKeyVersion });
+  return NextResponse.json({ status: EA_STATUS.IDLE, keyVersion: serverKeyVersion });
 }

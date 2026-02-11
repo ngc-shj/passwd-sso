@@ -11,6 +11,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { markGrantsStaleForOwner } from "./emergency-access-server";
+import { EA_STATUS } from "@/lib/constants";
 
 describe("markGrantsStaleForOwner", () => {
   beforeEach(() => {
@@ -26,13 +27,13 @@ describe("markGrantsStaleForOwner", () => {
     expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith({
       where: {
         ownerId: "owner-1",
-        status: { in: ["IDLE", "ACTIVATED"] },
+        status: { in: [EA_STATUS.IDLE, EA_STATUS.ACTIVATED] },
         OR: [
           { keyVersion: { lt: 2 } },
           { keyVersion: null },
         ],
       },
-      data: { status: "STALE" },
+      data: { status: EA_STATUS.STALE },
     });
   });
 

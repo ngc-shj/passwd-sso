@@ -19,6 +19,8 @@ import { TagBadge } from "@/components/tags/tag-badge";
 import { CopyButton } from "./copy-button";
 import { Favicon } from "./favicon";
 import { TOTPField, type TOTPEntry } from "./totp-field";
+import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
+import type { CustomFieldType } from "@/lib/constants";
 import {
   ArrowLeft,
   Edit,
@@ -40,8 +42,6 @@ interface PasswordHistoryEntry {
   password: string;
   changedAt: string;
 }
-
-type CustomFieldType = "text" | "hidden" | "url";
 
 interface CustomField {
   label: string;
@@ -312,7 +312,7 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
                   {field.label}
                 </label>
                 <div className="flex items-center gap-2">
-                  {field.type === "url" ? (
+                  {field.type === CUSTOM_FIELD_TYPE.URL ? (
                     <a
                       href={field.value}
                       target="_blank"
@@ -321,7 +321,7 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
                     >
                       {field.value}
                     </a>
-                  ) : field.type === "hidden" ? (
+                  ) : field.type === CUSTOM_FIELD_TYPE.HIDDEN ? (
                     <>
                       <span className="font-mono text-sm">
                         {revealedFields.has(idx) ? field.value : "••••••••••••"}

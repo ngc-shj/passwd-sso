@@ -22,12 +22,13 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 import { GET } from "./route";
+import { EA_STATUS } from "@/lib/constants";
 
 const activatedGrant = {
   id: "grant-1",
   ownerId: "owner-1",
   granteeId: "grantee-1",
-  status: "ACTIVATED",
+  status: EA_STATUS.ACTIVATED,
   ownerEphemeralPublicKey: '{"kty":"EC"}',
   encryptedSecretKey: "aabb",
   secretKeyIv: "112233445566778899aabbcc",
@@ -72,7 +73,7 @@ describe("GET /api/emergency-access/[id]/vault", () => {
   it("returns 403 when not ACTIVATED", async () => {
     mockPrismaGrant.findUnique.mockResolvedValue({
       ...activatedGrant,
-      status: "IDLE",
+      status: EA_STATUS.IDLE,
       waitExpiresAt: null,
     });
     const res = await GET(
@@ -85,7 +86,7 @@ describe("GET /api/emergency-access/[id]/vault", () => {
   it("returns 403 when grant is STALE", async () => {
     mockPrismaGrant.findUnique.mockResolvedValue({
       ...activatedGrant,
-      status: "STALE",
+      status: EA_STATUS.STALE,
       waitExpiresAt: null,
     });
     const res = await GET(
@@ -98,7 +99,7 @@ describe("GET /api/emergency-access/[id]/vault", () => {
   it("auto-activates when wait period expired", async () => {
     mockPrismaGrant.findUnique.mockResolvedValue({
       ...activatedGrant,
-      status: "REQUESTED",
+      status: EA_STATUS.REQUESTED,
       waitExpiresAt: new Date("2020-01-01"),
     });
     mockPrismaGrant.update.mockResolvedValue({});
@@ -110,7 +111,7 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     expect(res.status).toBe(200);
     expect(mockPrismaGrant.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ status: "ACTIVATED" }),
+        data: expect.objectContaining({ status: EA_STATUS.ACTIVATED }),
       })
     );
   });

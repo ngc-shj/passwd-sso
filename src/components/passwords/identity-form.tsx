@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { Loader2, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import { ENTRY_TYPE } from "@/lib/constants";
 
 interface IdentityFormProps {
   mode: "create" | "edit";
@@ -124,7 +125,7 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
         keyVersion: 1,
         aadVersion: aad ? AAD_VERSION : 0,
         tagIds: selectedTags.map((t) => t.id),
-        entryType: "IDENTITY",
+        entryType: ENTRY_TYPE.IDENTITY,
       };
 
       const endpoint =

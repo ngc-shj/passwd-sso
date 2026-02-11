@@ -29,6 +29,7 @@ vi.mock("@/lib/crypto-emergency", () => ({
 }));
 
 import { POST } from "./route";
+import { EA_STATUS } from "@/lib/constants";
 
 const validBody = {
   ownerEphemeralPublicKey: '{"kty":"EC","crv":"P-256","x":"abc","y":"def"}',
@@ -48,7 +49,7 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
       id: "grant-1",
       ownerId: "owner-1",
       granteeId: "grantee-1",
-      status: "ACCEPTED",
+      status: EA_STATUS.ACCEPTED,
       keyAlgorithm: "ECDH-P256",
     });
     mockPrismaGrant.update.mockResolvedValue({});
@@ -87,7 +88,7 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
     mockPrismaGrant.findUnique.mockResolvedValue({
       id: "grant-1",
       ownerId: "owner-1",
-      status: "IDLE",
+      status: EA_STATUS.IDLE,
       keyAlgorithm: "ECDH-P256",
     });
     const res = await POST(
@@ -123,7 +124,7 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
       id: "grant-1",
       ownerId: "owner-1",
       granteeId: "grantee-1",
-      status: "ACCEPTED",
+      status: EA_STATUS.ACCEPTED,
       keyAlgorithm: "UNKNOWN-ALG",
     });
     const res = await POST(
@@ -142,12 +143,12 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.status).toBe("IDLE");
+    expect(json.status).toBe(EA_STATUS.IDLE);
     expect(json.keyVersion).toBe(3);
     expect(mockPrismaGrant.update).toHaveBeenCalledWith({
       where: { id: "grant-1" },
       data: expect.objectContaining({
-        status: "IDLE",
+        status: EA_STATUS.IDLE,
         keyVersion: 3,
         wrapVersion: 1,
       }),
@@ -177,7 +178,7 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
       id: "grant-1",
       ownerId: "owner-1",
       granteeId: "grantee-1",
-      status: "STALE",
+      status: EA_STATUS.STALE,
       keyAlgorithm: "ECDH-P256",
     });
     const res = await POST(
@@ -186,7 +187,7 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.status).toBe("IDLE");
+    expect(json.status).toBe(EA_STATUS.IDLE);
     expect(json.keyVersion).toBe(3);
   });
 });

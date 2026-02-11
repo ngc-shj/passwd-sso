@@ -53,10 +53,12 @@ import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { ShareDialog } from "@/components/share/share-dialog";
+import { ENTRY_TYPE } from "@/lib/constants";
+import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
 
 interface PasswordCardProps {
   id: string;
-  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
+  entryType?: EntryTypeValue;
   title: string;
   username: string | null;
   urlHost: string | null;
@@ -99,7 +101,7 @@ interface VaultEntryFull {
   notes?: string | null;
   content?: string;
   tags: Array<{ name: string; color: string | null }>;
-  customFields?: Array<{ label: string; value: string; type: "text" | "hidden" | "url" }>;
+  customFields?: Array<{ label: string; value: string; type: CustomFieldType }>;
   passwordHistory?: Array<{ password: string; changedAt: string }>;
   totp?: TOTPEntry;
   cardholderName?: string | null;
@@ -128,7 +130,7 @@ const CLIPBOARD_CLEAR_DELAY = 30_000;
 
 export function PasswordCard({
   id,
-  entryType = "LOGIN",
+  entryType = ENTRY_TYPE.LOGIN,
   title,
   username,
   urlHost,
@@ -158,10 +160,10 @@ export function PasswordCard({
   orgId,
 }: PasswordCardProps) {
   const isOrgMode = !!getPasswordProp;
-  const isNote = entryType === "SECURE_NOTE";
-  const isCreditCard = entryType === "CREDIT_CARD";
-  const isIdentity = entryType === "IDENTITY";
-  const isPasskey = entryType === "PASSKEY";
+  const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
+  const isCreditCard = entryType === ENTRY_TYPE.CREDIT_CARD;
+  const isIdentity = entryType === ENTRY_TYPE.IDENTITY;
+  const isPasskey = entryType === ENTRY_TYPE.PASSKEY;
   const t = useTranslations("PasswordCard");
   const tc = useTranslations("Common");
   const tCopy = useTranslations("CopyButton");

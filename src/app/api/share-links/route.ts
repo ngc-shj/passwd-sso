@@ -14,6 +14,7 @@ import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import type { EntryTypeValue } from "@/lib/constants";
 
 const shareLinkLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
     parsed.data;
 
   let plaintext: string;
-  let entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
+  let entryType: EntryTypeValue;
 
   if (passwordEntryId) {
     // Personal entry — verify ownership

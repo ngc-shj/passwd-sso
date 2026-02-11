@@ -15,6 +15,7 @@ import { getTagColorClass } from "@/lib/dynamic-styles";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { ExportDialog } from "@/components/passwords/export-dialog";
 import { ImportDialog } from "@/components/passwords/import-dialog";
+import { ORG_ROLE, ENTRY_TYPE } from "@/lib/constants";
 
 // ─── Section keys ────────────────────────────────────────────────
 
@@ -250,17 +251,17 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         <CollapsibleContent>
           <div className="space-y-1">
             <Button
-              variant={activeTypeFilter === "LOGIN" ? "secondary" : "ghost"}
+              variant={activeTypeFilter === ENTRY_TYPE.LOGIN ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
-              <Link href="/dashboard?type=LOGIN" onClick={() => onOpenChange(false)}>
+            <Link href={`/dashboard?type=${ENTRY_TYPE.LOGIN}`} onClick={() => onOpenChange(false)}>
                 <KeyRound className="h-4 w-4" />
                 {t("catLogin")}
               </Link>
             </Button>
             <Button
-              variant={activeTypeFilter === "SECURE_NOTE" ? "secondary" : "ghost"}
+              variant={activeTypeFilter === ENTRY_TYPE.SECURE_NOTE ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
@@ -270,7 +271,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
               </Link>
             </Button>
             <Button
-              variant={activeTypeFilter === "CREDIT_CARD" ? "secondary" : "ghost"}
+              variant={activeTypeFilter === ENTRY_TYPE.CREDIT_CARD ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
@@ -280,7 +281,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
               </Link>
             </Button>
             <Button
-              variant={activeTypeFilter === "IDENTITY" ? "secondary" : "ghost"}
+              variant={activeTypeFilter === ENTRY_TYPE.IDENTITY ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
@@ -290,7 +291,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
               </Link>
             </Button>
             <Button
-              variant={activeTypeFilter === "PASSKEY" ? "secondary" : "ghost"}
+              variant={activeTypeFilter === ENTRY_TYPE.PASSKEY ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
@@ -331,18 +332,18 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                 {activeOrgId === org.id && (
                   <div className="ml-6 space-y-0.5">
                     <Button
-                      variant={activeOrgTypeFilter === "LOGIN" ? "secondary" : "ghost"}
+                      variant={activeOrgTypeFilter === ENTRY_TYPE.LOGIN ? "secondary" : "ghost"}
                       size="sm"
                       className="w-full justify-start gap-2 h-8"
                       asChild
                     >
-                      <Link href={`/dashboard/orgs/${org.id}?type=LOGIN`} onClick={() => onOpenChange(false)}>
+                    <Link href={`/dashboard/orgs/${org.id}?type=${ENTRY_TYPE.LOGIN}`} onClick={() => onOpenChange(false)}>
                         <KeyRound className="h-3.5 w-3.5" />
                         {t("catLogin")}
                       </Link>
                     </Button>
                     <Button
-                      variant={activeOrgTypeFilter === "SECURE_NOTE" ? "secondary" : "ghost"}
+                      variant={activeOrgTypeFilter === ENTRY_TYPE.SECURE_NOTE ? "secondary" : "ghost"}
                       size="sm"
                       className="w-full justify-start gap-2 h-8"
                       asChild
@@ -353,7 +354,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                       </Link>
                     </Button>
                     <Button
-                      variant={activeOrgTypeFilter === "CREDIT_CARD" ? "secondary" : "ghost"}
+                      variant={activeOrgTypeFilter === ENTRY_TYPE.CREDIT_CARD ? "secondary" : "ghost"}
                       size="sm"
                       className="w-full justify-start gap-2 h-8"
                       asChild
@@ -364,7 +365,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                       </Link>
                     </Button>
                     <Button
-                      variant={activeOrgTypeFilter === "IDENTITY" ? "secondary" : "ghost"}
+                      variant={activeOrgTypeFilter === ENTRY_TYPE.IDENTITY ? "secondary" : "ghost"}
                       size="sm"
                       className="w-full justify-start gap-2 h-8"
                       asChild
@@ -375,7 +376,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                       </Link>
                     </Button>
                     <Button
-                      variant={activeOrgTypeFilter === "PASSKEY" ? "secondary" : "ghost"}
+                      variant={activeOrgTypeFilter === ENTRY_TYPE.PASSKEY ? "secondary" : "ghost"}
                       size="sm"
                       className="w-full justify-start gap-2 h-8"
                       asChild
@@ -543,7 +544,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                   {t("auditLogPersonal")}
                 </Link>
               </Button>
-              {orgs.filter((org) => org.role === "OWNER" || org.role === "ADMIN").map((org) => (
+              {orgs.filter((org) => org.role === ORG_ROLE.OWNER || org.role === ORG_ROLE.ADMIN).map((org) => (
                 <Button
                   key={org.id}
                   variant={activeAuditOrgId === org.id ? "secondary" : "ghost"}

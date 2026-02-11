@@ -17,11 +17,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Download, Loader2, AlertTriangle, Lock } from "lucide-react";
+import { ENTRY_TYPE } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
 
 type ExportFormat = "csv" | "json";
 
 interface OrgExportEntry {
-  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+  entryType: EntryTypeValue;
   title: string;
   username: string | null;
   password: string;
@@ -100,7 +102,7 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
           const data = await res.json();
 
           entries.push({
-            entryType: data.entryType ?? "LOGIN",
+            entryType: data.entryType ?? ENTRY_TYPE.LOGIN,
             title: data.title ?? "",
             username: data.username ?? null,
             password: data.password ?? "",
@@ -310,9 +312,9 @@ function formatCsv(entries: OrgExportEntry[]): string {
     return val;
   };
   const rows = entries.map((e) => {
-    const isNote = e.entryType === "SECURE_NOTE";
-    const isCard = e.entryType === "CREDIT_CARD";
-    const isIdentity = e.entryType === "IDENTITY";
+    const isNote = e.entryType === ENTRY_TYPE.SECURE_NOTE;
+    const isCard = e.entryType === ENTRY_TYPE.CREDIT_CARD;
+    const isIdentity = e.entryType === ENTRY_TYPE.IDENTITY;
     const type = isIdentity ? "identity" : isCard ? "card" : isNote ? "securenote" : "login";
     const isLogin = !isNote && !isCard && !isIdentity;
     return [
@@ -337,7 +339,7 @@ function formatJson(entries: OrgExportEntry[]): string {
     {
       exportedAt: new Date().toISOString(),
       entries: entries.map((e) => {
-        if (e.entryType === "IDENTITY") {
+        if (e.entryType === ENTRY_TYPE.IDENTITY) {
           return {
             type: "identity",
             name: e.title,
@@ -355,7 +357,7 @@ function formatJson(entries: OrgExportEntry[]): string {
             notes: e.notes,
           };
         }
-        if (e.entryType === "CREDIT_CARD") {
+        if (e.entryType === ENTRY_TYPE.CREDIT_CARD) {
           return {
             type: "card",
             name: e.title,
@@ -370,7 +372,7 @@ function formatJson(entries: OrgExportEntry[]): string {
             notes: e.notes,
           };
         }
-        if (e.entryType === "SECURE_NOTE") {
+        if (e.entryType === ENTRY_TYPE.SECURE_NOTE) {
           return {
             type: "securenote",
             name: e.title,

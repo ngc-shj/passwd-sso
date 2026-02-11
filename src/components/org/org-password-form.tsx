@@ -48,8 +48,8 @@ import {
   normalizeCardBrand,
   normalizeCardNumber,
 } from "@/lib/credit-card";
-
-export type CustomFieldType = "text" | "hidden" | "url";
+import { ENTRY_TYPE, CUSTOM_FIELD_TYPE } from "@/lib/constants";
+import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
 
 export interface CustomField {
   label: string;
@@ -62,10 +62,10 @@ interface OrgPasswordFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
-  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
+  entryType?: EntryTypeValue;
   editData?: {
     id: string;
-    entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
+    entryType?: EntryTypeValue;
     title: string;
     username: string | null;
     password: string;
@@ -103,7 +103,7 @@ export function OrgPasswordForm({
   open,
   onOpenChange,
   onSaved,
-  entryType: entryTypeProp = "LOGIN",
+  entryType: entryTypeProp = ENTRY_TYPE.LOGIN,
   editData,
 }: OrgPasswordFormProps) {
   const t = useTranslations("PasswordForm");
@@ -119,10 +119,10 @@ export function OrgPasswordForm({
   const [showCvv, setShowCvv] = useState(false);
 
   const effectiveEntryType = editData?.entryType ?? entryTypeProp;
-  const isNote = effectiveEntryType === "SECURE_NOTE";
-  const isCreditCard = effectiveEntryType === "CREDIT_CARD";
-  const isIdentity = effectiveEntryType === "IDENTITY";
-  const isPasskey = effectiveEntryType === "PASSKEY";
+  const isNote = effectiveEntryType === ENTRY_TYPE.SECURE_NOTE;
+  const isCreditCard = effectiveEntryType === ENTRY_TYPE.CREDIT_CARD;
+  const isIdentity = effectiveEntryType === ENTRY_TYPE.IDENTITY;
+  const isPasskey = effectiveEntryType === ENTRY_TYPE.PASSKEY;
 
   const [title, setTitle] = useState(editData?.title ?? "");
   const [username, setUsername] = useState(editData?.username ?? "");
@@ -368,7 +368,7 @@ export function OrgPasswordForm({
 
       if (isPasskey) {
         body = {
-          entryType: "PASSKEY",
+          entryType: ENTRY_TYPE.PASSKEY,
           title: title.trim(),
           relyingPartyId: relyingPartyId.trim(),
           relyingPartyName: relyingPartyName.trim() || undefined,
@@ -381,7 +381,7 @@ export function OrgPasswordForm({
         };
       } else if (isIdentity) {
         body = {
-          entryType: "IDENTITY",
+          entryType: ENTRY_TYPE.IDENTITY,
           title: title.trim(),
           fullName: fullName.trim() || undefined,
           address: address.trim() || undefined,
@@ -397,7 +397,7 @@ export function OrgPasswordForm({
         };
       } else if (isCreditCard) {
         body = {
-          entryType: "CREDIT_CARD",
+          entryType: ENTRY_TYPE.CREDIT_CARD,
           title: title.trim(),
           cardholderName: cardholderName.trim() || undefined,
           cardNumber: normalizeCardNumber(cardNumber) || undefined,
@@ -410,7 +410,7 @@ export function OrgPasswordForm({
         };
       } else if (isNote) {
         body = {
-          entryType: "SECURE_NOTE",
+          entryType: ENTRY_TYPE.SECURE_NOTE,
           title: title.trim(),
           content,
           tagIds: selectedTags.map((t) => t.id),
@@ -1060,7 +1060,7 @@ export function OrgPasswordForm({
                     onClick={() =>
                       setCustomFields((prev) => [
                         ...prev,
-                        { label: "", value: "", type: "text" },
+                        { label: "", value: "", type: CUSTOM_FIELD_TYPE.TEXT },
                       ])
                     }
                   >
@@ -1101,19 +1101,19 @@ export function OrgPasswordForm({
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="text">{t("fieldText")}</SelectItem>
-                            <SelectItem value="hidden">
+                            <SelectItem value={CUSTOM_FIELD_TYPE.TEXT}>{t("fieldText")}</SelectItem>
+                            <SelectItem value={CUSTOM_FIELD_TYPE.HIDDEN}>
                               {t("fieldHidden")}
                             </SelectItem>
-                            <SelectItem value="url">{t("fieldUrl")}</SelectItem>
+                            <SelectItem value={CUSTOM_FIELD_TYPE.URL}>{t("fieldUrl")}</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
                       <Input
                         type={
-                          field.type === "hidden"
+                          field.type === CUSTOM_FIELD_TYPE.HIDDEN
                             ? "password"
-                            : field.type === "url"
+                            : field.type === CUSTOM_FIELD_TYPE.URL
                               ? "url"
                               : "text"
                         }

@@ -25,6 +25,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { GET } from "./route";
+import { ORG_ROLE } from "@/lib/constants";
 
 describe("GET /api/orgs/favorites", () => {
   beforeEach(() => {
@@ -51,7 +52,7 @@ describe("GET /api/orgs/favorites", () => {
   it("returns favorited entries with decrypted overviews and entryType", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
     mockPrismaOrgMember.findMany.mockResolvedValue([
-      { orgId: "org-1", role: "MEMBER" },
+      { orgId: "org-1", role: ORG_ROLE.MEMBER },
     ]);
     mockPrismaOrgPasswordFavorite.findMany.mockResolvedValue([
       {

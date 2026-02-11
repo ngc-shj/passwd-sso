@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
+import { ENTRY_TYPE } from "@/lib/constants";
 import {
   analyzeStrength,
   checkHIBP,
@@ -100,7 +101,7 @@ export function useWatchtower() {
       const entries: DecryptedEntry[] = [];
       for (const raw of rawEntries) {
         if (!raw.encryptedBlob) continue;
-        if (raw.entryType && raw.entryType !== "LOGIN") continue;
+        if (raw.entryType && raw.entryType !== ENTRY_TYPE.LOGIN) continue;
         try {
           const aad = raw.aadVersion >= 1 && userId
             ? buildPersonalEntryAAD(userId, raw.id)

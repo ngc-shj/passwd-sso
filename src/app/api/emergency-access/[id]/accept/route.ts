@@ -5,6 +5,7 @@ import { acceptEmergencyGrantByIdSchema } from "@/lib/validations";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { EA_STATUS } from "@/lib/constants";
 
 const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 
@@ -32,7 +33,7 @@ export async function POST(
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  if (grant.status !== "PENDING") {
+  if (grant.status !== EA_STATUS.PENDING) {
     return NextResponse.json({ error: API_ERROR.GRANT_NOT_PENDING }, { status: 400 });
   }
 
@@ -69,7 +70,7 @@ export async function POST(
     prisma.emergencyAccessGrant.update({
       where: { id },
       data: {
-        status: "ACCEPTED",
+        status: EA_STATUS.ACCEPTED,
         granteeId: session.user.id,
         granteePublicKey,
       },
@@ -94,5 +95,5 @@ export async function POST(
     ...extractRequestMeta(req),
   });
 
-  return NextResponse.json({ status: "ACCEPTED" });
+  return NextResponse.json({ status: EA_STATUS.ACCEPTED });
 }

@@ -16,6 +16,7 @@ import { UserAvatar } from "@/components/auth/user-avatar";
 import { SignOutButton } from "@/components/auth/signout-button";
 import { LanguageSwitcher } from "./language-switcher";
 import { useVault } from "@/lib/vault-context";
+import { VAULT_STATUS } from "@/lib/constants";
 import { ChangePassphraseDialog } from "@/components/vault/change-passphrase-dialog";
 
 interface HeaderProps {
@@ -68,7 +69,7 @@ export function Header({ onMenuToggle }: HeaderProps) {
               <DropdownMenuItem className="text-xs text-muted-foreground" disabled>
                 {session?.user?.email}
               </DropdownMenuItem>
-              {vaultStatus === "unlocked" && (
+              {vaultStatus === VAULT_STATUS.UNLOCKED && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => setChangePassOpen(true)}>

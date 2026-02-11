@@ -19,6 +19,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 import { POST } from "./route";
+import { EA_STATUS } from "@/lib/constants";
 
 describe("POST /api/emergency-access/[id]/revoke", () => {
   beforeEach(() => {
@@ -28,7 +29,7 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
       id: "grant-1",
       ownerId: "owner-1",
       granteeId: "grantee-1",
-      status: "IDLE",
+      status: EA_STATUS.IDLE,
     });
     mockPrismaGrant.update.mockResolvedValue({});
   });
@@ -64,11 +65,11 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.status).toBe("REVOKED");
+    expect(json.status).toBe(EA_STATUS.REVOKED);
     expect(mockPrismaGrant.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          status: "REVOKED",
+          status: EA_STATUS.REVOKED,
           encryptedSecretKey: null,
         }),
       })
@@ -79,7 +80,7 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
     mockPrismaGrant.findUnique.mockResolvedValue({
       id: "grant-1",
       ownerId: "owner-1",
-      status: "REQUESTED",
+      status: EA_STATUS.REQUESTED,
     });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/revoke", {
@@ -89,14 +90,14 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.status).toBe("IDLE");
+    expect(json.status).toBe(EA_STATUS.IDLE);
   });
 
   it("returns 400 when already revoked", async () => {
     mockPrismaGrant.findUnique.mockResolvedValue({
       id: "grant-1",
       ownerId: "owner-1",
-      status: "REVOKED",
+      status: EA_STATUS.REVOKED,
     });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/revoke", {
@@ -112,7 +113,7 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
       id: "grant-1",
       ownerId: "owner-1",
       granteeId: "grantee-1",
-      status: "STALE",
+      status: EA_STATUS.STALE,
     });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/revoke", {
@@ -122,6 +123,6 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.status).toBe("REVOKED");
+    expect(json.status).toBe(EA_STATUS.REVOKED);
   });
 });

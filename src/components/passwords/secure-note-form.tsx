@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { Loader2, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
+import { ENTRY_TYPE } from "@/lib/constants";
 
 interface SecureNoteFormProps {
   mode: "create" | "edit";
@@ -77,7 +78,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
         keyVersion: 1,
         aadVersion: aad ? AAD_VERSION : 0,
         tagIds: selectedTags.map((t) => t.id),
-        entryType: "SECURE_NOTE",
+        entryType: ENTRY_TYPE.SECURE_NOTE,
       };
 
       const endpoint =

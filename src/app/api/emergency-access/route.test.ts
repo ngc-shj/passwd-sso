@@ -28,6 +28,7 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 import { POST, GET } from "./route";
+import { EA_STATUS } from "@/lib/constants";
 
 describe("POST /api/emergency-access", () => {
   beforeEach(() => {
@@ -36,7 +37,7 @@ describe("POST /api/emergency-access", () => {
     mockPrismaGrant.findFirst.mockResolvedValue(null);
     mockPrismaGrant.create.mockResolvedValue({
       id: "grant-1",
-      status: "PENDING",
+      status: EA_STATUS.PENDING,
       granteeEmail: "grantee@test.com",
       waitDays: 7,
       tokenExpiresAt: new Date("2099-01-01"),
@@ -98,7 +99,7 @@ describe("POST /api/emergency-access", () => {
     expect(res.status).toBe(200);
     expect(json.id).toBe("grant-1");
     expect(json.token).toBe("mock-token-hex"); // plaintext token in response
-    expect(json.status).toBe("PENDING");
+    expect(json.status).toBe(EA_STATUS.PENDING);
     // DB stores hashed token
     expect(mockPrismaGrant.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -129,7 +130,7 @@ describe("GET /api/emergency-access", () => {
         ownerId: "user-1",
         granteeId: null,
         granteeEmail: "grantee@test.com",
-        status: "PENDING",
+        status: EA_STATUS.PENDING,
         waitDays: 7,
         keyAlgorithm: "ECDH-P256",
         tokenHash: "hashed-tok",

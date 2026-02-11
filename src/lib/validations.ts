@@ -5,6 +5,7 @@ import {
   normalizeCardNumber,
 } from "@/lib/credit-card";
 import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
+import { INVITE_ROLE_VALUES, ORG_ROLE, ORG_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, TOTP_ALGORITHM, TOTP_ALGORITHM_VALUES, CUSTOM_FIELD_TYPE_VALUES } from "@/lib/constants";
 
 export const generatePasswordSchema = z.object({
   length: z.number().int().min(8).max(128).default(16),
@@ -37,7 +38,7 @@ const encryptedFieldSchema = z.object({
   authTag: z.string().length(32), // 16 bytes hex
 });
 
-export const entryTypeSchema = z.enum(["LOGIN", "SECURE_NOTE", "CREDIT_CARD", "IDENTITY", "PASSKEY"]);
+export const entryTypeSchema = z.enum(ENTRY_TYPE_VALUES);
 
 export const createE2EPasswordSchema = z.object({
   id: z.string().uuid().optional(), // client-generated UUIDv4 (required for aadVersion >= 1)
@@ -46,7 +47,7 @@ export const createE2EPasswordSchema = z.object({
   keyVersion: z.number().int().min(1),
   aadVersion: z.number().int().min(0).max(1).optional().default(1),
   tagIds: z.array(z.string().cuid()).optional(),
-  entryType: entryTypeSchema.optional().default("LOGIN"),
+  entryType: entryTypeSchema.optional().default(ENTRY_TYPE.LOGIN),
 }).refine(
   (d) => (d.aadVersion ?? 0) < 1 || !!d.id,
   { message: "id is required when aadVersion >= 1", path: ["id"] }
@@ -111,22 +112,22 @@ export const updateOrgSchema = z.object({
 
 export const inviteSchema = z.object({
   email: z.string().email(),
-  role: z.enum(["ADMIN", "MEMBER", "VIEWER"]).default("MEMBER"),
+  role: z.enum(INVITE_ROLE_VALUES).default(ORG_ROLE.MEMBER),
 });
 
 export const updateMemberRoleSchema = z.object({
-  role: z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"]),
+  role: z.enum(ORG_ROLE_VALUES),
 });
 
-const orgCustomFieldSchema = z.object({
+export const customFieldSchema = z.object({
   label: z.string().min(1).max(100),
   value: z.string().max(10000),
-  type: z.enum(["text", "hidden", "url"]),
+  type: z.enum(CUSTOM_FIELD_TYPE_VALUES),
 });
 
-const orgTotpSchema = z.object({
+export const totpSchema = z.object({
   secret: z.string().min(1),
-  algorithm: z.enum(["SHA1", "SHA256", "SHA512"]).optional(),
+  algorithm: z.enum(TOTP_ALGORITHM_VALUES).optional(),
   digits: z.number().int().min(6).max(8).optional(),
   period: z.number().int().min(15).max(60).optional(),
 });
@@ -138,8 +139,8 @@ export const createOrgPasswordSchema = z.object({
   url: z.string().max(2000).optional().or(z.literal("")),
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
-  customFields: z.array(orgCustomFieldSchema).optional(),
-  totp: orgTotpSchema.optional().nullable(),
+  customFields: z.array(customFieldSchema).optional(),
+  totp: totpSchema.optional().nullable(),
 });
 
 export const updateOrgPasswordSchema = z.object({
@@ -149,13 +150,13 @@ export const updateOrgPasswordSchema = z.object({
   url: z.string().max(2000).optional().or(z.literal("")),
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
-  customFields: z.array(orgCustomFieldSchema).optional(),
-  totp: orgTotpSchema.optional().nullable(),
+  customFields: z.array(customFieldSchema).optional(),
+  totp: totpSchema.optional().nullable(),
   isArchived: z.boolean().optional(),
 });
 
 export const createOrgSecureNoteSchema = z.object({
-  entryType: z.literal("SECURE_NOTE"),
+  entryType: z.literal(ENTRY_TYPE.SECURE_NOTE),
   title: z.string().min(1).max(200).trim(),
   content: z.string().max(50000),
   tagIds: z.array(z.string().cuid()).optional(),
@@ -169,7 +170,7 @@ export const updateOrgSecureNoteSchema = z.object({
 });
 
 export const createOrgCreditCardSchema = z.object({
-  entryType: z.literal("CREDIT_CARD"),
+  entryType: z.literal(ENTRY_TYPE.CREDIT_CARD),
   title: z.string().min(1).max(200).trim(),
   cardholderName: z.string().max(200).optional().or(z.literal("")),
   cardNumber: z.string().max(30).optional().or(z.literal("")),
@@ -278,7 +279,7 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.liter
 const phoneSchema = z.string().max(50).regex(/^[0-9+\-\s()]*$/).optional().or(z.literal(""));
 
 export const createOrgIdentitySchema = z.object({
-  entryType: z.literal("IDENTITY"),
+  entryType: z.literal(ENTRY_TYPE.IDENTITY),
   title: z.string().min(1).max(200).trim(),
   fullName: z.string().max(200).optional().or(z.literal("")),
   address: z.string().max(500).optional().or(z.literal("")),
@@ -365,7 +366,7 @@ const shareDataSchema = z.object({
   customFields: z.array(z.object({
     label: z.string().max(100),
     value: z.string().max(10000),
-    type: z.enum(["text", "hidden", "url"]),
+    type: z.enum(CUSTOM_FIELD_TYPE_VALUES),
   })).nullish(),
   // SECURE_NOTE
   content: z.string().max(50000).nullish(),

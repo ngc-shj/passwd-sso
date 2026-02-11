@@ -4,10 +4,19 @@ import {
   createE2EPasswordSchema,
   updateE2EPasswordSchema,
   createShareLinkSchema,
+  customFieldSchema,
+  totpSchema,
 } from "./validations";
+import { ENTRY_TYPE, TOTP_ALGORITHM, CUSTOM_FIELD_TYPE } from "@/lib/constants";
 
 describe("entryTypeSchema", () => {
-  it.each(["LOGIN", "SECURE_NOTE", "CREDIT_CARD", "IDENTITY", "PASSKEY"])(
+  it.each([
+    ENTRY_TYPE.LOGIN,
+    ENTRY_TYPE.SECURE_NOTE,
+    ENTRY_TYPE.CREDIT_CARD,
+    ENTRY_TYPE.IDENTITY,
+    ENTRY_TYPE.PASSKEY,
+  ])(
     "accepts %s",
     (type) => {
       expect(entryTypeSchema.parse(type)).toBe(type);
@@ -35,15 +44,15 @@ describe("createE2EPasswordSchema", () => {
 
   it("defaults entryType to LOGIN", () => {
     const result = createE2EPasswordSchema.parse(validBase);
-    expect(result.entryType).toBe("LOGIN");
+    expect(result.entryType).toBe(ENTRY_TYPE.LOGIN);
   });
 
   it("accepts PASSKEY entryType", () => {
     const result = createE2EPasswordSchema.parse({
       ...validBase,
-      entryType: "PASSKEY",
+      entryType: ENTRY_TYPE.PASSKEY,
     });
-    expect(result.entryType).toBe("PASSKEY");
+    expect(result.entryType).toBe(ENTRY_TYPE.PASSKEY);
   });
 
   it("rejects invalid entryType", () => {
@@ -113,8 +122,8 @@ describe("createE2EPasswordSchema", () => {
 
 describe("updateE2EPasswordSchema", () => {
   it("accepts PASSKEY entryType", () => {
-    const result = updateE2EPasswordSchema.parse({ entryType: "PASSKEY" });
-    expect(result.entryType).toBe("PASSKEY");
+    const result = updateE2EPasswordSchema.parse({ entryType: ENTRY_TYPE.PASSKEY });
+    expect(result.entryType).toBe(ENTRY_TYPE.PASSKEY);
   });
 
   it("allows partial update without entryType", () => {
@@ -136,6 +145,40 @@ describe("updateE2EPasswordSchema", () => {
   it("rejects aadVersion=2 in update", () => {
     expect(() =>
       updateE2EPasswordSchema.parse({ aadVersion: 2 }),
+    ).toThrow();
+  });
+});
+
+describe("customFieldSchema", () => {
+  it.each([
+    CUSTOM_FIELD_TYPE.TEXT,
+    CUSTOM_FIELD_TYPE.HIDDEN,
+    CUSTOM_FIELD_TYPE.URL,
+  ])("accepts %s", (type) => {
+    const result = customFieldSchema.parse({ label: "Label", value: "Value", type });
+    expect(result.type).toBe(type);
+  });
+
+  it("rejects invalid custom field type", () => {
+    expect(() =>
+      customFieldSchema.parse({ label: "Label", value: "Value", type: "bad" }),
+    ).toThrow();
+  });
+});
+
+describe("totpSchema", () => {
+  it.each([
+    TOTP_ALGORITHM.SHA1,
+    TOTP_ALGORITHM.SHA256,
+    TOTP_ALGORITHM.SHA512,
+  ])("accepts %s algorithm", (algorithm) => {
+    const result = totpSchema.parse({ secret: "JBSWY3DPEHPK3PXP", algorithm });
+    expect(result.algorithm).toBe(algorithm);
+  });
+
+  it("rejects invalid algorithm", () => {
+    expect(() =>
+      totpSchema.parse({ secret: "JBSWY3DPEHPK3PXP", algorithm: "MD5" }),
     ).toThrow();
   });
 });

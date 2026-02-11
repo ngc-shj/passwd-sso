@@ -6,10 +6,12 @@ import { PasswordCard } from "@/components/passwords/password-card";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { OrgPasswordForm } from "@/components/org/org-password-form";
 import { Building2 } from "lucide-react";
+import { ORG_ROLE } from "@/lib/constants";
+import type { EntryTypeValue, TotpAlgorithm, CustomFieldType } from "@/lib/constants";
 
 interface OrgFavoriteEntry {
   id: string;
-  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+  entryType: EntryTypeValue;
   orgId: string;
   orgName: string;
   role: string;
@@ -51,8 +53,8 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
     url: string | null;
     notes: string | null;
     tags?: { id: string; name: string; color: string | null }[];
-    customFields?: { label: string; value: string; type: "text" | "hidden" | "url" }[];
-    totp?: { secret: string; algorithm?: "SHA1" | "SHA256" | "SHA512"; digits?: number; period?: number } | null;
+    customFields?: { label: string; value: string; type: CustomFieldType }[];
+    totp?: { secret: string; algorithm?: TotpAlgorithm; digits?: number; period?: number } | null;
   } | null>(null);
 
   const fetchFavorites = useCallback(async () => {
@@ -266,8 +268,8 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
             getDetail={createDetailFetcher(entry)}
             getUrl={createUrlFetcher(entry)}
             onEditClick={() => handleEdit(entry.id)}
-            canEdit={entry.role === "OWNER" || entry.role === "ADMIN" || entry.role === "MEMBER"}
-            canDelete={entry.role === "OWNER" || entry.role === "ADMIN"}
+            canEdit={entry.role === ORG_ROLE.OWNER || entry.role === ORG_ROLE.ADMIN || entry.role === ORG_ROLE.MEMBER}
+            canDelete={entry.role === ORG_ROLE.OWNER || entry.role === ORG_ROLE.ADMIN}
             createdBy={entry.orgName}
           />
         ))}
