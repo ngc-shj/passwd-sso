@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockRequireOrgMember, OrgAuthError, mockLogAudit } = vi.hoisted(() => {
+const { mockAuth, mockRequireOrgPermission, OrgAuthError, mockLogAudit } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -12,7 +12,7 @@ const { mockAuth, mockRequireOrgMember, OrgAuthError, mockLogAudit } = vi.hoiste
   }
   return {
     mockAuth: vi.fn(),
-    mockRequireOrgMember: vi.fn(),
+    mockRequireOrgPermission: vi.fn(),
     OrgAuthError: _OrgAuthError,
     mockLogAudit: vi.fn(),
   };
@@ -20,7 +20,7 @@ const { mockAuth, mockRequireOrgMember, OrgAuthError, mockLogAudit } = vi.hoiste
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/org-auth", () => ({
-  requireOrgMember: mockRequireOrgMember,
+  requireOrgPermission: mockRequireOrgPermission,
   OrgAuthError,
 }));
 vi.mock("@/lib/audit", () => ({
@@ -36,7 +36,7 @@ describe("POST /api/audit-logs/export", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgMember.mockResolvedValue({ role: "MEMBER" });
+    mockRequireOrgPermission.mockResolvedValue({ role: "MEMBER" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -83,7 +83,7 @@ describe("POST /api/audit-logs/export", () => {
         metadata: { entryCount: 10, format: "csv" },
       })
     );
-    expect(mockRequireOrgMember).not.toHaveBeenCalled();
+    expect(mockRequireOrgPermission).not.toHaveBeenCalled();
   });
 
   it("logs org export when orgId provided and user is member", async () => {
@@ -93,7 +93,7 @@ describe("POST /api/audit-logs/export", () => {
       })
     );
     expect(res.status).toBe(200);
-    expect(mockRequireOrgMember).toHaveBeenCalledWith("user-1", "org-1");
+    expect(mockRequireOrgPermission).toHaveBeenCalledWith("user-1", "org-1", "org:update");
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         scope: "ORG",
@@ -102,8 +102,21 @@ describe("POST /api/audit-logs/export", () => {
     );
   });
 
+  it("returns 403 when user lacks org:update permission", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    const res = await POST(
+      createRequest("POST", URL, {
+        body: { orgId: "org-1", entryCount: 1, format: "csv" },
+      })
+    );
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("FORBIDDEN");
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
   it("returns 404 when orgId specified but user is not a member", async () => {
-    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("NOT_FOUND", 404));
+    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("NOT_FOUND", 404));
     const res = await POST(
       createRequest("POST", URL, {
         body: { orgId: "org-other", entryCount: 1, format: "csv" },
