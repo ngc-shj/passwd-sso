@@ -50,7 +50,7 @@ export function OrgPasswordCard({
 
   return (
     <div
-      className="flex items-center gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/50 transition-colors"
+      className="flex items-center gap-3 rounded-lg border px-4 py-2 cursor-pointer hover:bg-muted/50 transition-colors"
       onClick={onClick}
     >
       {/* Favicon placeholder */}

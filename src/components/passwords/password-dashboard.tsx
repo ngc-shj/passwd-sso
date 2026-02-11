@@ -48,13 +48,23 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
   const isFavorites = view === "favorites";
   const isArchive = view === "archive";
 
+  const ENTRY_TYPE_TITLES: Record<string, string> = {
+    LOGIN: t("catLogin"),
+    SECURE_NOTE: t("catSecureNote"),
+    CREDIT_CARD: t("catCreditCard"),
+    IDENTITY: t("catIdentity"),
+    PASSKEY: t("catPasskey"),
+  };
+
   const title = isTrash
     ? t("trash")
     : isFavorites
       ? t("favorites")
       : isArchive
         ? t("archive")
-        : t("passwords");
+        : entryType && ENTRY_TYPE_TITLES[entryType]
+          ? ENTRY_TYPE_TITLES[entryType]
+          : t("passwords");
 
   // Listen for vault-data-changed (import, etc.)
   useEffect(() => {
