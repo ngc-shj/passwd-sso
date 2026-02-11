@@ -1,0 +1,64 @@
+project_name = "passwd-sso"
+env          = "dev"
+aws_region   = "ap-northeast-1"
+
+azs = ["ap-northeast-1a", "ap-northeast-1c"]
+
+vpc_cidr             = "10.10.0.0/16"
+public_subnet_cidrs  = ["10.10.0.0/24", "10.10.1.0/24"]
+private_subnet_cidrs = ["10.10.10.0/24", "10.10.11.0/24"]
+
+app_domain     = "app.dev.example.com"
+jackson_domain = "sso.dev.example.com"
+hosted_zone_id = "ZXXXXXXXXXXXXX"
+
+create_acm_certificate = true
+
+# Container images — use ECR repository URLs from terraform output
+app_image     = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-dev-app:latest"
+jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-dev-jackson:latest"
+
+app_secrets = {
+  DATABASE_URL        = "postgresql://USER:PASSWORD@HOST:5432/passwd_sso"
+  AUTH_URL            = "https://app.dev.example.com"
+  AUTH_SECRET         = "<REPLACE>"
+  AUTH_GOOGLE_ID      = "<REPLACE>"
+  AUTH_GOOGLE_SECRET  = "<REPLACE>"
+  AUTH_JACKSON_ID     = "<REPLACE>"
+  AUTH_JACKSON_SECRET = "<REPLACE>"
+  ORG_MASTER_KEY      = "<REPLACE>"  # Generate with: npm run generate:key
+  REDIS_URL           = "redis://HOST:6379"
+}
+
+jackson_secrets = {
+  JACKSON_API_KEYS = "<REPLACE>"
+  DB_URL           = "postgresql://USER:PASSWORD@HOST:5432/passwd_sso"
+  NEXTAUTH_URL     = "https://sso.dev.example.com"
+  EXTERNAL_URL     = "https://sso.dev.example.com"
+  NEXTAUTH_SECRET  = "<REPLACE>"
+}
+
+db_username = "passwd_user"
+db_password = "<REPLACE>"  # Use a strong, random password
+
+# RDS — dev settings (faster iteration)
+db_apply_immediately    = true
+db_skip_final_snapshot  = true
+db_multi_az             = false
+db_backup_retention_days = 3
+db_deletion_protection  = false
+
+# Redis — single node (dev)
+redis_use_replication_group      = false
+redis_transit_encryption_enabled = false
+redis_at_rest_encryption_enabled = false
+redis_auth_token                 = ""
+redis_num_node_groups            = 1
+redis_replicas_per_node_group    = 1
+
+# Attachments (S3 + optional CloudFront)
+enable_s3_attachments      = true
+attachments_bucket_name    = ""
+enable_cloudfront          = false
+cloudfront_aliases         = []
+cloudfront_certificate_arn = ""

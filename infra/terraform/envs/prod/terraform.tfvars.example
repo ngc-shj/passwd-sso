@@ -1,0 +1,69 @@
+project_name = "passwd-sso"
+env          = "prod"
+aws_region   = "ap-northeast-1"
+
+azs = ["ap-northeast-1a", "ap-northeast-1c"]
+
+vpc_cidr             = "10.20.0.0/16"
+public_subnet_cidrs  = ["10.20.0.0/24", "10.20.1.0/24"]
+private_subnet_cidrs = ["10.20.10.0/24", "10.20.11.0/24"]
+
+# nat_gateway_count = 2  # Recommended: 1 per AZ for HA
+
+app_domain     = "app.example.com"
+jackson_domain = "sso.example.com"
+hosted_zone_id = "ZXXXXXXXXXXXXX"
+
+create_acm_certificate = true
+
+# Container images — use ECR repository URLs from terraform output
+app_image     = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-prod-app:latest"
+jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-prod-jackson:latest"
+
+# app_desired_count    = 2  # Recommended for prod HA
+# jackson_desired_count = 2
+
+app_secrets = {
+  DATABASE_URL        = "postgresql://USER:PASSWORD@HOST:5432/passwd_sso"
+  AUTH_URL            = "https://app.example.com"
+  AUTH_SECRET         = "<REPLACE>"
+  AUTH_GOOGLE_ID      = "<REPLACE>"
+  AUTH_GOOGLE_SECRET  = "<REPLACE>"
+  AUTH_JACKSON_ID     = "<REPLACE>"
+  AUTH_JACKSON_SECRET = "<REPLACE>"
+  ORG_MASTER_KEY      = "<REPLACE>"  # Generate with: npm run generate:key
+  REDIS_URL           = "redis://HOST:6379"
+}
+
+jackson_secrets = {
+  JACKSON_API_KEYS = "<REPLACE>"
+  DB_URL           = "postgresql://USER:PASSWORD@HOST:5432/passwd_sso"
+  NEXTAUTH_URL     = "https://sso.example.com"
+  EXTERNAL_URL     = "https://sso.example.com"
+  NEXTAUTH_SECRET  = "<REPLACE>"
+}
+
+db_username = "passwd_user"
+db_password = "<REPLACE>"  # Use a strong, random password
+
+# RDS — production safety
+db_apply_immediately    = false
+db_skip_final_snapshot  = false
+db_multi_az             = true
+db_backup_retention_days = 7
+db_deletion_protection  = true
+
+# Redis — replication group with encryption (prod)
+redis_use_replication_group      = true
+redis_transit_encryption_enabled = true
+redis_at_rest_encryption_enabled = true
+redis_auth_token                 = "<REPLACE>"
+redis_num_node_groups            = 1
+redis_replicas_per_node_group    = 1
+
+# Attachments (S3 + optional CloudFront)
+enable_s3_attachments      = true
+attachments_bucket_name    = ""
+enable_cloudfront          = false
+cloudfront_aliases         = []
+cloudfront_certificate_arn = ""

@@ -66,5 +66,11 @@ encryption.key
 saml/
 *.cert
 
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/**/*.tfstate
+infra/terraform/**/*.tfstate.backup
+infra/terraform/envs/*/terraform.tfvars
+
 # Claude
 .claude/
