@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { validateRedisConfig } from "@/lib/redis";
 
 describe("createRateLimiter", () => {
   it("allows requests within the limit", async () => {
@@ -47,5 +48,47 @@ describe("createRateLimiter", () => {
     await new Promise((r) => setTimeout(r, 60));
 
     expect(await limiter.check("key4")).toBe(true);
+  });
+});
+
+describe("validateRedisConfig", () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalRedisUrl = process.env.REDIS_URL;
+
+  beforeEach(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+    if (originalRedisUrl !== undefined) {
+      process.env.REDIS_URL = originalRedisUrl;
+    } else {
+      delete process.env.REDIS_URL;
+    }
+  });
+
+  it("throws in production when REDIS_URL is not set", () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.REDIS_URL;
+
+    expect(() => validateRedisConfig()).toThrow("REDIS_URL is required");
+  });
+
+  it("does not throw in production when REDIS_URL is set", () => {
+    process.env.NODE_ENV = "production";
+    process.env.REDIS_URL = "redis://localhost:6379";
+
+    expect(() => validateRedisConfig()).not.toThrow();
+  });
+
+  it("does not throw in development when REDIS_URL is not set", () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.REDIS_URL;
+
+    expect(() => validateRedisConfig()).not.toThrow();
+  });
+
+  it("does not throw in test when REDIS_URL is not set", () => {
+    process.env.NODE_ENV = "test";
+    delete process.env.REDIS_URL;
+
+    expect(() => validateRedisConfig()).not.toThrow();
   });
 });

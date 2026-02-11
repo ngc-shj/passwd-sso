@@ -144,7 +144,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toContain("Maximum");
+    expect(json.error).toBe("ATTACHMENT_LIMIT_EXCEEDED");
   });
 
   it("returns 400 for invalid extension", async () => {
@@ -161,7 +161,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toContain("extension");
+    expect(json.error).toBe("EXTENSION_NOT_ALLOWED");
   });
 
   it("returns 400 for file too large", async () => {
@@ -178,7 +178,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toContain("size");
+    expect(json.error).toBe("FILE_TOO_LARGE");
   });
 
   it("returns 400 for invalid content type", async () => {
@@ -195,7 +195,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toContain("Content type");
+    expect(json.error).toBe("CONTENT_TYPE_NOT_ALLOWED");
   });
 
   it("returns 400 for invalid iv format", async () => {
@@ -291,7 +291,21 @@ describe("POST /api/passwords/[id]/attachments", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toContain("size");
+    expect(json.error).toBe("FILE_TOO_LARGE");
+  });
+
+  it("returns 413 when Content-Length exceeds 2x MAX_FILE_SIZE", async () => {
+    const req = new NextRequest(
+      "http://localhost:3000/api/passwords/pw-1/attachments",
+      {
+        method: "POST",
+        headers: { "content-length": String(30 * 1024 * 1024) },
+      }
+    );
+    const res = await POST(req, createParams("pw-1"));
+    expect(res.status).toBe(413);
+    const json = await res.json();
+    expect(json.error).toBe("PAYLOAD_TOO_LARGE");
   });
 
   it("defaults aadVersion to 0 when not provided", async () => {

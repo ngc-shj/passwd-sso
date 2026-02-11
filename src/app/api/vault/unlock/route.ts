@@ -15,7 +15,6 @@ const unlockSchema = z.object({
 const unlockLimiter = createRateLimiter({
   windowMs: 5 * 60 * 1000,
   max: 5,
-  useRedis: true,
 });
 
 /**

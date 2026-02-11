@@ -1,12 +1,10 @@
-import { getRedis } from "@/lib/redis";
+import { getRedis, validateRedisConfig } from "@/lib/redis";
 
 interface RateLimiterOptions {
   /** Time window in milliseconds */
   windowMs: number;
   /** Maximum requests allowed within the window */
   max: number;
-  /** Use Redis (with in-memory fallback) instead of in-memory only */
-  useRedis?: boolean;
 }
 
 interface RateLimiter {
@@ -18,12 +16,13 @@ interface RateLimiter {
 
 const MAX_MAP_SIZE = 10_000;
 
+let redisConfigValidated = false;
+
 export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
-  const { windowMs, max, useRedis = false } = options;
+  const { windowMs, max } = options;
   const store = new Map<string, { resetAt: number; count: number }>();
 
   async function checkRedis(key: string): Promise<boolean | null> {
-    if (!useRedis) return null;
     const redis = getRedis();
     if (!redis) return null;
     try {
@@ -39,7 +38,6 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
   }
 
   async function clearRedis(key: string): Promise<boolean> {
-    if (!useRedis) return false;
     const redis = getRedis();
     if (!redis) return false;
     try {
@@ -72,6 +70,11 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
 
   return {
     async check(key: string): Promise<boolean> {
+      // Validate Redis config on first request (not at module load / build time)
+      if (!redisConfigValidated) {
+        validateRedisConfig();
+        redisConfigValidated = true;
+      }
       const redisResult = await checkRedis(key);
       if (redisResult !== null) return redisResult;
       return checkMemory(key);

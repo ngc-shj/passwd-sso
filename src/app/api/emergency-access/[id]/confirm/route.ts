@@ -34,6 +34,16 @@ export async function POST(
     );
   }
 
+  // Fetch owner's current keyVersion from DB (server-authoritative)
+  const owner = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { keyVersion: true },
+  });
+
+  if (!owner) {
+    return NextResponse.json({ error: API_ERROR.USER_NOT_FOUND }, { status: 404 });
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -46,7 +56,7 @@ export async function POST(
     return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { ownerEphemeralPublicKey, encryptedSecretKey, secretKeyIv, secretKeyAuthTag, hkdfSalt, wrapVersion, keyVersion } = parsed.data;
+  const { ownerEphemeralPublicKey, encryptedSecretKey, secretKeyIv, secretKeyAuthTag, hkdfSalt, wrapVersion } = parsed.data;
 
   // Validate keyAlgorithm is compatible with wrapVersion
   const allowedAlgorithms = SUPPORTED_KEY_ALGORITHMS[wrapVersion];
@@ -56,6 +66,9 @@ export async function POST(
       { status: 400 }
     );
   }
+
+  // Use server-fetched keyVersion, ignore client-sent value
+  const serverKeyVersion = owner.keyVersion;
 
   await prisma.emergencyAccessGrant.update({
     where: { id },
@@ -67,7 +80,7 @@ export async function POST(
       secretKeyAuthTag,
       hkdfSalt,
       wrapVersion,
-      keyVersion,
+      keyVersion: serverKeyVersion,
     },
   });
 
@@ -77,9 +90,9 @@ export async function POST(
     userId: session.user.id,
     targetType: "EmergencyAccessGrant",
     targetId: id,
-    metadata: { granteeId: grant.granteeId, wrapVersion, keyVersion },
+    metadata: { granteeId: grant.granteeId, wrapVersion, keyVersion: serverKeyVersion },
     ...extractRequestMeta(req),
   });
 
-  return NextResponse.json({ status: "IDLE" });
+  return NextResponse.json({ status: "IDLE", keyVersion: serverKeyVersion });
 }

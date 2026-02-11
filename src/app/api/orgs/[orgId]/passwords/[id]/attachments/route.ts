@@ -109,9 +109,21 @@ export async function POST(
   });
   if (count >= MAX_ATTACHMENTS_PER_ENTRY) {
     return NextResponse.json(
-      { error: `Maximum ${MAX_ATTACHMENTS_PER_ENTRY} attachments per entry` },
+      { error: API_ERROR.ATTACHMENT_LIMIT_EXCEEDED },
       { status: 400 }
     );
+  }
+
+  // Early rejection: check Content-Length before consuming body into memory
+  const contentLength = req.headers.get("content-length");
+  if (contentLength) {
+    const declaredSize = parseInt(contentLength, 10);
+    if (!isNaN(declaredSize) && declaredSize > MAX_FILE_SIZE * 2) {
+      return NextResponse.json(
+        { error: API_ERROR.PAYLOAD_TOO_LARGE },
+        { status: 413 }
+      );
+    }
   }
 
   // Parse FormData
@@ -128,15 +140,15 @@ export async function POST(
 
   if (!file || !filename || !contentType) {
     return NextResponse.json(
-      { error: "Missing required fields: file, filename, contentType" },
+      { error: API_ERROR.MISSING_REQUIRED_FIELDS },
       { status: 400 }
     );
   }
 
-  // Validate size
+  // Validate size (File.size from Web API reflects actual parsed blob size)
   if (file.size > MAX_FILE_SIZE) {
     return NextResponse.json(
-      { error: `File size must not exceed ${MAX_FILE_SIZE / 1024 / 1024}MB` },
+      { error: API_ERROR.FILE_TOO_LARGE },
       { status: 400 }
     );
   }
@@ -145,7 +157,7 @@ export async function POST(
   const ext = getExtension(filename);
   if (!ALLOWED_EXTENSIONS.includes(ext as typeof ALLOWED_EXTENSIONS[number])) {
     return NextResponse.json(
-      { error: `File extension not allowed. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}` },
+      { error: API_ERROR.EXTENSION_NOT_ALLOWED },
       { status: 400 }
     );
   }
@@ -153,7 +165,7 @@ export async function POST(
   // Validate content type
   if (!ALLOWED_CONTENT_TYPES.includes(contentType as typeof ALLOWED_CONTENT_TYPES[number])) {
     return NextResponse.json(
-      { error: `Content type not allowed. Allowed: ${ALLOWED_CONTENT_TYPES.join(", ")}` },
+      { error: API_ERROR.CONTENT_TYPE_NOT_ALLOWED },
       { status: 400 }
     );
   }
@@ -161,8 +173,16 @@ export async function POST(
   // Sanitize filename
   const sanitizedFilename = filename.replace(/[/\\]/g, "_").slice(0, 255);
 
-  // Read plaintext file and encrypt server-side
+  // Read plaintext file and validate actual buffer size (defense in depth)
   const plainBuffer = Buffer.from(await file.arrayBuffer());
+  if (plainBuffer.length > MAX_FILE_SIZE) {
+    return NextResponse.json(
+      { error: API_ERROR.FILE_TOO_LARGE },
+      { status: 400 }
+    );
+  }
+
+  // Encrypt server-side
   const orgKey = unwrapOrgKey({
     ciphertext: entry.org.encryptedOrgKey,
     iv: entry.org.orgKeyIv,

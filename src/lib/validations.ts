@@ -441,7 +441,7 @@ export const confirmEmergencyGrantSchema = z.object({
     (v) => SUPPORTED_WRAP_VERSIONS.has(v),
     { message: `wrapVersion must be one of: ${[...SUPPORTED_WRAP_VERSIONS].join(", ")}` }
   ),
-  keyVersion: z.number().int().min(1),
+  keyVersion: z.number().int().min(1).optional(), // Server uses owner's DB value
 });
 
 export const acceptEmergencyGrantByIdSchema = z.object({

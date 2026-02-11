@@ -34,9 +34,15 @@ export const API_ERROR = {
   // ── Tags ──────────────────────────────────────────────────
   TAG_ALREADY_EXISTS: "TAG_ALREADY_EXISTS",
 
-  // ── Passwords ─────────────────────────────────────────────
+  // ── Passwords / Attachments ──────────────────────────────
   NOT_IN_TRASH: "NOT_IN_TRASH",
   ATTACHMENT_NOT_FOUND: "ATTACHMENT_NOT_FOUND",
+  ATTACHMENT_LIMIT_EXCEEDED: "ATTACHMENT_LIMIT_EXCEEDED",
+  FILE_TOO_LARGE: "FILE_TOO_LARGE",
+  PAYLOAD_TOO_LARGE: "PAYLOAD_TOO_LARGE",
+  MISSING_REQUIRED_FIELDS: "MISSING_REQUIRED_FIELDS",
+  EXTENSION_NOT_ALLOWED: "EXTENSION_NOT_ALLOWED",
+  CONTENT_TYPE_NOT_ALLOWED: "CONTENT_TYPE_NOT_ALLOWED",
   INVALID_FORM_DATA: "INVALID_FORM_DATA",
   INVALID_IV_FORMAT: "INVALID_IV_FORMAT",
   INVALID_AUTH_TAG_FORMAT: "INVALID_AUTH_TAG_FORMAT",
@@ -98,6 +104,12 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   TAG_ALREADY_EXISTS: "tagAlreadyExists",
   NOT_IN_TRASH: "notInTrash",
   ATTACHMENT_NOT_FOUND: "attachmentNotFound",
+  ATTACHMENT_LIMIT_EXCEEDED: "attachmentLimitExceeded",
+  FILE_TOO_LARGE: "fileTooLarge",
+  PAYLOAD_TOO_LARGE: "fileTooLarge",
+  MISSING_REQUIRED_FIELDS: "validationError",
+  EXTENSION_NOT_ALLOWED: "extensionNotAllowed",
+  CONTENT_TYPE_NOT_ALLOWED: "contentTypeNotAllowed",
   INVALID_FORM_DATA: "invalidFormData",
   INVALID_IV_FORMAT: "invalidRequest",
   INVALID_AUTH_TAG_FORMAT: "invalidRequest",
