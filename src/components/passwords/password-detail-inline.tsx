@@ -153,12 +153,12 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
   }, []);
 
   return (
-    <div className="space-y-4 border-t pt-4 px-4 pb-4">
+    <div className="space-y-3 border-t pt-3 px-4 pb-3">
       {isPasskey ? (
-        <>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           {/* Relying Party ID */}
           {data.relyingPartyId && (
-            <div className="space-y-1">
+            <div className="col-span-2 space-y-1">
               <label className="text-sm text-muted-foreground">{t("relyingPartyId")}</label>
               <div className="flex items-center gap-2">
                 <span className="text-sm">{data.relyingPartyId}</span>
@@ -171,7 +171,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           {data.relyingPartyName && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("relyingPartyName")}</label>
-              <span className="text-sm">{data.relyingPartyName}</span>
+              <p className="text-sm">{data.relyingPartyName}</p>
             </div>
           )}
 
@@ -188,7 +188,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
 
           {/* Credential ID */}
           {data.credentialId && (
-            <div className="space-y-1">
+            <div className="col-span-2 space-y-1">
               <label className="text-sm text-muted-foreground">{t("credentialId")}</label>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-sm break-all">
@@ -211,7 +211,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           {data.creationDate && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("creationDate")}</label>
-              <span className="text-sm">{data.creationDate}</span>
+              <p className="text-sm">{data.creationDate}</p>
             </div>
           )}
 
@@ -219,25 +219,25 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           {data.deviceInfo && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("deviceInfo")}</label>
-              <span className="text-sm">{data.deviceInfo}</span>
+              <p className="text-sm">{data.deviceInfo}</p>
             </div>
           )}
 
           {/* Notes */}
           {data.notes && (
-            <div className="space-y-1">
+            <div className="col-span-2 space-y-1">
               <label className="text-sm text-muted-foreground">{t("notes")}</label>
               <p className="text-sm whitespace-pre-wrap rounded-md bg-muted p-3">
                 {data.notes}
               </p>
             </div>
           )}
-        </>
+        </div>
       ) : isIdentity ? (
-        <>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           {/* Full Name */}
           {data.fullName && (
-            <div className="space-y-1">
+            <div className="col-span-2 space-y-1">
               <label className="text-sm text-muted-foreground">{t("fullName")}</label>
               <div className="flex items-center gap-2">
                 <span className="text-sm">{data.fullName}</span>
@@ -248,7 +248,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
 
           {/* Address */}
           {data.address && (
-            <div className="space-y-1">
+            <div className="col-span-2 space-y-1">
               <label className="text-sm text-muted-foreground">{t("address")}</label>
               <div className="flex items-center gap-2">
                 <span className="text-sm whitespace-pre-wrap">{data.address}</span>
@@ -283,7 +283,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           {data.dateOfBirth && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("dateOfBirth")}</label>
-              <span className="text-sm">{data.dateOfBirth}</span>
+              <p className="text-sm">{data.dateOfBirth}</p>
             </div>
           )}
 
@@ -291,13 +291,13 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           {data.nationality && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("nationality")}</label>
-              <span className="text-sm">{data.nationality}</span>
+              <p className="text-sm">{data.nationality}</p>
             </div>
           )}
 
           {/* ID Number */}
           {data.idNumber && (
-            <div className="space-y-1">
+            <div className="col-span-2 space-y-1">
               <label className="text-sm text-muted-foreground">{t("idNumber")}</label>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-sm">
@@ -320,7 +320,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           {data.issueDate && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("issueDate")}</label>
-              <span className="text-sm">{data.issueDate}</span>
+              <p className="text-sm">{data.issueDate}</p>
             </div>
           )}
 
@@ -328,25 +328,25 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           {data.expiryDate && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("expiryDate")}</label>
-              <span className="text-sm">{data.expiryDate}</span>
+              <p className="text-sm">{data.expiryDate}</p>
             </div>
           )}
 
           {/* Notes */}
           {data.notes && (
-            <div className="space-y-1">
+            <div className="col-span-2 space-y-1">
               <label className="text-sm text-muted-foreground">{t("notes")}</label>
               <p className="text-sm whitespace-pre-wrap rounded-md bg-muted p-3">
                 {data.notes}
               </p>
             </div>
           )}
-        </>
+        </div>
       ) : isCreditCard ? (
-        <>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           {/* Card Number */}
           {data.cardNumber && (
-            <div className="space-y-1">
+            <div className="col-span-2 space-y-1">
               <label className="text-sm text-muted-foreground">{t("cardNumber")}</label>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-sm">
@@ -382,7 +382,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           {data.brand && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("brand")}</label>
-              <span className="text-sm">{data.brand}</span>
+              <p className="text-sm">{data.brand}</p>
             </div>
           )}
 
@@ -390,9 +390,9 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           {(data.expiryMonth || data.expiryYear) && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("expiry")}</label>
-              <span className="text-sm">
+              <p className="text-sm">
                 {data.expiryMonth ?? "--"}/{data.expiryYear ?? "----"}
-              </span>
+              </p>
             </div>
           )}
 
@@ -419,14 +419,14 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
 
           {/* Notes */}
           {data.notes && (
-            <div className="space-y-1">
+            <div className="col-span-2 space-y-1">
               <label className="text-sm text-muted-foreground">{t("notes")}</label>
               <p className="text-sm whitespace-pre-wrap rounded-md bg-muted p-3">
                 {data.notes}
               </p>
             </div>
           )}
-        </>
+        </div>
       ) : isNote ? (
         /* Secure Note Content */
         <div className="space-y-1">

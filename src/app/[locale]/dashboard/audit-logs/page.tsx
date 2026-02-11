@@ -207,31 +207,33 @@ export default function AuditLogsPage() {
       ) : logs.length === 0 ? (
         <p className="text-center text-muted-foreground py-12">{t("noLogs")}</p>
       ) : (
-        <div className="space-y-2">
-          {logs.map((log) => (
-            <Card key={log.id} className="p-3 flex items-center gap-3">
-              <div className="shrink-0 text-muted-foreground">
-                {ACTION_ICONS[log.action] ?? <ScrollText className="h-4 w-4" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium">{t(log.action as never)}</p>
-                {log.targetType && (
-                  <p className="text-xs text-muted-foreground truncate">
-                    {log.targetType}
-                    {log.targetId ? ` · ${log.targetId.slice(0, 8)}…` : ""}
+        <>
+          <Card className="divide-y">
+            {logs.map((log) => (
+              <div key={log.id} className="px-4 py-3 flex items-start gap-3">
+                <div className="shrink-0 text-muted-foreground mt-0.5">
+                  {ACTION_ICONS[log.action] ?? <ScrollText className="h-4 w-4" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{t(log.action as never)}</p>
+                  {log.targetType && (
+                    <p className="text-xs text-muted-foreground truncate">
+                      {log.targetType}
+                      {log.targetId ? ` · ${log.targetId.slice(0, 8)}…` : ""}
+                    </p>
+                  )}
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-xs text-muted-foreground whitespace-nowrap">
+                    {formatDate(log.createdAt)}
                   </p>
-                )}
+                  {log.ip && (
+                    <p className="text-xs text-muted-foreground">{log.ip}</p>
+                  )}
+                </div>
               </div>
-              <div className="text-right shrink-0">
-                <p className="text-xs text-muted-foreground">
-                  {formatDate(log.createdAt)}
-                </p>
-                {log.ip && (
-                  <p className="text-xs text-muted-foreground">{log.ip}</p>
-                )}
-              </div>
-            </Card>
-          ))}
+            ))}
+          </Card>
 
           {nextCursor && (
             <div className="flex justify-center pt-4">
@@ -245,7 +247,7 @@ export default function AuditLogsPage() {
               </Button>
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   );

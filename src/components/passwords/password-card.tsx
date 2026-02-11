@@ -420,23 +420,23 @@ export function PasswordCard({
   return (
     <>
       <Card className="transition-colors">
-        <CardContent className="flex items-center gap-4 p-4">
-          <button
-            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-            onClick={() => onToggleExpand(id)}
-          >
+        <CardContent
+          className="flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-muted/50 transition-colors"
+          onClick={() => onToggleExpand(id)}
+        >
+          <div className="shrink-0 text-muted-foreground">
             {expanded ? (
               <ChevronDown className="h-4 w-4" />
             ) : (
               <ChevronRight className="h-4 w-4" />
             )}
-          </button>
+          </div>
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7 shrink-0"
             onClick={(e) => {
-              e.preventDefault();
+              e.stopPropagation();
               onToggleFavorite(id, isFavorite);
             }}
           >
@@ -456,13 +456,10 @@ export function PasswordCard({
             <Favicon host={urlHost} size={20} className="shrink-0" />
           )}
           <div className="flex-1 min-w-0">
-            <button
-              className="font-medium hover:underline truncate block text-left"
-              onClick={() => onToggleExpand(id)}
-            >
+            <span className="font-medium truncate block text-left">
               {title}
-            </button>
-            <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
+            </span>
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
               {isPasskey ? (
                 <>
                   {relyingPartyId && <span className="truncate">{relyingPartyId}</span>}
@@ -517,6 +514,8 @@ export function PasswordCard({
               ))}
             </div>
           )}
+          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+          <div className="flex items-center shrink-0" onClick={(e) => e.stopPropagation()}>
           {!isNote && !isCreditCard && !isIdentity && !isPasskey && <CopyButton getValue={fetchPassword} />}
           {isCreditCard && <CopyButton getValue={() => fetchCardField("cardNumber")} />}
           {isIdentity && <CopyButton getValue={() => fetchIdentityField("idNumber")} />}
@@ -647,6 +646,7 @@ export function PasswordCard({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
         </CardContent>
 
         {/* Expanded inline detail */}

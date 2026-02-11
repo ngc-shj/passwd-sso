@@ -61,6 +61,7 @@ export default function OrgDashboardPage({
   const activeTagId = searchParams.get("tag");
   const activeEntryType = searchParams.get("type");
   const t = useTranslations("Org");
+  const tDash = useTranslations("Dashboard");
   const [org, setOrg] = useState<OrgInfo | null>(null);
   const [passwords, setPasswords] = useState<OrgPasswordEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -311,8 +312,21 @@ export default function OrgDashboardPage({
     <div className="p-4 md:p-6">
       <div className="mx-auto max-w-3xl">
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold truncate">{org?.name ?? "..."}</h1>
+          <div className="flex items-center gap-3 min-w-0">
+            <h1 className="text-xl font-semibold truncate">
+              {org?.name ?? "..."}
+              {activeEntryType && (
+                <span className="text-muted-foreground font-normal text-base ml-2">
+                  / {({
+                    LOGIN: tDash("catLogin"),
+                    SECURE_NOTE: tDash("catSecureNote"),
+                    CREDIT_CARD: tDash("catCreditCard"),
+                    IDENTITY: tDash("catIdentity"),
+                    PASSKEY: tDash("catPasskey"),
+                  } as Record<string, string>)[activeEntryType] ?? activeEntryType}
+                </span>
+              )}
+            </h1>
             {org && <OrgRoleBadge role={org.role} />}
           </div>
           <div className="flex items-center gap-2">

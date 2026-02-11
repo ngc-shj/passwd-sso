@@ -331,6 +331,7 @@
     "lockedDescription": "Enter your passphrase to unlock.",
     "enterPassphrase": "Enter passphrase",
     "unlock": "Unlock",
+    "lockVault": "Lock Vault",
     "wrongPassphrase": "Incorrect passphrase.",
     "unlockError": "Failed to unlock.",
     "strengthWeak": "Weak",
