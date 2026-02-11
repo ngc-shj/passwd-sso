@@ -116,13 +116,17 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       try {
         const res = await fetch("/api/vault/status");
         if (!res.ok) {
-          setVaultStatus("locked");
+          setVaultStatus((prev) => prev === "unlocked" ? prev : "locked");
           return;
         }
         const data = await res.json();
-        setVaultStatus(data.setupRequired ? "setup-required" : "locked");
+        setVaultStatus((prev) => {
+          // Never overwrite "unlocked" — only the lock timer should do that
+          if (prev === "unlocked") return prev;
+          return data.setupRequired ? "setup-required" : "locked";
+        });
       } catch {
-        setVaultStatus("locked");
+        setVaultStatus((prev) => prev === "unlocked" ? prev : "locked");
       }
     }
 
@@ -160,16 +164,19 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
     const checkInactivity = () => {
       const now = Date.now();
-      const sinceActivity = now - lastActivityRef.current;
 
-      // Lock after inactivity timeout
-      if (sinceActivity > INACTIVITY_TIMEOUT_MS) {
-        lock();
+      // When tab is hidden, only check hidden timeout (not inactivity).
+      // The user may be active in other tabs — that's not "inactivity".
+      if (document.hidden) {
+        if (hiddenAtRef.current && now - hiddenAtRef.current > HIDDEN_TIMEOUT_MS) {
+          lock();
+        }
         return;
       }
 
-      // Lock after hidden timeout
-      if (hiddenAtRef.current && now - hiddenAtRef.current > HIDDEN_TIMEOUT_MS) {
+      // Tab is visible — check inactivity timeout
+      const sinceActivity = now - lastActivityRef.current;
+      if (sinceActivity > INACTIVITY_TIMEOUT_MS) {
         lock();
       }
     };
@@ -177,6 +184,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     window.addEventListener("mousemove", updateActivity);
     window.addEventListener("keydown", updateActivity);
     window.addEventListener("click", updateActivity);
+    window.addEventListener("scroll", updateActivity, true);
+    window.addEventListener("wheel", updateActivity, { passive: true });
     window.addEventListener("touchstart", updateActivity);
     document.addEventListener("visibilitychange", handleVisibility);
 
@@ -186,6 +195,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("mousemove", updateActivity);
       window.removeEventListener("keydown", updateActivity);
       window.removeEventListener("click", updateActivity);
+      window.removeEventListener("scroll", updateActivity, true);
+      window.removeEventListener("wheel", updateActivity);
       window.removeEventListener("touchstart", updateActivity);
       document.removeEventListener("visibilitychange", handleVisibility);
       clearInterval(intervalId);

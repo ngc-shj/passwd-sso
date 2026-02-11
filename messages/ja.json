@@ -331,6 +331,7 @@
     "lockedDescription": "パスフレーズを入力してアンロックしてください。",
     "enterPassphrase": "パスフレーズを入力",
     "unlock": "アンロック",
+    "lockVault": "保管庫をロック",
     "wrongPassphrase": "パスフレーズが正しくありません。",
     "unlockError": "アンロックに失敗しました。",
     "strengthWeak": "弱い",

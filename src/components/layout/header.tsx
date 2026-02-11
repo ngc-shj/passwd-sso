@@ -2,17 +2,20 @@
 
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import { KeyRound, Menu } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { KeyRound, Lock, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { SignOutButton } from "@/components/auth/signout-button";
 import { LanguageSwitcher } from "./language-switcher";
+import { useVault } from "@/lib/vault-context";
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -20,6 +23,8 @@ interface HeaderProps {
 
 export function Header({ onMenuToggle }: HeaderProps) {
   const { data: session } = useSession();
+  const { status: vaultStatus, lock } = useVault();
+  const t = useTranslations("Vault");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -61,6 +66,16 @@ export function Header({ onMenuToggle }: HeaderProps) {
               <DropdownMenuItem className="text-xs text-muted-foreground" disabled>
                 {session?.user?.email}
               </DropdownMenuItem>
+              {vaultStatus === "unlocked" && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={lock}>
+                    <Lock className="h-4 w-4" />
+                    {t("lockVault")}
+                  </DropdownMenuItem>
+                </>
+              )}
+              <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
                 <SignOutButton />
               </DropdownMenuItem>
