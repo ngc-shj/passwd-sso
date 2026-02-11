@@ -683,7 +683,9 @@
     "noEntries": "No entries found.",
     "username": "Username",
     "password": "Password",
-    "notes": "Notes"
+    "notes": "Notes",
+    "invalidInvitation": "This invitation is invalid or has expired. Please ask the owner to send a new invitation.",
+    "invitationAlreadyUsed": "This invitation has already been used."
   },
   "Attachments": {
     "title": "Attachments",

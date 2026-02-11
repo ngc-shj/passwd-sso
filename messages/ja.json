@@ -683,7 +683,9 @@
     "noEntries": "エントリーが見つかりません。",
     "username": "ユーザー名",
     "password": "パスワード",
-    "notes": "メモ"
+    "notes": "メモ",
+    "invalidInvitation": "この招待は無効または期限切れです。オーナーに再招待を依頼してください。",
+    "invitationAlreadyUsed": "この招待はすでに使用済みです。"
   },
   "Attachments": {
     "title": "添付ファイル",

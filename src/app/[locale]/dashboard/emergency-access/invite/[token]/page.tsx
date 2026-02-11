@@ -67,8 +67,11 @@ export default function AcceptEmergencyInvitePage() {
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error || t("networkError"));
+        toast.error(
+          res.status === 404 ? t("invalidInvitation")
+            : res.status === 410 ? t("invitationAlreadyUsed")
+            : t("networkError")
+        );
         return;
       }
 
@@ -91,8 +94,11 @@ export default function AcceptEmergencyInvitePage() {
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error || t("networkError"));
+        toast.error(
+          res.status === 404 ? t("invalidInvitation")
+            : res.status === 410 ? t("invitationAlreadyUsed")
+            : t("networkError")
+        );
         return;
       }
 

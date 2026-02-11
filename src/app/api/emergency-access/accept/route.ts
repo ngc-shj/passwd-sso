@@ -39,7 +39,10 @@ export async function POST(req: NextRequest) {
   });
 
   if (!grant) {
-    return NextResponse.json({ error: "Invalid invitation" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Invalid or expired invitation. Please ask the owner to re-invite." },
+      { status: 404 }
+    );
   }
 
   if (grant.status !== "PENDING") {
