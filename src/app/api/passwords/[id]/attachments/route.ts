@@ -151,8 +151,14 @@ export async function POST(
   // Sanitize filename (prevent path traversal)
   const sanitizedFilename = filename.replace(/[/\\]/g, "_").slice(0, 255);
 
-  // Read encrypted blob
+  // Read encrypted blob and validate actual size
   const buffer = Buffer.from(await file.arrayBuffer());
+  if (buffer.length > MAX_FILE_SIZE) {
+    return NextResponse.json(
+      { error: `Uploaded file exceeds maximum size of ${MAX_FILE_SIZE / 1024 / 1024}MB` },
+      { status: 400 }
+    );
+  }
 
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 0;
   const attachment = await prisma.attachment.create({

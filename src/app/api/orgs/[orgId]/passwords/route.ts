@@ -119,44 +119,50 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const entries: OrgPasswordListEntry[] = passwords.map((entry: any) => {
-    const aad = entry.aadVersion >= 1
-      ? Buffer.from(buildOrgEntryAAD(orgId, entry.id, "overview"))
-      : undefined;
-    const overview = JSON.parse(
-      decryptServerData(
-        {
-          ciphertext: entry.encryptedOverview,
-          iv: entry.overviewIv,
-          authTag: entry.overviewAuthTag,
-        },
-        orgKey,
-        aad
-      )
-    );
+  const entries: OrgPasswordListEntry[] = [];
+  for (const entry of passwords as any[]) {
+    try {
+      const aad = entry.aadVersion >= 1
+        ? Buffer.from(buildOrgEntryAAD(orgId, entry.id, "overview"))
+        : undefined;
+      const overview = JSON.parse(
+        decryptServerData(
+          {
+            ciphertext: entry.encryptedOverview,
+            iv: entry.overviewIv,
+            authTag: entry.overviewAuthTag,
+          },
+          orgKey,
+          aad
+        )
+      );
 
-    return {
-      id: entry.id,
-      entryType: entry.entryType,
-      title: overview.title,
-      username: overview.username ?? null,
-      urlHost: overview.urlHost ?? null,
-      snippet: overview.snippet ?? null,
-      brand: overview.brand ?? null,
-      lastFour: overview.lastFour ?? null,
-      cardholderName: overview.cardholderName ?? null,
-      fullName: overview.fullName ?? null,
-      idNumberLast4: overview.idNumberLast4 ?? null,
-      isFavorite: entry.favorites.length > 0,
-      isArchived: entry.isArchived,
-      tags: entry.tags,
-      createdBy: entry.createdBy,
-      updatedBy: entry.updatedBy,
-      createdAt: entry.createdAt,
-      updatedAt: entry.updatedAt,
-      deletedAt: entry.deletedAt,
-    };
-  });
+      entries.push({
+        id: entry.id,
+        entryType: entry.entryType,
+        title: overview.title,
+        username: overview.username ?? null,
+        urlHost: overview.urlHost ?? null,
+        snippet: overview.snippet ?? null,
+        brand: overview.brand ?? null,
+        lastFour: overview.lastFour ?? null,
+        cardholderName: overview.cardholderName ?? null,
+        fullName: overview.fullName ?? null,
+        idNumberLast4: overview.idNumberLast4 ?? null,
+        isFavorite: entry.favorites.length > 0,
+        isArchived: entry.isArchived,
+        tags: entry.tags,
+        createdBy: entry.createdBy,
+        updatedBy: entry.updatedBy,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        deletedAt: entry.deletedAt,
+      });
+    } catch {
+      // Skip entries with corrupt encrypted data rather than failing the entire list
+      continue;
+    }
+  }
 
   // Sort: favorites first, then by updatedAt desc
   entries.sort((a, b) => {

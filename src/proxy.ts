@@ -80,7 +80,7 @@ async function hasValidSession(request: NextRequest): Promise<boolean> {
   const cookie = request.headers.get("cookie");
   if (!cookie) return false;
 
-  const cacheKey = hashCookie(cookie);
+  const cacheKey = await hashCookie(cookie);
   const cached = sessionCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.valid;
@@ -115,12 +115,11 @@ function setSessionCache(key: string, valid: boolean) {
   });
 }
 
-function hashCookie(cookie: string): string {
-  let hash = 0;
-  for (let i = 0; i < cookie.length; i++) {
-    hash = (hash * 31 + cookie.charCodeAt(i)) | 0;
-  }
-  return hash.toString(16);
+async function hashCookie(cookie: string): Promise<string> {
+  const data = new TextEncoder().encode(cookie);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = new Uint8Array(hashBuffer);
+  return Array.from(hashArray, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function applySecurityHeaders(

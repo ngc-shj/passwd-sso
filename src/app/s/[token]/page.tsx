@@ -58,15 +58,17 @@ export default async function SharePage({ params }: Props) {
     return <ShareError reason="expired" />;
   }
 
-  if (share.maxViews !== null && share.viewCount >= share.maxViews) {
+  // Atomically check maxViews and increment viewCount in a single query
+  // to prevent race conditions between concurrent requests
+  const updated: number = await prisma.$executeRaw`
+    UPDATE "password_shares"
+    SET "view_count" = "view_count" + 1
+    WHERE "id" = ${share.id}
+      AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+
+  if (updated === 0) {
     return <ShareError reason="maxViews" />;
   }
-
-  // Atomically increment view count
-  await prisma.passwordShare.update({
-    where: { id: share.id },
-    data: { viewCount: { increment: 1 } },
-  });
 
   // Record access log (fire-and-forget)
   const ip = rateLimitIp === "unknown" ? null : rateLimitIp;

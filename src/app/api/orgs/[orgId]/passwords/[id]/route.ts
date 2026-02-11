@@ -76,17 +76,27 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const blobAad = entry.aadVersion >= 1
     ? Buffer.from(buildOrgEntryAAD(orgId, entry.id, "blob"))
     : undefined;
-  const blob = JSON.parse(
-    decryptServerData(
-      {
-        ciphertext: entry.encryptedBlob,
-        iv: entry.blobIv,
-        authTag: entry.blobAuthTag,
-      },
-      orgKey,
-      blobAad
-    )
-  );
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let blob: Record<string, any>;
+  try {
+    blob = JSON.parse(
+      decryptServerData(
+        {
+          ciphertext: entry.encryptedBlob,
+          iv: entry.blobIv,
+          authTag: entry.blobAuthTag,
+        },
+        orgKey,
+        blobAad
+      )
+    );
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to decrypt entry data" },
+      { status: 500 }
+    );
+  }
 
   const common = {
     id: entry.id,
@@ -211,17 +221,27 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const currentBlobAad = entry.aadVersion >= 1
     ? Buffer.from(buildOrgEntryAAD(orgId, id, "blob"))
     : undefined;
-  const currentBlob = JSON.parse(
-    decryptServerData(
-      {
-        ciphertext: entry.encryptedBlob,
-        iv: entry.blobIv,
-        authTag: entry.blobAuthTag,
-      },
-      orgKey,
-      currentBlobAad
-    )
-  );
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let currentBlob: Record<string, any>;
+  try {
+    currentBlob = JSON.parse(
+      decryptServerData(
+        {
+          ciphertext: entry.encryptedBlob,
+          iv: entry.blobIv,
+          authTag: entry.blobAuthTag,
+        },
+        orgKey,
+        currentBlobAad
+      )
+    );
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to decrypt entry data" },
+      { status: 500 }
+    );
+  }
 
   let updatedBlobStr: string;
   let overviewBlobStr: string;

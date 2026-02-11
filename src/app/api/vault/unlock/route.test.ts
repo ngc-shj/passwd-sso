@@ -2,10 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createHash } from "crypto";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaUser, mockPrismaVaultKey } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockRateLimiter } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockPrismaVaultKey: { findUnique: vi.fn() },
+  mockRateLimiter: { check: vi.fn(), clear: vi.fn() },
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -14,9 +15,8 @@ vi.mock("@/lib/prisma", () => ({
     vaultKey: mockPrismaVaultKey,
   },
 }));
-// Mock Redis to null (in-memory fallback)
-vi.mock("@/lib/redis", () => ({
-  getRedis: vi.fn(() => null),
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: () => mockRateLimiter,
 }));
 
 import { POST } from "./route";
@@ -30,7 +30,6 @@ const SERVER_HASH = createHash("sha256")
 function makeUnlockRequest(authHash: string = AUTH_HASH) {
   return createRequest("POST", "http://localhost:3000/api/vault/unlock", {
     body: { authHash },
-    headers: { "x-forwarded-for": "127.0.0.1" },
   });
 }
 
@@ -39,6 +38,8 @@ describe("POST /api/vault/unlock", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: `user-${Date.now()}-${Math.random()}` } });
     mockPrismaVaultKey.findUnique.mockResolvedValue(null);
+    mockRateLimiter.check.mockResolvedValue(true);
+    mockRateLimiter.clear.mockResolvedValue(undefined);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -119,26 +120,38 @@ describe("POST /api/vault/unlock", () => {
     });
   });
 
-  it("rate limits after 5 failed attempts (in-memory fallback)", async () => {
-    const userId = `rate-test-${Date.now()}`;
-    mockAuth.mockResolvedValue({ user: { id: userId } });
+  it("returns 429 when rate limiter denies request", async () => {
+    mockRateLimiter.check.mockResolvedValue(false);
 
+    const res = await POST(makeUnlockRequest());
+    expect(res.status).toBe(429);
+  });
+
+  it("clears rate limit on successful unlock", async () => {
     mockPrismaUser.findUnique.mockResolvedValue({
       vaultSetupAt: new Date(),
       masterPasswordServerHash: SERVER_HASH,
       masterPasswordServerSalt: SERVER_SALT,
+      encryptedSecretKey: "enc-key",
+      secretKeyIv: "iv",
+      secretKeyAuthTag: "tag",
+      accountSalt: "salt",
+      keyVersion: 1,
     });
 
-    const wrongHash = "f".repeat(64);
+    const res = await POST(makeUnlockRequest());
+    expect(res.status).toBe(200);
+    expect(mockRateLimiter.clear).toHaveBeenCalledWith(
+      expect.stringContaining("rl:vault_unlock:")
+    );
+  });
 
-    // First 5 should return 401 (wrong hash, not rate limited)
-    for (let i = 0; i < 5; i++) {
-      const res = await POST(makeUnlockRequest(wrongHash));
-      expect(res.status).toBe(401);
-    }
+  it("uses userId-only rate key (no IP)", async () => {
+    const userId = "test-user-rate";
+    mockAuth.mockResolvedValue({ user: { id: userId } });
+    mockRateLimiter.check.mockResolvedValue(false);
 
-    // 6th should be rate limited
-    const res = await POST(makeUnlockRequest(wrongHash));
-    expect(res.status).toBe(429);
+    await POST(makeUnlockRequest());
+    expect(mockRateLimiter.check).toHaveBeenCalledWith(`rl:vault_unlock:${userId}`);
   });
 });

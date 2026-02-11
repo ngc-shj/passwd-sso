@@ -275,6 +275,25 @@ describe("POST /api/passwords/[id]/attachments", () => {
     );
   });
 
+  it("returns 400 when actual file blob exceeds MAX_FILE_SIZE", async () => {
+    // Declare sizeBytes as small, but upload a huge blob
+    const hugeBlob = new Blob([new Uint8Array(11 * 1024 * 1024)]); // 11MB
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        file: hugeBlob,
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100", // declared small
+      }),
+      createParams("pw-1")
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("size");
+  });
+
   it("defaults aadVersion to 0 when not provided", async () => {
     mockPrismaAttachment.create.mockResolvedValue({
       id: "att-legacy",
