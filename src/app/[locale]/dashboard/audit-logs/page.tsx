@@ -21,13 +21,19 @@ import {
   Trash2,
   RotateCcw,
   Download,
+  Upload,
   UserPlus,
   UserMinus,
   ShieldCheck,
+  ShieldAlert,
+  ShieldOff,
   ScrollText,
   Loader2,
   Link as LinkIcon,
   Link2Off,
+  HeartPulse,
+  KeyRound,
+  Eye,
 } from "lucide-react";
 
 interface AuditLogItem {
@@ -49,11 +55,21 @@ const ACTION_ICONS: Record<string, React.ReactNode> = {
   ENTRY_DELETE: <Trash2 className="h-4 w-4" />,
   ENTRY_RESTORE: <RotateCcw className="h-4 w-4" />,
   ENTRY_EXPORT: <Download className="h-4 w-4" />,
+  ATTACHMENT_UPLOAD: <Upload className="h-4 w-4" />,
+  ATTACHMENT_DELETE: <Trash2 className="h-4 w-4" />,
   ORG_MEMBER_INVITE: <UserPlus className="h-4 w-4" />,
   ORG_MEMBER_REMOVE: <UserMinus className="h-4 w-4" />,
   ORG_ROLE_UPDATE: <ShieldCheck className="h-4 w-4" />,
   SHARE_CREATE: <LinkIcon className="h-4 w-4" />,
   SHARE_REVOKE: <Link2Off className="h-4 w-4" />,
+  EMERGENCY_GRANT_CREATE: <HeartPulse className="h-4 w-4" />,
+  EMERGENCY_GRANT_ACCEPT: <HeartPulse className="h-4 w-4" />,
+  EMERGENCY_GRANT_REJECT: <ShieldOff className="h-4 w-4" />,
+  EMERGENCY_GRANT_CONFIRM: <KeyRound className="h-4 w-4" />,
+  EMERGENCY_ACCESS_REQUEST: <ShieldAlert className="h-4 w-4" />,
+  EMERGENCY_ACCESS_ACTIVATE: <ShieldCheck className="h-4 w-4" />,
+  EMERGENCY_ACCESS_REVOKE: <ShieldOff className="h-4 w-4" />,
+  EMERGENCY_VAULT_ACCESS: <Eye className="h-4 w-4" />,
 };
 
 const ACTIONS = [
@@ -64,11 +80,21 @@ const ACTIONS = [
   "ENTRY_DELETE",
   "ENTRY_RESTORE",
   "ENTRY_EXPORT",
+  "ATTACHMENT_UPLOAD",
+  "ATTACHMENT_DELETE",
   "ORG_MEMBER_INVITE",
   "ORG_MEMBER_REMOVE",
   "ORG_ROLE_UPDATE",
   "SHARE_CREATE",
   "SHARE_REVOKE",
+  "EMERGENCY_GRANT_CREATE",
+  "EMERGENCY_GRANT_ACCEPT",
+  "EMERGENCY_GRANT_REJECT",
+  "EMERGENCY_GRANT_CONFIRM",
+  "EMERGENCY_ACCESS_REQUEST",
+  "EMERGENCY_ACCESS_ACTIVATE",
+  "EMERGENCY_ACCESS_REVOKE",
+  "EMERGENCY_VAULT_ACCESS",
 ] as const;
 
 export default function AuditLogsPage() {

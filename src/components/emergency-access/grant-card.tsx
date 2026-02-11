@@ -16,7 +16,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Copy, ShieldOff, ShieldAlert, KeyRound } from "lucide-react";
+import { Copy, ShieldOff, ShieldAlert, ShieldCheck, KeyRound } from "lucide-react";
 import { useRouter } from "@/i18n/navigation";
 
 type GrantStatus = "PENDING" | "ACCEPTED" | "IDLE" | "STALE" | "REQUESTED" | "ACTIVATED" | "REVOKED" | "REJECTED";
@@ -66,6 +66,10 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
   const t = useTranslations("EmergencyAccess");
   const router = useRouter();
   const isOwner = grant.ownerId === currentUserId;
+  const waitExpired =
+    grant.status === "REQUESTED" &&
+    !!grant.waitExpiresAt &&
+    new Date(grant.waitExpiresAt) <= new Date();
   const displayName = isOwner
     ? grant.grantee?.name || grant.granteeEmail
     : grant.owner.name || grant.owner.email || "";
@@ -86,6 +90,20 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
       });
       if (res.ok) {
         toast.success(permanent ? t("revoked") : t("requestRejected"));
+        onRefresh();
+      }
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
+  const handleApprove = async () => {
+    try {
+      const res = await fetch(`/api/emergency-access/${grant.id}/approve`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        toast.success(t("approved"));
         onRefresh();
       }
     } catch {
@@ -134,28 +152,52 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
           )}
 
           {isOwner && grant.status === "REQUESTED" && (
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="sm">
-                  <ShieldAlert className="mr-1 h-4 w-4" />
-                  {t("rejectRequest")}
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>{t("rejectRequest")}</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {t("rejectRequestConfirm", { name: displayName })}
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => handleRevoke(false)}>
+            <>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <ShieldCheck className="mr-1 h-4 w-4" />
+                    {t("approveRequest")}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("approveRequest")}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t("approveRequestConfirm", { name: displayName })}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleApprove}>
+                      {t("approveRequest")}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="sm">
+                    <ShieldAlert className="mr-1 h-4 w-4" />
                     {t("rejectRequest")}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("rejectRequest")}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t("rejectRequestConfirm", { name: displayName })}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => handleRevoke(false)}>
+                      {t("rejectRequest")}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </>
           )}
 
           {isOwner && !["REVOKED", "REJECTED"].includes(grant.status) && (
@@ -211,7 +253,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
             </AlertDialog>
           )}
 
-          {!isOwner && grant.status === "ACTIVATED" && (
+          {!isOwner && (grant.status === "ACTIVATED" || waitExpired) && (
             <Button
               size="sm"
               onClick={() => router.push(`/dashboard/emergency-access/${grant.id}/vault`)}

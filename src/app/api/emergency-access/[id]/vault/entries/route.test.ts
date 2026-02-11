@@ -18,6 +18,10 @@ vi.mock("@/lib/prisma", () => ({
     passwordEntry: mockPrismaEntry,
   },
 }));
+vi.mock("@/lib/audit", () => ({
+  logAudit: vi.fn(),
+  extractRequestMeta: () => ({ ip: null, userAgent: null }),
+}));
 
 import { GET } from "./route";
 

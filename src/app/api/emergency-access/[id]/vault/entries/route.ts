@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 
 // GET /api/emergency-access/[id]/vault/entries — Fetch owner's encrypted entries
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth();
@@ -51,6 +52,16 @@ export async function GET(
       updatedAt: true,
     },
     orderBy: { updatedAt: "desc" },
+  });
+
+  logAudit({
+    scope: "PERSONAL",
+    action: "EMERGENCY_VAULT_ACCESS",
+    userId: session.user.id,
+    targetType: "EmergencyAccessGrant",
+    targetId: id,
+    metadata: { ownerId: grant.ownerId, entryCount: entries.length },
+    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(entries);

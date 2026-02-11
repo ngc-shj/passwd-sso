@@ -228,6 +228,14 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+
+      // Fire-and-forget audit log
+      fetch("/api/audit-logs/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryCount: entries.length, format }),
+      }).catch(() => {});
+
       setOpen(false);
       resetState();
     } catch {
