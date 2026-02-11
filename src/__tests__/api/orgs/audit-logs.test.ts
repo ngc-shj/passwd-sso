@@ -142,6 +142,45 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     );
   });
 
+  it("applies actions filter with multiple values", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireOrgPermission.mockResolvedValue({ role: "OWNER" });
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest(
+      "GET",
+      `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=ENTRY_CREATE,ENTRY_UPDATE`
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          action: { in: ["ENTRY_CREATE", "ENTRY_UPDATE"] },
+        }),
+      })
+    );
+  });
+
+  it("returns 400 for invalid actions filter", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireOrgPermission.mockResolvedValue({ role: "OWNER" });
+
+    const req = createRequest(
+      "GET",
+      `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=ENTRY_CREATE,NOPE`
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await GET(req as any, createParams({ orgId: ORG_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.details).toEqual({ actions: ["NOPE"] });
+    expect(mockFindMany).not.toHaveBeenCalled();
+  });
+
   it("applies date range filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue({ role: "ADMIN" });
@@ -196,6 +235,23 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     expect(status).toBe(200);
     expect(json.items).toHaveLength(5);
     expect(json.nextCursor).toBe("log-4");
+  });
+
+  it("returns 400 for invalid cursor", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireOrgPermission.mockResolvedValue({ role: "ADMIN" });
+    mockFindMany.mockRejectedValue(new Error("Invalid cursor"));
+
+    const req = createRequest(
+      "GET",
+      `http://localhost/api/orgs/${ORG_ID}/audit-logs?cursor=bad-cursor`
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await GET(req as any, createParams({ orgId: ORG_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("INVALID_CURSOR");
   });
 
   it("re-throws non-OrgAuthError", async () => {
