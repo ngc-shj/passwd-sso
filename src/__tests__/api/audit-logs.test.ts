@@ -2,14 +2,16 @@ import { describe, it, expect, vi } from "vitest";
 import { DEFAULT_SESSION } from "../helpers/mock-auth";
 import { createRequest, parseResponse } from "../helpers/request-builder";
 
-const { mockAuth, mockFindMany } = vi.hoisted(() => ({
+const { mockAuth, mockFindMany, mockEntryFindMany } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
+  mockEntryFindMany: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     auditLog: { findMany: mockFindMany },
+    passwordEntry: { findMany: mockEntryFindMany },
   },
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));

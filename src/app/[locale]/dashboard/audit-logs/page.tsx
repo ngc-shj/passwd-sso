@@ -1,16 +1,18 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -35,6 +37,9 @@ import {
   KeyRound,
   Eye,
 } from "lucide-react";
+import { useVault } from "@/lib/vault-context";
+import { decryptData, type EncryptedData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 
 interface AuditLogItem {
   id: string;
@@ -45,7 +50,17 @@ interface AuditLogItem {
   ip: string | null;
   userAgent: string | null;
   createdAt: string;
+  user?: { id: string; name: string | null; email: string | null; image: string | null } | null;
 }
+
+type EntryOverviewMap = Record<
+  string,
+  { ciphertext: string; iv: string; authTag: string; aadVersion: number }
+>;
+type UserMap = Record<
+  string,
+  { id: string; name: string | null; email: string | null; image: string | null }
+>;
 
 const ACTION_ICONS: Record<string, React.ReactNode> = {
   AUTH_LOGIN: <LogIn className="h-4 w-4" />,
@@ -72,45 +87,74 @@ const ACTION_ICONS: Record<string, React.ReactNode> = {
   EMERGENCY_VAULT_ACCESS: <Eye className="h-4 w-4" />,
 };
 
-const ACTIONS = [
-  "AUTH_LOGIN",
-  "AUTH_LOGOUT",
-  "ENTRY_CREATE",
-  "ENTRY_UPDATE",
-  "ENTRY_DELETE",
-  "ENTRY_RESTORE",
-  "ENTRY_EXPORT",
-  "ATTACHMENT_UPLOAD",
-  "ATTACHMENT_DELETE",
-  "ORG_MEMBER_INVITE",
-  "ORG_MEMBER_REMOVE",
-  "ORG_ROLE_UPDATE",
-  "SHARE_CREATE",
-  "SHARE_REVOKE",
-  "EMERGENCY_GRANT_CREATE",
-  "EMERGENCY_GRANT_ACCEPT",
-  "EMERGENCY_GRANT_REJECT",
-  "EMERGENCY_GRANT_CONFIRM",
-  "EMERGENCY_ACCESS_REQUEST",
-  "EMERGENCY_ACCESS_ACTIVATE",
-  "EMERGENCY_ACCESS_REVOKE",
-  "EMERGENCY_VAULT_ACCESS",
+const ACTION_GROUPS = [
+  { label: "groupAuth", value: "group:auth", actions: ["AUTH_LOGIN", "AUTH_LOGOUT"] },
+  {
+    label: "groupEntry",
+    value: "group:entry",
+    actions: ["ENTRY_CREATE", "ENTRY_UPDATE", "ENTRY_DELETE", "ENTRY_RESTORE", "ENTRY_EXPORT"],
+  },
+  { label: "groupAttachment", value: "group:attachment", actions: ["ATTACHMENT_UPLOAD", "ATTACHMENT_DELETE"] },
+  { label: "groupOrg", value: "group:org", actions: ["ORG_MEMBER_INVITE", "ORG_MEMBER_REMOVE", "ORG_ROLE_UPDATE"] },
+  { label: "groupShare", value: "group:share", actions: ["SHARE_CREATE", "SHARE_REVOKE"] },
+  {
+    label: "groupEmergency",
+    value: "group:emergency",
+    actions: [
+      "EMERGENCY_GRANT_CREATE",
+      "EMERGENCY_GRANT_ACCEPT",
+      "EMERGENCY_GRANT_REJECT",
+      "EMERGENCY_GRANT_CONFIRM",
+      "EMERGENCY_ACCESS_REQUEST",
+      "EMERGENCY_ACCESS_ACTIVATE",
+      "EMERGENCY_ACCESS_REVOKE",
+      "EMERGENCY_VAULT_ACCESS",
+    ],
+  },
 ] as const;
 
 export default function AuditLogsPage() {
   const t = useTranslations("AuditLog");
+  const { data: session } = useSession();
+  const { encryptionKey } = useVault();
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
+  const [entryNames, setEntryNames] = useState<Map<string, string>>(new Map());
+  const [relatedUsers, setRelatedUsers] = useState<UserMap>({});
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [actionFilter, setActionFilter] = useState<string>("all");
+  const [selectedActions, setSelectedActions] = useState<Set<string>>(new Set());
+  const [actionSearch, setActionSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+
+  const resolveEntryNames = useCallback(
+    async (overviews: EntryOverviewMap) => {
+      if (!encryptionKey || !session?.user?.id) return new Map<string, string>();
+      const userId = session.user.id;
+      const names = new Map<string, string>();
+      for (const [id, ov] of Object.entries(overviews)) {
+        try {
+          const aad = ov.aadVersion >= 1 ? buildPersonalEntryAAD(userId, id) : undefined;
+          const overview = JSON.parse(
+            await decryptData(ov as EncryptedData, encryptionKey, aad)
+          );
+          names.set(id, overview.title);
+        } catch {
+          // Decryption failed — skip
+        }
+      }
+      return names;
+    },
+    [encryptionKey, session?.user?.id]
+  );
 
   const fetchLogs = useCallback(
     async (cursor?: string) => {
       const params = new URLSearchParams();
-      if (actionFilter !== "all") params.set("action", actionFilter);
+      if (selectedActions.size > 0) {
+        params.set("actions", Array.from(selectedActions).join(","));
+      }
       if (dateFrom) params.set("from", new Date(dateFrom).toISOString());
       if (dateTo) {
         const endOfDay = new Date(dateTo);
@@ -123,35 +167,170 @@ export default function AuditLogsPage() {
       if (!res.ok) return null;
       return res.json();
     },
-    [actionFilter, dateFrom, dateTo]
+    [selectedActions, dateFrom, dateTo]
   );
 
   useEffect(() => {
     setLoading(true);
-    fetchLogs().then((data) => {
+    fetchLogs().then(async (data) => {
       if (data) {
         setLogs(data.items);
         setNextCursor(data.nextCursor);
+        if (data.entryOverviews) {
+          const names = await resolveEntryNames(data.entryOverviews);
+          setEntryNames(names);
+        }
+        if (data.relatedUsers) {
+          setRelatedUsers(data.relatedUsers);
+        }
       }
       setLoading(false);
     });
-  }, [fetchLogs]);
+  }, [fetchLogs, resolveEntryNames]);
 
   const handleLoadMore = async () => {
     if (!nextCursor) return;
     setLoadingMore(true);
     const data = await fetchLogs(nextCursor);
-    if (data) {
-      setLogs((prev) => [...prev, ...data.items]);
-      setNextCursor(data.nextCursor);
-    }
+      if (data) {
+        setLogs((prev) => [...prev, ...data.items]);
+        setNextCursor(data.nextCursor);
+        if (data.entryOverviews) {
+          const names = await resolveEntryNames(data.entryOverviews);
+          setEntryNames((prev) => new Map([...prev, ...names]));
+        }
+        if (data.relatedUsers) {
+          setRelatedUsers((prev) => ({ ...prev, ...data.relatedUsers }));
+        }
+      }
     setLoadingMore(false);
   };
 
-  const formatDate = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleString();
+  const formatDate = (iso: string) => new Date(iso).toLocaleString();
+  const formatUser = (user?: { name: string | null; email: string | null } | null) => {
+    if (!user) return null;
+    const name = user.name?.trim();
+    if (name) return name;
+    return user.email ?? null;
   };
+
+  const formatViewer = (log: AuditLogItem) => {
+    if (!log.user) return null;
+    return formatUser(log.user);
+  };
+
+  const resolveUser = (id?: string, fallbackEmail?: string | null) => {
+    if (id && relatedUsers[id]) {
+      return formatUser(relatedUsers[id]);
+    }
+    if (fallbackEmail) return fallbackEmail;
+    return null;
+  };
+
+  const getEmergencyDetail = (log: AuditLogItem): string | null => {
+    const meta = log.metadata as { ownerId?: string; granteeId?: string; granteeEmail?: string; permanent?: boolean } | null;
+    const owner = resolveUser(meta?.ownerId) ?? t("unknownUser");
+    const grantee = resolveUser(meta?.granteeId, meta?.granteeEmail ?? null) ?? t("unknownUser");
+    const viewer = formatViewer(log) ?? t("unknownUser");
+
+    switch (log.action) {
+      case "EMERGENCY_GRANT_CREATE":
+        return t("eaGrantCreatedFor", { user: grantee });
+      case "EMERGENCY_GRANT_ACCEPT":
+        return t("eaGrantAcceptedBy", { viewer, owner });
+      case "EMERGENCY_GRANT_REJECT":
+        return t("eaGrantRejectedBy", { viewer, owner });
+      case "EMERGENCY_GRANT_CONFIRM":
+        return t("eaGrantConfirmedFor", { user: grantee });
+      case "EMERGENCY_ACCESS_REQUEST":
+        return t("eaAccessRequestedBy", { viewer, owner });
+      case "EMERGENCY_ACCESS_ACTIVATE":
+        return t("eaAccessActivatedFor", { user: meta?.granteeId ? grantee : owner });
+      case "EMERGENCY_ACCESS_REVOKE":
+        return t("eaAccessRevokedFor", { user: grantee });
+      case "EMERGENCY_VAULT_ACCESS":
+        return t("viewedByOwner", { viewer, owner });
+      default:
+        return null;
+    }
+  };
+
+  const getTargetLabel = (log: AuditLogItem): string | null => {
+    const meta = log.metadata;
+
+    // Entry operations: show resolved entry name
+    if (
+      log.targetType === "PasswordEntry" &&
+      log.targetId
+    ) {
+      const name = entryNames.get(log.targetId);
+      if (name) {
+        if (log.action === "ENTRY_DELETE" && meta?.permanent) {
+          return `${name}（${t("permanentDelete")}）`;
+        }
+        return name;
+      }
+      return t("deletedEntry");
+    }
+
+    // Attachment operations: show filename
+    if (meta?.filename) {
+      return String(meta.filename);
+    }
+
+    // Role updates: show role change
+    if (log.action === "ORG_ROLE_UPDATE" && meta?.previousRole && meta?.newRole) {
+      return t("roleChange", {
+        from: String(meta.previousRole),
+        to: String(meta.newRole),
+      });
+    }
+
+    return null;
+  };
+
+  const actionLabel = (action: string) => t(action as never);
+
+  const filteredActions = (actions: readonly string[]) => {
+    if (!actionSearch) return actions;
+    const q = actionSearch.toLowerCase();
+    return actions.filter((a) => {
+      const label = actionLabel(a).toLowerCase();
+      return label.includes(q) || a.toLowerCase().includes(q);
+    });
+  };
+
+  const isActionSelected = (action: string) => selectedActions.has(action);
+
+  const toggleAction = (action: string, checked: boolean) => {
+    setSelectedActions((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(action);
+      else next.delete(action);
+      return next;
+    });
+  };
+
+  const setGroupSelection = (actions: readonly string[], checked: boolean) => {
+    setSelectedActions((prev) => {
+      const next = new Set(prev);
+      for (const action of actions) {
+        if (checked) next.add(action);
+        else next.delete(action);
+      }
+      return next;
+    });
+  };
+
+  const clearActions = () => setSelectedActions(new Set());
+
+  const selectedCount = selectedActions.size;
+  const actionSummary =
+    selectedCount === 0
+      ? t("allActions")
+      : selectedCount === 1
+        ? actionLabel(Array.from(selectedActions)[0])
+        : t("actionsSelected", { count: selectedCount });
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
@@ -166,19 +345,58 @@ export default function AuditLogsPage() {
       <div className="flex flex-wrap gap-3 items-end">
         <div className="space-y-1">
           <Label className="text-xs">{t("action")}</Label>
-          <Select value={actionFilter} onValueChange={setActionFilter}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("allActions")}</SelectItem>
-              {ACTIONS.map((action) => (
-                <SelectItem key={action} value={action}>
-                  {t(action)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="w-[240px] justify-between">
+                <span className="truncate">{actionSummary}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-[280px] p-2" align="start">
+              <div className="px-2 pb-2">
+                <Input
+                  placeholder={t("actionSearch")}
+                  value={actionSearch}
+                  onChange={(e) => setActionSearch(e.target.value)}
+                />
+              </div>
+              <DropdownMenuCheckboxItem
+                checked={selectedActions.size === 0}
+                onCheckedChange={() => clearActions()}
+              >
+                {t("allActions")}
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
+              {ACTION_GROUPS.map((group) => {
+                const actions = filteredActions(group.actions);
+                if (actions.length === 0) return null;
+                const allSelected = group.actions.every((a) => selectedActions.has(a));
+                return (
+                  <div key={group.value}>
+                    <DropdownMenuLabel className="px-2 pt-2 text-xs">
+                      {t(group.label as never)}
+                    </DropdownMenuLabel>
+                    <DropdownMenuCheckboxItem
+                      checked={allSelected}
+                      onCheckedChange={(checked) => setGroupSelection(group.actions, !!checked)}
+                      className="font-medium"
+                    >
+                      {t("selectGroup")}
+                    </DropdownMenuCheckboxItem>
+                    {actions.map((action) => (
+                      <DropdownMenuCheckboxItem
+                        key={action}
+                        checked={isActionSelected(action)}
+                        onCheckedChange={(checked) => toggleAction(action, !!checked)}
+                        className="pl-6"
+                      >
+                        {actionLabel(action)}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </div>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         <div className="space-y-1">
           <Label className="text-xs">{t("dateFrom")}</Label>
@@ -209,30 +427,38 @@ export default function AuditLogsPage() {
       ) : (
         <>
           <Card className="divide-y">
-            {logs.map((log) => (
-              <div key={log.id} className="px-4 py-3 flex items-start gap-3">
-                <div className="shrink-0 text-muted-foreground mt-0.5">
-                  {ACTION_ICONS[log.action] ?? <ScrollText className="h-4 w-4" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{t(log.action as never)}</p>
-                  {log.targetType && (
-                    <p className="text-xs text-muted-foreground truncate">
-                      {log.targetType}
-                      {log.targetId ? ` · ${log.targetId.slice(0, 8)}…` : ""}
+            {logs.map((log) => {
+              const targetLabel = getTargetLabel(log);
+              return (
+                <div key={log.id} className="px-4 py-2 flex items-start gap-3">
+                  <div className="shrink-0 text-muted-foreground mt-0.5">
+                    {ACTION_ICONS[log.action] ?? <ScrollText className="h-4 w-4" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">{t(log.action as never)}</p>
+                    {targetLabel && (
+                      <p className="text-xs text-muted-foreground truncate">
+                        {targetLabel}
+                      </p>
+                    )}
+                    {log.action.startsWith("EMERGENCY_") && (() => {
+                      const detail = getEmergencyDetail(log);
+                      return detail ? (
+                        <p className="text-xs text-muted-foreground">{detail}</p>
+                      ) : null;
+                    })()}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs text-muted-foreground whitespace-nowrap">
+                      {formatDate(log.createdAt)}
                     </p>
-                  )}
+                    {log.ip && (
+                      <p className="text-xs text-muted-foreground">{log.ip}</p>
+                    )}
+                  </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <p className="text-xs text-muted-foreground whitespace-nowrap">
-                    {formatDate(log.createdAt)}
-                  </p>
-                  {log.ip && (
-                    <p className="text-xs text-muted-foreground">{log.ip}</p>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </Card>
 
           {nextCursor && (
