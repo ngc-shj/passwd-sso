@@ -94,7 +94,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     );
   } catch {
     return NextResponse.json(
-      { error: "Failed to decrypt entry data" },
+      { error: API_ERROR.DECRYPT_FAILED },
       { status: 500 }
     );
   }
@@ -204,7 +204,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     entry.createdById !== session.user.id
   ) {
     return NextResponse.json(
-      { error: "Can only update your own entries" },
+      { error: API_ERROR.ONLY_OWN_ENTRIES },
       { status: 403 }
     );
   }
@@ -239,7 +239,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     );
   } catch {
     return NextResponse.json(
-      { error: "Failed to decrypt entry data" },
+      { error: API_ERROR.DECRYPT_FAILED },
       { status: 500 }
     );
   }
@@ -364,7 +364,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       (updatedBlob.issueDate as string) >= (updatedBlob.expiryDate as string)
     ) {
       return NextResponse.json(
-        { error: "Expiry date must be after issue date" },
+        { error: API_ERROR.INVALID_DATE_RANGE },
         { status: 400 }
       );
     }
