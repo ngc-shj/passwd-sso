@@ -66,7 +66,7 @@ const ACTION_GROUPS = [
   {
     label: "groupEntry",
     value: "group:entry",
-    actions: ["ENTRY_CREATE", "ENTRY_UPDATE", "ENTRY_DELETE", "ENTRY_RESTORE"],
+    actions: ["ENTRY_CREATE", "ENTRY_UPDATE", "ENTRY_DELETE", "ENTRY_RESTORE", "ENTRY_EXPORT"],
   },
   { label: "groupAttachment", value: "group:attachment", actions: ["ATTACHMENT_UPLOAD", "ATTACHMENT_DELETE"] },
   { label: "groupOrg", value: "group:org", actions: ["ORG_MEMBER_INVITE", "ORG_MEMBER_REMOVE", "ORG_ROLE_UPDATE"] },
