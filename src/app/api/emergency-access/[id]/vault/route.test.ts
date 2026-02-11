@@ -81,6 +81,19 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     expect(res.status).toBe(403);
   });
 
+  it("returns 403 when grant is STALE", async () => {
+    mockPrismaGrant.findUnique.mockResolvedValue({
+      ...activatedGrant,
+      status: "STALE",
+      waitExpiresAt: null,
+    });
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/emergency-access/grant-1/vault"),
+      createParams({ id: "grant-1" })
+    );
+    expect(res.status).toBe(403);
+  });
+
   it("auto-activates when wait period expired", async () => {
     mockPrismaGrant.findUnique.mockResolvedValue({
       ...activatedGrant,

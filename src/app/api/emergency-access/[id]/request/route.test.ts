@@ -85,4 +85,18 @@ describe("POST /api/emergency-access/[id]/request", () => {
       })
     );
   });
+
+  it("returns 400 when grant is STALE", async () => {
+    mockPrismaGrant.findUnique.mockResolvedValue({
+      id: "grant-1",
+      granteeId: "grantee-1",
+      status: "STALE",
+      waitDays: 7,
+    });
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/emergency-access/grant-1/request"),
+      createParams({ id: "grant-1" })
+    );
+    expect(res.status).toBe(400);
+  });
 });

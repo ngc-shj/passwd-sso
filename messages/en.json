@@ -648,6 +648,7 @@
     "statusPending": "Pending",
     "statusAccepted": "Accepted",
     "statusIdle": "Ready",
+    "statusStale": "Re-confirm Needed",
     "statusRequested": "Requested",
     "statusActivated": "Activated",
     "statusRevoked": "Revoked",

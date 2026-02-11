@@ -648,6 +648,7 @@
     "statusPending": "保留中",
     "statusAccepted": "受諾済み",
     "statusIdle": "準備完了",
+    "statusStale": "再確認が必要",
     "statusRequested": "リクエスト中",
     "statusActivated": "有効",
     "statusRevoked": "取り消し済み",

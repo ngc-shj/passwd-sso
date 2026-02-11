@@ -431,6 +431,7 @@ enum EmergencyAccessStatus {
   PENDING
   ACCEPTED
   IDLE
+  STALE
   REQUESTED
   ACTIVATED
   REVOKED

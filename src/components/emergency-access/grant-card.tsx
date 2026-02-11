@@ -19,7 +19,7 @@ import { toast } from "sonner";
 import { Copy, ShieldOff, ShieldAlert, KeyRound } from "lucide-react";
 import { useRouter } from "@/i18n/navigation";
 
-type GrantStatus = "PENDING" | "ACCEPTED" | "IDLE" | "REQUESTED" | "ACTIVATED" | "REVOKED" | "REJECTED";
+type GrantStatus = "PENDING" | "ACCEPTED" | "IDLE" | "STALE" | "REQUESTED" | "ACTIVATED" | "REVOKED" | "REJECTED";
 
 interface Grant {
   id: string;
@@ -46,6 +46,7 @@ const statusColors: Record<GrantStatus, string> = {
   PENDING: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400",
   ACCEPTED: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
   IDLE: "bg-green-500/10 text-green-700 dark:text-green-400",
+  STALE: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
   REQUESTED: "bg-orange-500/10 text-orange-700 dark:text-orange-400",
   ACTIVATED: "bg-red-500/10 text-red-700 dark:text-red-400",
   REVOKED: "bg-gray-500/10 text-gray-500",

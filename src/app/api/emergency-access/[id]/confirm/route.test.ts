@@ -95,4 +95,20 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
       data: expect.objectContaining({ status: "IDLE" }),
     });
   });
+
+  it("re-escrows STALE grant back to IDLE", async () => {
+    mockPrismaGrant.findUnique.mockResolvedValue({
+      id: "grant-1",
+      ownerId: "owner-1",
+      granteeId: "grantee-1",
+      status: "STALE",
+    });
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/emergency-access/grant-1/confirm", { body: validBody }),
+      createParams({ id: "grant-1" })
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.status).toBe("IDLE");
+  });
 });

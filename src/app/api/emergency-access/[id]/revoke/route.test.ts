@@ -106,4 +106,22 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it("revokes STALE grant", async () => {
+    mockPrismaGrant.findUnique.mockResolvedValue({
+      id: "grant-1",
+      ownerId: "owner-1",
+      granteeId: "grantee-1",
+      status: "STALE",
+    });
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/emergency-access/grant-1/revoke", {
+        body: { permanent: true },
+      }),
+      createParams({ id: "grant-1" })
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.status).toBe("REVOKED");
+  });
 });

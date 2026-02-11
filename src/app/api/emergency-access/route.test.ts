@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockCheck } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     create: vi.fn(),
     findFirst: vi.fn(),
     findMany: vi.fn(),
   },
+  mockCheck: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -22,7 +23,7 @@ vi.mock("@/lib/audit", () => ({
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
 }));
 vi.mock("@/lib/rate-limit", () => ({
-  createRateLimiter: () => ({ check: () => Promise.resolve(true) }),
+  createRateLimiter: () => ({ check: mockCheck }),
 }));
 
 import { POST, GET } from "./route";
@@ -48,6 +49,23 @@ describe("POST /api/emergency-access", () => {
       body: { granteeEmail: "grantee@test.com", waitDays: 7 },
     }));
     expect(res.status).toBe(401);
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockCheck.mockResolvedValueOnce(false);
+    const res = await POST(createRequest("POST", "http://localhost/api/emergency-access", {
+      body: { granteeEmail: "grantee@test.com", waitDays: 7 },
+    }));
+    expect(res.status).toBe(429);
+  });
+
+  it("returns 400 for invalid JSON", async () => {
+    const req = createRequest("POST", "http://localhost/api/emergency-access");
+    vi.spyOn(req, "json").mockRejectedValue(new Error("parse error"));
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid JSON");
   });
 
   it("returns 400 for invalid waitDays", async () => {
@@ -124,5 +142,32 @@ describe("GET /api/emergency-access", () => {
     expect(json).toHaveLength(1);
     expect(json[0].id).toBe("grant-1");
     expect(json[0].token).toBe("tok"); // owner sees token for PENDING
+  });
+
+  it("hides token for non-owner grants", async () => {
+    mockPrismaGrant.findMany.mockResolvedValue([
+      {
+        id: "grant-2",
+        ownerId: "other-owner",
+        granteeId: "user-1",
+        granteeEmail: "user@test.com",
+        status: "IDLE",
+        waitDays: 7,
+        keyAlgorithm: "ECDH-P256",
+        token: "secret-tok",
+        requestedAt: null,
+        activatedAt: null,
+        waitExpiresAt: null,
+        revokedAt: null,
+        createdAt: new Date("2025-01-01"),
+        owner: { id: "other-owner", name: "Other", email: "other@test.com", image: null },
+        grantee: { id: "user-1", name: "User", email: "user@test.com", image: null },
+      },
+    ]);
+
+    const res = await GET();
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json[0].token).toBeUndefined();
   });
 });
