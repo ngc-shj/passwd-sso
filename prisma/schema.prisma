@@ -460,6 +460,10 @@ model EmergencyAccessGrant {
   hkdfSalt                String? @map("hkdf_salt") @db.VarChar(64)
   wrapVersion             Int     @default(1) @map("wrap_version")
 
+  // ML-KEM fields (v2 PQC hybrid, nullable until migration)
+  kemCiphertext  String? @map("kem_ciphertext") @db.Text
+  kemPublicKey   String? @map("kem_public_key") @db.Text
+
   // Timestamps for state machine
   requestedAt   DateTime? @map("requested_at")
   activatedAt   DateTime? @map("activated_at")

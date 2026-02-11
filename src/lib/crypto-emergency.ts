@@ -1,5 +1,9 @@
 /**
- * ECDH key exchange for Emergency Access (wrapVersion=2).
+ * ECDH key exchange for Emergency Access.
+ *
+ * Current: wrapVersion=1 (ECDH-P256)
+ * Planned: wrapVersion=2 (Hybrid ECDH-P256 + ML-KEM-768)
+ * See docs/3-8_emergency-access-pqc.md for PQC migration design.
  *
  * Flow:
  *   1. Grantee generates ECDH key pair (P-256)
@@ -9,12 +13,12 @@
  *   5. Wrapping key encrypts owner's secretKey for grantee (with AAD context binding)
  *   6. Grantee reverses: ECDH(granteePrivate, ownerEphemeralPublic) → same wrapping key
  *
- * Security (v2):
+ * Security:
  *   - HKDF uses random 32-byte salt (stored in DB) — prevents same-key reuse across grants
  *   - AES-GCM AAD binds ciphertext to grant context (grantId|ownerId|granteeId|keyVersion|wrapVersion)
  *     using fixed-order pipe-separated concatenation to avoid JSON serialization ordering issues
- *   - HKDF info includes version string for future algorithm migration
- *   - wrapVersion field enables v2→v3 migration without breaking existing data
+ *   - HKDF info includes version string for domain separation across algorithm versions
+ *   - wrapVersion field enables v1→v2 migration without breaking existing data
  *
  * Uses Web Crypto API. All CryptoKey objects are non-extractable except where export is needed.
  */
@@ -28,11 +32,27 @@ import {
 } from "./crypto-client";
 
 const ECDH_CURVE = "P-256";
-const HKDF_EMERGENCY_INFO = "passwd-sso-emergency-v1";
 const AES_KEY_LENGTH = 256;
 const IV_LENGTH = 12;
 const HKDF_SALT_LENGTH = 32;
-const CURRENT_WRAP_VERSION = 1;
+
+// ─── Wrap Version Registry ─────────────────────────────────
+// v1: ECDH-P256 → HKDF(SHA-256, random salt, "passwd-sso-emergency-v1") → AES-256-GCM
+// v2: (planned) HYBRID-ECDH-P256-MLKEM768 → KDF → AES-256-GCM
+//     See docs/3-8_emergency-access-pqc.md for full specification
+export const CURRENT_WRAP_VERSION = 1;
+export const CURRENT_KEY_ALGORITHM = "ECDH-P256" as const;
+
+const HKDF_INFO_BY_VERSION: Record<number, string> = {
+  1: "passwd-sso-emergency-v1",
+  // 2: "passwd-sso-emergency-v2",  // reserved for PQC hybrid
+};
+
+function getHkdfInfo(wrapVersion: number): string {
+  const info = HKDF_INFO_BY_VERSION[wrapVersion];
+  if (!info) throw new Error(`Unsupported wrapVersion: ${wrapVersion}`);
+  return info;
+}
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -130,14 +150,16 @@ export async function importPrivateKey(pkcs8Bytes: Uint8Array): Promise<CryptoKe
 
 /**
  * Derive a shared AES-256-GCM key from ECDH.
- * ECDH → raw bits → HKDF(salt, "passwd-sso-emergency-v1") → AES-256-GCM key.
+ * ECDH → raw bits → HKDF(salt, version-specific info) → AES-256-GCM key.
  *
  * @param salt - 32-byte random salt (generated per grant, stored in DB)
+ * @param wrapVersion - determines HKDF info string for domain separation
  */
 export async function deriveSharedKey(
   privateKey: CryptoKey,
   publicKey: CryptoKey,
-  salt: Uint8Array
+  salt: Uint8Array,
+  wrapVersion: number = CURRENT_WRAP_VERSION
 ): Promise<CryptoKey> {
   // Step 1: ECDH → shared bits
   const sharedBits = await crypto.subtle.deriveBits(
@@ -155,13 +177,13 @@ export async function deriveSharedKey(
     ["deriveKey"]
   );
 
-  // Step 3: HKDF → AES-256-GCM key (with random salt)
+  // Step 3: HKDF → AES-256-GCM key (with version-specific info)
   return crypto.subtle.deriveKey(
     {
       name: "HKDF",
       hash: "SHA-256",
       salt: toArrayBuffer(salt),
-      info: textEncode(HKDF_EMERGENCY_INFO),
+      info: textEncode(getHkdfInfo(wrapVersion)),
     },
     hkdfKey,
     { name: "AES-GCM", length: AES_KEY_LENGTH },
@@ -209,8 +231,8 @@ export async function wrapSecretKeyForGrantee(
   salt: Uint8Array,
   ctx: WrapContext
 ): Promise<{ encrypted: EncryptedData }> {
-  // Derive shared AES key with salt
-  const sharedKey = await deriveSharedKey(ownerEphemeralPrivateKey, granteePublicKey, salt);
+  // Derive shared AES key with salt and version-specific HKDF info
+  const sharedKey = await deriveSharedKey(ownerEphemeralPrivateKey, granteePublicKey, salt, ctx.wrapVersion);
 
   // Encrypt owner's secretKey with AAD context binding
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
@@ -252,8 +274,8 @@ export async function unwrapSecretKeyAsGrantee(
   // Import owner's ephemeral public key
   const ownerPubKey = await importPublicKey(ownerEphemeralPublicKeyJwk);
 
-  // Derive same shared AES key with salt
-  const sharedKey = await deriveSharedKey(granteePrivateKey, ownerPubKey, salt);
+  // Derive same shared AES key with salt and version-specific HKDF info
+  const sharedKey = await deriveSharedKey(granteePrivateKey, ownerPubKey, salt, ctx.wrapVersion);
 
   // Decrypt with AAD
   const ciphertext = hexDecode(encrypted.ciphertext);

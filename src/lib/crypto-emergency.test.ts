@@ -10,6 +10,8 @@ import {
   decryptPrivateKey,
   createKeyEscrow,
   unwrapSecretKeyAsGrantee,
+  buildAAD,
+  CURRENT_WRAP_VERSION,
   type WrapContext,
 } from "./crypto-emergency";
 import { deriveEncryptionKey, hexDecode } from "./crypto-client";
@@ -338,6 +340,95 @@ describe("crypto-emergency", () => {
       );
 
       expect(new TextDecoder().decode(plaintext)).toBe('{"title":"My Login","password":"secret123"}');
+    });
+  });
+
+  describe("buildAAD canonicalization", () => {
+    it("produces pipe-separated UTF-8 bytes in fixed order", () => {
+      const ctx: WrapContext = {
+        grantId: "clxyz123abc",
+        ownerId: "clusr_owner_001",
+        granteeId: "clusr_grantee_002",
+        keyVersion: 1,
+        wrapVersion: 1,
+      };
+      const aad = buildAAD(ctx);
+      const decoded = new TextDecoder().decode(aad);
+      expect(decoded).toBe("clxyz123abc|clusr_owner_001|clusr_grantee_002|1|1");
+    });
+
+    it("produces byte-identical output for same inputs", () => {
+      const ctx: WrapContext = {
+        grantId: "grant-abc",
+        ownerId: "owner-xyz",
+        granteeId: "grantee-123",
+        keyVersion: 2,
+        wrapVersion: 1,
+      };
+      const aad1 = new Uint8Array(buildAAD(ctx));
+      const aad2 = new Uint8Array(buildAAD(ctx));
+      expect(aad1).toEqual(aad2);
+    });
+
+    it("includes wrapVersion in output (downgrade prevention)", () => {
+      const ctxV1: WrapContext = {
+        grantId: "g1", ownerId: "o1", granteeId: "g2",
+        keyVersion: 1, wrapVersion: 1,
+      };
+      const ctxV2: WrapContext = {
+        grantId: "g1", ownerId: "o1", granteeId: "g2",
+        keyVersion: 1, wrapVersion: 2,
+      };
+      const aadV1 = new TextDecoder().decode(buildAAD(ctxV1));
+      const aadV2 = new TextDecoder().decode(buildAAD(ctxV2));
+      expect(aadV1).toBe("g1|o1|g2|1|1");
+      expect(aadV2).toBe("g1|o1|g2|1|2");
+      expect(aadV1).not.toBe(aadV2);
+    });
+
+    it("differs when any single field changes", () => {
+      const base: WrapContext = {
+        grantId: "g1", ownerId: "o1", granteeId: "g2",
+        keyVersion: 1, wrapVersion: 1,
+      };
+      const variants: WrapContext[] = [
+        { ...base, grantId: "g9" },
+        { ...base, ownerId: "o9" },
+        { ...base, granteeId: "g9" },
+        { ...base, keyVersion: 9 },
+        { ...base, wrapVersion: 9 },
+      ];
+      const baseAAD = new TextDecoder().decode(buildAAD(base));
+      for (const variant of variants) {
+        const variantAAD = new TextDecoder().decode(buildAAD(variant));
+        expect(variantAAD).not.toBe(baseAAD);
+      }
+    });
+
+    it("does not use JSON format", () => {
+      const ctx: WrapContext = {
+        grantId: "g1", ownerId: "o1", granteeId: "g2",
+        keyVersion: 1, wrapVersion: 1,
+      };
+      const decoded = new TextDecoder().decode(buildAAD(ctx));
+      expect(decoded).not.toContain("{");
+      expect(decoded).not.toContain("}");
+      expect(decoded).not.toContain("\"");
+      expect(decoded).not.toContain(":");
+    });
+  });
+
+  describe("CURRENT_WRAP_VERSION", () => {
+    it("is 1 (v1: ECDH-P256)", () => {
+      expect(CURRENT_WRAP_VERSION).toBe(1);
+    });
+
+    it("is used by createKeyEscrow", async () => {
+      const ownerSecretKey = crypto.getRandomValues(new Uint8Array(32));
+      const granteeKeyPair = await generateECDHKeyPair();
+      const granteePublicKeyJwk = await exportPublicKey(granteeKeyPair.publicKey);
+      const escrow = await createKeyEscrow(ownerSecretKey, granteePublicKeyJwk, TEST_CTX);
+      expect(escrow.wrapVersion).toBe(CURRENT_WRAP_VERSION);
     });
   });
 });
