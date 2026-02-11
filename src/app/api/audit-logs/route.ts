@@ -86,12 +86,12 @@ export async function GET(req: NextRequest) {
         { status: 400 }
       );
     }
-    where.action = { in: requested };
+    where.action = { in: requested as AuditAction[] };
   } else if (action) {
     if (ACTION_GROUPS[action]) {
       where.action = { in: ACTION_GROUPS[action] };
     } else if (VALID_ACTIONS.has(action)) {
-      where.action = action;
+      where.action = action as AuditAction;
     }
   }
 
