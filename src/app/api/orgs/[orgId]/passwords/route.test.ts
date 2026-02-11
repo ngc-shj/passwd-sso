@@ -45,6 +45,7 @@ vi.mock("@/lib/crypto-server", () => ({
 }));
 
 import { GET, POST } from "./route";
+import { ORG_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-123";
 const now = new Date("2025-01-01T00:00:00Z");
@@ -53,7 +54,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: "MEMBER" });
+    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.MEMBER });
     mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
     mockPrismaOrgPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
   });
@@ -396,7 +397,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: "MEMBER" });
+    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.MEMBER });
     mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
     mockEncryptServerData.mockReturnValue({ ciphertext: "enc", iv: "iv", authTag: "tag" });
   });

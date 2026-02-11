@@ -6,6 +6,7 @@ import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { EA_STATUS } from "@/lib/constants";
 
 const createLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 5 });
 
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
     where: {
       ownerId: session.user.id,
       granteeEmail: { equals: granteeEmail, mode: "insensitive" },
-      status: { notIn: ["REVOKED", "REJECTED"] },
+      status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] },
     },
   });
 
@@ -106,7 +107,7 @@ export async function GET() {
         { granteeId: session.user.id },
         {
           granteeEmail: { equals: session.user.email, mode: "insensitive" },
-          status: "PENDING",
+          status: EA_STATUS.PENDING,
         },
       ],
     },

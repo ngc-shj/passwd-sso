@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { EA_STATUS } from "@/lib/constants";
 
 // GET /api/emergency-access/[id]/vault/entries — Fetch owner's encrypted entries
 export async function GET(
@@ -24,7 +25,7 @@ export async function GET(
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  if (grant.status !== "ACTIVATED") {
+  if (grant.status !== EA_STATUS.ACTIVATED) {
     return NextResponse.json(
       { error: API_ERROR.NOT_ACTIVATED },
       { status: 403 }

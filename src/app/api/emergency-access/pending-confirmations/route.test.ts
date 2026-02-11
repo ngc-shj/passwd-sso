@@ -13,6 +13,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { GET } from "./route";
+import { EA_STATUS } from "@/lib/constants";
 
 describe("GET /api/emergency-access/pending-confirmations", () => {
   beforeEach(() => {
@@ -72,8 +73,8 @@ describe("GET /api/emergency-access/pending-confirmations", () => {
         ownerId: "owner-1",
         granteePublicKey: { not: null },
         OR: [
-          { status: "ACCEPTED", encryptedSecretKey: null },
-          { status: "STALE" },
+          { status: EA_STATUS.ACCEPTED, encryptedSecretKey: null },
+          { status: EA_STATUS.STALE },
         ],
       },
       select: {

@@ -1,3 +1,4 @@
+import { ORG_ROLE, INVITATION_STATUS } from "@/lib/constants";
 /**
  * Test data factories for creating mock database records.
  */
@@ -74,7 +75,7 @@ export function makeOrgMember(overrides: Record<string, unknown> = {}) {
     id: "member-1",
     orgId: "org-1",
     userId: "test-user-id",
-    role: "OWNER" as const,
+    role: ORG_ROLE.OWNER,
     createdAt: new Date(),
     updatedAt: new Date(),
     user: {
@@ -117,8 +118,8 @@ export function makeOrgInvitation(overrides: Record<string, unknown> = {}) {
     id: "inv-1",
     orgId: "org-1",
     email: "invited@example.com",
-    role: "MEMBER" as const,
-    status: "PENDING" as const,
+    role: ORG_ROLE.MEMBER,
+    status: INVITATION_STATUS.PENDING,
     token: "token-abc-123",
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     invitedById: "test-user-id",

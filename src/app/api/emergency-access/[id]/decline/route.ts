@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { EA_STATUS } from "@/lib/constants";
 
 // POST /api/emergency-access/[id]/decline — Decline a grant by ID (authenticated grantee)
 export async function POST(
@@ -24,7 +25,7 @@ export async function POST(
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  if (grant.status !== "PENDING") {
+  if (grant.status !== EA_STATUS.PENDING) {
     return NextResponse.json({ error: API_ERROR.GRANT_NOT_PENDING }, { status: 400 });
   }
 
@@ -34,7 +35,7 @@ export async function POST(
 
   await prisma.emergencyAccessGrant.update({
     where: { id },
-    data: { status: "REJECTED" },
+    data: { status: EA_STATUS.REJECTED },
   });
 
   logAudit({
@@ -47,5 +48,5 @@ export async function POST(
     ...extractRequestMeta(req),
   });
 
-  return NextResponse.json({ status: "REJECTED" });
+  return NextResponse.json({ status: EA_STATUS.REJECTED });
 }

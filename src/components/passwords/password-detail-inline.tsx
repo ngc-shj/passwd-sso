@@ -10,6 +10,10 @@ import { TOTPField, type TOTPEntry } from "./totp-field";
 import { AttachmentSection, type AttachmentMeta } from "./attachment-section";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "@/components/org/org-attachment-section";
 import { formatCardNumber } from "@/lib/credit-card";
+import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
+import type { CustomFieldType } from "@/lib/constants";
+import { ENTRY_TYPE } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
 import {
   Edit,
   Eye,
@@ -24,8 +28,6 @@ interface PasswordHistoryEntry {
   changedAt: string;
 }
 
-type CustomFieldType = "text" | "hidden" | "url";
-
 interface CustomField {
   label: string;
   value: string;
@@ -34,7 +36,7 @@ interface CustomField {
 
 export interface InlineDetailData {
   id: string;
-  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
+  entryType?: EntryTypeValue;
   password: string;
   content?: string;
   url: string | null;
@@ -142,10 +144,10 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
     setTimeout(() => setShowIdNumber(false), REVEAL_TIMEOUT);
   }, []);
 
-  const isNote = data.entryType === "SECURE_NOTE";
-  const isCreditCard = data.entryType === "CREDIT_CARD";
-  const isIdentity = data.entryType === "IDENTITY";
-  const isPasskey = data.entryType === "PASSKEY";
+  const isNote = data.entryType === ENTRY_TYPE.SECURE_NOTE;
+  const isCreditCard = data.entryType === ENTRY_TYPE.CREDIT_CARD;
+  const isIdentity = data.entryType === ENTRY_TYPE.IDENTITY;
+  const isPasskey = data.entryType === ENTRY_TYPE.PASSKEY;
 
   const handleRevealCredentialId = useCallback(() => {
     setShowCredentialId(true);
@@ -507,7 +509,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
                   {field.label}
                 </label>
                 <div className="flex items-center gap-2">
-                  {field.type === "url" ? (
+                  {field.type === CUSTOM_FIELD_TYPE.URL ? (
                     <a
                       href={field.value}
                       target="_blank"
@@ -516,7 +518,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
                     >
                       {field.value}
                     </a>
-                  ) : field.type === "hidden" ? (
+                  ) : field.type === CUSTOM_FIELD_TYPE.HIDDEN ? (
                     <>
                       <span className="font-mono text-sm">
                         {revealedFields.has(idx) ? field.value : "••••••••••••"}

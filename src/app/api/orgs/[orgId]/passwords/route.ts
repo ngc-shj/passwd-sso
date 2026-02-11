@@ -12,10 +12,12 @@ import {
   decryptServerData,
 } from "@/lib/crypto-server";
 import { buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
+import { ENTRY_TYPE, ENTRY_TYPE_VALUES } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string }> };
 
-const VALID_ENTRY_TYPES: Set<string> = new Set(["LOGIN", "SECURE_NOTE", "CREDIT_CARD", "IDENTITY", "PASSKEY"]);
+const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
 // GET /api/orgs/[orgId]/passwords — List org passwords (server decrypts overviews)
 export async function GET(req: NextRequest, { params }: Params) {
@@ -204,9 +206,9 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // Check entry type
   const rawBody = body as Record<string, unknown>;
-  const isSecureNote = rawBody.entryType === "SECURE_NOTE";
-  const isCreditCard = rawBody.entryType === "CREDIT_CARD";
-  const isIdentity = rawBody.entryType === "IDENTITY";
+  const isSecureNote = rawBody.entryType === ENTRY_TYPE.SECURE_NOTE;
+  const isCreditCard = rawBody.entryType === ENTRY_TYPE.CREDIT_CARD;
+  const isIdentity = rawBody.entryType === ENTRY_TYPE.IDENTITY;
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
@@ -229,7 +231,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   let fullBlob: string;
   let overviewBlob: string;
-  let entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" = "LOGIN";
+  let entryType: EntryTypeValue = ENTRY_TYPE.LOGIN;
   let tagIds: string[] | undefined;
   let responseTitle: string;
   let responseUsername: string | null = null;
@@ -246,7 +248,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const { title, content } = parsed.data;
     tagIds = parsed.data.tagIds;
-    entryType = "SECURE_NOTE";
+    entryType = ENTRY_TYPE.SECURE_NOTE;
     responseTitle = title;
 
     const snippet = content.slice(0, 100);
@@ -263,7 +265,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const { title, cardholderName, cardNumber, brand, expiryMonth, expiryYear, cvv, notes } = parsed.data;
     tagIds = parsed.data.tagIds;
-    entryType = "CREDIT_CARD";
+    entryType = ENTRY_TYPE.CREDIT_CARD;
     responseTitle = title;
 
     const lastFour = cardNumber ? cardNumber.slice(-4) : null;
@@ -294,7 +296,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const { title, fullName, address, phone, email, dateOfBirth, nationality, idNumber, issueDate, expiryDate, notes } = parsed.data;
     tagIds = parsed.data.tagIds;
-    entryType = "IDENTITY";
+    entryType = ENTRY_TYPE.IDENTITY;
     responseTitle = title;
 
     const idNumberLast4 = idNumber ? idNumber.slice(-4) : null;

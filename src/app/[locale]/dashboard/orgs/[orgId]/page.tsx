@@ -19,6 +19,8 @@ import {
 import { OrgExportDialog } from "@/components/org/org-export-dialog";
 import { Plus, Settings, KeyRound, Search, FileText, CreditCard, IdCard, Fingerprint, Download } from "lucide-react";
 import { toast } from "sonner";
+import { ORG_ROLE, ENTRY_TYPE } from "@/lib/constants";
+import type { EntryTypeValue, TotpAlgorithm, CustomFieldType } from "@/lib/constants";
 
 interface OrgInfo {
   id: string;
@@ -31,7 +33,7 @@ interface OrgInfo {
 
 interface OrgPasswordEntry {
   id: string;
-  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
+  entryType: EntryTypeValue;
   title: string;
   username: string | null;
   urlHost: string | null;
@@ -69,10 +71,10 @@ export default function OrgDashboardPage({
   const [searchQuery, setSearchQuery] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [newEntryType, setNewEntryType] = useState<"LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY">("LOGIN");
+  const [newEntryType, setNewEntryType] = useState<EntryTypeValue>(ENTRY_TYPE.LOGIN);
   const [editData, setEditData] = useState<{
     id: string;
-    entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
+    entryType?: EntryTypeValue;
     title: string;
     username: string | null;
     password: string;
@@ -80,8 +82,8 @@ export default function OrgDashboardPage({
     url: string | null;
     notes: string | null;
     tags?: { id: string; name: string; color: string | null }[];
-    customFields?: { label: string; value: string; type: "text" | "hidden" | "url" }[];
-    totp?: { secret: string; algorithm?: "SHA1" | "SHA256" | "SHA512"; digits?: number; period?: number } | null;
+    customFields?: { label: string; value: string; type: CustomFieldType }[];
+    totp?: { secret: string; algorithm?: TotpAlgorithm; digits?: number; period?: number } | null;
     cardholderName?: string | null;
     cardNumber?: string | null;
     brand?: string | null;
@@ -149,8 +151,8 @@ export default function OrgDashboardPage({
   }, [orgId, fetchPasswords]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const canCreate =
-    org?.role === "OWNER" || org?.role === "ADMIN" || org?.role === "MEMBER";
-  const canDeletePerm = org?.role === "OWNER" || org?.role === "ADMIN";
+    org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN || org?.role === ORG_ROLE.MEMBER;
+  const canDeletePerm = org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN;
   const canEditPerm = canCreate;
 
   const handleToggleFavorite = async (id: string, current: boolean) => {
@@ -208,7 +210,7 @@ export default function OrgDashboardPage({
   };
 
   const createDetailFetcher = useCallback(
-    (id: string, eType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY") => async (): Promise<InlineDetailData> => {
+    (id: string, eType?: EntryTypeValue) => async (): Promise<InlineDetailData> => {
       const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`);
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
@@ -330,7 +332,7 @@ export default function OrgDashboardPage({
             {org && <OrgRoleBadge role={org.role} />}
           </div>
           <div className="flex items-center gap-2">
-            {(org?.role === "OWNER" || org?.role === "ADMIN") && (
+            {(org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN) && (
               <OrgExportDialog
                 orgId={orgId}
                 trigger={
@@ -340,7 +342,7 @@ export default function OrgDashboardPage({
                 }
               />
             )}
-            {(org?.role === "OWNER" || org?.role === "ADMIN") && (
+            {(org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN) && (
               <Button variant="ghost" size="icon" asChild>
                 <Link href={`/dashboard/orgs/${orgId}/settings`}>
                   <Settings className="h-4 w-4" />
@@ -356,23 +358,23 @@ export default function OrgDashboardPage({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType("LOGIN"); setFormOpen(true); }}>
+                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.LOGIN); setFormOpen(true); }}>
                     <KeyRound className="h-4 w-4 mr-2" />
                     {t("newPassword")}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType("SECURE_NOTE"); setFormOpen(true); }}>
+                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setFormOpen(true); }}>
                     <FileText className="h-4 w-4 mr-2" />
                     {t("newSecureNote")}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType("CREDIT_CARD"); setFormOpen(true); }}>
+                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setFormOpen(true); }}>
                     <CreditCard className="h-4 w-4 mr-2" />
                     {t("newCreditCard")}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType("IDENTITY"); setFormOpen(true); }}>
+                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.IDENTITY); setFormOpen(true); }}>
                     <IdCard className="h-4 w-4 mr-2" />
                     {t("newIdentity")}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType("PASSKEY"); setFormOpen(true); }}>
+                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.PASSKEY); setFormOpen(true); }}>
                     <Fingerprint className="h-4 w-4 mr-2" />
                     {t("newPasskey")}
                   </DropdownMenuItem>

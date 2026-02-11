@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { Loader2, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import { ENTRY_TYPE } from "@/lib/constants";
 
 interface PasskeyFormProps {
   mode: "create" | "edit";
@@ -96,7 +97,7 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
         keyVersion: 1,
         aadVersion: aad ? AAD_VERSION : 0,
         tagIds: selectedTags.map((t) => t.id),
-        entryType: "PASSKEY",
+        entryType: ENTRY_TYPE.PASSKEY,
       };
 
       const endpoint =

@@ -10,6 +10,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { ORG_ROLE } from "@/lib/constants";
 import type { OrgRole } from "@prisma/client";
 
 // ─── Permission Definitions ─────────────────────────────────────
@@ -27,7 +28,7 @@ export type OrgPermission =
   | "tag:manage";
 
 const ROLE_PERMISSIONS: Record<OrgRole, Set<OrgPermission>> = {
-  OWNER: new Set([
+  [ORG_ROLE.OWNER]: new Set([
     "org:delete",
     "org:update",
     "member:invite",
@@ -39,7 +40,7 @@ const ROLE_PERMISSIONS: Record<OrgRole, Set<OrgPermission>> = {
     "password:delete",
     "tag:manage",
   ]),
-  ADMIN: new Set([
+  [ORG_ROLE.ADMIN]: new Set([
     "org:update",
     "member:invite",
     "member:remove",
@@ -50,13 +51,13 @@ const ROLE_PERMISSIONS: Record<OrgRole, Set<OrgPermission>> = {
     "password:delete",
     "tag:manage",
   ]),
-  MEMBER: new Set([
+  [ORG_ROLE.MEMBER]: new Set([
     "password:create",
     "password:read",
     "password:update",
     "tag:manage",
   ]),
-  VIEWER: new Set(["password:read"]),
+  [ORG_ROLE.VIEWER]: new Set(["password:read"]),
 };
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -71,10 +72,10 @@ export function hasOrgPermission(
 
 /** Role hierarchy for comparison (higher = more privileged). */
 const ROLE_LEVEL: Record<OrgRole, number> = {
-  OWNER: 4,
-  ADMIN: 3,
-  MEMBER: 2,
-  VIEWER: 1,
+  [ORG_ROLE.OWNER]: 4,
+  [ORG_ROLE.ADMIN]: 3,
+  [ORG_ROLE.MEMBER]: 2,
+  [ORG_ROLE.VIEWER]: 1,
 };
 
 /** Check if actorRole is strictly higher than targetRole. */

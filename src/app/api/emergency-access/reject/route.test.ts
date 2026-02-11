@@ -22,12 +22,13 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 import { POST } from "./route";
+import { EA_STATUS } from "@/lib/constants";
 
 const validGrant = {
   id: "grant-1",
   ownerId: "owner-1",
   granteeEmail: "grantee@test.com",
-  status: "PENDING",
+  status: EA_STATUS.PENDING,
 };
 
 describe("POST /api/emergency-access/reject", () => {
@@ -72,7 +73,7 @@ describe("POST /api/emergency-access/reject", () => {
   });
 
   it("returns 410 when invitation not PENDING", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({ ...validGrant, status: "ACCEPTED" });
+    mockPrismaGrant.findUnique.mockResolvedValue({ ...validGrant, status: EA_STATUS.ACCEPTED });
     const res = await POST(createRequest("POST", "http://localhost/api/emergency-access/reject", {
       body: { token: "tok" },
     }));
@@ -102,10 +103,10 @@ describe("POST /api/emergency-access/reject", () => {
     }));
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.status).toBe("REJECTED");
+    expect(json.status).toBe(EA_STATUS.REJECTED);
     expect(mockPrismaGrant.update).toHaveBeenCalledWith({
       where: { id: "grant-1" },
-      data: { status: "REJECTED" },
+      data: { status: EA_STATUS.REJECTED },
     });
   });
 });

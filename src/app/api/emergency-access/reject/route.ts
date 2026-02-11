@@ -5,6 +5,7 @@ import { rejectEmergencyGrantSchema } from "@/lib/validations";
 import { hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { EA_STATUS } from "@/lib/constants";
 
 // POST /api/emergency-access/reject — Reject an emergency access invitation
 export async function POST(req: NextRequest) {
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (grant.status !== "PENDING") {
+  if (grant.status !== EA_STATUS.PENDING) {
     return NextResponse.json({ error: API_ERROR.INVITATION_ALREADY_USED }, { status: 410 });
   }
 
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
 
   await prisma.emergencyAccessGrant.update({
     where: { id: grant.id },
-    data: { status: "REJECTED" },
+    data: { status: EA_STATUS.REJECTED },
   });
 
   logAudit({
@@ -63,5 +64,5 @@ export async function POST(req: NextRequest) {
     ...extractRequestMeta(req),
   });
 
-  return NextResponse.json({ status: "REJECTED" });
+  return NextResponse.json({ status: EA_STATUS.REJECTED });
 }

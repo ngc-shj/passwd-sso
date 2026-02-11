@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { EA_STATUS } from "@/lib/constants";
 
 const vaultLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
@@ -36,12 +37,12 @@ export async function GET(
   }
 
   // Auto-activate if wait period has expired
-  if (grant.status === "REQUESTED" && grant.waitExpiresAt && grant.waitExpiresAt <= new Date()) {
+  if (grant.status === EA_STATUS.REQUESTED && grant.waitExpiresAt && grant.waitExpiresAt <= new Date()) {
     await prisma.emergencyAccessGrant.update({
       where: { id },
-      data: { status: "ACTIVATED", activatedAt: new Date() },
+      data: { status: EA_STATUS.ACTIVATED, activatedAt: new Date() },
     });
-    grant.status = "ACTIVATED";
+    grant.status = EA_STATUS.ACTIVATED;
 
     logAudit({
       scope: "PERSONAL",
@@ -54,7 +55,7 @@ export async function GET(
     });
   }
 
-  if (grant.status !== "ACTIVATED") {
+  if (grant.status !== EA_STATUS.ACTIVATED) {
     return NextResponse.json(
       { error: API_ERROR.NOT_ACTIVATED },
       { status: 403 }

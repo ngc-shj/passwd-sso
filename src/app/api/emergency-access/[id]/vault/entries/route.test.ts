@@ -24,6 +24,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 import { GET } from "./route";
+import { EA_STATUS } from "@/lib/constants";
 
 describe("GET /api/emergency-access/[id]/vault/entries", () => {
   beforeEach(() => {
@@ -33,7 +34,7 @@ describe("GET /api/emergency-access/[id]/vault/entries", () => {
       id: "grant-1",
       ownerId: "owner-1",
       granteeId: "grantee-1",
-      status: "ACTIVATED",
+      status: EA_STATUS.ACTIVATED,
     });
     mockPrismaEntry.findMany.mockResolvedValue([]);
   });
@@ -70,7 +71,7 @@ describe("GET /api/emergency-access/[id]/vault/entries", () => {
       id: "grant-1",
       ownerId: "owner-1",
       granteeId: "grantee-1",
-      status: "IDLE",
+      status: EA_STATUS.IDLE,
     });
     const res = await GET(
       createRequest("GET", "http://localhost/api/emergency-access/grant-1/vault/entries"),
@@ -84,7 +85,7 @@ describe("GET /api/emergency-access/[id]/vault/entries", () => {
       id: "grant-1",
       ownerId: "owner-1",
       granteeId: "grantee-1",
-      status: "STALE",
+      status: EA_STATUS.STALE,
     });
     const res = await GET(
       createRequest("GET", "http://localhost/api/emergency-access/grant-1/vault/entries"),

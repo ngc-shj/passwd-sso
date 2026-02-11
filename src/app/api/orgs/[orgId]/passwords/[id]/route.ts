@@ -10,6 +10,7 @@ import {
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { ORG_ROLE, ENTRY_TYPE } from "@/lib/constants";
 import {
   unwrapOrgKey,
   encryptServerData,
@@ -112,14 +113,14 @@ export async function GET(_req: NextRequest, { params }: Params) {
     updatedAt: entry.updatedAt,
   };
 
-  if (entry.entryType === "SECURE_NOTE") {
+  if (entry.entryType === ENTRY_TYPE.SECURE_NOTE) {
     return NextResponse.json({
       ...common,
       content: blob.content,
     });
   }
 
-  if (entry.entryType === "CREDIT_CARD") {
+  if (entry.entryType === ENTRY_TYPE.CREDIT_CARD) {
     return NextResponse.json({
       ...common,
       cardholderName: blob.cardholderName ?? null,
@@ -132,7 +133,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     });
   }
 
-  if (entry.entryType === "IDENTITY") {
+  if (entry.entryType === ENTRY_TYPE.IDENTITY) {
     return NextResponse.json({
       ...common,
       fullName: blob.fullName ?? null,
@@ -200,7 +201,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
   if (
-    membership.role === "MEMBER" &&
+    membership.role === ORG_ROLE.MEMBER &&
     entry.createdById !== session.user.id
   ) {
     return NextResponse.json(
@@ -250,7 +251,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   let isArchived: boolean | undefined;
   let responseTitle: string;
 
-  if (entry.entryType === "SECURE_NOTE") {
+  if (entry.entryType === ENTRY_TYPE.SECURE_NOTE) {
     const parsed = updateOrgSecureNoteSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
@@ -271,7 +272,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     const snippet = updatedBlob.content.slice(0, 100);
     updatedBlobStr = JSON.stringify(updatedBlob);
     overviewBlobStr = JSON.stringify({ title: updatedBlob.title, snippet });
-  } else if (entry.entryType === "CREDIT_CARD") {
+  } else if (entry.entryType === ENTRY_TYPE.CREDIT_CARD) {
     const parsed = updateOrgCreditCardSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
@@ -326,7 +327,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       brand: updatedBlob.brand,
       lastFour,
     });
-  } else if (entry.entryType === "IDENTITY") {
+  } else if (entry.entryType === ENTRY_TYPE.IDENTITY) {
     const parsed = updateOrgIdentitySchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(

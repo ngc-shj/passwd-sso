@@ -31,6 +31,7 @@ import {
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { Loader2, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import { ENTRY_TYPE } from "@/lib/constants";
 
 interface CreditCardFormProps {
   mode: "create" | "edit";
@@ -141,7 +142,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
         keyVersion: 1,
         aadVersion: aad ? AAD_VERSION : 0,
         tagIds: selectedTags.map((t) => t.id),
-        entryType: "CREDIT_CARD",
+        entryType: ENTRY_TYPE.CREDIT_CARD,
       };
 
       const endpoint =

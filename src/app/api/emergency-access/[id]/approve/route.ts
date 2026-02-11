@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canTransition } from "@/lib/emergency-access-state";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { EA_STATUS } from "@/lib/constants";
 
 // POST /api/emergency-access/[id]/approve — Owner early-approves emergency access request
 export async function POST(
@@ -25,7 +26,7 @@ export async function POST(
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  if (!canTransition(grant.status, "ACTIVATED")) {
+  if (!canTransition(grant.status, EA_STATUS.ACTIVATED)) {
     return NextResponse.json(
       { error: API_ERROR.INVALID_STATUS },
       { status: 400 }
@@ -35,7 +36,7 @@ export async function POST(
   await prisma.emergencyAccessGrant.update({
     where: { id },
     data: {
-      status: "ACTIVATED",
+      status: EA_STATUS.ACTIVATED,
       activatedAt: new Date(),
     },
   });
@@ -50,5 +51,5 @@ export async function POST(
     ...extractRequestMeta(req),
   });
 
-  return NextResponse.json({ status: "ACTIVATED" });
+  return NextResponse.json({ status: EA_STATUS.ACTIVATED });
 }

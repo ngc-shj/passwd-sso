@@ -6,6 +6,7 @@ import { hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { EA_STATUS } from "@/lib/constants";
 
 const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (grant.status !== "PENDING") {
+  if (grant.status !== EA_STATUS.PENDING) {
     return NextResponse.json({ error: API_ERROR.INVITATION_ALREADY_USED }, { status: 410 });
   }
 
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest) {
     prisma.emergencyAccessGrant.update({
       where: { id: grant.id },
       data: {
-        status: "ACCEPTED",
+        status: EA_STATUS.ACCEPTED,
         granteeId: session.user.id,
         granteePublicKey,
       },
@@ -98,5 +99,5 @@ export async function POST(req: NextRequest) {
     ...extractRequestMeta(req),
   });
 
-  return NextResponse.json({ status: "ACCEPTED" });
+  return NextResponse.json({ status: EA_STATUS.ACCEPTED });
 }

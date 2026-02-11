@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { useVault } from "@/lib/vault-context";
+import { VAULT_STATUS } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -117,7 +118,7 @@ export default function AcceptEmergencyInvitePage() {
 
   if (!grantInfo) return null;
 
-  const vaultLocked = vaultStatus !== "unlocked";
+  const vaultLocked = vaultStatus !== VAULT_STATUS.UNLOCKED;
 
   return (
     <div className="mx-auto flex max-w-md items-center justify-center p-4 pt-20">

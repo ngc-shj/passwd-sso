@@ -23,6 +23,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Plus, ArrowUpDown, KeyRound, FileText, CreditCard, IdCard, Fingerprint } from "lucide-react";
+import type { EntryTypeValue } from "@/lib/constants";
+import { ENTRY_TYPE } from "@/lib/constants";
 
 type VaultView = "all" | "favorites" | "archive" | "trash";
 
@@ -40,7 +42,7 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
   const [refreshKey, setRefreshKey] = useState(0);
   const [sortBy, setSortBy] = useState<SortOption>("updatedAt");
   const [newDialogOpen, setNewDialogOpen] = useState(false);
-  const [newEntryType, setNewEntryType] = useState<"LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY">("LOGIN");
+  const [newEntryType, setNewEntryType] = useState<EntryTypeValue>(ENTRY_TYPE.LOGIN);
   const [helpOpen, setHelpOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -171,23 +173,23 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => { setNewEntryType("LOGIN"); setNewDialogOpen(true); }}>
+                  <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.LOGIN); setNewDialogOpen(true); }}>
                     <KeyRound className="h-4 w-4 mr-2" />
                     {t("newPassword")}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setNewEntryType("SECURE_NOTE"); setNewDialogOpen(true); }}>
+                  <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setNewDialogOpen(true); }}>
                     <FileText className="h-4 w-4 mr-2" />
                     {t("newSecureNote")}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setNewEntryType("CREDIT_CARD"); setNewDialogOpen(true); }}>
+                  <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setNewDialogOpen(true); }}>
                     <CreditCard className="h-4 w-4 mr-2" />
                     {t("newCreditCard")}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setNewEntryType("IDENTITY"); setNewDialogOpen(true); }}>
+                  <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.IDENTITY); setNewDialogOpen(true); }}>
                     <IdCard className="h-4 w-4 mr-2" />
                     {t("newIdentity")}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setNewEntryType("PASSKEY"); setNewDialogOpen(true); }}>
+                  <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.PASSKEY); setNewDialogOpen(true); }}>
                     <Fingerprint className="h-4 w-4 mr-2" />
                     {t("newPasskey")}
                   </DropdownMenuItem>

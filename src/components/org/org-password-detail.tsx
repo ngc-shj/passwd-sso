@@ -18,11 +18,14 @@ import { formatCardNumber } from "@/lib/credit-card";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { Eye, EyeOff, ExternalLink } from "lucide-react";
+import { ENTRY_TYPE } from "@/lib/constants";
+import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
+import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
 
 interface CustomField {
   label: string;
   value: string;
-  type: "text" | "hidden" | "url";
+  type: CustomFieldType;
 }
 
 interface OrgPasswordDetailProps {
@@ -34,7 +37,7 @@ interface OrgPasswordDetailProps {
 
 interface PasswordData {
   id: string;
-  entryType?: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+  entryType?: EntryTypeValue;
   title: string;
   username: string | null;
   password: string;
@@ -147,7 +150,7 @@ export function OrgPasswordDetail({
           </div>
         ) : data ? (
           <div className="space-y-4">
-            {data.entryType === "IDENTITY" ? (
+            {data.entryType === ENTRY_TYPE.IDENTITY ? (
               <>
                 {/* Full Name */}
                 {data.fullName && (
@@ -254,7 +257,7 @@ export function OrgPasswordDetail({
                   </div>
                 )}
               </>
-            ) : data.entryType === "CREDIT_CARD" ? (
+            ) : data.entryType === ENTRY_TYPE.CREDIT_CARD ? (
               <>
                 {/* Card Number */}
                 {data.cardNumber && (
@@ -349,7 +352,7 @@ export function OrgPasswordDetail({
                   </div>
                 )}
               </>
-            ) : data.entryType === "SECURE_NOTE" ? (
+            ) : data.entryType === ENTRY_TYPE.SECURE_NOTE ? (
               /* Secure Note: show content */
               <div>
                 <p className="text-xs text-muted-foreground mb-1">
@@ -452,7 +455,7 @@ export function OrgPasswordDetail({
                           {field.label}
                         </p>
                         <div className="flex items-center gap-2">
-                          {field.type === "hidden" ? (
+                          {field.type === CUSTOM_FIELD_TYPE.HIDDEN ? (
                             <>
                               <p className="text-sm flex-1 font-mono">
                                 {hiddenFieldsVisible.has(idx)
@@ -472,7 +475,7 @@ export function OrgPasswordDetail({
                                 )}
                               </Button>
                             </>
-                          ) : field.type === "url" ? (
+                          ) : field.type === CUSTOM_FIELD_TYPE.URL ? (
                             <>
                               <p className="text-sm flex-1 truncate">
                                 {field.value}

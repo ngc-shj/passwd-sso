@@ -26,8 +26,8 @@ import {
 } from "@/components/ui/select";
 import { Eye, EyeOff, Loader2, ArrowLeft, Dices, Plus, X, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-
-export type CustomFieldType = "text" | "hidden" | "url";
+import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
+import type { CustomFieldType } from "@/lib/constants";
 
 export interface CustomField {
   label: string;
@@ -317,7 +317,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                   onClick={() =>
                     setCustomFields((prev) => [
                       ...prev,
-                      { label: "", value: "", type: "text" },
+                      { label: "", value: "", type: CUSTOM_FIELD_TYPE.TEXT },
                     ])
                   }
                 >
@@ -355,14 +355,14 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="text">{t("fieldText")}</SelectItem>
-                          <SelectItem value="hidden">{t("fieldHidden")}</SelectItem>
-                          <SelectItem value="url">{t("fieldUrl")}</SelectItem>
+                          <SelectItem value={CUSTOM_FIELD_TYPE.TEXT}>{t("fieldText")}</SelectItem>
+                          <SelectItem value={CUSTOM_FIELD_TYPE.HIDDEN}>{t("fieldHidden")}</SelectItem>
+                          <SelectItem value={CUSTOM_FIELD_TYPE.URL}>{t("fieldUrl")}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                     <Input
-                      type={field.type === "hidden" ? "password" : field.type === "url" ? "url" : "text"}
+                      type={field.type === CUSTOM_FIELD_TYPE.HIDDEN ? "password" : field.type === CUSTOM_FIELD_TYPE.URL ? "url" : "text"}
                       value={field.value}
                       onChange={(e) =>
                         setCustomFields((prev) =>

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/passwords/copy-button";
+import { ENTRY_TYPE, CUSTOM_FIELD_TYPE } from "@/lib/constants";
 import {
   Eye,
   EyeOff,
@@ -20,11 +21,11 @@ import {
 const REVEAL_TIMEOUT = 30_000;
 
 const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
-  LOGIN: <KeyRound className="h-5 w-5" />,
-  SECURE_NOTE: <StickyNote className="h-5 w-5" />,
-  CREDIT_CARD: <CreditCard className="h-5 w-5" />,
-  IDENTITY: <UserSquare className="h-5 w-5" />,
-  PASSKEY: <Fingerprint className="h-5 w-5" />,
+  [ENTRY_TYPE.LOGIN]: <KeyRound className="h-5 w-5" />,
+  [ENTRY_TYPE.SECURE_NOTE]: <StickyNote className="h-5 w-5" />,
+  [ENTRY_TYPE.CREDIT_CARD]: <CreditCard className="h-5 w-5" />,
+  [ENTRY_TYPE.IDENTITY]: <UserSquare className="h-5 w-5" />,
+  [ENTRY_TYPE.PASSKEY]: <Fingerprint className="h-5 w-5" />,
 };
 
 interface ShareEntryViewProps {
@@ -133,10 +134,10 @@ export function ShareEntryView({
     return (
       <>
         {fields.map((f, i) => {
-          if (f.type === "hidden") {
+          if (f.type === CUSTOM_FIELD_TYPE.HIDDEN) {
             return renderSensitiveField(f.label, f.value, `custom_${i}`);
           }
-          if (f.type === "url" && f.value) {
+          if (f.type === CUSTOM_FIELD_TYPE.URL && f.value) {
             return (
               <div className="space-y-1" key={`custom_${i}`}>
                 <label className="text-sm text-muted-foreground">
@@ -248,13 +249,13 @@ export function ShareEntryView({
 
   const renderFields = () => {
     switch (entryType) {
-      case "SECURE_NOTE":
+      case ENTRY_TYPE.SECURE_NOTE:
         return renderSecureNoteFields();
-      case "CREDIT_CARD":
+      case ENTRY_TYPE.CREDIT_CARD:
         return renderCreditCardFields();
-      case "IDENTITY":
+      case ENTRY_TYPE.IDENTITY:
         return renderIdentityFields();
-      case "PASSKEY":
+      case ENTRY_TYPE.PASSKEY:
         return renderPasskeyFields();
       default:
         return renderLoginFields();

@@ -36,6 +36,7 @@ import { CopyButton } from "@/components/passwords/copy-button";
 import { Link } from "@/i18n/navigation";
 import { ArrowLeft, Loader2, UserPlus, Trash2, X, LinkIcon, Crown } from "lucide-react";
 import { toast } from "sonner";
+import { ORG_ROLE } from "@/lib/constants";
 
 interface OrgInfo {
   id: string;
@@ -83,7 +84,7 @@ export default function OrgSettingsPage({
 
   // Invite form
   const [invEmail, setInvEmail] = useState("");
-  const [invRole, setInvRole] = useState("MEMBER");
+  const [invRole, setInvRole] = useState<string>(ORG_ROLE.MEMBER);
   const [inviting, setInviting] = useState(false);
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -133,8 +134,8 @@ export default function OrgSettingsPage({
     fetchAll();
   }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const isOwner = org?.role === "OWNER";
-  const isAdmin = org?.role === "ADMIN" || isOwner;
+  const isOwner = org?.role === ORG_ROLE.OWNER;
+  const isAdmin = org?.role === ORG_ROLE.ADMIN || isOwner;
 
   const handleUpdateOrg = async () => {
     setSaving(true);
@@ -232,7 +233,7 @@ export default function OrgSettingsPage({
       const res = await fetch(`/api/orgs/${orgId}/members/${memberId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "OWNER" }),
+        body: JSON.stringify({ role: ORG_ROLE.OWNER }),
       });
       if (!res.ok) throw new Error("Failed");
       toast.success(t("ownershipTransferred"));
@@ -378,7 +379,7 @@ export default function OrgSettingsPage({
                   )}
                 </div>
 
-                {isAdmin && m.role !== "OWNER" && m.userId !== currentUserId ? (
+                {isAdmin && m.role !== ORG_ROLE.OWNER && m.userId !== currentUserId ? (
                   <div className="flex items-center gap-2">
                     <Select
                       value={m.role}
@@ -388,13 +389,13 @@ export default function OrgSettingsPage({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="ADMIN">
+                        <SelectItem value={ORG_ROLE.ADMIN}>
                           {t("roleAdmin")}
                         </SelectItem>
-                        <SelectItem value="MEMBER">
+                        <SelectItem value={ORG_ROLE.MEMBER}>
                           {t("roleMember")}
                         </SelectItem>
-                        <SelectItem value="VIEWER">
+                        <SelectItem value={ORG_ROLE.VIEWER}>
                           {t("roleViewer")}
                         </SelectItem>
                       </SelectContent>
@@ -436,7 +437,7 @@ export default function OrgSettingsPage({
         </section>
 
         {/* Transfer Ownership */}
-        {isOwner && members.filter((m) => m.role !== "OWNER").length > 0 && (
+        {isOwner && members.filter((m) => m.role !== ORG_ROLE.OWNER).length > 0 && (
           <>
             <Separator className="my-6" />
             <section className="space-y-4">
@@ -449,7 +450,7 @@ export default function OrgSettingsPage({
               </p>
               <div className="space-y-2">
                 {members
-                  .filter((m) => m.role !== "OWNER")
+                  .filter((m) => m.role !== ORG_ROLE.OWNER)
                   .map((m) => (
                     <div
                       key={m.id}
@@ -527,9 +528,9 @@ export default function OrgSettingsPage({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="ADMIN">{t("roleAdmin")}</SelectItem>
-                      <SelectItem value="MEMBER">{t("roleMember")}</SelectItem>
-                      <SelectItem value="VIEWER">{t("roleViewer")}</SelectItem>
+                      <SelectItem value={ORG_ROLE.ADMIN}>{t("roleAdmin")}</SelectItem>
+                      <SelectItem value={ORG_ROLE.MEMBER}>{t("roleMember")}</SelectItem>
+                      <SelectItem value={ORG_ROLE.VIEWER}>{t("roleViewer")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

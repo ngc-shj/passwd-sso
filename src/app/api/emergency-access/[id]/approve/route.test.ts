@@ -19,13 +19,14 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 import { POST } from "./route";
+import { EA_STATUS } from "@/lib/constants";
 
 const requestedGrant = {
   id: "grant-1",
   ownerId: "owner-1",
   granteeId: "grantee-1",
   granteeEmail: "grantee@test.com",
-  status: "REQUESTED",
+  status: EA_STATUS.REQUESTED,
   waitDays: 7,
 };
 
@@ -65,7 +66,7 @@ describe("POST /api/emergency-access/[id]/approve", () => {
   });
 
   it("returns 400 when grant is not REQUESTED", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({ ...requestedGrant, status: "IDLE" });
+    mockPrismaGrant.findUnique.mockResolvedValue({ ...requestedGrant, status: EA_STATUS.IDLE });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/approve"),
       createParams({ id: "grant-1" })
@@ -74,7 +75,7 @@ describe("POST /api/emergency-access/[id]/approve", () => {
   });
 
   it("returns 400 when grant is PENDING", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({ ...requestedGrant, status: "PENDING" });
+    mockPrismaGrant.findUnique.mockResolvedValue({ ...requestedGrant, status: EA_STATUS.PENDING });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/approve"),
       createParams({ id: "grant-1" })
@@ -89,11 +90,11 @@ describe("POST /api/emergency-access/[id]/approve", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.status).toBe("ACTIVATED");
+    expect(json.status).toBe(EA_STATUS.ACTIVATED);
     expect(mockPrismaGrant.update).toHaveBeenCalledWith({
       where: { id: "grant-1" },
       data: {
-        status: "ACTIVATED",
+        status: EA_STATUS.ACTIVATED,
         activatedAt: expect.any(Date),
       },
     });

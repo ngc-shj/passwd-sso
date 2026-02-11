@@ -5,8 +5,9 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { EntryType } from "@prisma/client";
+import { ENTRY_TYPE, ENTRY_TYPE_VALUES } from "@/lib/constants";
 
-const VALID_ENTRY_TYPES: Set<string> = new Set(["LOGIN", "SECURE_NOTE", "CREDIT_CARD", "IDENTITY", "PASSKEY"]);
+const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
 // GET /api/passwords - List passwords (returns encrypted overviews)
 export async function GET(req: NextRequest) {

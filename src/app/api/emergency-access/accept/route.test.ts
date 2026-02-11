@@ -33,6 +33,7 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 import { POST } from "./route";
+import { EA_STATUS } from "@/lib/constants";
 
 const validBody = {
   token: "valid-token",
@@ -48,7 +49,7 @@ const validGrant = {
   id: "grant-1",
   ownerId: "owner-1",
   granteeEmail: "grantee@test.com",
-  status: "PENDING",
+  status: EA_STATUS.PENDING,
   tokenExpiresAt: new Date("2099-01-01"),
 };
 
@@ -86,7 +87,7 @@ describe("POST /api/emergency-access/accept", () => {
   });
 
   it("returns 410 when invitation not PENDING", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({ ...validGrant, status: "ACCEPTED" });
+    mockPrismaGrant.findUnique.mockResolvedValue({ ...validGrant, status: EA_STATUS.ACCEPTED });
     const res = await POST(createRequest("POST", "http://localhost/api/emergency-access/accept", {
       body: validBody,
     }));
@@ -126,7 +127,7 @@ describe("POST /api/emergency-access/accept", () => {
     }));
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.status).toBe("ACCEPTED");
+    expect(json.status).toBe(EA_STATUS.ACCEPTED);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
 });

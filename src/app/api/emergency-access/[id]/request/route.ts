@@ -5,6 +5,7 @@ import { canTransition } from "@/lib/emergency-access-state";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { EA_STATUS } from "@/lib/constants";
 
 const requestLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 3 });
 
@@ -32,7 +33,7 @@ export async function POST(
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  if (!canTransition(grant.status, "REQUESTED")) {
+  if (!canTransition(grant.status, EA_STATUS.REQUESTED)) {
     return NextResponse.json(
       { error: API_ERROR.INVALID_STATUS },
       { status: 400 }
@@ -45,7 +46,7 @@ export async function POST(
   await prisma.emergencyAccessGrant.update({
     where: { id },
     data: {
-      status: "REQUESTED",
+      status: EA_STATUS.REQUESTED,
       requestedAt: now,
       waitExpiresAt,
     },
@@ -62,7 +63,7 @@ export async function POST(
   });
 
   return NextResponse.json({
-    status: "REQUESTED",
+    status: EA_STATUS.REQUESTED,
     requestedAt: now.toISOString(),
     waitExpiresAt: waitExpiresAt.toISOString(),
   });

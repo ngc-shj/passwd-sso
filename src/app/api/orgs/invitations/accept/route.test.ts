@@ -24,6 +24,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { POST } from "./route";
+import { ORG_ROLE, INVITATION_STATUS } from "@/lib/constants";
 
 const now = new Date("2025-01-01T00:00:00Z");
 const futureDate = new Date("2099-01-01T00:00:00Z");
@@ -32,9 +33,9 @@ const validInvitation = {
   id: "inv-1",
   orgId: "org-1",
   email: "user@test.com",
-  role: "MEMBER",
+  role: ORG_ROLE.MEMBER,
   token: "valid-token",
-  status: "PENDING",
+  status: INVITATION_STATUS.PENDING,
   expiresAt: futureDate,
   org: { id: "org-1", name: "My Org", slug: "my-org" },
 };
@@ -72,7 +73,7 @@ describe("POST /api/orgs/invitations/accept", () => {
   it("returns 410 when invitation already used", async () => {
     mockPrismaOrgInvitation.findUnique.mockResolvedValue({
       ...validInvitation,
-      status: "ACCEPTED",
+      status: INVITATION_STATUS.ACCEPTED,
     });
     const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
       body: { token: "valid-token" },
@@ -122,7 +123,7 @@ describe("POST /api/orgs/invitations/accept", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.alreadyMember).toBe(false);
-    expect(json.role).toBe("MEMBER");
+    expect(json.role).toBe(ORG_ROLE.MEMBER);
     expect(json.org.name).toBe("My Org");
     expect(mockTransaction).toHaveBeenCalledTimes(1);
   });

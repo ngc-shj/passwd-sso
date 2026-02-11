@@ -15,10 +15,12 @@ import {
 } from "@/components/ui/dialog";
 import { Building2, Trash2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
 import { toast } from "sonner";
+import { ORG_ROLE, ENTRY_TYPE } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
 
 interface OrgTrashEntry {
   id: string;
-  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY";
+  entryType: EntryTypeValue;
   orgId: string;
   orgName: string;
   role: string;
@@ -108,29 +110,29 @@ export function OrgTrashList({ refreshKey }: OrgTrashListProps) {
         {entries.map((entry) => (
           <Card key={entry.id}>
             <CardContent className="flex items-center gap-4 p-4">
-              {entry.entryType === "IDENTITY" ? (
+              {entry.entryType === ENTRY_TYPE.IDENTITY ? (
                 <IdCard className="h-4 w-4 shrink-0 text-muted-foreground" />
-              ) : entry.entryType === "CREDIT_CARD" ? (
+              ) : entry.entryType === ENTRY_TYPE.CREDIT_CARD ? (
                 <CreditCard className="h-4 w-4 shrink-0 text-muted-foreground" />
-              ) : entry.entryType === "SECURE_NOTE" ? (
+              ) : entry.entryType === ENTRY_TYPE.SECURE_NOTE ? (
                 <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
               ) : null}
               <div className="flex-1 min-w-0">
                 <p className="font-medium truncate">{entry.title}</p>
                 <div className="flex items-center gap-2 mt-0.5">
-                  {entry.entryType === "IDENTITY" ? (
+                  {entry.entryType === ENTRY_TYPE.IDENTITY ? (
                     (entry.fullName || entry.idNumberLast4) && (
                       <p className="text-sm text-muted-foreground truncate">
                         {entry.fullName}{entry.fullName && entry.idNumberLast4 ? " " : ""}{entry.idNumberLast4 ? `•••• ${entry.idNumberLast4}` : ""}
                       </p>
                     )
-                  ) : entry.entryType === "CREDIT_CARD" ? (
+                  ) : entry.entryType === ENTRY_TYPE.CREDIT_CARD ? (
                     (entry.brand || entry.lastFour) && (
                       <p className="text-sm text-muted-foreground truncate">
                         {entry.brand}{entry.brand && entry.lastFour ? " " : ""}{entry.lastFour ? `•••• ${entry.lastFour}` : ""}
                       </p>
                     )
-                  ) : entry.entryType === "SECURE_NOTE" ? (
+                  ) : entry.entryType === ENTRY_TYPE.SECURE_NOTE ? (
                     entry.snippet && (
                       <p className="text-sm text-muted-foreground truncate">
                         {entry.snippet}
@@ -148,7 +150,7 @@ export function OrgTrashList({ refreshKey }: OrgTrashListProps) {
                   </span>
                 </div>
               </div>
-              {(entry.role === "OWNER" || entry.role === "ADMIN") && (
+              {(entry.role === ORG_ROLE.OWNER || entry.role === ORG_ROLE.ADMIN) && (
                 <div className="flex gap-2 shrink-0">
                   <Button
                     variant="outline"

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { useVault } from "@/lib/vault-context";
+import { VAULT_STATUS } from "@/lib/constants";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -158,7 +159,7 @@ export default function EmergencyVaultPage() {
   }, [encryptionKey, grantId, t]);
 
   useEffect(() => {
-    if (vaultStatus === "unlocked") {
+    if (vaultStatus === VAULT_STATUS.UNLOCKED) {
       decryptEntries();
     }
   }, [vaultStatus, decryptEntries]);
@@ -172,7 +173,7 @@ export default function EmergencyVaultPage() {
     });
   };
 
-  if (vaultStatus !== "unlocked") {
+  if (vaultStatus !== VAULT_STATUS.UNLOCKED) {
     return (
       <div className="mx-auto flex max-w-md items-center justify-center p-4 pt-20">
         <Card className="w-full text-center">

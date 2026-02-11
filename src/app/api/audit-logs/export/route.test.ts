@@ -29,6 +29,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 import { POST } from "./route";
+import { ORG_ROLE } from "@/lib/constants";
 
 const URL = "http://localhost:3000/api/audit-logs/export";
 
@@ -36,7 +37,7 @@ describe("POST /api/audit-logs/export", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: "MEMBER" });
+    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.MEMBER });
   });
 
   it("returns 401 when unauthenticated", async () => {

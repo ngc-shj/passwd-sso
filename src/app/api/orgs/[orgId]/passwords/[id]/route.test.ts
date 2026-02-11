@@ -48,6 +48,7 @@ vi.mock("@/lib/crypto-server", () => ({
 }));
 
 import { GET, PUT, DELETE } from "./route";
+import { ORG_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-123";
 const PW_ID = "pw-456";
@@ -59,7 +60,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: "MEMBER" });
+    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.MEMBER });
     mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
   });
 
@@ -312,7 +313,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: "ADMIN", userId: "test-user-id" });
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.ADMIN, userId: "test-user-id" });
     mockHasOrgPermission.mockReturnValue(true);
     mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
     mockDecryptServerData.mockReturnValue(
@@ -333,7 +334,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
   });
 
   it("returns 403 when MEMBER tries to update another's entry", async () => {
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: "MEMBER", userId: "test-user-id" });
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.MEMBER, userId: "test-user-id" });
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
       orgId: ORG_ID,
@@ -668,7 +669,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: "ADMIN" });
+    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
   });
 
   it("returns 401 when unauthenticated", async () => {

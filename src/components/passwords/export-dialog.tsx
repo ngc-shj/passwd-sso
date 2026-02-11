@@ -20,11 +20,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react";
+import { ENTRY_TYPE } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
 
 type ExportFormat = "csv" | "json";
 
 interface DecryptedExport {
-  entryType: "LOGIN" | "SECURE_NOTE" | "CREDIT_CARD" | "IDENTITY" | "PASSKEY";
+  entryType: EntryTypeValue;
   title: string;
   username: string | null;
   password: string;
@@ -116,7 +118,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
           );
           const parsed = JSON.parse(plaintext);
           entries.push({
-            entryType: raw.entryType ?? "LOGIN",
+            entryType: raw.entryType ?? ENTRY_TYPE.LOGIN,
             title: parsed.title ?? "",
             username: parsed.username ?? null,
             password: parsed.password ?? "",
@@ -166,7 +168,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
                   if (!detailRes.ok) continue;
                   const data = await detailRes.json();
                   entries.push({
-                    entryType: data.entryType ?? "LOGIN",
+                    entryType: data.entryType ?? ENTRY_TYPE.LOGIN,
                     title: data.title ?? "",
                     username: data.username ?? null,
                     password: data.password ?? "",
@@ -409,10 +411,10 @@ function formatCsv(entries: DecryptedExport[]): string {
     return val;
   };
   const rows = entries.map((e) => {
-    const isNote = e.entryType === "SECURE_NOTE";
-    const isCard = e.entryType === "CREDIT_CARD";
-    const isIdentity = e.entryType === "IDENTITY";
-    const isPasskey = e.entryType === "PASSKEY";
+    const isNote = e.entryType === ENTRY_TYPE.SECURE_NOTE;
+    const isCard = e.entryType === ENTRY_TYPE.CREDIT_CARD;
+    const isIdentity = e.entryType === ENTRY_TYPE.IDENTITY;
+    const isPasskey = e.entryType === ENTRY_TYPE.PASSKEY;
     const type = isPasskey ? "passkey" : isIdentity ? "identity" : isCard ? "card" : isNote ? "securenote" : "login";
     const isLogin = !isNote && !isCard && !isIdentity && !isPasskey;
     return [
@@ -437,7 +439,7 @@ function formatJson(entries: DecryptedExport[]): string {
     {
       exportedAt: new Date().toISOString(),
       entries: entries.map((e) => {
-        if (e.entryType === "PASSKEY") {
+        if (e.entryType === ENTRY_TYPE.PASSKEY) {
           return {
             type: "passkey",
             name: e.title,
@@ -452,7 +454,7 @@ function formatJson(entries: DecryptedExport[]): string {
             notes: e.notes,
           };
         }
-        if (e.entryType === "IDENTITY") {
+        if (e.entryType === ENTRY_TYPE.IDENTITY) {
           return {
             type: "identity",
             name: e.title,
@@ -470,7 +472,7 @@ function formatJson(entries: DecryptedExport[]): string {
             notes: e.notes,
           };
         }
-        if (e.entryType === "CREDIT_CARD") {
+        if (e.entryType === ENTRY_TYPE.CREDIT_CARD) {
           return {
             type: "card",
             name: e.title,
@@ -485,7 +487,7 @@ function formatJson(entries: DecryptedExport[]): string {
             notes: e.notes,
           };
         }
-        if (e.entryType === "SECURE_NOTE") {
+        if (e.entryType === ENTRY_TYPE.SECURE_NOTE) {
           return {
             type: "securenote",
             name: e.title,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useVault } from "@/lib/vault-context";
+import { VAULT_STATUS } from "@/lib/constants";
 import { VaultSetupWizard } from "./vault-setup-wizard";
 import { VaultLockScreen } from "./vault-lock-screen";
 import { Loader2 } from "lucide-react";
@@ -19,7 +20,7 @@ interface VaultGateProps {
 export function VaultGate({ children }: VaultGateProps) {
   const { status } = useVault();
 
-  if (status === "loading") {
+  if (status === VAULT_STATUS.LOADING) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -27,11 +28,11 @@ export function VaultGate({ children }: VaultGateProps) {
     );
   }
 
-  if (status === "setup-required") {
+  if (status === VAULT_STATUS.SETUP_REQUIRED) {
     return <VaultSetupWizard />;
   }
 
-  if (status === "locked") {
+  if (status === VAULT_STATUS.LOCKED) {
     return <VaultLockScreen />;
   }
 
