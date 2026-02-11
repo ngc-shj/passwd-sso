@@ -9,16 +9,24 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **SSO Authentication** - Google OIDC + SAML 2.0 (via [BoxyHQ SAML Jackson](https://github.com/boxyhq/jackson))
 - **End-to-End Encryption** - AES-256-GCM; the server never sees plaintext passwords
 - **Master Passphrase** - PBKDF2 (600k iterations) + HKDF key derivation with Secret Key
+- **Multiple Entry Types** - Passwords, secure notes, credit cards, identity/personal info, and passkey records
 - **Password Generator** - Random passwords (8-128 chars) and diceware passphrases (3-10 words)
 - **TOTP Authenticator** - Store and generate 2FA codes (otpauth:// URI support)
 - **Security Audit (Watchtower)** - Breached (HIBP), weak, reused, old, and HTTP-URL detection with security score
 - **Import / Export** - Bitwarden, 1Password, Chrome CSV import; CSV and JSON export
+- **Password-Protected Export** - AES-256-GCM encrypted exports with PBKDF2 (600k)
+- **Attachments** - Encrypted file attachments (personal E2E, org server-side)
+- **Share Links** - Time-limited read-only sharing with access logs
+- **Audit Logs** - Personal and org audit logs with filters and export events
+- **Emergency Access** - Request/approve temporary vault access with key exchange
+- **Key Rotation** - Rotate vault encryption key with passphrase verification
 - **Tags & Organization** - Color-coded tags, favorites, archive, soft-delete trash (30-day auto-purge)
 - **Keyboard Shortcuts** - `/ or Cmd+K` search, `n` new, `?` help, `Esc` clear
 - **i18n** - English and Japanese (next-intl)
 - **Dark Mode** - Light / dark / system (next-themes)
 - **Organization Vault** - Team password sharing with server-side AES-256-GCM encryption and RBAC (Owner/Admin/Member/Viewer)
 - **Rate Limiting** - Redis-backed vault unlock rate limiting
+- **CSP & Security Headers** - Content Security Policy with nonce, CSP violation reporting
 - **Self-Hosted** - Docker Compose with PostgreSQL, SAML Jackson, and Redis
 
 ## Tech Stack
@@ -91,9 +99,9 @@ Edit `.env.local` and fill in:
 | `AUTH_JACKSON_SECRET` | Jackson OIDC client secret |
 | `SAML_PROVIDER_NAME` | Display name on sign-in page (e.g., "HENNGE") |
 | `ORG_MASTER_KEY` | Org vault master key — `openssl rand -hex 32` |
-| `REDIS_URL` | (Optional) Redis URL for rate limiting |
+| `REDIS_URL` | Redis URL for rate limiting (required in production) |
 
-> **Redis is optional.** If `REDIS_URL` is not set, the app runs without Redis and rate limiting on vault unlock is disabled. For single-instance deployments, you can omit Redis entirely.
+> **Redis is required in production.** In development/test, you can omit `REDIS_URL` to use an in-memory fallback for rate limiting.
 
 ### 3. Start services
 
@@ -135,6 +143,9 @@ docker compose up -d
 | `npm run build` | Production build |
 | `npm run start` | Start production server |
 | `npm run lint` | ESLint |
+| `npm test` | Run tests (Vitest) |
+| `npm run test:watch` | Run tests in watch mode |
+| `npm run test:coverage` | Run tests with coverage |
 | `npm run db:migrate` | Prisma migrate (dev) |
 | `npm run db:push` | Push schema without migration |
 | `npm run db:seed` | Seed data |
@@ -149,19 +160,43 @@ src/
 │   ├── page.tsx              # Landing / Sign-in
 │   ├── dashboard/            # Personal vault, org vault, watchtower, etc.
 │   └── auth/                 # Auth pages
+├── app/api/
+│   ├── auth/                 # Auth.js handlers
+│   ├── passwords/            # Password CRUD + generation
+│   ├── tags/                 # Tag CRUD
+│   ├── vault/                # Setup, unlock, status, key rotation
+│   ├── orgs/                 # Organization management
+│   ├── share-links/          # Share link CRUD + access
+│   ├── audit-logs/           # Audit log queries
+│   ├── emergency-access/     # Emergency access workflows
+│   ├── watchtower/           # Security audit (HIBP, analysis)
+│   └── csp-report/           # CSP violation reporting
 ├── components/
 │   ├── layout/               # Header, Sidebar, SearchBar
-│   ├── passwords/            # PasswordList, PasswordForm, Generator, etc.
+│   ├── passwords/            # PasswordList, PasswordForm, Generator, entry type forms
 │   ├── org/                  # Org vault UI (list, form, settings, invitations)
+│   ├── emergency-access/     # Emergency access UI
+│   ├── share/                # Share link UI
+│   ├── watchtower/           # Security audit dashboard
+│   ├── vault/                # Vault lock/unlock UI
 │   ├── tags/                 # TagInput, TagBadge
+│   ├── providers/            # Client-side providers (theme, session, etc.)
 │   ├── auth/                 # SignOutButton
 │   └── ui/                   # shadcn/ui components
 ├── lib/
 │   ├── crypto-client.ts      # Client-side E2E encryption (personal vault)
 │   ├── crypto-server.ts      # Server-side encryption (org vault)
+│   ├── crypto-aad.ts         # Additional Authenticated Data for encryption
+│   ├── crypto-emergency.ts   # Emergency access key exchange
+│   ├── export-crypto.ts      # Password-protected export encryption
 │   ├── org-auth.ts           # Org RBAC authorization helpers
+│   ├── audit.ts              # Audit log helpers
 │   ├── vault-context.tsx     # Vault lock/unlock state
 │   ├── password-generator.ts # Server-side secure generation
+│   ├── password-analyzer.ts  # Password strength analysis
+│   ├── credit-card.ts        # Credit card validation & formatting
+│   ├── rate-limit.ts         # Rate limiting logic
+│   ├── api-error-codes.ts    # Centralized API error codes & i18n mapping
 │   ├── prisma.ts             # Prisma singleton
 │   ├── redis.ts              # Redis client (rate limiting)
 │   └── validations.ts        # Zod schemas
@@ -174,17 +209,21 @@ src/
 - **Key derivation** - Passphrase -> PBKDF2 (600k) -> wrapping key -> wraps random 256-bit secret key
 - **Domain separation** - Secret key -> HKDF -> separate encryption key + auth key
 - **Secret Key** - Additional account-specific salt for defense against server compromise
+- **AAD binding** - Additional Authenticated Data ties ciphertext to user and entry IDs
+- **Key rotation** - Rotate vault encryption key without re-entering all passwords
 - **Session security** - Database sessions (not JWT), 8-hour timeout with 1-hour extension
 - **Auto-lock** - Vault locks after 15 min idle or 5 min tab hidden
 - **Clipboard clear** - Copied passwords auto-clear after 30 seconds
 - **Organization vault** - Server-side AES-256-GCM with per-org keys wrapped by `ORG_MASTER_KEY`
 - **RBAC** - Owner / Admin / Member / Viewer role-based access control for organizations
 - **Rate limiting** - Redis-backed rate limiting on vault unlock (5 attempts per 15 min)
+- **CSP** - Content Security Policy with nonce-based script control and violation reporting
 
 ## Deployment Guides
 
 - [Docker Compose Setup (English)](docs/setup.docker.en.md) / [日本語](docs/setup.docker.ja.md)
 - [AWS Deployment (English)](docs/setup.aws.en.md) / [日本語](docs/setup.aws.ja.md)
+- [Terraform (AWS) — English](infra/terraform/README.md) / [日本語](infra/terraform/README.ja.md)
 
 ## License
 
