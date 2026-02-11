@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { requireOrgMember, OrgAuthError } from "@/lib/org-auth";
 import { z } from "zod/v4";
 import { API_ERROR } from "@/lib/api-error-codes";
 
@@ -30,6 +31,18 @@ export async function POST(req: NextRequest) {
   }
 
   const { orgId, entryCount, format } = result.data;
+
+  // Verify org membership when orgId is specified
+  if (orgId) {
+    try {
+      await requireOrgMember(session.user.id, orgId);
+    } catch (e) {
+      if (e instanceof OrgAuthError) {
+        return NextResponse.json({ error: e.message }, { status: e.status });
+      }
+      throw e;
+    }
+  }
 
   logAudit({
     scope: orgId ? "ORG" : "PERSONAL",
