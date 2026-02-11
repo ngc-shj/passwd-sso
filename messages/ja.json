@@ -332,7 +332,11 @@
     "enterPassphrase": "パスフレーズを入力",
     "unlock": "アンロック",
     "wrongPassphrase": "パスフレーズが正しくありません。",
-    "unlockError": "アンロックに失敗しました。"
+    "unlockError": "アンロックに失敗しました。",
+    "strengthWeak": "弱い",
+    "strengthFair": "やや弱い",
+    "strengthGood": "良好",
+    "strengthStrong": "強い"
   },
   "Tag": {
     "addTag": "タグを追加",

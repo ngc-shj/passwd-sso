@@ -332,7 +332,11 @@
     "enterPassphrase": "Enter passphrase",
     "unlock": "Unlock",
     "wrongPassphrase": "Incorrect passphrase.",
-    "unlockError": "Failed to unlock."
+    "unlockError": "Failed to unlock.",
+    "strengthWeak": "Weak",
+    "strengthFair": "Fair",
+    "strengthGood": "Good",
+    "strengthStrong": "Strong"
   },
   "Tag": {
     "addTag": "Add tag",

@@ -44,7 +44,7 @@ export function VaultSetupWizard() {
     }
   };
 
-  const strength = getStrength(passphrase);
+  const strength = getStrength(passphrase, t);
 
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
@@ -151,7 +151,10 @@ export function VaultSetupWizard() {
   );
 }
 
-function getStrength(passphrase: string): {
+function getStrength(
+  passphrase: string,
+  t: (key: string) => string,
+): {
   level: number;
   label: string;
   color: string;
@@ -165,10 +168,10 @@ function getStrength(passphrase: string): {
   if (/[0-9]/.test(passphrase) || /[^a-zA-Z0-9]/.test(passphrase)) score++;
 
   const levels = [
-    { level: 1, label: "Weak", color: "bg-red-500" },
-    { level: 2, label: "Fair", color: "bg-orange-500" },
-    { level: 3, label: "Good", color: "bg-yellow-500" },
-    { level: 4, label: "Strong", color: "bg-green-500" },
+    { level: 1, label: t("strengthWeak"), color: "bg-red-500" },
+    { level: 2, label: t("strengthFair"), color: "bg-orange-500" },
+    { level: 3, label: t("strengthGood"), color: "bg-yellow-500" },
+    { level: 4, label: t("strengthStrong"), color: "bg-green-500" },
   ];
 
   return levels[Math.min(score, 3)];

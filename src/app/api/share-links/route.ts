@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     }
     if (!data) {
       return NextResponse.json(
-        { error: "data is required for personal entries" },
+        { error: API_ERROR.MISSING_REQUIRED_FIELDS },
         { status: 400 }
       );
     }

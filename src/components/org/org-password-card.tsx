@@ -37,12 +37,14 @@ export function OrgPasswordCard({
   onDelete,
 }: OrgPasswordCardProps) {
   const t = useTranslations("Org");
+  const tCard = useTranslations("PasswordCard");
+  const tCopy = useTranslations("CopyButton");
 
   const copyUsername = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (entry.username) {
       await navigator.clipboard.writeText(entry.username);
-      toast.success("Copied!");
+      toast.success(tCopy("copied"));
     }
   };
 
@@ -101,7 +103,7 @@ export function OrgPasswordCard({
                 }}
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
-                URL
+                {tCard("openUrl")}
               </DropdownMenuItem>
             )}
             {canEdit && (
