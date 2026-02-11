@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,7 +39,7 @@ interface TrashListProps {
 export function TrashList({ refreshKey }: TrashListProps) {
   const t = useTranslations("Trash");
   const tl = useTranslations("PasswordList");
-  const { encryptionKey } = useVault();
+  const { encryptionKey, userId } = useVault();
   const [entries, setEntries] = useState<TrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -54,10 +55,14 @@ export function TrashList({ refreshKey }: TrashListProps) {
       for (const entry of data) {
         if (!entry.encryptedOverview) continue;
         try {
+          const aad = entry.aadVersion >= 1 && userId
+            ? buildPersonalEntryAAD(userId, entry.id)
+            : undefined;
           const overview = JSON.parse(
             await decryptData(
               entry.encryptedOverview as EncryptedData,
-              encryptionKey
+              encryptionKey,
+              aad
             )
           );
           decrypted.push({

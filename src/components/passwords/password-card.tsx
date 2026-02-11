@@ -51,6 +51,7 @@ import {
 import { toast } from "sonner";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { ShareDialog } from "@/components/share/share-dialog";
 
 interface PasswordCardProps {
@@ -164,7 +165,7 @@ export function PasswordCard({
   const t = useTranslations("PasswordCard");
   const tc = useTranslations("Common");
   const tCopy = useTranslations("CopyButton");
-  const { encryptionKey } = useVault();
+  const { encryptionKey, userId } = useVault();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -177,9 +178,13 @@ export function PasswordCard({
     const res = await fetch(`/api/passwords/${id}`);
     if (!res.ok) throw new Error("Failed to fetch");
     const raw = await res.json();
+    const aad = raw.aadVersion >= 1 && userId
+      ? buildPersonalEntryAAD(userId, id)
+      : undefined;
     const plaintext = await decryptData(
       raw.encryptedBlob as EncryptedData,
-      encryptionKey
+      encryptionKey,
+      aad
     );
     return { entry: JSON.parse(plaintext), raw };
   };

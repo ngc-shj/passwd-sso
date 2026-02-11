@@ -31,5 +31,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         });
       }
     },
+    async signOut(message) {
+      if ("session" in message && message.session?.userId) {
+        logAudit({
+          scope: "PERSONAL",
+          action: "AUTH_LOGOUT",
+          userId: message.session.userId,
+        });
+      }
+    },
   },
 });

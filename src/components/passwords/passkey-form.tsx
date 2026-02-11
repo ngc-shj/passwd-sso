@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
 import { encryptData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,7 +37,7 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
   const t = useTranslations("PasskeyForm");
   const tc = useTranslations("Common");
   const router = useRouter();
-  const { encryptionKey } = useVault();
+  const { encryptionKey, userId } = useVault();
   const [submitting, setSubmitting] = useState(false);
   const [showCredentialId, setShowCredentialId] = useState(false);
 
@@ -82,13 +83,18 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
         tags,
       });
 
-      const encryptedBlob = await encryptData(fullBlob, encryptionKey);
-      const encryptedOverview = await encryptData(overviewBlob, encryptionKey);
+      const entryId = mode === "create" ? crypto.randomUUID() : initialData!.id;
+      const aad = userId ? buildPersonalEntryAAD(userId, entryId) : undefined;
+
+      const encryptedBlob = await encryptData(fullBlob, encryptionKey, aad);
+      const encryptedOverview = await encryptData(overviewBlob, encryptionKey, aad);
 
       const body = {
+        ...(mode === "create" ? { id: entryId } : {}),
         encryptedBlob,
         encryptedOverview,
         keyVersion: 1,
+        aadVersion: aad ? AAD_VERSION : 0,
         tagIds: selectedTags.map((t) => t.id),
         entryType: "PASSKEY",
       };

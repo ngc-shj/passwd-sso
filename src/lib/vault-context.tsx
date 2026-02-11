@@ -23,6 +23,7 @@ import {
   verifyKey,
   type EncryptedData,
 } from "./crypto-client";
+import { createKeyEscrow } from "./crypto-emergency";
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -31,6 +32,7 @@ export type VaultStatus = "loading" | "locked" | "unlocked" | "setup-required";
 interface VaultContextValue {
   status: VaultStatus;
   encryptionKey: CryptoKey | null;
+  userId: string | null;
   unlock: (passphrase: string) => Promise<boolean>;
   lock: () => void;
   setup: (passphrase: string) => Promise<void>;
@@ -43,6 +45,7 @@ const VaultContext = createContext<VaultContextValue | null>(null);
 const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 const HIDDEN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes when tab hidden
 const ACTIVITY_CHECK_INTERVAL_MS = 30_000; // check every 30 seconds
+const EA_CONFIRM_INTERVAL_MS = 2 * 60 * 1000; // check pending EA grants every 2 minutes
 
 function hexDecode(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
@@ -58,12 +61,42 @@ function hexEncode(buf: Uint8Array): string {
     .join("");
 }
 
+// ─── Emergency Access Auto-Confirm ──────────────────────────
+
+async function confirmPendingEmergencyGrants(secretKey: Uint8Array, ownerId: string): Promise<void> {
+  const res = await fetch("/api/emergency-access/pending-confirmations");
+  if (!res.ok) return;
+  const grants: Array<{
+    id: string;
+    granteeId: string;
+    granteePublicKey: string;
+  }> = await res.json();
+
+  for (const grant of grants) {
+    try {
+      const escrow = await createKeyEscrow(secretKey, grant.granteePublicKey, {
+        grantId: grant.id,
+        ownerId,
+        granteeId: grant.granteeId,
+      });
+      await fetch(`/api/emergency-access/${grant.id}/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(escrow),
+      });
+    } catch {
+      // Skip individual grant failures
+    }
+  }
+}
+
 // ─── Provider ───────────────────────────────────────────────────
 
 export function VaultProvider({ children }: { children: ReactNode }) {
   const { data: session, status: sessionStatus } = useSession();
   const [vaultStatus, setVaultStatus] = useState<VaultStatus>("loading");
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
+  const secretKeyRef = useRef<Uint8Array | null>(null);
   const lastActivityRef = useRef(Date.now());
   const hiddenAtRef = useRef<number | null>(null);
 
@@ -97,6 +130,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // ─── Auto-lock on inactivity ──────────────────────────────────
 
   const lock = useCallback(() => {
+    if (secretKeyRef.current) {
+      secretKeyRef.current.fill(0);
+      secretKeyRef.current = null;
+    }
     setEncryptionKey(null);
     setVaultStatus((prev) =>
       prev === "unlocked" ? "locked" : prev
@@ -152,6 +189,53 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       clearInterval(intervalId);
     };
   }, [vaultStatus, lock]);
+
+  // ─── Periodic EA auto-confirm ────────────────────────────────
+
+  useEffect(() => {
+    if (vaultStatus !== "unlocked" || !session?.user?.id) return;
+
+    const userId = session.user.id;
+    let inFlight = false;
+
+    const run = () => {
+      if (inFlight || !secretKeyRef.current) return;
+      inFlight = true;
+      confirmPendingEmergencyGrants(secretKeyRef.current, userId)
+        .catch(() => {})
+        .finally(() => { inFlight = false; });
+    };
+
+    const intervalId = setInterval(run, EA_CONFIRM_INTERVAL_MS);
+
+    // Re-check on tab focus and network reconnect
+    const handleVisible = () => { if (!document.hidden) run(); };
+    const handleOnline = () => run();
+    document.addEventListener("visibilitychange", handleVisible);
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisible);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [vaultStatus, session?.user?.id]);
+
+  // ─── SecretKey cleanup on unmount / page unload ─────────────
+
+  useEffect(() => {
+    const zeroSecretKey = () => {
+      if (secretKeyRef.current) {
+        secretKeyRef.current.fill(0);
+        secretKeyRef.current = null;
+      }
+    };
+    window.addEventListener("pagehide", zeroSecretKey);
+    return () => {
+      window.removeEventListener("pagehide", zeroSecretKey);
+      zeroSecretKey(); // also zero on unmount
+    };
+  }, []);
 
   // ─── Setup (first time) ───────────────────────────────────────
 
@@ -250,8 +334,19 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ authHash }),
       });
 
-      // 6. Store encryption key in memory and clear sensitive data
+      // 6. Store secretKey for periodic EA auto-confirm, zero the local copy
+      secretKeyRef.current = new Uint8Array(secretKey);
       secretKey.fill(0);
+
+      // 7. Auto-confirm pending emergency access grants (fire-and-forget)
+      const userId = session?.user?.id;
+      if (userId && secretKeyRef.current) {
+        confirmPendingEmergencyGrants(secretKeyRef.current, userId).catch(() => {
+          // Silently ignore — emergency access confirmation is best-effort
+        });
+      }
+
+      // 8. Store encryption key in memory
       setEncryptionKey(encKey);
       setVaultStatus("unlocked");
       lastActivityRef.current = Date.now();
@@ -267,6 +362,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       value={{
         status: vaultStatus,
         encryptionKey,
+        userId: session?.user?.id ?? null,
         unlock,
         lock,
         setup,

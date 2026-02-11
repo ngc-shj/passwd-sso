@@ -5,6 +5,8 @@ import {
   unwrapOrgKey,
   encryptServerData,
   decryptServerData,
+  encryptServerBinary,
+  decryptServerBinary,
   generateShareToken,
   hashToken,
   encryptShareData,
@@ -127,6 +129,72 @@ describe("crypto-server", () => {
       const e2 = encryptServerData("same input", orgKey);
       expect(e1.ciphertext).not.toBe(e2.ciphertext);
       expect(e1.iv).not.toBe(e2.iv);
+    });
+
+    it("roundtrips with AAD", () => {
+      const orgKey = generateOrgKey();
+      const aad = Buffer.from("org-1|entry-1");
+      const encrypted = encryptServerData("secret", orgKey, aad);
+      const decrypted = decryptServerData(encrypted, orgKey, aad);
+      expect(decrypted).toBe("secret");
+    });
+
+    it("fails when AAD mismatches", () => {
+      const orgKey = generateOrgKey();
+      const aad1 = Buffer.from("org-1|entry-1");
+      const aad2 = Buffer.from("org-1|entry-2");
+      const encrypted = encryptServerData("secret", orgKey, aad1);
+      expect(() => decryptServerData(encrypted, orgKey, aad2)).toThrow();
+    });
+
+    it("fails when AAD expected but not provided", () => {
+      const orgKey = generateOrgKey();
+      const aad = Buffer.from("context");
+      const encrypted = encryptServerData("secret", orgKey, aad);
+      expect(() => decryptServerData(encrypted, orgKey)).toThrow();
+    });
+  });
+
+  describe("encryptServerBinary / decryptServerBinary", () => {
+    it("roundtrips correctly", () => {
+      const orgKey = generateOrgKey();
+      const data = Buffer.from("binary file content");
+      const encrypted = encryptServerBinary(data, orgKey);
+      const decrypted = decryptServerBinary(encrypted, orgKey);
+      expect(decrypted.equals(data)).toBe(true);
+    });
+
+    it("roundtrips with AAD", () => {
+      const orgKey = generateOrgKey();
+      const data = Buffer.from("attachment data");
+      const aad = Buffer.from("entry-1|attach-1");
+      const encrypted = encryptServerBinary(data, orgKey, aad);
+      const decrypted = decryptServerBinary(encrypted, orgKey, aad);
+      expect(decrypted.equals(data)).toBe(true);
+    });
+
+    it("fails when AAD mismatches", () => {
+      const orgKey = generateOrgKey();
+      const data = Buffer.from("secret binary");
+      const aad1 = Buffer.from("entry-1|attach-1");
+      const aad2 = Buffer.from("entry-1|attach-2");
+      const encrypted = encryptServerBinary(data, orgKey, aad1);
+      expect(() => decryptServerBinary(encrypted, orgKey, aad2)).toThrow();
+    });
+
+    it("fails when AAD expected but not provided", () => {
+      const orgKey = generateOrgKey();
+      const data = Buffer.from("protected binary");
+      const aad = Buffer.from("context");
+      const encrypted = encryptServerBinary(data, orgKey, aad);
+      expect(() => decryptServerBinary(encrypted, orgKey)).toThrow();
+    });
+
+    it("fails with wrong key", () => {
+      const orgKey1 = generateOrgKey();
+      const orgKey2 = generateOrgKey();
+      const encrypted = encryptServerBinary(Buffer.from("data"), orgKey1);
+      expect(() => decryptServerBinary(encrypted, orgKey2)).toThrow();
     });
   });
 

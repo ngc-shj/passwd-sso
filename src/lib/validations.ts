@@ -39,9 +39,11 @@ const encryptedFieldSchema = z.object({
 export const entryTypeSchema = z.enum(["LOGIN", "SECURE_NOTE", "CREDIT_CARD", "IDENTITY", "PASSKEY"]);
 
 export const createE2EPasswordSchema = z.object({
+  id: z.string().uuid().optional(), // client-generated UUIDv4 (required for aadVersion >= 1)
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
   keyVersion: z.number().int().min(1),
+  aadVersion: z.number().int().min(0).max(1).optional().default(0),
   tagIds: z.array(z.string().cuid()).optional(),
   entryType: entryTypeSchema.optional().default("LOGIN"),
 });
@@ -50,6 +52,7 @@ export const updateE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema.optional(),
   encryptedOverview: encryptedFieldSchema.optional(),
   keyVersion: z.number().int().min(1).optional(),
+  aadVersion: z.number().int().min(0).max(1).optional(),
   tagIds: z.array(z.string().cuid()).optional(),
   isFavorite: z.boolean().optional(),
   isArchived: z.boolean().optional(),
@@ -401,6 +404,42 @@ export const createShareLinkSchema = z.object({
   { message: "data is required for personal entries" }
 );
 
+// ─── Emergency Access Schemas ─────────────────────────────
+
+export const createEmergencyGrantSchema = z.object({
+  granteeEmail: z.string().email(),
+  waitDays: z.number().int().refine((n) => [7, 14, 30].includes(n), {
+    message: "waitDays must be 7, 14, or 30",
+  }),
+});
+
+export const acceptEmergencyGrantSchema = z.object({
+  token: z.string().min(1),
+  granteePublicKey: z.string().min(1),
+  encryptedPrivateKey: z.object({
+    ciphertext: z.string().min(1),
+    iv: z.string().length(24),
+    authTag: z.string().length(32),
+  }),
+});
+
+export const rejectEmergencyGrantSchema = z.object({
+  token: z.string().min(1),
+});
+
+export const confirmEmergencyGrantSchema = z.object({
+  ownerEphemeralPublicKey: z.string().min(1),
+  encryptedSecretKey: z.string().min(1),
+  secretKeyIv: z.string().length(24),
+  secretKeyAuthTag: z.string().length(32),
+  hkdfSalt: z.string().length(64),
+  wrapVersion: z.number().int().min(1),
+});
+
+export const revokeEmergencyGrantSchema = z.object({
+  permanent: z.boolean().default(true),
+});
+
 // ─── Type Exports ──────────────────────────────────────────
 
 export type GeneratePasswordInput = z.infer<typeof generatePasswordSchema>;
@@ -423,3 +462,7 @@ export type CreateOrgIdentityInput = z.infer<typeof createOrgIdentitySchema>;
 export type UpdateOrgIdentityInput = z.infer<typeof updateOrgIdentitySchema>;
 export type CreateOrgTagInput = z.infer<typeof createOrgTagSchema>;
 export type CreateShareLinkInput = z.infer<typeof createShareLinkSchema>;
+export type CreateEmergencyGrantInput = z.infer<typeof createEmergencyGrantSchema>;
+export type AcceptEmergencyGrantInput = z.infer<typeof acceptEmergencyGrantSchema>;
+export type ConfirmEmergencyGrantInput = z.infer<typeof confirmEmergencyGrantSchema>;
+export type RevokeEmergencyGrantInput = z.infer<typeof revokeEmergencyGrantSchema>;

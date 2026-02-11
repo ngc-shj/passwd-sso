@@ -213,6 +213,68 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     expect(json.notes).toBe("Keep safe");
   });
 
+  it("passes AAD to decryptServerData for aadVersion >= 1 entries", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "LOGIN",
+      aadVersion: 1,
+      encryptedBlob: "blob-cipher",
+      blobIv: "blob-iv",
+      blobAuthTag: "blob-tag",
+      isArchived: false,
+      org: orgKeyData,
+      tags: [],
+      createdBy: { id: "u1", name: "User", image: null },
+      updatedBy: { id: "u1", name: "User" },
+      favorites: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({ title: "Test", username: "admin", password: "secret", url: null, notes: null })
+    );
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+
+    const decryptCall = mockDecryptServerData.mock.calls[0];
+    expect(decryptCall[2]).toBeInstanceOf(Buffer);
+  });
+
+  it("passes undefined AAD for legacy entries (aadVersion=0)", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "LOGIN",
+      aadVersion: 0,
+      encryptedBlob: "blob-cipher",
+      blobIv: "blob-iv",
+      blobAuthTag: "blob-tag",
+      isArchived: false,
+      org: orgKeyData,
+      tags: [],
+      createdBy: { id: "u1", name: "User", image: null },
+      updatedBy: { id: "u1", name: "User" },
+      favorites: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({ title: "Test", username: "admin", password: "secret", url: null, notes: null })
+    );
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+
+    const decryptCall = mockDecryptServerData.mock.calls[0];
+    expect(decryptCall[2]).toBeUndefined();
+  });
+
   it("returns SECURE_NOTE with content instead of password", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
@@ -314,6 +376,52 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     expect(res.status).toBe(200);
     expect(json.title).toBe("Updated");
     expect(mockEncryptServerData).toHaveBeenCalledTimes(2); // blob + overview
+  });
+
+  it("performs save-time migration: aadVersion=0 entry re-encrypted with AAD", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "LOGIN",
+      aadVersion: 0,
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+    mockPrismaOrgPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      tags: [],
+      updatedAt: now,
+    });
+
+    await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { title: "Migrated" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+
+    // Decrypt call: aadVersion=0 → no AAD
+    const decryptCall = mockDecryptServerData.mock.calls[0];
+    expect(decryptCall[2]).toBeUndefined();
+
+    // Encrypt calls: always with AAD (save-time migration)
+    expect(mockEncryptServerData).toHaveBeenCalledTimes(2);
+    const blobEncryptCall = mockEncryptServerData.mock.calls[0];
+    const overviewEncryptCall = mockEncryptServerData.mock.calls[1];
+    expect(blobEncryptCall[2]).toBeInstanceOf(Buffer);
+    expect(overviewEncryptCall[2]).toBeInstanceOf(Buffer);
+
+    // Prisma update should set aadVersion=1
+    expect(mockPrismaOrgPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          aadVersion: 1,
+        }),
+      }),
+    );
   });
 
   it("updates CREDIT_CARD entry with re-encryption", async () => {

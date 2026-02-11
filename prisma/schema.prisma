@@ -85,6 +85,10 @@ model User {
   passwordShares       PasswordShare[]
   attachments          Attachment[]
 
+  // Emergency Access relations
+  emergencyGrantsAsOwner   EmergencyAccessGrant[] @relation("emergencyGrantsAsOwner")
+  emergencyGrantsAsGrantee EmergencyAccessGrant[] @relation("emergencyGrantsAsGrantee")
+
   @@map("users")
 }
 
@@ -129,6 +133,7 @@ model PasswordEntry {
   overviewIv        String   @map("overview_iv") @db.VarChar(24)
   overviewAuthTag   String   @map("overview_auth_tag") @db.VarChar(32)
   keyVersion        Int      @map("key_version")
+  aadVersion        Int      @default(0) @map("aad_version")
   entryType         EntryType @default(LOGIN) @map("entry_type")
 
   // Metadata (unencrypted)
@@ -223,6 +228,7 @@ model OrgPasswordEntry {
   encryptedOverview String @map("encrypted_overview") @db.Text
   overviewIv        String @map("overview_iv") @db.VarChar(24)
   overviewAuthTag   String @map("overview_auth_tag") @db.VarChar(32)
+  aadVersion        Int    @default(0) @map("aad_version")
   entryType         EntryType @default(LOGIN) @map("entry_type")
 
   // Metadata (unencrypted)
@@ -359,6 +365,14 @@ enum AuditAction {
   ORG_ROLE_UPDATE
   SHARE_CREATE
   SHARE_REVOKE
+  EMERGENCY_GRANT_CREATE
+  EMERGENCY_GRANT_ACCEPT
+  EMERGENCY_GRANT_REJECT
+  EMERGENCY_GRANT_CONFIRM
+  EMERGENCY_ACCESS_REQUEST
+  EMERGENCY_ACCESS_ACTIVATE
+  EMERGENCY_ACCESS_REVOKE
+  EMERGENCY_VAULT_ACCESS
 }
 
 enum AuditScope {
@@ -399,6 +413,7 @@ model Attachment {
   iv            String   @db.VarChar(24)
   authTag       String   @map("auth_tag") @db.VarChar(32)
   keyVersion    Int?     @map("key_version")
+  aadVersion    Int      @default(0) @map("aad_version")
 
   passwordEntryId    String? @map("password_entry_id")
   orgPasswordEntryId String? @map("org_password_entry_id")
@@ -412,4 +427,75 @@ model Attachment {
   @@index([passwordEntryId])
   @@index([orgPasswordEntryId])
   @@map("attachments")
+}
+
+// ─── Emergency Access Models ─────────────────────────────────
+
+enum EmergencyAccessStatus {
+  PENDING
+  ACCEPTED
+  IDLE
+  STALE
+  REQUESTED
+  ACTIVATED
+  REVOKED
+  REJECTED
+}
+
+model EmergencyAccessGrant {
+  id           String                @id @default(cuid())
+  ownerId      String                @map("owner_id")
+  granteeId    String?               @map("grantee_id")
+  granteeEmail String                @map("grantee_email")
+  status       EmergencyAccessStatus @default(PENDING)
+  waitDays     Int                   @map("wait_days")
+
+  token          String   @unique
+  tokenExpiresAt DateTime @map("token_expires_at")
+
+  // ECDH key exchange fields
+  keyAlgorithm            String  @default("ECDH-P256") @map("key_algorithm") @db.VarChar(32)
+  granteePublicKey        String? @map("grantee_public_key") @db.Text
+  ownerEphemeralPublicKey String? @map("owner_ephemeral_public_key") @db.Text
+  encryptedSecretKey      String? @map("encrypted_secret_key") @db.Text
+  secretKeyIv             String? @map("secret_key_iv") @db.VarChar(24)
+  secretKeyAuthTag        String? @map("secret_key_auth_tag") @db.VarChar(32)
+  hkdfSalt                String? @map("hkdf_salt") @db.VarChar(64)
+  wrapVersion             Int     @default(1) @map("wrap_version")
+
+  // ML-KEM fields (v2 PQC hybrid, nullable until migration)
+  kemCiphertext  String? @map("kem_ciphertext") @db.Text
+  kemPublicKey   String? @map("kem_public_key") @db.Text
+
+  // Timestamps for state machine
+  requestedAt   DateTime? @map("requested_at")
+  activatedAt   DateTime? @map("activated_at")
+  waitExpiresAt DateTime? @map("wait_expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  owner          User                    @relation("emergencyGrantsAsOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  grantee        User?                   @relation("emergencyGrantsAsGrantee", fields: [granteeId], references: [id], onDelete: SetNull)
+  granteeKeyPair EmergencyAccessKeyPair?
+
+  @@index([ownerId])
+  @@index([granteeId])
+  @@index([status])
+  @@map("emergency_access_grants")
+}
+
+model EmergencyAccessKeyPair {
+  id                  String @id @default(cuid())
+  grantId             String @unique @map("grant_id")
+  encryptedPrivateKey String @map("encrypted_private_key") @db.Text
+  privateKeyIv        String @map("private_key_iv") @db.VarChar(24)
+  privateKeyAuthTag   String @map("private_key_auth_tag") @db.VarChar(32)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  grant EmergencyAccessGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+
+  @@map("emergency_access_key_pairs")
 }

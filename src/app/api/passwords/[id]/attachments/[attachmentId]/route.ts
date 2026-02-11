@@ -49,6 +49,7 @@ export async function GET(
     iv: attachment.iv,
     authTag: attachment.authTag,
     keyVersion: attachment.keyVersion,
+    aadVersion: attachment.aadVersion,
   });
 }
 

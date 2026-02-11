@@ -81,15 +81,17 @@ export function unwrapOrgKey(wrapped: ServerEncryptedData): Buffer {
 
 // ─── Data Encryption / Decryption ───────────────────────────────
 
-/** Encrypt plaintext JSON with an org key (AES-256-GCM). */
+/** Encrypt plaintext JSON with an org key (AES-256-GCM). Optional AAD for binding context. */
 export function encryptServerData(
   plaintext: string,
-  orgKey: Buffer
+  orgKey: Buffer,
+  aad?: Buffer
 ): ServerEncryptedData {
   const iv = randomBytes(IV_LENGTH);
   const cipher = createCipheriv(ALGORITHM, orgKey, iv, {
     authTagLength: AUTH_TAG_LENGTH,
   });
+  if (aad) cipher.setAAD(aad);
 
   const ciphertext = Buffer.concat([
     cipher.update(plaintext, "utf8"),
@@ -104,10 +106,11 @@ export function encryptServerData(
   };
 }
 
-/** Decrypt ciphertext with an org key (AES-256-GCM). */
+/** Decrypt ciphertext with an org key (AES-256-GCM). Optional AAD must match encryption. */
 export function decryptServerData(
   encrypted: ServerEncryptedData,
-  orgKey: Buffer
+  orgKey: Buffer,
+  aad?: Buffer
 ): string {
   const iv = Buffer.from(encrypted.iv, "hex");
   const authTag = Buffer.from(encrypted.authTag, "hex");
@@ -116,6 +119,7 @@ export function decryptServerData(
   const decipher = createDecipheriv(ALGORITHM, orgKey, iv, {
     authTagLength: AUTH_TAG_LENGTH,
   });
+  if (aad) decipher.setAAD(aad);
   decipher.setAuthTag(authTag);
 
   return Buffer.concat([
@@ -132,15 +136,17 @@ export interface ServerEncryptedBinary {
   authTag: string; // hex
 }
 
-/** Encrypt binary data (Buffer) with an org key (AES-256-GCM). */
+/** Encrypt binary data (Buffer) with an org key (AES-256-GCM). Optional AAD for binding context. */
 export function encryptServerBinary(
   data: Buffer,
-  orgKey: Buffer
+  orgKey: Buffer,
+  aad?: Buffer
 ): ServerEncryptedBinary {
   const iv = randomBytes(IV_LENGTH);
   const cipher = createCipheriv(ALGORITHM, orgKey, iv, {
     authTagLength: AUTH_TAG_LENGTH,
   });
+  if (aad) cipher.setAAD(aad);
 
   const ciphertext = Buffer.concat([cipher.update(data), cipher.final()]);
   const authTag = cipher.getAuthTag();
@@ -152,10 +158,11 @@ export function encryptServerBinary(
   };
 }
 
-/** Decrypt binary data with an org key (AES-256-GCM). */
+/** Decrypt binary data with an org key (AES-256-GCM). Optional AAD must match encryption. */
 export function decryptServerBinary(
   encrypted: ServerEncryptedBinary,
-  orgKey: Buffer
+  orgKey: Buffer,
+  aad?: Buffer
 ): Buffer {
   const iv = Buffer.from(encrypted.iv, "hex");
   const authTag = Buffer.from(encrypted.authTag, "hex");
@@ -163,6 +170,7 @@ export function decryptServerBinary(
   const decipher = createDecipheriv(ALGORITHM, orgKey, iv, {
     authTagLength: AUTH_TAG_LENGTH,
   });
+  if (aad) decipher.setAAD(aad);
   decipher.setAuthTag(authTag);
 
   return Buffer.concat([

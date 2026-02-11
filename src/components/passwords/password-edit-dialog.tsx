@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import {
   PasswordForm,
   type PasswordHistoryEntry,
@@ -114,7 +115,7 @@ export function PasswordEditDialog({
   const ti = useTranslations("IdentityForm");
   const tpk = useTranslations("PasskeyForm");
   const td = useTranslations("PasswordDetail");
-  const { encryptionKey } = useVault();
+  const { encryptionKey, userId } = useVault();
   const [data, setData] = useState<FormData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
@@ -135,9 +136,13 @@ export function PasswordEditDialog({
         if (!res.ok) throw new Error(td("notFound"));
         const raw = await res.json();
 
+        const aad = raw.aadVersion >= 1 && userId
+          ? buildPersonalEntryAAD(userId, id)
+          : undefined;
         const plaintext = await decryptData(
           raw.encryptedBlob as EncryptedData,
-          encryptionKey!
+          encryptionKey!,
+          aad
         );
         const entry: VaultEntryFull = JSON.parse(plaintext);
 

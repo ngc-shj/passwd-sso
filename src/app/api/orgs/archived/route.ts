@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { unwrapOrgKey, decryptServerData } from "@/lib/crypto-server";
+import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 import { hasOrgPermission } from "@/lib/org-auth";
 
 // GET /api/orgs/archived — Get all archived org passwords across all orgs
@@ -62,6 +63,9 @@ export async function GET() {
       authTag: entry.org.orgKeyAuthTag,
     });
 
+    const aad = entry.aadVersion >= 1
+      ? Buffer.from(buildOrgEntryAAD(entry.orgId, entry.id, "overview"))
+      : undefined;
     const overview = JSON.parse(
       decryptServerData(
         {
@@ -69,7 +73,8 @@ export async function GET() {
           iv: entry.overviewIv,
           authTag: entry.overviewAuthTag,
         },
-        orgKey
+        orgKey,
+        aad
       )
     );
 

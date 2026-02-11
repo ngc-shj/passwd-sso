@@ -42,6 +42,7 @@ export async function GET(
       authTag: entry.overviewAuthTag,
     },
     keyVersion: entry.keyVersion,
+    aadVersion: entry.aadVersion,
     entryType: entry.entryType,
     isFavorite: entry.isFavorite,
     isArchived: entry.isArchived,
@@ -90,7 +91,7 @@ export async function PUT(
     );
   }
 
-  const { encryptedBlob, encryptedOverview, keyVersion, tagIds, isFavorite, isArchived, entryType } = parsed.data;
+  const { encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, isFavorite, isArchived, entryType } = parsed.data;
   const updateData: Record<string, unknown> = {};
 
   if (encryptedBlob) {
@@ -104,6 +105,7 @@ export async function PUT(
     updateData.overviewAuthTag = encryptedOverview.authTag;
   }
   if (keyVersion !== undefined) updateData.keyVersion = keyVersion;
+  if (aadVersion !== undefined) updateData.aadVersion = aadVersion;
   if (isFavorite !== undefined) updateData.isFavorite = isFavorite;
   if (isArchived !== undefined) updateData.isArchived = isArchived;
   if (entryType !== undefined) updateData.entryType = entryType;
@@ -134,6 +136,7 @@ export async function PUT(
       authTag: updated.overviewAuthTag,
     },
     keyVersion: updated.keyVersion,
+    aadVersion: updated.aadVersion,
     entryType: updated.entryType,
     tagIds: updated.tags.map((t) => t.id),
     createdAt: updated.createdAt,

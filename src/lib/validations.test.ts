@@ -50,6 +50,45 @@ describe("createE2EPasswordSchema", () => {
       createE2EPasswordSchema.parse({ ...validBase, entryType: "UNKNOWN" }),
     ).toThrow();
   });
+
+  it("accepts client-generated UUID id", () => {
+    const id = "550e8400-e29b-41d4-a716-446655440000";
+    const result = createE2EPasswordSchema.parse({ ...validBase, id });
+    expect(result.id).toBe(id);
+  });
+
+  it("rejects non-UUID id", () => {
+    expect(() =>
+      createE2EPasswordSchema.parse({ ...validBase, id: "not-a-uuid" }),
+    ).toThrow();
+  });
+
+  it("id is optional (defaults to undefined)", () => {
+    const result = createE2EPasswordSchema.parse(validBase);
+    expect(result.id).toBeUndefined();
+  });
+
+  it("defaults aadVersion to 0", () => {
+    const result = createE2EPasswordSchema.parse(validBase);
+    expect(result.aadVersion).toBe(0);
+  });
+
+  it("accepts aadVersion=1", () => {
+    const result = createE2EPasswordSchema.parse({ ...validBase, aadVersion: 1 });
+    expect(result.aadVersion).toBe(1);
+  });
+
+  it("rejects aadVersion=2 (out of range)", () => {
+    expect(() =>
+      createE2EPasswordSchema.parse({ ...validBase, aadVersion: 2 }),
+    ).toThrow();
+  });
+
+  it("rejects negative aadVersion", () => {
+    expect(() =>
+      createE2EPasswordSchema.parse({ ...validBase, aadVersion: -1 }),
+    ).toThrow();
+  });
 });
 
 describe("updateE2EPasswordSchema", () => {
@@ -62,6 +101,22 @@ describe("updateE2EPasswordSchema", () => {
     const result = updateE2EPasswordSchema.parse({ isFavorite: true });
     expect(result.entryType).toBeUndefined();
     expect(result.isFavorite).toBe(true);
+  });
+
+  it("accepts aadVersion=1 in update", () => {
+    const result = updateE2EPasswordSchema.parse({ aadVersion: 1 });
+    expect(result.aadVersion).toBe(1);
+  });
+
+  it("aadVersion is optional in update", () => {
+    const result = updateE2EPasswordSchema.parse({ isFavorite: false });
+    expect(result.aadVersion).toBeUndefined();
+  });
+
+  it("rejects aadVersion=2 in update", () => {
+    expect(() =>
+      updateE2EPasswordSchema.parse({ aadVersion: 2 }),
+    ).toThrow();
   });
 });
 

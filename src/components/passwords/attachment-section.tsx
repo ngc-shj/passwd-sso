@@ -31,6 +31,7 @@ import {
   hexEncode,
   type EncryptedBinary,
 } from "@/lib/crypto-client";
+import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -123,17 +124,23 @@ export function AttachmentSection({
       // Read file as ArrayBuffer
       const arrayBuffer = await file.arrayBuffer();
 
-      // Encrypt client-side
-      const encrypted: EncryptedBinary = await encryptBinary(arrayBuffer, encryptionKey);
+      // Pre-generate attachment ID for AAD binding
+      const attachmentId = crypto.randomUUID();
+      const aad = buildAttachmentAAD(entryId, attachmentId);
+
+      // Encrypt client-side with AAD
+      const encrypted: EncryptedBinary = await encryptBinary(arrayBuffer, encryptionKey, aad);
 
       // Build FormData with encrypted blob
       const formData = new FormData();
+      formData.append("id", attachmentId);
       formData.append("file", new Blob([encrypted.ciphertext.buffer.slice(0) as ArrayBuffer]));
       formData.append("iv", encrypted.iv);
       formData.append("authTag", encrypted.authTag);
       formData.append("filename", file.name);
       formData.append("contentType", file.type);
       formData.append("sizeBytes", file.size.toString());
+      formData.append("aadVersion", String(AAD_VERSION));
       if (keyVersion) formData.append("keyVersion", keyVersion.toString());
 
       const res = await fetch(`/api/passwords/${entryId}/attachments`, {
@@ -175,10 +182,14 @@ export function AttachmentSection({
         ciphertext[i] = binaryStr.charCodeAt(i);
       }
 
-      // Decrypt client-side
+      // Decrypt client-side (with AAD if aadVersion >= 1)
+      const aad = data.aadVersion >= 1
+        ? buildAttachmentAAD(entryId, attachment.id)
+        : undefined;
       const decrypted = await decryptBinary(
         { ciphertext, iv: data.iv, authTag: data.authTag },
-        encryptionKey
+        encryptionKey,
+        aad
       );
 
       // Trigger download
