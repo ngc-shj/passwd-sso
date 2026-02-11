@@ -39,9 +39,11 @@ const encryptedFieldSchema = z.object({
 export const entryTypeSchema = z.enum(["LOGIN", "SECURE_NOTE", "CREDIT_CARD", "IDENTITY", "PASSKEY"]);
 
 export const createE2EPasswordSchema = z.object({
+  id: z.string().uuid().optional(), // client-generated UUIDv4 (required for aadVersion >= 1)
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
   keyVersion: z.number().int().min(1),
+  aadVersion: z.number().int().min(0).max(1).optional().default(0),
   tagIds: z.array(z.string().cuid()).optional(),
   entryType: entryTypeSchema.optional().default("LOGIN"),
 });
@@ -50,6 +52,7 @@ export const updateE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema.optional(),
   encryptedOverview: encryptedFieldSchema.optional(),
   keyVersion: z.number().int().min(1).optional(),
+  aadVersion: z.number().int().min(0).max(1).optional(),
   tagIds: z.array(z.string().cuid()).optional(),
   isFavorite: z.boolean().optional(),
   isArchived: z.boolean().optional(),

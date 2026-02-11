@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { PasswordDetail } from "@/components/passwords/password-detail";
 import type { TOTPEntry } from "@/components/passwords/totp-field";
 import { Loader2 } from "lucide-react";
@@ -53,7 +54,7 @@ export default function PasswordDetailPage() {
   const t = useTranslations("PasswordDetail");
   const params = useParams();
   const id = params.id as string;
-  const { encryptionKey } = useVault();
+  const { encryptionKey, userId } = useVault();
   const [data, setData] = useState<DetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,9 +67,13 @@ export default function PasswordDetailPage() {
         if (!res.ok) throw new Error(t("notFound"));
         const raw = await res.json();
 
+        const aad = raw.aadVersion >= 1 && userId
+          ? buildPersonalEntryAAD(userId, id)
+          : undefined;
         const plaintext = await decryptData(
           raw.encryptedBlob as EncryptedData,
-          encryptionKey!
+          encryptionKey!,
+          aad
         );
         const entry: VaultEntryFull = JSON.parse(plaintext);
 

@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import {
   PasswordForm,
   type PasswordHistoryEntry,
@@ -46,7 +47,7 @@ export default function EditPasswordPage() {
   const t = useTranslations("PasswordDetail");
   const params = useParams();
   const id = params.id as string;
-  const { encryptionKey } = useVault();
+  const { encryptionKey, userId } = useVault();
   const [data, setData] = useState<FormData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,9 +60,13 @@ export default function EditPasswordPage() {
         if (!res.ok) throw new Error(t("notFound"));
         const raw = await res.json();
 
+        const aad = raw.aadVersion >= 1 && userId
+          ? buildPersonalEntryAAD(userId, id)
+          : undefined;
         const plaintext = await decryptData(
           raw.encryptedBlob as EncryptedData,
-          encryptionKey!
+          encryptionKey!,
+          aad
         );
         const entry: VaultEntryFull = JSON.parse(plaintext);
 

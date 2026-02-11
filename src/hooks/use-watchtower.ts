@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import {
   analyzeStrength,
   checkHIBP,
@@ -59,7 +60,7 @@ interface DecryptedEntry {
 // ─── Hook ────────────────────────────────────────────────────
 
 export function useWatchtower() {
-  const { encryptionKey } = useVault();
+  const { encryptionKey, userId } = useVault();
   const [report, setReport] = useState<WatchtowerReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<WatchtowerProgress>({
@@ -101,9 +102,13 @@ export function useWatchtower() {
         if (!raw.encryptedBlob) continue;
         if (raw.entryType && raw.entryType !== "LOGIN") continue;
         try {
+          const aad = raw.aadVersion >= 1 && userId
+            ? buildPersonalEntryAAD(userId, raw.id)
+            : undefined;
           const plaintext = await decryptData(
             raw.encryptedBlob as EncryptedData,
-            encryptionKey
+            encryptionKey,
+            aad
           );
           const parsed = JSON.parse(plaintext);
           entries.push({

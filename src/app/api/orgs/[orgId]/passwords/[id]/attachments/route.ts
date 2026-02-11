@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { unwrapOrgKey, encryptServerBinary } from "@/lib/crypto-server";
+import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -166,16 +167,21 @@ export async function POST(
     iv: entry.org.orgKeyIv,
     authTag: entry.org.orgKeyAuthTag,
   });
-  const encrypted = encryptServerBinary(plainBuffer, orgKey);
+  // Pre-generate attachment ID for AAD binding
+  const attachmentId = crypto.randomUUID();
+  const aad = Buffer.from(buildAttachmentAAD(id, attachmentId));
+  const encrypted = encryptServerBinary(plainBuffer, orgKey, aad);
 
   const attachment = await prisma.attachment.create({
     data: {
+      id: attachmentId,
       filename: sanitizedFilename,
       contentType,
       sizeBytes: file.size,
       encryptedData: new Uint8Array(encrypted.ciphertext),
       iv: encrypted.iv,
       authTag: encrypted.authTag,
+      aadVersion: AAD_VERSION,
       orgPasswordEntryId: id,
       createdById: session.user.id,
     },

@@ -317,19 +317,19 @@ export async function decryptData(
 // ─── Binary E2E Encryption (for file attachments) ───────────────
 
 /**
- * Encrypt binary data (ArrayBuffer) with AES-256-GCM.
+ * Encrypt binary data (ArrayBuffer) with AES-256-GCM. Optional AAD for binding context.
  * Returns raw Uint8Array ciphertext instead of hex — more efficient for large files.
  */
 export async function encryptBinary(
   data: ArrayBuffer,
-  key: CryptoKey
+  key: CryptoKey,
+  aad?: Uint8Array
 ): Promise<EncryptedBinary> {
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
-  const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: toArrayBuffer(iv) },
-    key,
-    data
-  );
+  const params: AesGcmParams = { name: "AES-GCM", iv: toArrayBuffer(iv) };
+  if (aad) params.additionalData = toArrayBuffer(aad);
+
+  const encrypted = await crypto.subtle.encrypt(params, key, data);
 
   const encryptedBytes = new Uint8Array(encrypted);
   const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - 16);
@@ -343,12 +343,13 @@ export async function encryptBinary(
 }
 
 /**
- * Decrypt binary data (EncryptedBinary) with AES-256-GCM.
+ * Decrypt binary data (EncryptedBinary) with AES-256-GCM. Optional AAD must match encryption.
  * Accepts raw Uint8Array ciphertext — reverse of encryptBinary.
  */
 export async function decryptBinary(
   encrypted: EncryptedBinary,
-  key: CryptoKey
+  key: CryptoKey,
+  aad?: Uint8Array
 ): Promise<ArrayBuffer> {
   const iv = hexDecode(encrypted.iv);
   const authTag = hexDecode(encrypted.authTag);
@@ -357,9 +358,8 @@ export async function decryptBinary(
   combined.set(encrypted.ciphertext);
   combined.set(authTag, encrypted.ciphertext.length);
 
-  return crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: toArrayBuffer(iv) },
-    key,
-    toArrayBuffer(combined)
-  );
+  const params: AesGcmParams = { name: "AES-GCM", iv: toArrayBuffer(iv) };
+  if (aad) params.additionalData = toArrayBuffer(aad);
+
+  return crypto.subtle.decrypt(params, key, toArrayBuffer(combined));
 }

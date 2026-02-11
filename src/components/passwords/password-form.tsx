@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
 import { encryptData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,7 +65,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   const t = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
   const router = useRouter();
-  const { encryptionKey } = useVault();
+  const { encryptionKey, userId } = useVault();
   const [showPassword, setShowPassword] = useState(false);
   const [showGenerator, setShowGenerator] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -142,13 +143,20 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
         tags,
       });
 
-      const encryptedBlob = await encryptData(fullBlob, encryptionKey);
-      const encryptedOverview = await encryptData(overviewBlob, encryptionKey);
+      // For create: generate client-side UUID for AAD binding
+      // For edit: use existing entry ID, re-encrypt with AAD (save-time migration)
+      const entryId = mode === "create" ? crypto.randomUUID() : initialData!.id;
+      const aad = userId ? buildPersonalEntryAAD(userId, entryId) : undefined;
+
+      const encryptedBlob = await encryptData(fullBlob, encryptionKey, aad);
+      const encryptedOverview = await encryptData(overviewBlob, encryptionKey, aad);
 
       const body = {
+        ...(mode === "create" ? { id: entryId } : {}),
         encryptedBlob,
         encryptedOverview,
         keyVersion: 1,
+        aadVersion: aad ? AAD_VERSION : 0,
         tagIds: selectedTags.map((t) => t.id),
       };
 

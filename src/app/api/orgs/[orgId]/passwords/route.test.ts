@@ -277,6 +277,83 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     );
   });
 
+  it("passes AAD to decryptServerData for entries with aadVersion >= 1", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek",
+      orgKeyIv: "iv",
+      orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
+      {
+        id: "pw-aad",
+        entryType: "LOGIN",
+        aadVersion: 1,
+        encryptedOverview: "cipher",
+        overviewIv: "iv",
+        overviewAuthTag: "tag",
+        isArchived: false,
+        favorites: [],
+        tags: [],
+        createdBy: { id: "u1", name: "User", image: null },
+        updatedBy: { id: "u1", name: "User" },
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      },
+    ]);
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({ title: "Test", username: "admin", urlHost: "example.com" })
+    );
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createParams({ orgId: ORG_ID }),
+    );
+
+    // decryptServerData should be called with a Buffer AAD argument (3rd arg)
+    const decryptCall = mockDecryptServerData.mock.calls[0];
+    expect(decryptCall[2]).toBeInstanceOf(Buffer);
+    expect(decryptCall[2].length).toBeGreaterThan(0);
+  });
+
+  it("passes undefined AAD for legacy entries with aadVersion=0", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek",
+      orgKeyIv: "iv",
+      orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
+      {
+        id: "pw-legacy",
+        entryType: "LOGIN",
+        aadVersion: 0,
+        encryptedOverview: "cipher",
+        overviewIv: "iv",
+        overviewAuthTag: "tag",
+        isArchived: false,
+        favorites: [],
+        tags: [],
+        createdBy: { id: "u1", name: "User", image: null },
+        updatedBy: { id: "u1", name: "User" },
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      },
+    ]);
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({ title: "Legacy", username: "user", urlHost: null })
+    );
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createParams({ orgId: ORG_ID }),
+    );
+
+    // decryptServerData should be called without AAD (3rd arg = undefined)
+    const decryptCall = mockDecryptServerData.mock.calls[0];
+    expect(decryptCall[2]).toBeUndefined();
+  });
+
   it("returns SECURE_NOTE entries with snippet", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
       encryptedOrgKey: "ek",
@@ -365,6 +442,41 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
     expect(json.id).toBe("new-pw");
     expect(json.title).toBe("My Password");
     expect(mockEncryptServerData).toHaveBeenCalledTimes(2); // blob + overview
+  });
+
+  it("encrypts with AAD and stores aadVersion=1", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      entryType: "LOGIN",
+      tags: [],
+      createdAt: now,
+    });
+
+    await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: validBody }),
+      createParams({ orgId: ORG_ID }),
+    );
+
+    // encryptServerData should be called twice (blob + overview) with Buffer AAD args
+    expect(mockEncryptServerData).toHaveBeenCalledTimes(2);
+    const blobCall = mockEncryptServerData.mock.calls[0];
+    const overviewCall = mockEncryptServerData.mock.calls[1];
+    expect(blobCall[2]).toBeInstanceOf(Buffer);
+    expect(overviewCall[2]).toBeInstanceOf(Buffer);
+    // Blob and overview AAD should be different (different vaultType)
+    expect(blobCall[2].equals(overviewCall[2])).toBe(false);
+
+    // Prisma create should include aadVersion=1
+    expect(mockPrismaOrgPasswordEntry.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          aadVersion: 1,
+        }),
+      }),
+    );
   });
 
   it("creates SECURE_NOTE entry (201)", async () => {

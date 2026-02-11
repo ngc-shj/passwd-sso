@@ -87,6 +87,7 @@ describe("GET /api/passwords/[id]/attachments/[attachmentId]", () => {
       iv: "a".repeat(24),
       authTag: "b".repeat(32),
       keyVersion: 1,
+      aadVersion: 0,
     });
 
     const res = await GET(
@@ -99,6 +100,29 @@ describe("GET /api/passwords/[id]/attachments/[attachmentId]", () => {
     expect(json.encryptedData).toBeTruthy(); // base64 encoded
     expect(json.iv).toBe("a".repeat(24));
     expect(json.authTag).toBe("b".repeat(32));
+  });
+
+  it("returns aadVersion in response", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ userId: "user-1" });
+    mockPrismaAttachment.findUnique.mockResolvedValue({
+      id: "att-1",
+      filename: "test.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      encryptedData: Buffer.from("encrypted-content"),
+      iv: "a".repeat(24),
+      authTag: "b".repeat(32),
+      keyVersion: 1,
+      aadVersion: 1,
+    });
+
+    const res = await GET(
+      createRequest("GET", "http://localhost:3000/api/passwords/pw-1/attachments/att-1"),
+      createParams("pw-1", "att-1")
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.aadVersion).toBe(1);
   });
 });
 

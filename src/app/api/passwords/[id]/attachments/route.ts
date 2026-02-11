@@ -97,6 +97,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid form data" }, { status: 400 });
   }
 
+  const clientId = formData.get("id") as string | null;
   const file = formData.get("file") as File | null;
   const iv = formData.get("iv") as string | null;
   const authTag = formData.get("authTag") as string | null;
@@ -104,6 +105,7 @@ export async function POST(
   const contentType = formData.get("contentType") as string | null;
   const sizeBytes = formData.get("sizeBytes") as string | null;
   const keyVersion = formData.get("keyVersion") as string | null;
+  const aadVersionStr = formData.get("aadVersion") as string | null;
 
   if (!file || !iv || !authTag || !filename || !contentType || !sizeBytes) {
     return NextResponse.json(
@@ -152,8 +154,10 @@ export async function POST(
   // Read encrypted blob
   const buffer = Buffer.from(await file.arrayBuffer());
 
+  const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 0;
   const attachment = await prisma.attachment.create({
     data: {
+      ...(clientId ? { id: clientId } : {}),
       filename: sanitizedFilename,
       contentType,
       sizeBytes: originalSize,
@@ -161,6 +165,7 @@ export async function POST(
       iv,
       authTag,
       keyVersion: keyVersion ? parseInt(keyVersion, 10) : null,
+      aadVersion,
       passwordEntryId: id,
       createdById: session.user.id,
     },

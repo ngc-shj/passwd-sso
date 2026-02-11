@@ -133,6 +133,7 @@ model PasswordEntry {
   overviewIv        String   @map("overview_iv") @db.VarChar(24)
   overviewAuthTag   String   @map("overview_auth_tag") @db.VarChar(32)
   keyVersion        Int      @map("key_version")
+  aadVersion        Int      @default(0) @map("aad_version")
   entryType         EntryType @default(LOGIN) @map("entry_type")
 
   // Metadata (unencrypted)
@@ -227,6 +228,7 @@ model OrgPasswordEntry {
   encryptedOverview String @map("encrypted_overview") @db.Text
   overviewIv        String @map("overview_iv") @db.VarChar(24)
   overviewAuthTag   String @map("overview_auth_tag") @db.VarChar(32)
+  aadVersion        Int    @default(0) @map("aad_version")
   entryType         EntryType @default(LOGIN) @map("entry_type")
 
   // Metadata (unencrypted)
@@ -411,6 +413,7 @@ model Attachment {
   iv            String   @db.VarChar(24)
   authTag       String   @map("auth_tag") @db.VarChar(32)
   keyVersion    Int?     @map("key_version")
+  aadVersion    Int      @default(0) @map("aad_version")
 
   passwordEntryId    String? @map("password_entry_id")
   orgPasswordEntryId String? @map("org_password_entry_id")

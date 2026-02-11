@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { unwrapOrgKey, decryptServerBinary } from "@/lib/crypto-server";
+import { buildAttachmentAAD } from "@/lib/crypto-aad";
 
 type RouteContext = {
   params: Promise<{ orgId: string; id: string; attachmentId: string }>;
@@ -63,13 +64,17 @@ export async function GET(
     authTag: entry.org.orgKeyAuthTag,
   });
 
+  const aad = attachment.aadVersion >= 1
+    ? Buffer.from(buildAttachmentAAD(id, attachmentId))
+    : undefined;
   const decrypted = decryptServerBinary(
     {
       ciphertext: Buffer.from(attachment.encryptedData),
       iv: attachment.iv,
       authTag: attachment.authTag,
     },
-    orgKey
+    orgKey,
+    aad
   );
 
   return new NextResponse(new Uint8Array(decrypted), {

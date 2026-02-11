@@ -29,6 +29,7 @@ const ownedEntry = {
   overviewIv: "overview-iv",
   overviewAuthTag: "overview-tag",
   keyVersion: 1,
+  aadVersion: 0,
   entryType: "LOGIN",
   isFavorite: false,
   isArchived: false,
@@ -100,6 +101,27 @@ describe("GET /api/passwords/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.entryType).toBe("SECURE_NOTE");
+  });
+
+  it("returns aadVersion in response", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ ...ownedEntry, aadVersion: 1 });
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.aadVersion).toBe(1);
+  });
+
+  it("returns aadVersion=0 for legacy entries", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(json.aadVersion).toBe(0);
   });
 
   it("returns PASSKEY entryType", async () => {
@@ -176,6 +198,36 @@ describe("PUT /api/passwords/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.id).toBe(PW_ID);
+  });
+
+  it("stores aadVersion when provided in update body", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "new-over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      aadVersion: 1,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { ...updateBody, aadVersion: 1 },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.aadVersion).toBe(1);
+    expect(mockPrismaPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ aadVersion: 1 }),
+      }),
+    );
   });
 
   it("updates favorite and archive flags", async () => {

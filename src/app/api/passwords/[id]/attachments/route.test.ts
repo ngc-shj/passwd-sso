@@ -240,4 +240,67 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(json.id).toBe("att-new");
     expect(json.filename).toBe("test.pdf");
   });
+
+  it("stores client-generated id and aadVersion from FormData", async () => {
+    const clientId = "550e8400-e29b-41d4-a716-446655440000";
+    mockPrismaAttachment.create.mockResolvedValue({
+      id: clientId,
+      filename: "test.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      createdAt: now,
+    });
+
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        id: clientId,
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+        aadVersion: "1",
+      }),
+      createParams("pw-1")
+    );
+    expect(res.status).toBe(201);
+    expect(mockPrismaAttachment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          id: clientId,
+          aadVersion: 1,
+        }),
+      }),
+    );
+  });
+
+  it("defaults aadVersion to 0 when not provided", async () => {
+    mockPrismaAttachment.create.mockResolvedValue({
+      id: "att-legacy",
+      filename: "test.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      createdAt: now,
+    });
+
+    await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+      }),
+      createParams("pw-1")
+    );
+    expect(mockPrismaAttachment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          aadVersion: 0,
+        }),
+      }),
+    );
+  });
 });

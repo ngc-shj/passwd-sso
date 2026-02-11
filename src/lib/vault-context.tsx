@@ -32,6 +32,7 @@ export type VaultStatus = "loading" | "locked" | "unlocked" | "setup-required";
 interface VaultContextValue {
   status: VaultStatus;
   encryptionKey: CryptoKey | null;
+  userId: string | null;
   unlock: (passphrase: string) => Promise<boolean>;
   lock: () => void;
   setup: (passphrase: string) => Promise<void>;
@@ -361,6 +362,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       value={{
         status: vaultStatus,
         encryptionKey,
+        userId: session?.user?.id ?? null,
         unlock,
         lock,
         setup,

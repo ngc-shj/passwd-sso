@@ -9,6 +9,7 @@ import {
   unwrapOrgKey,
   decryptServerData,
 } from "@/lib/crypto-server";
+import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -114,10 +115,14 @@ export async function POST(req: NextRequest) {
       iv: entry.org.orgKeyIv,
       authTag: entry.org.orgKeyAuthTag,
     });
+    const blobAad = entry.aadVersion >= 1
+      ? Buffer.from(buildOrgEntryAAD(entry.org.id, entry.id, "blob"))
+      : undefined;
     const blob = JSON.parse(
       decryptServerData(
         { ciphertext: entry.encryptedBlob, iv: entry.blobIv, authTag: entry.blobAuthTag },
-        orgKey
+        orgKey,
+        blobAad
       )
     );
 

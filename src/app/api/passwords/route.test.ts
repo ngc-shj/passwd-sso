@@ -27,6 +27,7 @@ const mockEntry = {
   blobIv: "blob-iv",
   blobAuthTag: "blob-tag",
   keyVersion: 1,
+  aadVersion: 0,
   entryType: "LOGIN",
   isFavorite: false,
   isArchived: false,
@@ -124,6 +125,22 @@ describe("GET /api/passwords", () => {
         where: expect.objectContaining({ deletedAt: { not: null } }),
       })
     );
+  });
+
+  it("returns aadVersion in response entries", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([
+      { ...mockEntry, aadVersion: 1 },
+    ]);
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    const json = await res.json();
+    expect(json[0].aadVersion).toBe(1);
+  });
+
+  it("returns aadVersion=0 for legacy entries", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([mockEntry]);
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    const json = await res.json();
+    expect(json[0].aadVersion).toBe(0);
   });
 
   it("excludes deleted items by default", async () => {
@@ -233,6 +250,62 @@ describe("POST /api/passwords", () => {
     expect(json.id).toBe("new-pw");
     expect(json.entryType).toBe("LOGIN");
     expect(json.tagIds).toEqual([]);
+  });
+
+  it("creates entry with client-generated id and aadVersion", async () => {
+    const clientId = "550e8400-e29b-41d4-a716-446655440000";
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: clientId,
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      aadVersion: 1,
+      entryType: "LOGIN",
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: { ...validBody, id: clientId, aadVersion: 1 },
+    }));
+    const json = await res.json();
+    expect(res.status).toBe(201);
+    expect(json.id).toBe(clientId);
+    expect(json.aadVersion).toBe(1);
+    expect(mockPrismaPasswordEntry.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          id: clientId,
+          aadVersion: 1,
+        }),
+      }),
+    );
+  });
+
+  it("creates entry without id (server-generated, aadVersion=0)", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      aadVersion: 0,
+      entryType: "LOGIN",
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: validBody,
+    }));
+    const json = await res.json();
+    expect(res.status).toBe(201);
+    expect(json.aadVersion).toBe(0);
+    const createCall = mockPrismaPasswordEntry.create.mock.calls[0][0];
+    expect(createCall.data).not.toHaveProperty("id");
   });
 
   it("creates SECURE_NOTE entry (201)", async () => {

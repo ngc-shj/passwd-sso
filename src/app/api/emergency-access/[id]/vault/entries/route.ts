@@ -45,6 +45,7 @@ export async function GET(
       overviewIv: true,
       overviewAuthTag: true,
       keyVersion: true,
+      aadVersion: true,
       entryType: true,
       isFavorite: true,
       isArchived: true,

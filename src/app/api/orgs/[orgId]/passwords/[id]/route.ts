@@ -14,6 +14,7 @@ import {
   encryptServerData,
   decryptServerData,
 } from "@/lib/crypto-server";
+import { buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 
 type Params = { params: Promise<{ orgId: string; id: string }> };
 
@@ -72,6 +73,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 
   const orgKey = getOrgKey(entry.org);
+  const blobAad = entry.aadVersion >= 1
+    ? Buffer.from(buildOrgEntryAAD(orgId, entry.id, "blob"))
+    : undefined;
   const blob = JSON.parse(
     decryptServerData(
       {
@@ -79,7 +83,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
         iv: entry.blobIv,
         authTag: entry.blobAuthTag,
       },
-      orgKey
+      orgKey,
+      blobAad
     )
   );
 
@@ -202,7 +207,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   const orgKey = getOrgKey(entry.org);
 
-  // Decrypt current blob and merge updates
+  // Decrypt current blob (with AAD if entry was encrypted with it)
+  const currentBlobAad = entry.aadVersion >= 1
+    ? Buffer.from(buildOrgEntryAAD(orgId, id, "blob"))
+    : undefined;
   const currentBlob = JSON.parse(
     decryptServerData(
       {
@@ -210,7 +218,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
         iv: entry.blobIv,
         authTag: entry.blobAuthTag,
       },
-      orgKey
+      orgKey,
+      currentBlobAad
     )
   );
 
@@ -409,8 +418,12 @@ export async function PUT(req: NextRequest, { params }: Params) {
     });
   }
 
-  const encryptedBlob = encryptServerData(updatedBlobStr, orgKey);
-  const encryptedOverview = encryptServerData(overviewBlobStr, orgKey);
+  // Always re-encrypt with AAD (save-time migration for legacy entries)
+  const blobAad = Buffer.from(buildOrgEntryAAD(orgId, id, "blob"));
+  const overviewAad = Buffer.from(buildOrgEntryAAD(orgId, id, "overview"));
+
+  const encryptedBlob = encryptServerData(updatedBlobStr, orgKey, blobAad);
+  const encryptedOverview = encryptServerData(overviewBlobStr, orgKey, overviewAad);
 
   const updateData: Record<string, unknown> = {
     encryptedBlob: encryptedBlob.ciphertext,
@@ -419,6 +432,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     encryptedOverview: encryptedOverview.ciphertext,
     overviewIv: encryptedOverview.iv,
     overviewAuthTag: encryptedOverview.authTag,
+    aadVersion: AAD_VERSION,
     updatedById: session.user.id,
   };
 

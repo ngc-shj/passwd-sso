@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { PasswordCard } from "./password-card";
 import { Archive, KeyRound, Loader2, Star } from "lucide-react";
 
@@ -65,7 +66,7 @@ export function PasswordList({
   onDataChange,
 }: PasswordListProps) {
   const t = useTranslations("PasswordList");
-  const { encryptionKey } = useVault();
+  const { encryptionKey, userId } = useVault();
   const [entries, setEntries] = useState<DisplayEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -93,10 +94,14 @@ export function PasswordList({
       for (const entry of data) {
         if (!entry.encryptedOverview) continue;
         try {
+          const aad = entry.aadVersion >= 1 && userId
+            ? buildPersonalEntryAAD(userId, entry.id)
+            : undefined;
           const overview: DecryptedOverview = JSON.parse(
             await decryptData(
               entry.encryptedOverview as EncryptedData,
-              encryptionKey
+              encryptionKey,
+              aad
             )
           );
 

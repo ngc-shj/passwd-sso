@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
 import { encryptData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import {
   CARD_BRANDS,
   detectCardBrand,
@@ -53,7 +54,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
   const t = useTranslations("CreditCardForm");
   const tc = useTranslations("Common");
   const router = useRouter();
-  const { encryptionKey } = useVault();
+  const { encryptionKey, userId } = useVault();
   const [submitting, setSubmitting] = useState(false);
   const [showCardNumber, setShowCardNumber] = useState(false);
   const [showCvv, setShowCvv] = useState(false);
@@ -127,13 +128,18 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
         tags,
       });
 
-      const encryptedBlob = await encryptData(fullBlob, encryptionKey);
-      const encryptedOverview = await encryptData(overviewBlob, encryptionKey);
+      const entryId = mode === "create" ? crypto.randomUUID() : initialData!.id;
+      const aad = userId ? buildPersonalEntryAAD(userId, entryId) : undefined;
+
+      const encryptedBlob = await encryptData(fullBlob, encryptionKey, aad);
+      const encryptedOverview = await encryptData(overviewBlob, encryptionKey, aad);
 
       const body = {
+        ...(mode === "create" ? { id: entryId } : {}),
         encryptedBlob,
         encryptedOverview,
         keyVersion: 1,
+        aadVersion: aad ? AAD_VERSION : 0,
         tagIds: selectedTags.map((t) => t.id),
         entryType: "CREDIT_CARD",
       };

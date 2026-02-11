@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { encryptExport } from "@/lib/export-crypto";
 import {
   Dialog,
@@ -59,7 +60,7 @@ interface ExportDialogProps {
 
 export function ExportDialog({ trigger }: ExportDialogProps) {
   const t = useTranslations("Export");
-  const { encryptionKey } = useVault();
+  const { encryptionKey, userId } = useVault();
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [passwordProtect, setPasswordProtect] = useState(false);
@@ -105,9 +106,13 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
       for (const raw of rawEntries) {
         if (!raw.encryptedBlob) continue;
         try {
+          const aad = raw.aadVersion >= 1 && userId
+            ? buildPersonalEntryAAD(userId, raw.id)
+            : undefined;
           const plaintext = await decryptData(
             raw.encryptedBlob as EncryptedData,
-            encryptionKey
+            encryptionKey,
+            aad
           );
           const parsed = JSON.parse(plaintext);
           entries.push({

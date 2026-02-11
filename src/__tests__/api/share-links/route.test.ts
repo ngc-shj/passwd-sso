@@ -2,12 +2,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
 
-const { mockAuth, mockCreate, mockFindMany, mockFindUnique } = vi.hoisted(
+const { mockAuth, mockCreate, mockFindMany, mockFindUnique, mockDecryptServerData } = vi.hoisted(
   () => ({
     mockAuth: vi.fn(),
     mockCreate: vi.fn(),
     mockFindMany: vi.fn(),
     mockFindUnique: vi.fn(),
+    mockDecryptServerData: vi.fn().mockReturnValue(
+      JSON.stringify({ title: "Test", username: "user", password: "pass" })
+    ),
   })
 );
 
@@ -28,8 +31,7 @@ vi.mock("@/lib/crypto-server", () => ({
     authTag: "t".repeat(32),
   }),
   unwrapOrgKey: () => Buffer.alloc(32),
-  decryptServerData: () =>
-    JSON.stringify({ title: "Test", username: "user", password: "pass" }),
+  decryptServerData: mockDecryptServerData,
 }));
 vi.mock("@/lib/org-auth", () => ({
   requireOrgPermission: vi.fn(),
@@ -135,6 +137,76 @@ describe("POST /api/share-links", () => {
 
     expect(status).toBe(429);
     expect(json.error).toBe("Rate limit exceeded");
+  });
+
+  it("passes AAD to decryptServerData for org entry with aadVersion >= 1", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique
+      .mockResolvedValueOnce({
+        id: "org-entry-1",
+        entryType: "LOGIN",
+        aadVersion: 1,
+        encryptedBlob: "blob",
+        blobIv: "iv",
+        blobAuthTag: "tag",
+        org: {
+          id: "org-123",
+          encryptedOrgKey: "ek",
+          orgKeyIv: "oiv",
+          orgKeyAuthTag: "otag",
+        },
+      })
+      .mockResolvedValueOnce({ orgId: "org-123" }); // audit log lookup
+    mockCreate.mockResolvedValue({
+      id: "share-org",
+      expiresAt: new Date(Date.now() + 86400000),
+    });
+
+    const req = createRequest("POST", "http://localhost/api/share-links", {
+      body: {
+        orgPasswordEntryId: VALID_ENTRY_ID,
+        expiresIn: "1d",
+      },
+    });
+    await POST(req as never);
+
+    const decryptCall = mockDecryptServerData.mock.calls[0];
+    expect(decryptCall[2]).toBeInstanceOf(Buffer);
+  });
+
+  it("passes undefined AAD for org entry with aadVersion=0", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique
+      .mockResolvedValueOnce({
+        id: "org-entry-legacy",
+        entryType: "LOGIN",
+        aadVersion: 0,
+        encryptedBlob: "blob",
+        blobIv: "iv",
+        blobAuthTag: "tag",
+        org: {
+          id: "org-123",
+          encryptedOrgKey: "ek",
+          orgKeyIv: "oiv",
+          orgKeyAuthTag: "otag",
+        },
+      })
+      .mockResolvedValueOnce({ orgId: "org-123" });
+    mockCreate.mockResolvedValue({
+      id: "share-legacy",
+      expiresAt: new Date(Date.now() + 86400000),
+    });
+
+    const req = createRequest("POST", "http://localhost/api/share-links", {
+      body: {
+        orgPasswordEntryId: VALID_ENTRY_ID,
+        expiresIn: "1d",
+      },
+    });
+    await POST(req as never);
+
+    const decryptCall = mockDecryptServerData.mock.calls[0];
+    expect(decryptCall[2]).toBeUndefined();
   });
 
   it("returns 404 when entry not owned by user", async () => {

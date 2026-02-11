@@ -16,6 +16,7 @@ import {
   unwrapSecretKeyAsGrantee,
 } from "@/lib/crypto-emergency";
 import { deriveEncryptionKey, decryptData, hexDecode, type EncryptedData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 
 interface VaultEntry {
   id: string;
@@ -26,6 +27,7 @@ interface VaultEntry {
   overviewIv: string;
   overviewAuthTag: string;
   keyVersion: number;
+  aadVersion: number;
   entryType: string;
   isFavorite: boolean;
   isArchived: boolean;
@@ -127,7 +129,10 @@ export default function EmergencyVaultPage() {
             iv: entry.blobIv,
             authTag: entry.blobAuthTag,
           };
-          const plaintext = await decryptData(blobEncrypted, ownerEncKey);
+          const aad = entry.aadVersion >= 1
+            ? buildPersonalEntryAAD(vaultData.ownerId, entry.id)
+            : undefined;
+          const plaintext = await decryptData(blobEncrypted, ownerEncKey, aad);
           const data = JSON.parse(plaintext);
           decrypted.push({
             id: entry.id,

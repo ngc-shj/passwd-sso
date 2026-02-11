@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { encryptData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import {
   isEncryptedExport,
   decryptExport,
@@ -373,7 +374,7 @@ interface ImportDialogProps {
 
 export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
   const t = useTranslations("Import");
-  const { encryptionKey } = useVault();
+  const { encryptionKey, userId } = useVault();
   const fileRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState<ParsedEntry[]>([]);
@@ -587,17 +588,22 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
           });
         }
 
-        const encryptedBlob = await encryptData(fullBlob, encryptionKey);
-        const encryptedOverview = await encryptData(overviewBlob, encryptionKey);
+        const entryId = crypto.randomUUID();
+        const aad = userId ? buildPersonalEntryAAD(userId, entryId) : undefined;
+
+        const encryptedBlob = await encryptData(fullBlob, encryptionKey, aad);
+        const encryptedOverview = await encryptData(overviewBlob, encryptionKey, aad);
 
         const res = await fetch("/api/passwords", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            id: entryId,
             encryptedBlob,
             encryptedOverview,
             entryType: entry.entryType,
             keyVersion: 1,
+            aadVersion: aad ? AAD_VERSION : 0,
           }),
         });
 

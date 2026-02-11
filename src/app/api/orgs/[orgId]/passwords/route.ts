@@ -10,6 +10,7 @@ import {
   encryptServerData,
   decryptServerData,
 } from "@/lib/crypto-server";
+import { buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 
 type Params = { params: Promise<{ orgId: string }> };
 
@@ -119,6 +120,9 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const entries: OrgPasswordListEntry[] = passwords.map((entry: any) => {
+    const aad = entry.aadVersion >= 1
+      ? Buffer.from(buildOrgEntryAAD(orgId, entry.id, "overview"))
+      : undefined;
     const overview = JSON.parse(
       decryptServerData(
         {
@@ -126,7 +130,8 @@ export async function GET(req: NextRequest, { params }: Params) {
           iv: entry.overviewIv,
           authTag: entry.overviewAuthTag,
         },
-        orgKey
+        orgKey,
+        aad
       )
     );
 
@@ -342,17 +347,24 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
   }
 
-  const encryptedBlob = encryptServerData(fullBlob, orgKey);
-  const encryptedOverview = encryptServerData(overviewBlob, orgKey);
+  // Pre-generate entry ID for AAD binding
+  const entryId = crypto.randomUUID();
+  const blobAad = Buffer.from(buildOrgEntryAAD(orgId, entryId, "blob"));
+  const overviewAad = Buffer.from(buildOrgEntryAAD(orgId, entryId, "overview"));
+
+  const encryptedBlob = encryptServerData(fullBlob, orgKey, blobAad);
+  const encryptedOverview = encryptServerData(overviewBlob, orgKey, overviewAad);
 
   const entry = await prisma.orgPasswordEntry.create({
     data: {
+      id: entryId,
       encryptedBlob: encryptedBlob.ciphertext,
       blobIv: encryptedBlob.iv,
       blobAuthTag: encryptedBlob.authTag,
       encryptedOverview: encryptedOverview.ciphertext,
       overviewIv: encryptedOverview.iv,
       overviewAuthTag: encryptedOverview.authTag,
+      aadVersion: AAD_VERSION,
       entryType,
       orgId,
       createdById: session.user.id,
