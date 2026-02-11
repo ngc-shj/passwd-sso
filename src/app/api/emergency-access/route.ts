@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
   const existing = await prisma.emergencyAccessGrant.findFirst({
     where: {
       ownerId: session.user.id,
-      granteeEmail: { equals: granteeEmail, mode: "insensitive" },
+      granteeEmail: granteeEmail.toLowerCase(),
       status: { notIn: ["REVOKED", "REJECTED"] },
     },
   });
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
   const grant = await prisma.emergencyAccessGrant.create({
     data: {
       ownerId: session.user.id,
-      granteeEmail,
+      granteeEmail: granteeEmail.toLowerCase(),
       waitDays,
       token,
       tokenExpiresAt,
@@ -103,7 +103,7 @@ export async function GET() {
         { ownerId: session.user.id },
         { granteeId: session.user.id },
         {
-          granteeEmail: { equals: session.user.email, mode: "insensitive" },
+          granteeEmail: session.user.email.toLowerCase(),
           status: "PENDING",
         },
       ],
