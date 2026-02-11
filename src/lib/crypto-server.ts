@@ -14,6 +14,8 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
+  createHmac,
+  timingSafeEqual,
 } from "node:crypto";
 
 const ALGORITHM = "aes-256-gcm";
@@ -201,4 +203,85 @@ export function encryptShareData(plaintext: string): ServerEncryptedData {
 export function decryptShareData(encrypted: ServerEncryptedData): string {
   const masterKey = getMasterKey();
   return decryptServerData(encrypted, masterKey);
+}
+
+// ─── Passphrase Verifier (HMAC pepper) ──────────────────────────
+
+const VERIFIER_HEX_RE = /^[0-9a-f]{64}$/;
+
+/**
+ * Get the verifier pepper key.
+ *
+ * - Prefers VERIFIER_PEPPER_KEY env var (64-char hex = 256-bit).
+ * - In production, VERIFIER_PEPPER_KEY is **required** (throws on missing).
+ * - In dev/test, falls back to SHA-256("verifier-pepper:" || ORG_MASTER_KEY).
+ */
+function getVerifierPepper(): Buffer {
+  const pepperHex = process.env.VERIFIER_PEPPER_KEY;
+  if (pepperHex) {
+    if (!VERIFIER_HEX_RE.test(pepperHex.toLowerCase())) {
+      throw new Error(
+        "VERIFIER_PEPPER_KEY must be a 64-char hex string (256 bits)"
+      );
+    }
+    return Buffer.from(pepperHex, "hex");
+  }
+
+  // Production requires explicit pepper — no silent fallback
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "VERIFIER_PEPPER_KEY is required in production"
+    );
+  }
+
+  // Dev/test fallback: domain-separated derivation from ORG_MASTER_KEY
+  return createHash("sha256")
+    .update("verifier-pepper:")
+    .update(getMasterKey())
+    .digest();
+}
+
+/**
+ * HMAC(pepper, verifierHash) — for DB storage.
+ * Prevents offline dictionary attacks if the DB is leaked.
+ *
+ * Input is normalized to lowercase and validated as 64-char hex.
+ * Throws on invalid input (caller should validate before saving).
+ */
+export function hmacVerifier(verifierHashHex: string): string {
+  const normalized = verifierHashHex.toLowerCase();
+  if (!VERIFIER_HEX_RE.test(normalized)) {
+    throw new Error("verifierHash must be a 64-char lowercase hex string");
+  }
+  const pepper = getVerifierPepper();
+  return createHmac("sha256", pepper).update(normalized).digest("hex");
+}
+
+/**
+ * Verify a client-provided verifier hash against the stored HMAC.
+ * Uses timingSafeEqual to prevent timing attacks.
+ *
+ * Returns false (instead of throwing) if stored value is corrupted,
+ * to avoid 500 errors in production.
+ */
+export function verifyPassphraseVerifier(
+  clientVerifierHash: string,
+  storedHmacHex: string
+): boolean {
+  try {
+    const normalized = clientVerifierHash.toLowerCase();
+    if (!VERIFIER_HEX_RE.test(normalized)) return false;
+
+    const computed = hmacVerifier(normalized);
+    const storedNormalized = storedHmacHex.toLowerCase();
+    if (!VERIFIER_HEX_RE.test(storedNormalized)) return false;
+
+    const a = Buffer.from(computed, "hex");
+    const b = Buffer.from(storedNormalized, "hex");
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  } catch {
+    // Corrupted stored value or pepper issue — fail closed
+    return false;
+  }
 }

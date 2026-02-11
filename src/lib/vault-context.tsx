@@ -19,6 +19,7 @@ import {
   wrapSecretKey,
   unwrapSecretKey,
   computeAuthHash,
+  computePassphraseVerifier,
   createVerificationArtifact,
   verifyKey,
   type EncryptedData,
@@ -36,6 +37,7 @@ interface VaultContextValue {
   unlock: (passphrase: string) => Promise<boolean>;
   lock: () => void;
   setup: (passphrase: string) => Promise<void>;
+  changePassphrase: (currentPassphrase: string, newPassphrase: string) => Promise<void>;
 }
 
 const VaultContext = createContext<VaultContextValue | null>(null);
@@ -99,6 +101,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
   const secretKeyRef = useRef<Uint8Array | null>(null);
   const keyVersionRef = useRef<number>(0);
+  const accountSaltRef = useRef<Uint8Array | null>(null);
   const lastActivityRef = useRef(Date.now());
   const hiddenAtRef = useRef<number | null>(null);
 
@@ -273,7 +276,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     // 6. Create verification artifact
     const artifact = await createVerificationArtifact(encKey);
 
-    // 7. Send to server
+    // 7. Compute passphrase verifier for server-side identity confirmation
+    const verifierHash = await computePassphraseVerifier(passphrase, accountSalt);
+
+    // 8. Send to server
     const res = await fetch("/api/vault/setup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -283,6 +289,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         secretKeyAuthTag: wrappedKey.authTag,
         accountSalt: hexEncode(accountSalt),
         authHash,
+        verifierHash,
         verificationArtifact: artifact,
       }),
     });
@@ -292,7 +299,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       throw new Error(err.error || "Setup failed");
     }
 
-    // 8. Store encryption key in memory
+    // 9. Store encryption key and accountSalt in memory
+    accountSaltRef.current = accountSalt;
     setEncryptionKey(encKey);
     setVaultStatus("unlocked");
     lastActivityRef.current = Date.now();
@@ -341,15 +349,26 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // 5. Compute auth hash and verify with server (for logging/rate-limiting)
       const authKey = await deriveAuthKey(secretKey);
       const authHash = await computeAuthHash(authKey);
+
+      // 5b. Compute verifier for backfill if server doesn't have one yet
+      const unlockBody: Record<string, string> = { authHash };
+      if (!vaultData.hasVerifier) {
+        unlockBody.verifierHash = await computePassphraseVerifier(
+          passphrase,
+          accountSalt
+        );
+      }
+
       await fetch("/api/vault/unlock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authHash }),
+        body: JSON.stringify(unlockBody),
       });
 
-      // 6. Store secretKey and keyVersion for periodic EA auto-confirm, zero the local copy
+      // 6. Store secretKey, keyVersion, accountSalt for EA auto-confirm and changePassphrase
       secretKeyRef.current = new Uint8Array(secretKey);
       keyVersionRef.current = vaultData.keyVersion ?? 1;
+      accountSaltRef.current = accountSalt;
       secretKey.fill(0);
 
       // 7. Auto-confirm pending emergency access grants (fire-and-forget)
@@ -371,6 +390,58 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // ─── Change Passphrase ────────────────────────────────────────
+
+  const changePassphrase = useCallback(
+    async (currentPassphrase: string, newPassphrase: string) => {
+      if (!accountSaltRef.current || !secretKeyRef.current) {
+        throw new Error("Vault must be unlocked to change passphrase");
+      }
+
+      // 1. Compute current verifier for server-side identity confirmation
+      const currentVerifierHash = await computePassphraseVerifier(
+        currentPassphrase,
+        accountSaltRef.current
+      );
+
+      // 2. Generate new account salt
+      const newAccountSalt = generateAccountSalt();
+
+      // 3. Derive new wrapping key and re-wrap secretKey
+      const newWrappingKey = await deriveWrappingKey(newPassphrase, newAccountSalt);
+      const rewrapped = await wrapSecretKey(secretKeyRef.current, newWrappingKey);
+
+      // 4. Compute new verifier
+      const newVerifierHash = await computePassphraseVerifier(
+        newPassphrase,
+        newAccountSalt
+      );
+
+      // 5. Send to server
+      const res = await fetch("/api/vault/change-passphrase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentVerifierHash,
+          encryptedSecretKey: rewrapped.ciphertext,
+          secretKeyIv: rewrapped.iv,
+          secretKeyAuthTag: rewrapped.authTag,
+          accountSalt: hexEncode(newAccountSalt),
+          newVerifierHash,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw err;
+      }
+
+      // 6. Update local accountSalt (secretKey unchanged)
+      accountSaltRef.current = newAccountSalt;
+    },
+    []
+  );
+
   return (
     <VaultContext.Provider
       value={{
@@ -380,6 +451,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         unlock,
         lock,
         setup,
+        changePassphrase,
       }}
     >
       {children}

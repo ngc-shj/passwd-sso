@@ -26,6 +26,7 @@ export async function GET() {
       secretKeyIv: true,
       secretKeyAuthTag: true,
       keyVersion: true,
+      passphraseVerifierHmac: true,
     },
   });
 
@@ -56,6 +57,7 @@ export async function GET() {
     secretKeyIv: user.secretKeyIv,
     secretKeyAuthTag: user.secretKeyAuthTag,
     keyVersion: user.keyVersion,
+    hasVerifier: !!user.passphraseVerifierHmac,
     verificationArtifact: vaultKey
       ? {
           ciphertext: vaultKey.verificationCiphertext,

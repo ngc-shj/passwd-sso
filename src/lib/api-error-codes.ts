@@ -29,6 +29,8 @@ export const API_ERROR = {
   VAULT_ALREADY_SETUP: "VAULT_ALREADY_SETUP",
   VAULT_NOT_SETUP: "VAULT_NOT_SETUP",
   INVALID_PASSPHRASE: "INVALID_PASSPHRASE",
+  VERIFIER_NOT_SET: "VERIFIER_NOT_SET",
+  VERIFIER_VERSION_UNSUPPORTED: "VERIFIER_VERSION_UNSUPPORTED",
   USER_NOT_FOUND: "USER_NOT_FOUND",
 
   // ── Tags ──────────────────────────────────────────────────
@@ -111,6 +113,8 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   VAULT_ALREADY_SETUP: "vaultAlreadySetup",
   VAULT_NOT_SETUP: "vaultNotSetup",
   INVALID_PASSPHRASE: "invalidPassphrase",
+  VERIFIER_NOT_SET: "verifierNotSet",
+  VERIFIER_VERSION_UNSUPPORTED: "verifierVersionUnsupported",
   USER_NOT_FOUND: "userNotFound",
   TAG_ALREADY_EXISTS: "tagAlreadyExists",
   NOT_IN_TRASH: "notInTrash",

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
-import { KeyRound, Lock, Menu } from "lucide-react";
+import { KeyRound, Lock, Menu, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -16,6 +16,7 @@ import { UserAvatar } from "@/components/auth/user-avatar";
 import { SignOutButton } from "@/components/auth/signout-button";
 import { LanguageSwitcher } from "./language-switcher";
 import { useVault } from "@/lib/vault-context";
+import { ChangePassphraseDialog } from "@/components/vault/change-passphrase-dialog";
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -26,6 +27,7 @@ export function Header({ onMenuToggle }: HeaderProps) {
   const { status: vaultStatus, lock } = useVault();
   const t = useTranslations("Vault");
   const [mounted, setMounted] = useState(false);
+  const [changePassOpen, setChangePassOpen] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -69,6 +71,10 @@ export function Header({ onMenuToggle }: HeaderProps) {
               {vaultStatus === "unlocked" && (
                 <>
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setChangePassOpen(true)}>
+                    <RefreshCw className="h-4 w-4" />
+                    {t("changePassphrase")}
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={lock}>
                     <Lock className="h-4 w-4" />
                     {t("lockVault")}
@@ -87,6 +93,10 @@ export function Header({ onMenuToggle }: HeaderProps) {
           </Button>
         )}
       </div>
+      <ChangePassphraseDialog
+        open={changePassOpen}
+        onOpenChange={setChangePassOpen}
+      />
     </header>
   );
 }

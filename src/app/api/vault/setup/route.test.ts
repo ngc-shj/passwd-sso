@@ -15,6 +15,9 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockTransaction,
   },
 }));
+vi.mock("@/lib/crypto-server", () => ({
+  hmacVerifier: vi.fn().mockReturnValue("a".repeat(64)),
+}));
 
 import { POST } from "./route";
 
@@ -24,6 +27,7 @@ const validBody = {
   secretKeyAuthTag: "b".repeat(32),
   accountSalt: "c".repeat(64),
   authHash: "d".repeat(64),
+  verifierHash: "a".repeat(64),
   verificationArtifact: {
     ciphertext: "verification-cipher",
     iv: "e".repeat(24),

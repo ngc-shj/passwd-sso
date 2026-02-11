@@ -16,6 +16,13 @@ const HKDF_ENC_INFO = "passwd-sso-enc-v1";
 const HKDF_AUTH_INFO = "passwd-sso-auth-v1";
 const VERIFICATION_PLAINTEXT = "passwd-sso-vault-verification-v1";
 
+// ─── Passphrase Verifier constants (tied to VERIFIER_VERSION) ───
+export const VERIFIER_VERSION = 1;
+const VERIFIER_PBKDF2_HASH = "SHA-256";
+const VERIFIER_PBKDF2_ITERATIONS = 600_000;
+const VERIFIER_PBKDF2_BITS = 256; // 32 bytes output
+const VERIFIER_DOMAIN_PREFIX = "verifier";
+
 export interface EncryptedData {
   ciphertext: string; // hex
   iv: string; // hex
@@ -362,4 +369,59 @@ export async function decryptBinary(
   if (aad) params.additionalData = toArrayBuffer(aad);
 
   return crypto.subtle.decrypt(params, key, toArrayBuffer(combined));
+}
+
+// ─── Passphrase Verifier ────────────────────────────────────────
+
+/**
+ * Domain-separated verifier salt: SHA-256("verifier" || accountSalt).
+ * Ensures the verifier PBKDF2 uses a different salt than the wrapping key PBKDF2.
+ */
+export async function deriveVerifierSalt(
+  accountSalt: Uint8Array
+): Promise<Uint8Array> {
+  const prefix = new TextEncoder().encode(VERIFIER_DOMAIN_PREFIX);
+  const combined = new Uint8Array(prefix.length + accountSalt.length);
+  combined.set(prefix);
+  combined.set(accountSalt, prefix.length);
+  const hash = await crypto.subtle.digest("SHA-256", toArrayBuffer(combined));
+  return new Uint8Array(hash);
+}
+
+/**
+ * Compute a passphrase verifier for server-side identity confirmation.
+ *
+ * Chain: verifierSalt = SHA-256("verifier" || accountSalt)
+ *      → PBKDF2(passphrase, verifierSalt, 600k, SHA-256) → 256-bit verifierKey
+ *      → SHA-256(verifierKey) → verifierHash (64 hex)
+ *
+ * The server stores HMAC(pepper, verifierHash) — not the raw hash.
+ */
+export async function computePassphraseVerifier(
+  passphrase: string,
+  accountSalt: Uint8Array
+): Promise<string> {
+  const verifierSalt = await deriveVerifierSalt(accountSalt);
+
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    textEncode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+
+  const verifierKeyBits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: toArrayBuffer(verifierSalt),
+      iterations: VERIFIER_PBKDF2_ITERATIONS,
+      hash: VERIFIER_PBKDF2_HASH,
+    },
+    keyMaterial,
+    VERIFIER_PBKDF2_BITS
+  );
+
+  const verifierHash = await crypto.subtle.digest("SHA-256", verifierKeyBits);
+  return hexEncode(verifierHash);
 }
