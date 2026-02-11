@@ -337,7 +337,20 @@
     "strengthWeak": "Weak",
     "strengthFair": "Fair",
     "strengthGood": "Good",
-    "strengthStrong": "Strong"
+    "strengthStrong": "Strong",
+    "changePassphrase": "Change Passphrase",
+    "changePassphraseDescription": "Update your vault passphrase. Your saved data will not be affected.",
+    "currentPassphrase": "Current Passphrase",
+    "currentPassphrasePlaceholder": "Enter your current passphrase",
+    "newPassphrase": "New Passphrase",
+    "newPassphrasePlaceholder": "Enter a new passphrase (10+ characters)",
+    "confirmNewPassphrase": "Confirm New Passphrase",
+    "confirmNewPassphrasePlaceholder": "Re-enter your new passphrase",
+    "changePassphraseButton": "Change Passphrase",
+    "passphraseChanged": "Passphrase changed successfully.",
+    "changePassphraseFailed": "Failed to change passphrase.",
+    "verifierNotSetHint": "Please lock and unlock your vault once before changing your passphrase.",
+    "verifierVersionUnsupported": "Please update the app to change your passphrase."
   },
   "Tag": {
     "addTag": "Add tag",
@@ -766,6 +779,8 @@
     "invalidDateRange": "The expiry date must be after the issue date.",
     "alreadyRevoked": "Already revoked.",
     "upstreamError": "An external service error occurred.",
+    "verifierNotSet": "Please lock and unlock your vault first.",
+    "verifierVersionUnsupported": "Please update the app.",
     "unknownError": "An error occurred. Please try again."
   },
   "Attachments": {

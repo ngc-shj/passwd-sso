@@ -3,7 +3,9 @@ import { createHash, randomBytes } from "crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { hmacVerifier } from "@/lib/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -12,14 +14,15 @@ const setupLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 5 });
 
 const setupSchema = z.object({
   encryptedSecretKey: z.string().min(1),
-  secretKeyIv: z.string().length(24), // 12 bytes hex
-  secretKeyAuthTag: z.string().length(32), // 16 bytes hex
-  accountSalt: z.string().length(64), // 32 bytes hex
-  authHash: z.string().length(64), // SHA-256 hex
+  secretKeyIv: z.string().regex(/^[0-9a-f]{24}$/), // 12 bytes hex
+  secretKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/), // 16 bytes hex
+  accountSalt: z.string().regex(/^[0-9a-f]{64}$/), // 32 bytes hex
+  authHash: z.string().regex(/^[0-9a-f]{64}$/), // SHA-256 hex
+  verifierHash: z.string().regex(/^[0-9a-f]{64}$/), // passphrase verifier
   verificationArtifact: z.object({
     ciphertext: z.string().min(1),
-    iv: z.string().length(24),
-    authTag: z.string().length(32),
+    iv: z.string().regex(/^[0-9a-f]{24}$/),
+    authTag: z.string().regex(/^[0-9a-f]{32}$/),
   }),
 });
 
@@ -89,6 +92,8 @@ export async function POST(request: Request) {
         masterPasswordServerHash: serverHash,
         masterPasswordServerSalt: serverSalt,
         keyVersion: 1,
+        passphraseVerifierHmac: hmacVerifier(data.verifierHash),
+        passphraseVerifierVersion: VERIFIER_VERSION,
       },
     }),
     prisma.vaultKey.create({

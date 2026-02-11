@@ -3,13 +3,16 @@ import { createHash } from "crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { hmacVerifier } from "@/lib/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { z } from "zod";
 
 export const runtime = "nodejs";
 
 const unlockSchema = z.object({
-  authHash: z.string().length(64),
+  authHash: z.string().regex(/^[0-9a-f]{64}$/),
+  verifierHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 
 const unlockLimiter = createRateLimiter({
@@ -84,6 +87,20 @@ export async function POST(request: Request) {
 
   // Reset failure counter on success
   await unlockLimiter.clear(rateKey);
+
+  // Backfill passphrase verifier for existing users (transparent migration)
+  if (parsed.data.verifierHash) {
+    await prisma.user.updateMany({
+      where: {
+        id: session.user.id,
+        passphraseVerifierHmac: null,
+      },
+      data: {
+        passphraseVerifierHmac: hmacVerifier(parsed.data.verifierHash),
+        passphraseVerifierVersion: VERIFIER_VERSION,
+      },
+    });
+  }
 
   // Fetch verification artifact
   const vaultKey = await prisma.vaultKey.findUnique({

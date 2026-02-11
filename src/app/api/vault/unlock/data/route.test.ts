@@ -41,6 +41,7 @@ describe("GET /api/vault/unlock/data", () => {
       secretKeyIv: "iv-hex",
       secretKeyAuthTag: "tag-hex",
       keyVersion: 1,
+      passphraseVerifierHmac: null,
     });
     mockPrismaVaultKey.findUnique.mockResolvedValue({
       verificationCiphertext: "v-cipher",
@@ -57,6 +58,7 @@ describe("GET /api/vault/unlock/data", () => {
       secretKeyIv: "iv-hex",
       secretKeyAuthTag: "tag-hex",
       keyVersion: 1,
+      hasVerifier: false,
       verificationArtifact: {
         ciphertext: "v-cipher",
         iv: "v-iv",

@@ -337,7 +337,20 @@
     "strengthWeak": "弱い",
     "strengthFair": "やや弱い",
     "strengthGood": "良好",
-    "strengthStrong": "強い"
+    "strengthStrong": "強い",
+    "changePassphrase": "パスフレーズを変更",
+    "changePassphraseDescription": "保管庫のパスフレーズを更新します。保存済みデータには影響しません。",
+    "currentPassphrase": "現在のパスフレーズ",
+    "currentPassphrasePlaceholder": "現在のパスフレーズを入力",
+    "newPassphrase": "新しいパスフレーズ",
+    "newPassphrasePlaceholder": "新しいパスフレーズを入力（10文字以上）",
+    "confirmNewPassphrase": "新しいパスフレーズの確認",
+    "confirmNewPassphrasePlaceholder": "新しいパスフレーズを再入力",
+    "changePassphraseButton": "パスフレーズを変更",
+    "passphraseChanged": "パスフレーズを変更しました。",
+    "changePassphraseFailed": "パスフレーズの変更に失敗しました。",
+    "verifierNotSetHint": "パスフレーズを変更するには、一度保管庫をロックしてアンロックしてください。",
+    "verifierVersionUnsupported": "パスフレーズを変更するには、アプリを更新してください。"
   },
   "Tag": {
     "addTag": "タグを追加",
@@ -766,6 +779,8 @@
     "invalidDateRange": "有効期限は発行日より後の日付にしてください。",
     "alreadyRevoked": "既に取り消し済みです。",
     "upstreamError": "外部サービスでエラーが発生しました。",
+    "verifierNotSet": "一度保管庫をロックしてアンロックしてください。",
+    "verifierVersionUnsupported": "アプリを更新してください。",
     "unknownError": "エラーが発生しました。もう一度お試しください。"
   },
   "Attachments": {

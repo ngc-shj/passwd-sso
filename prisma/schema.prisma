@@ -69,6 +69,10 @@ model User {
   masterPasswordServerSalt String?   @map("master_password_server_salt") @db.VarChar(64)
   keyVersion               Int       @default(0) @map("key_version")
 
+  // HMAC(pepper, SHA-256(PBKDF2(passphrase, verifierSalt))) — 本人確認用、暗号鍵導出には使わない
+  passphraseVerifierHmac    String?   @map("passphrase_verifier_hmac") @db.VarChar(64)
+  passphraseVerifierVersion Int       @default(1) @map("passphrase_verifier_version")
+
   accounts   Account[]
   sessions   Session[]
   passwords  PasswordEntry[]

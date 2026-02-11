@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Loader2, Eye, EyeOff, ShieldCheck } from "lucide-react";
+import { getStrength, STRENGTH_COLORS } from "./passphrase-strength";
 
 export function VaultSetupWizard() {
   const t = useTranslations("Vault");
@@ -44,7 +45,7 @@ export function VaultSetupWizard() {
     }
   };
 
-  const strength = getStrength(passphrase, t);
+  const strength = getStrength(passphrase);
 
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
@@ -92,14 +93,14 @@ export function VaultSetupWizard() {
                         key={i}
                         className={`h-1 flex-1 rounded-full ${
                           i < strength.level
-                            ? strength.color
+                            ? STRENGTH_COLORS[strength.level]
                             : "bg-muted"
                         }`}
                       />
                     ))}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {strength.label}
+                    {strength.labelKey ? t(strength.labelKey) : ""}
                   </p>
                 </div>
               )}
@@ -149,30 +150,4 @@ export function VaultSetupWizard() {
       </Card>
     </div>
   );
-}
-
-function getStrength(
-  passphrase: string,
-  t: (key: string) => string,
-): {
-  level: number;
-  label: string;
-  color: string;
-} {
-  if (!passphrase) return { level: 0, label: "", color: "" };
-
-  let score = 0;
-  if (passphrase.length >= 10) score++;
-  if (passphrase.length >= 16) score++;
-  if (/[a-z]/.test(passphrase) && /[A-Z]/.test(passphrase)) score++;
-  if (/[0-9]/.test(passphrase) || /[^a-zA-Z0-9]/.test(passphrase)) score++;
-
-  const levels = [
-    { level: 1, label: t("strengthWeak"), color: "bg-red-500" },
-    { level: 2, label: t("strengthFair"), color: "bg-orange-500" },
-    { level: 3, label: t("strengthGood"), color: "bg-yellow-500" },
-    { level: 4, label: t("strengthStrong"), color: "bg-green-500" },
-  ];
-
-  return levels[Math.min(score, 3)];
 }
