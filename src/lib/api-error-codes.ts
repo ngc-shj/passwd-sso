@@ -69,6 +69,9 @@ export const API_ERROR = {
   INVALID_PREFIX: "INVALID_PREFIX",
   UPSTREAM_ERROR: "UPSTREAM_ERROR",
 
+  // ── Pagination ──────────────────────────────────────────────
+  INVALID_CURSOR: "INVALID_CURSOR",
+
   // ── Audit ─────────────────────────────────────────────────
   INVALID_BODY: "INVALID_BODY",
 
@@ -127,6 +130,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   ALREADY_REVOKED: "alreadyRevoked",
   INVALID_PREFIX: "invalidRequest",
   UPSTREAM_ERROR: "upstreamError",
+  INVALID_CURSOR: "invalidRequest",
   INVALID_BODY: "invalidRequest",
   // EA-only codes — generic fallback in non-EA contexts
   GRANT_NOT_PENDING: "unknownError",

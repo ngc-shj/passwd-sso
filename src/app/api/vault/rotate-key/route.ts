@@ -46,7 +46,13 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = await request.json();
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
+  }
+
   const parsed = rotateKeySchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(

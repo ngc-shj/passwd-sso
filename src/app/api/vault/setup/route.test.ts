@@ -52,6 +52,20 @@ describe("POST /api/vault/setup", () => {
     expect(json.error).toBe("VAULT_ALREADY_SETUP");
   });
 
+  it("returns 400 on malformed JSON", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null });
+    const { NextRequest } = await import("next/server");
+    const req = new NextRequest("http://localhost:3000/api/vault/setup", {
+      method: "POST",
+      body: "not-json",
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("INVALID_JSON");
+  });
+
   it("returns 400 on invalid body", async () => {
     mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null });
     const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: { authHash: "short" } }));

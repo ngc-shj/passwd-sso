@@ -60,12 +60,17 @@ export async function GET(req: NextRequest) {
     where.createdAt = createdAt;
   }
 
-  const logs = await prisma.auditLog.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-  });
+  let logs;
+  try {
+    logs = await prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+  } catch {
+    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+  }
 
   const hasMore = logs.length > limit;
   const items = hasMore ? logs.slice(0, limit) : logs;

@@ -30,20 +30,25 @@ export async function GET(req: NextRequest) {
     where.revokedAt = { not: null };
   }
 
-  const shares = await prisma.passwordShare.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    include: {
-      passwordEntry: {
-        select: { id: true },
+  let shares;
+  try {
+    shares = await prisma.passwordShare.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      include: {
+        passwordEntry: {
+          select: { id: true },
+        },
+        orgPasswordEntry: {
+          select: { id: true, org: { select: { name: true } } },
+        },
       },
-      orgPasswordEntry: {
-        select: { id: true, org: { select: { name: true } } },
-      },
-    },
-  });
+    });
+  } catch {
+    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+  }
 
   const hasMore = shares.length > limit;
   const items = hasMore ? shares.slice(0, limit) : shares;

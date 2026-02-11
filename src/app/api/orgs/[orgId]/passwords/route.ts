@@ -15,6 +15,8 @@ import { buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 
 type Params = { params: Promise<{ orgId: string }> };
 
+const VALID_ENTRY_TYPES: Set<string> = new Set(["LOGIN", "SECURE_NOTE", "CREDIT_CARD", "IDENTITY", "PASSKEY"]);
+
 // GET /api/orgs/[orgId]/passwords — List org passwords (server decrypts overviews)
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();
@@ -35,7 +37,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const { searchParams } = new URL(req.url);
   const tagId = searchParams.get("tag");
-  const entryType = searchParams.get("type") as EntryType | null;
+  const rawType = searchParams.get("type");
+  const entryType = rawType && VALID_ENTRY_TYPES.has(rawType) ? (rawType as EntryType) : null;
   const favoritesOnly = searchParams.get("favorites") === "true";
   const trashOnly = searchParams.get("trash") === "true";
   const archivedOnly = searchParams.get("archived") === "true";

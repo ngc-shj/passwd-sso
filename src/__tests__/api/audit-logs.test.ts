@@ -196,4 +196,20 @@ describe("GET /api/audit-logs", () => {
       })
     );
   });
+
+  it("returns 400 when cursor causes Prisma error", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindMany.mockRejectedValue(new Error("Record to return not found"));
+
+    const req = createRequest(
+      "GET",
+      "http://localhost/api/audit-logs?cursor=invalid-cursor-id"
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await GET(req as any);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("INVALID_CURSOR");
+  });
 });

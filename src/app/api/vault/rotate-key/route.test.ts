@@ -93,6 +93,19 @@ describe("POST /api/vault/rotate-key", () => {
     expect(json.error).toBe("INVALID_PASSPHRASE");
   });
 
+  it("returns 400 on malformed JSON", async () => {
+    const { NextRequest } = await import("next/server");
+    const req = new NextRequest("http://localhost/api/vault/rotate-key", {
+      method: "POST",
+      body: "not-json",
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("INVALID_JSON");
+  });
+
   it("returns 400 for invalid body", async () => {
     const res = await POST(
       createRequest("POST", "http://localhost/api/vault/rotate-key", {

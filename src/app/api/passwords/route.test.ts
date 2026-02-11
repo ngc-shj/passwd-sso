@@ -422,6 +422,16 @@ describe("POST /api/passwords", () => {
     expect(json[0].entryType).toBe("PASSKEY");
   });
 
+  it("ignores invalid entryType query param", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      searchParams: { type: "INVALID_TYPE" },
+    }));
+    const call = mockPrismaPasswordEntry.findMany.mock.calls[0][0];
+    expect(call.where).not.toHaveProperty("entryType");
+  });
+
   it("filters by entryType PASSKEY", async () => {
     mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
     await GET(createRequest("GET", "http://localhost:3000/api/passwords", {

@@ -6,6 +6,8 @@ import { createE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { EntryType } from "@prisma/client";
 
+const VALID_ENTRY_TYPES: Set<string> = new Set(["LOGIN", "SECURE_NOTE", "CREDIT_CARD", "IDENTITY", "PASSKEY"]);
+
 // GET /api/passwords - List passwords (returns encrypted overviews)
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -15,7 +17,8 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const tagId = searchParams.get("tag");
-  const entryType = searchParams.get("type") as EntryType | null;
+  const rawType = searchParams.get("type");
+  const entryType = rawType && VALID_ENTRY_TYPES.has(rawType) ? (rawType as EntryType) : null;
   const includeBlob = searchParams.get("include") === "blob";
   const favoritesOnly = searchParams.get("favorites") === "true";
   const trashOnly = searchParams.get("trash") === "true";

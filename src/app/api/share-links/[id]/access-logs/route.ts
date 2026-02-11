@@ -28,18 +28,23 @@ export async function GET(req: NextRequest, { params }: Params) {
   const cursor = searchParams.get("cursor");
   const limit = 50;
 
-  const logs = await prisma.shareAccessLog.findMany({
-    where: { shareId: id },
-    orderBy: { createdAt: "desc" },
-    take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    select: {
-      id: true,
-      ip: true,
-      userAgent: true,
-      createdAt: true,
-    },
-  });
+  let logs;
+  try {
+    logs = await prisma.shareAccessLog.findMany({
+      where: { shareId: id },
+      orderBy: { createdAt: "desc" },
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        ip: true,
+        userAgent: true,
+        createdAt: true,
+      },
+    });
+  } catch {
+    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+  }
 
   const hasMore = logs.length > limit;
   const items = hasMore ? logs.slice(0, limit) : logs;
