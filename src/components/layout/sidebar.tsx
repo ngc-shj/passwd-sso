@@ -8,11 +8,31 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
-import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, Fingerprint, ScrollText, Link as LinkIcon, HeartPulse } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, Fingerprint, ScrollText, Link as LinkIcon, HeartPulse, ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
+import { useLocalStorage } from "@/hooks/use-local-storage";
 import { ExportDialog } from "@/components/passwords/export-dialog";
 import { ImportDialog } from "@/components/passwords/import-dialog";
+
+// ─── Section keys ────────────────────────────────────────────────
+
+const SIDEBAR_SECTIONS = [
+  "vault", "categories", "organizations", "organize", "security", "utilities",
+] as const;
+type SidebarSection = typeof SIDEBAR_SECTIONS[number];
+
+const COLLAPSE_DEFAULTS: Record<SidebarSection, boolean> = {
+  vault: false,         // open
+  categories: true,     // closed
+  organizations: false, // open
+  organize: true,       // closed
+  security: false,      // open
+  utilities: true,      // closed
+};
+
+// ─── Interfaces ──────────────────────────────────────────────────
 
 interface TagItem {
   id: string;
@@ -38,6 +58,8 @@ interface SidebarProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
+
+// ─── Component ───────────────────────────────────────────────────
 
 export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const t = useTranslations("Dashboard");
@@ -72,6 +94,39 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const isOrgsManage = cleanPath === "/dashboard/orgs";
   const isShareLinks = cleanPath === "/dashboard/share-links";
   const isEmergencyAccess = cleanPath === "/dashboard/emergency-access" || cleanPath.startsWith("/dashboard/emergency-access/");
+
+  // ─── Collapsible state ──────────────────────────────────────────
+
+  const [collapsed, setCollapsed] = useLocalStorage<Record<SidebarSection, boolean>>(
+    "sidebar-collapsed",
+    COLLAPSE_DEFAULTS
+  );
+
+  const isOpen = (k: SidebarSection) => !collapsed[k];
+
+  const toggleSection = (k: SidebarSection) => (open: boolean) =>
+    setCollapsed((prev) => ({ ...prev, [k]: !open }));
+
+  // Auto-expand section when navigating to a route within it.
+  // One-time per navigation — user can manually close afterward.
+  useEffect(() => {
+    const toOpen: SidebarSection[] = [];
+    if (isVaultAll || isVaultFavorites || isVaultArchive || isVaultTrash) toOpen.push("vault");
+    if (activeTypeFilter !== null) toOpen.push("categories");
+    if (activeOrgId !== null || isOrgsManage) toOpen.push("organizations");
+    if (activeTagId !== null || activeOrgTagId !== null) toOpen.push("organize");
+    if (isWatchtower || isShareLinks || isEmergencyAccess || isAuditLog) toOpen.push("security");
+
+    if (toOpen.length > 0) {
+      setCollapsed((prev) => {
+        const next = { ...prev };
+        for (const k of toOpen) next[k] = false;
+        return next;
+      });
+    }
+  }, [pathname, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Data fetching ──────────────────────────────────────────────
 
   const fetchData = () => {
     fetch("/api/tags")
@@ -132,262 +187,246 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     window.dispatchEvent(new CustomEvent("vault-data-changed"));
   };
 
+  // ─── Content ────────────────────────────────────────────────────
+
   const content = (
     <nav className="space-y-4 p-4">
-      <div>
-        <SectionLabel>{t("vault")}</SectionLabel>
-        <div className="space-y-1">
-          <Button
-            variant={isVaultAll ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard" onClick={() => onOpenChange(false)}>
-              <FolderOpen className="h-4 w-4" />
-              {t("allPasswords")}
-            </Link>
-          </Button>
-          <Button
-            variant={isVaultFavorites ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard/favorites" onClick={() => onOpenChange(false)}>
-              <Star className="h-4 w-4" />
-              {t("favorites")}
-            </Link>
-          </Button>
-          <Button
-            variant={isVaultArchive ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard/archive" onClick={() => onOpenChange(false)}>
-              <Archive className="h-4 w-4" />
-              {t("archive")}
-            </Link>
-          </Button>
-          <Button
-            variant={isVaultTrash ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard/trash" onClick={() => onOpenChange(false)}>
-              <Trash2 className="h-4 w-4" />
-              {t("trash")}
-            </Link>
-          </Button>
-        </div>
-      </div>
+      {/* ── Vault ──────────────────────────────────────────── */}
+      <Collapsible open={isOpen("vault")} onOpenChange={toggleSection("vault")}>
+        <CollapsibleSectionHeader isOpen={isOpen("vault")}>
+          {t("vault")}
+        </CollapsibleSectionHeader>
+        <CollapsibleContent>
+          <div className="space-y-1">
+            <Button
+              variant={isVaultAll ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard" onClick={() => onOpenChange(false)}>
+                <FolderOpen className="h-4 w-4" />
+                {t("allPasswords")}
+              </Link>
+            </Button>
+            <Button
+              variant={isVaultFavorites ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard/favorites" onClick={() => onOpenChange(false)}>
+                <Star className="h-4 w-4" />
+                {t("favorites")}
+              </Link>
+            </Button>
+            <Button
+              variant={isVaultArchive ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard/archive" onClick={() => onOpenChange(false)}>
+                <Archive className="h-4 w-4" />
+                {t("archive")}
+              </Link>
+            </Button>
+            <Button
+              variant={isVaultTrash ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard/trash" onClick={() => onOpenChange(false)}>
+                <Trash2 className="h-4 w-4" />
+                {t("trash")}
+              </Link>
+            </Button>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
 
-      <div>
-        <SectionLabel>{t("categories")}</SectionLabel>
-        <div className="space-y-1">
-          <Button
-            variant={activeTypeFilter === "LOGIN" ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard?type=LOGIN" onClick={() => onOpenChange(false)}>
-              <KeyRound className="h-4 w-4" />
-              {t("catLogin")}
-            </Link>
-          </Button>
-          <Button
-            variant={activeTypeFilter === "SECURE_NOTE" ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard?type=SECURE_NOTE" onClick={() => onOpenChange(false)}>
-              <FileText className="h-4 w-4" />
-              {t("catSecureNote")}
-            </Link>
-          </Button>
-          <Button
-            variant={activeTypeFilter === "CREDIT_CARD" ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard?type=CREDIT_CARD" onClick={() => onOpenChange(false)}>
-              <CreditCard className="h-4 w-4" />
-              {t("catCreditCard")}
-            </Link>
-          </Button>
-          <Button
-            variant={activeTypeFilter === "IDENTITY" ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard?type=IDENTITY" onClick={() => onOpenChange(false)}>
-              <IdCard className="h-4 w-4" />
-              {t("catIdentity")}
-            </Link>
-          </Button>
-          <Button
-            variant={activeTypeFilter === "PASSKEY" ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard?type=PASSKEY" onClick={() => onOpenChange(false)}>
-              <Fingerprint className="h-4 w-4" />
-              {t("catPasskey")}
-            </Link>
-          </Button>
-        </div>
-      </div>
+      {/* ── Categories ─────────────────────────────────────── */}
+      <Collapsible open={isOpen("categories")} onOpenChange={toggleSection("categories")}>
+        <CollapsibleSectionHeader isOpen={isOpen("categories")}>
+          {t("categories")}
+        </CollapsibleSectionHeader>
+        <CollapsibleContent>
+          <div className="space-y-1">
+            <Button
+              variant={activeTypeFilter === "LOGIN" ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard?type=LOGIN" onClick={() => onOpenChange(false)}>
+                <KeyRound className="h-4 w-4" />
+                {t("catLogin")}
+              </Link>
+            </Button>
+            <Button
+              variant={activeTypeFilter === "SECURE_NOTE" ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard?type=SECURE_NOTE" onClick={() => onOpenChange(false)}>
+                <FileText className="h-4 w-4" />
+                {t("catSecureNote")}
+              </Link>
+            </Button>
+            <Button
+              variant={activeTypeFilter === "CREDIT_CARD" ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard?type=CREDIT_CARD" onClick={() => onOpenChange(false)}>
+                <CreditCard className="h-4 w-4" />
+                {t("catCreditCard")}
+              </Link>
+            </Button>
+            <Button
+              variant={activeTypeFilter === "IDENTITY" ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard?type=IDENTITY" onClick={() => onOpenChange(false)}>
+                <IdCard className="h-4 w-4" />
+                {t("catIdentity")}
+              </Link>
+            </Button>
+            <Button
+              variant={activeTypeFilter === "PASSKEY" ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard?type=PASSKEY" onClick={() => onOpenChange(false)}>
+                <Fingerprint className="h-4 w-4" />
+                {t("catPasskey")}
+              </Link>
+            </Button>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
 
-      <div>
-        <SectionLabel icon={<Building2 className="h-3 w-3" />}>
+      {/* ── Organizations ──────────────────────────────────── */}
+      <Collapsible open={isOpen("organizations")} onOpenChange={toggleSection("organizations")}>
+        <CollapsibleSectionHeader
+          icon={<Building2 className="h-3 w-3" />}
+          isOpen={isOpen("organizations")}
+        >
           {tOrg("organizations")}
-        </SectionLabel>
-        <div className="space-y-1">
-          {orgs.map((org) => (
-            <div key={org.id}>
-              <Button
-                variant={activeOrgId === org.id && !activeOrgTypeFilter ? "secondary" : "ghost"}
-                className="w-full justify-start gap-2"
-                asChild
-              >
-                <Link
-                  href={`/dashboard/orgs/${org.id}`}
-                  onClick={() => onOpenChange(false)}
+        </CollapsibleSectionHeader>
+        <CollapsibleContent>
+          <div className="space-y-1">
+            {orgs.map((org) => (
+              <div key={org.id}>
+                <Button
+                  variant={activeOrgId === org.id && !activeOrgTypeFilter ? "secondary" : "ghost"}
+                  className="w-full justify-start gap-2"
+                  asChild
                 >
-                  <Building2 className="h-4 w-4" />
-                  <span className="truncate">{org.name}</span>
-                </Link>
-              </Button>
-              {activeOrgId === org.id && (
-                <div className="ml-6 space-y-0.5">
-                  <Button
-                    variant={activeOrgTypeFilter === "LOGIN" ? "secondary" : "ghost"}
-                    size="sm"
-                    className="w-full justify-start gap-2 h-8"
-                    asChild
+                  <Link
+                    href={`/dashboard/orgs/${org.id}`}
+                    onClick={() => onOpenChange(false)}
                   >
-                    <Link href={`/dashboard/orgs/${org.id}?type=LOGIN`} onClick={() => onOpenChange(false)}>
-                      <KeyRound className="h-3.5 w-3.5" />
-                      {t("catLogin")}
-                    </Link>
-                  </Button>
-                  <Button
-                    variant={activeOrgTypeFilter === "SECURE_NOTE" ? "secondary" : "ghost"}
-                    size="sm"
-                    className="w-full justify-start gap-2 h-8"
-                    asChild
-                  >
-                    <Link href={`/dashboard/orgs/${org.id}?type=SECURE_NOTE`} onClick={() => onOpenChange(false)}>
-                      <FileText className="h-3.5 w-3.5" />
-                      {t("catSecureNote")}
-                    </Link>
-                  </Button>
-                  <Button
-                    variant={activeOrgTypeFilter === "CREDIT_CARD" ? "secondary" : "ghost"}
-                    size="sm"
-                    className="w-full justify-start gap-2 h-8"
-                    asChild
-                  >
-                    <Link href={`/dashboard/orgs/${org.id}?type=CREDIT_CARD`} onClick={() => onOpenChange(false)}>
-                      <CreditCard className="h-3.5 w-3.5" />
-                      {t("catCreditCard")}
-                    </Link>
-                  </Button>
-                  <Button
-                    variant={activeOrgTypeFilter === "IDENTITY" ? "secondary" : "ghost"}
-                    size="sm"
-                    className="w-full justify-start gap-2 h-8"
-                    asChild
-                  >
-                    <Link href={`/dashboard/orgs/${org.id}?type=IDENTITY`} onClick={() => onOpenChange(false)}>
-                      <IdCard className="h-3.5 w-3.5" />
-                      {t("catIdentity")}
-                    </Link>
-                  </Button>
-                  <Button
-                    variant={activeOrgTypeFilter === "PASSKEY" ? "secondary" : "ghost"}
-                    size="sm"
-                    className="w-full justify-start gap-2 h-8"
-                    asChild
-                  >
-                    <Link href={`/dashboard/orgs/${org.id}?type=PASSKEY`} onClick={() => onOpenChange(false)}>
-                      <Fingerprint className="h-3.5 w-3.5" />
-                      {t("catPasskey")}
-                    </Link>
-                  </Button>
-                </div>
-              )}
-            </div>
-          ))}
-          <Button
-            variant={isOrgsManage ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard/orgs" onClick={() => onOpenChange(false)}>
-              <Settings className="h-4 w-4" />
-              {tOrg("manage")}
-            </Link>
-          </Button>
-        </div>
-      </div>
+                    <Building2 className="h-4 w-4" />
+                    <span className="truncate">{org.name}</span>
+                  </Link>
+                </Button>
+                {activeOrgId === org.id && (
+                  <div className="ml-6 space-y-0.5">
+                    <Button
+                      variant={activeOrgTypeFilter === "LOGIN" ? "secondary" : "ghost"}
+                      size="sm"
+                      className="w-full justify-start gap-2 h-8"
+                      asChild
+                    >
+                      <Link href={`/dashboard/orgs/${org.id}?type=LOGIN`} onClick={() => onOpenChange(false)}>
+                        <KeyRound className="h-3.5 w-3.5" />
+                        {t("catLogin")}
+                      </Link>
+                    </Button>
+                    <Button
+                      variant={activeOrgTypeFilter === "SECURE_NOTE" ? "secondary" : "ghost"}
+                      size="sm"
+                      className="w-full justify-start gap-2 h-8"
+                      asChild
+                    >
+                      <Link href={`/dashboard/orgs/${org.id}?type=SECURE_NOTE`} onClick={() => onOpenChange(false)}>
+                        <FileText className="h-3.5 w-3.5" />
+                        {t("catSecureNote")}
+                      </Link>
+                    </Button>
+                    <Button
+                      variant={activeOrgTypeFilter === "CREDIT_CARD" ? "secondary" : "ghost"}
+                      size="sm"
+                      className="w-full justify-start gap-2 h-8"
+                      asChild
+                    >
+                      <Link href={`/dashboard/orgs/${org.id}?type=CREDIT_CARD`} onClick={() => onOpenChange(false)}>
+                        <CreditCard className="h-3.5 w-3.5" />
+                        {t("catCreditCard")}
+                      </Link>
+                    </Button>
+                    <Button
+                      variant={activeOrgTypeFilter === "IDENTITY" ? "secondary" : "ghost"}
+                      size="sm"
+                      className="w-full justify-start gap-2 h-8"
+                      asChild
+                    >
+                      <Link href={`/dashboard/orgs/${org.id}?type=IDENTITY`} onClick={() => onOpenChange(false)}>
+                        <IdCard className="h-3.5 w-3.5" />
+                        {t("catIdentity")}
+                      </Link>
+                    </Button>
+                    <Button
+                      variant={activeOrgTypeFilter === "PASSKEY" ? "secondary" : "ghost"}
+                      size="sm"
+                      className="w-full justify-start gap-2 h-8"
+                      asChild
+                    >
+                      <Link href={`/dashboard/orgs/${org.id}?type=PASSKEY`} onClick={() => onOpenChange(false)}>
+                        <Fingerprint className="h-3.5 w-3.5" />
+                        {t("catPasskey")}
+                      </Link>
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+            <Button
+              variant={isOrgsManage ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard/orgs" onClick={() => onOpenChange(false)}>
+                <Settings className="h-4 w-4" />
+                {tOrg("manage")}
+              </Link>
+            </Button>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
 
-
+      {/* ── Organize (tags) ────────────────────────────────── */}
       {(tags.filter((tg) => tg.passwordCount > 0).length > 0 || orgTagGroups.length > 0) && (
         <>
           <Separator />
-          <div>
-            <SectionLabel icon={<Tag className="h-3 w-3" />}>
+          <Collapsible open={isOpen("organize")} onOpenChange={toggleSection("organize")}>
+            <CollapsibleSectionHeader
+              icon={<Tag className="h-3 w-3" />}
+              isOpen={isOpen("organize")}
+            >
               {t("organize")}
-            </SectionLabel>
-            <div className="space-y-1">
-              {tags.filter((tg) => tg.passwordCount > 0).map((tag) => {
-                const colorClass = getTagColorClass(tag.color);
-                return (
-                  <Button
-                    key={tag.id}
-                    variant={activeTagId === tag.id ? "secondary" : "ghost"}
-                    className="w-full justify-start gap-2"
-                    asChild
-                  >
-                    <Link
-                      href={`/dashboard/tags/${tag.id}`}
-                      onClick={() => onOpenChange(false)}
-                    >
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "h-3 w-3 rounded-full p-0",
-                          colorClass && "tag-color-bg",
-                          colorClass
-                        )}
-                      />
-                      {tag.name}
-                      <span className="ml-auto text-xs text-muted-foreground">
-                        {tag.passwordCount}
-                      </span>
-                    </Link>
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-
-          {orgTagGroups.map((group) => (
-            <div key={group.orgId}>
-              <SectionLabel icon={<Building2 className="h-3 w-3" />}>
-                {group.orgName}
-              </SectionLabel>
+            </CollapsibleSectionHeader>
+            <CollapsibleContent>
               <div className="space-y-1">
-                {group.tags.map((tag) => {
+                {tags.filter((tg) => tg.passwordCount > 0).map((tag) => {
                   const colorClass = getTagColorClass(tag.color);
                   return (
                     <Button
                       key={tag.id}
-                      variant={activeOrgTagId === tag.id ? "secondary" : "ghost"}
+                      variant={activeTagId === tag.id ? "secondary" : "ghost"}
                       className="w-full justify-start gap-2"
                       asChild
                     >
                       <Link
-                        href={`/dashboard/orgs/${group.orgId}?tag=${tag.id}`}
+                        href={`/dashboard/tags/${tag.id}`}
                         onClick={() => onOpenChange(false)}
                       >
                         <Badge
@@ -400,111 +439,160 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                         />
                         {tag.name}
                         <span className="ml-auto text-xs text-muted-foreground">
-                          {tag.count}
+                          {tag.passwordCount}
                         </span>
                       </Link>
                     </Button>
                   );
                 })}
               </div>
-            </div>
-          ))}
+
+              {orgTagGroups.map((group) => (
+                <div key={group.orgId}>
+                  <SectionLabel icon={<Building2 className="h-3 w-3" />}>
+                    {group.orgName}
+                  </SectionLabel>
+                  <div className="space-y-1">
+                    {group.tags.map((tag) => {
+                      const colorClass = getTagColorClass(tag.color);
+                      return (
+                        <Button
+                          key={tag.id}
+                          variant={activeOrgTagId === tag.id ? "secondary" : "ghost"}
+                          className="w-full justify-start gap-2"
+                          asChild
+                        >
+                          <Link
+                            href={`/dashboard/orgs/${group.orgId}?tag=${tag.id}`}
+                            onClick={() => onOpenChange(false)}
+                          >
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "h-3 w-3 rounded-full p-0",
+                                colorClass && "tag-color-bg",
+                                colorClass
+                              )}
+                            />
+                            {tag.name}
+                            <span className="ml-auto text-xs text-muted-foreground">
+                              {tag.count}
+                            </span>
+                          </Link>
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </CollapsibleContent>
+          </Collapsible>
         </>
       )}
 
       <Separator />
 
-      <div>
-        <SectionLabel>{t("security")}</SectionLabel>
-        <div className="space-y-1">
-          <Button
-            variant={isWatchtower ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard/watchtower" onClick={() => onOpenChange(false)}>
-              <Shield className="h-4 w-4" />
-              {t("watchtower")}
-            </Link>
-          </Button>
-          <Button
-            variant={isShareLinks ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard/share-links" onClick={() => onOpenChange(false)}>
-              <LinkIcon className="h-4 w-4" />
-              {t("shareLinks")}
-            </Link>
-          </Button>
-          <Button
-            variant={isEmergencyAccess ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard/emergency-access" onClick={() => onOpenChange(false)}>
-              <HeartPulse className="h-4 w-4" />
-              {t("emergencyAccess")}
-            </Link>
-          </Button>
-          <SectionLabel icon={<ScrollText className="h-3 w-3" />}>
-            {t("auditLog")}
-          </SectionLabel>
+      {/* ── Security ───────────────────────────────────────── */}
+      <Collapsible open={isOpen("security")} onOpenChange={toggleSection("security")}>
+        <CollapsibleSectionHeader isOpen={isOpen("security")}>
+          {t("security")}
+        </CollapsibleSectionHeader>
+        <CollapsibleContent>
           <div className="space-y-1">
             <Button
-              variant={isPersonalAuditLog ? "secondary" : "ghost"}
+              variant={isWatchtower ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
-              <Link href="/dashboard/audit-logs" onClick={() => onOpenChange(false)}>
-                <FolderOpen className="h-4 w-4" />
-                {t("auditLogPersonal")}
+              <Link href="/dashboard/watchtower" onClick={() => onOpenChange(false)}>
+                <Shield className="h-4 w-4" />
+                {t("watchtower")}
               </Link>
             </Button>
-            {orgs.filter((org) => org.role === "OWNER" || org.role === "ADMIN").map((org) => (
+            <Button
+              variant={isShareLinks ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard/share-links" onClick={() => onOpenChange(false)}>
+                <LinkIcon className="h-4 w-4" />
+                {t("shareLinks")}
+              </Link>
+            </Button>
+            <Button
+              variant={isEmergencyAccess ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard/emergency-access" onClick={() => onOpenChange(false)}>
+                <HeartPulse className="h-4 w-4" />
+                {t("emergencyAccess")}
+              </Link>
+            </Button>
+            <SectionLabel icon={<ScrollText className="h-3 w-3" />}>
+              {t("auditLog")}
+            </SectionLabel>
+            <div className="ml-4 space-y-1">
               <Button
-                key={org.id}
-                variant={activeAuditOrgId === org.id ? "secondary" : "ghost"}
+                variant={isPersonalAuditLog ? "secondary" : "ghost"}
                 className="w-full justify-start gap-2"
                 asChild
               >
-                <Link
-                  href={`/dashboard/orgs/${org.id}/audit-logs`}
-                  onClick={() => onOpenChange(false)}
-                >
-                  <Building2 className="h-4 w-4" />
-                  <span className="truncate">{org.name}</span>
+                <Link href="/dashboard/audit-logs" onClick={() => onOpenChange(false)}>
+                  <FolderOpen className="h-4 w-4" />
+                  {t("auditLogPersonal")}
                 </Link>
               </Button>
-            ))}
+              {orgs.filter((org) => org.role === "OWNER" || org.role === "ADMIN").map((org) => (
+                <Button
+                  key={org.id}
+                  variant={activeAuditOrgId === org.id ? "secondary" : "ghost"}
+                  className="w-full justify-start gap-2"
+                  asChild
+                >
+                  <Link
+                    href={`/dashboard/orgs/${org.id}/audit-logs`}
+                    onClick={() => onOpenChange(false)}
+                  >
+                    <Building2 className="h-4 w-4" />
+                    <span className="truncate">{org.name}</span>
+                  </Link>
+                </Button>
+              ))}
+            </div>
           </div>
-        </div>
-      </div>
+        </CollapsibleContent>
+      </Collapsible>
 
       <Separator />
 
-      <div>
-        <SectionLabel>{t("utilities")}</SectionLabel>
-        <div className="space-y-1">
-          <ExportDialog
-            trigger={
-              <Button variant="ghost" className="w-full justify-start gap-2">
-                <Download className="h-4 w-4" />
-                {t("export")}
-              </Button>
-            }
-          />
-          <ImportDialog
-            trigger={
-              <Button variant="ghost" className="w-full justify-start gap-2">
-                <Upload className="h-4 w-4" />
-                {t("import")}
-              </Button>
-            }
-            onComplete={handleImportComplete}
-          />
-        </div>
-      </div>
+      {/* ── Utilities ──────────────────────────────────────── */}
+      <Collapsible open={isOpen("utilities")} onOpenChange={toggleSection("utilities")}>
+        <CollapsibleSectionHeader isOpen={isOpen("utilities")}>
+          {t("utilities")}
+        </CollapsibleSectionHeader>
+        <CollapsibleContent>
+          <div className="space-y-1">
+            <ExportDialog
+              trigger={
+                <Button variant="ghost" className="w-full justify-start gap-2">
+                  <Download className="h-4 w-4" />
+                  {t("export")}
+                </Button>
+              }
+            />
+            <ImportDialog
+              trigger={
+                <Button variant="ghost" className="w-full justify-start gap-2">
+                  <Upload className="h-4 w-4" />
+                  {t("import")}
+                </Button>
+              }
+              onComplete={handleImportComplete}
+            />
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </nav>
   );
 
@@ -525,6 +613,32 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   );
 }
 
+// ─── Sub-components ──────────────────────────────────────────────
+
+/** Interactive collapsible section header with chevron indicator. */
+function CollapsibleSectionHeader({
+  children,
+  icon,
+  isOpen,
+}: {
+  children: React.ReactNode;
+  icon?: React.ReactNode;
+  isOpen: boolean;
+}) {
+  return (
+    <CollapsibleTrigger asChild>
+      <button type="button" className="w-full px-3 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center justify-between gap-1 hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm">
+        <span className="flex items-center gap-1">
+          {icon}
+          {children}
+        </span>
+        {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+      </button>
+    </CollapsibleTrigger>
+  );
+}
+
+/** Non-interactive label for sub-sections (e.g. Audit Log within Security). */
 function SectionLabel({
   children,
   icon,
