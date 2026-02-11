@@ -3,7 +3,7 @@ import { STALE_ELIGIBLE_STATUSES } from "@/lib/emergency-access-state";
 
 /**
  * Mark all escrow-holding grants as STALE when the owner's keyVersion changes.
- * Called from key rotation endpoints.
+ * Called from POST /api/vault/rotate-key after keyVersion bump.
  */
 export async function markGrantsStaleForOwner(ownerId: string, newKeyVersion: number): Promise<number> {
   const result = await prisma.emergencyAccessGrant.updateMany({

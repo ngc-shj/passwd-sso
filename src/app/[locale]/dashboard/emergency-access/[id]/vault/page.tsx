@@ -92,7 +92,7 @@ export default function EmergencyVaultPage() {
         grantId: vaultData.grantId,
         ownerId: vaultData.ownerId,
         granteeId: vaultData.granteeId,
-        keyVersion: 1,
+        keyVersion: vaultData.keyVersion ?? 1,
         wrapVersion: vaultData.wrapVersion ?? 1,
       };
       const ownerSecretKey = await unwrapSecretKeyAsGrantee(
