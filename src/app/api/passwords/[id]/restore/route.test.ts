@@ -66,7 +66,7 @@ describe("POST /api/passwords/[id]/restore", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("Not in trash");
+    expect(json.error).toBe("NOT_IN_TRASH");
   });
 
   it("restores entry from trash successfully", async () => {

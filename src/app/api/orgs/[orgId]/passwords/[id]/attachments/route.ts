@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
+import { API_ERROR } from "@/lib/api-error-codes";
 import { unwrapOrgKey, encryptServerBinary } from "@/lib/crypto-server";
 import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import {
@@ -25,7 +26,7 @@ export async function GET(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId, id } = await params;
@@ -45,7 +46,7 @@ export async function GET(
   });
 
   if (!entry || entry.orgId !== orgId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   const attachments = await prisma.attachment.findMany({
@@ -70,7 +71,7 @@ export async function POST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId, id } = await params;
@@ -99,7 +100,7 @@ export async function POST(
   });
 
   if (!entry || entry.orgId !== orgId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   // Check attachment count limit
@@ -118,7 +119,7 @@ export async function POST(
   try {
     formData = await req.formData();
   } catch {
-    return NextResponse.json({ error: "Invalid form data" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_FORM_DATA }, { status: 400 });
   }
 
   const file = formData.get("file") as File | null;

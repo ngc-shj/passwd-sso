@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { markGrantsStaleForOwner } from "@/lib/emergency-access-server";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { API_ERROR } from "@/lib/api-error-codes";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -35,12 +36,12 @@ const rotateKeySchema = z.object({
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   if (!(await rotateLimiter.check(`rl:vault_rotate:${session.user.id}`))) {
     return NextResponse.json(
-      { error: "Rate limit exceeded" },
+      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 }
     );
   }
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
   const parsed = rotateKeySchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.flatten() },
+      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
       { status: 400 }
     );
   }
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
 
   if (!user?.vaultSetupAt) {
     return NextResponse.json(
-      { error: "Vault not set up" },
+      { error: API_ERROR.VAULT_NOT_SETUP },
       { status: 404 }
     );
   }
@@ -78,7 +79,7 @@ export async function POST(request: Request) {
 
   if (computedHash !== user.masterPasswordServerHash) {
     return NextResponse.json(
-      { error: "Invalid current passphrase" },
+      { error: API_ERROR.INVALID_PASSPHRASE },
       { status: 401 }
     );
   }

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createOrgPasswordSchema, createOrgSecureNoteSchema, createOrgCreditCardSchema, createOrgIdentitySchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
+import { API_ERROR } from "@/lib/api-error-codes";
 import type { EntryType } from "@prisma/client";
 import {
   unwrapOrgKey,
@@ -18,7 +19,7 @@ type Params = { params: Promise<{ orgId: string }> };
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId } = await params;
@@ -49,7 +50,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   });
 
   if (!org) {
-    return NextResponse.json({ error: "Org not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.ORG_NOT_FOUND }, { status: 404 });
   }
 
   const orgKey = unwrapOrgKey({
@@ -177,7 +178,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId } = await params;
@@ -195,7 +196,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
   // Check entry type
@@ -214,7 +215,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   });
 
   if (!org) {
-    return NextResponse.json({ error: "Org not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.ORG_NOT_FOUND }, { status: 404 });
   }
 
   const orgKey = unwrapOrgKey({
@@ -235,7 +236,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const parsed = createOrgSecureNoteSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: parsed.error.flatten() },
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
         { status: 400 }
       );
     }
@@ -252,7 +253,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const parsed = createOrgCreditCardSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: parsed.error.flatten() },
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
         { status: 400 }
       );
     }
@@ -283,7 +284,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const parsed = createOrgIdentitySchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: parsed.error.flatten() },
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
         { status: 400 }
       );
     }
@@ -316,7 +317,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const parsed = createOrgPasswordSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: parsed.error.flatten() },
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
         { status: 400 }
       );
     }

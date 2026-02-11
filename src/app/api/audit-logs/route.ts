@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import type { AuditAction } from "@prisma/client";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 const VALID_ACTIONS: AuditAction[] = [
   "AUTH_LOGIN",
@@ -32,7 +33,7 @@ const VALID_ACTIONS: AuditAction[] = [
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { searchParams } = new URL(req.url);

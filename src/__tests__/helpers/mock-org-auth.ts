@@ -42,11 +42,11 @@ export function createOrgAuthMocks(
 
   return {
     requireOrgMember: vi.fn(async () => {
-      if (!membership) throw new OrgAuthError("Not found", 404);
+      if (!membership) throw new OrgAuthError("NOT_FOUND", 404);
       return membership;
     }),
     requireOrgPermission: vi.fn(async () => {
-      if (!membership) throw new OrgAuthError("Not found", 404);
+      if (!membership) throw new OrgAuthError("NOT_FOUND", 404);
       return membership;
     }),
     hasOrgPermission: vi.fn(() => !!membership),

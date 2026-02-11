@@ -31,6 +31,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 
 interface ShareLink {
   id: string;
@@ -61,6 +62,7 @@ export function ShareDialog({
   decryptedData,
 }: ShareDialogProps) {
   const t = useTranslations("Share");
+  const tApi = useTranslations("ApiErrors");
   const [expiresIn, setExpiresIn] = useState<string>("1d");
   const [maxViews, setMaxViews] = useState<string>("");
   const [creating, setCreating] = useState(false);
@@ -127,7 +129,7 @@ export function ShareDialog({
 
       if (!res.ok) {
         const err = await res.json().catch(() => null);
-        toast.error(err?.error || t("createError"));
+        toast.error(tApi(apiErrorToI18nKey(err?.error)));
         return;
       }
 

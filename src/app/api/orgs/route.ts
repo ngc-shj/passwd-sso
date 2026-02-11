@@ -3,12 +3,13 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createOrgSchema } from "@/lib/validations";
 import { generateOrgKey, wrapOrgKey } from "@/lib/crypto-server";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 // GET /api/orgs — List organizations the user belongs to
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const memberships = await prisma.orgMember.findMany({
@@ -39,20 +40,20 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
   const parsed = createOrgSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.flatten() },
+      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
       { status: 400 }
     );
   }
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest) {
   });
   if (existing) {
     return NextResponse.json(
-      { error: "Slug already taken" },
+      { error: API_ERROR.SLUG_ALREADY_TAKEN },
       { status: 409 }
     );
   }

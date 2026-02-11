@@ -65,7 +65,7 @@ describe("POST /api/emergency-access", () => {
     const res = await POST(req);
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("Invalid JSON");
+    expect(json.error).toBe("INVALID_JSON");
   });
 
   it("returns 400 for invalid waitDays", async () => {

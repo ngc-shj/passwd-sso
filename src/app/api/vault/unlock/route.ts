@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { API_ERROR } from "@/lib/api-error-codes";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -26,13 +27,13 @@ const unlockLimiter = createRateLimiter({
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const rateKey = `rl:vault_unlock:${session.user.id}`;
   if (!(await unlockLimiter.check(rateKey))) {
     return NextResponse.json(
-      { error: "Rate limit exceeded" },
+      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 }
     );
   }
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
   const parsed = unlockSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.flatten() },
+      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
       { status: 400 }
     );
   }
@@ -62,7 +63,7 @@ export async function POST(request: Request) {
 
   if (!user?.vaultSetupAt) {
     return NextResponse.json(
-      { error: "Vault not set up" },
+      { error: API_ERROR.VAULT_NOT_SETUP },
       { status: 404 }
     );
   }

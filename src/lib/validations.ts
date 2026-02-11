@@ -444,6 +444,15 @@ export const confirmEmergencyGrantSchema = z.object({
   keyVersion: z.number().int().min(1),
 });
 
+export const acceptEmergencyGrantByIdSchema = z.object({
+  granteePublicKey: z.string().min(1),
+  encryptedPrivateKey: z.object({
+    ciphertext: z.string().min(1),
+    iv: z.string().length(24),
+    authTag: z.string().length(32),
+  }),
+});
+
 export const revokeEmergencyGrantSchema = z.object({
   permanent: z.boolean().default(true),
 });

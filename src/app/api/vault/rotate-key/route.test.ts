@@ -90,7 +90,7 @@ describe("POST /api/vault/rotate-key", () => {
     );
     expect(res.status).toBe(401);
     const json = await res.json();
-    expect(json.error).toContain("passphrase");
+    expect(json.error).toBe("INVALID_PASSPHRASE");
   });
 
   it("returns 400 for invalid body", async () => {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 type RouteContext = {
   params: Promise<{ id: string; attachmentId: string }>;
@@ -14,7 +15,7 @@ export async function GET(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { id, attachmentId } = await params;
@@ -25,10 +26,10 @@ export async function GET(
   });
 
   if (!entry) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
   if (entry.userId !== session.user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
   const attachment = await prisma.attachment.findUnique({
@@ -36,7 +37,7 @@ export async function GET(
   });
 
   if (!attachment) {
-    return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
   }
 
   // Return encrypted data + crypto metadata for client-side decryption
@@ -60,7 +61,7 @@ export async function DELETE(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { id, attachmentId } = await params;
@@ -71,10 +72,10 @@ export async function DELETE(
   });
 
   if (!entry) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
   if (entry.userId !== session.user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
   const attachment = await prisma.attachment.findUnique({
@@ -83,7 +84,7 @@ export async function DELETE(
   });
 
   if (!attachment) {
-    return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
   }
 
   await prisma.attachment.delete({

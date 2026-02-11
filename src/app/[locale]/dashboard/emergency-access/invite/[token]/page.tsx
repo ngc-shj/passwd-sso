@@ -15,6 +15,7 @@ import {
   exportPrivateKey,
   encryptPrivateKey,
 } from "@/lib/crypto-emergency";
+import { API_ERROR, eaErrorToI18nKey } from "@/lib/api-error-codes";
 
 export default function AcceptEmergencyInvitePage() {
   const t = useTranslations("EmergencyAccess");
@@ -67,11 +68,13 @@ export default function AcceptEmergencyInvitePage() {
       });
 
       if (!res.ok) {
-        toast.error(
-          res.status === 404 ? t("invalidInvitation")
-            : res.status === 410 ? t("invitationAlreadyUsed")
-            : t("networkError")
-        );
+        const data = await res.json().catch(() => null);
+        // Token-based NOT_FOUND means invalid/expired invitation (better UX message)
+        if (data?.error === API_ERROR.NOT_FOUND) {
+          toast.error(t("invalidInvitation"));
+        } else {
+          toast.error(t(eaErrorToI18nKey(data?.error)));
+        }
         return;
       }
 
@@ -94,11 +97,12 @@ export default function AcceptEmergencyInvitePage() {
       });
 
       if (!res.ok) {
-        toast.error(
-          res.status === 404 ? t("invalidInvitation")
-            : res.status === 410 ? t("invitationAlreadyUsed")
-            : t("networkError")
-        );
+        const data = await res.json().catch(() => null);
+        if (data?.error === API_ERROR.NOT_FOUND) {
+          toast.error(t("invalidInvitation"));
+        } else {
+          toast.error(t(eaErrorToI18nKey(data?.error)));
+        }
         return;
       }
 

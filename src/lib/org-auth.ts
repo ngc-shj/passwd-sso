@@ -9,6 +9,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
+import { API_ERROR } from "@/lib/api-error-codes";
 import type { OrgRole } from "@prisma/client";
 
 // ─── Permission Definitions ─────────────────────────────────────
@@ -99,7 +100,7 @@ export async function requireOrgMember(userId: string, orgId: string) {
   const membership = await getOrgMembership(userId, orgId);
   if (!membership) {
     // Hide org existence from non-members
-    throw new OrgAuthError("Not found", 404);
+    throw new OrgAuthError(API_ERROR.NOT_FOUND, 404);
   }
   return membership;
 }
@@ -115,7 +116,7 @@ export async function requireOrgPermission(
 ) {
   const membership = await requireOrgMember(userId, orgId);
   if (!hasOrgPermission(membership.role, permission)) {
-    throw new OrgAuthError("Forbidden", 403);
+    throw new OrgAuthError(API_ERROR.FORBIDDEN, 403);
   }
   return membership;
 }

@@ -26,7 +26,7 @@ describe("GET /api/audit-logs", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(401);
-    expect(json.error).toBe("Unauthorized");
+    expect(json.error).toBe("UNAUTHORIZED");
   });
 
   it("returns personal audit logs with pagination", async () => {

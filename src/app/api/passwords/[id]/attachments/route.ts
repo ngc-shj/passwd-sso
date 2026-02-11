@@ -8,6 +8,7 @@ import {
   MAX_FILE_SIZE,
   MAX_ATTACHMENTS_PER_ENTRY,
 } from "@/lib/validations";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -22,7 +23,7 @@ export async function GET(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { id } = await params;
@@ -33,10 +34,10 @@ export async function GET(
   });
 
   if (!entry) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
   if (entry.userId !== session.user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
   const attachments = await prisma.attachment.findMany({
@@ -61,7 +62,7 @@ export async function POST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { id } = await params;
@@ -72,10 +73,10 @@ export async function POST(
   });
 
   if (!entry) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
   if (entry.userId !== session.user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
   // Check attachment count limit
@@ -94,7 +95,7 @@ export async function POST(
   try {
     formData = await req.formData();
   } catch {
-    return NextResponse.json({ error: "Invalid form data" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_FORM_DATA }, { status: 400 });
   }
 
   const clientId = formData.get("id") as string | null;
@@ -116,10 +117,10 @@ export async function POST(
 
   // Validate iv/authTag format (hex strings)
   if (!/^[0-9a-f]{24}$/.test(iv)) {
-    return NextResponse.json({ error: "Invalid iv format" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_IV_FORMAT }, { status: 400 });
   }
   if (!/^[0-9a-f]{32}$/.test(authTag)) {
-    return NextResponse.json({ error: "Invalid authTag format" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_AUTH_TAG_FORMAT }, { status: 400 });
   }
 
   // Validate original file size (before encryption)

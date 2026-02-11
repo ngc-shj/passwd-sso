@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { canTransition } from "@/lib/emergency-access-state";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 
-// POST /api/emergency-access/[id]/approve — Owner early-approves emergency access request
+// POST /api/emergency-access/[id]/decline — Decline a grant by ID (authenticated grantee)
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth();
-  if (!session?.user?.id) {
+  if (!session?.user?.id || !session.user.email) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
@@ -21,34 +20,32 @@ export async function POST(
     where: { id },
   });
 
-  if (!grant || grant.ownerId !== session.user.id) {
+  if (!grant) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  if (!canTransition(grant.status, "ACTIVATED")) {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_STATUS },
-      { status: 400 }
-    );
+  if (grant.status !== "PENDING") {
+    return NextResponse.json({ error: API_ERROR.GRANT_NOT_PENDING }, { status: 400 });
+  }
+
+  if (grant.granteeEmail.toLowerCase() !== session.user.email.toLowerCase()) {
+    return NextResponse.json({ error: API_ERROR.NOT_AUTHORIZED_FOR_GRANT }, { status: 403 });
   }
 
   await prisma.emergencyAccessGrant.update({
     where: { id },
-    data: {
-      status: "ACTIVATED",
-      activatedAt: new Date(),
-    },
+    data: { status: "REJECTED" },
   });
 
   logAudit({
     scope: "PERSONAL",
-    action: "EMERGENCY_ACCESS_ACTIVATE",
+    action: "EMERGENCY_GRANT_REJECT",
     userId: session.user.id,
     targetType: "EmergencyAccessGrant",
     targetId: id,
-    metadata: { granteeId: grant.granteeId, earlyApproval: true },
+    metadata: { ownerId: grant.ownerId },
     ...extractRequestMeta(req),
   });
 
-  return NextResponse.json({ status: "ACTIVATED" });
+  return NextResponse.json({ status: "REJECTED" });
 }

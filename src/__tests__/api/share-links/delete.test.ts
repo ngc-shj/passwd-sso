@@ -35,7 +35,7 @@ describe("DELETE /api/share-links/[id]", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(401);
-    expect(json.error).toBe("Unauthorized");
+    expect(json.error).toBe("UNAUTHORIZED");
   });
 
   it("returns 404 when share not found", async () => {
@@ -47,7 +47,7 @@ describe("DELETE /api/share-links/[id]", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(404);
-    expect(json.error).toBe("Not found");
+    expect(json.error).toBe("NOT_FOUND");
   });
 
   it("returns 404 when share belongs to another user", async () => {
@@ -64,7 +64,7 @@ describe("DELETE /api/share-links/[id]", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(404);
-    expect(json.error).toBe("Not found");
+    expect(json.error).toBe("NOT_FOUND");
   });
 
   it("returns 409 when already revoked", async () => {
@@ -81,7 +81,7 @@ describe("DELETE /api/share-links/[id]", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(409);
-    expect(json.error).toBe("Already revoked");
+    expect(json.error).toBe("ALREADY_REVOKED");
   });
 
   it("revokes successfully", async () => {

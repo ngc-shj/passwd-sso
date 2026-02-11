@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,8 +17,16 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Copy, ShieldOff, ShieldAlert, ShieldCheck, KeyRound } from "lucide-react";
+import { Copy, ShieldOff, ShieldAlert, ShieldCheck, ShieldX, KeyRound, Lock, Loader2 } from "lucide-react";
 import { useRouter } from "@/i18n/navigation";
+import { useVault } from "@/lib/vault-context";
+import {
+  generateECDHKeyPair,
+  exportPublicKey,
+  exportPrivateKey,
+  encryptPrivateKey,
+} from "@/lib/crypto-emergency";
+import { eaErrorToI18nKey } from "@/lib/api-error-codes";
 
 type GrantStatus = "PENDING" | "ACCEPTED" | "IDLE" | "STALE" | "REQUESTED" | "ACTIVATED" | "REVOKED" | "REJECTED";
 
@@ -65,6 +74,8 @@ function getTimeRemaining(waitExpiresAt: string): string {
 export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
   const t = useTranslations("EmergencyAccess");
   const router = useRouter();
+  const { status: vaultStatus, encryptionKey } = useVault();
+  const [accepting, setAccepting] = useState(false);
   const isOwner = grant.ownerId === currentUserId;
   const waitExpired =
     grant.status === "REQUESTED" &&
@@ -91,6 +102,9 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
       if (res.ok) {
         toast.success(permanent ? t("revoked") : t("requestRejected"));
         onRefresh();
+      } else {
+        const data = await res.json().catch(() => null);
+        toast.error(translateApiError(data?.error));
       }
     } catch {
       toast.error(t("networkError"));
@@ -105,6 +119,9 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
       if (res.ok) {
         toast.success(t("approved"));
         onRefresh();
+      } else {
+        const data = await res.json().catch(() => null);
+        toast.error(translateApiError(data?.error));
       }
     } catch {
       toast.error(t("networkError"));
@@ -119,11 +136,74 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
       if (res.ok) {
         toast.success(t("requested"));
         onRefresh();
+      } else {
+        const data = await res.json().catch(() => null);
+        toast.error(translateApiError(data?.error));
       }
     } catch {
       toast.error(t("networkError"));
     }
   };
+
+  const handleAcceptGrant = async () => {
+    if (!encryptionKey) {
+      toast.error(t("vaultUnlockRequired"));
+      return;
+    }
+    setAccepting(true);
+    try {
+      const keyPair = await generateECDHKeyPair();
+      const publicKeyJwk = await exportPublicKey(keyPair.publicKey);
+      const privateKeyBytes = await exportPrivateKey(keyPair.privateKey);
+      const encryptedPrivKey = await encryptPrivateKey(privateKeyBytes, encryptionKey);
+
+      const res = await fetch(`/api/emergency-access/${grant.id}/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          granteePublicKey: publicKeyJwk,
+          encryptedPrivateKey: {
+            ciphertext: encryptedPrivKey.ciphertext,
+            iv: encryptedPrivKey.iv,
+            authTag: encryptedPrivKey.authTag,
+          },
+        }),
+      });
+
+      if (res.ok) {
+        toast.success(t("accepted"));
+        onRefresh();
+      } else {
+        const data = await res.json().catch(() => null);
+        toast.error(translateApiError(data?.error));
+      }
+    } catch {
+      toast.error(t("networkError"));
+    } finally {
+      setAccepting(false);
+    }
+  };
+
+  const handleDeclineGrant = async () => {
+    try {
+      const res = await fetch(`/api/emergency-access/${grant.id}/decline`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        toast.success(t("declined"));
+        onRefresh();
+      } else {
+        const data = await res.json().catch(() => null);
+        toast.error(translateApiError(data?.error));
+      }
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
+  const translateApiError = (error: unknown) => t(eaErrorToI18nKey(error));
+
+  const vaultLocked = vaultStatus !== "unlocked";
 
   return (
     <Card>
@@ -225,6 +305,51 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
           )}
 
           {/* Grantee actions */}
+          {!isOwner && grant.status === "PENDING" && (
+            <div className="flex items-center gap-1">
+              {vaultLocked && (
+                <span title={t("vaultUnlockRequired")}>
+                  <Lock className="h-4 w-4 text-yellow-500" />
+                </span>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleAcceptGrant}
+                disabled={accepting || vaultLocked}
+              >
+                {accepting ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <ShieldCheck className="mr-1 h-4 w-4" />
+                )}
+                {t("accept")}
+              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="sm" disabled={accepting}>
+                    <ShieldX className="mr-1 h-4 w-4" />
+                    {t("decline")}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("decline")}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t("declineConfirm", { name: displayName })}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleDeclineGrant}>
+                      {t("decline")}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          )}
+
           {!isOwner && grant.status === "IDLE" && (
             <AlertDialog>
               <AlertDialogTrigger asChild>

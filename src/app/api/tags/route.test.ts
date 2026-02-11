@@ -78,7 +78,7 @@ describe("POST /api/tags", () => {
     }));
     expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toBe("Tag already exists");
+    expect(json.error).toBe("TAG_ALREADY_EXISTS");
   });
 
   it("creates tag successfully (201)", async () => {

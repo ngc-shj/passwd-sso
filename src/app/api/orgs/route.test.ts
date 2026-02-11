@@ -98,7 +98,7 @@ describe("POST /api/orgs", () => {
     }));
     expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toBe("Slug already taken");
+    expect(json.error).toBe("SLUG_ALREADY_TAKEN");
   });
 
   it("creates org with wrapped encryption key (201)", async () => {

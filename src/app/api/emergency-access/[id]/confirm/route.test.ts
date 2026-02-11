@@ -113,7 +113,7 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toContain("keyAlgorithm");
+    expect(json.error).toBe("INCOMPATIBLE_KEY_ALGORITHM");
   });
 
   it("confirms key escrow successfully with keyVersion", async () => {

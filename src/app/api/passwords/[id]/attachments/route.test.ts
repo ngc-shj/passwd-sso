@@ -212,7 +212,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toContain("iv");
+    expect(json.error).toBe("INVALID_IV_FORMAT");
   });
 
   it("creates attachment successfully", async () => {

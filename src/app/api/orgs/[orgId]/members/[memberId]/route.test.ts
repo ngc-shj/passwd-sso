@@ -60,7 +60,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
   });
 
   it("returns 403 when lacking permission", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("Forbidden", 403));
+    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
         body: { role: "ADMIN" },

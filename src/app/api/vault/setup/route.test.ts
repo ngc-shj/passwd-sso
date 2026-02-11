@@ -49,7 +49,7 @@ describe("POST /api/vault/setup", () => {
     const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: validBody }));
     expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toBe("Vault already set up");
+    expect(json.error).toBe("VAULT_ALREADY_SETUP");
   });
 
   it("returns 400 on invalid body", async () => {

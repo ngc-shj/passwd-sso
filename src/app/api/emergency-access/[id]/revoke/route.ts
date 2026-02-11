@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { revokeEmergencyGrantSchema } from "@/lib/validations";
 import { canTransition } from "@/lib/emergency-access-state";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 // POST /api/emergency-access/[id]/revoke — Owner revokes or rejects request
 export async function POST(
@@ -12,7 +13,7 @@ export async function POST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { id } = await params;
@@ -22,19 +23,19 @@ export async function POST(
   });
 
   if (!grant || grant.ownerId !== session.user.id) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
   const parsed = revokeEmergencyGrantSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() }, { status: 400 });
   }
 
   const { permanent } = parsed.data;
@@ -43,7 +44,7 @@ export async function POST(
     // Full revoke
     if (!canTransition(grant.status, "REVOKED")) {
       return NextResponse.json(
-        { error: `Cannot revoke grant in ${grant.status} status` },
+        { error: API_ERROR.INVALID_STATUS },
         { status: 400 }
       );
     }
@@ -77,7 +78,7 @@ export async function POST(
     // Reject request only (revert to IDLE)
     if (!canTransition(grant.status, "IDLE")) {
       return NextResponse.json(
-        { error: `Cannot reject request in ${grant.status} status` },
+        { error: API_ERROR.INVALID_STATUS },
         { status: 400 }
       );
     }
