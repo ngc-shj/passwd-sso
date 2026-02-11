@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createEmergencyGrantSchema } from "@/lib/validations";
-import { generateShareToken } from "@/lib/crypto-server";
+import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 const createLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 5 });
 
@@ -12,23 +13,23 @@ const createLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 5 });
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   if (!(await createLimiter.check(`rl:ea_create:${session.user.id}`))) {
-    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+    return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
   const parsed = createEmergencyGrantSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() }, { status: 400 });
   }
 
   const { granteeEmail, waitDays } = parsed.data;
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
   // Cannot grant to self
   if (granteeEmail.toLowerCase() === session.user.email.toLowerCase()) {
     return NextResponse.json(
-      { error: "Cannot grant emergency access to yourself" },
+      { error: API_ERROR.CANNOT_GRANT_SELF },
       { status: 400 }
     );
   }
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest) {
 
   if (existing) {
     return NextResponse.json(
-      { error: "Active grant already exists for this email" },
+      { error: API_ERROR.DUPLICATE_GRANT },
       { status: 409 }
     );
   }
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest) {
       ownerId: session.user.id,
       granteeEmail,
       waitDays,
-      token,
+      tokenHash: hashToken(token),
       tokenExpiresAt,
     },
   });
@@ -80,9 +81,10 @@ export async function POST(req: NextRequest) {
     ...extractRequestMeta(req),
   });
 
+  // Return plaintext token only at creation time; DB stores only the hash
   return NextResponse.json({
     id: grant.id,
-    token: grant.token,
+    token,
     status: grant.status,
     granteeEmail: grant.granteeEmail,
     waitDays: grant.waitDays,
@@ -94,7 +96,7 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const grants = await prisma.emergencyAccessGrant.findMany({
@@ -128,8 +130,7 @@ export async function GET() {
     waitExpiresAt: g.waitExpiresAt?.toISOString() ?? null,
     revokedAt: g.revokedAt?.toISOString() ?? null,
     createdAt: g.createdAt.toISOString(),
-    // Include token only for owner's PENDING grants
-    token: g.ownerId === session.user!.id && g.status === "PENDING" ? g.token : undefined,
+    // Token hash is never exposed — plaintext token only returned at creation time
     owner: g.owner,
     grantee: g.grantee,
   }));

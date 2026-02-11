@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
+import { API_ERROR } from "@/lib/api-error-codes";
 import type { AuditAction } from "@prisma/client";
 
 type Params = { params: Promise<{ orgId: string }> };
@@ -27,7 +28,7 @@ const VALID_ACTIONS: AuditAction[] = [
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId } = await params;
@@ -65,15 +66,20 @@ export async function GET(req: NextRequest, { params }: Params) {
     where.createdAt = createdAt;
   }
 
-  const logs = await prisma.auditLog.findMany({
-    where,
-    include: {
-      user: { select: { id: true, name: true, image: true } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-  });
+  let logs;
+  try {
+    logs = await prisma.auditLog.findMany({
+      where,
+      include: {
+        user: { select: { id: true, name: true, image: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+  } catch {
+    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+  }
 
   const hasMore = logs.length > limit;
   const items = hasMore ? logs.slice(0, limit) : logs;

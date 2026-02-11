@@ -8,6 +8,7 @@ import {
   isRoleAbove,
   OrgAuthError,
 } from "@/lib/org-auth";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 type Params = { params: Promise<{ orgId: string; memberId: string }> };
 
@@ -15,7 +16,7 @@ type Params = { params: Promise<{ orgId: string; memberId: string }> };
 export async function PUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId, memberId } = await params;
@@ -39,20 +40,20 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 
   if (!target || target.orgId !== orgId) {
-    return NextResponse.json({ error: "Member not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
   const parsed = updateMemberRoleSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.flatten() },
+      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
       { status: 400 }
     );
   }
@@ -61,7 +62,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (parsed.data.role === "OWNER") {
     if (actorMembership.role !== "OWNER") {
       return NextResponse.json(
-        { error: "Only the owner can transfer ownership" },
+        { error: API_ERROR.OWNER_ONLY },
         { status: 403 }
       );
     }
@@ -104,7 +105,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   // Cannot change OWNER role (unless transferring ownership above)
   if (target.role === "OWNER") {
     return NextResponse.json(
-      { error: "Cannot change the owner's role" },
+      { error: API_ERROR.CANNOT_CHANGE_OWNER_ROLE },
       { status: 403 }
     );
   }
@@ -115,7 +116,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     !isRoleAbove(actorMembership.role, target.role)
   ) {
     return NextResponse.json(
-      { error: "Cannot change role of a member at or above your level" },
+      { error: API_ERROR.CANNOT_CHANGE_HIGHER_ROLE },
       { status: 403 }
     );
   }
@@ -153,7 +154,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 export async function DELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId, memberId } = await params;
@@ -177,12 +178,12 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   });
 
   if (!target || target.orgId !== orgId) {
-    return NextResponse.json({ error: "Member not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
   }
 
   if (target.role === "OWNER") {
     return NextResponse.json(
-      { error: "Cannot remove the owner" },
+      { error: API_ERROR.CANNOT_REMOVE_OWNER },
       { status: 403 }
     );
   }
@@ -192,7 +193,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     !isRoleAbove(actorMembership.role, target.role)
   ) {
     return NextResponse.json(
-      { error: "Cannot remove a member at or above your level" },
+      { error: API_ERROR.CANNOT_REMOVE_HIGHER_ROLE },
       { status: 403 }
     );
   }

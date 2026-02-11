@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { inviteSchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 type Params = { params: Promise<{ orgId: string }> };
 
@@ -12,7 +13,7 @@ type Params = { params: Promise<{ orgId: string }> };
 export async function GET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId } = await params;
@@ -54,7 +55,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId } = await params;
@@ -72,13 +73,13 @@ export async function POST(req: NextRequest, { params }: Params) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
   const parsed = inviteSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.flatten() },
+      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
       { status: 400 }
     );
   }
@@ -97,7 +98,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
     if (existingMember) {
       return NextResponse.json(
-        { error: "User is already a member" },
+        { error: API_ERROR.ALREADY_A_MEMBER },
         { status: 409 }
       );
     }
@@ -109,7 +110,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   });
   if (existingInv) {
     return NextResponse.json(
-      { error: "Invitation already sent" },
+      { error: API_ERROR.INVITATION_ALREADY_SENT },
       { status: 409 }
     );
   }

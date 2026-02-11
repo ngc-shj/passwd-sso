@@ -3,7 +3,9 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { confirmEmergencyGrantSchema } from "@/lib/validations";
 import { canTransition } from "@/lib/emergency-access-state";
+import { SUPPORTED_KEY_ALGORITHMS } from "@/lib/crypto-emergency";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 // POST /api/emergency-access/[id]/confirm — Owner performs key escrow
 export async function POST(
@@ -12,7 +14,7 @@ export async function POST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { id } = await params;
@@ -22,29 +24,51 @@ export async function POST(
   });
 
   if (!grant || grant.ownerId !== session.user.id) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   if (!canTransition(grant.status, "IDLE")) {
     return NextResponse.json(
-      { error: `Cannot confirm grant in ${grant.status} status` },
+      { error: API_ERROR.INVALID_STATUS },
       { status: 400 }
     );
+  }
+
+  // Fetch owner's current keyVersion from DB (server-authoritative)
+  const owner = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { keyVersion: true },
+  });
+
+  if (!owner) {
+    return NextResponse.json({ error: API_ERROR.USER_NOT_FOUND }, { status: 404 });
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
   const parsed = confirmEmergencyGrantSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() }, { status: 400 });
   }
 
   const { ownerEphemeralPublicKey, encryptedSecretKey, secretKeyIv, secretKeyAuthTag, hkdfSalt, wrapVersion } = parsed.data;
+
+  // Validate keyAlgorithm is compatible with wrapVersion
+  const allowedAlgorithms = SUPPORTED_KEY_ALGORITHMS[wrapVersion];
+  if (!allowedAlgorithms?.includes(grant.keyAlgorithm)) {
+    return NextResponse.json(
+      { error: API_ERROR.INCOMPATIBLE_KEY_ALGORITHM },
+      { status: 400 }
+    );
+  }
+
+  // Use server-fetched keyVersion, ignore client-sent value
+  const serverKeyVersion = owner.keyVersion;
 
   await prisma.emergencyAccessGrant.update({
     where: { id },
@@ -56,6 +80,7 @@ export async function POST(
       secretKeyAuthTag,
       hkdfSalt,
       wrapVersion,
+      keyVersion: serverKeyVersion,
     },
   });
 
@@ -65,9 +90,9 @@ export async function POST(
     userId: session.user.id,
     targetType: "EmergencyAccessGrant",
     targetId: id,
-    metadata: { granteeId: grant.granteeId },
+    metadata: { granteeId: grant.granteeId, wrapVersion, keyVersion: serverKeyVersion },
     ...extractRequestMeta(req),
   });
 
-  return NextResponse.json({ status: "IDLE" });
+  return NextResponse.json({ status: "IDLE", keyVersion: serverKeyVersion });
 }

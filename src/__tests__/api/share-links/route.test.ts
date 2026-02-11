@@ -79,7 +79,7 @@ describe("POST /api/share-links", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(401);
-    expect(json.error).toBe("Unauthorized");
+    expect(json.error).toBe("UNAUTHORIZED");
   });
 
   it("returns 400 for invalid body", async () => {
@@ -136,7 +136,7 @@ describe("POST /api/share-links", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(429);
-    expect(json.error).toBe("Rate limit exceeded");
+    expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
   });
 
   it("passes AAD to decryptServerData for org entry with aadVersion >= 1", async () => {
@@ -227,7 +227,7 @@ describe("POST /api/share-links", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(404);
-    expect(json.error).toBe("Not found");
+    expect(json.error).toBe("NOT_FOUND");
   });
 });
 
@@ -256,7 +256,7 @@ describe("GET /api/share-links", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
-    expect(json.error).toContain("required");
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("returns share links with isActive flag", async () => {

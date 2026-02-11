@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 type Params = { params: Promise<{ orgId: string; id: string }> };
 
@@ -9,7 +10,7 @@ type Params = { params: Promise<{ orgId: string; id: string }> };
 export async function POST(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId, id } = await params;
@@ -30,7 +31,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
   });
 
   if (!entry || entry.orgId !== orgId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   // Toggle: if exists, remove; if not, create

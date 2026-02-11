@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 // GET /api/share-links/mine — List all share links created by the current user
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { searchParams } = new URL(req.url);
@@ -29,20 +30,25 @@ export async function GET(req: NextRequest) {
     where.revokedAt = { not: null };
   }
 
-  const shares = await prisma.passwordShare.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    include: {
-      passwordEntry: {
-        select: { id: true },
+  let shares;
+  try {
+    shares = await prisma.passwordShare.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      include: {
+        passwordEntry: {
+          select: { id: true },
+        },
+        orgPasswordEntry: {
+          select: { id: true, org: { select: { name: true } } },
+        },
       },
-      orgPasswordEntry: {
-        select: { id: true, org: { select: { name: true } } },
-      },
-    },
-  });
+    });
+  } catch {
+    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+  }
 
   const hasMore = shares.length > limit;
   const items = hasMore ? shares.slice(0, limit) : shares;

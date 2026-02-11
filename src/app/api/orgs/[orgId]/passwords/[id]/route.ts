@@ -9,6 +9,7 @@ import {
   hasOrgPermission,
   OrgAuthError,
 } from "@/lib/org-auth";
+import { API_ERROR } from "@/lib/api-error-codes";
 import {
   unwrapOrgKey,
   encryptServerData,
@@ -34,7 +35,7 @@ function getOrgKey(org: {
 export async function GET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId, id } = await params;
@@ -69,24 +70,34 @@ export async function GET(_req: NextRequest, { params }: Params) {
   });
 
   if (!entry || entry.orgId !== orgId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   const orgKey = getOrgKey(entry.org);
   const blobAad = entry.aadVersion >= 1
     ? Buffer.from(buildOrgEntryAAD(orgId, entry.id, "blob"))
     : undefined;
-  const blob = JSON.parse(
-    decryptServerData(
-      {
-        ciphertext: entry.encryptedBlob,
-        iv: entry.blobIv,
-        authTag: entry.blobAuthTag,
-      },
-      orgKey,
-      blobAad
-    )
-  );
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let blob: Record<string, any>;
+  try {
+    blob = JSON.parse(
+      decryptServerData(
+        {
+          ciphertext: entry.encryptedBlob,
+          iv: entry.blobIv,
+          authTag: entry.blobAuthTag,
+        },
+        orgKey,
+        blobAad
+      )
+    );
+  } catch {
+    return NextResponse.json(
+      { error: API_ERROR.DECRYPT_FAILED },
+      { status: 500 }
+    );
+  }
 
   const common = {
     id: entry.id,
@@ -152,7 +163,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 export async function PUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId, id } = await params;
@@ -181,19 +192,19 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 
   if (!entry || entry.orgId !== orgId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   // MEMBER can only update their own entries
   if (!hasOrgPermission(membership.role, "password:update")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
   if (
     membership.role === "MEMBER" &&
     entry.createdById !== session.user.id
   ) {
     return NextResponse.json(
-      { error: "Can only update your own entries" },
+      { error: API_ERROR.ONLY_OWN_ENTRIES },
       { status: 403 }
     );
   }
@@ -202,7 +213,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
   const orgKey = getOrgKey(entry.org);
@@ -211,17 +222,27 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const currentBlobAad = entry.aadVersion >= 1
     ? Buffer.from(buildOrgEntryAAD(orgId, id, "blob"))
     : undefined;
-  const currentBlob = JSON.parse(
-    decryptServerData(
-      {
-        ciphertext: entry.encryptedBlob,
-        iv: entry.blobIv,
-        authTag: entry.blobAuthTag,
-      },
-      orgKey,
-      currentBlobAad
-    )
-  );
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let currentBlob: Record<string, any>;
+  try {
+    currentBlob = JSON.parse(
+      decryptServerData(
+        {
+          ciphertext: entry.encryptedBlob,
+          iv: entry.blobIv,
+          authTag: entry.blobAuthTag,
+        },
+        orgKey,
+        currentBlobAad
+      )
+    );
+  } catch {
+    return NextResponse.json(
+      { error: API_ERROR.DECRYPT_FAILED },
+      { status: 500 }
+    );
+  }
 
   let updatedBlobStr: string;
   let overviewBlobStr: string;
@@ -233,7 +254,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     const parsed = updateOrgSecureNoteSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: parsed.error.flatten() },
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
         { status: 400 }
       );
     }
@@ -254,7 +275,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     const parsed = updateOrgCreditCardSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: parsed.error.flatten() },
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
         { status: 400 }
       );
     }
@@ -309,7 +330,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     const parsed = updateOrgIdentitySchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: parsed.error.flatten() },
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
         { status: 400 }
       );
     }
@@ -343,7 +364,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       (updatedBlob.issueDate as string) >= (updatedBlob.expiryDate as string)
     ) {
       return NextResponse.json(
-        { error: "Expiry date must be after issue date" },
+        { error: API_ERROR.INVALID_DATE_RANGE },
         { status: 400 }
       );
     }
@@ -361,7 +382,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     const parsed = updateOrgPasswordSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: parsed.error.flatten() },
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
         { status: 400 }
       );
     }
@@ -472,7 +493,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 export async function DELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId, id } = await params;
@@ -491,7 +512,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   });
 
   if (!existing || existing.orgId !== orgId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   const { searchParams } = new URL(req.url);

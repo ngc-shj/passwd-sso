@@ -47,7 +47,7 @@ describe("GET /api/share-links/mine", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(401);
-    expect(json.error).toBe("Unauthorized");
+    expect(json.error).toBe("UNAUTHORIZED");
   });
 
   it("returns share links for authenticated user", async () => {

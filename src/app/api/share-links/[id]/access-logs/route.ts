@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -8,7 +9,7 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { id } = await params;
@@ -20,25 +21,30 @@ export async function GET(req: NextRequest, { params }: Params) {
   });
 
   if (!share || share.createdById !== session.user.id) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   const { searchParams } = new URL(req.url);
   const cursor = searchParams.get("cursor");
   const limit = 50;
 
-  const logs = await prisma.shareAccessLog.findMany({
-    where: { shareId: id },
-    orderBy: { createdAt: "desc" },
-    take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    select: {
-      id: true,
-      ip: true,
-      userAgent: true,
-      createdAt: true,
-    },
-  });
+  let logs;
+  try {
+    logs = await prisma.shareAccessLog.findMany({
+      where: { shareId: id },
+      orderBy: { createdAt: "desc" },
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        ip: true,
+        userAgent: true,
+        createdAt: true,
+      },
+    });
+  } catch {
+    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+  }
 
   const hasMore = logs.length > limit;
   const items = hasMore ? logs.slice(0, limit) : logs;

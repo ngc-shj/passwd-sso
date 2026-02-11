@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { canTransition } from "@/lib/emergency-access-state";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 // POST /api/emergency-access/[id]/approve — Owner early-approves emergency access request
 export async function POST(
@@ -11,7 +12,7 @@ export async function POST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { id } = await params;
@@ -21,12 +22,12 @@ export async function POST(
   });
 
   if (!grant || grant.ownerId !== session.user.id) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   if (!canTransition(grant.status, "ACTIVATED")) {
     return NextResponse.json(
-      { error: `Cannot approve grant in ${grant.status} status` },
+      { error: API_ERROR.INVALID_STATUS },
       { status: 400 }
     );
   }

@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 const vaultLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
@@ -13,11 +14,11 @@ export async function GET(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   if (!(await vaultLimiter.check(`rl:ea_vault:${session.user.id}`))) {
-    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+    return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
   }
 
   const { id } = await params;
@@ -31,7 +32,7 @@ export async function GET(
   });
 
   if (!grant || grant.granteeId !== session.user.id) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   // Auto-activate if wait period has expired
@@ -55,14 +56,14 @@ export async function GET(
 
   if (grant.status !== "ACTIVATED") {
     return NextResponse.json(
-      { error: "Emergency access not yet activated" },
+      { error: API_ERROR.NOT_ACTIVATED },
       { status: 403 }
     );
   }
 
   if (!grant.encryptedSecretKey || !grant.granteeKeyPair) {
     return NextResponse.json(
-      { error: "Key escrow not completed" },
+      { error: API_ERROR.KEY_ESCROW_NOT_COMPLETED },
       { status: 400 }
     );
   }
@@ -77,6 +78,7 @@ export async function GET(
     secretKeyAuthTag: grant.secretKeyAuthTag,
     hkdfSalt: grant.hkdfSalt,
     wrapVersion: grant.wrapVersion,
+    keyVersion: grant.keyVersion,
     keyAlgorithm: grant.keyAlgorithm,
     granteeKeyPair: {
       encryptedPrivateKey: grant.granteeKeyPair.encryptedPrivateKey,

@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
+import { eaErrorToI18nKey } from "@/lib/api-error-codes";
 
 interface CreateGrantDialogProps {
   onCreated: () => void;
@@ -35,8 +36,14 @@ export function CreateGrantDialog({ onCreated }: CreateGrantDialogProps) {
   const [waitDays, setWaitDays] = useState("7");
   const [loading, setLoading] = useState(false);
 
+  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
   const handleSubmit = async () => {
     if (!email) return;
+    if (!isValidEmail(email)) {
+      toast.error(t("invalidEmail"));
+      return;
+    }
     setLoading(true);
 
     try {
@@ -47,8 +54,8 @@ export function CreateGrantDialog({ onCreated }: CreateGrantDialogProps) {
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error || t("networkError"));
+        const data = await res.json().catch(() => null);
+        toast.error(t(eaErrorToI18nKey(data?.error)));
         return;
       }
 
@@ -112,7 +119,7 @@ export function CreateGrantDialog({ onCreated }: CreateGrantDialogProps) {
           <Button variant="outline" onClick={() => setOpen(false)}>
             {t("cancel")}
           </Button>
-          <Button onClick={handleSubmit} disabled={loading || !email}>
+          <Button onClick={handleSubmit} disabled={loading || !email || !isValidEmail(email)}>
             {t("createGrant")}
           </Button>
         </DialogFooter>

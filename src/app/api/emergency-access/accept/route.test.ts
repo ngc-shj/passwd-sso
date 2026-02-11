@@ -21,6 +21,9 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockTransaction,
   },
 }));
+vi.mock("@/lib/crypto-server", () => ({
+  hashToken: (t: string) => `hashed-${t}`,
+}));
 vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(),
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
@@ -63,6 +66,15 @@ describe("POST /api/emergency-access/accept", () => {
       body: validBody,
     }));
     expect(res.status).toBe(401);
+  });
+
+  it("looks up grant by tokenHash", async () => {
+    await POST(createRequest("POST", "http://localhost/api/emergency-access/accept", {
+      body: validBody,
+    }));
+    expect(mockPrismaGrant.findUnique).toHaveBeenCalledWith({
+      where: { tokenHash: "hashed-valid-token" },
+    });
   });
 
   it("returns 404 when token invalid", async () => {

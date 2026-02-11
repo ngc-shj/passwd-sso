@@ -60,7 +60,7 @@ describe("GET /api/orgs/[orgId]/invitations", () => {
   });
 
   it("returns 403 when lacking invite permission", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("Forbidden", 403));
+    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`),
       createParams({ orgId: ORG_ID }),
@@ -135,7 +135,7 @@ describe("POST /api/orgs/[orgId]/invitations", () => {
     );
     expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toBe("User is already a member");
+    expect(json.error).toBe("ALREADY_A_MEMBER");
   });
 
   it("returns 409 when invitation already pending", async () => {
@@ -149,7 +149,7 @@ describe("POST /api/orgs/[orgId]/invitations", () => {
     );
     expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toBe("Invitation already sent");
+    expect(json.error).toBe("INVITATION_ALREADY_SENT");
   });
 
   it("creates invitation successfully (201)", async () => {

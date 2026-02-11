@@ -24,6 +24,7 @@ import {
   File,
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import {
   ALLOWED_EXTENSIONS,
   MAX_FILE_SIZE,
@@ -66,6 +67,7 @@ export function OrgAttachmentSection({
   readOnly = false,
 }: OrgAttachmentSectionProps) {
   const t = useTranslations("Attachments");
+  const tApi = useTranslations("ApiErrors");
   const tc = useTranslations("Common");
   const [uploading, setUploading] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
@@ -104,15 +106,16 @@ export function OrgAttachmentSection({
       );
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Upload failed" }));
-        throw new Error(err.error || "Upload failed");
+        const err = await res.json().catch(() => null);
+        toast.error(tApi(apiErrorToI18nKey(err?.error)));
+        return;
       }
 
       const newAttachment: OrgAttachmentMeta = await res.json();
       onAttachmentsChange([newAttachment, ...attachments]);
       toast.success(t("uploaded"));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("uploadError"));
+    } catch {
+      toast.error(t("uploadError"));
     } finally {
       setUploading(false);
     }

@@ -38,7 +38,7 @@ describe("GET /api/share-links/[id]/access-logs", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(401);
-    expect(json.error).toBe("Unauthorized");
+    expect(json.error).toBe("UNAUTHORIZED");
   });
 
   it("returns 404 when share not found", async () => {
@@ -53,7 +53,7 @@ describe("GET /api/share-links/[id]/access-logs", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(404);
-    expect(json.error).toBe("Not found");
+    expect(json.error).toBe("NOT_FOUND");
   });
 
   it("returns 404 when share belongs to another user", async () => {
@@ -68,7 +68,7 @@ describe("GET /api/share-links/[id]/access-logs", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(404);
-    expect(json.error).toBe("Not found");
+    expect(json.error).toBe("NOT_FOUND");
   });
 
   it("returns access logs for own share link", async () => {

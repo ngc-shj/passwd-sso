@@ -154,7 +154,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
 
   it("returns 403 when user lacks permission", async () => {
     mockRequireOrgPermission.mockRejectedValue(
-      new OrgAuthError("Forbidden", 403)
+      new OrgAuthError("FORBIDDEN", 403)
     );
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),

@@ -9,6 +9,7 @@ import { Plus, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
+import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 
 export interface OrgTagData {
   id: string;
@@ -24,6 +25,7 @@ interface OrgTagInputProps {
 
 export function OrgTagInput({ orgId, selectedTags, onChange }: OrgTagInputProps) {
   const t = useTranslations("Tag");
+  const tApi = useTranslations("ApiErrors");
   const [allTags, setAllTags] = useState<OrgTagData[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
@@ -98,7 +100,7 @@ export function OrgTagInput({ orgId, selectedTags, onChange }: OrgTagInputProps)
         addTag(newTag);
       } else {
         const err = await res.json().catch(() => null);
-        toast.error(err?.error ?? t("createFailed"));
+        toast.error(tApi(apiErrorToI18nKey(err?.error)));
       }
     } catch {
       toast.error(t("createFailed"));

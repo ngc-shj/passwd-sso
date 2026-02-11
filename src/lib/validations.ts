@@ -4,6 +4,7 @@ import {
   getMinLength,
   normalizeCardNumber,
 } from "@/lib/credit-card";
+import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
 
 export const generatePasswordSchema = z.object({
   length: z.number().int().min(8).max(128).default(16),
@@ -43,10 +44,13 @@ export const createE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
   keyVersion: z.number().int().min(1),
-  aadVersion: z.number().int().min(0).max(1).optional().default(0),
+  aadVersion: z.number().int().min(0).max(1).optional().default(1),
   tagIds: z.array(z.string().cuid()).optional(),
   entryType: entryTypeSchema.optional().default("LOGIN"),
-});
+}).refine(
+  (d) => (d.aadVersion ?? 0) < 1 || !!d.id,
+  { message: "id is required when aadVersion >= 1", path: ["id"] }
+);
 
 export const updateE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema.optional(),
@@ -354,45 +358,45 @@ export const createOrgTagSchema = z.object({
 
 const shareDataSchema = z.object({
   title: z.string().min(1).max(200),
-  username: z.string().max(200).optional(),
-  password: z.string().optional(),
-  url: z.string().max(2000).optional(),
-  notes: z.string().max(10000).optional(),
+  username: z.string().max(200).nullish(),
+  password: z.string().nullish(),
+  url: z.string().max(2000).nullish(),
+  notes: z.string().max(10000).nullish(),
   customFields: z.array(z.object({
     label: z.string().max(100),
     value: z.string().max(10000),
     type: z.enum(["text", "hidden", "url"]),
-  })).optional(),
+  })).nullish(),
   // SECURE_NOTE
-  content: z.string().max(50000).optional(),
+  content: z.string().max(50000).nullish(),
   // CREDIT_CARD
-  cardholderName: z.string().max(200).optional(),
-  cardNumber: z.string().max(30).optional(),
-  brand: z.string().max(50).optional(),
-  expiryMonth: z.string().max(2).optional(),
-  expiryYear: z.string().max(4).optional(),
-  cvv: z.string().max(10).optional(),
+  cardholderName: z.string().max(200).nullish(),
+  cardNumber: z.string().max(30).nullish(),
+  brand: z.string().max(50).nullish(),
+  expiryMonth: z.string().max(2).nullish(),
+  expiryYear: z.string().max(4).nullish(),
+  cvv: z.string().max(10).nullish(),
   // PASSKEY
-  relyingPartyId: z.string().max(200).optional(),
-  relyingPartyName: z.string().max(200).optional(),
-  credentialId: z.string().max(500).optional(),
-  creationDate: z.string().optional(),
-  deviceInfo: z.string().max(200).optional(),
+  relyingPartyId: z.string().max(200).nullish(),
+  relyingPartyName: z.string().max(200).nullish(),
+  credentialId: z.string().max(500).nullish(),
+  creationDate: z.string().nullish(),
+  deviceInfo: z.string().max(200).nullish(),
   // IDENTITY
-  fullName: z.string().max(200).optional(),
-  address: z.string().max(500).optional(),
-  phone: z.string().max(50).optional(),
-  email: z.string().max(200).optional(),
-  dateOfBirth: z.string().optional(),
-  nationality: z.string().max(100).optional(),
-  idNumber: z.string().max(100).optional(),
-  issueDate: z.string().optional(),
-  expiryDate: z.string().optional(),
+  fullName: z.string().max(200).nullish(),
+  address: z.string().max(500).nullish(),
+  phone: z.string().max(50).nullish(),
+  email: z.string().max(200).nullish(),
+  dateOfBirth: z.string().nullish(),
+  nationality: z.string().max(100).nullish(),
+  idNumber: z.string().max(100).nullish(),
+  issueDate: z.string().nullish(),
+  expiryDate: z.string().nullish(),
 });
 
 export const createShareLinkSchema = z.object({
-  passwordEntryId: z.string().cuid().optional(),
-  orgPasswordEntryId: z.string().cuid().optional(),
+  passwordEntryId: z.string().min(1).optional(),
+  orgPasswordEntryId: z.string().min(1).optional(),
   data: shareDataSchema.optional(),
   expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
   maxViews: z.number().int().min(1).max(100).optional(),
@@ -433,7 +437,20 @@ export const confirmEmergencyGrantSchema = z.object({
   secretKeyIv: z.string().length(24),
   secretKeyAuthTag: z.string().length(32),
   hkdfSalt: z.string().length(64),
-  wrapVersion: z.number().int().min(1),
+  wrapVersion: z.number().int().refine(
+    (v) => SUPPORTED_WRAP_VERSIONS.has(v),
+    { message: `wrapVersion must be one of: ${[...SUPPORTED_WRAP_VERSIONS].join(", ")}` }
+  ),
+  keyVersion: z.number().int().min(1).optional(), // Server uses owner's DB value
+});
+
+export const acceptEmergencyGrantByIdSchema = z.object({
+  granteePublicKey: z.string().min(1),
+  encryptedPrivateKey: z.object({
+    ciphertext: z.string().min(1),
+    iv: z.string().length(24),
+    authTag: z.string().length(32),
+  }),
 });
 
 export const revokeEmergencyGrantSchema = z.object({

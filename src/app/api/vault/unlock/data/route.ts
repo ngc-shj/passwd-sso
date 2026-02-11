@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,7 @@ export const runtime = "nodejs";
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const user = await prisma.user.findUnique({
@@ -30,7 +31,7 @@ export async function GET() {
 
   if (!user?.vaultSetupAt) {
     return NextResponse.json(
-      { error: "Vault not set up" },
+      { error: API_ERROR.VAULT_NOT_SETUP },
       { status: 404 }
     );
   }

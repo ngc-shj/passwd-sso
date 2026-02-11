@@ -4,12 +4,13 @@ import { prisma } from "@/lib/prisma";
 import { unwrapOrgKey, decryptServerData } from "@/lib/crypto-server";
 import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 import { hasOrgPermission } from "@/lib/org-auth";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 // GET /api/orgs/favorites — Get all org passwords favorited by current user
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   // Build role map for permission check + UI display

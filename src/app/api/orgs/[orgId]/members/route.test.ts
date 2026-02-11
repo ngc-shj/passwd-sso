@@ -49,7 +49,7 @@ describe("GET /api/orgs/[orgId]/members", () => {
   });
 
   it("returns 404 when not a member", async () => {
-    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("Not found", 404));
+    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("NOT_FOUND", 404));
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/members`),
       createParams({ orgId: ORG_ID }),

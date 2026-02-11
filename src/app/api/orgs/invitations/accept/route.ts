@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 
@@ -9,12 +10,12 @@ const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   if (!(await acceptLimiter.check(`rl:invite_accept:${session.user.id}`))) {
     return NextResponse.json(
-      { error: "Rate limit exceeded" },
+      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 }
     );
   }
@@ -23,12 +24,12 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
   const { token } = body as { token?: string };
   if (!token || typeof token !== "string") {
-    return NextResponse.json({ error: "Token required" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.TOKEN_REQUIRED }, { status: 400 });
   }
 
   const invitation = await prisma.orgInvitation.findUnique({
@@ -38,14 +39,14 @@ export async function POST(req: NextRequest) {
 
   if (!invitation) {
     return NextResponse.json(
-      { error: "Invalid invitation" },
+      { error: API_ERROR.INVALID_INVITATION },
       { status: 404 }
     );
   }
 
   if (invitation.status !== "PENDING") {
     return NextResponse.json(
-      { error: "Invitation already used" },
+      { error: API_ERROR.INVITATION_ALREADY_USED },
       { status: 410 }
     );
   }
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
       data: { status: "EXPIRED" },
     });
     return NextResponse.json(
-      { error: "Invitation expired" },
+      { error: API_ERROR.INVITATION_EXPIRED },
       { status: 410 }
     );
   }
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest) {
   // Verify the invitation email matches the authenticated user
   if (invitation.email.toLowerCase() !== session.user.email.toLowerCase()) {
     return NextResponse.json(
-      { error: "Invitation was sent to a different email" },
+      { error: API_ERROR.INVITATION_WRONG_EMAIL },
       { status: 403 }
     );
   }

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canTransition } from "@/lib/emergency-access-state";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 const requestLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 3 });
 
@@ -14,11 +15,11 @@ export async function POST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   if (!(await requestLimiter.check(`rl:ea_request:${session.user.id}`))) {
-    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+    return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
   }
 
   const { id } = await params;
@@ -28,12 +29,12 @@ export async function POST(
   });
 
   if (!grant || grant.granteeId !== session.user.id) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   if (!canTransition(grant.status, "REQUESTED")) {
     return NextResponse.json(
-      { error: `Cannot request access in ${grant.status} status` },
+      { error: API_ERROR.INVALID_STATUS },
       { status: 400 }
     );
   }

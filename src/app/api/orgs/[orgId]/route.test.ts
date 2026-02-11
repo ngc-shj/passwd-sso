@@ -65,7 +65,7 @@ describe("GET /api/orgs/[orgId]", () => {
   });
 
   it("returns 404 when not a member", async () => {
-    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("Not found", 404));
+    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("NOT_FOUND", 404));
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}`),
       createParams({ orgId: ORG_ID }),
@@ -113,7 +113,7 @@ describe("PUT /api/orgs/[orgId]", () => {
   });
 
   it("returns 403 when lacking permission", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("Forbidden", 403));
+    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}`, { body: { name: "New" } }),
       createParams({ orgId: ORG_ID }),
@@ -157,7 +157,7 @@ describe("DELETE /api/orgs/[orgId]", () => {
   });
 
   it("returns 403 when not OWNER", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("Forbidden", 403));
+    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}`),
       createParams({ orgId: ORG_ID }),

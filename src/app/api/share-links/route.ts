@@ -13,6 +13,7 @@ import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 const shareLinkLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
@@ -27,12 +28,12 @@ const EXPIRY_MAP: Record<string, number> = {
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   if (!(await shareLinkLimiter.check(`rl:share_create:${session.user.id}`))) {
     return NextResponse.json(
-      { error: "Rate limit exceeded" },
+      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 }
     );
   }
@@ -41,13 +42,13 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
   const parsed = createShareLinkSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Validation failed", details: parsed.error.flatten() },
+      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
       { status: 400 }
     );
   }
@@ -65,11 +66,11 @@ export async function POST(req: NextRequest) {
       select: { userId: true, entryType: true },
     });
     if (!entry || entry.userId !== session.user.id) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
     }
     if (!data) {
       return NextResponse.json(
-        { error: "data is required for personal entries" },
+        { error: API_ERROR.MISSING_REQUIRED_FIELDS },
         { status: 400 }
       );
     }
@@ -93,7 +94,7 @@ export async function POST(req: NextRequest) {
       },
     });
     if (!entry) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
     }
 
     try {
@@ -190,7 +191,7 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { searchParams } = new URL(req.url);
@@ -199,7 +200,7 @@ export async function GET(req: NextRequest) {
 
   if (!passwordEntryId && !orgPasswordEntryId) {
     return NextResponse.json(
-      { error: "passwordEntryId or orgPasswordEntryId is required" },
+      { error: API_ERROR.VALIDATION_ERROR },
       { status: 400 }
     );
   }

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { z } from "zod/v4";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 const bodySchema = z.object({
   orgId: z.string().optional(),
@@ -13,22 +15,34 @@ const bodySchema = z.object({
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
   const result = bodySchema.safeParse(body);
   if (!result.success) {
-    return NextResponse.json({ error: "Invalid body" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
   }
 
   const { orgId, entryCount, format } = result.data;
+
+  // Verify org membership when orgId is specified
+  if (orgId) {
+    try {
+      await requireOrgPermission(session.user.id, orgId, "org:update");
+    } catch (e) {
+      if (e instanceof OrgAuthError) {
+        return NextResponse.json({ error: e.message }, { status: e.status });
+      }
+      throw e;
+    }
+  }
 
   logAudit({
     scope: orgId ? "ORG" : "PERSONAL",

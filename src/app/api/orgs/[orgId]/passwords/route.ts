@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createOrgPasswordSchema, createOrgSecureNoteSchema, createOrgCreditCardSchema, createOrgIdentitySchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
+import { API_ERROR } from "@/lib/api-error-codes";
 import type { EntryType } from "@prisma/client";
 import {
   unwrapOrgKey,
@@ -14,11 +15,13 @@ import { buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 
 type Params = { params: Promise<{ orgId: string }> };
 
+const VALID_ENTRY_TYPES: Set<string> = new Set(["LOGIN", "SECURE_NOTE", "CREDIT_CARD", "IDENTITY", "PASSKEY"]);
+
 // GET /api/orgs/[orgId]/passwords — List org passwords (server decrypts overviews)
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId } = await params;
@@ -34,7 +37,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const { searchParams } = new URL(req.url);
   const tagId = searchParams.get("tag");
-  const entryType = searchParams.get("type") as EntryType | null;
+  const rawType = searchParams.get("type");
+  const entryType = rawType && VALID_ENTRY_TYPES.has(rawType) ? (rawType as EntryType) : null;
   const favoritesOnly = searchParams.get("favorites") === "true";
   const trashOnly = searchParams.get("trash") === "true";
   const archivedOnly = searchParams.get("archived") === "true";
@@ -49,7 +53,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   });
 
   if (!org) {
-    return NextResponse.json({ error: "Org not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.ORG_NOT_FOUND }, { status: 404 });
   }
 
   const orgKey = unwrapOrgKey({
@@ -119,44 +123,50 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const entries: OrgPasswordListEntry[] = passwords.map((entry: any) => {
-    const aad = entry.aadVersion >= 1
-      ? Buffer.from(buildOrgEntryAAD(orgId, entry.id, "overview"))
-      : undefined;
-    const overview = JSON.parse(
-      decryptServerData(
-        {
-          ciphertext: entry.encryptedOverview,
-          iv: entry.overviewIv,
-          authTag: entry.overviewAuthTag,
-        },
-        orgKey,
-        aad
-      )
-    );
+  const entries: OrgPasswordListEntry[] = [];
+  for (const entry of passwords as any[]) {
+    try {
+      const aad = entry.aadVersion >= 1
+        ? Buffer.from(buildOrgEntryAAD(orgId, entry.id, "overview"))
+        : undefined;
+      const overview = JSON.parse(
+        decryptServerData(
+          {
+            ciphertext: entry.encryptedOverview,
+            iv: entry.overviewIv,
+            authTag: entry.overviewAuthTag,
+          },
+          orgKey,
+          aad
+        )
+      );
 
-    return {
-      id: entry.id,
-      entryType: entry.entryType,
-      title: overview.title,
-      username: overview.username ?? null,
-      urlHost: overview.urlHost ?? null,
-      snippet: overview.snippet ?? null,
-      brand: overview.brand ?? null,
-      lastFour: overview.lastFour ?? null,
-      cardholderName: overview.cardholderName ?? null,
-      fullName: overview.fullName ?? null,
-      idNumberLast4: overview.idNumberLast4 ?? null,
-      isFavorite: entry.favorites.length > 0,
-      isArchived: entry.isArchived,
-      tags: entry.tags,
-      createdBy: entry.createdBy,
-      updatedBy: entry.updatedBy,
-      createdAt: entry.createdAt,
-      updatedAt: entry.updatedAt,
-      deletedAt: entry.deletedAt,
-    };
-  });
+      entries.push({
+        id: entry.id,
+        entryType: entry.entryType,
+        title: overview.title,
+        username: overview.username ?? null,
+        urlHost: overview.urlHost ?? null,
+        snippet: overview.snippet ?? null,
+        brand: overview.brand ?? null,
+        lastFour: overview.lastFour ?? null,
+        cardholderName: overview.cardholderName ?? null,
+        fullName: overview.fullName ?? null,
+        idNumberLast4: overview.idNumberLast4 ?? null,
+        isFavorite: entry.favorites.length > 0,
+        isArchived: entry.isArchived,
+        tags: entry.tags,
+        createdBy: entry.createdBy,
+        updatedBy: entry.updatedBy,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        deletedAt: entry.deletedAt,
+      });
+    } catch {
+      // Skip entries with corrupt encrypted data rather than failing the entire list
+      continue;
+    }
+  }
 
   // Sort: favorites first, then by updatedAt desc
   entries.sort((a, b) => {
@@ -171,7 +181,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { orgId } = await params;
@@ -189,7 +199,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
   // Check entry type
@@ -208,7 +218,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   });
 
   if (!org) {
-    return NextResponse.json({ error: "Org not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.ORG_NOT_FOUND }, { status: 404 });
   }
 
   const orgKey = unwrapOrgKey({
@@ -229,7 +239,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const parsed = createOrgSecureNoteSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: parsed.error.flatten() },
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
         { status: 400 }
       );
     }
@@ -246,7 +256,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const parsed = createOrgCreditCardSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: parsed.error.flatten() },
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
         { status: 400 }
       );
     }
@@ -277,7 +287,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const parsed = createOrgIdentitySchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: parsed.error.flatten() },
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
         { status: 400 }
       );
     }
@@ -310,7 +320,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const parsed = createOrgPasswordSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: parsed.error.flatten() },
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
         { status: 400 }
       );
     }

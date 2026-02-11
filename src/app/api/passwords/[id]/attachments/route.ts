@@ -8,6 +8,7 @@ import {
   MAX_FILE_SIZE,
   MAX_ATTACHMENTS_PER_ENTRY,
 } from "@/lib/validations";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -22,7 +23,7 @@ export async function GET(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { id } = await params;
@@ -33,10 +34,10 @@ export async function GET(
   });
 
   if (!entry) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
   if (entry.userId !== session.user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
   const attachments = await prisma.attachment.findMany({
@@ -61,7 +62,7 @@ export async function POST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { id } = await params;
@@ -72,10 +73,10 @@ export async function POST(
   });
 
   if (!entry) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
   if (entry.userId !== session.user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
   // Check attachment count limit
@@ -84,9 +85,21 @@ export async function POST(
   });
   if (count >= MAX_ATTACHMENTS_PER_ENTRY) {
     return NextResponse.json(
-      { error: `Maximum ${MAX_ATTACHMENTS_PER_ENTRY} attachments per entry` },
+      { error: API_ERROR.ATTACHMENT_LIMIT_EXCEEDED },
       { status: 400 }
     );
+  }
+
+  // Early rejection: check Content-Length before consuming body into memory
+  const contentLength = req.headers.get("content-length");
+  if (contentLength) {
+    const declaredSize = parseInt(contentLength, 10);
+    if (!isNaN(declaredSize) && declaredSize > MAX_FILE_SIZE * 2) {
+      return NextResponse.json(
+        { error: API_ERROR.PAYLOAD_TOO_LARGE },
+        { status: 413 }
+      );
+    }
   }
 
   // Parse FormData
@@ -94,7 +107,7 @@ export async function POST(
   try {
     formData = await req.formData();
   } catch {
-    return NextResponse.json({ error: "Invalid form data" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_FORM_DATA }, { status: 400 });
   }
 
   const clientId = formData.get("id") as string | null;
@@ -109,24 +122,24 @@ export async function POST(
 
   if (!file || !iv || !authTag || !filename || !contentType || !sizeBytes) {
     return NextResponse.json(
-      { error: "Missing required fields: file, iv, authTag, filename, contentType, sizeBytes" },
+      { error: API_ERROR.MISSING_REQUIRED_FIELDS },
       { status: 400 }
     );
   }
 
   // Validate iv/authTag format (hex strings)
   if (!/^[0-9a-f]{24}$/.test(iv)) {
-    return NextResponse.json({ error: "Invalid iv format" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_IV_FORMAT }, { status: 400 });
   }
   if (!/^[0-9a-f]{32}$/.test(authTag)) {
-    return NextResponse.json({ error: "Invalid authTag format" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.INVALID_AUTH_TAG_FORMAT }, { status: 400 });
   }
 
   // Validate original file size (before encryption)
   const originalSize = parseInt(sizeBytes, 10);
   if (isNaN(originalSize) || originalSize <= 0 || originalSize > MAX_FILE_SIZE) {
     return NextResponse.json(
-      { error: `File size must be between 1 byte and ${MAX_FILE_SIZE / 1024 / 1024}MB` },
+      { error: API_ERROR.FILE_TOO_LARGE },
       { status: 400 }
     );
   }
@@ -135,7 +148,7 @@ export async function POST(
   const ext = getExtension(filename);
   if (!ALLOWED_EXTENSIONS.includes(ext as typeof ALLOWED_EXTENSIONS[number])) {
     return NextResponse.json(
-      { error: `File extension not allowed. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}` },
+      { error: API_ERROR.EXTENSION_NOT_ALLOWED },
       { status: 400 }
     );
   }
@@ -143,7 +156,7 @@ export async function POST(
   // Validate content type
   if (!ALLOWED_CONTENT_TYPES.includes(contentType as typeof ALLOWED_CONTENT_TYPES[number])) {
     return NextResponse.json(
-      { error: `Content type not allowed. Allowed: ${ALLOWED_CONTENT_TYPES.join(", ")}` },
+      { error: API_ERROR.CONTENT_TYPE_NOT_ALLOWED },
       { status: 400 }
     );
   }
@@ -151,8 +164,14 @@ export async function POST(
   // Sanitize filename (prevent path traversal)
   const sanitizedFilename = filename.replace(/[/\\]/g, "_").slice(0, 255);
 
-  // Read encrypted blob
+  // Read encrypted blob and validate actual size
   const buffer = Buffer.from(await file.arrayBuffer());
+  if (buffer.length > MAX_FILE_SIZE) {
+    return NextResponse.json(
+      { error: API_ERROR.FILE_TOO_LARGE },
+      { status: 400 }
+    );
+  }
 
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 0;
   const attachment = await prisma.attachment.create({

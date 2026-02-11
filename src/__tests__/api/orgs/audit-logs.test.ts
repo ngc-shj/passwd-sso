@@ -48,13 +48,13 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(401);
-    expect(json.error).toBe("Unauthorized");
+    expect(json.error).toBe("UNAUTHORIZED");
   });
 
   it("returns 403 when user lacks org:update permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockRejectedValue(
-      new OrgAuthError("Forbidden", 403)
+      new OrgAuthError("FORBIDDEN", 403)
     );
 
     const req = createRequest(
@@ -66,7 +66,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(403);
-    expect(json.error).toBe("Forbidden");
+    expect(json.error).toBe("FORBIDDEN");
   });
 
   it("returns org audit logs for ADMIN/OWNER", async () => {

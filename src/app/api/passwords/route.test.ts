@@ -209,6 +209,7 @@ describe("POST /api/passwords", () => {
   });
 
   const validBody = {
+    id: "550e8400-e29b-41d4-a716-446655440000",
     encryptedBlob: { ciphertext: "blob", iv: "a".repeat(24), authTag: "b".repeat(32) },
     encryptedOverview: { ciphertext: "over", iv: "c".repeat(24), authTag: "d".repeat(32) },
     keyVersion: 1,
@@ -284,7 +285,7 @@ describe("POST /api/passwords", () => {
     );
   });
 
-  it("creates entry without id (server-generated, aadVersion=0)", async () => {
+  it("creates entry without id (legacy aadVersion=0)", async () => {
     mockPrismaPasswordEntry.create.mockResolvedValue({
       id: "new-pw",
       encryptedOverview: "over",
@@ -298,8 +299,9 @@ describe("POST /api/passwords", () => {
       updatedAt: now,
     });
 
+    const { id: _, ...bodyWithoutId } = validBody;
     const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
-      body: validBody,
+      body: { ...bodyWithoutId, aadVersion: 0 },
     }));
     const json = await res.json();
     expect(res.status).toBe(201);
@@ -420,6 +422,16 @@ describe("POST /api/passwords", () => {
     const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
     const json = await res.json();
     expect(json[0].entryType).toBe("PASSKEY");
+  });
+
+  it("ignores invalid entryType query param", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      searchParams: { type: "INVALID_TYPE" },
+    }));
+    const call = mockPrismaPasswordEntry.findMany.mock.calls[0][0];
+    expect(call.where).not.toHaveProperty("entryType");
   });
 
   it("filters by entryType PASSKEY", async () => {

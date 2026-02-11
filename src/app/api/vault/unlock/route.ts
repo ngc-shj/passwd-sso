@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { getRedis } from "@/lib/redis";
+import { createRateLimiter } from "@/lib/rate-limit";
+import { API_ERROR } from "@/lib/api-error-codes";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -11,48 +12,10 @@ const unlockSchema = z.object({
   authHash: z.string().length(64),
 });
 
-const RATE_WINDOW_MS = 5 * 60 * 1000;
-const RATE_MAX = 5;
-const rate = new Map<string, { resetAt: number; count: number }>();
-
-async function checkRateLimit(key: string): Promise<boolean> {
-  const redis = getRedis();
-  if (redis) {
-    try {
-      const windowSec = Math.floor(RATE_WINDOW_MS / 1000);
-      const count = await redis.incr(key);
-      if (count === 1) {
-        await redis.expire(key, windowSec);
-      }
-      return count <= RATE_MAX;
-    } catch {
-      // Fallback to in-memory on Redis errors
-    }
-  }
-
-  const now = Date.now();
-  const entry = rate.get(key);
-  if (!entry || entry.resetAt < now) {
-    rate.set(key, { resetAt: now + RATE_WINDOW_MS, count: 1 });
-    return true;
-  }
-  if (entry.count >= RATE_MAX) return false;
-  entry.count += 1;
-  return true;
-}
-
-async function clearRateLimit(key: string) {
-  const redis = getRedis();
-  if (redis) {
-    try {
-      await redis.del(key);
-      return;
-    } catch {
-      // Fallback to in-memory on Redis errors
-    }
-  }
-  rate.delete(key);
-}
+const unlockLimiter = createRateLimiter({
+  windowMs: 5 * 60 * 1000,
+  max: 5,
+});
 
 /**
  * POST /api/vault/unlock
@@ -63,26 +26,28 @@ async function clearRateLimit(key: string) {
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const ip =
-    request.headers.get("x-forwarded-for") ??
-    request.headers.get("x-real-ip") ??
-    "unknown";
-  const rateKey = `rl:vault_unlock:${session.user.id}:${ip}`;
-  if (!(await checkRateLimit(rateKey))) {
+  const rateKey = `rl:vault_unlock:${session.user.id}`;
+  if (!(await unlockLimiter.check(rateKey))) {
     return NextResponse.json(
-      { error: "Rate limit exceeded" },
+      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 }
     );
   }
 
-  const body = await request.json();
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
+  }
+
   const parsed = unlockSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.flatten() },
+      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
       { status: 400 }
     );
   }
@@ -103,7 +68,7 @@ export async function POST(request: Request) {
 
   if (!user?.vaultSetupAt) {
     return NextResponse.json(
-      { error: "Vault not set up" },
+      { error: API_ERROR.VAULT_NOT_SETUP },
       { status: 404 }
     );
   }
@@ -118,7 +83,7 @@ export async function POST(request: Request) {
   }
 
   // Reset failure counter on success
-  await clearRateLimit(rateKey);
+  await unlockLimiter.clear(rateKey);
 
   // Fetch verification artifact
   const vaultKey = await prisma.vaultKey.findUnique({

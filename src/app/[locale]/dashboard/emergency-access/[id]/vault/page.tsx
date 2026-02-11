@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useRouter } from "@/i18n/navigation";
 import { ArrowLeft, Eye, EyeOff, KeyRound, Lock } from "lucide-react";
+import { eaErrorToI18nKey } from "@/lib/api-error-codes";
 import {
   decryptPrivateKey,
   importPrivateKey,
@@ -67,8 +68,8 @@ export default function EmergencyVaultPage() {
       // 1. Fetch ECDH data
       const vaultRes = await fetch(`/api/emergency-access/${grantId}/vault`);
       if (!vaultRes.ok) {
-        const data = await vaultRes.json();
-        setError(data.error || t("networkError"));
+        const data = await vaultRes.json().catch(() => null);
+        setError(t(eaErrorToI18nKey(data?.error)));
         setLoading(false);
         return;
       }
@@ -92,7 +93,7 @@ export default function EmergencyVaultPage() {
         grantId: vaultData.grantId,
         ownerId: vaultData.ownerId,
         granteeId: vaultData.granteeId,
-        keyVersion: 1,
+        keyVersion: vaultData.keyVersion ?? 1,
         wrapVersion: vaultData.wrapVersion ?? 1,
       };
       const ownerSecretKey = await unwrapSecretKeyAsGrantee(
@@ -240,7 +241,7 @@ export default function EmergencyVaultPage() {
                     className="cursor-pointer font-mono hover:underline"
                     onClick={() => {
                       navigator.clipboard.writeText(entry.username!);
-                      toast.success("Copied");
+                      toast.success(t("copied"));
                     }}
                   >
                     {entry.username}
@@ -254,7 +255,7 @@ export default function EmergencyVaultPage() {
                     className="cursor-pointer font-mono hover:underline"
                     onClick={() => {
                       navigator.clipboard.writeText(entry.password!);
-                      toast.success("Copied");
+                      toast.success(t("copied"));
                     }}
                   >
                     {visiblePasswords.has(entry.id) ? entry.password : "••••••••"}

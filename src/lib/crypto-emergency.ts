@@ -43,6 +43,15 @@ const HKDF_SALT_LENGTH = 32;
 export const CURRENT_WRAP_VERSION = 1;
 export const CURRENT_KEY_ALGORITHM = "ECDH-P256" as const;
 
+/** Explicitly allowed wrapVersion values. Only versions with implemented key exchange are included. */
+export const SUPPORTED_WRAP_VERSIONS = new Set([1]);
+
+/** Allowed keyAlgorithm values per wrapVersion. */
+export const SUPPORTED_KEY_ALGORITHMS: Record<number, readonly string[]> = {
+  1: ["ECDH-P256"],
+  // 2: ["HYBRID-ECDH-P256-MLKEM768"],  // reserved for PQC hybrid
+};
+
 const HKDF_INFO_BY_VERSION: Record<number, string> = {
   1: "passwd-sso-emergency-v1",
   // 2: "passwd-sso-emergency-v2",  // reserved for PQC hybrid
@@ -306,7 +315,7 @@ export async function unwrapSecretKeyAsGrantee(
 export async function createKeyEscrow(
   ownerSecretKey: Uint8Array,
   granteePublicKeyJwk: string,
-  ctx: Omit<WrapContext, "wrapVersion" | "keyVersion">
+  ctx: Omit<WrapContext, "wrapVersion">
 ): Promise<{
   ownerEphemeralPublicKey: string;
   encryptedSecretKey: string;
@@ -314,6 +323,7 @@ export async function createKeyEscrow(
   secretKeyAuthTag: string;
   hkdfSalt: string;
   wrapVersion: number;
+  keyVersion: number;
 }> {
   const ephemeralKeyPair = await generateECDHKeyPair();
   const granteePublicKey = await importPublicKey(granteePublicKeyJwk);
@@ -323,7 +333,6 @@ export async function createKeyEscrow(
 
   const wrapCtx: WrapContext = {
     ...ctx,
-    keyVersion: 1,
     wrapVersion: CURRENT_WRAP_VERSION,
   };
 
@@ -344,5 +353,6 @@ export async function createKeyEscrow(
     secretKeyAuthTag: encrypted.authTag,
     hkdfSalt: hexEncode(salt),
     wrapVersion: CURRENT_WRAP_VERSION,
+    keyVersion: ctx.keyVersion,
   };
 }

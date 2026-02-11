@@ -17,3 +17,6 @@ export function canTransition(
 ): boolean {
   return VALID_TRANSITIONS[from]?.includes(to) ?? false;
 }
+
+/** Statuses that hold escrowed key data and can become STALE on keyVersion bump. */
+export const STALE_ELIGIBLE_STATUSES: EmergencyAccessStatus[] = ["IDLE", "ACTIVATED"];

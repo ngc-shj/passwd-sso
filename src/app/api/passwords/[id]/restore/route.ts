@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 // POST /api/passwords/[id]/restore - Restore from trash
 export async function POST(
@@ -10,7 +11,7 @@ export async function POST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { id } = await params;
@@ -20,15 +21,15 @@ export async function POST(
   });
 
   if (!existing) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   if (existing.userId !== session.user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
   if (!existing.deletedAt) {
-    return NextResponse.json({ error: "Not in trash" }, { status: 400 });
+    return NextResponse.json({ error: API_ERROR.NOT_IN_TRASH }, { status: 400 });
   }
 
   await prisma.passwordEntry.update({

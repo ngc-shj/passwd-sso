@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 // GET /api/emergency-access/[id]/vault/entries — Fetch owner's encrypted entries
 export async function GET(
@@ -10,7 +11,7 @@ export async function GET(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
   const { id } = await params;
@@ -20,12 +21,12 @@ export async function GET(
   });
 
   if (!grant || grant.granteeId !== session.user.id) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   if (grant.status !== "ACTIVATED") {
     return NextResponse.json(
-      { error: "Emergency access not activated" },
+      { error: API_ERROR.NOT_ACTIVATED },
       { status: 403 }
     );
   }
