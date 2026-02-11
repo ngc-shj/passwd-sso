@@ -27,6 +27,7 @@ describe("createE2EPasswordSchema", () => {
   };
 
   const validBase = {
+    id: "550e8400-e29b-41d4-a716-446655440000",
     encryptedBlob: validEncrypted,
     encryptedOverview: validEncrypted,
     keyVersion: 1,
@@ -63,14 +64,21 @@ describe("createE2EPasswordSchema", () => {
     ).toThrow();
   });
 
-  it("id is optional (defaults to undefined)", () => {
-    const result = createE2EPasswordSchema.parse(validBase);
+  it("id is optional when aadVersion=0", () => {
+    const result = createE2EPasswordSchema.parse({ ...validBase, id: undefined, aadVersion: 0 });
     expect(result.id).toBeUndefined();
   });
 
-  it("defaults aadVersion to 0", () => {
+  it("id is required when aadVersion defaults to 1", () => {
+    const { id: _, ...baseWithoutId } = validBase;
+    expect(() => createE2EPasswordSchema.parse(baseWithoutId)).toThrow(
+      "id is required when aadVersion >= 1"
+    );
+  });
+
+  it("defaults aadVersion to 1", () => {
     const result = createE2EPasswordSchema.parse(validBase);
-    expect(result.aadVersion).toBe(0);
+    expect(result.aadVersion).toBe(1);
   });
 
   it("accepts aadVersion=1 with id", () => {
@@ -84,8 +92,9 @@ describe("createE2EPasswordSchema", () => {
   });
 
   it("rejects aadVersion=1 without id", () => {
+    const { id: _, ...baseWithoutId } = validBase;
     expect(() =>
-      createE2EPasswordSchema.parse({ ...validBase, aadVersion: 1 }),
+      createE2EPasswordSchema.parse({ ...baseWithoutId, aadVersion: 1 }),
     ).toThrow("id is required when aadVersion >= 1");
   });
 

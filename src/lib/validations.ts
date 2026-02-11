@@ -44,7 +44,7 @@ export const createE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
   keyVersion: z.number().int().min(1),
-  aadVersion: z.number().int().min(0).max(1).optional().default(0),
+  aadVersion: z.number().int().min(0).max(1).optional().default(1),
   tagIds: z.array(z.string().cuid()).optional(),
   entryType: entryTypeSchema.optional().default("LOGIN"),
 }).refine(
