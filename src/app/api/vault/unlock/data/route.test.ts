@@ -108,6 +108,7 @@ describe("GET /api/vault/unlock/data", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual({
+      userId: "test-user-id",
       accountSalt: "salt-hex",
       encryptedSecretKey: "enc-key",
       secretKeyIv: "iv-hex",
@@ -136,5 +137,6 @@ describe("GET /api/vault/unlock/data", () => {
     const res = await GET(req());
     const json = await res.json();
     expect(json.verificationArtifact).toBeNull();
+    expect(json.userId).toBe("test-user-id");
   });
 });

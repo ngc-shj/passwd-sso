@@ -11,11 +11,12 @@ export function App() {
 
   useEffect(() => {
     sendMessage({ type: "GET_STATUS" }).then((res) => {
-      if (res.hasToken) {
-        // Token exists — vault unlock flow is next phase
-        setState("logged_in");
-      } else {
+      if (!res.hasToken) {
         setState("not_logged_in");
+      } else if (res.vaultUnlocked) {
+        setState("vault_unlocked");
+      } else {
+        setState("logged_in");
       }
     });
   }, []);
@@ -33,8 +34,12 @@ export function App() {
           </div>
         )}
         {state === "not_logged_in" && <LoginPrompt />}
-        {state === "logged_in" && <VaultUnlock />}
-        {state === "vault_unlocked" && <MatchList />}
+        {state === "logged_in" && (
+          <VaultUnlock onUnlocked={() => setState("vault_unlocked")} />
+        )}
+        {state === "vault_unlocked" && (
+          <MatchList onLock={() => setState("logged_in")} />
+        )}
       </main>
     </div>
   );

@@ -1,13 +1,61 @@
-export function VaultUnlock() {
+import { useState } from "react";
+import { sendMessage } from "../../lib/messaging";
+import { getSettings } from "../../lib/storage";
+import { ensureHostPermission } from "../../lib/api";
+
+interface Props {
+  onUnlocked: () => void;
+}
+
+export function VaultUnlock({ onUnlocked }: Props) {
+  const [passphrase, setPassphrase] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passphrase) return;
+    setLoading(true);
+    setError("");
+
+    const { serverUrl } = await getSettings();
+    const granted = await ensureHostPermission(serverUrl);
+    if (!granted) {
+      setError("Permission denied.");
+      setLoading(false);
+      return;
+    }
+
+    const res = await sendMessage({ type: "UNLOCK_VAULT", passphrase });
+    setLoading(false);
+    if (res.ok) {
+      setPassphrase("");
+      onUnlocked();
+    } else {
+      setError(res.error || "Incorrect passphrase.");
+    }
+  };
+
   return (
-    <div className="flex flex-col gap-4 py-4">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4 py-4">
       <p className="text-sm text-gray-600">
-        Vault unlock will be available in a future update.
+        Enter your master passphrase to unlock the vault.
       </p>
-      <div className="space-y-3">
-        <div className="h-10 bg-gray-100 rounded-md animate-pulse" />
-        <div className="h-10 bg-gray-100 rounded-md animate-pulse" />
-      </div>
-    </div>
+      <input
+        type="password"
+        value={passphrase}
+        onChange={(e) => setPassphrase(e.target.value)}
+        placeholder="Passphrase"
+        className="h-10 px-3 rounded-md border border-gray-300 text-sm"
+      />
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <button
+        type="submit"
+        disabled={loading}
+        className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors disabled:opacity-60"
+      >
+        {loading ? "Unlocking..." : "Unlock"}
+      </button>
+    </form>
   );
 }

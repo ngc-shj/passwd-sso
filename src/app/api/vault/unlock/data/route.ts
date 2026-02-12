@@ -66,6 +66,7 @@ export async function GET(req: NextRequest) {
   });
 
   return NextResponse.json({
+    userId,
     accountSalt: user.accountSalt,
     encryptedSecretKey: user.encryptedSecretKey,
     secretKeyIv: user.secretKeyIv,
