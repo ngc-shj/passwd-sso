@@ -3,12 +3,14 @@
  */
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, waitFor } from "@testing-library/react";
+import { render, waitFor, screen, fireEvent } from "@testing-library/react";
 
 const mockSendMessage = vi.fn();
 const mockMatchList = vi.fn((_props: unknown) => null);
 const mockVaultUnlock = vi.fn((_props: unknown) => null);
 const mockLoginPrompt = vi.fn((_props: unknown) => null);
+
+const mockOpenOptionsPage = vi.fn();
 
 vi.mock("../../lib/messaging", () => ({
   sendMessage: (...args: unknown[]) => mockSendMessage(...args),
@@ -41,6 +43,9 @@ describe("App tab URL handling", () => {
       tabs: {
         query: vi.fn(),
       },
+      runtime: {
+        openOptionsPage: mockOpenOptionsPage,
+      },
     };
     vi.stubGlobal("chrome", chromeMock);
   });
@@ -65,5 +70,22 @@ describe("App tab URL handling", () => {
       | { tabUrl?: string | null }
       | undefined;
     expect(props?.tabUrl ?? null).toBeNull();
+  });
+
+  it("opens options page from header button", async () => {
+    const chromeMock = (globalThis as unknown as { chrome: { tabs: { query: ReturnType<typeof vi.fn> }; runtime: { openOptionsPage: ReturnType<typeof vi.fn> } } }).chrome;
+    chromeMock.tabs.query.mockResolvedValueOnce([{ url: "https://example.com" }]);
+    mockSendMessage.mockResolvedValueOnce({
+      type: "GET_STATUS",
+      hasToken: false,
+      vaultUnlocked: false,
+      expiresAt: null,
+    });
+
+    render(<App />);
+
+    const button = await screen.findByTitle("Settings");
+    fireEvent.click(button);
+    expect(mockOpenOptionsPage).toHaveBeenCalled();
   });
 });
