@@ -1,0 +1,53 @@
+{
+  "popup": {
+    "title": "passwd-sso",
+    "settings": "Settings",
+    "loading": "Loading...",
+    "signIn": "Sign in to passwd-sso to use the extension.",
+    "openApp": "Open passwd-sso",
+    "unlockDescription": "Enter your master passphrase to unlock the vault.",
+    "passphrasePlaceholder": "Passphrase",
+    "show": "Show",
+    "hide": "Hide",
+    "unlock": "Unlock",
+    "unlocking": "Unlocking...",
+    "passwords": "Passwords",
+    "lock": "Lock",
+    "noEntries": "No entries found.",
+    "searchPlaceholder": "Search...",
+    "noResults": "No results for \"{query}\"",
+    "matchesFor": "Matches for {host}",
+    "noMatchesFor": "No matches for {host}",
+    "noMatchesForPage": "No matches for this page",
+    "otherEntries": "Other entries",
+    "fill": "Fill",
+    "copy": "Copy",
+    "autofillSent": "Autofill sent",
+    "passwordCopied": "Password copied"
+  },
+  "options": {
+    "title": "Settings",
+    "description": "Configure server connection and auto-lock behavior.",
+    "serverUrl": "Server URL",
+    "serverUrlPlaceholder": "https://example.com",
+    "httpsRequired": "HTTPS required (HTTP allowed for localhost).",
+    "autoLock": "Auto-lock (minutes)",
+    "never": "Never",
+    "save": "Save",
+    "saved": "Saved!"
+  },
+  "errors": {
+    "invalidPassphrase": "Passphrase is incorrect.",
+    "vaultLocked": "Vault is locked.",
+    "fetchFailed": "Failed to load entries.",
+    "noPassword": "No password available for this entry.",
+    "permissionDenied": "Host permission was denied.",
+    "clipboardFailed": "Clipboard write failed.",
+    "copyFailed": "Copy failed.",
+    "noActiveTab": "No active tab found.",
+    "autofillFailed": "Autofill failed.",
+    "invalidUrl": "Invalid URL",
+    "httpsRequired": "HTTPS required (HTTP allowed for localhost).",
+    "autoLockInvalid": "Auto-lock minutes must be 0 or more"
+  }
+}

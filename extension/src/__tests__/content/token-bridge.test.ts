@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { tryReadToken } from "../../content/token-bridge";
+import { tryReadToken } from "../../content/token-bridge-lib";
 
 describe("token bridge", () => {
   beforeEach(() => {

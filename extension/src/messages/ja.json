@@ -1,0 +1,53 @@
+{
+  "popup": {
+    "title": "passwd-sso",
+    "settings": "設定",
+    "loading": "読み込み中...",
+    "signIn": "拡張機能を使うには passwd-sso にサインインしてください。",
+    "openApp": "passwd-sso を開く",
+    "unlockDescription": "保管庫を解除するためにマスターパスフレーズを入力してください。",
+    "passphrasePlaceholder": "パスフレーズ",
+    "show": "表示",
+    "hide": "非表示",
+    "unlock": "解除",
+    "unlocking": "解除中...",
+    "passwords": "パスワード",
+    "lock": "ロック",
+    "noEntries": "エントリがありません。",
+    "searchPlaceholder": "検索...",
+    "noResults": "「{query}」に一致する結果はありません",
+    "matchesFor": "{host} の一致",
+    "noMatchesFor": "{host} に一致するものはありません",
+    "noMatchesForPage": "このページに一致するものはありません",
+    "otherEntries": "その他のエントリ",
+    "fill": "入力",
+    "copy": "コピー",
+    "autofillSent": "自動入力を送信しました",
+    "passwordCopied": "パスワードをコピーしました"
+  },
+  "options": {
+    "title": "設定",
+    "description": "サーバー接続と自動ロックの設定を行います。",
+    "serverUrl": "サーバーURL",
+    "serverUrlPlaceholder": "https://example.com",
+    "httpsRequired": "HTTPS 必須（localhost は HTTP 可）",
+    "autoLock": "自動ロック（分）",
+    "never": "しない",
+    "save": "保存",
+    "saved": "保存しました"
+  },
+  "errors": {
+    "invalidPassphrase": "パスフレーズが正しくありません。",
+    "vaultLocked": "保管庫がロックされています。",
+    "fetchFailed": "エントリの取得に失敗しました。",
+    "noPassword": "このエントリにパスワードがありません。",
+    "permissionDenied": "ホスト権限が拒否されました。",
+    "clipboardFailed": "クリップボードに書き込めませんでした。",
+    "copyFailed": "コピーに失敗しました。",
+    "noActiveTab": "アクティブなタブが見つかりません。",
+    "autofillFailed": "自動入力に失敗しました。",
+    "invalidUrl": "URL が正しくありません。",
+    "httpsRequired": "HTTPS 必須（localhost は HTTP 可）",
+    "autoLockInvalid": "自動ロックは 0 以上にしてください"
+  }
+}

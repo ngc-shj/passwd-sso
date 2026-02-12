@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { sendMessage } from "../lib/messaging";
+import { t } from "../lib/i18n";
 import { LoginPrompt } from "./components/LoginPrompt";
 import { VaultUnlock } from "./components/VaultUnlock";
 import { MatchList } from "./components/MatchList";
@@ -33,12 +34,12 @@ export function App() {
   return (
     <div className="flex flex-col min-h-[480px] bg-white text-gray-900">
       <header className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200">
-        <h1 className="text-lg font-semibold">passwd-sso</h1>
+        <h1 className="text-lg font-semibold">{t("popup.title")}</h1>
         <button
           onClick={() => chrome.runtime.openOptionsPage()}
           className="text-gray-500 hover:text-gray-700 text-3xl leading-none w-10 h-10 flex items-center justify-center"
-          title="Settings"
-          aria-label="Settings"
+          title={t("popup.settings")}
+          aria-label={t("popup.settings")}
         >
           ⚙
         </button>
@@ -47,7 +48,7 @@ export function App() {
       <main className="flex-1 p-4">
         {state === "loading" && (
           <div className="flex items-center justify-center h-full">
-            <p className="text-gray-500">Loading...</p>
+            <p className="text-gray-500">{t("popup.loading")}</p>
           </div>
         )}
         {state === "not_logged_in" && <LoginPrompt />}

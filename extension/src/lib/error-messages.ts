@@ -1,15 +1,21 @@
-const ERROR_MAP: Record<string, string> = {
-  INVALID_PASSPHRASE: "Passphrase is incorrect.",
-  VAULT_LOCKED: "Vault is locked.",
-  FETCH_FAILED: "Failed to load entries.",
-  NO_PASSWORD: "No password available for this entry.",
-  PERMISSION_DENIED: "Host permission was denied.",
-  CLIPBOARD_FAILED: "Clipboard write failed.",
-  COPY_FAILED: "Copy failed.",
-  NO_ACTIVE_TAB: "No active tab found.",
-  AUTOFILL_FAILED: "Autofill failed.",
+import { t } from "./i18n";
+
+const ERROR_KEY_MAP: Record<string, string> = {
+  INVALID_PASSPHRASE: "errors.invalidPassphrase",
+  VAULT_LOCKED: "errors.vaultLocked",
+  FETCH_FAILED: "errors.fetchFailed",
+  NO_PASSWORD: "errors.noPassword",
+  PERMISSION_DENIED: "errors.permissionDenied",
+  CLIPBOARD_FAILED: "errors.clipboardFailed",
+  COPY_FAILED: "errors.copyFailed",
+  NO_ACTIVE_TAB: "errors.noActiveTab",
+  AUTOFILL_FAILED: "errors.autofillFailed",
+  INVALID_URL: "errors.invalidUrl",
+  HTTPS_REQUIRED: "errors.httpsRequired",
+  AUTO_LOCK_INVALID: "errors.autoLockInvalid",
 };
 
 export function humanizeError(code: string): string {
-  return ERROR_MAP[code] ?? code;
+  const key = ERROR_KEY_MAP[code];
+  return key ? t(key) : code;
 }
