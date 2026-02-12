@@ -23,10 +23,14 @@ type MessageHandler = (
 let messageHandlers: MessageHandler[] = [];
 let alarmHandlers: Array<(alarm: { name: string }) => void> = [];
 let chromeMock: ReturnType<typeof installChromeMock> | null = null;
+let storageChangeHandlers: Array<
+  (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, areaName: string) => void
+> = [];
 
 function installChromeMock() {
   messageHandlers = [];
   alarmHandlers = [];
+  storageChangeHandlers = [];
 
   const chromeMock = {
     runtime: {
@@ -45,6 +49,12 @@ function installChromeMock() {
       create: vi.fn(),
       clear: vi.fn(),
     },
+    scripting: {
+      executeScript: vi.fn().mockResolvedValue([]),
+    },
+    tabs: {
+      sendMessage: vi.fn().mockResolvedValue({}),
+    },
     permissions: {
       contains: vi.fn().mockResolvedValue(true),
     },
@@ -53,6 +63,11 @@ function installChromeMock() {
         get: vi
           .fn()
           .mockResolvedValue({ serverUrl: "https://localhost:3000", autoLockMinutes: 15 }),
+      },
+      onChanged: {
+        addListener: (fn: (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, areaName: string) => void) => {
+          storageChangeHandlers.push(fn);
+        },
       },
     },
   };
@@ -100,6 +115,7 @@ describe("background message flow", () => {
             json: async () => ({
               id: "pw-1",
               encryptedBlob: { ciphertext: "aa", iv: "bb", authTag: "cc" },
+              encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" },
               aadVersion: 1,
             }),
           };
@@ -169,6 +185,45 @@ describe("background message flow", () => {
       expiresAt: Date.now() + 60_000,
     });
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    expect(chromeMock?.alarms.create).not.toHaveBeenCalledWith(
+      "vault-auto-lock",
+      expect.anything()
+    );
+  });
+
+  it("updates auto-lock timer when settings change", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const handler = storageChangeHandlers[0];
+    handler({ autoLockMinutes: { newValue: 5 } }, "local");
+    expect(chromeMock?.alarms.clear).toHaveBeenCalledWith("vault-auto-lock");
+    expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
+      "vault-auto-lock",
+      expect.objectContaining({ delayInMinutes: 5 })
+    );
+  });
+
+  it("clears auto-lock timer when set to 0", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const handler = storageChangeHandlers[0];
+    handler({ autoLockMinutes: { newValue: 0 } }, "local");
+    expect(chromeMock?.alarms.clear).toHaveBeenCalledWith("vault-auto-lock");
+  });
+
+  it("ignores auto-lock changes while vault is locked", async () => {
+    const handler = storageChangeHandlers[0];
+    handler({ autoLockMinutes: { newValue: 5 } }, "local");
     expect(chromeMock?.alarms.create).not.toHaveBeenCalledWith(
       "vault-auto-lock",
       expect.anything()
@@ -261,5 +316,79 @@ describe("background message flow", () => {
       password: null,
       error: "NOT_FOUND",
     });
+  });
+
+  it("returns error when AUTOFILL called while vault locked", async () => {
+    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "VAULT_LOCKED" });
+  });
+
+  it("autofills successfully", async () => {
+    cryptoMocks.decryptData
+      .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
+      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    expect(res).toEqual({ type: "AUTOFILL", ok: true });
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalled();
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(1, {
+      type: "AUTOFILL_FILL",
+      username: "alice",
+      password: "secret",
+    });
+  });
+
+  it("returns error when AUTOFILL fetch fails", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/vault/unlock/data")) {
+        return {
+          ok: true,
+          json: async () => ({
+            userId: "user-1",
+            accountSalt: "00",
+            encryptedSecretKey: "aa",
+            secretKeyIv: "bb",
+            secretKeyAuthTag: "cc",
+            verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+          }),
+        };
+      }
+      return { ok: false, json: async () => ({ error: "NOT_FOUND" }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "NOT_FOUND" });
+  });
+
+  it("returns error when AUTOFILL script injection fails", async () => {
+    chromeMock?.scripting.executeScript.mockRejectedValueOnce(new Error("CSP"));
+    cryptoMocks.decryptData
+      .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
+      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "CSP" });
   });
 });

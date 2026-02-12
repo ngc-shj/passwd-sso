@@ -8,7 +8,8 @@ export type ExtensionMessage =
   | { type: "UNLOCK_VAULT"; passphrase: string }
   | { type: "LOCK_VAULT" }
   | { type: "FETCH_PASSWORDS" }
-  | { type: "COPY_PASSWORD"; entryId: string };
+  | { type: "COPY_PASSWORD"; entryId: string }
+  | { type: "AUTOFILL"; entryId: string; tabId: number };
 
 export interface DecryptedEntry {
   id: string;
@@ -26,4 +27,11 @@ export type ExtensionResponse =
   | { type: "UNLOCK_VAULT"; ok: boolean; error?: string }
   | { type: "LOCK_VAULT"; ok: true }
   | { type: "FETCH_PASSWORDS"; entries: DecryptedEntry[] | null; error?: string }
-  | { type: "COPY_PASSWORD"; password: string | null; error?: string };
+  | { type: "COPY_PASSWORD"; password: string | null; error?: string }
+  | { type: "AUTOFILL"; ok: boolean; error?: string };
+
+export interface AutofillPayload {
+  type: "AUTOFILL_FILL";
+  username: string;
+  password: string;
+}

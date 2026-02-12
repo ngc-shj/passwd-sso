@@ -20,6 +20,11 @@ describe("MatchList", () => {
       writeText: vi.fn().mockResolvedValue(undefined),
     };
     Object.assign(navigator, { clipboard });
+    vi.stubGlobal("chrome", {
+      tabs: {
+        query: vi.fn().mockResolvedValue([{ id: 1 }]),
+      },
+    });
   });
 
   it("renders entries after fetch", async () => {
@@ -51,7 +56,7 @@ describe("MatchList", () => {
     });
 
     render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
-    expect(await screen.findByText(/fetch_failed/i)).toBeInTheDocument();
+    expect(await screen.findByText(/failed to load entries/i)).toBeInTheDocument();
   });
 
   it("locks vault on button click", async () => {
@@ -124,7 +129,7 @@ describe("MatchList", () => {
     const copyButton = await screen.findByRole("button", { name: "Copy" });
     fireEvent.click(copyButton);
 
-    expect(await screen.findByText(/no_password/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no password available/i)).toBeInTheDocument();
   });
 
   it("shows generic no-match message for non-http(s) pages", async () => {
@@ -162,5 +167,52 @@ describe("MatchList", () => {
     render(<MatchList tabUrl={null} onLock={vi.fn()} />);
     expect(await screen.findByText("Example")).toBeInTheDocument();
     expect(screen.queryByText(/matches for/i)).toBeNull();
+  });
+
+  it("hides copy/fill buttons for non-login entries", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "Note",
+          username: "",
+          urlHost: "",
+          entryType: "SECURE_NOTE",
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
+    await screen.findByText("Note");
+    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Fill" })).toBeNull();
+  });
+
+  it("triggers autofill on Fill click", async () => {
+    const closeSpy = vi.spyOn(window, "close").mockImplementation(() => {});
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Example",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: "LOGIN",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ type: "AUTOFILL", ok: true });
+
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+
+    const fillButton = await screen.findByRole("button", { name: "Fill" });
+    fireEvent.click(fillButton);
+    await waitFor(() => {
+      expect(closeSpy).toHaveBeenCalled();
+    });
+    closeSpy.mockRestore();
   });
 });

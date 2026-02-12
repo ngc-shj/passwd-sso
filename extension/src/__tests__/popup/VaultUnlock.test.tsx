@@ -45,7 +45,7 @@ describe("VaultUnlock", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /unlock/i }));
 
-    expect(await screen.findByText(/permission denied/i)).toBeInTheDocument();
+    expect(await screen.findByText(/host permission was denied/i)).toBeInTheDocument();
   });
 
   it("calls onUnlocked on success", async () => {
@@ -76,6 +76,21 @@ describe("VaultUnlock", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /unlock/i }));
 
-    expect(await screen.findByText(/invalid_passphrase/i)).toBeInTheDocument();
+    expect(await screen.findByText(/passphrase is incorrect/i)).toBeInTheDocument();
+  });
+
+  it("autofocuses passphrase input", async () => {
+    render(<VaultUnlock onUnlocked={vi.fn()} />);
+    const input = screen.getByPlaceholderText("Passphrase");
+    expect(input).toHaveFocus();
+  });
+
+  it("toggles show/hide passphrase", async () => {
+    render(<VaultUnlock onUnlocked={vi.fn()} />);
+    const input = screen.getByPlaceholderText("Passphrase");
+    const toggle = screen.getByRole("button", { name: /show/i });
+    expect(input).toHaveAttribute("type", "password");
+    fireEvent.click(toggle);
+    expect(input).toHaveAttribute("type", "text");
   });
 });
