@@ -19,6 +19,10 @@ export default defineManifest({
       "128": "public/icons/icon-128.png",
     },
   },
+  options_ui: {
+    page: "src/options/index.html",
+    open_in_tab: false,
+  },
   icons: {
     "16": "public/icons/icon-16.png",
     "48": "public/icons/icon-48.png",

@@ -12,6 +12,7 @@ import {
   unwrapSecretKey,
   verifyKey,
 } from "../lib/crypto";
+import { getSettings } from "../lib/storage";
 
 // ── In-memory token storage (never persisted to disk) ────────
 
@@ -22,7 +23,6 @@ let currentUserId: string | null = null;
 
 const ALARM_NAME = "extension-token-ttl";
 const VAULT_ALARM = "vault-auto-lock";
-const VAULT_TIMEOUT_MS = 15 * 60 * 1000;
 
 /** Securely clear token from memory */
 function clearToken(): void {
@@ -196,9 +196,12 @@ chrome.runtime.onMessage.addListener(
 
             encryptionKey = encKey;
             currentUserId = data.userId || null;
-            chrome.alarms.create(VAULT_ALARM, {
-              delayInMinutes: VAULT_TIMEOUT_MS / 60000,
-            });
+            const { autoLockMinutes } = await getSettings();
+            if (autoLockMinutes > 0) {
+              chrome.alarms.create(VAULT_ALARM, {
+                delayInMinutes: autoLockMinutes,
+              });
+            }
 
             sendResponse({ type: "UNLOCK_VAULT", ok: true });
           } catch (err) {

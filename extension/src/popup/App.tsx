@@ -32,8 +32,16 @@ export function App() {
 
   return (
     <div className="flex flex-col min-h-[480px] bg-white text-gray-900">
-      <header className="flex items-center gap-2 px-4 py-3 border-b border-gray-200">
+      <header className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200">
         <h1 className="text-lg font-semibold">passwd-sso</h1>
+        <button
+          onClick={() => chrome.runtime.openOptionsPage()}
+          className="text-gray-500 hover:text-gray-700 text-3xl leading-none w-10 h-10 flex items-center justify-center"
+          title="Settings"
+          aria-label="Settings"
+        >
+          ⚙
+        </button>
       </header>
 
       <main className="flex-1 p-4">

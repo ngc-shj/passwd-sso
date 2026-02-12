@@ -22,6 +22,7 @@ type MessageHandler = (
 
 let messageHandlers: MessageHandler[] = [];
 let alarmHandlers: Array<(alarm: { name: string }) => void> = [];
+let chromeMock: ReturnType<typeof installChromeMock> | null = null;
 
 function installChromeMock() {
   messageHandlers = [];
@@ -49,7 +50,9 @@ function installChromeMock() {
     },
     storage: {
       local: {
-        get: vi.fn().mockResolvedValue({ serverUrl: "https://localhost:3000" }),
+        get: vi
+          .fn()
+          .mockResolvedValue({ serverUrl: "https://localhost:3000", autoLockMinutes: 15 }),
       },
     },
   };
@@ -73,7 +76,7 @@ describe("background message flow", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
-    installChromeMock();
+    chromeMock = installChromeMock();
 
     vi.stubGlobal(
       "fetch",
@@ -135,6 +138,10 @@ describe("background message flow", () => {
     expect(status).toEqual(
       expect.objectContaining({ type: "GET_STATUS", vaultUnlocked: true })
     );
+    expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
+      "vault-auto-lock",
+      expect.objectContaining({ delayInMinutes: 15 })
+    );
   });
 
   it("returns error on invalid passphrase", async () => {
@@ -148,6 +155,23 @@ describe("background message flow", () => {
     const res = await sendMessage({ type: "UNLOCK_VAULT", passphrase: "bad" });
     expect(res).toEqual(
       expect.objectContaining({ type: "UNLOCK_VAULT", ok: false })
+    );
+  });
+
+  it("does not create auto-lock alarm when disabled", async () => {
+    chromeMock?.storage.local.get.mockResolvedValue({
+      serverUrl: "https://localhost:3000",
+      autoLockMinutes: 0,
+    });
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    expect(chromeMock?.alarms.create).not.toHaveBeenCalledWith(
+      "vault-auto-lock",
+      expect.anything()
     );
   });
 
