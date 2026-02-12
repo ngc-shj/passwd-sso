@@ -2,6 +2,7 @@ import { useState } from "react";
 import { sendMessage } from "../../lib/messaging";
 import { getSettings } from "../../lib/storage";
 import { ensureHostPermission } from "../../lib/api";
+import { humanizeError } from "../../lib/error-messages";
 
 interface Props {
   onUnlocked: () => void;
@@ -11,6 +12,7 @@ export function VaultUnlock({ onUnlocked }: Props) {
   const [passphrase, setPassphrase] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassphrase, setShowPassphrase] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,7 +23,7 @@ export function VaultUnlock({ onUnlocked }: Props) {
     const { serverUrl } = await getSettings();
     const granted = await ensureHostPermission(serverUrl);
     if (!granted) {
-      setError("Permission denied.");
+      setError("PERMISSION_DENIED");
       setLoading(false);
       return;
     }
@@ -32,7 +34,7 @@ export function VaultUnlock({ onUnlocked }: Props) {
       setPassphrase("");
       onUnlocked();
     } else {
-      setError(res.error || "Incorrect passphrase.");
+      setError(res.error || "INVALID_PASSPHRASE");
     }
   };
 
@@ -41,14 +43,26 @@ export function VaultUnlock({ onUnlocked }: Props) {
       <p className="text-sm text-gray-600">
         Enter your master passphrase to unlock the vault.
       </p>
-      <input
-        type="password"
-        value={passphrase}
-        onChange={(e) => setPassphrase(e.target.value)}
-        placeholder="Passphrase"
-        className="h-10 px-3 rounded-md border border-gray-300 text-sm"
-      />
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      <div className="flex items-center gap-2">
+        <input
+          type={showPassphrase ? "text" : "password"}
+          value={passphrase}
+          onChange={(e) => setPassphrase(e.target.value)}
+          placeholder="Passphrase"
+          className="h-10 flex-1 px-3 rounded-md border border-gray-300 text-sm"
+          autoFocus
+        />
+        <button
+          type="button"
+          onClick={() => setShowPassphrase((v) => !v)}
+          className="text-xs text-gray-600 hover:text-gray-800"
+        >
+          {showPassphrase ? "Hide" : "Show"}
+        </button>
+      </div>
+      {error && (
+        <p className="text-sm text-red-600">{humanizeError(error)}</p>
+      )}
       <button
         type="submit"
         disabled={loading}

@@ -6,6 +6,7 @@ import {
   sortByUrlMatch,
 } from "../../lib/url-matching";
 import type { DecryptedEntry } from "../../types/messages";
+import { humanizeError } from "../../lib/error-messages";
 
 interface Props {
   tabUrl: string | null;
@@ -18,6 +19,8 @@ export function MatchList({ tabUrl, onLock }: Props) {
   const [error, setError] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [filling, setFilling] = useState(false);
+  const [fillError, setFillError] = useState<string | null>(null);
   const hasTabUrl = Boolean(tabUrl);
   const tabHost = tabUrl ? extractHost(tabUrl) : null;
 
@@ -26,7 +29,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
       if (res.entries) {
         setEntries(res.entries);
       } else {
-        setError(res.error || "Failed to load entries.");
+        setError(res.error || "FETCH_FAILED");
       }
       setLoading(false);
     });
@@ -50,10 +53,33 @@ export function MatchList({ tabUrl, onLock }: Props) {
           navigator.clipboard.writeText("").catch(() => {});
         }, 30_000);
       } catch {
-        setCopyError("Clipboard failed.");
+        setCopyError("CLIPBOARD_FAILED");
       }
     } else {
-      setCopyError(res.error || "Copy failed.");
+      setCopyError(res.error || "COPY_FAILED");
+    }
+  };
+
+  const handleFill = async (entryId: string) => {
+    if (filling) return;
+    setFillError(null);
+    setFilling(true);
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) {
+      setFillError("NO_ACTIVE_TAB");
+      setFilling(false);
+      return;
+    }
+    const res = await sendMessage({
+      type: "AUTOFILL",
+      entryId,
+      tabId: tab.id,
+    });
+    if (res.ok) {
+      window.close();
+    } else {
+      setFillError(res.error || "AUTOFILL_FAILED");
+      setFilling(false);
     }
   };
 
@@ -77,7 +103,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
 
       {loading && <p className="text-sm text-gray-500">Loading...</p>}
       {!loading && error && (
-        <p className="text-sm text-red-600">{error}</p>
+        <p className="text-sm text-red-600">{humanizeError(error)}</p>
       )}
       {!loading && !error && entries.length === 0 && (
         <p className="text-sm text-gray-500">No entries found.</p>
@@ -106,12 +132,23 @@ export function MatchList({ tabUrl, onLock }: Props) {
                     <div className="text-sm font-medium text-gray-900">
                       {e.title || "(Untitled)"}
                     </div>
-                    <button
-                      onClick={() => handleCopy(e.id)}
-                      className="text-xs text-blue-700 hover:text-blue-900"
-                    >
-                      {copiedId === e.id ? "Copied!" : "Copy"}
-                    </button>
+                    {e.entryType === "LOGIN" && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleFill(e.id)}
+                          disabled={filling}
+                          className="text-xs text-gray-700 hover:text-gray-900 disabled:opacity-60"
+                        >
+                          Fill
+                        </button>
+                        <button
+                          onClick={() => handleCopy(e.id)}
+                          className="text-xs text-blue-700 hover:text-blue-900"
+                        >
+                          {copiedId === e.id ? "Copied!" : "Copy"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   {e.username && (
                     <div className="text-xs text-gray-600">{e.username}</div>
@@ -139,12 +176,23 @@ export function MatchList({ tabUrl, onLock }: Props) {
                     <div className="text-sm font-medium text-gray-900">
                       {e.title || "(Untitled)"}
                     </div>
-                    <button
-                      onClick={() => handleCopy(e.id)}
-                      className="text-xs text-blue-700 hover:text-blue-900"
-                    >
-                      {copiedId === e.id ? "Copied!" : "Copy"}
-                    </button>
+                    {e.entryType === "LOGIN" && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleFill(e.id)}
+                          disabled={filling}
+                          className="text-xs text-gray-700 hover:text-gray-900 disabled:opacity-60"
+                        >
+                          Fill
+                        </button>
+                        <button
+                          onClick={() => handleCopy(e.id)}
+                          className="text-xs text-blue-700 hover:text-blue-900"
+                        >
+                          {copiedId === e.id ? "Copied!" : "Copy"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   {e.username && (
                     <div className="text-xs text-gray-600">{e.username}</div>
@@ -158,7 +206,10 @@ export function MatchList({ tabUrl, onLock }: Props) {
           )}
 
           {copyError && (
-            <p className="text-xs text-red-600">{copyError}</p>
+            <p className="text-xs text-red-600">{humanizeError(copyError)}</p>
+          )}
+          {fillError && (
+            <p className="text-xs text-red-600">{humanizeError(fillError)}</p>
           )}
         </div>
       )}
