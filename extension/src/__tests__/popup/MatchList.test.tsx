@@ -32,7 +32,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
 
     expect(await screen.findByText("Example")).toBeInTheDocument();
     expect(screen.getByText("alice")).toBeInTheDocument();
@@ -46,7 +46,7 @@ describe("MatchList", () => {
       error: "FETCH_FAILED",
     });
 
-    render(<MatchList onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
     expect(await screen.findByText(/fetch_failed/i)).toBeInTheDocument();
   });
 
@@ -56,7 +56,7 @@ describe("MatchList", () => {
       .mockResolvedValueOnce({ type: "FETCH_PASSWORDS", entries: [] })
       .mockResolvedValueOnce({ type: "LOCK_VAULT", ok: true });
 
-    render(<MatchList onLock={onLock} />);
+    render(<MatchList tabUrl="https://example.com/login" onLock={onLock} />);
 
     const lockButton = await screen.findByRole("button", { name: /lock/i });
     fireEvent.click(lockButton);
@@ -64,5 +64,42 @@ describe("MatchList", () => {
     await waitFor(() => {
       expect(onLock).toHaveBeenCalled();
     });
+  });
+
+  it("shows generic no-match message for non-http(s) pages", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "Example",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: "LOGIN",
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="edge://extensions" onLock={vi.fn()} />);
+    expect(await screen.findByText(/no matches for this page/i)).toBeInTheDocument();
+  });
+
+  it("shows entries without match header when tabUrl is null", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "Example",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: "LOGIN",
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
+    expect(await screen.findByText("Example")).toBeInTheDocument();
+    expect(screen.queryByText(/matches for/i)).toBeNull();
   });
 });
