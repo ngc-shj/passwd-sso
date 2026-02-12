@@ -94,6 +94,12 @@ export const API_ERROR = {
   NOT_ACTIVATED: "NOT_ACTIVATED",
   KEY_ESCROW_NOT_COMPLETED: "KEY_ESCROW_NOT_COMPLETED",
   INCOMPATIBLE_KEY_ALGORITHM: "INCOMPATIBLE_KEY_ALGORITHM",
+
+  // ── Extension Token ─────────────────────────────────────
+  EXTENSION_TOKEN_EXPIRED: "EXTENSION_TOKEN_EXPIRED",
+  EXTENSION_TOKEN_REVOKED: "EXTENSION_TOKEN_REVOKED",
+  EXTENSION_TOKEN_INVALID: "EXTENSION_TOKEN_INVALID",
+  EXTENSION_TOKEN_SCOPE_INSUFFICIENT: "EXTENSION_TOKEN_SCOPE_INSUFFICIENT",
 } as const;
 
 export type ApiErrorCode = (typeof API_ERROR)[keyof typeof API_ERROR];
@@ -161,6 +167,10 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   NOT_ACTIVATED: "unknownError",
   KEY_ESCROW_NOT_COMPLETED: "unknownError",
   INCOMPATIBLE_KEY_ALGORITHM: "unknownError",
+  EXTENSION_TOKEN_EXPIRED: "extensionTokenExpired",
+  EXTENSION_TOKEN_REVOKED: "extensionTokenRevoked",
+  EXTENSION_TOKEN_INVALID: "extensionTokenInvalid",
+  EXTENSION_TOKEN_SCOPE_INSUFFICIENT: "extensionTokenScopeInsufficient",
 } satisfies Record<ApiErrorCode, string>;
 
 /**

@@ -781,7 +781,11 @@
     "upstreamError": "An external service error occurred.",
     "verifierNotSet": "Please lock and unlock your vault first.",
     "verifierVersionUnsupported": "Please update the app.",
-    "unknownError": "An error occurred. Please try again."
+    "unknownError": "An error occurred. Please try again.",
+    "extensionTokenExpired": "Extension token has expired.",
+    "extensionTokenRevoked": "Extension token has been revoked.",
+    "extensionTokenInvalid": "Invalid extension token.",
+    "extensionTokenScopeInsufficient": "Extension token does not have the required scope."
   },
   "Attachments": {
     "title": "Attachments",

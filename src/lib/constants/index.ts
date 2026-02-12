@@ -18,3 +18,12 @@ export type { EaStatusValue } from "./emergency-access";
 
 export { INVITATION_STATUS } from "./invitation";
 export type { InvitationStatusValue } from "./invitation";
+
+export {
+  EXTENSION_TOKEN_SCOPE,
+  EXTENSION_TOKEN_SCOPE_VALUES,
+  EXTENSION_TOKEN_DEFAULT_SCOPES,
+  EXTENSION_TOKEN_TTL_MS,
+  EXTENSION_TOKEN_MAX_ACTIVE,
+} from "./extension-token";
+export type { ExtensionTokenScope } from "./extension-token";

@@ -4,17 +4,22 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { authOrToken } from "@/lib/auth-or-token";
 import type { EntryType } from "@prisma/client";
-import { ENTRY_TYPE, ENTRY_TYPE_VALUES } from "@/lib/constants";
+import { ENTRY_TYPE, ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
 // GET /api/passwords - List passwords (returns encrypted overviews)
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
+  if (authResult?.type === "scope_insufficient") {
+    return NextResponse.json({ error: API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT }, { status: 403 });
+  }
+  if (!authResult) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
+  const userId = authResult.userId;
 
   const { searchParams } = new URL(req.url);
   const tagId = searchParams.get("tag");
@@ -27,7 +32,7 @@ export async function GET(req: NextRequest) {
 
   const passwords = await prisma.passwordEntry.findMany({
     where: {
-      userId: session.user.id,
+      userId,
       ...(trashOnly
         ? { deletedAt: { not: null } }
         : { deletedAt: null }),
@@ -47,7 +52,7 @@ export async function GET(req: NextRequest) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     await prisma.passwordEntry.deleteMany({
       where: {
-        userId: session.user.id,
+        userId,
         deletedAt: { lt: thirtyDaysAgo },
       },
     }).catch(() => {});
