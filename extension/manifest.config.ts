@@ -5,7 +5,7 @@ export default defineManifest({
   name: "passwd-sso",
   version: "0.1.0",
   description: "Browser extension for passwd-sso password manager",
-  permissions: ["storage", "alarms"],
+  permissions: ["storage", "alarms", "activeTab"],
   optional_host_permissions: ["https://*/*"],
   background: {
     service_worker: "src/background/index.ts",

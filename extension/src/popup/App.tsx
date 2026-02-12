@@ -8,14 +8,24 @@ type AppState = "loading" | "not_logged_in" | "logged_in" | "vault_unlocked";
 
 export function App() {
   const [state, setState] = useState<AppState>("loading");
+  const [tabUrl, setTabUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    chrome.tabs
+      .query({ active: true, currentWindow: true })
+      .then((tabs) => {
+        setTabUrl(tabs[0]?.url ?? null);
+      })
+      .catch(() => {
+        setTabUrl(null);
+      });
     sendMessage({ type: "GET_STATUS" }).then((res) => {
-      if (res.hasToken) {
-        // Token exists — vault unlock flow is next phase
-        setState("logged_in");
-      } else {
+      if (!res.hasToken) {
         setState("not_logged_in");
+      } else if (res.vaultUnlocked) {
+        setState("vault_unlocked");
+      } else {
+        setState("logged_in");
       }
     });
   }, []);
@@ -33,8 +43,12 @@ export function App() {
           </div>
         )}
         {state === "not_logged_in" && <LoginPrompt />}
-        {state === "logged_in" && <VaultUnlock />}
-        {state === "vault_unlocked" && <MatchList />}
+        {state === "logged_in" && (
+          <VaultUnlock onUnlocked={() => setState("vault_unlocked")} />
+        )}
+        {state === "vault_unlocked" && (
+          <MatchList tabUrl={tabUrl} onLock={() => setState("logged_in")} />
+        )}
       </main>
     </div>
   );

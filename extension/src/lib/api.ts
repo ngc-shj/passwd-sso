@@ -5,8 +5,13 @@ import { getSettings } from "./storage";
  * Ensure the extension has host permission for the configured server URL.
  * Prompts the user if not already granted (optional_host_permissions).
  */
-async function ensureHostPermission(serverUrl: string): Promise<boolean> {
-  const origin = new URL(serverUrl).origin;
+export async function ensureHostPermission(serverUrl: string): Promise<boolean> {
+  let origin: string;
+  try {
+    origin = new URL(serverUrl).origin;
+  } catch {
+    return false;
+  }
   const has = await chrome.permissions.contains({
     origins: [`${origin}/*`],
   });
@@ -31,7 +36,13 @@ export async function apiFetch(
   const granted = await ensureHostPermission(serverUrl);
   if (!granted) return null;
 
-  const url = `${serverUrl}${path}`;
+  let origin: string;
+  try {
+    origin = new URL(serverUrl).origin;
+  } catch {
+    return null;
+  }
+  const url = `${origin}${path}`;
 
   return fetch(url, {
     ...init,
