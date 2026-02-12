@@ -71,7 +71,7 @@ describe("Options App", () => {
       target: { value: "https://demo.example.com" },
     });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
-    expect(await screen.findByText(/host permission denied/i)).toBeInTheDocument();
+    expect(await screen.findByText(/host permission was denied/i)).toBeInTheDocument();
     expect(mockSetSettings).not.toHaveBeenCalled();
   });
 

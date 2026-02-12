@@ -135,6 +135,36 @@ describe("MatchList", () => {
     );
   });
 
+  it("shows error when clipboard write fails", async () => {
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Example",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: "LOGIN",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        type: "COPY_PASSWORD",
+        password: "secret",
+      });
+    (navigator.clipboard.writeText as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("denied")
+    );
+
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+
+    const copyButton = await screen.findByRole("button", { name: "Copy" });
+    fireEvent.click(copyButton);
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/clipboard write failed/i);
+  });
+
   it("shows generic no-match message for non-http(s) pages", async () => {
     mockSendMessage.mockResolvedValueOnce({
       type: "FETCH_PASSWORDS",
@@ -217,6 +247,57 @@ describe("MatchList", () => {
       expect(closeSpy).toHaveBeenCalled();
     });
     closeSpy.mockRestore();
+  });
+
+  it("shows error when autofill fails", async () => {
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Example",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: "LOGIN",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ type: "AUTOFILL", ok: false, error: "AUTOFILL_FAILED" });
+
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+
+    const fillButton = await screen.findByRole("button", { name: "Fill" });
+    fireEvent.click(fillButton);
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/autofill failed/i);
+  });
+
+  it("shows error when no active tab is available", async () => {
+    vi.stubGlobal("chrome", {
+      tabs: {
+        query: vi.fn().mockResolvedValue([]),
+      },
+    });
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "Example",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: "LOGIN",
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+
+    const fillButton = await screen.findByRole("button", { name: "Fill" });
+    fireEvent.click(fillButton);
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/no active tab found/i);
   });
 
   it("filters entries by search query", async () => {

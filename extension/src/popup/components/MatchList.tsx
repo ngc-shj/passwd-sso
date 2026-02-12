@@ -7,6 +7,7 @@ import {
 } from "../../lib/url-matching";
 import type { DecryptedEntry } from "../../types/messages";
 import { humanizeError } from "../../lib/error-messages";
+import { t } from "../../lib/i18n";
 import { Toast } from "./Toast";
 
 interface Props {
@@ -45,7 +46,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
     if (res.password) {
       try {
         await navigator.clipboard.writeText(res.password);
-        setToast({ message: "Password copied", type: "success" });
+        setToast({ message: t("popup.passwordCopied"), type: "success" });
         setTimeout(() => setToast(null), 2000);
         // Best-effort clipboard clear
         setTimeout(() => {
@@ -74,7 +75,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
       tabId: tab.id,
     });
     if (res.ok) {
-      setToast({ message: "Autofill sent", type: "success" });
+      setToast({ message: t("popup.autofillSent"), type: "success" });
       window.close();
     } else {
       setToast({ message: humanizeError(res.error || "AUTOFILL_FAILED"), type: "error" });
@@ -109,44 +110,44 @@ export function MatchList({ tabUrl, onLock }: Props) {
         type={toast?.type}
       />
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-700">Passwords</h2>
+        <h2 className="text-sm font-semibold text-gray-700">{t("popup.passwords")}</h2>
         <button
           onClick={handleLock}
           className="text-xs text-gray-600 hover:text-gray-800"
         >
-          Lock
+          {t("popup.lock")}
         </button>
       </div>
 
-      {loading && <p className="text-sm text-gray-500">Loading...</p>}
+      {loading && <p className="text-sm text-gray-500">{t("popup.loading")}</p>}
       {!loading && error && (
         <p className="text-sm text-red-600">{humanizeError(error)}</p>
       )}
       {!loading && !error && entries.length === 0 && (
-        <p className="text-sm text-gray-500">No entries found.</p>
+        <p className="text-sm text-gray-500">{t("popup.noEntries")}</p>
       )}
 
       {!loading && !error && entries.length > 0 && (
         <div className="flex flex-col gap-3">
           <input
             type="text"
-            placeholder="Search..."
+            placeholder={t("popup.searchPlaceholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="h-9 px-3 rounded-md border border-gray-300 text-sm"
           />
 
           {query && filteredMatched.length === 0 && filteredUnmatched.length === 0 && (
-            <p className="text-sm text-gray-500">No results for "{query}"</p>
+            <p className="text-sm text-gray-500">{t("popup.noResults", { query })}</p>
           )}
 
           {hasTabUrl && (
             <div className="text-xs font-medium text-gray-500">
               {tabHost
                 ? filteredMatched.length > 0
-                  ? `Matches for ${tabHost}`
-                  : `No matches for ${tabHost}`
-                : "No matches for this page"}
+                  ? t("popup.matchesFor", { host: tabHost })
+                  : t("popup.noMatchesFor", { host: tabHost })
+                : t("popup.noMatchesForPage")}
             </div>
           )}
 
@@ -168,13 +169,13 @@ export function MatchList({ tabUrl, onLock }: Props) {
                           disabled={filling}
                           className="text-xs text-gray-700 hover:text-gray-900 disabled:opacity-60"
                         >
-                          Fill
+                          {t("popup.fill")}
                         </button>
                         <button
                           onClick={() => handleCopy(e.id)}
                           className="text-xs text-blue-700 hover:text-blue-900"
                         >
-                          Copy
+                          {t("popup.copy")}
                         </button>
                       </div>
                     )}
@@ -191,7 +192,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
           )}
 
           {tabHost && filteredUnmatched.length > 0 && (
-            <div className="text-xs font-medium text-gray-500">Other entries</div>
+            <div className="text-xs font-medium text-gray-500">{t("popup.otherEntries")}</div>
           )}
 
           {filteredUnmatched.length > 0 && (
@@ -212,13 +213,13 @@ export function MatchList({ tabUrl, onLock }: Props) {
                           disabled={filling}
                           className="text-xs text-gray-700 hover:text-gray-900 disabled:opacity-60"
                         >
-                          Fill
+                          {t("popup.fill")}
                         </button>
                         <button
                           onClick={() => handleCopy(e.id)}
                           className="text-xs text-blue-700 hover:text-blue-900"
                         >
-                          Copy
+                          {t("popup.copy")}
                         </button>
                       </div>
                     )}
