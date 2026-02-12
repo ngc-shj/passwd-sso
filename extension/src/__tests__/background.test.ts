@@ -26,11 +26,13 @@ let chromeMock: ReturnType<typeof installChromeMock> | null = null;
 let storageChangeHandlers: Array<
   (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, areaName: string) => void
 > = [];
+let commandHandlers: Array<(command: string) => void | Promise<void>> = [];
 
 function installChromeMock() {
   messageHandlers = [];
   alarmHandlers = [];
   storageChangeHandlers = [];
+  commandHandlers = [];
 
   const chromeMock = {
     runtime: {
@@ -51,9 +53,16 @@ function installChromeMock() {
     },
     scripting: {
       executeScript: vi.fn().mockResolvedValue([]),
+      registerContentScripts: vi.fn().mockResolvedValue(undefined),
+      unregisterContentScripts: vi.fn().mockResolvedValue(undefined),
     },
     tabs: {
       sendMessage: vi.fn().mockResolvedValue({}),
+      query: vi.fn().mockResolvedValue([{ id: 1, url: "https://github.com" }]),
+    },
+    action: {
+      setBadgeText: vi.fn().mockResolvedValue(undefined),
+      setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
     },
     permissions: {
       contains: vi.fn().mockResolvedValue(true),
@@ -67,6 +76,13 @@ function installChromeMock() {
       onChanged: {
         addListener: (fn: (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, areaName: string) => void) => {
           storageChangeHandlers.push(fn);
+        },
+      },
+    },
+    commands: {
+      onCommand: {
+        addListener: (fn: (command: string) => void | Promise<void>) => {
+          commandHandlers.push(fn);
         },
       },
     },
@@ -228,6 +244,54 @@ describe("background message flow", () => {
       "vault-auto-lock",
       expect.anything()
     );
+  });
+
+  it("registers token bridge content script on startup", async () => {
+    expect(chromeMock?.scripting.unregisterContentScripts).toHaveBeenCalled();
+    expect(chromeMock?.scripting.registerContentScripts).toHaveBeenCalled();
+  });
+
+  it("skips token bridge registration when permission is denied", async () => {
+    vi.resetModules();
+    chromeMock = installChromeMock();
+    chromeMock?.permissions.contains.mockResolvedValueOnce(false);
+    await loadBackground();
+    expect(chromeMock?.scripting.registerContentScripts).not.toHaveBeenCalled();
+  });
+
+  it("updates badge when token is set and vault unlocked", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "" });
+  });
+
+  it("handles trigger-autofill command with url match", async () => {
+    cryptoMocks.decryptData
+      .mockResolvedValueOnce(JSON.stringify({ title: "GitHub", username: "alice", urlHost: "github.com" }))
+      .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
+      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const handler = commandHandlers[0];
+    await handler("trigger-autofill");
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalled();
+  });
+
+  it("does nothing when command has no active tab url", async () => {
+    chromeMock?.tabs.query.mockResolvedValueOnce([{ id: 1, url: undefined }]);
+    const handler = commandHandlers[0];
+    await handler("trigger-autofill");
+    expect(chromeMock?.scripting.executeScript).not.toHaveBeenCalled();
   });
 
   it("fetches and decrypts password overviews", async () => {

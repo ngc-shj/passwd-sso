@@ -102,6 +102,7 @@ describe("MatchList", () => {
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith("secret");
     });
+    expect(await screen.findByRole("status")).toHaveTextContent("Password copied");
   });
 
   it("shows error when password is unavailable", async () => {
@@ -129,7 +130,9 @@ describe("MatchList", () => {
     const copyButton = await screen.findByRole("button", { name: "Copy" });
     fireEvent.click(copyButton);
 
-    expect(await screen.findByText(/no password available/i)).toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "No password available for this entry."
+    );
   });
 
   it("shows generic no-match message for non-http(s) pages", async () => {
@@ -214,5 +217,53 @@ describe("MatchList", () => {
       expect(closeSpy).toHaveBeenCalled();
     });
     closeSpy.mockRestore();
+  });
+
+  it("filters entries by search query", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "GitHub",
+          username: "alice",
+          urlHost: "github.com",
+          entryType: "LOGIN",
+        },
+        {
+          id: "pw-2",
+          title: "Google",
+          username: "bob",
+          urlHost: "google.com",
+          entryType: "LOGIN",
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
+    const input = await screen.findByPlaceholderText("Search...");
+    fireEvent.change(input, { target: { value: "git" } });
+    expect(await screen.findByText("GitHub")).toBeInTheDocument();
+    expect(screen.queryByText("Google")).toBeNull();
+  });
+
+  it("shows no results message when search yields no entries", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "GitHub",
+          username: "alice",
+          urlHost: "github.com",
+          entryType: "LOGIN",
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
+    const input = await screen.findByPlaceholderText("Search...");
+    fireEvent.change(input, { target: { value: "nope" } });
+    expect(await screen.findByText(/no results for/i)).toBeInTheDocument();
   });
 });

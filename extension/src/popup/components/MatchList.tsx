@@ -7,6 +7,7 @@ import {
 } from "../../lib/url-matching";
 import type { DecryptedEntry } from "../../types/messages";
 import { humanizeError } from "../../lib/error-messages";
+import { Toast } from "./Toast";
 
 interface Props {
   tabUrl: string | null;
@@ -17,10 +18,9 @@ export function MatchList({ tabUrl, onLock }: Props) {
   const [entries, setEntries] = useState<DecryptedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [copyError, setCopyError] = useState<string | null>(null);
   const [filling, setFilling] = useState(false);
-  const [fillError, setFillError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const hasTabUrl = Boolean(tabUrl);
   const tabHost = tabUrl ? extractHost(tabUrl) : null;
 
@@ -41,32 +41,30 @@ export function MatchList({ tabUrl, onLock }: Props) {
   };
 
   const handleCopy = async (entryId: string) => {
-    setCopyError(null);
     const res = await sendMessage({ type: "COPY_PASSWORD", entryId });
     if (res.password) {
       try {
         await navigator.clipboard.writeText(res.password);
-        setCopiedId(entryId);
-        setTimeout(() => setCopiedId(null), 2000);
+        setToast({ message: "Password copied", type: "success" });
+        setTimeout(() => setToast(null), 2000);
         // Best-effort clipboard clear
         setTimeout(() => {
           navigator.clipboard.writeText("").catch(() => {});
         }, 30_000);
       } catch {
-        setCopyError("CLIPBOARD_FAILED");
+        setToast({ message: humanizeError("CLIPBOARD_FAILED"), type: "error" });
       }
     } else {
-      setCopyError(res.error || "COPY_FAILED");
+      setToast({ message: humanizeError(res.error || "COPY_FAILED"), type: "error" });
     }
   };
 
   const handleFill = async (entryId: string) => {
     if (filling) return;
-    setFillError(null);
     setFilling(true);
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) {
-      setFillError("NO_ACTIVE_TAB");
+      setToast({ message: humanizeError("NO_ACTIVE_TAB"), type: "error" });
       setFilling(false);
       return;
     }
@@ -76,9 +74,10 @@ export function MatchList({ tabUrl, onLock }: Props) {
       tabId: tab.id,
     });
     if (res.ok) {
+      setToast({ message: "Autofill sent", type: "success" });
       window.close();
     } else {
-      setFillError(res.error || "AUTOFILL_FAILED");
+      setToast({ message: humanizeError(res.error || "AUTOFILL_FAILED"), type: "error" });
       setFilling(false);
     }
   };
@@ -89,8 +88,26 @@ export function MatchList({ tabUrl, onLock }: Props) {
     : [];
   const unmatched = tabHost ? sorted.filter((e) => !matched.includes(e)) : sorted;
 
+  const filterEntries = (list: DecryptedEntry[], q: string) => {
+    if (!q) return list;
+    const lower = q.toLowerCase();
+    return list.filter(
+      (e) =>
+        e.title.toLowerCase().includes(lower) ||
+        e.username.toLowerCase().includes(lower) ||
+        e.urlHost.toLowerCase().includes(lower),
+    );
+  };
+  const filteredMatched = filterEntries(matched, query);
+  const filteredUnmatched = filterEntries(unmatched, query);
+
   return (
     <div className="flex flex-col gap-4 py-4">
+      <Toast
+        visible={!!toast}
+        message={toast?.message || ""}
+        type={toast?.type}
+      />
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-700">Passwords</h2>
         <button
@@ -111,19 +128,31 @@ export function MatchList({ tabUrl, onLock }: Props) {
 
       {!loading && !error && entries.length > 0 && (
         <div className="flex flex-col gap-3">
+          <input
+            type="text"
+            placeholder="Search..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="h-9 px-3 rounded-md border border-gray-300 text-sm"
+          />
+
+          {query && filteredMatched.length === 0 && filteredUnmatched.length === 0 && (
+            <p className="text-sm text-gray-500">No results for "{query}"</p>
+          )}
+
           {hasTabUrl && (
             <div className="text-xs font-medium text-gray-500">
               {tabHost
-                ? matched.length > 0
+                ? filteredMatched.length > 0
                   ? `Matches for ${tabHost}`
                   : `No matches for ${tabHost}`
                 : "No matches for this page"}
             </div>
           )}
 
-          {matched.length > 0 && (
+          {filteredMatched.length > 0 && (
             <ul className="flex flex-col gap-2">
-              {matched.map((e) => (
+              {filteredMatched.map((e) => (
                 <li
                   key={e.id}
                   className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2"
@@ -145,7 +174,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
                           onClick={() => handleCopy(e.id)}
                           className="text-xs text-blue-700 hover:text-blue-900"
                         >
-                          {copiedId === e.id ? "Copied!" : "Copy"}
+                          Copy
                         </button>
                       </div>
                     )}
@@ -161,13 +190,13 @@ export function MatchList({ tabUrl, onLock }: Props) {
             </ul>
           )}
 
-          {tabHost && unmatched.length > 0 && (
+          {tabHost && filteredUnmatched.length > 0 && (
             <div className="text-xs font-medium text-gray-500">Other entries</div>
           )}
 
-          {unmatched.length > 0 && (
+          {filteredUnmatched.length > 0 && (
             <ul className="flex flex-col gap-2">
-              {unmatched.map((e) => (
+              {filteredUnmatched.map((e) => (
                 <li
                   key={e.id}
                   className="rounded-md border border-gray-200 px-3 py-2"
@@ -189,7 +218,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
                           onClick={() => handleCopy(e.id)}
                           className="text-xs text-blue-700 hover:text-blue-900"
                         >
-                          {copiedId === e.id ? "Copied!" : "Copy"}
+                          Copy
                         </button>
                       </div>
                     )}
@@ -205,12 +234,6 @@ export function MatchList({ tabUrl, onLock }: Props) {
             </ul>
           )}
 
-          {copyError && (
-            <p className="text-xs text-red-600">{humanizeError(copyError)}</p>
-          )}
-          {fillError && (
-            <p className="text-xs text-red-600">{humanizeError(fillError)}</p>
-          )}
         </div>
       )}
     </div>

@@ -18,6 +18,7 @@ import { LanguageSwitcher } from "./language-switcher";
 import { useVault } from "@/lib/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
 import { ChangePassphraseDialog } from "@/components/vault/change-passphrase-dialog";
+import { ConnectExtensionButton } from "@/components/extension/connect-extension-button";
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -82,6 +83,8 @@ export function Header({ onMenuToggle }: HeaderProps) {
                   </DropdownMenuItem>
                 </>
               )}
+              <DropdownMenuSeparator />
+              <ConnectExtensionButton />
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
                 <SignOutButton />
