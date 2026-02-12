@@ -91,6 +91,16 @@ describe("background message flow", () => {
             }),
           };
         }
+        if (url.includes("/api/passwords/")) {
+          return {
+            ok: true,
+            json: async () => ({
+              id: "pw-1",
+              encryptedBlob: { ciphertext: "aa", iv: "bb", authTag: "cc" },
+              aadVersion: 1,
+            }),
+          };
+        }
         if (url.includes("/api/passwords")) {
           return {
             ok: true,
@@ -166,5 +176,66 @@ describe("background message flow", () => {
       "user-1",
       "pw-1"
     );
+  });
+
+  it("returns error when COPY_PASSWORD called while vault locked", async () => {
+    const res = await sendMessage({ type: "COPY_PASSWORD", entryId: "pw-1" });
+    expect(res).toEqual({
+      type: "COPY_PASSWORD",
+      password: null,
+      error: "VAULT_LOCKED",
+    });
+  });
+
+  it("returns password for COPY_PASSWORD", async () => {
+    cryptoMocks.decryptData.mockResolvedValueOnce(
+      JSON.stringify({ password: "secret" })
+    );
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({ type: "COPY_PASSWORD", entryId: "pw-1" });
+    expect(res).toEqual({
+      type: "COPY_PASSWORD",
+      password: "secret",
+    });
+  });
+
+  it("returns error when COPY_PASSWORD fetch fails", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/vault/unlock/data")) {
+        return {
+          ok: true,
+          json: async () => ({
+            userId: "user-1",
+            accountSalt: "00",
+            encryptedSecretKey: "aa",
+            secretKeyIv: "bb",
+            secretKeyAuthTag: "cc",
+            verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+          }),
+        };
+      }
+      return { ok: false, json: async () => ({ error: "NOT_FOUND" }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({ type: "COPY_PASSWORD", entryId: "pw-1" });
+    expect(res).toEqual({
+      type: "COPY_PASSWORD",
+      password: null,
+      error: "NOT_FOUND",
+    });
   });
 });

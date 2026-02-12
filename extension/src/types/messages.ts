@@ -7,7 +7,8 @@ export type ExtensionMessage =
   | { type: "GET_STATUS" }
   | { type: "UNLOCK_VAULT"; passphrase: string }
   | { type: "LOCK_VAULT" }
-  | { type: "FETCH_PASSWORDS" };
+  | { type: "FETCH_PASSWORDS" }
+  | { type: "COPY_PASSWORD"; entryId: string };
 
 export interface DecryptedEntry {
   id: string;
@@ -24,4 +25,5 @@ export type ExtensionResponse =
   | { type: "GET_STATUS"; hasToken: boolean; expiresAt: number | null; vaultUnlocked: boolean }
   | { type: "UNLOCK_VAULT"; ok: boolean; error?: string }
   | { type: "LOCK_VAULT"; ok: true }
-  | { type: "FETCH_PASSWORDS"; entries: DecryptedEntry[] | null; error?: string };
+  | { type: "FETCH_PASSWORDS"; entries: DecryptedEntry[] | null; error?: string }
+  | { type: "COPY_PASSWORD"; password: string | null; error?: string };

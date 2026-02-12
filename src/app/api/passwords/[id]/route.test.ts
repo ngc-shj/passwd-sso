@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaPasswordEntry } = vi.hoisted(() => ({
+const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
+  mockAuthOrToken: vi.fn(),
   mockPrismaPasswordEntry: {
     findUnique: vi.fn(),
     update: vi.fn(),
@@ -10,6 +11,7 @@ const { mockAuth, mockPrismaPasswordEntry } = vi.hoisted(() => ({
   },
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { passwordEntry: mockPrismaPasswordEntry, auditLog: { create: vi.fn().mockResolvedValue({}) } },
 }));
@@ -41,16 +43,37 @@ const ownedEntry = {
 describe("GET /api/passwords/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
   });
 
   it("returns 401 when unauthenticated", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuthOrToken.mockResolvedValue(null);
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
       createParams({ id: PW_ID }),
     );
     expect(res.status).toBe(401);
+  });
+
+  it("returns 403 when scope insufficient", async () => {
+    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("accepts Bearer token auth", async () => {
+    mockAuthOrToken.mockResolvedValue({ type: "token", userId: "test-user-id", scopes: ["passwords:read"] });
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        headers: { Authorization: `Bearer ${"a".repeat(64)}` },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
   });
 
   it("returns 404 when entry not found", async () => {
