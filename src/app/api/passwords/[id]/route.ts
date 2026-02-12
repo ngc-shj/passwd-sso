@@ -4,16 +4,25 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { authOrToken } from "@/lib/auth-or-token";
+import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 
 // GET /api/passwords/[id] - Get password detail (returns encrypted blob)
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
+  if (authResult?.type === "scope_insufficient") {
+    return NextResponse.json(
+      { error: API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT },
+      { status: 403 },
+    );
+  }
+  if (!authResult) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
+  const userId = authResult.userId;
 
   const { id } = await params;
 
@@ -26,7 +35,7 @@ export async function GET(
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  if (entry.userId !== session.user.id) {
+  if (entry.userId !== userId) {
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 

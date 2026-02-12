@@ -16,6 +16,10 @@ import { MatchList } from "../../popup/components/MatchList";
 describe("MatchList", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    const clipboard = {
+      writeText: vi.fn().mockResolvedValue(undefined),
+    };
+    Object.assign(navigator, { clipboard });
   });
 
   it("renders entries after fetch", async () => {
@@ -64,6 +68,63 @@ describe("MatchList", () => {
     await waitFor(() => {
       expect(onLock).toHaveBeenCalled();
     });
+  });
+
+  it("copies password on button click", async () => {
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Example",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: "LOGIN",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        type: "COPY_PASSWORD",
+        password: "secret",
+      });
+
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+
+    const copyButton = await screen.findByRole("button", { name: "Copy" });
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("secret");
+    });
+  });
+
+  it("shows error when password is unavailable", async () => {
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Example",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: "LOGIN",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        type: "COPY_PASSWORD",
+        password: null,
+        error: "NO_PASSWORD",
+      });
+
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+
+    const copyButton = await screen.findByRole("button", { name: "Copy" });
+    fireEvent.click(copyButton);
+
+    expect(await screen.findByText(/no_password/i)).toBeInTheDocument();
   });
 
   it("shows generic no-match message for non-http(s) pages", async () => {

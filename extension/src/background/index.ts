@@ -300,6 +300,74 @@ chrome.runtime.onMessage.addListener(
         return true;
       }
 
+      case "COPY_PASSWORD": {
+        if (!encryptionKey || !currentUserId) {
+          sendResponse({
+            type: "COPY_PASSWORD",
+            password: null,
+            error: "VAULT_LOCKED",
+          });
+          break;
+        }
+
+        (async () => {
+          try {
+            const res = await swFetch(`/api/passwords/${message.entryId}`);
+            if (!res.ok) {
+              const json = await res.json().catch(() => ({}));
+              sendResponse({
+                type: "COPY_PASSWORD",
+                password: null,
+                error: json.error || "FETCH_FAILED",
+              });
+              return;
+            }
+
+            const data = (await res.json()) as {
+              encryptedBlob: { ciphertext: string; iv: string; authTag: string };
+              aadVersion?: number;
+              id: string;
+            };
+
+            const aad =
+              (data.aadVersion ?? 0) >= 1
+                ? buildPersonalEntryAAD(currentUserId, data.id)
+                : undefined;
+            const plaintext = await decryptData(
+              data.encryptedBlob,
+              encryptionKey,
+              aad
+            );
+            let password: string | null = null;
+            try {
+              const blob = JSON.parse(plaintext) as { password?: string | null };
+              password = blob.password ?? null;
+            } catch {
+              password = null;
+            }
+
+            if (!password) {
+              sendResponse({
+                type: "COPY_PASSWORD",
+                password: null,
+                error: "NO_PASSWORD",
+              });
+              return;
+            }
+
+            sendResponse({ type: "COPY_PASSWORD", password });
+          } catch (err) {
+            sendResponse({
+              type: "COPY_PASSWORD",
+              password: null,
+              error: err instanceof Error ? err.message : "FETCH_FAILED",
+            });
+          }
+        })();
+
+        return true;
+      }
+
       default:
         // Unknown message — do not hold the channel open
         return false;

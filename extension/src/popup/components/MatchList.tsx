@@ -16,6 +16,8 @@ export function MatchList({ tabUrl, onLock }: Props) {
   const [entries, setEntries] = useState<DecryptedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const hasTabUrl = Boolean(tabUrl);
   const tabHost = tabUrl ? extractHost(tabUrl) : null;
 
@@ -33,6 +35,26 @@ export function MatchList({ tabUrl, onLock }: Props) {
   const handleLock = async () => {
     await sendMessage({ type: "LOCK_VAULT" });
     onLock();
+  };
+
+  const handleCopy = async (entryId: string) => {
+    setCopyError(null);
+    const res = await sendMessage({ type: "COPY_PASSWORD", entryId });
+    if (res.password) {
+      try {
+        await navigator.clipboard.writeText(res.password);
+        setCopiedId(entryId);
+        setTimeout(() => setCopiedId(null), 2000);
+        // Best-effort clipboard clear
+        setTimeout(() => {
+          navigator.clipboard.writeText("").catch(() => {});
+        }, 30_000);
+      } catch {
+        setCopyError("Clipboard failed.");
+      }
+    } else {
+      setCopyError(res.error || "Copy failed.");
+    }
   };
 
   const sorted = sortByUrlMatch(entries, tabHost);
@@ -80,8 +102,16 @@ export function MatchList({ tabUrl, onLock }: Props) {
                   key={e.id}
                   className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2"
                 >
-                  <div className="text-sm font-medium text-gray-900">
-                    {e.title || "(Untitled)"}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-medium text-gray-900">
+                      {e.title || "(Untitled)"}
+                    </div>
+                    <button
+                      onClick={() => handleCopy(e.id)}
+                      className="text-xs text-blue-700 hover:text-blue-900"
+                    >
+                      {copiedId === e.id ? "Copied!" : "Copy"}
+                    </button>
                   </div>
                   {e.username && (
                     <div className="text-xs text-gray-600">{e.username}</div>
@@ -105,8 +135,16 @@ export function MatchList({ tabUrl, onLock }: Props) {
                   key={e.id}
                   className="rounded-md border border-gray-200 px-3 py-2"
                 >
-                  <div className="text-sm font-medium text-gray-900">
-                    {e.title || "(Untitled)"}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-medium text-gray-900">
+                      {e.title || "(Untitled)"}
+                    </div>
+                    <button
+                      onClick={() => handleCopy(e.id)}
+                      className="text-xs text-blue-700 hover:text-blue-900"
+                    >
+                      {copiedId === e.id ? "Copied!" : "Copy"}
+                    </button>
                   </div>
                   {e.username && (
                     <div className="text-xs text-gray-600">{e.username}</div>
@@ -117,6 +155,10 @@ export function MatchList({ tabUrl, onLock }: Props) {
                 </li>
               ))}
             </ul>
+          )}
+
+          {copyError && (
+            <p className="text-xs text-red-600">{copyError}</p>
           )}
         </div>
       )}
