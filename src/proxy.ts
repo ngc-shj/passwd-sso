@@ -58,6 +58,19 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
 async function handleApiAuth(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Routes that accept extension token (Bearer) as alternative auth.
+  // Let the route handler validate the token instead of checking session.
+  const extensionTokenRoutes = ["/api/passwords", "/api/vault/unlock/data"];
+  const hasBearer = request.headers
+    .get("authorization")
+    ?.startsWith("Bearer ");
+  const isExactOrChild = (route: string) =>
+    pathname === route || pathname.startsWith(route + "/");
+
+  if (hasBearer && extensionTokenRoutes.some(isExactOrChild)) {
+    return NextResponse.next();
+  }
+
   if (
     pathname.startsWith("/api/passwords") ||
     pathname.startsWith("/api/tags") ||
@@ -65,7 +78,8 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith("/api/orgs") ||
     pathname.startsWith("/api/audit-logs") ||
     pathname.startsWith("/api/share-links") ||
-    pathname.startsWith("/api/emergency-access")
+    pathname.startsWith("/api/emergency-access") ||
+    pathname.startsWith("/api/extension")
   ) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {

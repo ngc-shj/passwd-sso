@@ -781,7 +781,11 @@
     "upstreamError": "外部サービスでエラーが発生しました。",
     "verifierNotSet": "一度保管庫をロックしてアンロックしてください。",
     "verifierVersionUnsupported": "アプリを更新してください。",
-    "unknownError": "エラーが発生しました。もう一度お試しください。"
+    "unknownError": "エラーが発生しました。もう一度お試しください。",
+    "extensionTokenExpired": "拡張機能トークンの有効期限が切れています。",
+    "extensionTokenRevoked": "拡張機能トークンは無効化されています。",
+    "extensionTokenInvalid": "無効な拡張機能トークンです。",
+    "extensionTokenScopeInsufficient": "拡張機能トークンに必要なスコープがありません。"
   },
   "Attachments": {
     "title": "添付ファイル",

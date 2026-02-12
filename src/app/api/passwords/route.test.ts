@@ -1,17 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaPasswordEntry } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaPasswordEntry, mockExtTokenFindUnique, mockExtTokenUpdate } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: {
     findMany: vi.fn(),
     create: vi.fn(),
     deleteMany: vi.fn(),
   },
+  mockExtTokenFindUnique: vi.fn(),
+  mockExtTokenUpdate: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { passwordEntry: mockPrismaPasswordEntry, auditLog: { create: vi.fn().mockResolvedValue({}) } },
+  prisma: {
+    passwordEntry: mockPrismaPasswordEntry,
+    auditLog: { create: vi.fn().mockResolvedValue({}) },
+    extensionToken: { findUnique: mockExtTokenFindUnique, update: mockExtTokenUpdate },
+  },
+}));
+vi.mock("@/lib/crypto-server", () => ({
+  hashToken: (t: string) => `hashed_${t}`,
 }));
 
 import { GET, POST } from "./route";
@@ -42,12 +51,51 @@ describe("GET /api/passwords", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
+    mockExtTokenUpdate.mockResolvedValue({});
   });
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
+    mockExtTokenFindUnique.mockResolvedValue(null);
     const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
     expect(res.status).toBe(401);
+  });
+
+  it("accepts extension token with passwords:read scope", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockExtTokenFindUnique.mockResolvedValue({
+      id: "tok-1",
+      userId: "token-user",
+      scope: "passwords:read",
+      expiresAt: new Date("2030-01-01"),
+      revokedAt: null,
+    });
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([mockEntry]);
+
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      headers: { Authorization: `Bearer ${"a".repeat(64)}` },
+    }));
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json).toHaveLength(1);
+  });
+
+  it("returns 403 when extension token lacks required scope", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockExtTokenFindUnique.mockResolvedValue({
+      id: "tok-2",
+      userId: "token-user",
+      scope: "vault:unlock-data",
+      expiresAt: new Date("2030-01-01"),
+      revokedAt: null,
+    });
+
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      headers: { Authorization: `Bearer ${"b".repeat(64)}` },
+    }));
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("EXTENSION_TOKEN_SCOPE_INSUFFICIENT");
   });
 
   it("returns password entries with encrypted overviews and entryType", async () => {

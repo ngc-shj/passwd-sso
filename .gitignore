@@ -72,5 +72,9 @@ infra/terraform/**/*.tfstate
 infra/terraform/**/*.tfstate.backup
 infra/terraform/envs/*/terraform.tfvars
 
+# Extension
+extension/dist/
+extension/node_modules/
+
 # Claude
 .claude/
