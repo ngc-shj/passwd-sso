@@ -740,6 +740,12 @@
     "copied": "Copied",
     "invalidEmail": "Please enter a valid email address."
   },
+  "Extension": {
+    "connect": "Connect Extension",
+    "connecting": "Connecting...",
+    "connected": "Connected!",
+    "failed": "Connection failed"
+  },
   "ApiErrors": {
     "unauthorized": "Authentication required.",
     "rateLimitExceeded": "Too many requests. Please try again later.",

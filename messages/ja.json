@@ -740,6 +740,12 @@
     "copied": "コピーしました",
     "invalidEmail": "有効なメールアドレスを入力してください。"
   },
+  "Extension": {
+    "connect": "拡張機能を接続",
+    "connecting": "接続中...",
+    "connected": "接続完了",
+    "failed": "接続失敗"
+  },
   "ApiErrors": {
     "unauthorized": "認証が必要です。",
     "rateLimitExceeded": "リクエスト回数の制限を超えました。しばらくしてからお試しください。",

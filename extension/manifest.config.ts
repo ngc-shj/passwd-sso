@@ -23,9 +23,25 @@ export default defineManifest({
     page: "src/options/index.html",
     open_in_tab: false,
   },
+  commands: {
+    _execute_action: {
+      suggested_key: {
+        default: "Ctrl+Shift+L",
+        mac: "Command+Shift+L",
+      },
+      description: "Open passwd-sso popup",
+    },
+    "trigger-autofill": {
+      suggested_key: {
+        default: "Ctrl+Shift+F",
+        mac: "Command+Shift+F",
+      },
+      description: "Autofill current page",
+    },
+  },
   web_accessible_resources: [
     {
-      resources: ["src/content/autofill.ts"],
+      resources: ["src/content/autofill.ts", "src/content/token-bridge.ts"],
       matches: ["<all_urls>"],
     },
   ],

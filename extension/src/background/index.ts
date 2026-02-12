@@ -13,6 +13,7 @@ import {
   verifyKey,
 } from "../lib/crypto";
 import { getSettings } from "../lib/storage";
+import { extractHost, isHostMatch } from "../lib/url-matching";
 
 // ── In-memory token storage (never persisted to disk) ────────
 
@@ -23,18 +24,34 @@ let currentUserId: string | null = null;
 
 const ALARM_NAME = "extension-token-ttl";
 const VAULT_ALARM = "vault-auto-lock";
+const TOKEN_BRIDGE_SCRIPT_ID = "token-bridge";
 
 /** Securely clear token from memory */
 function clearToken(): void {
   currentToken = null;
   tokenExpiresAt = null;
   clearVault();
+  void updateBadge();
 }
 
 function clearVault(): void {
   encryptionKey = null;
   currentUserId = null;
   chrome.alarms.clear(VAULT_ALARM);
+  void updateBadge();
+}
+
+async function updateBadge(): Promise<void> {
+  if (!currentToken) {
+    await chrome.action.setBadgeText({ text: "" });
+    return;
+  }
+  if (!encryptionKey) {
+    await chrome.action.setBadgeText({ text: "!" });
+    await chrome.action.setBadgeBackgroundColor({ color: "#F59E0B" });
+    return;
+  }
+  await chrome.action.setBadgeText({ text: "" });
 }
 
 // ── Alarm: auto-clear on expiry ──────────────────────────────
@@ -50,6 +67,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
+  if (changes.serverUrl?.newValue) {
+    registerTokenBridgeScript(String(changes.serverUrl.newValue)).catch(() => {});
+  }
   if (!changes.autoLockMinutes) return;
   if (!encryptionKey) return;
 
@@ -60,6 +80,58 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (newValue > 0) {
     chrome.alarms.create(VAULT_ALARM, { delayInMinutes: newValue });
   }
+});
+
+async function registerTokenBridgeScript(serverUrl: string): Promise<void> {
+  let origin: string;
+  try {
+    origin = new URL(serverUrl).origin;
+  } catch {
+    return;
+  }
+  try {
+    await chrome.scripting.unregisterContentScripts({
+      ids: [TOKEN_BRIDGE_SCRIPT_ID],
+    });
+  } catch {
+    // ignore
+  }
+  const allowed = await chrome.permissions.contains({
+    origins: [`${origin}/*`],
+  });
+  if (!allowed) return;
+  await chrome.scripting.registerContentScripts([
+    {
+      id: TOKEN_BRIDGE_SCRIPT_ID,
+      matches: [`${origin}/*`],
+      js: ["src/content/token-bridge.ts"],
+      runAt: "document_idle",
+    },
+  ]);
+}
+
+getSettings()
+  .then(({ serverUrl }) => registerTokenBridgeScript(serverUrl))
+  .catch(() => {});
+
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command !== "trigger-autofill") return;
+  if (!currentToken || !encryptionKey || !currentUserId) return;
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || !tab.url) return;
+  const tabHost = extractHost(tab.url);
+  if (!tabHost) return;
+
+  const res = await swFetch("/api/passwords");
+  if (!res.ok) return;
+  const raw = (await res.json()) as RawEntry[];
+  const entries = await decryptOverviews(raw);
+  const match = entries.find(
+    (e) => e.entryType === "LOGIN" && e.urlHost && isHostMatch(e.urlHost, tabHost)
+  );
+  if (!match) return;
+  await performAutofillForEntry(match.id, tab.id);
 });
 
 async function swFetch(path: string): Promise<Response> {
@@ -87,6 +159,104 @@ async function swFetch(path: string): Promise<Response> {
   });
 }
 
+type RawEntry = {
+  id: string;
+  encryptedOverview: { ciphertext: string; iv: string; authTag: string };
+  entryType: string;
+  aadVersion?: number;
+  urlHost?: string;
+};
+
+async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
+  if (!encryptionKey || !currentUserId) return [];
+  const entries: DecryptedEntry[] = [];
+  for (const item of raw) {
+    const aad =
+      (item.aadVersion ?? 0) >= 1
+        ? buildPersonalEntryAAD(currentUserId, item.id)
+        : undefined;
+    try {
+      const plaintext = await decryptData(
+        item.encryptedOverview,
+        encryptionKey,
+        aad
+      );
+      const overview = JSON.parse(plaintext) as {
+        title?: string;
+        username?: string;
+        urlHost?: string;
+        cardholderName?: string;
+        fullName?: string;
+      };
+      entries.push({
+        id: item.id,
+        title: overview.title ?? "",
+        username:
+          overview.username ??
+          overview.cardholderName ??
+          overview.fullName ??
+          "",
+        urlHost: overview.urlHost ?? "",
+        entryType: item.entryType,
+      });
+    } catch {
+      // Skip entries that fail to decrypt/parse
+    }
+  }
+  return entries;
+}
+
+async function performAutofillForEntry(
+  entryId: string,
+  tabId: number,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!encryptionKey || !currentUserId) {
+    return { ok: false, error: "VAULT_LOCKED" };
+  }
+  const res = await swFetch(`/api/passwords/${entryId}`);
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    return { ok: false, error: json.error || "FETCH_FAILED" };
+  }
+  const data = (await res.json()) as {
+    encryptedBlob: { ciphertext: string; iv: string; authTag: string };
+    encryptedOverview: { ciphertext: string; iv: string; authTag: string };
+    aadVersion?: number;
+    id: string;
+  };
+
+  const aad =
+    (data.aadVersion ?? 0) >= 1
+      ? buildPersonalEntryAAD(currentUserId, data.id)
+      : undefined;
+  const blobPlain = await decryptData(data.encryptedBlob, encryptionKey, aad);
+  const overviewPlain = await decryptData(
+    data.encryptedOverview,
+    encryptionKey,
+    aad,
+  );
+
+  const blob = JSON.parse(blobPlain) as { password?: string | null };
+  const overview = JSON.parse(overviewPlain) as { username?: string | null };
+  const password = blob.password ?? null;
+  const username = overview.username ?? "";
+
+  if (!password) {
+    return { ok: false, error: "NO_PASSWORD" };
+  }
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["src/content/autofill.ts"],
+  });
+  await chrome.tabs.sendMessage(tabId, {
+    type: "AUTOFILL_FILL",
+    username,
+    password,
+  });
+  return { ok: true };
+}
+
 // ── Message handler ──────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener(
@@ -112,6 +282,7 @@ chrome.runtime.onMessage.addListener(
         }
 
         sendResponse({ type: "SET_TOKEN", ok: true });
+        void updateBadge();
         break;
       }
 
@@ -218,6 +389,7 @@ chrome.runtime.onMessage.addListener(
             }
 
             sendResponse({ type: "UNLOCK_VAULT", ok: true });
+            void updateBadge();
           } catch (err) {
             sendResponse({
               type: "UNLOCK_VAULT",
@@ -259,52 +431,9 @@ chrome.runtime.onMessage.addListener(
               return;
             }
 
-            const raw = (await res.json()) as Array<{
-              id: string;
-              encryptedOverview: { ciphertext: string; iv: string; authTag: string };
-              entryType: string;
-              aadVersion?: number;
-            }>;
-
-            const entries: DecryptedEntry[] = [];
-            for (const item of raw) {
-              const aad =
-                (item.aadVersion ?? 0) >= 1
-                  ? buildPersonalEntryAAD(currentUserId, item.id)
-                  : undefined;
-              try {
-                const plaintext = await decryptData(
-                  item.encryptedOverview,
-                  encryptionKey,
-                  aad
-                );
-                const overview = JSON.parse(plaintext) as {
-                  title?: string;
-                  username?: string;
-                  urlHost?: string;
-                  cardholderName?: string;
-                  fullName?: string;
-                };
-                entries.push({
-                  id: item.id,
-                  title: overview.title ?? "",
-                  username:
-                    overview.username ??
-                    overview.cardholderName ??
-                    overview.fullName ??
-                    "",
-                  urlHost: overview.urlHost ?? "",
-                  entryType: item.entryType,
-                });
-              } catch {
-                // Skip entries that fail to decrypt/parse
-              }
-            }
-
-            sendResponse({
-              type: "FETCH_PASSWORDS",
-              entries,
-            });
+            const raw = (await res.json()) as RawEntry[];
+            const entries = await decryptOverviews(raw);
+            sendResponse({ type: "FETCH_PASSWORDS", entries });
           } catch (err) {
             sendResponse({
               type: "FETCH_PASSWORDS",
@@ -386,71 +515,17 @@ chrome.runtime.onMessage.addListener(
       }
 
       case "AUTOFILL": {
-        if (!encryptionKey || !currentUserId) {
-          sendResponse({ type: "AUTOFILL", ok: false, error: "VAULT_LOCKED" });
-          break;
-        }
-
         (async () => {
           try {
-            const res = await swFetch(`/api/passwords/${message.entryId}`);
-            if (!res.ok) {
-              const json = await res.json().catch(() => ({}));
-              sendResponse({
-                type: "AUTOFILL",
-                ok: false,
-                error: json.error || "FETCH_FAILED",
-              });
-              return;
-            }
-
-            const data = (await res.json()) as {
-              encryptedBlob: { ciphertext: string; iv: string; authTag: string };
-              encryptedOverview: { ciphertext: string; iv: string; authTag: string };
-              aadVersion?: number;
-              id: string;
-            };
-
-            const aad =
-              (data.aadVersion ?? 0) >= 1
-                ? buildPersonalEntryAAD(currentUserId, data.id)
-                : undefined;
-            const blobPlain = await decryptData(
-              data.encryptedBlob,
-              encryptionKey,
-              aad
+            const result = await performAutofillForEntry(
+              message.entryId,
+              message.tabId,
             );
-            const overviewPlain = await decryptData(
-              data.encryptedOverview,
-              encryptionKey,
-              aad
-            );
-
-            const blob = JSON.parse(blobPlain) as { password?: string | null };
-            const overview = JSON.parse(overviewPlain) as { username?: string | null };
-            const password = blob.password ?? null;
-            const username = overview.username ?? "";
-
-            if (!password) {
-              sendResponse({
-                type: "AUTOFILL",
-                ok: false,
-                error: "NO_PASSWORD",
-              });
-              return;
-            }
-
-            await chrome.scripting.executeScript({
-              target: { tabId: message.tabId },
-              files: ["src/content/autofill.ts"],
+            sendResponse({
+              type: "AUTOFILL",
+              ok: result.ok,
+              error: result.error,
             });
-            await chrome.tabs.sendMessage(message.tabId, {
-              type: "AUTOFILL_FILL",
-              username,
-              password,
-            });
-
-            sendResponse({ type: "AUTOFILL", ok: true });
           } catch (err) {
             sendResponse({
               type: "AUTOFILL",
