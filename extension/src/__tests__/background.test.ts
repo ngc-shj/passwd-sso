@@ -1,4 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  ALARM_VAULT_LOCK,
+  ALARM_TOKEN_REFRESH,
+  CMD_TRIGGER_AUTOFILL,
+  SESSION_KEY,
+} from "../lib/constants";
 
 const cryptoMocks = vi.hoisted(() => ({
   deriveWrappingKey: vi.fn().mockResolvedValue("wrap-key"),
@@ -186,7 +192,7 @@ describe("background message flow", () => {
       expect.objectContaining({ type: "GET_STATUS", vaultUnlocked: true })
     );
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
-      "vault-auto-lock",
+      ALARM_VAULT_LOCK,
       expect.objectContaining({ delayInMinutes: 15 })
     );
   });
@@ -217,7 +223,7 @@ describe("background message flow", () => {
     });
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
     expect(chromeMock?.alarms.create).not.toHaveBeenCalledWith(
-      "vault-auto-lock",
+      ALARM_VAULT_LOCK,
       expect.anything()
     );
   });
@@ -232,9 +238,9 @@ describe("background message flow", () => {
 
     const handler = storageChangeHandlers[0];
     handler({ autoLockMinutes: { newValue: 5 } }, "local");
-    expect(chromeMock?.alarms.clear).toHaveBeenCalledWith("vault-auto-lock");
+    expect(chromeMock?.alarms.clear).toHaveBeenCalledWith(ALARM_VAULT_LOCK);
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
-      "vault-auto-lock",
+      ALARM_VAULT_LOCK,
       expect.objectContaining({ delayInMinutes: 5 })
     );
   });
@@ -249,14 +255,14 @@ describe("background message flow", () => {
 
     const handler = storageChangeHandlers[0];
     handler({ autoLockMinutes: { newValue: 0 } }, "local");
-    expect(chromeMock?.alarms.clear).toHaveBeenCalledWith("vault-auto-lock");
+    expect(chromeMock?.alarms.clear).toHaveBeenCalledWith(ALARM_VAULT_LOCK);
   });
 
   it("ignores auto-lock changes while vault is locked", async () => {
     const handler = storageChangeHandlers[0];
     handler({ autoLockMinutes: { newValue: 5 } }, "local");
     expect(chromeMock?.alarms.create).not.toHaveBeenCalledWith(
-      "vault-auto-lock",
+      ALARM_VAULT_LOCK,
       expect.anything()
     );
   });
@@ -298,14 +304,14 @@ describe("background message flow", () => {
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const handler = commandHandlers[0];
-    await handler("trigger-autofill");
+    await handler(CMD_TRIGGER_AUTOFILL);
     expect(chromeMock?.scripting.executeScript).toHaveBeenCalled();
   });
 
   it("does nothing when command has no active tab url", async () => {
     chromeMock?.tabs.query.mockResolvedValueOnce([{ id: 1, url: undefined }]);
     const handler = commandHandlers[0];
-    await handler("trigger-autofill");
+    await handler(CMD_TRIGGER_AUTOFILL);
     expect(chromeMock?.scripting.executeScript).not.toHaveBeenCalled();
   });
 
@@ -552,7 +558,7 @@ describe("session persistence", () => {
     });
     await sendMessage({ type: "CLEAR_TOKEN" });
 
-    expect(chromeMock?.storage.session.remove).toHaveBeenCalledWith("authState");
+    expect(chromeMock?.storage.session.remove).toHaveBeenCalledWith(SESSION_KEY);
   });
 
   it("clears refresh alarm on CLEAR_TOKEN", async () => {
@@ -563,7 +569,7 @@ describe("session persistence", () => {
     });
     await sendMessage({ type: "CLEAR_TOKEN" });
 
-    expect(chromeMock?.alarms.clear).toHaveBeenCalledWith("extension-token-refresh");
+    expect(chromeMock?.alarms.clear).toHaveBeenCalledWith(ALARM_TOKEN_REFRESH);
   });
 
   it("schedules refresh alarm on SET_TOKEN", async () => {
@@ -571,7 +577,7 @@ describe("session persistence", () => {
     await sendMessage({ type: "SET_TOKEN", token: "tok-1", expiresAt });
 
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
-      "extension-token-refresh",
+      ALARM_TOKEN_REFRESH,
       expect.objectContaining({ when: expect.any(Number) })
     );
   });
@@ -617,7 +623,7 @@ describe("session hydration", () => {
 
     await loadBackground();
 
-    expect(chromeMock.storage.session.remove).toHaveBeenCalledWith("authState");
+    expect(chromeMock.storage.session.remove).toHaveBeenCalledWith(SESSION_KEY);
 
     const status = await sendMessage({ type: "GET_STATUS" });
     expect(status).toEqual(
@@ -678,7 +684,7 @@ describe("token refresh alarm", () => {
 
     // Trigger refresh alarm
     const handler = alarmHandlers[0];
-    handler({ name: "extension-token-refresh" });
+    handler({ name: ALARM_TOKEN_REFRESH });
 
     // Wait for async refresh to complete
     await new Promise((r) => setTimeout(r, 50));
@@ -731,7 +737,7 @@ describe("token refresh alarm", () => {
 
     // Trigger refresh alarm
     const handler = alarmHandlers[0];
-    handler({ name: "extension-token-refresh" });
+    handler({ name: ALARM_TOKEN_REFRESH });
 
     await new Promise((r) => setTimeout(r, 50));
 
@@ -782,7 +788,7 @@ describe("token refresh alarm", () => {
     chromeMock?.alarms.create.mockClear();
 
     const handler = alarmHandlers[0];
-    handler({ name: "extension-token-refresh" });
+    handler({ name: ALARM_TOKEN_REFRESH });
 
     await new Promise((r) => setTimeout(r, 50));
 
@@ -794,7 +800,7 @@ describe("token refresh alarm", () => {
 
     // Should schedule a retry
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
-      "extension-token-refresh",
+      ALARM_TOKEN_REFRESH,
       expect.objectContaining({ delayInMinutes: 1 })
     );
   });
@@ -836,7 +842,7 @@ describe("token refresh alarm", () => {
     chromeMock?.alarms.create.mockClear();
 
     const handler = alarmHandlers[0];
-    handler({ name: "extension-token-refresh" });
+    handler({ name: ALARM_TOKEN_REFRESH });
 
     await new Promise((r) => setTimeout(r, 50));
 
@@ -848,7 +854,7 @@ describe("token refresh alarm", () => {
 
     // Should schedule a retry alarm
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
-      "extension-token-refresh",
+      ALARM_TOKEN_REFRESH,
       expect.objectContaining({ delayInMinutes: 1 })
     );
   });

@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { tryReadToken } from "../../content/token-bridge-lib";
+import { TOKEN_ELEMENT_ID } from "../../lib/constants";
 
 describe("token bridge", () => {
   beforeEach(() => {
@@ -17,7 +18,7 @@ describe("token bridge", () => {
 
   it("reads token from DOM and sends SET_TOKEN", () => {
     const el = document.createElement("div");
-    el.id = "passwd-sso-ext-token";
+    el.id = TOKEN_ELEMENT_ID;
     el.setAttribute("data-token", "tkn");
     el.setAttribute("data-expires-at", "123");
     document.body.appendChild(el);
@@ -33,7 +34,7 @@ describe("token bridge", () => {
 
   it("returns false when token is missing/invalid", () => {
     const el = document.createElement("div");
-    el.id = "passwd-sso-ext-token";
+    el.id = TOKEN_ELEMENT_ID;
     el.setAttribute("data-token", "");
     el.setAttribute("data-expires-at", "NaN");
     document.body.appendChild(el);

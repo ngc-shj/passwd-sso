@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { SESSION_KEY } from "../../lib/constants";
 
 let mockStorage: Record<string, unknown>;
 
@@ -46,7 +47,7 @@ describe("session-storage", () => {
 
   describe("loadSession", () => {
     it("returns state when valid data exists", async () => {
-      mockStorage.authState = {
+      mockStorage[SESSION_KEY] = {
         token: "tok-1",
         expiresAt: 1700000000000,
         userId: "u-1",
@@ -65,13 +66,13 @@ describe("session-storage", () => {
     });
 
     it("returns null for malformed data (missing token)", async () => {
-      mockStorage.authState = { expiresAt: 123, userId: "u-1" };
+      mockStorage[SESSION_KEY] = { expiresAt: 123, userId: "u-1" };
       const result = await loadSession();
       expect(result).toBeNull();
     });
 
     it("returns null for malformed data (wrong types)", async () => {
-      mockStorage.authState = {
+      mockStorage[SESSION_KEY] = {
         token: 123,
         expiresAt: "not-a-number",
         userId: "u-1",
@@ -81,13 +82,13 @@ describe("session-storage", () => {
     });
 
     it("returns null for non-object value", async () => {
-      mockStorage.authState = "invalid";
+      mockStorage[SESSION_KEY] = "invalid";
       const result = await loadSession();
       expect(result).toBeNull();
     });
 
     it("returns state without userId (pre-unlock)", async () => {
-      mockStorage.authState = {
+      mockStorage[SESSION_KEY] = {
         token: "tok-1",
         expiresAt: 1700000000000,
       };
@@ -99,7 +100,7 @@ describe("session-storage", () => {
     });
 
     it("returns null when userId is wrong type", async () => {
-      mockStorage.authState = {
+      mockStorage[SESSION_KEY] = {
         token: "tok-1",
         expiresAt: 1700000000000,
         userId: 123,
@@ -112,7 +113,7 @@ describe("session-storage", () => {
   describe("clearSession", () => {
     it("removes authState key", async () => {
       await clearSession();
-      expect(chrome.storage.session.remove).toHaveBeenCalledWith("authState");
+      expect(chrome.storage.session.remove).toHaveBeenCalledWith(SESSION_KEY);
     });
   });
 });

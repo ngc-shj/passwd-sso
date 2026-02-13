@@ -1,4 +1,5 @@
 import { defineManifest } from "@crxjs/vite-plugin";
+import { CMD_TRIGGER_AUTOFILL } from "./src/lib/constants";
 
 export default defineManifest({
   manifest_version: 3,
@@ -31,7 +32,7 @@ export default defineManifest({
       },
       description: "Open passwd-sso popup",
     },
-    "trigger-autofill": {
+    [CMD_TRIGGER_AUTOFILL]: {
       suggested_key: {
         default: "Ctrl+Shift+F",
         mac: "Command+Shift+F",

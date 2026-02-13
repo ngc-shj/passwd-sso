@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getSettings } from "../../lib/storage";
 import { t } from "../../lib/i18n";
+import { EXT_CONNECT_PARAM } from "../../lib/constants";
 
 export function LoginPrompt() {
   const [serverUrl, setServerUrl] = useState("");
@@ -11,7 +12,7 @@ export function LoginPrompt() {
 
   const handleLogin = async () => {
     const { serverUrl } = await getSettings();
-    chrome.tabs.create({ url: `${serverUrl}/dashboard?ext_connect=1` });
+    chrome.tabs.create({ url: `${serverUrl}/dashboard?${EXT_CONNECT_PARAM}=1` });
   };
 
   return (
