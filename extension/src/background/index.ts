@@ -12,6 +12,7 @@ import {
   unwrapSecretKey,
   verifyKey,
 } from "../lib/crypto";
+import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import { getSettings } from "../lib/storage";
 import { extractHost, isHostMatch } from "../lib/url-matching";
 import {
@@ -52,7 +53,7 @@ async function getCachedEntries(): Promise<DecryptedEntry[]> {
   if (cachedEntries && Date.now() - cacheTimestamp < CACHE_TTL_MS) {
     return cachedEntries;
   }
-  const res = await swFetch("/api/passwords");
+  const res = await swFetch(EXT_API_PATH.PASSWORDS);
   if (!res.ok) return [];
   const raw = (await res.json()) as RawEntry[];
   const entries = await decryptOverviews(raw);
@@ -151,7 +152,7 @@ async function attemptTokenRefresh(): Promise<void> {
       return;
     }
 
-    const res = await fetch(`${origin}/api/extension/token/refresh`, {
+    const res = await fetch(`${origin}${EXT_API_PATH.EXTENSION_TOKEN_REFRESH}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${currentToken}` },
     });
@@ -355,7 +356,7 @@ async function performAutofillForEntry(
   if (!encryptionKey || !currentUserId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
-  const res = await swFetch(`/api/passwords/${entryId}`);
+  const res = await swFetch(extApiPath.passwordById(entryId));
   if (!res.ok) {
     const json = await res.json().catch(() => ({}));
     return { ok: false, error: json.error || "FETCH_FAILED" };
@@ -472,7 +473,7 @@ chrome.runtime.onMessage.addListener(
 
         (async () => {
           try {
-            const res = await swFetch("/api/vault/unlock/data");
+            const res = await swFetch(EXT_API_PATH.VAULT_UNLOCK_DATA);
             if (!res.ok) {
               const json = await res.json().catch(() => ({}));
               sendResponse({
@@ -565,7 +566,7 @@ chrome.runtime.onMessage.addListener(
 
         (async () => {
           try {
-            const res = await swFetch("/api/passwords");
+            const res = await swFetch(EXT_API_PATH.PASSWORDS);
             if (!res.ok) {
               const json = await res.json().catch(() => ({}));
               sendResponse({
@@ -603,7 +604,7 @@ chrome.runtime.onMessage.addListener(
 
         (async () => {
           try {
-            const res = await swFetch(`/api/passwords/${message.entryId}`);
+            const res = await swFetch(extApiPath.passwordById(message.entryId));
             if (!res.ok) {
               const json = await res.json().catch(() => ({}));
               sendResponse({

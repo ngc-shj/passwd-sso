@@ -25,6 +25,7 @@ export { CONNECT_STATUS } from "./connect-status";
 export type { ConnectStatus } from "./connect-status";
 
 export { TOKEN_ELEMENT_ID, TOKEN_READY_EVENT, EXT_CONNECT_PARAM } from "./extension";
+export { API_PATH, apiPath } from "./api-path";
 export { AUDIT_TARGET_TYPE } from "./audit-target";
 export type { AuditTargetType } from "./audit-target";
 export {
