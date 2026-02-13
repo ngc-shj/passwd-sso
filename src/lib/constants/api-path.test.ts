@@ -3,6 +3,7 @@ import { API_PATH, apiPath } from "@/lib/constants";
 
 describe("API_PATH", () => {
   it("keeps core paths stable", () => {
+    expect(API_PATH.API_ROOT).toBe("/api");
     expect(API_PATH.AUTH_SESSION).toBe("/api/auth/session");
     expect(API_PATH.EXTENSION_TOKEN).toBe("/api/extension/token");
     expect(API_PATH.PASSWORDS).toBe("/api/passwords");
@@ -31,6 +32,7 @@ describe("API_PATH", () => {
       "/api/emergency-access/pending-confirmations"
     );
     expect(API_PATH.WATCHTOWER_HIBP).toBe("/api/watchtower/hibp");
+    expect(API_PATH.CSP_REPORT).toBe("/api/csp-report");
   });
 
   it("builds emergency confirm path", () => {

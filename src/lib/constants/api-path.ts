@@ -1,4 +1,5 @@
 export const API_PATH = {
+  API_ROOT: "/api",
   AUTH_SESSION: "/api/auth/session",
   EXTENSION_TOKEN: "/api/extension/token",
   PASSWORDS: "/api/passwords",
@@ -23,6 +24,7 @@ export const API_PATH = {
   EMERGENCY_ACCESS_REJECT: "/api/emergency-access/reject",
   EMERGENCY_PENDING_CONFIRMATIONS: "/api/emergency-access/pending-confirmations",
   WATCHTOWER_HIBP: "/api/watchtower/hibp",
+  CSP_REPORT: "/api/csp-report",
 } as const;
 
 export const apiPath = {

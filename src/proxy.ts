@@ -2,6 +2,7 @@ import createIntlMiddleware from "next-intl/middleware";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { routing } from "./i18n/routing";
+import { API_PATH } from "./lib/constants";
 
 const intlMiddleware = createIntlMiddleware(routing);
 
@@ -18,7 +19,7 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
   const { pathname } = request.nextUrl;
 
   // Skip i18n for API routes
-  if (pathname.startsWith("/api/")) {
+  if (pathname.startsWith(`${API_PATH.API_ROOT}/`)) {
     return handleApiAuth(request);
   }
 
@@ -60,7 +61,7 @@ async function handleApiAuth(request: NextRequest) {
 
   // Routes that accept extension token (Bearer) as alternative auth.
   // Let the route handler validate the token instead of checking session.
-  const extensionTokenRoutes = ["/api/passwords", "/api/vault/unlock/data"];
+  const extensionTokenRoutes = [API_PATH.PASSWORDS, API_PATH.VAULT_UNLOCK_DATA];
   const hasBearer = request.headers
     .get("authorization")
     ?.startsWith("Bearer ");
@@ -72,14 +73,14 @@ async function handleApiAuth(request: NextRequest) {
   }
 
   if (
-    pathname.startsWith("/api/passwords") ||
-    pathname.startsWith("/api/tags") ||
-    pathname.startsWith("/api/watchtower") ||
-    pathname.startsWith("/api/orgs") ||
-    pathname.startsWith("/api/audit-logs") ||
-    pathname.startsWith("/api/share-links") ||
-    pathname.startsWith("/api/emergency-access") ||
-    pathname.startsWith("/api/extension")
+    pathname.startsWith(API_PATH.PASSWORDS) ||
+    pathname.startsWith(API_PATH.TAGS) ||
+    pathname.startsWith(`${API_PATH.API_ROOT}/watchtower`) ||
+    pathname.startsWith(API_PATH.ORGS) ||
+    pathname.startsWith(API_PATH.AUDIT_LOGS) ||
+    pathname.startsWith(API_PATH.SHARE_LINKS) ||
+    pathname.startsWith(API_PATH.EMERGENCY_ACCESS) ||
+    pathname.startsWith(`${API_PATH.API_ROOT}/extension`)
   ) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {
@@ -102,7 +103,7 @@ async function hasValidSession(request: NextRequest): Promise<boolean> {
   if (cached) sessionCache.delete(cacheKey);
 
   try {
-    const sessionUrl = new URL("/api/auth/session", request.url);
+    const sessionUrl = new URL(API_PATH.AUTH_SESSION, request.url);
     const res = await fetch(sessionUrl, {
       headers: { cookie },
     });
@@ -146,13 +147,13 @@ function applySecurityHeaders(
     JSON.stringify({
       group: "csp-endpoint",
       max_age: 10886400,
-      endpoints: [{ url: "/api/csp-report" }],
+      endpoints: [{ url: API_PATH.CSP_REPORT }],
       include_subdomains: true,
     })
   );
   response.headers.set(
     "Reporting-Endpoints",
-    'csp-endpoint="/api/csp-report"'
+    `csp-endpoint="${API_PATH.CSP_REPORT}"`
   );
 
   response.cookies.set("csp-nonce", nonce, {
