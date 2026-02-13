@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect } from "vitest";
-import { performAutofill } from "../../content/autofill";
+import { performAutofill } from "../../content/autofill-lib";
 
 function setupForm(html: string) {
   document.body.innerHTML = html;
