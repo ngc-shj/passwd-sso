@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
+import { AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 type RouteContext = {
   params: Promise<{ id: string; attachmentId: string }>;
@@ -107,7 +108,7 @@ export async function DELETE(
     scope: "PERSONAL",
     action: "ATTACHMENT_DELETE",
     userId: session.user.id,
-    targetType: "Attachment",
+    targetType: AUDIT_TARGET_TYPE.ATTACHMENT,
     targetId: attachmentId,
     metadata: { filename: attachment.filename, entryId: id },
     ...extractRequestMeta(req),

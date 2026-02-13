@@ -9,7 +9,7 @@ import {
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_ROLE } from "@/lib/constants";
+import { ORG_PERMISSION, ORG_ROLE } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string; memberId: string }> };
 
@@ -27,7 +27,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     actorMembership = await requireOrgPermission(
       session.user.id,
       orgId,
-      "member:changeRole"
+      ORG_PERMISSION.MEMBER_CHANGE_ROLE
     );
   } catch (e) {
     if (e instanceof OrgAuthError) {
@@ -165,7 +165,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     actorMembership = await requireOrgPermission(
       session.user.id,
       orgId,
-      "member:remove"
+      ORG_PERMISSION.MEMBER_REMOVE
     );
   } catch (e) {
     if (e instanceof OrgAuthError) {

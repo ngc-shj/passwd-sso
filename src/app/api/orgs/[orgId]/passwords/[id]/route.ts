@@ -10,7 +10,7 @@ import {
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_ROLE, ENTRY_TYPE } from "@/lib/constants";
+import { ORG_PERMISSION, ORG_ROLE, ENTRY_TYPE } from "@/lib/constants";
 import {
   unwrapOrgKey,
   encryptServerData,
@@ -42,7 +42,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "password:read");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -197,7 +197,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   // MEMBER can only update their own entries
-  if (!hasOrgPermission(membership.role, "password:update")) {
+  if (!hasOrgPermission(membership.role, ORG_PERMISSION.PASSWORD_UPDATE)) {
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
   if (
@@ -500,7 +500,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const { orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "password:delete");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_DELETE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

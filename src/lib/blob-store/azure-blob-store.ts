@@ -3,6 +3,10 @@ import {
   type AttachmentBlobStore,
 } from "@/lib/blob-store/types";
 import { loadCloudBlobConfig } from "@/lib/blob-store/config";
+import {
+  BLOB_CONFIG_ERROR,
+  BLOB_CONTENT_TYPE,
+} from "@/lib/blob-store/constants";
 import { buildObjectKey, decodeObjectRef, encodeObjectRef } from "@/lib/blob-store/object-ref";
 import { streamBodyToBuffer } from "@/lib/blob-store/stream";
 
@@ -54,7 +58,7 @@ async function getAzureContainerClient() {
       }
 
       throw new Error(
-        "Azure backend requires AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_SAS_TOKEN",
+        BLOB_CONFIG_ERROR.AZURE_AUTH_REQUIRED,
       );
     })();
   }
@@ -76,7 +80,7 @@ export const azureBlobStore: AttachmentBlobStore = {
     const containerClient = await getAzureContainerClient();
     const blobClient = containerClient.getBlockBlobClient(key);
     await blobClient.uploadData(Buffer.from(data), {
-      blobHTTPHeaders: { blobContentType: "application/octet-stream" },
+      blobHTTPHeaders: { blobContentType: BLOB_CONTENT_TYPE.OCTET_STREAM },
     });
     return encodeObjectRef({ key });
   },

@@ -8,6 +8,7 @@ import {
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { ORG_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string }> };
 
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "tag:manage");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

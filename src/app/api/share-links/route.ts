@@ -14,6 +14,7 @@ import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { ORG_PERMISSION } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 const shareLinkLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
@@ -102,7 +103,7 @@ export async function POST(req: NextRequest) {
       await requireOrgPermission(
         session.user.id,
         entry.org.id,
-        "password:read"
+        ORG_PERMISSION.PASSWORD_READ
       );
     } catch (e) {
       if (e instanceof OrgAuthError) {

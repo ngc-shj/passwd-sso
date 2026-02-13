@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { unwrapOrgKey, decryptServerBinary } from "@/lib/crypto-server";
 import { buildAttachmentAAD } from "@/lib/crypto-aad";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
+import { AUDIT_TARGET_TYPE, ORG_PERMISSION } from "@/lib/constants";
 
 type RouteContext = {
   params: Promise<{ orgId: string; id: string; attachmentId: string }>;
@@ -25,7 +26,7 @@ export async function GET(
   const { orgId, id, attachmentId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "password:read");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -107,7 +108,7 @@ export async function DELETE(
   const { orgId, id, attachmentId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "password:delete");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_DELETE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -149,7 +150,7 @@ export async function DELETE(
     action: "ATTACHMENT_DELETE",
     userId: session.user.id,
     orgId,
-    targetType: "Attachment",
+    targetType: AUDIT_TARGET_TYPE.ATTACHMENT,
     targetId: attachmentId,
     metadata: { filename: attachment.filename, entryId: id },
     ...extractRequestMeta(req),

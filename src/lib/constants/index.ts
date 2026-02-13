@@ -12,6 +12,8 @@ export type { CustomFieldType } from "./custom-field";
 
 export { ORG_ROLE, ORG_ROLE_VALUES, INVITE_ROLE_VALUES } from "./org";
 export type { OrgRoleValue } from "./org";
+export { ORG_PERMISSION } from "./org-permission";
+export type { OrgPermissionValue } from "./org-permission";
 
 export { EA_STATUS } from "./emergency-access";
 export type { EaStatusValue } from "./emergency-access";
@@ -23,6 +25,8 @@ export { CONNECT_STATUS } from "./connect-status";
 export type { ConnectStatus } from "./connect-status";
 
 export { TOKEN_ELEMENT_ID, TOKEN_READY_EVENT, EXT_CONNECT_PARAM } from "./extension";
+export { AUDIT_TARGET_TYPE } from "./audit-target";
+export type { AuditTargetType } from "./audit-target";
 
 
 export {

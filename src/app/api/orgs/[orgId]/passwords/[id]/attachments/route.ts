@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { unwrapOrgKey, encryptServerBinary } from "@/lib/crypto-server";
 import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
+import { AUDIT_TARGET_TYPE, ORG_PERMISSION } from "@/lib/constants";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -33,7 +34,7 @@ export async function GET(
   const { orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "password:read");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -78,7 +79,7 @@ export async function POST(
   const { orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "password:update");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_UPDATE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -230,7 +231,7 @@ export async function POST(
     action: "ATTACHMENT_UPLOAD",
     userId: session.user.id,
     orgId,
-    targetType: "Attachment",
+    targetType: AUDIT_TARGET_TYPE.ATTACHMENT,
     targetId: attachment.id,
     metadata: { filename: sanitizedFilename, sizeBytes: file.size, entryId: id },
     ...extractRequestMeta(req),

@@ -5,6 +5,7 @@ import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { unwrapOrgKey, decryptServerData } from "@/lib/crypto-server";
 import { buildOrgEntryAAD } from "@/lib/crypto-aad";
+import { ORG_PERMISSION } from "@/lib/constants";
 import type { AuditAction } from "@prisma/client";
 
 type Params = { params: Promise<{ orgId: string }> };
@@ -43,7 +44,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "org:update");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.ORG_UPDATE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
