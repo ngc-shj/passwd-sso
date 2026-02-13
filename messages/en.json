@@ -744,7 +744,9 @@
     "connect": "Connect Extension",
     "connecting": "Connecting...",
     "connected": "Connected!",
-    "failed": "Connection failed"
+    "failed": "Connection failed",
+    "autoConnected": "Extension connected",
+    "autoConnectFailed": "Extension connection failed"
   },
   "ApiErrors": {
     "unauthorized": "Authentication required.",
