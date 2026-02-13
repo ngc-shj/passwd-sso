@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import authConfig from "./auth.config";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -25,8 +26,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async signIn({ user }) {
       if (user.id) {
         logAudit({
-          scope: "PERSONAL",
-          action: "AUTH_LOGIN",
+          scope: AUDIT_SCOPE.PERSONAL,
+          action: AUDIT_ACTION.AUTH_LOGIN,
           userId: user.id,
         });
       }
@@ -34,8 +35,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async signOut(message) {
       if ("session" in message && message.session?.userId) {
         logAudit({
-          scope: "PERSONAL",
-          action: "AUTH_LOGOUT",
+          scope: AUDIT_SCOPE.PERSONAL,
+          action: AUDIT_ACTION.AUTH_LOGOUT,
           userId: message.session.userId,
         });
       }

@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -42,7 +42,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);
   logAudit({
-    scope: share.orgPasswordEntryId ? "ORG" : "PERSONAL",
+    scope: share.orgPasswordEntryId ? AUDIT_SCOPE.ORG : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.SHARE_REVOKE,
     userId: session.user.id,
     orgId: share.orgPasswordEntryId
