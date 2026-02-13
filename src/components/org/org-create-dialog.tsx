@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { API_PATH } from "@/lib/constants";
 
 interface OrgCreateDialogProps {
   trigger: React.ReactNode;
@@ -57,7 +58,7 @@ export function OrgCreateDialog({ trigger, onCreated }: OrgCreateDialogProps) {
     setSlugError("");
 
     try {
-      const res = await fetch("/api/orgs", {
+      const res = await fetch(API_PATH.ORGS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

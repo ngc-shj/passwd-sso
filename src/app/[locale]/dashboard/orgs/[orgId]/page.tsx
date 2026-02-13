@@ -19,7 +19,7 @@ import {
 import { OrgExportDialog } from "@/components/org/org-export-dialog";
 import { Plus, Settings, KeyRound, Search, FileText, CreditCard, IdCard, Fingerprint, Download } from "lucide-react";
 import { toast } from "sonner";
-import { ORG_ROLE, ENTRY_TYPE } from "@/lib/constants";
+import { ORG_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, TotpAlgorithm, CustomFieldType } from "@/lib/constants";
 
 interface OrgInfo {
@@ -108,7 +108,7 @@ export default function OrgDashboardPage({
 
   const fetchOrg = async (): Promise<boolean> => {
     try {
-      const res = await fetch(`/api/orgs/${orgId}`);
+      const res = await fetch(apiPath.orgById(orgId));
       if (!res.ok) {
         setOrg(null);
         setLoadError(true);
@@ -131,7 +131,7 @@ export default function OrgDashboardPage({
     if (activeTagId) params.set("tag", activeTagId);
     if (activeEntryType) params.set("type", activeEntryType);
     const qs = params.toString();
-    const url = `/api/orgs/${orgId}/passwords${qs ? `?${qs}` : ""}`;
+    const url = `${apiPath.orgPasswords(orgId)}${qs ? `?${qs}` : ""}`;
     fetch(url)
       .then((res) => res.json())
       .then((data) => {
@@ -161,7 +161,7 @@ export default function OrgDashboardPage({
       prev.map((e) => (e.id === id ? { ...e, isFavorite: !current } : e))
     );
     try {
-      const res = await fetch(`/api/orgs/${orgId}/passwords/${id}/favorite`, {
+      const res = await fetch(apiPath.orgPasswordFavorite(orgId, id), {
         method: "POST",
       });
       if (!res.ok) fetchPasswords();
@@ -173,7 +173,7 @@ export default function OrgDashboardPage({
   const handleToggleArchive = async (id: string, current: boolean) => {
     setPasswords((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`, {
+      const res = await fetch(apiPath.orgPasswordById(orgId, id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isArchived: !current }),
@@ -187,7 +187,7 @@ export default function OrgDashboardPage({
   const handleDelete = async (id: string) => {
     setPasswords((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`, {
+      const res = await fetch(apiPath.orgPasswordById(orgId, id), {
         method: "DELETE",
       });
       if (!res.ok) fetchPasswords();
@@ -199,7 +199,7 @@ export default function OrgDashboardPage({
 
   const handleEdit = async (id: string) => {
     try {
-      const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`);
+      const res = await fetch(apiPath.orgPasswordById(orgId, id));
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       setEditData(data);
@@ -211,7 +211,7 @@ export default function OrgDashboardPage({
 
   const createDetailFetcher = useCallback(
     (id: string, eType?: EntryTypeValue) => async (): Promise<InlineDetailData> => {
-      const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`);
+      const res = await fetch(apiPath.orgPasswordById(orgId, id));
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       return {
@@ -255,7 +255,7 @@ export default function OrgDashboardPage({
 
   const createPasswordFetcher = useCallback(
     (id: string) => async (): Promise<string> => {
-      const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`);
+      const res = await fetch(apiPath.orgPasswordById(orgId, id));
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       return data.password ?? data.content ?? "";
@@ -265,7 +265,7 @@ export default function OrgDashboardPage({
 
   const createUrlFetcher = useCallback(
     (id: string) => async (): Promise<string | null> => {
-      const res = await fetch(`/api/orgs/${orgId}/passwords/${id}`);
+      const res = await fetch(apiPath.orgPasswordById(orgId, id));
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       return data.url;

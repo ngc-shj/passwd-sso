@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { useVault } from "@/lib/vault-context";
-import { VAULT_STATUS } from "@/lib/constants";
+import { VAULT_STATUS, API_PATH } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -54,7 +54,7 @@ export default function AcceptEmergencyInvitePage() {
       // Encrypt private key with grantee's vault encryption key
       const encryptedPrivKey = await encryptPrivateKey(privateKeyBytes, encryptionKey);
 
-      const res = await fetch("/api/emergency-access/accept", {
+      const res = await fetch(API_PATH.EMERGENCY_ACCESS_ACCEPT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -91,7 +91,7 @@ export default function AcceptEmergencyInvitePage() {
   const handleDecline = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/emergency-access/reject", {
+      const res = await fetch(API_PATH.EMERGENCY_ACCESS_REJECT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),

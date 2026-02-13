@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Download, Loader2, AlertTriangle, Lock } from "lucide-react";
-import { API_PATH } from "@/lib/constants";
+import { API_PATH, apiPath } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
@@ -90,7 +90,7 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
 
     try {
       // Fetch list of all org passwords (overview only)
-      const listRes = await fetch(`/api/orgs/${orgId}/passwords`);
+      const listRes = await fetch(apiPath.orgPasswords(orgId));
       if (!listRes.ok) throw new Error("Failed to fetch list");
       const list: { id: string; entryType: string }[] = await listRes.json();
 
@@ -98,7 +98,7 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
       const entries: OrgExportEntry[] = [];
       for (const item of list) {
         try {
-          const res = await fetch(`/api/orgs/${orgId}/passwords/${item.id}`);
+          const res = await fetch(apiPath.orgPasswordById(orgId, item.id));
           if (!res.ok) continue;
           const data = await res.json();
 

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { useVault } from "@/lib/vault-context";
-import { VAULT_STATUS } from "@/lib/constants";
+import { VAULT_STATUS, apiPath } from "@/lib/constants";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,7 +67,7 @@ export default function EmergencyVaultPage() {
 
     try {
       // 1. Fetch ECDH data
-      const vaultRes = await fetch(`/api/emergency-access/${grantId}/vault`);
+      const vaultRes = await fetch(apiPath.emergencyGrantVault(grantId));
       if (!vaultRes.ok) {
         const data = await vaultRes.json().catch(() => null);
         setError(t(eaErrorToI18nKey(data?.error)));
@@ -114,7 +114,7 @@ export default function EmergencyVaultPage() {
       ownerSecretKey.fill(0);
 
       // 5. Fetch encrypted entries
-      const entriesRes = await fetch(`/api/emergency-access/${grantId}/vault/entries`);
+      const entriesRes = await fetch(apiPath.emergencyGrantVaultEntries(grantId));
       if (!entriesRes.ok) {
         setError(t("networkError"));
         setLoading(false);

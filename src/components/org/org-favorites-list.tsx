@@ -6,7 +6,7 @@ import { PasswordCard } from "@/components/passwords/password-card";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { OrgPasswordForm } from "@/components/org/org-password-form";
 import { Building2 } from "lucide-react";
-import { ORG_ROLE } from "@/lib/constants";
+import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, TotpAlgorithm, CustomFieldType } from "@/lib/constants";
 
 interface OrgFavoriteEntry {
@@ -60,7 +60,7 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
   const fetchFavorites = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/orgs/favorites");
+      const res = await fetch(API_PATH.ORGS_FAVORITES);
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data)) setEntries(data);
@@ -81,7 +81,7 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
     // Optimistic: remove from list
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      await fetch(`/api/orgs/${entry.orgId}/passwords/${id}/favorite`, {
+      await fetch(apiPath.orgPasswordFavorite(entry.orgId, id), {
         method: "POST",
       });
     } catch {
@@ -94,7 +94,7 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
     if (!entry) return;
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(`/api/orgs/${entry.orgId}/passwords/${id}`, {
+      const res = await fetch(apiPath.orgPasswordById(entry.orgId, id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isArchived: !current }),
@@ -110,7 +110,7 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
     if (!entry) return;
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(`/api/orgs/${entry.orgId}/passwords/${id}`, {
+      const res = await fetch(apiPath.orgPasswordById(entry.orgId, id), {
         method: "DELETE",
       });
       if (!res.ok) fetchFavorites();
@@ -123,7 +123,7 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;
     try {
-      const res = await fetch(`/api/orgs/${entry.orgId}/passwords/${id}`);
+      const res = await fetch(apiPath.orgPasswordById(entry.orgId, id));
       if (!res.ok) return;
       const data = await res.json();
       setEditOrgId(entry.orgId);
@@ -138,7 +138,7 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
     (entry: OrgFavoriteEntry) =>
       async (): Promise<InlineDetailData> => {
         const res = await fetch(
-          `/api/orgs/${entry.orgId}/passwords/${entry.id}`
+          apiPath.orgPasswordById(entry.orgId, entry.id)
         );
         if (!res.ok) throw new Error("Failed");
         const data = await res.json();
@@ -185,7 +185,7 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
     (entry: OrgFavoriteEntry) =>
       async (): Promise<string> => {
         const res = await fetch(
-          `/api/orgs/${entry.orgId}/passwords/${entry.id}`
+          apiPath.orgPasswordById(entry.orgId, entry.id)
         );
         if (!res.ok) throw new Error("Failed");
         const data = await res.json();
@@ -198,7 +198,7 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
     (entry: OrgFavoriteEntry) =>
       async (): Promise<string | null> => {
         const res = await fetch(
-          `/api/orgs/${entry.orgId}/passwords/${entry.id}`
+          apiPath.orgPasswordById(entry.orgId, entry.id)
         );
         if (!res.ok) throw new Error("Failed");
         const data = await res.json();

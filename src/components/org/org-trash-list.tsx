@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Building2, Trash2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
 import { toast } from "sonner";
-import { ORG_ROLE, ENTRY_TYPE } from "@/lib/constants";
+import { ORG_ROLE, ENTRY_TYPE, API_PATH, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 interface OrgTrashEntry {
@@ -47,7 +47,7 @@ export function OrgTrashList({ refreshKey }: OrgTrashListProps) {
   const fetchTrash = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/orgs/trash");
+      const res = await fetch(API_PATH.ORGS_TRASH);
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data)) setEntries(data);
@@ -65,7 +65,7 @@ export function OrgTrashList({ refreshKey }: OrgTrashListProps) {
   const handleRestore = async (entry: OrgTrashEntry) => {
     try {
       const res = await fetch(
-        `/api/orgs/${entry.orgId}/passwords/${entry.id}/restore`,
+        apiPath.orgPasswordRestore(entry.orgId, entry.id),
         { method: "POST" }
       );
       if (res.ok) {
@@ -82,7 +82,7 @@ export function OrgTrashList({ refreshKey }: OrgTrashListProps) {
   const handleDeletePermanently = async (entry: OrgTrashEntry) => {
     try {
       const res = await fetch(
-        `/api/orgs/${entry.orgId}/passwords/${entry.id}?permanent=true`,
+        `${apiPath.orgPasswordById(entry.orgId, entry.id)}?permanent=true`,
         { method: "DELETE" }
       );
       if (res.ok) {

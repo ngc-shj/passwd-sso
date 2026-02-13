@@ -106,7 +106,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
     async function loadAttachments() {
       try {
         const url = orgId
-          ? `/api/orgs/${orgId}/passwords/${data.id}/attachments`
+          ? apiPath.orgPasswordAttachments(orgId, data.id)
           : apiPath.passwordAttachments(data.id);
         const res = await fetch(url);
         if (res.ok && !cancelled) {

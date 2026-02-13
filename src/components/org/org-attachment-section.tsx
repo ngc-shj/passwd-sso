@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { apiPath } from "@/lib/constants";
 import {
   ALLOWED_EXTENSIONS,
   MAX_FILE_SIZE,
@@ -101,7 +102,7 @@ export function OrgAttachmentSection({
       formData.append("contentType", file.type);
 
       const res = await fetch(
-        `/api/orgs/${orgId}/passwords/${entryId}/attachments`,
+        apiPath.orgPasswordAttachments(orgId, entryId),
         { method: "POST", body: formData }
       );
 
@@ -126,7 +127,7 @@ export function OrgAttachmentSection({
     try {
       // Org: server decrypts and returns plaintext binary
       const res = await fetch(
-        `/api/orgs/${orgId}/passwords/${entryId}/attachments/${attachment.id}`
+        apiPath.orgPasswordAttachmentById(orgId, entryId, attachment.id)
       );
       if (!res.ok) throw new Error("Download failed");
 
@@ -152,7 +153,7 @@ export function OrgAttachmentSection({
     setDeleting(true);
     try {
       const res = await fetch(
-        `/api/orgs/${orgId}/passwords/${entryId}/attachments/${deleteTarget.id}`,
+        apiPath.orgPasswordAttachmentById(orgId, entryId, deleteTarget.id),
         { method: "DELETE" }
       );
       if (!res.ok) throw new Error("Delete failed");

@@ -15,7 +15,7 @@ import { getTagColorClass } from "@/lib/dynamic-styles";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { ExportDialog } from "@/components/passwords/export-dialog";
 import { ImportDialog } from "@/components/passwords/import-dialog";
-import { ORG_ROLE, ENTRY_TYPE } from "@/lib/constants";
+import { ORG_ROLE, ENTRY_TYPE, API_PATH, apiPath } from "@/lib/constants";
 
 // ─── Section keys ────────────────────────────────────────────────
 
@@ -130,7 +130,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   // ─── Data fetching ──────────────────────────────────────────────
 
   const fetchData = () => {
-    fetch("/api/tags")
+    fetch(API_PATH.TAGS)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch tags");
         return res.json();
@@ -140,7 +140,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       })
       .catch(() => {});
 
-    fetch("/api/orgs")
+    fetch(API_PATH.ORGS)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch orgs");
         return res.json();
@@ -154,7 +154,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         await Promise.all(
           data.map(async (org: OrgItem) => {
             try {
-              const res = await fetch(`/api/orgs/${org.id}/tags`);
+              const res = await fetch(apiPath.orgTags(org.id));
               if (!res.ok) return;
               const tags = await res.json();
               if (Array.isArray(tags) && tags.length > 0) {

@@ -25,7 +25,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";
-import { ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { ENTRY_TYPE, apiPath, API_PATH } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 interface VaultEntryFull {
@@ -149,7 +149,7 @@ export function PasswordEditDialog({
         const entry: VaultEntryFull = JSON.parse(plaintext);
 
         const [tagsRes, attachRes] = await Promise.all([
-          fetch("/api/tags"),
+          fetch(API_PATH.TAGS),
           fetch(apiPath.passwordAttachments(id)),
         ]);
         const allTags: TagData[] = tagsRes.ok ? await tagsRes.json() : [];

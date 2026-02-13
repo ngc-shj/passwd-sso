@@ -36,7 +36,7 @@ import { CopyButton } from "@/components/passwords/copy-button";
 import { Link } from "@/i18n/navigation";
 import { ArrowLeft, Loader2, UserPlus, Trash2, X, LinkIcon, Crown } from "lucide-react";
 import { toast } from "sonner";
-import { ORG_ROLE } from "@/lib/constants";
+import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
 
 interface OrgInfo {
   id: string;
@@ -90,14 +90,14 @@ export default function OrgSettingsPage({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/auth/session")
+    fetch(API_PATH.AUTH_SESSION)
       .then((r) => r.json())
       .then((d) => setCurrentUserId(d?.user?.id ?? null))
       .catch(() => {});
   }, []);
 
   const fetchAll = () => {
-    fetch(`/api/orgs/${orgId}`)
+    fetch(apiPath.orgById(orgId))
       .then((r) => {
         if (!r.ok) throw new Error("Forbidden");
         return r.json();
@@ -113,14 +113,14 @@ export default function OrgSettingsPage({
         setLoadError(true);
       });
 
-    fetch(`/api/orgs/${orgId}/members`)
+    fetch(apiPath.orgMembers(orgId))
       .then((r) => r.json())
       .then((d) => {
         if (Array.isArray(d)) setMembers(d);
       })
       .catch(() => {});
 
-    fetch(`/api/orgs/${orgId}/invitations`)
+    fetch(apiPath.orgInvitations(orgId))
       .then((r) => r.json())
       .then((d) => {
         if (Array.isArray(d)) setInvitations(d);
@@ -140,7 +140,7 @@ export default function OrgSettingsPage({
   const handleUpdateOrg = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`/api/orgs/${orgId}`, {
+      const res = await fetch(apiPath.orgById(orgId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim(), description: description.trim() }),
@@ -158,7 +158,7 @@ export default function OrgSettingsPage({
 
   const handleDeleteOrg = async () => {
     try {
-      const res = await fetch(`/api/orgs/${orgId}`, { method: "DELETE" });
+      const res = await fetch(apiPath.orgById(orgId), { method: "DELETE" });
       if (!res.ok) throw new Error("Failed");
       toast.success(t("deleted"));
       window.dispatchEvent(new CustomEvent("org-data-changed"));
@@ -172,7 +172,7 @@ export default function OrgSettingsPage({
     if (!invEmail.trim()) return;
     setInviting(true);
     try {
-      const res = await fetch(`/api/orgs/${orgId}/invitations`, {
+      const res = await fetch(apiPath.orgInvitations(orgId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: invEmail.trim(), role: invRole }),
@@ -203,7 +203,7 @@ export default function OrgSettingsPage({
 
   const handleCancelInvitation = async (invId: string) => {
     try {
-      await fetch(`/api/orgs/${orgId}/invitations/${invId}`, {
+      await fetch(apiPath.orgInvitationById(orgId, invId), {
         method: "DELETE",
       });
       toast.success(t("invitationCancelled"));
@@ -215,7 +215,7 @@ export default function OrgSettingsPage({
 
   const handleChangeRole = async (memberId: string, role: string) => {
     try {
-      const res = await fetch(`/api/orgs/${orgId}/members/${memberId}`, {
+      const res = await fetch(apiPath.orgMemberById(orgId, memberId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role }),
@@ -230,7 +230,7 @@ export default function OrgSettingsPage({
 
   const handleTransferOwnership = async (memberId: string) => {
     try {
-      const res = await fetch(`/api/orgs/${orgId}/members/${memberId}`, {
+      const res = await fetch(apiPath.orgMemberById(orgId, memberId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: ORG_ROLE.OWNER }),
@@ -246,7 +246,7 @@ export default function OrgSettingsPage({
 
   const handleRemoveMember = async (memberId: string) => {
     try {
-      const res = await fetch(`/api/orgs/${orgId}/members/${memberId}`, {
+      const res = await fetch(apiPath.orgMemberById(orgId, memberId), {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed");

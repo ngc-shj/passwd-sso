@@ -15,7 +15,7 @@ import {
 import type { TagData } from "@/components/tags/tag-input";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import { Loader2 } from "lucide-react";
-import { apiPath } from "@/lib/constants";
+import { apiPath, API_PATH } from "@/lib/constants";
 
 interface VaultEntryFull {
   title: string;
@@ -72,7 +72,7 @@ export default function EditPasswordPage() {
         const entry: VaultEntryFull = JSON.parse(plaintext);
 
         // Fetch user's tags to resolve IDs from tagIds
-        const tagsRes = await fetch("/api/tags");
+        const tagsRes = await fetch(API_PATH.TAGS);
         const allTags: TagData[] = tagsRes.ok ? await tagsRes.json() : [];
         const tagIdsSet = new Set<string>(raw.tagIds ?? []);
         const resolvedTags = allTags.filter((t) => tagIdsSet.has(t.id));
