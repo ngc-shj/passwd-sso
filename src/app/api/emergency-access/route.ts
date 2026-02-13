@@ -6,7 +6,7 @@ import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { EA_STATUS } from "@/lib/constants";
+import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 const createLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 5 });
 
@@ -73,10 +73,10 @@ export async function POST(req: NextRequest) {
   });
 
   logAudit({
-    scope: "PERSONAL",
-    action: "EMERGENCY_GRANT_CREATE",
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.EMERGENCY_GRANT_CREATE,
     userId: session.user.id,
-    targetType: "EmergencyAccessGrant",
+    targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: grant.id,
     metadata: { granteeEmail, waitDays },
     ...extractRequestMeta(req),

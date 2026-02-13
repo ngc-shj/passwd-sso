@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { ORG_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string; id: string }> };
 
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "password:delete");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_DELETE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -46,11 +47,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   });
 
   logAudit({
-    scope: "ORG",
-    action: "ENTRY_RESTORE",
+    scope: AUDIT_SCOPE.ORG,
+    action: AUDIT_ACTION.ENTRY_RESTORE,
     userId: session.user.id,
     orgId,
-    targetType: "OrgPasswordEntry",
+    targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: id,
     ...extractRequestMeta(req),
   });

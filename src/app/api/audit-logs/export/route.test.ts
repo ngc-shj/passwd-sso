@@ -29,7 +29,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 import { POST } from "./route";
-import { ORG_ROLE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE, ORG_PERMISSION, ORG_ROLE } from "@/lib/constants";
 
 const URL = "http://localhost:3000/api/audit-logs/export";
 
@@ -78,8 +78,8 @@ describe("POST /api/audit-logs/export", () => {
     expect(json.ok).toBe(true);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        scope: "PERSONAL",
-        action: "ENTRY_EXPORT",
+        scope: AUDIT_SCOPE.PERSONAL,
+        action: AUDIT_ACTION.ENTRY_EXPORT,
         userId: "user-1",
         metadata: { entryCount: 10, format: "csv" },
       })
@@ -94,10 +94,14 @@ describe("POST /api/audit-logs/export", () => {
       })
     );
     expect(res.status).toBe(200);
-    expect(mockRequireOrgPermission).toHaveBeenCalledWith("user-1", "org-1", "org:update");
+    expect(mockRequireOrgPermission).toHaveBeenCalledWith(
+      "user-1",
+      "org-1",
+      ORG_PERMISSION.ORG_UPDATE
+    );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        scope: "ORG",
+        scope: AUDIT_SCOPE.ORG,
         orgId: "org-1",
       })
     );

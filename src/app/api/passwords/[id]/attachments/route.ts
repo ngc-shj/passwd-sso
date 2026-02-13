@@ -10,6 +10,7 @@ import {
 } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -209,10 +210,10 @@ export async function POST(
   }
 
   logAudit({
-    scope: "PERSONAL",
-    action: "ATTACHMENT_UPLOAD",
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.ATTACHMENT_UPLOAD,
     userId: session.user.id,
-    targetType: "Attachment",
+    targetType: AUDIT_TARGET_TYPE.ATTACHMENT,
     targetId: attachment.id,
     metadata: { filename: sanitizedFilename, sizeBytes: originalSize, entryId: id },
     ...extractRequestMeta(req),

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canTransition } from "@/lib/emergency-access-state";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { EA_STATUS } from "@/lib/constants";
+import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 // POST /api/emergency-access/[id]/approve — Owner early-approves emergency access request
 export async function POST(
@@ -42,10 +42,10 @@ export async function POST(
   });
 
   logAudit({
-    scope: "PERSONAL",
-    action: "EMERGENCY_ACCESS_ACTIVATE",
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE,
     userId: session.user.id,
-    targetType: "EmergencyAccessGrant",
+    targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: id,
     metadata: { granteeId: grant.granteeId, earlyApproval: true },
     ...extractRequestMeta(req),

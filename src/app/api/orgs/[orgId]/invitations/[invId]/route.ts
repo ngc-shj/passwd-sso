@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { ORG_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string; invId: string }> };
 
@@ -16,7 +17,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const { orgId, invId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "member:invite");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.MEMBER_INVITE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

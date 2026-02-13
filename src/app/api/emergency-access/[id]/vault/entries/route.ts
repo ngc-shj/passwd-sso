@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { EA_STATUS } from "@/lib/constants";
+import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 // GET /api/emergency-access/[id]/vault/entries — Fetch owner's encrypted entries
 export async function GET(
@@ -58,10 +58,10 @@ export async function GET(
   });
 
   logAudit({
-    scope: "PERSONAL",
-    action: "EMERGENCY_VAULT_ACCESS",
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.EMERGENCY_VAULT_ACCESS,
     userId: session.user.id,
-    targetType: "EmergencyAccessGrant",
+    targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: id,
     metadata: { ownerId: grant.ownerId, entryCount: entries.length },
     ...extractRequestMeta(req),

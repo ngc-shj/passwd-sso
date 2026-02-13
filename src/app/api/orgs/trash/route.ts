@@ -5,6 +5,7 @@ import { unwrapOrgKey, decryptServerData } from "@/lib/crypto-server";
 import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 import { hasOrgPermission } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { ORG_PERMISSION } from "@/lib/constants";
 
 // GET /api/orgs/trash — Get all trashed org passwords across all orgs
 export async function GET() {
@@ -21,7 +22,7 @@ export async function GET() {
 
   // Only include orgs where user has password:read permission
   const readable = memberships.filter((m) =>
-    hasOrgPermission(m.role, "password:read")
+    hasOrgPermission(m.role, ORG_PERMISSION.PASSWORD_READ)
   );
   const orgIds = readable.map((m) => m.orgId);
   const roleMap = new Map(readable.map((m) => [m.orgId, m.role]));

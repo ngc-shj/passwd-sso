@@ -10,54 +10,45 @@
 
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_ROLE } from "@/lib/constants";
+import { ORG_PERMISSION, ORG_ROLE } from "@/lib/constants";
 import type { OrgRole } from "@prisma/client";
 
 // ─── Permission Definitions ─────────────────────────────────────
 
 export type OrgPermission =
-  | "org:delete"
-  | "org:update"
-  | "member:invite"
-  | "member:remove"
-  | "member:changeRole"
-  | "password:create"
-  | "password:read"
-  | "password:update"
-  | "password:delete"
-  | "tag:manage";
+  (typeof ORG_PERMISSION)[keyof typeof ORG_PERMISSION];
 
 const ROLE_PERMISSIONS: Record<OrgRole, Set<OrgPermission>> = {
   [ORG_ROLE.OWNER]: new Set([
-    "org:delete",
-    "org:update",
-    "member:invite",
-    "member:remove",
-    "member:changeRole",
-    "password:create",
-    "password:read",
-    "password:update",
-    "password:delete",
-    "tag:manage",
+    ORG_PERMISSION.ORG_DELETE,
+    ORG_PERMISSION.ORG_UPDATE,
+    ORG_PERMISSION.MEMBER_INVITE,
+    ORG_PERMISSION.MEMBER_REMOVE,
+    ORG_PERMISSION.MEMBER_CHANGE_ROLE,
+    ORG_PERMISSION.PASSWORD_CREATE,
+    ORG_PERMISSION.PASSWORD_READ,
+    ORG_PERMISSION.PASSWORD_UPDATE,
+    ORG_PERMISSION.PASSWORD_DELETE,
+    ORG_PERMISSION.TAG_MANAGE,
   ]),
   [ORG_ROLE.ADMIN]: new Set([
-    "org:update",
-    "member:invite",
-    "member:remove",
-    "member:changeRole",
-    "password:create",
-    "password:read",
-    "password:update",
-    "password:delete",
-    "tag:manage",
+    ORG_PERMISSION.ORG_UPDATE,
+    ORG_PERMISSION.MEMBER_INVITE,
+    ORG_PERMISSION.MEMBER_REMOVE,
+    ORG_PERMISSION.MEMBER_CHANGE_ROLE,
+    ORG_PERMISSION.PASSWORD_CREATE,
+    ORG_PERMISSION.PASSWORD_READ,
+    ORG_PERMISSION.PASSWORD_UPDATE,
+    ORG_PERMISSION.PASSWORD_DELETE,
+    ORG_PERMISSION.TAG_MANAGE,
   ]),
   [ORG_ROLE.MEMBER]: new Set([
-    "password:create",
-    "password:read",
-    "password:update",
-    "tag:manage",
+    ORG_PERMISSION.PASSWORD_CREATE,
+    ORG_PERMISSION.PASSWORD_READ,
+    ORG_PERMISSION.PASSWORD_UPDATE,
+    ORG_PERMISSION.TAG_MANAGE,
   ]),
-  [ORG_ROLE.VIEWER]: new Set(["password:read"]),
+  [ORG_ROLE.VIEWER]: new Set([ORG_PERMISSION.PASSWORD_READ]),
 };
 
 // ─── Helpers ────────────────────────────────────────────────────

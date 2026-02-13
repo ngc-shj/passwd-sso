@@ -32,6 +32,13 @@ import {
   Link as LinkIcon,
   Link2Off,
 } from "lucide-react";
+import {
+  AUDIT_ACTION,
+  AUDIT_ACTION_GROUP,
+  AUDIT_ACTION_GROUPS_ORG,
+  AUDIT_TARGET_TYPE,
+  type AuditActionValue,
+} from "@/lib/constants";
 
 interface OrgAuditLogItem {
   id: string;
@@ -45,32 +52,32 @@ interface OrgAuditLogItem {
   user: { id: string; name: string | null; image: string | null };
 }
 
-const ACTION_ICONS: Record<string, React.ReactNode> = {
-  AUTH_LOGIN: <LogIn className="h-4 w-4" />,
-  AUTH_LOGOUT: <LogOut className="h-4 w-4" />,
-  ENTRY_CREATE: <Plus className="h-4 w-4" />,
-  ENTRY_UPDATE: <Pencil className="h-4 w-4" />,
-  ENTRY_DELETE: <Trash2 className="h-4 w-4" />,
-  ENTRY_RESTORE: <RotateCcw className="h-4 w-4" />,
-  ENTRY_EXPORT: <Download className="h-4 w-4" />,
-  ATTACHMENT_UPLOAD: <Upload className="h-4 w-4" />,
-  ATTACHMENT_DELETE: <Trash2 className="h-4 w-4" />,
-  ORG_MEMBER_INVITE: <UserPlus className="h-4 w-4" />,
-  ORG_MEMBER_REMOVE: <UserMinus className="h-4 w-4" />,
-  ORG_ROLE_UPDATE: <ShieldCheck className="h-4 w-4" />,
-  SHARE_CREATE: <LinkIcon className="h-4 w-4" />,
-  SHARE_REVOKE: <Link2Off className="h-4 w-4" />,
+const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
+  [AUDIT_ACTION.AUTH_LOGIN]: <LogIn className="h-4 w-4" />,
+  [AUDIT_ACTION.AUTH_LOGOUT]: <LogOut className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_CREATE]: <Plus className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_UPDATE]: <Pencil className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_DELETE]: <Trash2 className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_RESTORE]: <RotateCcw className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_EXPORT]: <Download className="h-4 w-4" />,
+  [AUDIT_ACTION.ATTACHMENT_UPLOAD]: <Upload className="h-4 w-4" />,
+  [AUDIT_ACTION.ATTACHMENT_DELETE]: <Trash2 className="h-4 w-4" />,
+  [AUDIT_ACTION.ORG_MEMBER_INVITE]: <UserPlus className="h-4 w-4" />,
+  [AUDIT_ACTION.ORG_MEMBER_REMOVE]: <UserMinus className="h-4 w-4" />,
+  [AUDIT_ACTION.ORG_ROLE_UPDATE]: <ShieldCheck className="h-4 w-4" />,
+  [AUDIT_ACTION.SHARE_CREATE]: <LinkIcon className="h-4 w-4" />,
+  [AUDIT_ACTION.SHARE_REVOKE]: <Link2Off className="h-4 w-4" />,
 };
 
 const ACTION_GROUPS = [
   {
     label: "groupEntry",
-    value: "group:entry",
-    actions: ["ENTRY_CREATE", "ENTRY_UPDATE", "ENTRY_DELETE", "ENTRY_RESTORE", "ENTRY_EXPORT"],
+    value: AUDIT_ACTION_GROUP.ENTRY,
+    actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.ENTRY],
   },
-  { label: "groupAttachment", value: "group:attachment", actions: ["ATTACHMENT_UPLOAD", "ATTACHMENT_DELETE"] },
-  { label: "groupOrg", value: "group:org", actions: ["ORG_MEMBER_INVITE", "ORG_MEMBER_REMOVE", "ORG_ROLE_UPDATE"] },
-  { label: "groupShare", value: "group:share", actions: ["SHARE_CREATE", "SHARE_REVOKE"] },
+  { label: "groupAttachment", value: AUDIT_ACTION_GROUP.ATTACHMENT, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.ATTACHMENT] },
+  { label: "groupOrg", value: AUDIT_ACTION_GROUP.ORG, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.ORG] },
+  { label: "groupShare", value: AUDIT_ACTION_GROUP.SHARE, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.SHARE] },
 ] as const;
 
 export default function OrgAuditLogsPage({
@@ -86,7 +93,7 @@ export default function OrgAuditLogsPage({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [selectedActions, setSelectedActions] = useState<Set<string>>(new Set());
+  const [selectedActions, setSelectedActions] = useState<Set<AuditActionValue>>(new Set());
   const [actionSearch, setActionSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -157,10 +164,10 @@ export default function OrgAuditLogsPage({
     const meta = log.metadata;
 
     // Entry operations: show resolved entry name
-    if (log.targetType === "OrgPasswordEntry" && log.targetId) {
+    if (log.targetType === AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY && log.targetId) {
       const name = entryNames[log.targetId];
       if (name) {
-        if (log.action === "ENTRY_DELETE" && meta?.permanent) {
+        if (log.action === AUDIT_ACTION.ENTRY_DELETE && meta?.permanent) {
           return `${name}（${t("permanentDelete")}）`;
         }
         return name;
@@ -175,14 +182,14 @@ export default function OrgAuditLogsPage({
 
     // Member operations: show email
     if (
-      (log.action === "ORG_MEMBER_INVITE" || log.action === "ORG_MEMBER_REMOVE") &&
+      (log.action === AUDIT_ACTION.ORG_MEMBER_INVITE || log.action === AUDIT_ACTION.ORG_MEMBER_REMOVE) &&
       meta?.email
     ) {
       return String(meta.email);
     }
 
     // Role updates: show role change
-    if (log.action === "ORG_ROLE_UPDATE" && meta?.previousRole && meta?.newRole) {
+    if (log.action === AUDIT_ACTION.ORG_ROLE_UPDATE && meta?.previousRole && meta?.newRole) {
       return t("roleChange", {
         from: String(meta.previousRole),
         to: String(meta.newRole),
@@ -192,9 +199,9 @@ export default function OrgAuditLogsPage({
     return null;
   };
 
-  const actionLabel = (action: string) => t(action as never);
+  const actionLabel = (action: AuditActionValue | string) => t(action as never);
 
-  const filteredActions = (actions: readonly string[]) => {
+  const filteredActions = (actions: readonly AuditActionValue[]) => {
     if (!actionSearch) return actions;
     const q = actionSearch.toLowerCase();
     return actions.filter((a) => {
@@ -203,9 +210,9 @@ export default function OrgAuditLogsPage({
     });
   };
 
-  const isActionSelected = (action: string) => selectedActions.has(action);
+  const isActionSelected = (action: AuditActionValue) => selectedActions.has(action);
 
-  const toggleAction = (action: string, checked: boolean) => {
+  const toggleAction = (action: AuditActionValue, checked: boolean) => {
     setSelectedActions((prev) => {
       const next = new Set(prev);
       if (checked) next.add(action);
@@ -214,7 +221,7 @@ export default function OrgAuditLogsPage({
     });
   };
 
-  const setGroupSelection = (actions: readonly string[], checked: boolean) => {
+  const setGroupSelection = (actions: readonly AuditActionValue[], checked: boolean) => {
     setSelectedActions((prev) => {
       const next = new Set(prev);
       for (const action of actions) {
@@ -335,7 +342,7 @@ export default function OrgAuditLogsPage({
               return (
                 <div key={log.id} className="px-4 py-2 flex items-start gap-3">
                   <div className="shrink-0 text-muted-foreground mt-0.5">
-                    {ACTION_ICONS[log.action] ?? <ScrollText className="h-4 w-4" />}
+                    {ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
                   </div>
                   <Avatar className="h-6 w-6 shrink-0">
                     <AvatarImage src={log.user.image ?? undefined} />

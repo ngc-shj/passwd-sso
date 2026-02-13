@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 // POST /api/passwords/[id]/restore - Restore from trash
 export async function POST(
@@ -38,10 +39,10 @@ export async function POST(
   });
 
   logAudit({
-    scope: "PERSONAL",
-    action: "ENTRY_RESTORE",
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.ENTRY_RESTORE,
     userId: session.user.id,
-    targetType: "PasswordEntry",
+    targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: id,
     ...extractRequestMeta(req),
   });

@@ -1,4 +1,5 @@
 import type { AttachmentBlobContext } from "@/lib/blob-store/types";
+import { BLOB_OBJECT_SCOPE } from "@/lib/blob-store/constants";
 
 export interface BlobObjectRef {
   key: string;
@@ -29,7 +30,7 @@ export function buildObjectKey(context: AttachmentBlobContext): string {
   const rawPrefix = process.env.BLOB_OBJECT_PREFIX?.trim() ?? "";
   const prefix = rawPrefix ? `${rawPrefix.replace(/\/+$/, "")}/` : "";
   const scope = context.orgId
-    ? `org/${context.orgId}`
-    : "personal";
+    ? `${BLOB_OBJECT_SCOPE.ORG}/${context.orgId}`
+    : BLOB_OBJECT_SCOPE.PERSONAL;
   return `${prefix}${scope}/${context.entryId}/${context.attachmentId}.bin`;
 }

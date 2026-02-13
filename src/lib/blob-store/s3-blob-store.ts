@@ -3,6 +3,9 @@ import {
   type AttachmentBlobStore,
 } from "@/lib/blob-store/types";
 import { loadCloudBlobConfig } from "@/lib/blob-store/config";
+import {
+  BLOB_CONTENT_TYPE,
+} from "@/lib/blob-store/constants";
 import { buildObjectKey, decodeObjectRef, encodeObjectRef } from "@/lib/blob-store/object-ref";
 import { streamBodyToBuffer } from "@/lib/blob-store/stream";
 
@@ -49,7 +52,7 @@ export const s3BlobStore: AttachmentBlobStore = {
         Bucket: bucket,
         Key: key,
         Body: Buffer.from(data),
-        ContentType: "application/octet-stream",
+        ContentType: BLOB_CONTENT_TYPE.OCTET_STREAM,
       }),
     );
 

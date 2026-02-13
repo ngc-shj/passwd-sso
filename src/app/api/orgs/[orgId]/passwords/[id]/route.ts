@@ -10,7 +10,7 @@ import {
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_ROLE, ENTRY_TYPE } from "@/lib/constants";
+import { ORG_PERMISSION, ORG_ROLE, ENTRY_TYPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import {
   unwrapOrgKey,
   encryptServerData,
@@ -42,7 +42,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "password:read");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -197,7 +197,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   // MEMBER can only update their own entries
-  if (!hasOrgPermission(membership.role, "password:update")) {
+  if (!hasOrgPermission(membership.role, ORG_PERMISSION.PASSWORD_UPDATE)) {
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
   if (
@@ -472,11 +472,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 
   logAudit({
-    scope: "ORG",
-    action: "ENTRY_UPDATE",
+    scope: AUDIT_SCOPE.ORG,
+    action: AUDIT_ACTION.ENTRY_UPDATE,
     userId: session.user.id,
     orgId,
-    targetType: "OrgPasswordEntry",
+    targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: id,
     ...extractRequestMeta(req),
   });
@@ -500,7 +500,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const { orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "password:delete");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_DELETE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -529,11 +529,11 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   logAudit({
-    scope: "ORG",
-    action: "ENTRY_DELETE",
+    scope: AUDIT_SCOPE.ORG,
+    action: AUDIT_ACTION.ENTRY_DELETE,
     userId: session.user.id,
     orgId,
-    targetType: "OrgPasswordEntry",
+    targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: id,
     metadata: { permanent },
     ...extractRequestMeta(req),

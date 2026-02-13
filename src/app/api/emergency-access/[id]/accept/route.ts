@@ -5,7 +5,7 @@ import { acceptEmergencyGrantByIdSchema } from "@/lib/validations";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { EA_STATUS } from "@/lib/constants";
+import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 
@@ -86,10 +86,10 @@ export async function POST(
   ]);
 
   logAudit({
-    scope: "PERSONAL",
-    action: "EMERGENCY_GRANT_ACCEPT",
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.EMERGENCY_GRANT_ACCEPT,
     userId: session.user.id,
-    targetType: "EmergencyAccessGrant",
+    targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: id,
     metadata: { ownerId: grant.ownerId },
     ...extractRequestMeta(req),

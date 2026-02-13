@@ -4,6 +4,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { z } from "zod/v4";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { ORG_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 const bodySchema = z.object({
   orgId: z.string().optional(),
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
   // Verify org membership when orgId is specified
   if (orgId) {
     try {
-      await requireOrgPermission(session.user.id, orgId, "org:update");
+      await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.ORG_UPDATE);
     } catch (e) {
       if (e instanceof OrgAuthError) {
         return NextResponse.json({ error: e.message }, { status: e.status });
@@ -45,8 +46,8 @@ export async function POST(req: NextRequest) {
   }
 
   logAudit({
-    scope: orgId ? "ORG" : "PERSONAL",
-    action: "ENTRY_EXPORT",
+    scope: orgId ? AUDIT_SCOPE.ORG : AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.ENTRY_EXPORT,
     userId: session.user.id,
     orgId: orgId ?? undefined,
     metadata: { entryCount, format },

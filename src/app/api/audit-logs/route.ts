@@ -3,49 +3,16 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import type { AuditAction, Prisma } from "@prisma/client";
 import { API_ERROR } from "@/lib/api-error-codes";
+import {
+  AUDIT_ACTION,
+  AUDIT_ACTION_EMERGENCY_PREFIX,
+  AUDIT_ACTION_GROUPS_PERSONAL,
+  AUDIT_ACTION_VALUES,
+  AUDIT_SCOPE,
+  AUDIT_TARGET_TYPE,
+} from "@/lib/constants";
 
-const VALID_ACTIONS: Set<string> = new Set([
-  "AUTH_LOGIN",
-  "AUTH_LOGOUT",
-  "ENTRY_CREATE",
-  "ENTRY_UPDATE",
-  "ENTRY_DELETE",
-  "ENTRY_RESTORE",
-  "ENTRY_EXPORT",
-  "ATTACHMENT_UPLOAD",
-  "ATTACHMENT_DELETE",
-  "ORG_MEMBER_INVITE",
-  "ORG_MEMBER_REMOVE",
-  "ORG_ROLE_UPDATE",
-  "SHARE_CREATE",
-  "SHARE_REVOKE",
-  "EMERGENCY_GRANT_CREATE",
-  "EMERGENCY_GRANT_ACCEPT",
-  "EMERGENCY_GRANT_REJECT",
-  "EMERGENCY_GRANT_CONFIRM",
-  "EMERGENCY_ACCESS_REQUEST",
-  "EMERGENCY_ACCESS_ACTIVATE",
-  "EMERGENCY_ACCESS_REVOKE",
-  "EMERGENCY_VAULT_ACCESS",
-]);
-
-const ACTION_GROUPS: Record<string, AuditAction[]> = {
-  "group:auth": ["AUTH_LOGIN", "AUTH_LOGOUT"],
-  "group:entry": ["ENTRY_CREATE", "ENTRY_UPDATE", "ENTRY_DELETE", "ENTRY_RESTORE", "ENTRY_EXPORT"],
-  "group:attachment": ["ATTACHMENT_UPLOAD", "ATTACHMENT_DELETE"],
-  "group:org": ["ORG_MEMBER_INVITE", "ORG_MEMBER_REMOVE", "ORG_ROLE_UPDATE"],
-  "group:share": ["SHARE_CREATE", "SHARE_REVOKE"],
-  "group:emergency": [
-    "EMERGENCY_GRANT_CREATE",
-    "EMERGENCY_GRANT_ACCEPT",
-    "EMERGENCY_GRANT_REJECT",
-    "EMERGENCY_GRANT_CONFIRM",
-    "EMERGENCY_ACCESS_REQUEST",
-    "EMERGENCY_ACCESS_ACTIVATE",
-    "EMERGENCY_ACCESS_REVOKE",
-    "EMERGENCY_VAULT_ACCESS",
-  ],
-};
+const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 
 // GET /api/audit-logs — Personal audit logs (cursor-based pagination)
 export async function GET(req: NextRequest) {
@@ -64,11 +31,11 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(Math.max(parseInt(limitParam ?? "50", 10) || 50, 1), 100);
 
   const where: Prisma.AuditLogWhereInput = {
-    scope: "PERSONAL",
+    scope: AUDIT_SCOPE.PERSONAL,
     OR: [
       { userId: session.user.id },
       {
-        action: "EMERGENCY_VAULT_ACCESS",
+        action: AUDIT_ACTION.EMERGENCY_VAULT_ACCESS,
         metadata: {
           path: ["ownerId"],
           equals: session.user.id,
@@ -88,8 +55,8 @@ export async function GET(req: NextRequest) {
     }
     where.action = { in: requested as AuditAction[] };
   } else if (action) {
-    if (ACTION_GROUPS[action]) {
-      where.action = { in: ACTION_GROUPS[action] };
+    if (AUDIT_ACTION_GROUPS_PERSONAL[action]) {
+      where.action = { in: AUDIT_ACTION_GROUPS_PERSONAL[action] };
     } else if (VALID_ACTIONS.has(action)) {
       where.action = action as AuditAction;
     }
@@ -125,7 +92,7 @@ export async function GET(req: NextRequest) {
   const entryIds = [
     ...new Set(
       items
-        .filter((l) => l.targetType === "PasswordEntry" && l.targetId)
+        .filter((l) => l.targetType === AUDIT_TARGET_TYPE.PASSWORD_ENTRY && l.targetId)
         .map((l) => l.targetId as string)
     ),
   ];
@@ -160,7 +127,7 @@ export async function GET(req: NextRequest) {
   const relatedIds = [
     ...new Set(
       items
-        .filter((l) => l.action.startsWith("EMERGENCY_"))
+        .filter((l) => l.action.startsWith(AUDIT_ACTION_EMERGENCY_PREFIX))
         .flatMap((l) => {
           const meta = l.metadata as { ownerId?: string; granteeId?: string } | null;
           return [meta?.ownerId, meta?.granteeId].filter((id): id is string => !!id);

@@ -5,7 +5,7 @@ import { rejectEmergencyGrantSchema } from "@/lib/validations";
 import { hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { EA_STATUS } from "@/lib/constants";
+import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 // POST /api/emergency-access/reject — Reject an emergency access invitation
 export async function POST(req: NextRequest) {
@@ -55,10 +55,10 @@ export async function POST(req: NextRequest) {
   });
 
   logAudit({
-    scope: "PERSONAL",
-    action: "EMERGENCY_GRANT_REJECT",
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.EMERGENCY_GRANT_REJECT,
     userId: session.user.id,
-    targetType: "EmergencyAccessGrant",
+    targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: grant.id,
     metadata: { ownerId: grant.ownerId },
     ...extractRequestMeta(req),

@@ -6,7 +6,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { inviteSchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { INVITATION_STATUS } from "@/lib/constants";
+import { INVITATION_STATUS, ORG_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string }> };
 
@@ -20,7 +20,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "member:invite");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.MEMBER_INVITE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "member:invite");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.MEMBER_INVITE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -131,11 +131,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   });
 
   logAudit({
-    scope: "ORG",
-    action: "ORG_MEMBER_INVITE",
+    scope: AUDIT_SCOPE.ORG,
+    action: AUDIT_ACTION.ORG_MEMBER_INVITE,
     userId: session.user.id,
     orgId,
-    targetType: "OrgInvitation",
+    targetType: AUDIT_TARGET_TYPE.ORG_INVITATION,
     targetId: invitation.id,
     metadata: { email, role },
     ...extractRequestMeta(req),

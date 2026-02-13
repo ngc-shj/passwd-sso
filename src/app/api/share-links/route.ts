@@ -14,6 +14,12 @@ import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import {
+  ORG_PERMISSION,
+  AUDIT_TARGET_TYPE,
+  AUDIT_ACTION,
+  AUDIT_SCOPE,
+} from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 const shareLinkLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
@@ -102,7 +108,7 @@ export async function POST(req: NextRequest) {
       await requireOrgPermission(
         session.user.id,
         entry.org.id,
-        "password:read"
+        ORG_PERMISSION.PASSWORD_READ
       );
     } catch (e) {
       if (e instanceof OrgAuthError) {
@@ -162,8 +168,8 @@ export async function POST(req: NextRequest) {
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);
   logAudit({
-    scope: orgPasswordEntryId ? "ORG" : "PERSONAL",
-    action: "SHARE_CREATE",
+    scope: orgPasswordEntryId ? AUDIT_SCOPE.ORG : AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.SHARE_CREATE,
     userId: session.user.id,
     orgId: orgPasswordEntryId
       ? (
@@ -173,7 +179,7 @@ export async function POST(req: NextRequest) {
           })
         )?.orgId
       : undefined,
-    targetType: "PasswordShare",
+    targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
     metadata: { expiresIn, maxViews: maxViews ?? null },
     ip,

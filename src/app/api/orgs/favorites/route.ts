@@ -5,6 +5,7 @@ import { unwrapOrgKey, decryptServerData } from "@/lib/crypto-server";
 import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 import { hasOrgPermission } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { ORG_PERMISSION } from "@/lib/constants";
 
 // GET /api/orgs/favorites — Get all org passwords favorited by current user
 export async function GET() {
@@ -47,7 +48,7 @@ export async function GET() {
     const entry = f.orgPasswordEntry;
     if (entry.deletedAt || entry.isArchived) return false;
     const role = roleMap.get(entry.orgId);
-    return role && hasOrgPermission(role, "password:read");
+    return role && hasOrgPermission(role, ORG_PERMISSION.PASSWORD_READ);
   });
 
   const entries = active.map((f) => {

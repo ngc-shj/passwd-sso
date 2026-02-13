@@ -12,7 +12,7 @@ import {
   decryptServerData,
 } from "@/lib/crypto-server";
 import { buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
-import { ENTRY_TYPE, ENTRY_TYPE_VALUES } from "@/lib/constants";
+import { ENTRY_TYPE, ENTRY_TYPE_VALUES, ORG_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string }> };
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "password:read");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -189,7 +189,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, "password:create");
+    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_CREATE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -391,11 +391,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   });
 
   logAudit({
-    scope: "ORG",
-    action: "ENTRY_CREATE",
+    scope: AUDIT_SCOPE.ORG,
+    action: AUDIT_ACTION.ENTRY_CREATE,
     userId: session.user.id,
     orgId,
-    targetType: "OrgPasswordEntry",
+    targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: entry.id,
     ...extractRequestMeta(req),
   });

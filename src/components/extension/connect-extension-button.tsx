@@ -3,40 +3,39 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { CONNECT_STATUS, type ConnectStatus } from "@/lib/constants";
 import { injectExtensionToken } from "@/lib/inject-extension-token";
-
-type Status = "idle" | "connecting" | "connected" | "failed";
 
 export function ConnectExtensionButton() {
   const t = useTranslations("Extension");
-  const [status, setStatus] = useState<Status>("idle");
+  const [status, setStatus] = useState<ConnectStatus>(CONNECT_STATUS.IDLE);
 
   const handleClick = async () => {
-    if (status === "connecting") return;
-    setStatus("connecting");
+    if (status === CONNECT_STATUS.CONNECTING) return;
+    setStatus(CONNECT_STATUS.CONNECTING);
     try {
       const res = await fetch("/api/extension/token", { method: "POST" });
       if (!res.ok) {
-        setStatus("failed");
-        setTimeout(() => setStatus("idle"), 3000);
+        setStatus(CONNECT_STATUS.FAILED);
+        setTimeout(() => setStatus(CONNECT_STATUS.IDLE), 3000);
         return;
       }
       const json = await res.json();
       injectExtensionToken(json.token, Date.parse(json.expiresAt));
-      setStatus("connected");
-      setTimeout(() => setStatus("idle"), 3000);
+      setStatus(CONNECT_STATUS.CONNECTED);
+      setTimeout(() => setStatus(CONNECT_STATUS.IDLE), 3000);
     } catch {
-      setStatus("failed");
-      setTimeout(() => setStatus("idle"), 3000);
+      setStatus(CONNECT_STATUS.FAILED);
+      setTimeout(() => setStatus(CONNECT_STATUS.IDLE), 3000);
     }
   };
 
   const label =
-    status === "connecting"
+    status === CONNECT_STATUS.CONNECTING
       ? t("connecting")
-      : status === "connected"
+      : status === CONNECT_STATUS.CONNECTED
       ? t("connected")
-      : status === "failed"
+      : status === CONNECT_STATUS.FAILED
       ? t("failed")
       : t("connect");
 

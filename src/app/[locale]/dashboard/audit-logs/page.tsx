@@ -40,6 +40,14 @@ import {
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
+import {
+  AUDIT_ACTION,
+  AUDIT_ACTION_EMERGENCY_PREFIX,
+  AUDIT_ACTION_GROUP,
+  AUDIT_ACTION_GROUPS_PERSONAL,
+  AUDIT_TARGET_TYPE,
+  type AuditActionValue,
+} from "@/lib/constants";
 
 interface AuditLogItem {
   id: string;
@@ -62,54 +70,45 @@ type UserMap = Record<
   { id: string; name: string | null; email: string | null; image: string | null }
 >;
 
-const ACTION_ICONS: Record<string, React.ReactNode> = {
-  AUTH_LOGIN: <LogIn className="h-4 w-4" />,
-  AUTH_LOGOUT: <LogOut className="h-4 w-4" />,
-  ENTRY_CREATE: <Plus className="h-4 w-4" />,
-  ENTRY_UPDATE: <Pencil className="h-4 w-4" />,
-  ENTRY_DELETE: <Trash2 className="h-4 w-4" />,
-  ENTRY_RESTORE: <RotateCcw className="h-4 w-4" />,
-  ENTRY_EXPORT: <Download className="h-4 w-4" />,
-  ATTACHMENT_UPLOAD: <Upload className="h-4 w-4" />,
-  ATTACHMENT_DELETE: <Trash2 className="h-4 w-4" />,
-  ORG_MEMBER_INVITE: <UserPlus className="h-4 w-4" />,
-  ORG_MEMBER_REMOVE: <UserMinus className="h-4 w-4" />,
-  ORG_ROLE_UPDATE: <ShieldCheck className="h-4 w-4" />,
-  SHARE_CREATE: <LinkIcon className="h-4 w-4" />,
-  SHARE_REVOKE: <Link2Off className="h-4 w-4" />,
-  EMERGENCY_GRANT_CREATE: <HeartPulse className="h-4 w-4" />,
-  EMERGENCY_GRANT_ACCEPT: <HeartPulse className="h-4 w-4" />,
-  EMERGENCY_GRANT_REJECT: <ShieldOff className="h-4 w-4" />,
-  EMERGENCY_GRANT_CONFIRM: <KeyRound className="h-4 w-4" />,
-  EMERGENCY_ACCESS_REQUEST: <ShieldAlert className="h-4 w-4" />,
-  EMERGENCY_ACCESS_ACTIVATE: <ShieldCheck className="h-4 w-4" />,
-  EMERGENCY_ACCESS_REVOKE: <ShieldOff className="h-4 w-4" />,
-  EMERGENCY_VAULT_ACCESS: <Eye className="h-4 w-4" />,
+const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
+  [AUDIT_ACTION.AUTH_LOGIN]: <LogIn className="h-4 w-4" />,
+  [AUDIT_ACTION.AUTH_LOGOUT]: <LogOut className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_CREATE]: <Plus className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_UPDATE]: <Pencil className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_DELETE]: <Trash2 className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_RESTORE]: <RotateCcw className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_EXPORT]: <Download className="h-4 w-4" />,
+  [AUDIT_ACTION.ATTACHMENT_UPLOAD]: <Upload className="h-4 w-4" />,
+  [AUDIT_ACTION.ATTACHMENT_DELETE]: <Trash2 className="h-4 w-4" />,
+  [AUDIT_ACTION.ORG_MEMBER_INVITE]: <UserPlus className="h-4 w-4" />,
+  [AUDIT_ACTION.ORG_MEMBER_REMOVE]: <UserMinus className="h-4 w-4" />,
+  [AUDIT_ACTION.ORG_ROLE_UPDATE]: <ShieldCheck className="h-4 w-4" />,
+  [AUDIT_ACTION.SHARE_CREATE]: <LinkIcon className="h-4 w-4" />,
+  [AUDIT_ACTION.SHARE_REVOKE]: <Link2Off className="h-4 w-4" />,
+  [AUDIT_ACTION.EMERGENCY_GRANT_CREATE]: <HeartPulse className="h-4 w-4" />,
+  [AUDIT_ACTION.EMERGENCY_GRANT_ACCEPT]: <HeartPulse className="h-4 w-4" />,
+  [AUDIT_ACTION.EMERGENCY_GRANT_REJECT]: <ShieldOff className="h-4 w-4" />,
+  [AUDIT_ACTION.EMERGENCY_GRANT_CONFIRM]: <KeyRound className="h-4 w-4" />,
+  [AUDIT_ACTION.EMERGENCY_ACCESS_REQUEST]: <ShieldAlert className="h-4 w-4" />,
+  [AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE]: <ShieldCheck className="h-4 w-4" />,
+  [AUDIT_ACTION.EMERGENCY_ACCESS_REVOKE]: <ShieldOff className="h-4 w-4" />,
+  [AUDIT_ACTION.EMERGENCY_VAULT_ACCESS]: <Eye className="h-4 w-4" />,
 };
 
 const ACTION_GROUPS = [
-  { label: "groupAuth", value: "group:auth", actions: ["AUTH_LOGIN", "AUTH_LOGOUT"] },
+  { label: "groupAuth", value: AUDIT_ACTION_GROUP.AUTH, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.AUTH] },
   {
     label: "groupEntry",
-    value: "group:entry",
-    actions: ["ENTRY_CREATE", "ENTRY_UPDATE", "ENTRY_DELETE", "ENTRY_RESTORE", "ENTRY_EXPORT"],
+    value: AUDIT_ACTION_GROUP.ENTRY,
+    actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ENTRY],
   },
-  { label: "groupAttachment", value: "group:attachment", actions: ["ATTACHMENT_UPLOAD", "ATTACHMENT_DELETE"] },
-  { label: "groupOrg", value: "group:org", actions: ["ORG_MEMBER_INVITE", "ORG_MEMBER_REMOVE", "ORG_ROLE_UPDATE"] },
-  { label: "groupShare", value: "group:share", actions: ["SHARE_CREATE", "SHARE_REVOKE"] },
+  { label: "groupAttachment", value: AUDIT_ACTION_GROUP.ATTACHMENT, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ATTACHMENT] },
+  { label: "groupOrg", value: AUDIT_ACTION_GROUP.ORG, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ORG] },
+  { label: "groupShare", value: AUDIT_ACTION_GROUP.SHARE, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.SHARE] },
   {
     label: "groupEmergency",
-    value: "group:emergency",
-    actions: [
-      "EMERGENCY_GRANT_CREATE",
-      "EMERGENCY_GRANT_ACCEPT",
-      "EMERGENCY_GRANT_REJECT",
-      "EMERGENCY_GRANT_CONFIRM",
-      "EMERGENCY_ACCESS_REQUEST",
-      "EMERGENCY_ACCESS_ACTIVATE",
-      "EMERGENCY_ACCESS_REVOKE",
-      "EMERGENCY_VAULT_ACCESS",
-    ],
+    value: AUDIT_ACTION_GROUP.EMERGENCY,
+    actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.EMERGENCY],
   },
 ] as const;
 
@@ -123,7 +122,7 @@ export default function AuditLogsPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [selectedActions, setSelectedActions] = useState<Set<string>>(new Set());
+  const [selectedActions, setSelectedActions] = useState<Set<AuditActionValue>>(new Set());
   const [actionSearch, setActionSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -234,21 +233,21 @@ export default function AuditLogsPage() {
     const viewer = formatViewer(log) ?? t("unknownUser");
 
     switch (log.action) {
-      case "EMERGENCY_GRANT_CREATE":
+      case AUDIT_ACTION.EMERGENCY_GRANT_CREATE:
         return t("eaGrantCreatedFor", { user: grantee });
-      case "EMERGENCY_GRANT_ACCEPT":
+      case AUDIT_ACTION.EMERGENCY_GRANT_ACCEPT:
         return t("eaGrantAcceptedBy", { viewer, owner });
-      case "EMERGENCY_GRANT_REJECT":
+      case AUDIT_ACTION.EMERGENCY_GRANT_REJECT:
         return t("eaGrantRejectedBy", { viewer, owner });
-      case "EMERGENCY_GRANT_CONFIRM":
+      case AUDIT_ACTION.EMERGENCY_GRANT_CONFIRM:
         return t("eaGrantConfirmedFor", { user: grantee });
-      case "EMERGENCY_ACCESS_REQUEST":
+      case AUDIT_ACTION.EMERGENCY_ACCESS_REQUEST:
         return t("eaAccessRequestedBy", { viewer, owner });
-      case "EMERGENCY_ACCESS_ACTIVATE":
+      case AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE:
         return t("eaAccessActivatedFor", { user: meta?.granteeId ? grantee : owner });
-      case "EMERGENCY_ACCESS_REVOKE":
+      case AUDIT_ACTION.EMERGENCY_ACCESS_REVOKE:
         return t("eaAccessRevokedFor", { user: grantee });
-      case "EMERGENCY_VAULT_ACCESS":
+      case AUDIT_ACTION.EMERGENCY_VAULT_ACCESS:
         return t("viewedByOwner", { viewer, owner });
       default:
         return null;
@@ -260,12 +259,12 @@ export default function AuditLogsPage() {
 
     // Entry operations: show resolved entry name
     if (
-      log.targetType === "PasswordEntry" &&
+      log.targetType === AUDIT_TARGET_TYPE.PASSWORD_ENTRY &&
       log.targetId
     ) {
       const name = entryNames.get(log.targetId);
       if (name) {
-        if (log.action === "ENTRY_DELETE" && meta?.permanent) {
+        if (log.action === AUDIT_ACTION.ENTRY_DELETE && meta?.permanent) {
           return `${name}（${t("permanentDelete")}）`;
         }
         return name;
@@ -279,7 +278,7 @@ export default function AuditLogsPage() {
     }
 
     // Role updates: show role change
-    if (log.action === "ORG_ROLE_UPDATE" && meta?.previousRole && meta?.newRole) {
+    if (log.action === AUDIT_ACTION.ORG_ROLE_UPDATE && meta?.previousRole && meta?.newRole) {
       return t("roleChange", {
         from: String(meta.previousRole),
         to: String(meta.newRole),
@@ -289,9 +288,9 @@ export default function AuditLogsPage() {
     return null;
   };
 
-  const actionLabel = (action: string) => t(action as never);
+  const actionLabel = (action: AuditActionValue | string) => t(action as never);
 
-  const filteredActions = (actions: readonly string[]) => {
+  const filteredActions = (actions: readonly AuditActionValue[]) => {
     if (!actionSearch) return actions;
     const q = actionSearch.toLowerCase();
     return actions.filter((a) => {
@@ -300,9 +299,9 @@ export default function AuditLogsPage() {
     });
   };
 
-  const isActionSelected = (action: string) => selectedActions.has(action);
+  const isActionSelected = (action: AuditActionValue) => selectedActions.has(action);
 
-  const toggleAction = (action: string, checked: boolean) => {
+  const toggleAction = (action: AuditActionValue, checked: boolean) => {
     setSelectedActions((prev) => {
       const next = new Set(prev);
       if (checked) next.add(action);
@@ -311,7 +310,7 @@ export default function AuditLogsPage() {
     });
   };
 
-  const setGroupSelection = (actions: readonly string[], checked: boolean) => {
+  const setGroupSelection = (actions: readonly AuditActionValue[], checked: boolean) => {
     setSelectedActions((prev) => {
       const next = new Set(prev);
       for (const action of actions) {
@@ -432,7 +431,7 @@ export default function AuditLogsPage() {
               return (
                 <div key={log.id} className="px-4 py-2 flex items-start gap-3">
                   <div className="shrink-0 text-muted-foreground mt-0.5">
-                    {ACTION_ICONS[log.action] ?? <ScrollText className="h-4 w-4" />}
+                    {ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium">{t(log.action as never)}</p>
@@ -441,7 +440,7 @@ export default function AuditLogsPage() {
                         {targetLabel}
                       </p>
                     )}
-                    {log.action.startsWith("EMERGENCY_") && (() => {
+                    {log.action.startsWith(AUDIT_ACTION_EMERGENCY_PREFIX) && (() => {
                       const detail = getEmergencyDetail(log);
                       return detail ? (
                         <p className="text-xs text-muted-foreground">{detail}</p>
