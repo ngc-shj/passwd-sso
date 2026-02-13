@@ -1,10 +1,12 @@
+import { TOKEN_ELEMENT_ID, TOKEN_READY_EVENT } from "../lib/constants";
+
 function isContextValid(): boolean {
   try { return !!chrome.runtime?.id; }
   catch { return false; }
 }
 
 export function tryReadToken(): boolean {
-  const el = document.getElementById("passwd-sso-ext-token");
+  const el = document.getElementById(TOKEN_ELEMENT_ID);
   if (!el) return false;
   if (!isContextValid()) return false;
   const token = el.getAttribute("data-token");
@@ -34,7 +36,7 @@ export function startObserver(): void {
 
 /** Listen for custom event dispatched by injectExtensionToken(). Survives after observer timeout. */
 export function listenForTokenEvent(): void {
-  document.addEventListener("passwd-sso-token-ready", () => {
+  document.addEventListener(TOKEN_READY_EVENT, () => {
     tryReadToken();
   });
 }

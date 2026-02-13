@@ -1,5 +1,3 @@
-export const EXT_CONNECT_PARAM = "ext_connect";
-
 export const CONNECT_STATUS = {
   IDLE: "idle",
   CONNECTING: "connecting",

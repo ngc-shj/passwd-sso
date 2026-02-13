@@ -3,13 +3,13 @@
  * Survives service worker restarts but clears on browser close.
  */
 
+import { SESSION_KEY } from "./constants";
+
 export interface SessionState {
   token: string;
   expiresAt: number; // ms timestamp
   userId?: string;
 }
-
-const SESSION_KEY = "authState";
 
 export async function persistSession(state: SessionState): Promise<void> {
   await chrome.storage.session.set({ [SESSION_KEY]: state });

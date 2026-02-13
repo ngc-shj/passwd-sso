@@ -128,10 +128,14 @@ export function App() {
               type="button"
               onClick={async () => {
                 if (autofillAllEnabled) {
-                  const removed = await chrome.permissions.remove({
-                    origins: ["https://*/*"],
-                  });
-                  if (removed) setAutofillAllEnabled(false);
+                  try {
+                    const removed = await chrome.permissions.remove({
+                      origins: ["https://*/*"],
+                    });
+                    if (removed) setAutofillAllEnabled(false);
+                  } catch {
+                    // content_scripts declares https://*/* as required — cannot remove
+                  }
                 } else {
                   const granted = await chrome.permissions.request({
                     origins: ["https://*/*"],
