@@ -1,4 +1,7 @@
+import { azureBlobStore } from "@/lib/blob-store/azure-blob-store";
 import { dbBlobStore } from "@/lib/blob-store/db-blob-store";
+import { gcsBlobStore } from "@/lib/blob-store/gcs-blob-store";
+import { s3BlobStore } from "@/lib/blob-store/s3-blob-store";
 import {
   BLOB_STORAGE,
   type AttachmentBlobStore,
@@ -16,7 +19,9 @@ export function resolveBlobBackend(): BlobBackend {
 
 export function getAttachmentBlobStore(): AttachmentBlobStore {
   const backend = resolveBlobBackend();
-  if (backend === BLOB_STORAGE.DB) return dbBlobStore;
+  if (backend === BLOB_STORAGE.S3) return s3BlobStore;
+  if (backend === BLOB_STORAGE.AZURE) return azureBlobStore;
+  if (backend === BLOB_STORAGE.GCS) return gcsBlobStore;
   return dbBlobStore;
 }
 
