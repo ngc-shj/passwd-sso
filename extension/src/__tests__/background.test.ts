@@ -73,6 +73,11 @@ function installChromeMock() {
           .fn()
           .mockResolvedValue({ serverUrl: "https://localhost:3000", autoLockMinutes: 15 }),
       },
+      session: {
+        get: vi.fn().mockResolvedValue({}),
+        set: vi.fn().mockResolvedValue(undefined),
+        remove: vi.fn().mockResolvedValue(undefined),
+      },
       onChanged: {
         addListener: (fn: (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, areaName: string) => void) => {
           storageChangeHandlers.push(fn);
@@ -112,6 +117,16 @@ describe("background message flow", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.includes("/api/extension/token/refresh")) {
+          return {
+            ok: true,
+            json: async () => ({
+              token: "refreshed-tok",
+              expiresAt: new Date(Date.now() + 900_000).toISOString(),
+              scope: ["passwords:read", "vault:unlock-data"],
+            }),
+          };
+        }
         if (url.includes("/api/vault/unlock/data")) {
           return {
             ok: true,
@@ -350,6 +365,16 @@ describe("background message flow", () => {
 
   it("returns error when COPY_PASSWORD fetch fails", async () => {
     const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/extension/token/refresh")) {
+        return {
+          ok: true,
+          json: async () => ({
+            token: "refreshed-tok",
+            expiresAt: new Date(Date.now() + 900_000).toISOString(),
+            scope: ["passwords:read", "vault:unlock-data"],
+          }),
+        };
+      }
       if (url.includes("/api/vault/unlock/data")) {
         return {
           ok: true,
@@ -411,6 +436,16 @@ describe("background message flow", () => {
 
   it("returns error when AUTOFILL fetch fails", async () => {
     const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/extension/token/refresh")) {
+        return {
+          ok: true,
+          json: async () => ({
+            token: "refreshed-tok",
+            expiresAt: new Date(Date.now() + 900_000).toISOString(),
+            scope: ["passwords:read", "vault:unlock-data"],
+          }),
+        };
+      }
       if (url.includes("/api/vault/unlock/data")) {
         return {
           ok: true,
@@ -454,5 +489,310 @@ describe("background message flow", () => {
 
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
     expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "CSP" });
+  });
+});
+
+// ── Session persistence & token refresh ──────────────────────
+
+describe("session persistence", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/api/vault/unlock/data")) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        if (url.includes("/api/passwords")) {
+          return {
+            ok: true,
+            json: async () => [],
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      })
+    );
+
+    await loadBackground();
+  });
+
+  it("persists state to session storage after SET_TOKEN", async () => {
+    const expiresAt = Date.now() + 600_000;
+    await sendMessage({ type: "SET_TOKEN", token: "tok-1", expiresAt });
+    // userId is not set yet at SET_TOKEN time, so persistState requires all 3 fields.
+    // After UNLOCK_VAULT, userId is set and persistState is called.
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    expect(chromeMock?.storage.session.set).toHaveBeenCalledWith({
+      authState: expect.objectContaining({
+        token: "tok-1",
+        userId: "user-1",
+      }),
+    });
+  });
+
+  it("clears session storage on CLEAR_TOKEN", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "tok-1",
+      expiresAt: Date.now() + 600_000,
+    });
+    await sendMessage({ type: "CLEAR_TOKEN" });
+
+    expect(chromeMock?.storage.session.remove).toHaveBeenCalledWith("authState");
+  });
+
+  it("clears refresh alarm on CLEAR_TOKEN", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "tok-1",
+      expiresAt: Date.now() + 600_000,
+    });
+    await sendMessage({ type: "CLEAR_TOKEN" });
+
+    expect(chromeMock?.alarms.clear).toHaveBeenCalledWith("extension-token-refresh");
+  });
+
+  it("schedules refresh alarm on SET_TOKEN", async () => {
+    const expiresAt = Date.now() + 600_000;
+    await sendMessage({ type: "SET_TOKEN", token: "tok-1", expiresAt });
+
+    expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
+      "extension-token-refresh",
+      expect.objectContaining({ when: expect.any(Number) })
+    );
+  });
+});
+
+describe("session hydration", () => {
+  it("restores state from session storage on startup", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    const expiresAt = Date.now() + 600_000;
+    chromeMock.storage.session.get.mockResolvedValue({
+      authState: { token: "hydrated-tok", expiresAt, userId: "u-1" },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) }))
+    );
+
+    await loadBackground();
+
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({ hasToken: true, expiresAt })
+    );
+  });
+
+  it("clears expired state during hydration", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    chromeMock.storage.session.get.mockResolvedValue({
+      authState: { token: "old-tok", expiresAt: Date.now() - 1000, userId: "u-1" },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) }))
+    );
+
+    await loadBackground();
+
+    expect(chromeMock.storage.session.remove).toHaveBeenCalledWith("authState");
+
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({ hasToken: false })
+    );
+  });
+});
+
+describe("token refresh alarm", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+  });
+
+  it("refreshes token on REFRESH_ALARM and updates state", async () => {
+    const newExpiresAt = new Date(Date.now() + 900_000).toISOString();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/api/extension/token/refresh")) {
+          return {
+            ok: true,
+            json: async () => ({
+              token: "refreshed-tok",
+              expiresAt: newExpiresAt,
+              scope: ["passwords:read"],
+            }),
+          };
+        }
+        if (url.includes("/api/vault/unlock/data")) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      })
+    );
+
+    await loadBackground();
+
+    // Set token and unlock vault
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "original-tok",
+      expiresAt: Date.now() + 600_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    // Trigger refresh alarm
+    const handler = alarmHandlers[0];
+    handler({ name: "extension-token-refresh" });
+
+    // Wait for async refresh to complete
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Verify session storage was updated with new token
+    expect(chromeMock?.storage.session.set).toHaveBeenCalledWith({
+      authState: expect.objectContaining({
+        token: "refreshed-tok",
+        userId: "user-1",
+      }),
+    });
+  });
+
+  it("clears token when server rejects refresh", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/api/extension/token/refresh")) {
+          return {
+            ok: false,
+            status: 401,
+            json: async () => ({ error: "UNAUTHORIZED" }),
+          };
+        }
+        if (url.includes("/api/vault/unlock/data")) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      })
+    );
+
+    await loadBackground();
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "tok",
+      expiresAt: Date.now() + 600_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    // Trigger refresh alarm
+    const handler = alarmHandlers[0];
+    handler({ name: "extension-token-refresh" });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Token should be cleared
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({ hasToken: false })
+    );
+  });
+
+  it("retries on network error if TTL remains", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/api/extension/token/refresh")) {
+          throw new Error("NetworkError");
+        }
+        if (url.includes("/api/vault/unlock/data")) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      })
+    );
+
+    await loadBackground();
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "tok",
+      expiresAt: Date.now() + 600_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    // Clear create calls from SET_TOKEN so we can check the retry
+    chromeMock?.alarms.create.mockClear();
+
+    const handler = alarmHandlers[0];
+    handler({ name: "extension-token-refresh" });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Token should still be valid
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({ hasToken: true })
+    );
+
+    // Should schedule a retry alarm
+    expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
+      "extension-token-refresh",
+      expect.objectContaining({ delayInMinutes: 1 })
+    );
   });
 });
