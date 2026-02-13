@@ -1,4 +1,4 @@
-export type BlobBackend = "db";
+export type BlobBackend = "db" | "s3" | "azure" | "gcs";
 
 /**
  * Minimal storage boundary for attachment binary payloads.
@@ -13,4 +13,3 @@ export interface AttachmentBlobStore {
   toBuffer(stored: Uint8Array): Buffer;
   toBase64(stored: Uint8Array): string;
 }
-
