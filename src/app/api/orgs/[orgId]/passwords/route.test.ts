@@ -45,7 +45,7 @@ vi.mock("@/lib/crypto-server", () => ({
 }));
 
 import { GET, POST } from "./route";
-import { ORG_ROLE } from "@/lib/constants";
+import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-123";
 const now = new Date("2025-01-01T00:00:00Z");
@@ -86,7 +86,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {
         id: "pw-1",
-        entryType: "LOGIN",
+        entryType: ENTRY_TYPE.LOGIN,
         encryptedOverview: "cipher",
         overviewIv: "iv",
         overviewAuthTag: "tag",
@@ -112,7 +112,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].title).toBe("Test");
-    expect(json[0].entryType).toBe("LOGIN");
+    expect(json[0].entryType).toBe(ENTRY_TYPE.LOGIN);
     expect(json[0].isFavorite).toBe(true);
   });
 
@@ -287,7 +287,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {
         id: "pw-aad",
-        entryType: "LOGIN",
+        entryType: ENTRY_TYPE.LOGIN,
         aadVersion: 1,
         encryptedOverview: "cipher",
         overviewIv: "iv",
@@ -326,7 +326,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {
         id: "pw-legacy",
-        entryType: "LOGIN",
+        entryType: ENTRY_TYPE.LOGIN,
         aadVersion: 0,
         encryptedOverview: "cipher",
         overviewIv: "iv",
@@ -451,7 +451,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
     });
     mockPrismaOrgPasswordEntry.create.mockResolvedValue({
       id: "new-pw",
-      entryType: "LOGIN",
+      entryType: ENTRY_TYPE.LOGIN,
       tags: [],
       createdAt: now,
     });

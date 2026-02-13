@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
+import { ENTRY_TYPE } from "@/lib/constants";
 
 const { mockAuth, mockFindMany } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -19,7 +20,7 @@ import { GET } from "@/app/api/share-links/mine/route";
 function makeShare(overrides: Record<string, unknown> = {}) {
   return {
     id: "share-1",
-    entryType: "LOGIN",
+    entryType: ENTRY_TYPE.LOGIN,
     expiresAt: new Date(Date.now() + 86400_000), // +1 day
     maxViews: null,
     viewCount: 0,

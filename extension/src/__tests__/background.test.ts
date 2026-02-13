@@ -3,6 +3,7 @@ import {
   ALARM_VAULT_LOCK,
   ALARM_TOKEN_REFRESH,
   CMD_TRIGGER_AUTOFILL,
+  EXT_ENTRY_TYPE,
   SESSION_KEY,
 } from "../lib/constants";
 
@@ -164,7 +165,7 @@ describe("background message flow", () => {
               {
                 id: "pw-1",
                 encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" },
-                entryType: "LOGIN",
+                entryType: EXT_ENTRY_TYPE.LOGIN,
                 aadVersion: 1,
               },
             ],
@@ -332,7 +333,7 @@ describe("background message flow", () => {
           title: "Example",
           username: "alice",
           urlHost: "example.com",
-          entryType: "LOGIN",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
         },
       ],
     });

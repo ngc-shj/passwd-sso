@@ -48,7 +48,7 @@ vi.mock("@/lib/crypto-server", () => ({
 }));
 
 import { GET, PUT, DELETE } from "./route";
-import { ORG_ROLE } from "@/lib/constants";
+import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-123";
 const PW_ID = "pw-456";
@@ -86,7 +86,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
       orgId: ORG_ID,
-      entryType: "LOGIN",
+      entryType: ENTRY_TYPE.LOGIN,
       encryptedBlob: "blob-cipher",
       blobIv: "blob-iv",
       blobAuthTag: "blob-tag",
@@ -218,7 +218,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
       orgId: ORG_ID,
-      entryType: "LOGIN",
+      entryType: ENTRY_TYPE.LOGIN,
       aadVersion: 1,
       encryptedBlob: "blob-cipher",
       blobIv: "blob-iv",
@@ -249,7 +249,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
       orgId: ORG_ID,
-      entryType: "LOGIN",
+      entryType: ENTRY_TYPE.LOGIN,
       aadVersion: 0,
       encryptedBlob: "blob-cipher",
       blobIv: "blob-iv",
@@ -383,7 +383,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
       orgId: ORG_ID,
-      entryType: "LOGIN",
+      entryType: ENTRY_TYPE.LOGIN,
       aadVersion: 0,
       createdById: "test-user-id",
       encryptedBlob: "old-cipher",

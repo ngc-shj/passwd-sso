@@ -25,7 +25,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { GET } from "./route";
-import { ORG_ROLE } from "@/lib/constants";
+import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
 
 describe("GET /api/orgs/favorites", () => {
   beforeEach(() => {
@@ -59,7 +59,7 @@ describe("GET /api/orgs/favorites", () => {
         orgPasswordEntry: {
           id: "pw-1",
           orgId: "org-1",
-          entryType: "LOGIN",
+          entryType: ENTRY_TYPE.LOGIN,
           deletedAt: null,
           isArchived: false,
           encryptedOverview: "cipher",
@@ -83,7 +83,7 @@ describe("GET /api/orgs/favorites", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].title).toBe("Fav PW");
-    expect(json[0].entryType).toBe("LOGIN");
+    expect(json[0].entryType).toBe(ENTRY_TYPE.LOGIN);
     expect(json[0].isFavorite).toBe(true);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
+import { ENTRY_TYPE } from "@/lib/constants";
 
 const { mockAuth, mockCreate, mockFindMany, mockFindUnique, mockDecryptServerData } = vi.hoisted(
   () => ({
@@ -98,7 +99,7 @@ describe("POST /api/share-links", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue({
       userId: DEFAULT_SESSION.user.id,
-      entryType: "LOGIN",
+      entryType: ENTRY_TYPE.LOGIN,
     });
     mockCreate.mockResolvedValue({
       id: "share-1",
@@ -144,7 +145,7 @@ describe("POST /api/share-links", () => {
     mockFindUnique
       .mockResolvedValueOnce({
         id: "org-entry-1",
-        entryType: "LOGIN",
+        entryType: ENTRY_TYPE.LOGIN,
         aadVersion: 1,
         encryptedBlob: "blob",
         blobIv: "iv",
@@ -179,7 +180,7 @@ describe("POST /api/share-links", () => {
     mockFindUnique
       .mockResolvedValueOnce({
         id: "org-entry-legacy",
-        entryType: "LOGIN",
+        entryType: ENTRY_TYPE.LOGIN,
         aadVersion: 0,
         encryptedBlob: "blob",
         blobIv: "iv",
@@ -213,7 +214,7 @@ describe("POST /api/share-links", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue({
       userId: "other-user",
-      entryType: "LOGIN",
+      entryType: ENTRY_TYPE.LOGIN,
     });
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
