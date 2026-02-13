@@ -8,6 +8,7 @@ import {
 } from "@/lib/blob-store/constants";
 import { buildObjectKey, decodeObjectRef, encodeObjectRef } from "@/lib/blob-store/object-ref";
 import { streamBodyToBuffer } from "@/lib/blob-store/stream";
+import { requireOptionalModule } from "@/lib/blob-store/runtime-module";
 
 let s3ClientPromise: Promise<{
   client: { send: (command: unknown) => Promise<unknown> };
@@ -20,7 +21,12 @@ async function getS3Client(region: string) {
   if (!s3ClientPromise) {
     s3ClientPromise = (async () => {
       const moduleName = "@aws-sdk/client-s3";
-      const mod = await import(moduleName);
+      const mod = requireOptionalModule<Record<string, unknown>>(moduleName) as {
+        S3Client: new (options: { region: string }) => unknown;
+        PutObjectCommand: new (input: unknown) => unknown;
+        GetObjectCommand: new (input: unknown) => unknown;
+        DeleteObjectCommand: new (input: unknown) => unknown;
+      };
       return {
         client: new mod.S3Client({ region }) as { send: (command: unknown) => Promise<unknown> },
         PutObjectCommand: mod.PutObjectCommand as new (input: unknown) => unknown,

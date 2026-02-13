@@ -5,6 +5,7 @@ import {
 import { loadCloudBlobConfig } from "@/lib/blob-store/config";
 import { BLOB_CONTENT_TYPE } from "@/lib/blob-store/constants";
 import { buildObjectKey, decodeObjectRef, encodeObjectRef } from "@/lib/blob-store/object-ref";
+import { requireOptionalModule } from "@/lib/blob-store/runtime-module";
 
 let gcsBucketPromise: Promise<{
   file: (key: string) => {
@@ -18,7 +19,11 @@ async function getGcsBucket() {
   if (!gcsBucketPromise) {
     gcsBucketPromise = (async () => {
       const moduleName = "@google-cloud/storage";
-      const mod = await import(moduleName);
+      const mod = requireOptionalModule<Record<string, unknown>>(moduleName) as {
+        Storage: new () => {
+          bucket: (bucketName: string) => unknown;
+        };
+      };
       const { bucket } = loadCloudBlobConfig(BLOB_STORAGE.GCS);
       const storage = new mod.Storage() as {
         bucket: (bucketName: string) => unknown;
