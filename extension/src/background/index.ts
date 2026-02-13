@@ -104,7 +104,7 @@ async function registerTokenBridgeScript(serverUrl: string): Promise<void> {
     {
       id: TOKEN_BRIDGE_SCRIPT_ID,
       matches: [`${origin}/*`],
-      js: ["src/content/token-bridge.ts"],
+      js: ["src/content/token-bridge.js"],
       runAt: "document_idle",
     },
   ]);
@@ -247,7 +247,7 @@ async function performAutofillForEntry(
 
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: ["src/content/autofill.ts"],
+    files: ["src/content/autofill.js"],
   });
   await chrome.tabs.sendMessage(tabId, {
     type: "AUTOFILL_FILL",
