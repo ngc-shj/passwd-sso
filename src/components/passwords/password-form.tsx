@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Eye, EyeOff, Loader2, ArrowLeft, Dices, Plus, X, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, Loader2, ArrowLeft, Dices, Plus, X, ShieldCheck, Tags, Rows3, BadgeCheck } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, CUSTOM_FIELD_TYPE, apiPath } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
@@ -63,6 +63,7 @@ interface PasswordFormProps {
 
 export function PasswordForm({ mode, initialData, variant = "page", onSaved }: PasswordFormProps) {
   const t = useTranslations("PasswordForm");
+  const tGen = useTranslations("PasswordGenerator");
   const tc = useTranslations("Common");
   const router = useRouter();
   const { encryptionKey, userId } = useVault();
@@ -88,6 +89,36 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     initialData?.totp ?? null
   );
   const [showTotpInput, setShowTotpInput] = useState(!!initialData?.totp);
+
+  const initialSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        title: initialData?.title ?? "",
+        username: initialData?.username ?? "",
+        password: initialData?.password ?? "",
+        url: initialData?.url ?? "",
+        notes: initialData?.notes ?? "",
+        tags: initialData?.tags ?? [],
+        generatorSettings:
+          initialData?.generatorSettings ?? { ...DEFAULT_GENERATOR_SETTINGS },
+        customFields: initialData?.customFields ?? [],
+        totp: initialData?.totp ?? null,
+      }),
+    [initialData]
+  );
+
+  const currentSnapshot = JSON.stringify({
+    title,
+    username,
+    password,
+    url,
+    notes,
+    tags: selectedTags,
+    generatorSettings,
+    customFields,
+    totp,
+  });
+  const hasChanges = currentSnapshot !== initialSnapshot;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -198,8 +229,14 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     }
   };
 
+  const generatorSummary =
+    generatorSettings.mode === "passphrase"
+      ? `${tGen("modePassphrase")} · ${generatorSettings.passphrase.wordCount}`
+      : `${tGen("modePassword")} · ${generatorSettings.length}`;
+
   const formContent = (
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4 space-y-4 transition-colors">
             <div className="space-y-2">
               <Label htmlFor="title">{t("title")}</Label>
               <Input
@@ -222,7 +259,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 rounded-lg border bg-background/70 p-3">
               <Label htmlFor="password">{t("password")}</Label>
               <div className="flex gap-2">
                 <div className="relative flex-1">
@@ -261,6 +298,19 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                   </div>
                 </div>
               </div>
+              <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
+                <p className="text-xs text-muted-foreground">{generatorSummary}</p>
+                <Button
+                  type="button"
+                  variant={showGenerator ? "secondary" : "outline"}
+                  size="sm"
+                  className="h-7 gap-1.5 text-xs"
+                  onClick={() => setShowGenerator((v) => !v)}
+                >
+                  <Dices className="h-3.5 w-3.5" />
+                  {showGenerator ? t("closeGenerator") : t("openGenerator")}
+                </Button>
+              </div>
               <PasswordGenerator
                 open={showGenerator}
                 onClose={() => setShowGenerator(false)}
@@ -295,10 +345,17 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
+            </div>
 
             {/* Tags section - 1Password style */}
-            <div className="space-y-2">
-              <Label>{t("tags")}</Label>
+            <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+              <div className="space-y-1">
+                <Label className="flex items-center gap-2">
+                  <Tags className="h-3.5 w-3.5" />
+                  {t("tags")}
+                </Label>
+                <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
+              </div>
               <TagInput
                 selectedTags={selectedTags}
                 onChange={setSelectedTags}
@@ -306,9 +363,17 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
             </div>
 
             {/* Custom fields */}
-            <div className="space-y-2">
+            <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
               <div className="flex items-center justify-between">
-                <Label>{t("customFields")}</Label>
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <Rows3 className="h-3.5 w-3.5" />
+                    {t("customFields")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t("customFieldsHint")}
+                  </p>
+                </div>
                 <Button
                   type="button"
                   variant="ghost"
@@ -391,12 +456,15 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
             </div>
 
             {/* TOTP */}
-            <div className="space-y-2">
+            <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
               <div className="flex items-center justify-between">
-                <Label className="flex items-center gap-1">
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  {t("totp")}
-                </Label>
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-1">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    {t("totp")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("totpHint")}</p>
+                </div>
                 {!showTotpInput && (
                   <Button
                     type="button"
@@ -420,7 +488,19 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
               )}
             </div>
 
-            <div className="flex gap-2 pt-4">
+            <div className="sticky bottom-0 z-10 -mx-1 rounded-lg border bg-background/90 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+              <div className="flex items-center justify-between gap-3">
+                <div
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] ${
+                    hasChanges
+                      ? "bg-amber-100 text-amber-800"
+                      : "bg-emerald-100 text-emerald-800"
+                  }`}
+                >
+                  <BadgeCheck className="h-3.5 w-3.5" />
+                  {hasChanges ? t("statusUnsaved") : t("statusSaved")}
+                </div>
+                <div className="flex gap-2">
               <Button type="submit" disabled={submitting}>
                 {submitting && (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -434,6 +514,8 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
               >
                 {tc("cancel")}
               </Button>
+                </div>
+              </div>
             </div>
           </form>
   );

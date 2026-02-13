@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { RefreshCw, History, Copy, Check } from "lucide-react";
+import { RefreshCw, History, Copy, Check, Sparkles } from "lucide-react";
 import {
   SYMBOL_GROUPS,
   SYMBOL_GROUP_KEYS,
@@ -28,6 +28,39 @@ interface PasswordGeneratorProps {
 }
 
 const SEPARATORS = ["-", ".", "_", " "];
+const LENGTH_PRESETS = [16, 24, 32];
+
+function estimateBits(settings: GeneratorSettings, generated: string): number {
+  if (!generated) return 0;
+  if (settings.mode === "passphrase") {
+    // Diceware-like estimate: 4096 words ~= 12 bits/word
+    return settings.passphrase.wordCount * 12;
+  }
+
+  let charsetSize = 0;
+  if (settings.uppercase) charsetSize += 26;
+  if (settings.lowercase) charsetSize += 26;
+  if (settings.numbers) charsetSize += 10;
+  for (const key of SYMBOL_GROUP_KEYS) {
+    if (settings.symbolGroups[key]) charsetSize += SYMBOL_GROUPS[key].length;
+  }
+  if (charsetSize <= 1) return 0;
+  return generated.length * Math.log2(charsetSize);
+}
+
+function strengthLevel(bits: number): 1 | 2 | 3 | 4 {
+  if (bits >= 100) return 4;
+  if (bits >= 72) return 3;
+  if (bits >= 50) return 2;
+  return 1;
+}
+
+function strengthClass(level: 1 | 2 | 3 | 4): string {
+  if (level === 4) return "bg-emerald-500";
+  if (level === 3) return "bg-lime-500";
+  if (level === 2) return "bg-amber-500";
+  return "bg-rose-500";
+}
 
 export function PasswordGenerator({
   open,
@@ -44,6 +77,7 @@ export function PasswordGenerator({
   const [history, setHistory] = useState<string[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [copiedGenerated, setCopiedGenerated] = useState(false);
 
   // Sync when initialSettings changes (e.g. editing a different entry)
   useEffect(() => {
@@ -95,6 +129,17 @@ export function PasswordGenerator({
 
   if (!open) return null;
 
+  const bits = estimateBits(settings, generated);
+  const level = strengthLevel(bits);
+  const strengthLabel =
+    level === 4
+      ? t("strengthVeryStrong")
+      : level === 3
+      ? t("strengthStrong")
+      : level === 2
+      ? t("strengthFair")
+      : t("strengthWeak");
+
   const handleUse = () => {
     if (generated) {
       setHistory((prev) => [generated, ...prev].slice(0, 10));
@@ -107,6 +152,13 @@ export function PasswordGenerator({
     await navigator.clipboard.writeText(pw);
     setCopiedIdx(idx);
     setTimeout(() => setCopiedIdx(null), 2000);
+  };
+
+  const copyGenerated = async () => {
+    if (!generated) return;
+    await navigator.clipboard.writeText(generated);
+    setCopiedGenerated(true);
+    setTimeout(() => setCopiedGenerated(false), 2000);
   };
 
   const update = (partial: Partial<GeneratorSettings>) => {
@@ -143,9 +195,9 @@ export function PasswordGenerator({
   const setMode = (mode: GeneratorMode) => update({ mode });
 
   return (
-    <div className="rounded-lg border bg-popover shadow-md p-3 space-y-3">
+    <div className="rounded-xl border bg-background/95 shadow-xl p-4 space-y-4 backdrop-blur supports-[backdrop-filter]:bg-background/85 transition-all duration-200">
       {/* Top bar: Cancel | Refresh | Use */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between border-b pb-2">
         <Button
           type="button"
           variant="ghost"
@@ -177,12 +229,12 @@ export function PasswordGenerator({
       </div>
 
       {/* Mode toggle */}
-      <div className="flex rounded-md border overflow-hidden">
+      <div className="flex rounded-lg border overflow-hidden bg-muted/20">
         <button
           type="button"
           className={`flex-1 text-xs py-1.5 transition-colors ${
             settings.mode === "password"
-              ? "bg-primary text-primary-foreground"
+              ? "bg-primary text-primary-foreground shadow-sm"
               : "bg-muted/50 text-muted-foreground hover:bg-muted"
           }`}
           onClick={() => setMode("password")}
@@ -193,7 +245,7 @@ export function PasswordGenerator({
           type="button"
           className={`flex-1 text-xs py-1.5 transition-colors ${
             settings.mode === "passphrase"
-              ? "bg-primary text-primary-foreground"
+              ? "bg-primary text-primary-foreground shadow-sm"
               : "bg-muted/50 text-muted-foreground hover:bg-muted"
           }`}
           onClick={() => setMode("passphrase")}
@@ -202,17 +254,67 @@ export function PasswordGenerator({
         </button>
       </div>
 
+      {settings.mode === "password" && (
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">{t("quickLength")}</Label>
+          <div className="flex gap-1.5">
+            {LENGTH_PRESETS.map((len) => (
+              <Button
+                key={len}
+                type="button"
+                variant={settings.length === len ? "default" : "outline"}
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => update({ length: len })}
+              >
+                {len}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Generated password display */}
       {generated && (
-        <div className="rounded-md bg-muted px-3 py-2">
-          <p className="font-mono text-sm break-all leading-relaxed">
-            {generated}
-          </p>
+        <div className="rounded-md border bg-muted/40 px-3 py-2 space-y-2 transition-all duration-200">
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-mono text-sm break-all leading-relaxed flex-1">
+              {generated}
+            </p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0"
+              onClick={copyGenerated}
+            >
+              {copiedGenerated ? (
+                <Check className="h-3.5 w-3.5 text-emerald-500" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <div className="flex items-center gap-1">
+                <Sparkles className="h-3 w-3" />
+                <span>{t("strength")}</span>
+              </div>
+              <span>{strengthLabel}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full transition-all ${strengthClass(level)}`}
+                style={{ width: `${level * 25}%` }}
+              />
+            </div>
+          </div>
         </div>
       )}
 
       {/* Settings */}
-      <div className="space-y-2.5">
+      <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
         {settings.mode === "password" ? (
           <>
             {/* Length: label + slider + input in one row */}
@@ -246,70 +348,103 @@ export function PasswordGenerator({
             </div>
 
             {/* Character types */}
-            <div className="pt-1 border-t space-y-2">
+            <div className="pt-2 border-t space-y-2">
               <Label className="text-xs text-muted-foreground font-medium">
                 {t("charTypes")}
               </Label>
 
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="gen-uppercase"
-                  checked={settings.uppercase}
-                  onCheckedChange={(v) => update({ uppercase: !!v })}
-                />
-                <Label
-                  htmlFor="gen-uppercase"
-                  className="text-xs text-muted-foreground cursor-pointer"
+              <div className="flex flex-wrap gap-1.5">
+                <div
+                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 transition-colors ${
+                    settings.uppercase
+                      ? "border-primary/50 bg-primary/10"
+                      : "bg-background hover:bg-muted/60"
+                  }`}
                 >
-                  {t("uppercase")}
-                </Label>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="gen-lowercase"
-                  checked={settings.lowercase}
-                  onCheckedChange={(v) => update({ lowercase: !!v })}
-                />
-                <Label
-                  htmlFor="gen-lowercase"
-                  className="text-xs text-muted-foreground cursor-pointer"
-                >
-                  {t("lowercase")}
-                </Label>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="gen-numbers"
-                  checked={settings.numbers}
-                  onCheckedChange={(v) => update({ numbers: !!v })}
-                />
-                <Label
-                  htmlFor="gen-numbers"
-                  className="text-xs text-muted-foreground cursor-pointer"
-                >
-                  {t("numbers")}
-                </Label>
-              </div>
-
-              {SYMBOL_GROUP_KEYS.map((key) => (
-                <div key={key} className="flex items-center gap-2">
                   <Checkbox
-                    id={`gen-sym-${key}`}
-                    checked={settings.symbolGroups[key]}
-                    onCheckedChange={() => toggleSymbolGroup(key)}
+                    id="gen-uppercase"
+                    checked={settings.uppercase}
+                    onCheckedChange={(v) => update({ uppercase: !!v })}
                   />
                   <Label
-                    htmlFor={`gen-sym-${key}`}
-                    className="text-xs font-mono text-muted-foreground cursor-pointer"
+                    htmlFor="gen-uppercase"
+                    className="text-xs text-muted-foreground cursor-pointer"
                   >
-                    {SYMBOL_GROUPS[key]}
+                    {t("uppercase")}
                   </Label>
                 </div>
-              ))}
 
-              <div className="flex items-center gap-2 pt-1 border-t">
+                <div
+                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 transition-colors ${
+                    settings.lowercase
+                      ? "border-primary/50 bg-primary/10"
+                      : "bg-background hover:bg-muted/60"
+                  }`}
+                >
+                  <Checkbox
+                    id="gen-lowercase"
+                    checked={settings.lowercase}
+                    onCheckedChange={(v) => update({ lowercase: !!v })}
+                  />
+                  <Label
+                    htmlFor="gen-lowercase"
+                    className="text-xs text-muted-foreground cursor-pointer"
+                  >
+                    {t("lowercase")}
+                  </Label>
+                </div>
+
+                <div
+                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 transition-colors ${
+                    settings.numbers
+                      ? "border-primary/50 bg-primary/10"
+                      : "bg-background hover:bg-muted/60"
+                  }`}
+                >
+                  <Checkbox
+                    id="gen-numbers"
+                    checked={settings.numbers}
+                    onCheckedChange={(v) => update({ numbers: !!v })}
+                  />
+                  <Label
+                    htmlFor="gen-numbers"
+                    className="text-xs text-muted-foreground cursor-pointer"
+                  >
+                    {t("numbers")}
+                  </Label>
+                </div>
+
+                {SYMBOL_GROUP_KEYS.map((key) => (
+                  <div
+                    key={key}
+                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 transition-colors ${
+                      settings.symbolGroups[key]
+                        ? "border-primary/50 bg-primary/10"
+                        : "bg-background hover:bg-muted/60"
+                    }`}
+                  >
+                    <Checkbox
+                      id={`gen-sym-${key}`}
+                      checked={settings.symbolGroups[key]}
+                      onCheckedChange={() => toggleSymbolGroup(key)}
+                    />
+                    <Label
+                      htmlFor={`gen-sym-${key}`}
+                      className="text-xs font-mono text-muted-foreground cursor-pointer"
+                    >
+                      {SYMBOL_GROUPS[key]}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+
+              <div
+                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 transition-colors ${
+                  settings.excludeAmbiguous
+                    ? "border-primary/50 bg-primary/10"
+                    : "bg-background hover:bg-muted/60"
+                }`}
+              >
                 <Checkbox
                   id="gen-exclude-ambiguous"
                   checked={settings.excludeAmbiguous}
@@ -378,8 +513,15 @@ export function PasswordGenerator({
               </div>
             </div>
 
-            <div className="pt-1 border-t space-y-2">
-              <div className="flex items-center gap-2">
+            <div className="pt-2 border-t">
+              <div className="flex flex-wrap gap-1.5">
+                <div
+                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 transition-colors ${
+                    settings.passphrase.capitalize
+                      ? "border-primary/50 bg-primary/10"
+                      : "bg-background hover:bg-muted/60"
+                  }`}
+                >
                 <Checkbox
                   id="gen-capitalize"
                   checked={settings.passphrase.capitalize}
@@ -391,9 +533,15 @@ export function PasswordGenerator({
                 >
                   {t("capitalize")}
                 </Label>
-              </div>
+                </div>
 
-              <div className="flex items-center gap-2">
+                <div
+                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 transition-colors ${
+                    settings.passphrase.includeNumber
+                      ? "border-primary/50 bg-primary/10"
+                      : "bg-background hover:bg-muted/60"
+                  }`}
+                >
                 <Checkbox
                   id="gen-include-number"
                   checked={settings.passphrase.includeNumber}
@@ -405,6 +553,7 @@ export function PasswordGenerator({
                 >
                   {t("includeNumber")}
                 </Label>
+                </div>
               </div>
             </div>
           </>
