@@ -19,6 +19,23 @@ vi.mock("../../lib/api", () => ({
 
 import { App } from "../../options/App";
 
+// Mock chrome.permissions for autofill toggle
+const existingChrome =
+  typeof globalThis.chrome === "object" && globalThis.chrome !== null
+    ? globalThis.chrome
+    : {};
+vi.stubGlobal("chrome", {
+  ...existingChrome,
+  permissions: {
+    contains: vi.fn().mockResolvedValue(false),
+    request: vi.fn().mockResolvedValue(true),
+    remove: vi.fn().mockResolvedValue(true),
+  },
+  runtime: {
+    openOptionsPage: vi.fn(),
+  },
+});
+
 describe("Options App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -27,6 +44,7 @@ describe("Options App", () => {
       autoLockMinutes: 15,
     });
     mockEnsureHostPermission.mockResolvedValue(true);
+    (chrome.permissions.contains as ReturnType<typeof vi.fn>).mockResolvedValue(false);
   });
 
   it("loads settings on mount", async () => {
