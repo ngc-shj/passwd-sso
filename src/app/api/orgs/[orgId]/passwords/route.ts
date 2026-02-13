@@ -12,7 +12,7 @@ import {
   decryptServerData,
 } from "@/lib/crypto-server";
 import { buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
-import { ENTRY_TYPE, ENTRY_TYPE_VALUES, ORG_PERMISSION, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { ENTRY_TYPE, ENTRY_TYPE_VALUES, ORG_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string }> };
@@ -391,8 +391,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   });
 
   logAudit({
-    scope: "ORG",
-    action: "ENTRY_CREATE",
+    scope: AUDIT_SCOPE.ORG,
+    action: AUDIT_ACTION.ENTRY_CREATE,
     userId: session.user.id,
     orgId,
     targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,

@@ -6,7 +6,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { inviteSchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { INVITATION_STATUS, ORG_PERMISSION, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { INVITATION_STATUS, ORG_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string }> };
 
@@ -131,8 +131,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   });
 
   logAudit({
-    scope: "ORG",
-    action: "ORG_MEMBER_INVITE",
+    scope: AUDIT_SCOPE.ORG,
+    action: AUDIT_ACTION.ORG_MEMBER_INVITE,
     userId: session.user.id,
     orgId,
     targetType: AUDIT_TARGET_TYPE.ORG_INVITATION,

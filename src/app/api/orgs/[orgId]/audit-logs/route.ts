@@ -5,34 +5,18 @@ import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { unwrapOrgKey, decryptServerData } from "@/lib/crypto-server";
 import { buildOrgEntryAAD } from "@/lib/crypto-aad";
-import { ORG_PERMISSION } from "@/lib/constants";
+import {
+  ORG_PERMISSION,
+  AUDIT_SCOPE,
+  AUDIT_ACTION_GROUPS_ORG,
+  AUDIT_ACTION_VALUES,
+  AUDIT_TARGET_TYPE,
+} from "@/lib/constants";
 import type { AuditAction } from "@prisma/client";
 
 type Params = { params: Promise<{ orgId: string }> };
 
-const VALID_ACTIONS: Set<string> = new Set([
-  "AUTH_LOGIN",
-  "AUTH_LOGOUT",
-  "ENTRY_CREATE",
-  "ENTRY_UPDATE",
-  "ENTRY_DELETE",
-  "ENTRY_RESTORE",
-  "ENTRY_EXPORT",
-  "ATTACHMENT_UPLOAD",
-  "ATTACHMENT_DELETE",
-  "ORG_MEMBER_INVITE",
-  "ORG_MEMBER_REMOVE",
-  "ORG_ROLE_UPDATE",
-  "SHARE_CREATE",
-  "SHARE_REVOKE",
-]);
-
-const ACTION_GROUPS: Record<string, AuditAction[]> = {
-  "group:entry": ["ENTRY_CREATE", "ENTRY_UPDATE", "ENTRY_DELETE", "ENTRY_RESTORE"],
-  "group:attachment": ["ATTACHMENT_UPLOAD", "ATTACHMENT_DELETE"],
-  "group:org": ["ORG_MEMBER_INVITE", "ORG_MEMBER_REMOVE", "ORG_ROLE_UPDATE"],
-  "group:share": ["SHARE_CREATE", "SHARE_REVOKE"],
-};
+const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 
 // GET /api/orgs/[orgId]/audit-logs — Org audit logs (ADMIN/OWNER only)
 export async function GET(req: NextRequest, { params }: Params) {
@@ -63,7 +47,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const where: Record<string, unknown> = {
     orgId,
-    scope: "ORG",
+    scope: AUDIT_SCOPE.ORG,
   };
 
   if (actionsParam) {
@@ -77,8 +61,8 @@ export async function GET(req: NextRequest, { params }: Params) {
     }
     where.action = { in: requested };
   } else if (action) {
-    if (ACTION_GROUPS[action]) {
-      where.action = { in: ACTION_GROUPS[action] };
+    if (AUDIT_ACTION_GROUPS_ORG[action]) {
+      where.action = { in: AUDIT_ACTION_GROUPS_ORG[action] };
     } else if (VALID_ACTIONS.has(action as AuditAction)) {
       where.action = action;
     }
@@ -114,7 +98,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const entryIds = [
     ...new Set(
       items
-        .filter((l) => l.targetType === "OrgPasswordEntry" && l.targetId)
+        .filter((l) => l.targetType === AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY && l.targetId)
         .map((l) => l.targetId as string)
     ),
   ];

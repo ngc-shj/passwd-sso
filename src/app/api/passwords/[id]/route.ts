@@ -5,7 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { authOrToken } from "@/lib/auth-or-token";
-import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 // GET /api/passwords/[id] - Get password detail (returns encrypted blob)
 export async function GET(
@@ -130,8 +130,8 @@ export async function PUT(
   });
 
   logAudit({
-    scope: "PERSONAL",
-    action: "ENTRY_UPDATE",
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.ENTRY_UPDATE,
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: id,
@@ -190,8 +190,8 @@ export async function DELETE(
   }
 
   logAudit({
-    scope: "PERSONAL",
-    action: "ENTRY_DELETE",
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.ENTRY_DELETE,
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: id,

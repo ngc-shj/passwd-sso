@@ -9,7 +9,7 @@ import {
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION, ORG_ROLE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { ORG_PERMISSION, ORG_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string; memberId: string }> };
 
@@ -83,8 +83,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
     });
 
     logAudit({
-      scope: "ORG",
-      action: "ORG_ROLE_UPDATE",
+      scope: AUDIT_SCOPE.ORG,
+      action: AUDIT_ACTION.ORG_ROLE_UPDATE,
       userId: session.user.id,
       orgId,
       targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
@@ -131,8 +131,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 
   logAudit({
-    scope: "ORG",
-    action: "ORG_ROLE_UPDATE",
+    scope: AUDIT_SCOPE.ORG,
+    action: AUDIT_ACTION.ORG_ROLE_UPDATE,
     userId: session.user.id,
     orgId,
     targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
@@ -202,8 +202,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   await prisma.orgMember.delete({ where: { id: memberId } });
 
   logAudit({
-    scope: "ORG",
-    action: "ORG_MEMBER_REMOVE",
+    scope: AUDIT_SCOPE.ORG,
+    action: AUDIT_ACTION.ORG_MEMBER_REMOVE,
     userId: session.user.id,
     orgId,
     targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,

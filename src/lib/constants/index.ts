@@ -27,6 +27,16 @@ export type { ConnectStatus } from "./connect-status";
 export { TOKEN_ELEMENT_ID, TOKEN_READY_EVENT, EXT_CONNECT_PARAM } from "./extension";
 export { AUDIT_TARGET_TYPE } from "./audit-target";
 export type { AuditTargetType } from "./audit-target";
+export {
+  AUDIT_SCOPE,
+  AUDIT_ACTION,
+  AUDIT_ACTION_VALUES,
+  AUDIT_ACTION_GROUP,
+  AUDIT_ACTION_GROUPS_PERSONAL,
+  AUDIT_ACTION_GROUPS_ORG,
+  AUDIT_ACTION_EMERGENCY_PREFIX,
+} from "./audit";
+export type { AuditScopeValue, AuditActionValue } from "./audit";
 
 
 export {

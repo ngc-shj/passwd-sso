@@ -7,7 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { unwrapOrgKey, decryptServerBinary } from "@/lib/crypto-server";
 import { buildAttachmentAAD } from "@/lib/crypto-aad";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
-import { AUDIT_TARGET_TYPE, ORG_PERMISSION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, ORG_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type RouteContext = {
   params: Promise<{ orgId: string; id: string; attachmentId: string }>;
@@ -146,8 +146,8 @@ export async function DELETE(
   });
 
   logAudit({
-    scope: "ORG",
-    action: "ATTACHMENT_DELETE",
+    scope: AUDIT_SCOPE.ORG,
+    action: AUDIT_ACTION.ATTACHMENT_DELETE,
     userId: session.user.id,
     orgId,
     targetType: AUDIT_TARGET_TYPE.ATTACHMENT,

@@ -7,7 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { unwrapOrgKey, encryptServerBinary } from "@/lib/crypto-server";
 import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
-import { AUDIT_TARGET_TYPE, ORG_PERMISSION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, ORG_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -227,8 +227,8 @@ export async function POST(
   }
 
   logAudit({
-    scope: "ORG",
-    action: "ATTACHMENT_UPLOAD",
+    scope: AUDIT_SCOPE.ORG,
+    action: AUDIT_ACTION.ATTACHMENT_UPLOAD,
     userId: session.user.id,
     orgId,
     targetType: AUDIT_TARGET_TYPE.ATTACHMENT,
