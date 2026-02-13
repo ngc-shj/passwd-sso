@@ -19,6 +19,9 @@ export type { EaStatusValue } from "./emergency-access";
 export { INVITATION_STATUS } from "./invitation";
 export type { InvitationStatusValue } from "./invitation";
 
+export { EXT_CONNECT_PARAM, CONNECT_STATUS } from "./connect-status";
+export type { ConnectStatus } from "./connect-status";
+
 export {
   EXTENSION_TOKEN_SCOPE,
   EXTENSION_TOKEN_SCOPE_VALUES,
