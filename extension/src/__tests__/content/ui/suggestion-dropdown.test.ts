@@ -9,6 +9,7 @@ import {
   handleDropdownKeydown,
   type DropdownOptions,
 } from "../../../content/ui/suggestion-dropdown";
+import { EXT_ENTRY_TYPE } from "../../../lib/constants";
 
 // Mock chrome.runtime
 vi.stubGlobal("chrome", {
@@ -39,8 +40,8 @@ function makeOptions(overrides?: Partial<DropdownOptions>): DropdownOptions {
   return {
     anchorRect: makeAnchorRect(),
     entries: [
-      { id: "1", title: "Example", username: "alice", urlHost: "example.com", entryType: "LOGIN" },
-      { id: "2", title: "Test", username: "bob", urlHost: "test.com", entryType: "LOGIN" },
+      { id: "1", title: "Example", username: "alice", urlHost: "example.com", entryType: EXT_ENTRY_TYPE.LOGIN },
+      { id: "2", title: "Test", username: "bob", urlHost: "test.com", entryType: EXT_ENTRY_TYPE.LOGIN },
     ],
     vaultLocked: false,
     onSelect: vi.fn(),

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
+import { ENTRY_TYPE } from "@/lib/constants";
 
 const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -32,7 +33,7 @@ const ownedEntry = {
   overviewAuthTag: "overview-tag",
   keyVersion: 1,
   aadVersion: 0,
-  entryType: "LOGIN",
+  entryType: ENTRY_TYPE.LOGIN,
   isFavorite: false,
   isArchived: false,
   tags: [{ id: "t1" }],
@@ -103,7 +104,7 @@ describe("GET /api/passwords/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.id).toBe(PW_ID);
-    expect(json.entryType).toBe("LOGIN");
+    expect(json.entryType).toBe(ENTRY_TYPE.LOGIN);
     expect(json.encryptedBlob).toEqual({
       ciphertext: "blob-cipher",
       iv: "blob-iv",

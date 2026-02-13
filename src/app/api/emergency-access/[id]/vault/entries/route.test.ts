@@ -24,7 +24,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 import { GET } from "./route";
-import { EA_STATUS } from "@/lib/constants";
+import { EA_STATUS, ENTRY_TYPE } from "@/lib/constants";
 
 describe("GET /api/emergency-access/[id]/vault/entries", () => {
   beforeEach(() => {
@@ -105,7 +105,7 @@ describe("GET /api/emergency-access/[id]/vault/entries", () => {
         overviewIv: "c".repeat(24),
         overviewAuthTag: "d".repeat(32),
         keyVersion: 1,
-        entryType: "LOGIN",
+        entryType: ENTRY_TYPE.LOGIN,
         isFavorite: false,
         isArchived: false,
         createdAt: new Date("2025-01-01"),
@@ -123,7 +123,7 @@ describe("GET /api/emergency-access/[id]/vault/entries", () => {
     expect(json).toHaveLength(1);
     expect(json[0].id).toBe("entry-1");
     expect(json[0].encryptedBlob).toBe("blob-data");
-    expect(json[0].entryType).toBe("LOGIN");
+    expect(json[0].entryType).toBe(ENTRY_TYPE.LOGIN);
   });
 
   it("queries only non-deleted entries for the owner", async () => {

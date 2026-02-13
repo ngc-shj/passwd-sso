@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { ENTRY_TYPE } from "@/lib/constants";
 
 const { mockAuth, mockPrismaPasswordEntry, mockExtTokenFindUnique, mockExtTokenUpdate } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -37,7 +38,7 @@ const mockEntry = {
   blobAuthTag: "blob-tag",
   keyVersion: 1,
   aadVersion: 0,
-  entryType: "LOGIN",
+  entryType: ENTRY_TYPE.LOGIN,
   isFavorite: false,
   isArchived: false,
   tags: [{ id: "t1" }],
@@ -109,7 +110,7 @@ describe("GET /api/passwords", () => {
       iv: "overview-iv",
       authTag: "overview-tag",
     });
-    expect(json[0].entryType).toBe("LOGIN");
+    expect(json[0].entryType).toBe(ENTRY_TYPE.LOGIN);
     expect(json[0].tagIds).toEqual(["t1"]);
     // Should not include blob by default
     expect(json[0].encryptedBlob).toBeUndefined();
@@ -285,7 +286,7 @@ describe("POST /api/passwords", () => {
       overviewIv: "c".repeat(24),
       overviewAuthTag: "d".repeat(32),
       keyVersion: 1,
-      entryType: "LOGIN",
+      entryType: ENTRY_TYPE.LOGIN,
       tags: [],
       createdAt: now,
       updatedAt: now,
@@ -297,7 +298,7 @@ describe("POST /api/passwords", () => {
     const json = await res.json();
     expect(res.status).toBe(201);
     expect(json.id).toBe("new-pw");
-    expect(json.entryType).toBe("LOGIN");
+    expect(json.entryType).toBe(ENTRY_TYPE.LOGIN);
     expect(json.tagIds).toEqual([]);
   });
 
@@ -310,7 +311,7 @@ describe("POST /api/passwords", () => {
       overviewAuthTag: "d".repeat(32),
       keyVersion: 1,
       aadVersion: 1,
-      entryType: "LOGIN",
+      entryType: ENTRY_TYPE.LOGIN,
       tags: [],
       createdAt: now,
       updatedAt: now,
@@ -341,7 +342,7 @@ describe("POST /api/passwords", () => {
       overviewAuthTag: "d".repeat(32),
       keyVersion: 1,
       aadVersion: 0,
-      entryType: "LOGIN",
+      entryType: ENTRY_TYPE.LOGIN,
       tags: [],
       createdAt: now,
       updatedAt: now,

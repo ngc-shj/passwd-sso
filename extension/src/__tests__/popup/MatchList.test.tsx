@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { EXT_ENTRY_TYPE } from "../../lib/constants";
 
 const mockSendMessage = vi.fn();
 
@@ -36,7 +37,7 @@ describe("MatchList", () => {
           title: "Example",
           username: "alice",
           urlHost: "example.com",
-          entryType: "LOGIN",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
         },
       ],
     });
@@ -85,7 +86,7 @@ describe("MatchList", () => {
             title: "Example",
             username: "alice",
             urlHost: "example.com",
-            entryType: "LOGIN",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
           },
         ],
       })
@@ -115,7 +116,7 @@ describe("MatchList", () => {
             title: "Example",
             username: "alice",
             urlHost: "example.com",
-            entryType: "LOGIN",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
           },
         ],
       })
@@ -145,7 +146,7 @@ describe("MatchList", () => {
             title: "Example",
             username: "alice",
             urlHost: "example.com",
-            entryType: "LOGIN",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
           },
         ],
       })
@@ -174,7 +175,7 @@ describe("MatchList", () => {
           title: "Example",
           username: "alice",
           urlHost: "example.com",
-          entryType: "LOGIN",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
         },
       ],
     });
@@ -192,7 +193,7 @@ describe("MatchList", () => {
           title: "Example",
           username: "alice",
           urlHost: "example.com",
-          entryType: "LOGIN",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
         },
       ],
     });
@@ -233,7 +234,7 @@ describe("MatchList", () => {
             title: "Example",
             username: "alice",
             urlHost: "example.com",
-            entryType: "LOGIN",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
           },
         ],
       })
@@ -259,7 +260,7 @@ describe("MatchList", () => {
             title: "Example",
             username: "alice",
             urlHost: "example.com",
-            entryType: "LOGIN",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
           },
         ],
       })
@@ -287,7 +288,7 @@ describe("MatchList", () => {
           title: "Example",
           username: "alice",
           urlHost: "example.com",
-          entryType: "LOGIN",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
         },
       ],
     });
@@ -309,14 +310,14 @@ describe("MatchList", () => {
           title: "GitHub",
           username: "alice",
           urlHost: "github.com",
-          entryType: "LOGIN",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
         },
         {
           id: "pw-2",
           title: "Google",
           username: "bob",
           urlHost: "google.com",
-          entryType: "LOGIN",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
         },
       ],
     });
@@ -337,7 +338,7 @@ describe("MatchList", () => {
           title: "GitHub",
           username: "alice",
           urlHost: "github.com",
-          entryType: "LOGIN",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
         },
       ],
     });

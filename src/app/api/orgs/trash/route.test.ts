@@ -25,7 +25,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { GET } from "./route";
-import { ORG_ROLE } from "@/lib/constants";
+import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
 
 describe("GET /api/orgs/trash", () => {
   beforeEach(() => {
@@ -58,7 +58,7 @@ describe("GET /api/orgs/trash", () => {
       {
         id: "pw-1",
         orgId: "org-1",
-        entryType: "LOGIN",
+        entryType: ENTRY_TYPE.LOGIN,
         isArchived: false,
         deletedAt,
         encryptedOverview: "cipher",
@@ -82,7 +82,7 @@ describe("GET /api/orgs/trash", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].title).toBe("Trashed PW");
-    expect(json[0].entryType).toBe("LOGIN");
+    expect(json[0].entryType).toBe(ENTRY_TYPE.LOGIN);
     expect(json[0].deletedAt).toBeDefined();
   });
 });
