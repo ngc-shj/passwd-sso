@@ -6,6 +6,7 @@ import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { unwrapOrgKey, decryptServerBinary } from "@/lib/crypto-server";
 import { buildAttachmentAAD } from "@/lib/crypto-aad";
+import { getAttachmentBlobStore } from "@/lib/blob-store";
 
 type RouteContext = {
   params: Promise<{ orgId: string; id: string; attachmentId: string }>;
@@ -68,9 +69,10 @@ export async function GET(
   const aad = attachment.aadVersion >= 1
     ? Buffer.from(buildAttachmentAAD(id, attachmentId))
     : undefined;
+  const blobStore = getAttachmentBlobStore();
   const decrypted = decryptServerBinary(
     {
-      ciphertext: Buffer.from(attachment.encryptedData),
+      ciphertext: blobStore.toBuffer(attachment.encryptedData),
       iv: attachment.iv,
       authTag: attachment.authTag,
     },
