@@ -113,7 +113,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
         <h2 className="text-sm font-semibold text-gray-700">{t("popup.passwords")}</h2>
         <button
           onClick={handleLock}
-          className="text-xs text-gray-600 hover:text-gray-800"
+          className="text-xs text-gray-600 px-2 py-1 rounded hover:bg-gray-100 hover:text-gray-800 active:bg-gray-200 transition-colors"
         >
           {t("popup.lock")}
         </button>
@@ -167,13 +167,13 @@ export function MatchList({ tabUrl, onLock }: Props) {
                         <button
                           onClick={() => handleFill(e.id)}
                           disabled={filling}
-                          className="text-xs text-gray-700 hover:text-gray-900 disabled:opacity-60"
+                          className="text-xs text-gray-700 px-2 py-1 rounded hover:bg-gray-100 hover:text-gray-900 active:bg-gray-200 transition-colors disabled:opacity-60"
                         >
                           {t("popup.fill")}
                         </button>
                         <button
                           onClick={() => handleCopy(e.id)}
-                          className="text-xs text-blue-700 hover:text-blue-900"
+                          className="text-xs text-blue-700 px-2 py-1 rounded hover:bg-blue-50 hover:text-blue-900 active:bg-blue-100 transition-colors"
                         >
                           {t("popup.copy")}
                         </button>
@@ -211,13 +211,13 @@ export function MatchList({ tabUrl, onLock }: Props) {
                         <button
                           onClick={() => handleFill(e.id)}
                           disabled={filling}
-                          className="text-xs text-gray-700 hover:text-gray-900 disabled:opacity-60"
+                          className="text-xs text-gray-700 px-2 py-1 rounded hover:bg-gray-100 hover:text-gray-900 active:bg-gray-200 transition-colors disabled:opacity-60"
                         >
                           {t("popup.fill")}
                         </button>
                         <button
                           onClick={() => handleCopy(e.id)}
-                          className="text-xs text-blue-700 hover:text-blue-900"
+                          className="text-xs text-blue-700 px-2 py-1 rounded hover:bg-blue-50 hover:text-blue-900 active:bg-blue-100 transition-colors"
                         >
                           {t("popup.copy")}
                         </button>

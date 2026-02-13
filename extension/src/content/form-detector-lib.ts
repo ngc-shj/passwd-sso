@@ -198,15 +198,20 @@ export function initFormDetector(): FormDetectorCleanup {
       return;
     }
     const url = window.location.href;
-    chrome.runtime.sendMessage(
-      { type: "GET_MATCHES_FOR_URL", url },
-      (response) => {
-        if (destroyed) return;
-        if (chrome.runtime.lastError) return;
-        if (!response) return;
-        showForInput(input, response.entries ?? [], response.vaultLocked ?? false);
-      },
-    );
+    try {
+      chrome.runtime.sendMessage(
+        { type: "GET_MATCHES_FOR_URL", url },
+        (response) => {
+          if (destroyed) return;
+          if (!isContextValid()) { destroy(); return; }
+          if (chrome.runtime.lastError) return;
+          if (!response) return;
+          showForInput(input, response.entries ?? [], response.vaultLocked ?? false);
+        },
+      );
+    } catch {
+      destroy();
+    }
   }
 
   // Start

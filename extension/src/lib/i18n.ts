@@ -7,12 +7,19 @@ type Messages = typeof en;
 const MESSAGES: Record<Locale, Messages> = { en, ja };
 
 function getLocale(): Locale {
-  const raw =
-    (typeof chrome !== "undefined" &&
+  let raw: string | false = false;
+  try {
+    raw =
+      typeof chrome !== "undefined" &&
       chrome.i18n &&
       typeof chrome.i18n.getUILanguage === "function" &&
-      chrome.i18n.getUILanguage()) ||
-    (typeof navigator !== "undefined" ? navigator.language : "en");
+      chrome.i18n.getUILanguage();
+  } catch {
+    // Extension context invalidated — fall through to navigator
+  }
+  if (!raw) {
+    raw = typeof navigator !== "undefined" ? navigator.language : "en";
+  }
   const normalized = (raw || "en").toLowerCase();
   return normalized.startsWith("ja") ? "ja" : "en";
 }

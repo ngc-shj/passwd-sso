@@ -73,7 +73,11 @@ export function showDropdown(opts: DropdownOptions): void {
       // Use mousedown + preventDefault to prevent input blur
       item.addEventListener("mousedown", (e) => {
         e.preventDefault();
-        opts.onSelect(entry.id);
+        try {
+          opts.onSelect(entry.id);
+        } catch {
+          // Extension context may have been invalidated — swallow silently
+        }
       });
 
       item.addEventListener("mouseenter", () => {
