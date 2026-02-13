@@ -37,6 +37,7 @@ import {
   AUDIT_ACTION_GROUP,
   AUDIT_ACTION_GROUPS_ORG,
   AUDIT_TARGET_TYPE,
+  type AuditActionValue,
 } from "@/lib/constants";
 
 interface OrgAuditLogItem {
@@ -51,7 +52,7 @@ interface OrgAuditLogItem {
   user: { id: string; name: string | null; image: string | null };
 }
 
-const ACTION_ICONS: Record<string, React.ReactNode> = {
+const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
   [AUDIT_ACTION.AUTH_LOGIN]: <LogIn className="h-4 w-4" />,
   [AUDIT_ACTION.AUTH_LOGOUT]: <LogOut className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_CREATE]: <Plus className="h-4 w-4" />,
@@ -92,7 +93,7 @@ export default function OrgAuditLogsPage({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [selectedActions, setSelectedActions] = useState<Set<string>>(new Set());
+  const [selectedActions, setSelectedActions] = useState<Set<AuditActionValue>>(new Set());
   const [actionSearch, setActionSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -198,9 +199,9 @@ export default function OrgAuditLogsPage({
     return null;
   };
 
-  const actionLabel = (action: string) => t(action as never);
+  const actionLabel = (action: AuditActionValue | string) => t(action as never);
 
-  const filteredActions = (actions: readonly string[]) => {
+  const filteredActions = (actions: readonly AuditActionValue[]) => {
     if (!actionSearch) return actions;
     const q = actionSearch.toLowerCase();
     return actions.filter((a) => {
@@ -209,9 +210,9 @@ export default function OrgAuditLogsPage({
     });
   };
 
-  const isActionSelected = (action: string) => selectedActions.has(action);
+  const isActionSelected = (action: AuditActionValue) => selectedActions.has(action);
 
-  const toggleAction = (action: string, checked: boolean) => {
+  const toggleAction = (action: AuditActionValue, checked: boolean) => {
     setSelectedActions((prev) => {
       const next = new Set(prev);
       if (checked) next.add(action);
@@ -220,7 +221,7 @@ export default function OrgAuditLogsPage({
     });
   };
 
-  const setGroupSelection = (actions: readonly string[], checked: boolean) => {
+  const setGroupSelection = (actions: readonly AuditActionValue[], checked: boolean) => {
     setSelectedActions((prev) => {
       const next = new Set(prev);
       for (const action of actions) {
@@ -341,7 +342,7 @@ export default function OrgAuditLogsPage({
               return (
                 <div key={log.id} className="px-4 py-2 flex items-start gap-3">
                   <div className="shrink-0 text-muted-foreground mt-0.5">
-                    {ACTION_ICONS[log.action] ?? <ScrollText className="h-4 w-4" />}
+                    {ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
                   </div>
                   <Avatar className="h-6 w-6 shrink-0">
                     <AvatarImage src={log.user.image ?? undefined} />
