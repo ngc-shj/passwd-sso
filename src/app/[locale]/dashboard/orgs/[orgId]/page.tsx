@@ -155,6 +155,15 @@ export default function OrgDashboardPage({
     org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN || org?.role === ORG_ROLE.MEMBER;
   const canDeletePerm = org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN;
   const canEditPerm = canCreate;
+  const activeCategoryLabel = activeEntryType
+    ? ({
+        [ENTRY_TYPE.LOGIN]: tDash("catLogin"),
+        [ENTRY_TYPE.SECURE_NOTE]: tDash("catSecureNote"),
+        [ENTRY_TYPE.CREDIT_CARD]: tDash("catCreditCard"),
+        [ENTRY_TYPE.IDENTITY]: tDash("catIdentity"),
+        [ENTRY_TYPE.PASSKEY]: tDash("catPasskey"),
+      } as Record<string, string>)[activeEntryType] ?? activeEntryType
+    : null;
 
   const handleToggleFavorite = async (id: string, current: boolean) => {
     // Optimistic update
@@ -322,21 +331,12 @@ export default function OrgDashboardPage({
               <div className="flex min-w-0 items-center gap-3">
                 <h1 className="truncate text-2xl font-bold">
                   {org?.name ?? "..."}
-                  {activeEntryType && (
-                    <span className="ml-2 text-base font-normal text-muted-foreground">
-                      / {({
-                        LOGIN: tDash("catLogin"),
-                        SECURE_NOTE: tDash("catSecureNote"),
-                        CREDIT_CARD: tDash("catCreditCard"),
-                        IDENTITY: tDash("catIdentity"),
-                        PASSKEY: tDash("catPasskey"),
-                      } as Record<string, string>)[activeEntryType] ?? activeEntryType}
-                    </span>
-                  )}
                 </h1>
                 {org && <OrgRoleBadge role={org.role} />}
               </div>
-              <p className="text-sm text-muted-foreground">{t("allPasswords")}</p>
+              <p className="text-sm text-muted-foreground">
+                {activeCategoryLabel ?? t("allPasswords")}
+              </p>
             </div>
             <div className="flex items-center gap-2">
               {(org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN) && (

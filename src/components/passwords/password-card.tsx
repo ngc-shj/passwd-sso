@@ -165,6 +165,7 @@ export function PasswordCard({
   const isIdentity = entryType === ENTRY_TYPE.IDENTITY;
   const isPasskey = entryType === ENTRY_TYPE.PASSKEY;
   const t = useTranslations("PasswordCard");
+  const tDash = useTranslations("Dashboard");
   const tc = useTranslations("Common");
   const tCopy = useTranslations("CopyButton");
   const { encryptionKey, userId } = useVault();
@@ -174,6 +175,13 @@ export function PasswordCard({
   const [shareData, setShareData] = useState<Record<string, unknown> | undefined>(undefined);
   const [detailData, setDetailData] = useState<InlineDetailData | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const entryTypeLabel = {
+    [ENTRY_TYPE.LOGIN]: tDash("catLogin"),
+    [ENTRY_TYPE.SECURE_NOTE]: tDash("catSecureNote"),
+    [ENTRY_TYPE.CREDIT_CARD]: tDash("catCreditCard"),
+    [ENTRY_TYPE.IDENTITY]: tDash("catIdentity"),
+    [ENTRY_TYPE.PASSKEY]: tDash("catPasskey"),
+  }[entryType] ?? entryType;
 
   const fetchDecryptedEntry = async (): Promise<{ entry: VaultEntryFull; raw: Record<string, unknown> }> => {
     if (!encryptionKey) throw new Error("Vault locked");
@@ -502,7 +510,12 @@ export function PasswordCard({
                   )}
                 </>
               )}
-              {createdBy && (
+              {createdBy && isOrgMode && (
+                <span className="truncate text-xs font-medium">
+                  {createdBy} / {entryTypeLabel}
+                </span>
+              )}
+              {createdBy && !isOrgMode && (
                 <span className="truncate text-xs">
                   {createdBy}
                 </span>
