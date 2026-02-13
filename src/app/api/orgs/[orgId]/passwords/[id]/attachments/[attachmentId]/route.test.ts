@@ -7,6 +7,7 @@ const {
   mockPrismaOrgPasswordEntry,
   mockPrismaAttachment,
   mockDecryptServerBinary,
+  MockOrgAuthError,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireOrgPermission: vi.fn(),
@@ -18,14 +19,19 @@ const {
     delete: vi.fn(),
   },
   mockDecryptServerBinary: vi.fn(),
+  MockOrgAuthError: class MockOrgAuthError extends Error {
+    status: number;
+    constructor(message: string, status = 403) {
+      super(message);
+      this.status = status;
+    }
+  },
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/org-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,
-  OrgAuthError: class OrgAuthError extends Error {
-    status = 403;
-  },
+  OrgAuthError: MockOrgAuthError,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -65,6 +71,46 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () =
         orgKeyAuthTag: "cc",
       },
     });
+  });
+
+  it("returns 401 when unauthenticated", async () => {
+    mockAuth.mockResolvedValue(null);
+    const res = await GET(
+      createRequest(
+        "GET",
+        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+      ),
+      createParams("org-1", "pw-1", "att-1"),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns org auth error when permission denied", async () => {
+    mockRequireOrgPermission.mockRejectedValue(
+      new MockOrgAuthError("FORBIDDEN", 403),
+    );
+    const res = await GET(
+      createRequest(
+        "GET",
+        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+      ),
+      createParams("org-1", "pw-1", "att-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("FORBIDDEN");
+  });
+
+  it("returns 404 when entry does not belong to org", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-org" });
+    const res = await GET(
+      createRequest(
+        "GET",
+        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+      ),
+      createParams("org-1", "pw-1", "att-1"),
+    );
+    expect(res.status).toBe(404);
   });
 
   it("returns 404 when attachment not found", async () => {
@@ -114,6 +160,60 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", (
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "org-1" });
   });
 
+  it("returns 401 when unauthenticated", async () => {
+    mockAuth.mockResolvedValue(null);
+    const res = await DELETE(
+      createRequest(
+        "DELETE",
+        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+      ),
+      createParams("org-1", "pw-1", "att-1"),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns org auth error when permission denied", async () => {
+    mockRequireOrgPermission.mockRejectedValue(
+      new MockOrgAuthError("FORBIDDEN", 403),
+    );
+    const res = await DELETE(
+      createRequest(
+        "DELETE",
+        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+      ),
+      createParams("org-1", "pw-1", "att-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("FORBIDDEN");
+  });
+
+  it("returns 404 when entry does not belong to org", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-org" });
+    const res = await DELETE(
+      createRequest(
+        "DELETE",
+        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+      ),
+      createParams("org-1", "pw-1", "att-1"),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 when attachment not found", async () => {
+    mockPrismaAttachment.findUnique.mockResolvedValue(null);
+    const res = await DELETE(
+      createRequest(
+        "DELETE",
+        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+      ),
+      createParams("org-1", "pw-1", "att-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(404);
+    expect(json.error).toBe("ATTACHMENT_NOT_FOUND");
+  });
+
   it("deletes attachment", async () => {
     mockPrismaAttachment.findUnique.mockResolvedValue({
       id: "att-1",
@@ -133,4 +233,3 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", (
     expect(json.success).toBe(true);
   });
 });
-

@@ -1,17 +1,27 @@
 import { dbBlobStore } from "@/lib/blob-store/db-blob-store";
-import type { AttachmentBlobStore, BlobBackend } from "@/lib/blob-store/types";
+import {
+  BLOB_STORAGE,
+  type AttachmentBlobStore,
+  type BlobBackend,
+} from "@/lib/blob-store/types";
 
 export function resolveBlobBackend(): BlobBackend {
   const raw = process.env.BLOB_BACKEND?.trim().toLowerCase();
-  if (!raw || raw === "db") return "db";
-  if (raw === "s3" || raw === "azure" || raw === "gcs") return raw;
-  return "db";
+  if (!raw) return BLOB_STORAGE.DB;
+  if (raw === BLOB_STORAGE.S3) return BLOB_STORAGE.S3;
+  if (raw === BLOB_STORAGE.AZURE) return BLOB_STORAGE.AZURE;
+  if (raw === BLOB_STORAGE.GCS) return BLOB_STORAGE.GCS;
+  return BLOB_STORAGE.DB;
 }
 
 export function getAttachmentBlobStore(): AttachmentBlobStore {
   const backend = resolveBlobBackend();
-  if (backend === "db") return dbBlobStore;
+  if (backend === BLOB_STORAGE.DB) return dbBlobStore;
   return dbBlobStore;
 }
 
-export type { AttachmentBlobStore, BlobBackend } from "@/lib/blob-store/types";
+export {
+  BLOB_STORAGE,
+  type AttachmentBlobStore,
+  type BlobBackend,
+} from "@/lib/blob-store/types";

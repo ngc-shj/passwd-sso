@@ -1,7 +1,10 @@
-import type { AttachmentBlobStore } from "@/lib/blob-store/types";
+import {
+  BLOB_STORAGE,
+  type AttachmentBlobStore,
+} from "@/lib/blob-store/types";
 
 export const dbBlobStore: AttachmentBlobStore = {
-  backend: "db",
+  backend: BLOB_STORAGE.DB,
   toStored(data) {
     return data instanceof Uint8Array ? data : new Uint8Array(data);
   },
@@ -12,4 +15,3 @@ export const dbBlobStore: AttachmentBlobStore = {
     return Buffer.from(stored).toString("base64");
   },
 };
-
