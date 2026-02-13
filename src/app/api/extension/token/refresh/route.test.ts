@@ -72,9 +72,16 @@ describe("POST /api/extension/token/refresh", () => {
     vi.clearAllMocks();
     mockExtTokenUpdateMany.mockResolvedValue({ count: 1 });
     mockExtTokenCreate.mockResolvedValue({});
-    mockTransaction.mockImplementation(async (operations: Promise<unknown>[]) => {
-      return Promise.all(operations);
-    });
+    // Interactive transaction: pass tx object with same mocks to the callback
+    mockTransaction.mockImplementation(
+      async (cb: (tx: unknown) => unknown) =>
+        cb({
+          extensionToken: {
+            updateMany: mockExtTokenUpdateMany,
+            create: mockExtTokenCreate,
+          },
+        }),
+    );
   });
 
   it("returns 401 when no Bearer token", async () => {
@@ -167,7 +174,7 @@ describe("POST /api/extension/token/refresh", () => {
     expect(json.scope).toEqual(["passwords:read", "vault:unlock-data"]);
   });
 
-  it("revokes old token in transaction", async () => {
+  it("revokes old token and creates new in transaction", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
     mockSessionFindFirst.mockResolvedValue({ id: "session-1" });
 
@@ -176,10 +183,13 @@ describe("POST /api/extension/token/refresh", () => {
     });
     await POST(req);
 
-    expect(mockTransaction).toHaveBeenCalledWith([
-      expect.anything(),
-      expect.anything(),
-    ]);
+    expect(mockTransaction).toHaveBeenCalled();
+    expect(mockExtTokenUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "old-tok-id", revokedAt: null }),
+      }),
+    );
+    expect(mockExtTokenCreate).toHaveBeenCalled();
   });
 
   it("inherits scopes from old token", async () => {
@@ -211,5 +221,7 @@ describe("POST /api/extension/token/refresh", () => {
 
     expect(status).toBe(401);
     expect(json.error).toBe("EXTENSION_TOKEN_REVOKED");
+    // Must NOT create a new token when old one was already revoked
+    expect(mockExtTokenCreate).not.toHaveBeenCalled();
   });
 });
