@@ -467,34 +467,143 @@ export function OrgPasswordForm({
   const baselineSnapshot = useMemo(
     () =>
       JSON.stringify({
+        entryType: effectiveEntryType,
         title: editData?.title ?? "",
-        username: editData?.username ?? "",
-        password: editData?.password ?? "",
-        url: editData?.url ?? "",
         notes: editData?.notes ?? "",
         selectedTagIds: (editData?.tags ?? []).map((tag) => tag.id).sort(),
-        customFields: editData?.customFields ?? [],
-        totp: editData?.totp ?? null,
+        login: isNote || isCreditCard || isIdentity || isPasskey
+          ? null
+          : {
+              username: editData?.username ?? "",
+              password: editData?.password ?? "",
+              url: editData?.url ?? "",
+              customFields: editData?.customFields ?? [],
+              totp: editData?.totp ?? null,
+            },
+        secureNote: isNote
+          ? {
+              content: editData?.content ?? "",
+            }
+          : null,
+        creditCard: isCreditCard
+          ? {
+              cardholderName: editData?.cardholderName ?? "",
+              cardNumber: formatCardNumber(editData?.cardNumber ?? "", editData?.brand ?? ""),
+              brand: editData?.brand ?? "",
+              expiryMonth: editData?.expiryMonth ?? "",
+              expiryYear: editData?.expiryYear ?? "",
+              cvv: editData?.cvv ?? "",
+            }
+          : null,
+        identity: isIdentity
+          ? {
+              fullName: editData?.fullName ?? "",
+              address: editData?.address ?? "",
+              phone: editData?.phone ?? "",
+              email: editData?.email ?? "",
+              dateOfBirth: editData?.dateOfBirth ?? "",
+              nationality: editData?.nationality ?? "",
+              idNumber: editData?.idNumber ?? "",
+              issueDate: editData?.issueDate ?? "",
+              expiryDate: editData?.expiryDate ?? "",
+            }
+          : null,
+        passkey: isPasskey
+          ? {
+              relyingPartyId: editData?.relyingPartyId ?? "",
+              relyingPartyName: editData?.relyingPartyName ?? "",
+              username: editData?.username ?? "",
+              credentialId: editData?.credentialId ?? "",
+              creationDate: editData?.creationDate ?? "",
+              deviceInfo: editData?.deviceInfo ?? "",
+            }
+          : null,
       }),
-    [editData]
+    [editData, effectiveEntryType, isNote, isCreditCard, isIdentity, isPasskey]
   );
 
   const currentSnapshot = useMemo(
     () =>
       JSON.stringify({
+        entryType: effectiveEntryType,
         title,
-        username,
-        password,
-        url,
         notes,
         selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
-        customFields,
-        totp,
+        login: isNote || isCreditCard || isIdentity || isPasskey
+          ? null
+          : { username, password, url, customFields, totp },
+        secureNote: isNote ? { content } : null,
+        creditCard: isCreditCard
+          ? { cardholderName, cardNumber, brand, expiryMonth, expiryYear, cvv }
+          : null,
+        identity: isIdentity
+          ? {
+              fullName,
+              address,
+              phone,
+              email,
+              dateOfBirth,
+              nationality,
+              idNumber,
+              issueDate,
+              expiryDate,
+            }
+          : null,
+        passkey: isPasskey
+          ? {
+              relyingPartyId,
+              relyingPartyName,
+              username,
+              credentialId,
+              creationDate,
+              deviceInfo,
+            }
+          : null,
       }),
-    [title, username, password, url, notes, selectedTags, customFields, totp]
+    [
+      effectiveEntryType,
+      title,
+      notes,
+      selectedTags,
+      isNote,
+      isCreditCard,
+      isIdentity,
+      isPasskey,
+      username,
+      password,
+      url,
+      customFields,
+      totp,
+      content,
+      cardholderName,
+      cardNumber,
+      brand,
+      expiryMonth,
+      expiryYear,
+      cvv,
+      fullName,
+      address,
+      phone,
+      email,
+      dateOfBirth,
+      nationality,
+      idNumber,
+      issueDate,
+      expiryDate,
+      relyingPartyId,
+      relyingPartyName,
+      credentialId,
+      creationDate,
+      deviceInfo,
+    ]
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
+
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void handleSubmit();
+  };
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -524,7 +633,8 @@ export function OrgPasswordForm({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <form onSubmit={handleFormSubmit} className="space-y-5">
+          <div className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4 space-y-4 transition-colors">
           {/* Title */}
           <div className="space-y-2">
             <Label>{isPasskey ? tpk("title") : isIdentity ? ti("title") : isCreditCard ? tcc("title") : isNote ? tn("title") : t("title")}</Label>
@@ -630,8 +740,14 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags */}
-              <div className="space-y-2">
-                <Label>{tpk("tags")}</Label>
+              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <Tags className="h-3.5 w-3.5" />
+                    {tpk("tags")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
+                </div>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
@@ -783,8 +899,14 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags */}
-              <div className="space-y-2">
-                <Label>{ti("tags")}</Label>
+              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <Tags className="h-3.5 w-3.5" />
+                    {ti("tags")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
+                </div>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
@@ -960,8 +1082,14 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags */}
-              <div className="space-y-2">
-                <Label>{tcc("tags")}</Label>
+              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <Tags className="h-3.5 w-3.5" />
+                    {tcc("tags")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
+                </div>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
@@ -985,8 +1113,14 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags (org tags) */}
-              <div className="space-y-2">
-                <Label>{tn("tags")}</Label>
+              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <Tags className="h-3.5 w-3.5" />
+                    {tn("tags")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
+                </div>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
@@ -1246,7 +1380,7 @@ export function OrgPasswordForm({
               </div>
             </>
           )}
-        </div>
+          </div>
 
         {/* Actions */}
         <div className="sticky bottom-0 z-10 -mx-1 rounded-lg border bg-background/90 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
@@ -1263,7 +1397,7 @@ export function OrgPasswordForm({
             </div>
             <div className="flex gap-2">
               <Button
-                onClick={handleSubmit}
+                type="submit"
                 disabled={
                   saving ||
                   !title.trim() ||
@@ -1276,6 +1410,7 @@ export function OrgPasswordForm({
                 {isEdit ? tc("update") : tc("save")}
               </Button>
               <Button
+                type="button"
                 variant="outline"
                 onClick={() => handleOpenChange(false)}
               >
@@ -1284,6 +1419,7 @@ export function OrgPasswordForm({
             </div>
           </div>
         </div>
+        </form>
 
         {/* Attachments (edit mode only) */}
         {isEdit && editData && (

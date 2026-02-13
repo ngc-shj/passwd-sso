@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
@@ -29,7 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
-import { Loader2, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { Loader2, ArrowLeft, Eye, EyeOff, Tags, BadgeCheck } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 
@@ -53,6 +53,7 @@ interface CreditCardFormProps {
 
 export function CreditCardForm({ mode, initialData, variant = "page", onSaved }: CreditCardFormProps) {
   const t = useTranslations("CreditCardForm");
+  const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
   const router = useRouter();
   const { encryptionKey, userId } = useVault();
@@ -76,6 +77,50 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
   const [selectedTags, setSelectedTags] = useState<TagData[]>(
     initialData?.tags ?? []
   );
+
+  const baselineSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        title: initialData?.title ?? "",
+        cardholderName: initialData?.cardholderName ?? "",
+        cardNumber: formatCardNumber(initialData?.cardNumber ?? "", initialData?.brand ?? ""),
+        brand: initialData?.brand ?? "",
+        expiryMonth: initialData?.expiryMonth ?? "",
+        expiryYear: initialData?.expiryYear ?? "",
+        cvv: initialData?.cvv ?? "",
+        notes: initialData?.notes ?? "",
+        selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
+      }),
+    [initialData]
+  );
+
+  const currentSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        title,
+        cardholderName,
+        cardNumber,
+        brand,
+        expiryMonth,
+        expiryYear,
+        cvv,
+        notes,
+        selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
+      }),
+    [
+      title,
+      cardholderName,
+      cardNumber,
+      brand,
+      expiryMonth,
+      expiryYear,
+      cvv,
+      notes,
+      selectedTags,
+    ]
+  );
+
+  const hasChanges = currentSnapshot !== baselineSnapshot;
 
   const validation = getCardNumberValidation(cardNumber, brand);
   const allowedLengths = getAllowedLengths(validation.effectiveBrand);
@@ -198,7 +243,8 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
   };
 
   const formContent = (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4 space-y-4 transition-colors">
       <div className="space-y-2">
         <Label htmlFor="title">{t("title")}</Label>
         <Input
@@ -373,28 +419,50 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
         />
       </div>
 
-      <div className="space-y-2">
-        <Label>{t("tags")}</Label>
+      </div>
+
+      <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+        <div className="space-y-1">
+          <Label className="flex items-center gap-2">
+            <Tags className="h-3.5 w-3.5" />
+            {t("tags")}
+          </Label>
+          <p className="text-xs text-muted-foreground">{tPw("tagsHint")}</p>
+        </div>
         <TagInput
           selectedTags={selectedTags}
           onChange={setSelectedTags}
         />
       </div>
 
-      <div className="flex gap-2 pt-4">
-        <Button type="submit" disabled={submitting || !cardNumberValid}>
-          {submitting && (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          )}
-          {mode === "create" ? tc("save") : tc("update")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={handleCancel}
-        >
-          {tc("cancel")}
-        </Button>
+      <div className="sticky bottom-0 z-10 -mx-1 rounded-lg border bg-background/90 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+        <div className="flex items-center justify-between gap-3">
+          <div
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] ${
+              hasChanges
+                ? "bg-amber-100 text-amber-800"
+                : "bg-emerald-100 text-emerald-800"
+            }`}
+          >
+            <BadgeCheck className="h-3.5 w-3.5" />
+            {hasChanges ? tPw("statusUnsaved") : tPw("statusSaved")}
+          </div>
+          <div className="flex gap-2">
+            <Button type="submit" disabled={submitting || !cardNumberValid}>
+              {submitting && (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              )}
+              {mode === "create" ? tc("save") : tc("update")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleCancel}
+            >
+              {tc("cancel")}
+            </Button>
+          </div>
+        </div>
       </div>
     </form>
   );
