@@ -9,6 +9,7 @@ import {
 } from "@/lib/blob-store/constants";
 import { buildObjectKey, decodeObjectRef, encodeObjectRef } from "@/lib/blob-store/object-ref";
 import { streamBodyToBuffer } from "@/lib/blob-store/stream";
+import { requireOptionalModule } from "@/lib/blob-store/runtime-module";
 
 let containerClientPromise: Promise<{
   getBlockBlobClient: (key: string) => {
@@ -22,7 +23,11 @@ async function getAzureContainerClient() {
   if (!containerClientPromise) {
     containerClientPromise = (async () => {
       const moduleName = "@azure/storage-blob";
-      const mod = await import(moduleName);
+      const mod = requireOptionalModule<Record<string, unknown>>(moduleName) as {
+        BlobServiceClient: {
+          fromConnectionString: (connectionString: string) => unknown;
+        } & (new (endpoint: string) => unknown);
+      };
       const { account, container } = loadCloudBlobConfig(BLOB_STORAGE.AZURE);
 
       const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING?.trim();
