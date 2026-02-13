@@ -19,10 +19,12 @@ export function resolveBlobBackend(): BlobBackend {
 
 export function getAttachmentBlobStore(): AttachmentBlobStore {
   const backend = resolveBlobBackend();
-  if (backend === BLOB_STORAGE.S3) return s3BlobStore;
-  if (backend === BLOB_STORAGE.AZURE) return azureBlobStore;
-  if (backend === BLOB_STORAGE.GCS) return gcsBlobStore;
-  return dbBlobStore;
+  let store: AttachmentBlobStore = dbBlobStore;
+  if (backend === BLOB_STORAGE.S3) store = s3BlobStore;
+  if (backend === BLOB_STORAGE.AZURE) store = azureBlobStore;
+  if (backend === BLOB_STORAGE.GCS) store = gcsBlobStore;
+  store.validateConfig();
+  return store;
 }
 
 export {

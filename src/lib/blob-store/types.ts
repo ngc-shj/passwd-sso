@@ -16,6 +16,7 @@ export type BlobBackend = (typeof BLOB_STORAGE)[keyof typeof BLOB_STORAGE];
  */
 export interface AttachmentBlobStore {
   readonly backend: BlobBackend;
+  validateConfig(): void;
   toStored(data: Uint8Array | Buffer): Uint8Array;
   toBuffer(stored: Uint8Array): Buffer;
   toBase64(stored: Uint8Array): string;

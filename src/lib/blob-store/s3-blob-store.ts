@@ -10,6 +10,13 @@ import {
  */
 export const s3BlobStore: AttachmentBlobStore = {
   backend: BLOB_STORAGE.S3,
+  validateConfig() {
+    if (!process.env.AWS_REGION || !process.env.S3_ATTACHMENTS_BUCKET) {
+      throw new Error(
+        "S3 backend requires AWS_REGION and S3_ATTACHMENTS_BUCKET",
+      );
+    }
+  },
   toStored(data) {
     return data instanceof Uint8Array ? data : new Uint8Array(data);
   },
@@ -20,4 +27,3 @@ export const s3BlobStore: AttachmentBlobStore = {
     return Buffer.from(stored).toString("base64");
   },
 };
-

@@ -10,6 +10,11 @@ import {
  */
 export const gcsBlobStore: AttachmentBlobStore = {
   backend: BLOB_STORAGE.GCS,
+  validateConfig() {
+    if (!process.env.GCS_ATTACHMENTS_BUCKET) {
+      throw new Error("GCS backend requires GCS_ATTACHMENTS_BUCKET");
+    }
+  },
   toStored(data) {
     return data instanceof Uint8Array ? data : new Uint8Array(data);
   },
@@ -20,4 +25,3 @@ export const gcsBlobStore: AttachmentBlobStore = {
     return Buffer.from(stored).toString("base64");
   },
 };
-

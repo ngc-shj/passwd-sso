@@ -5,6 +5,9 @@ import {
 
 export const dbBlobStore: AttachmentBlobStore = {
   backend: BLOB_STORAGE.DB,
+  validateConfig() {
+    // No external config required.
+  },
   toStored(data) {
     return data instanceof Uint8Array ? data : new Uint8Array(data);
   },

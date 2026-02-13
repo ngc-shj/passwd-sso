@@ -10,6 +10,13 @@ import {
  */
 export const azureBlobStore: AttachmentBlobStore = {
   backend: BLOB_STORAGE.AZURE,
+  validateConfig() {
+    if (!process.env.AZURE_STORAGE_ACCOUNT || !process.env.AZURE_BLOB_CONTAINER) {
+      throw new Error(
+        "Azure backend requires AZURE_STORAGE_ACCOUNT and AZURE_BLOB_CONTAINER",
+      );
+    }
+  },
   toStored(data) {
     return data instanceof Uint8Array ? data : new Uint8Array(data);
   },
@@ -20,4 +27,3 @@ export const azureBlobStore: AttachmentBlobStore = {
     return Buffer.from(stored).toString("base64");
   },
 };
-
