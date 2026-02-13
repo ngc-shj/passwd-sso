@@ -19,6 +19,16 @@ export interface GcsBlobConfig {
 
 export type CloudBlobConfig = S3BlobConfig | AzureBlobConfig | GcsBlobConfig;
 
+export function loadCloudBlobConfig(
+  backend: typeof BLOB_STORAGE.S3,
+): S3BlobConfig;
+export function loadCloudBlobConfig(
+  backend: typeof BLOB_STORAGE.AZURE,
+): AzureBlobConfig;
+export function loadCloudBlobConfig(
+  backend: typeof BLOB_STORAGE.GCS,
+): GcsBlobConfig;
+export function loadCloudBlobConfig(backend: BlobBackend): CloudBlobConfig;
 export function loadCloudBlobConfig(backend: BlobBackend): CloudBlobConfig {
   if (backend === BLOB_STORAGE.S3) {
     const region = process.env.AWS_REGION?.trim();
@@ -52,4 +62,3 @@ export function loadCloudBlobConfig(backend: BlobBackend): CloudBlobConfig {
 
   throw new Error("Cloud blob config requested for non-cloud backend");
 }
-

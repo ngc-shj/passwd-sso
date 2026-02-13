@@ -175,29 +175,38 @@ export async function POST(
   }
 
   const blobStore = getAttachmentBlobStore();
+  const attachmentId = clientId ?? crypto.randomUUID();
+  const blobContext = { attachmentId, entryId: id };
+  const storedBlob = await blobStore.putObject(buffer, blobContext);
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 0;
-  const attachment = await prisma.attachment.create({
-    data: {
-      ...(clientId ? { id: clientId } : {}),
-      filename: sanitizedFilename,
-      contentType,
-      sizeBytes: originalSize,
-      encryptedData: blobStore.toStored(buffer),
-      iv,
-      authTag,
-      keyVersion: keyVersion ? parseInt(keyVersion, 10) : null,
-      aadVersion,
-      passwordEntryId: id,
-      createdById: session.user.id,
-    },
-    select: {
-      id: true,
-      filename: true,
-      contentType: true,
-      sizeBytes: true,
-      createdAt: true,
-    },
-  });
+  let attachment;
+  try {
+    attachment = await prisma.attachment.create({
+      data: {
+        id: attachmentId,
+        filename: sanitizedFilename,
+        contentType,
+        sizeBytes: originalSize,
+        encryptedData: Buffer.from(storedBlob),
+        iv,
+        authTag,
+        keyVersion: keyVersion ? parseInt(keyVersion, 10) : null,
+        aadVersion,
+        passwordEntryId: id,
+        createdById: session.user.id,
+      },
+      select: {
+        id: true,
+        filename: true,
+        contentType: true,
+        sizeBytes: true,
+        createdAt: true,
+      },
+    });
+  } catch (error) {
+    await blobStore.deleteObject(storedBlob, blobContext).catch(() => {});
+    throw error;
+  }
 
   logAudit({
     scope: "PERSONAL",

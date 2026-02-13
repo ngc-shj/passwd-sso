@@ -42,13 +42,17 @@ export async function GET(
   }
 
   const blobStore = getAttachmentBlobStore();
+  const encryptedBuffer = await blobStore.getObject(attachment.encryptedData, {
+    attachmentId,
+    entryId: id,
+  });
   // Return encrypted data + crypto metadata for client-side decryption
   return NextResponse.json({
     id: attachment.id,
     filename: attachment.filename,
     contentType: attachment.contentType,
     sizeBytes: attachment.sizeBytes,
-    encryptedData: blobStore.toBase64(attachment.encryptedData),
+    encryptedData: encryptedBuffer.toString("base64"),
     iv: attachment.iv,
     authTag: attachment.authTag,
     keyVersion: attachment.keyVersion,
@@ -82,12 +86,18 @@ export async function DELETE(
 
   const attachment = await prisma.attachment.findUnique({
     where: { id: attachmentId, passwordEntryId: id },
-    select: { id: true, filename: true },
+    select: { id: true, filename: true, encryptedData: true },
   });
 
   if (!attachment) {
     return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
   }
+
+  const blobStore = getAttachmentBlobStore();
+  await blobStore.deleteObject(attachment.encryptedData, {
+    attachmentId,
+    entryId: id,
+  });
 
   await prisma.attachment.delete({
     where: { id: attachmentId },
