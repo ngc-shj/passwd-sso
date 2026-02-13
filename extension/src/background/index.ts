@@ -25,6 +25,7 @@ import {
   ALARM_TOKEN_REFRESH,
   TOKEN_BRIDGE_SCRIPT_ID,
   CMD_TRIGGER_AUTOFILL,
+  EXT_ENTRY_TYPE,
 } from "../lib/constants";
 
 // ── In-memory state (token/userId persisted to chrome.storage.session) ──
@@ -266,7 +267,10 @@ chrome.commands.onCommand.addListener(async (command) => {
 
   const entries = await getCachedEntries();
   const match = entries.find(
-    (e) => e.entryType === "LOGIN" && e.urlHost && isHostMatch(e.urlHost, tabHost)
+    (e) =>
+      e.entryType === EXT_ENTRY_TYPE.LOGIN &&
+      e.urlHost &&
+      isHostMatch(e.urlHost, tabHost)
   );
   if (!match) return;
   await performAutofillForEntry(match.id, tab.id);
@@ -704,7 +708,7 @@ chrome.runtime.onMessage.addListener(
             const entries = await getCachedEntries();
             const matches = entries.filter(
               (e) =>
-                e.entryType === "LOGIN" &&
+                e.entryType === EXT_ENTRY_TYPE.LOGIN &&
                 e.urlHost &&
                 isHostMatch(e.urlHost, tabHost),
             );

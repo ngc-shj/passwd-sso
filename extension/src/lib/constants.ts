@@ -18,3 +18,8 @@ export const CMD_TRIGGER_AUTOFILL = "trigger-autofill";
 
 // ── URL params ──
 export const EXT_CONNECT_PARAM = "ext_connect";
+
+// ── Entry types used in extension UI/logic ──
+export const EXT_ENTRY_TYPE = {
+  LOGIN: "LOGIN",
+} as const;

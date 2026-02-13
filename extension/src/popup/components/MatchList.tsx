@@ -8,6 +8,7 @@ import {
 import type { DecryptedEntry } from "../../types/messages";
 import { humanizeError } from "../../lib/error-messages";
 import { t } from "../../lib/i18n";
+import { EXT_ENTRY_TYPE } from "../../lib/constants";
 import { Toast } from "./Toast";
 
 interface Props {
@@ -162,7 +163,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
                     <div className="text-sm font-medium text-gray-900">
                       {e.title || "(Untitled)"}
                     </div>
-                    {e.entryType === "LOGIN" && (
+                    {e.entryType === EXT_ENTRY_TYPE.LOGIN && (
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleFill(e.id)}
@@ -206,7 +207,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
                     <div className="text-sm font-medium text-gray-900">
                       {e.title || "(Untitled)"}
                     </div>
-                    {e.entryType === "LOGIN" && (
+                    {e.entryType === EXT_ENTRY_TYPE.LOGIN && (
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleFill(e.id)}
