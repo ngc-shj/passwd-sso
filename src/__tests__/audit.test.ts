@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 const { mockCreate } = vi.hoisted(() => ({
   mockCreate: vi.fn(),
@@ -17,15 +18,15 @@ describe("logAudit", () => {
     mockCreate.mockResolvedValue({});
 
     logAudit({
-      scope: "PERSONAL",
-      action: "AUTH_LOGIN",
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.AUTH_LOGIN,
       userId: "user-1",
     });
 
     expect(mockCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        scope: "PERSONAL",
-        action: "AUTH_LOGIN",
+        scope: AUDIT_SCOPE.PERSONAL,
+        action: AUDIT_ACTION.AUTH_LOGIN,
         userId: "user-1",
         orgId: null,
         targetType: null,
@@ -40,11 +41,11 @@ describe("logAudit", () => {
     mockCreate.mockResolvedValue({});
 
     logAudit({
-      scope: "ORG",
-      action: "ENTRY_CREATE",
+      scope: AUDIT_SCOPE.ORG,
+      action: AUDIT_ACTION.ENTRY_CREATE,
       userId: "user-1",
       orgId: "org-1",
-      targetType: "PasswordEntry",
+      targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
       targetId: "entry-1",
       metadata: { key: "value" },
       ip: "192.168.1.1",
@@ -53,11 +54,11 @@ describe("logAudit", () => {
 
     expect(mockCreate).toHaveBeenCalledWith({
       data: {
-        scope: "ORG",
-        action: "ENTRY_CREATE",
+        scope: AUDIT_SCOPE.ORG,
+        action: AUDIT_ACTION.ENTRY_CREATE,
         userId: "user-1",
         orgId: "org-1",
-        targetType: "PasswordEntry",
+        targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
         targetId: "entry-1",
         metadata: { key: "value" },
         ip: "192.168.1.1",
@@ -74,8 +75,8 @@ describe("logAudit", () => {
     };
 
     logAudit({
-      scope: "PERSONAL",
-      action: "ENTRY_UPDATE",
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.ENTRY_UPDATE,
       userId: "user-1",
       metadata: largeMetadata,
     });
@@ -96,8 +97,8 @@ describe("logAudit", () => {
     const longUA = "A".repeat(1000);
 
     logAudit({
-      scope: "PERSONAL",
-      action: "AUTH_LOGIN",
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.AUTH_LOGIN,
       userId: "user-1",
       userAgent: longUA,
     });
@@ -115,8 +116,8 @@ describe("logAudit", () => {
     // Should not throw
     expect(() =>
       logAudit({
-        scope: "PERSONAL",
-        action: "AUTH_LOGIN",
+        scope: AUDIT_SCOPE.PERSONAL,
+        action: AUDIT_ACTION.AUTH_LOGIN,
         userId: "user-1",
       })
     ).not.toThrow();

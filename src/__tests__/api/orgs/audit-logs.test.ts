@@ -32,7 +32,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { GET } from "@/app/api/orgs/[orgId]/audit-logs/route";
-import { ORG_ROLE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, ORG_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-1";
 
@@ -78,8 +78,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     const logs = [
       {
         id: "log-1",
-        action: "ENTRY_CREATE",
-        targetType: "OrgPasswordEntry",
+        action: AUDIT_ACTION.ENTRY_CREATE,
+        targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
         targetId: "entry-1",
         metadata: null,
         ip: "10.0.0.1",
@@ -112,7 +112,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       expect.objectContaining({
         where: {
           orgId: ORG_ID,
-          scope: "ORG",
+          scope: AUDIT_SCOPE.ORG,
         },
         include: {
           user: { select: { id: true, name: true, image: true } },
@@ -129,7 +129,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?action=ORG_MEMBER_INVITE`
+      `http://localhost/api/orgs/${ORG_ID}/audit-logs?action=${AUDIT_ACTION.ORG_MEMBER_INVITE}`
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await GET(req as any, createParams({ orgId: ORG_ID }));
@@ -137,7 +137,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          action: "ORG_MEMBER_INVITE",
+          action: AUDIT_ACTION.ORG_MEMBER_INVITE,
         }),
       })
     );
@@ -150,7 +150,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=ENTRY_CREATE,ENTRY_UPDATE`
+      `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},${AUDIT_ACTION.ENTRY_UPDATE}`
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await GET(req as any, createParams({ orgId: ORG_ID }));
@@ -158,7 +158,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          action: { in: ["ENTRY_CREATE", "ENTRY_UPDATE"] },
+          action: { in: [AUDIT_ACTION.ENTRY_CREATE, AUDIT_ACTION.ENTRY_UPDATE] },
         }),
       })
     );
@@ -170,7 +170,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=ENTRY_CREATE,NOPE`
+      `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},NOPE`
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await GET(req as any, createParams({ orgId: ORG_ID }));
@@ -213,7 +213,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     // Return limit+1 items to trigger hasMore
     const logs = Array.from({ length: 6 }, (_, i) => ({
       id: `log-${i}`,
-      action: "ENTRY_UPDATE",
+      action: AUDIT_ACTION.ENTRY_UPDATE,
       targetType: null,
       targetId: null,
       metadata: null,

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { DEFAULT_SESSION } from "../helpers/mock-auth";
 import { createRequest, parseResponse } from "../helpers/request-builder";
+import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 const { mockAuth, mockFindMany, mockEntryFindMany, mockUserFindMany } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -39,8 +40,8 @@ describe("GET /api/audit-logs", () => {
     const now = new Date();
     const logs = Array.from({ length: 3 }, (_, i) => ({
       id: `log-${i}`,
-      action: "ENTRY_CREATE",
-      targetType: "PasswordEntry",
+      action: AUDIT_ACTION.ENTRY_CREATE,
+      targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
       targetId: `entry-${i}`,
       metadata: null,
       ip: "127.0.0.1",
@@ -61,7 +62,7 @@ describe("GET /api/audit-logs", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          scope: "PERSONAL",
+          scope: AUDIT_SCOPE.PERSONAL,
           OR: expect.any(Array),
         }),
         include: { user: { select: { id: true, name: true, email: true, image: true } } },
@@ -77,7 +78,7 @@ describe("GET /api/audit-logs", () => {
     // Return limit+1 items to trigger pagination
     const logs = Array.from({ length: 4 }, (_, i) => ({
       id: `log-${i}`,
-      action: "ENTRY_CREATE",
+      action: AUDIT_ACTION.ENTRY_CREATE,
       targetType: null,
       targetId: null,
       metadata: null,
@@ -107,7 +108,7 @@ describe("GET /api/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      "http://localhost/api/audit-logs?action=AUTH_LOGIN"
+      `http://localhost/api/audit-logs?action=${AUDIT_ACTION.AUTH_LOGIN}`
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await GET(req as any);
@@ -115,7 +116,7 @@ describe("GET /api/audit-logs", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          action: "AUTH_LOGIN",
+          action: AUDIT_ACTION.AUTH_LOGIN,
         }),
       })
     );
@@ -127,7 +128,7 @@ describe("GET /api/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      "http://localhost/api/audit-logs?actions=AUTH_LOGIN,ENTRY_CREATE"
+      `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.AUTH_LOGIN},${AUDIT_ACTION.ENTRY_CREATE}`
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await GET(req as any);
@@ -135,7 +136,7 @@ describe("GET /api/audit-logs", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          action: { in: ["AUTH_LOGIN", "ENTRY_CREATE"] },
+          action: { in: [AUDIT_ACTION.AUTH_LOGIN, AUDIT_ACTION.ENTRY_CREATE] },
         }),
       })
     );
@@ -178,7 +179,7 @@ describe("GET /api/audit-logs", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          scope: "PERSONAL",
+          scope: AUDIT_SCOPE.PERSONAL,
         }),
       })
     );
@@ -189,7 +190,7 @@ describe("GET /api/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      "http://localhost/api/audit-logs?actions=AUTH_LOGIN,INVALID_ACTION"
+      `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.AUTH_LOGIN},INVALID_ACTION`
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await GET(req as any);
@@ -259,8 +260,8 @@ describe("GET /api/audit-logs", () => {
     const logs = [
       {
         id: "log-1",
-        action: "EMERGENCY_VAULT_ACCESS",
-        targetType: "EmergencyAccessGrant",
+        action: AUDIT_ACTION.EMERGENCY_VAULT_ACCESS,
+        targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
         targetId: "grant-1",
         metadata: { ownerId: "owner-1", granteeId: DEFAULT_SESSION.user.id },
         ip: "127.0.0.1",
