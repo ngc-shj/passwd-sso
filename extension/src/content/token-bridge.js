@@ -40,4 +40,9 @@ if (typeof document !== "undefined") {
   if (!tryReadToken()) {
     startObserver();
   }
+  // Listen for custom event dispatched by injectExtensionToken()
+  // This survives after the MutationObserver's 30s timeout
+  document.addEventListener("passwd-sso-token-ready", function () {
+    tryReadToken();
+  });
 }

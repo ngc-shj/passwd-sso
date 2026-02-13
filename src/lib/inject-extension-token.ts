@@ -11,6 +11,8 @@ export function injectExtensionToken(token: string, expiresAt: number): void {
   el.setAttribute("data-expires-at", String(expiresAt));
   el.style.display = "none";
   document.body.appendChild(el);
+  // Notify token-bridge even if its MutationObserver has timed out
+  document.dispatchEvent(new CustomEvent("passwd-sso-token-ready"));
   setTimeout(() => {
     el.remove();
   }, 10_000);
