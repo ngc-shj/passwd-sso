@@ -49,6 +49,9 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
   const isTrash = view === "trash";
   const isFavorites = view === "favorites";
   const isArchive = view === "archive";
+  const contextualEntryType = entryType && Object.values(ENTRY_TYPE).includes(entryType as EntryTypeValue)
+    ? (entryType as EntryTypeValue)
+    : null;
 
   const ENTRY_TYPE_TITLES: Record<string, string> = {
     LOGIN: t("catLogin"),
@@ -107,7 +110,10 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
 
       if (e.key === "n") {
         e.preventDefault();
-        if (!isTrash && !isArchive) setNewDialogOpen(true);
+        if (!isTrash && !isArchive) {
+          if (contextualEntryType) setNewEntryType(contextualEntryType);
+          setNewDialogOpen(true);
+        }
         return;
       }
 
@@ -120,7 +126,7 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [searchQuery, isTrash, isArchive]);
+  }, [searchQuery, isTrash, isArchive, contextualEntryType]);
 
   const isMac = typeof navigator !== "undefined" && navigator.platform.toUpperCase().includes("MAC");
   const mod = isMac ? "⌘" : "Ctrl+";
@@ -166,36 +172,48 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
                 </DropdownMenu>
               )}
               {!isTrash && !isArchive && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button>
-                      <Plus className="h-4 w-4 mr-2" />
-                      {t("newItem")}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.LOGIN); setNewDialogOpen(true); }}>
-                      <KeyRound className="h-4 w-4 mr-2" />
-                      {t("newPassword")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setNewDialogOpen(true); }}>
-                      <FileText className="h-4 w-4 mr-2" />
-                      {t("newSecureNote")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setNewDialogOpen(true); }}>
-                      <CreditCard className="h-4 w-4 mr-2" />
-                      {t("newCreditCard")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.IDENTITY); setNewDialogOpen(true); }}>
-                      <IdCard className="h-4 w-4 mr-2" />
-                      {t("newIdentity")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.PASSKEY); setNewDialogOpen(true); }}>
-                      <Fingerprint className="h-4 w-4 mr-2" />
-                      {t("newPasskey")}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                contextualEntryType ? (
+                  <Button
+                    onClick={() => {
+                      setNewEntryType(contextualEntryType);
+                      setNewDialogOpen(true);
+                    }}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    {t("newItem")}
+                  </Button>
+                ) : (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button>
+                        <Plus className="h-4 w-4 mr-2" />
+                        {t("newItem")}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.LOGIN); setNewDialogOpen(true); }}>
+                        <KeyRound className="h-4 w-4 mr-2" />
+                        {t("newPassword")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setNewDialogOpen(true); }}>
+                        <FileText className="h-4 w-4 mr-2" />
+                        {t("newSecureNote")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setNewDialogOpen(true); }}>
+                        <CreditCard className="h-4 w-4 mr-2" />
+                        {t("newCreditCard")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.IDENTITY); setNewDialogOpen(true); }}>
+                        <IdCard className="h-4 w-4 mr-2" />
+                        {t("newIdentity")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.PASSKEY); setNewDialogOpen(true); }}>
+                        <Fingerprint className="h-4 w-4 mr-2" />
+                        {t("newPasskey")}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )
               )}
             </div>
           </div>
