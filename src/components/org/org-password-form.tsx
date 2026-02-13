@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -36,6 +36,9 @@ import {
   Plus,
   X,
   ShieldCheck,
+  Tags,
+  Rows3,
+  BadgeCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -107,6 +110,7 @@ export function OrgPasswordForm({
   editData,
 }: OrgPasswordFormProps) {
   const t = useTranslations("PasswordForm");
+  const tGen = useTranslations("PasswordGenerator");
   const tn = useTranslations("SecureNoteForm");
   const tcc = useTranslations("CreditCardForm");
   const ti = useTranslations("IdentityForm");
@@ -455,9 +459,46 @@ export function OrgPasswordForm({
     }
   };
 
+  const generatorSummary =
+    generatorSettings.mode === "passphrase"
+      ? `${tGen("modePassphrase")} · ${generatorSettings.passphrase.wordCount}`
+      : `${tGen("modePassword")} · ${generatorSettings.length}`;
+
+  const baselineSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        title: editData?.title ?? "",
+        username: editData?.username ?? "",
+        password: editData?.password ?? "",
+        url: editData?.url ?? "",
+        notes: editData?.notes ?? "",
+        selectedTagIds: (editData?.tags ?? []).map((tag) => tag.id).sort(),
+        customFields: editData?.customFields ?? [],
+        totp: editData?.totp ?? null,
+      }),
+    [editData]
+  );
+
+  const currentSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        title,
+        username,
+        password,
+        url,
+        notes,
+        selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
+        customFields,
+        totp,
+      }),
+    [title, username, password, url, notes, selectedTags, customFields, totp]
+  );
+
+  const hasChanges = currentSnapshot !== baselineSnapshot;
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {isPasskey
@@ -967,7 +1008,7 @@ export function OrgPasswordForm({
               </div>
 
               {/* Password with show/hide and generator */}
-              <div className="space-y-2">
+              <div className="space-y-2 rounded-lg border bg-background/70 p-3">
                 <Label>{t("password")}</Label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
@@ -1004,6 +1045,19 @@ export function OrgPasswordForm({
                     </div>
                   </div>
                 </div>
+                <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">{generatorSummary}</p>
+                  <Button
+                    type="button"
+                    variant={showGenerator ? "secondary" : "outline"}
+                    size="sm"
+                    className="h-7 gap-1.5 text-xs"
+                    onClick={() => setShowGenerator((v) => !v)}
+                  >
+                    <Dices className="h-3.5 w-3.5" />
+                    {showGenerator ? t("closeGenerator") : t("openGenerator")}
+                  </Button>
+                </div>
                 <PasswordGenerator
                   open={showGenerator}
                   onClose={() => setShowGenerator(false)}
@@ -1039,8 +1093,14 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags (org tags) */}
-              <div className="space-y-2">
-                <Label>{t("tags")}</Label>
+              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <Tags className="h-3.5 w-3.5" />
+                    {t("tags")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
+                </div>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
@@ -1049,9 +1109,17 @@ export function OrgPasswordForm({
               </div>
 
               {/* Custom Fields */}
-              <div className="space-y-2">
+              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
                 <div className="flex items-center justify-between">
-                  <Label>{t("customFields")}</Label>
+                  <div className="space-y-1">
+                    <Label className="flex items-center gap-2">
+                      <Rows3 className="h-3.5 w-3.5" />
+                      {t("customFields")}
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      {t("customFieldsHint")}
+                    </p>
+                  </div>
                   <Button
                     type="button"
                     variant="ghost"
@@ -1145,12 +1213,15 @@ export function OrgPasswordForm({
               </div>
 
               {/* TOTP */}
-              <div className="space-y-2">
+              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
                 <div className="flex items-center justify-between">
-                  <Label className="flex items-center gap-1">
-                    <ShieldCheck className="h-3.5 w-3.5" />
-                    {t("totp")}
-                  </Label>
+                  <div className="space-y-1">
+                    <Label className="flex items-center gap-1">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      {t("totp")}
+                    </Label>
+                    <p className="text-xs text-muted-foreground">{t("totpHint")}</p>
+                  </div>
                   {!showTotpInput && (
                     <Button
                       type="button"
@@ -1178,26 +1249,40 @@ export function OrgPasswordForm({
         </div>
 
         {/* Actions */}
-        <div className="flex gap-2 pt-2">
-          <Button
-            onClick={handleSubmit}
-            disabled={
-              saving ||
-              !title.trim() ||
-              (isPasskey && !relyingPartyId.trim()) ||
-              (!isNote && !isCreditCard && !isIdentity && !isPasskey && !password) ||
-              (isCreditCard && !cardNumberValid)
-            }
-          >
-            {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {isEdit ? tc("update") : tc("save")}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => handleOpenChange(false)}
-          >
-            {tc("cancel")}
-          </Button>
+        <div className="sticky bottom-0 z-10 -mx-1 rounded-lg border bg-background/90 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+          <div className="flex items-center justify-between gap-3">
+            <div
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] ${
+                hasChanges
+                  ? "bg-amber-100 text-amber-800"
+                  : "bg-emerald-100 text-emerald-800"
+              }`}
+            >
+              <BadgeCheck className="h-3.5 w-3.5" />
+              {hasChanges ? t("statusUnsaved") : t("statusSaved")}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleSubmit}
+                disabled={
+                  saving ||
+                  !title.trim() ||
+                  (isPasskey && !relyingPartyId.trim()) ||
+                  (!isNote && !isCreditCard && !isIdentity && !isPasskey && !password) ||
+                  (isCreditCard && !cardNumberValid)
+                }
+              >
+                {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {isEdit ? tc("update") : tc("save")}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => handleOpenChange(false)}
+              >
+                {tc("cancel")}
+              </Button>
+            </div>
+          </div>
         </div>
 
         {/* Attachments (edit mode only) */}
