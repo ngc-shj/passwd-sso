@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PasswordGenerator } from "./password-generator";
 import { TOTPField, type TOTPEntry } from "./totp-field";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
+import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
@@ -24,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Eye, EyeOff, Loader2, ArrowLeft, Dices, Plus, X, ShieldCheck, Tags, Rows3, BadgeCheck } from "lucide-react";
+import { Eye, EyeOff, ArrowLeft, Dices, Plus, X, ShieldCheck, Tags, Rows3 } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, CUSTOM_FIELD_TYPE, apiPath } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
@@ -236,7 +237,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
 
   const formContent = (
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4 space-y-4 transition-colors">
+            <EntryPrimaryCard>
             <div className="space-y-2">
               <Label htmlFor="title">{t("title")}</Label>
               <Input
@@ -285,15 +286,6 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                       ) : (
                         <Eye className="h-4 w-4" />
                       )}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => setShowGenerator(!showGenerator)}
-                    >
-                      <Dices className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
@@ -345,10 +337,10 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
-            </div>
+            </EntryPrimaryCard>
 
             {/* Tags section - 1Password style */}
-            <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+            <EntrySectionCard>
               <div className="space-y-1">
                 <Label className="flex items-center gap-2">
                   <Tags className="h-3.5 w-3.5" />
@@ -360,10 +352,10 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                 selectedTags={selectedTags}
                 onChange={setSelectedTags}
               />
-            </div>
+            </EntrySectionCard>
 
             {/* Custom fields */}
-            <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+            <EntrySectionCard>
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <Label className="flex items-center gap-2">
@@ -453,10 +445,10 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                   </Button>
                 </div>
               ))}
-            </div>
+            </EntrySectionCard>
 
             {/* TOTP */}
-            <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+            <EntrySectionCard>
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <Label className="flex items-center gap-1">
@@ -486,37 +478,17 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                   onRemove={() => setShowTotpInput(false)}
                 />
               )}
-            </div>
+            </EntrySectionCard>
 
-            <div className="sticky bottom-0 z-10 -mx-1 rounded-lg border bg-background/90 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-              <div className="flex items-center justify-between gap-3">
-                <div
-                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] ${
-                    hasChanges
-                      ? "bg-amber-100 text-amber-800"
-                      : "bg-emerald-100 text-emerald-800"
-                  }`}
-                >
-                  <BadgeCheck className="h-3.5 w-3.5" />
-                  {hasChanges ? t("statusUnsaved") : t("statusSaved")}
-                </div>
-                <div className="flex gap-2">
-              <Button type="submit" disabled={submitting}>
-                {submitting && (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                )}
-                {mode === "create" ? tc("save") : tc("update")}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleCancel}
-              >
-                {tc("cancel")}
-              </Button>
-                </div>
-              </div>
-            </div>
+            <EntryActionBar
+              hasChanges={hasChanges}
+              submitting={submitting}
+              saveLabel={mode === "create" ? tc("save") : tc("update")}
+              cancelLabel={tc("cancel")}
+              statusUnsavedLabel={t("statusUnsaved")}
+              statusSavedLabel={t("statusSaved")}
+              onCancel={handleCancel}
+            />
           </form>
   );
 
