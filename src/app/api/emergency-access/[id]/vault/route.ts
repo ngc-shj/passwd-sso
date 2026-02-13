@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { EA_STATUS } from "@/lib/constants";
+import { EA_STATUS, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 const vaultLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
@@ -48,7 +48,7 @@ export async function GET(
       scope: "PERSONAL",
       action: "EMERGENCY_ACCESS_ACTIVATE",
       userId: session.user.id,
-      targetType: "EmergencyAccessGrant",
+      targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
       targetId: id,
       metadata: { ownerId: grant.ownerId },
       ...extractRequestMeta(req),

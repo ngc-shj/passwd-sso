@@ -5,7 +5,7 @@ import { revokeEmergencyGrantSchema } from "@/lib/validations";
 import { canTransition } from "@/lib/emergency-access-state";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { EA_STATUS } from "@/lib/constants";
+import { EA_STATUS, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 // POST /api/emergency-access/[id]/revoke — Owner revokes or rejects request
 export async function POST(
@@ -68,7 +68,7 @@ export async function POST(
       scope: "PERSONAL",
       action: "EMERGENCY_ACCESS_REVOKE",
       userId: session.user.id,
-      targetType: "EmergencyAccessGrant",
+      targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
       targetId: id,
       metadata: { granteeId: grant.granteeId, permanent: true },
       ...extractRequestMeta(req),
@@ -97,7 +97,7 @@ export async function POST(
       scope: "PERSONAL",
       action: "EMERGENCY_ACCESS_REVOKE",
       userId: session.user.id,
-      targetType: "EmergencyAccessGrant",
+      targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
       targetId: id,
       metadata: { granteeId: grant.granteeId, permanent: false },
       ...extractRequestMeta(req),

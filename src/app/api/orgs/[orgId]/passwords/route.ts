@@ -12,7 +12,7 @@ import {
   decryptServerData,
 } from "@/lib/crypto-server";
 import { buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
-import { ENTRY_TYPE, ENTRY_TYPE_VALUES, ORG_PERMISSION } from "@/lib/constants";
+import { ENTRY_TYPE, ENTRY_TYPE_VALUES, ORG_PERMISSION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string }> };
@@ -395,7 +395,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     action: "ENTRY_CREATE",
     userId: session.user.id,
     orgId,
-    targetType: "OrgPasswordEntry",
+    targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: entry.id,
     ...extractRequestMeta(req),
   });

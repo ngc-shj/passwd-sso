@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { EA_STATUS } from "@/lib/constants";
+import { EA_STATUS, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 // POST /api/emergency-access/[id]/decline — Decline a grant by ID (authenticated grantee)
 export async function POST(
@@ -42,7 +42,7 @@ export async function POST(
     scope: "PERSONAL",
     action: "EMERGENCY_GRANT_REJECT",
     userId: session.user.id,
-    targetType: "EmergencyAccessGrant",
+    targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: id,
     metadata: { ownerId: grant.ownerId },
     ...extractRequestMeta(req),

@@ -6,7 +6,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { inviteSchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { INVITATION_STATUS, ORG_PERMISSION } from "@/lib/constants";
+import { INVITATION_STATUS, ORG_PERMISSION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string }> };
 
@@ -135,7 +135,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     action: "ORG_MEMBER_INVITE",
     userId: session.user.id,
     orgId,
-    targetType: "OrgInvitation",
+    targetType: AUDIT_TARGET_TYPE.ORG_INVITATION,
     targetId: invitation.id,
     metadata: { email, role },
     ...extractRequestMeta(req),

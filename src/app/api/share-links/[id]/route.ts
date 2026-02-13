@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -52,7 +53,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
           })
         )?.orgId
       : undefined,
-    targetType: "PasswordShare",
+    targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
     ip,
     userAgent,

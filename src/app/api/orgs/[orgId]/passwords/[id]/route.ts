@@ -10,7 +10,7 @@ import {
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION, ORG_ROLE, ENTRY_TYPE } from "@/lib/constants";
+import { ORG_PERMISSION, ORG_ROLE, ENTRY_TYPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import {
   unwrapOrgKey,
   encryptServerData,
@@ -476,7 +476,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     action: "ENTRY_UPDATE",
     userId: session.user.id,
     orgId,
-    targetType: "OrgPasswordEntry",
+    targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: id,
     ...extractRequestMeta(req),
   });
@@ -533,7 +533,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     action: "ENTRY_DELETE",
     userId: session.user.id,
     orgId,
-    targetType: "OrgPasswordEntry",
+    targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: id,
     metadata: { permanent },
     ...extractRequestMeta(req),

@@ -9,7 +9,7 @@ import {
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION, ORG_ROLE } from "@/lib/constants";
+import { ORG_PERMISSION, ORG_ROLE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string; memberId: string }> };
 
@@ -87,7 +87,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       action: "ORG_ROLE_UPDATE",
       userId: session.user.id,
       orgId,
-      targetType: "OrgMember",
+      targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
       targetId: memberId,
       metadata: { newRole: ORG_ROLE.OWNER, previousRole: target.role, transfer: true },
       ...extractRequestMeta(req),
@@ -135,7 +135,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     action: "ORG_ROLE_UPDATE",
     userId: session.user.id,
     orgId,
-    targetType: "OrgMember",
+    targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
     targetId: memberId,
     metadata: { newRole: parsed.data.role, previousRole: target.role },
     ...extractRequestMeta(req),
@@ -206,7 +206,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     action: "ORG_MEMBER_REMOVE",
     userId: session.user.id,
     orgId,
-    targetType: "OrgMember",
+    targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
     targetId: memberId,
     metadata: { removedUserId: target.userId, removedRole: target.role },
     ...extractRequestMeta(req),

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION } from "@/lib/constants";
+import { ORG_PERMISSION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string; id: string }> };
 
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     action: "ENTRY_RESTORE",
     userId: session.user.id,
     orgId,
-    targetType: "OrgPasswordEntry",
+    targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: id,
     ...extractRequestMeta(req),
   });

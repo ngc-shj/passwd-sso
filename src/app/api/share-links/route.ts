@@ -14,7 +14,7 @@ import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION } from "@/lib/constants";
+import { ORG_PERMISSION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 const shareLinkLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
@@ -174,7 +174,7 @@ export async function POST(req: NextRequest) {
           })
         )?.orgId
       : undefined,
-    targetType: "PasswordShare",
+    targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
     metadata: { expiresIn, maxViews: maxViews ?? null },
     ip,
