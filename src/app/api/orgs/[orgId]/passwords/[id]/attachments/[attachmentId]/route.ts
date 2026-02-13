@@ -70,9 +70,14 @@ export async function GET(
     ? Buffer.from(buildAttachmentAAD(id, attachmentId))
     : undefined;
   const blobStore = getAttachmentBlobStore();
+  const encryptedBuffer = await blobStore.getObject(attachment.encryptedData, {
+    attachmentId,
+    entryId: id,
+    orgId,
+  });
   const decrypted = decryptServerBinary(
     {
-      ciphertext: blobStore.toBuffer(attachment.encryptedData),
+      ciphertext: encryptedBuffer,
       iv: attachment.iv,
       authTag: attachment.authTag,
     },
@@ -121,12 +126,19 @@ export async function DELETE(
 
   const attachment = await prisma.attachment.findUnique({
     where: { id: attachmentId, orgPasswordEntryId: id },
-    select: { id: true, filename: true },
+    select: { id: true, filename: true, encryptedData: true },
   });
 
   if (!attachment) {
     return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
   }
+
+  const blobStore = getAttachmentBlobStore();
+  await blobStore.deleteObject(attachment.encryptedData, {
+    attachmentId,
+    entryId: id,
+    orgId,
+  });
 
   await prisma.attachment.delete({
     where: { id: attachmentId },

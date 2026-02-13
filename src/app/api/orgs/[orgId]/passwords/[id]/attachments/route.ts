@@ -194,28 +194,36 @@ export async function POST(
   const aad = Buffer.from(buildAttachmentAAD(id, attachmentId));
   const encrypted = encryptServerBinary(plainBuffer, orgKey, aad);
   const blobStore = getAttachmentBlobStore();
+  const blobContext = { attachmentId, entryId: id, orgId };
+  const storedBlob = await blobStore.putObject(encrypted.ciphertext, blobContext);
 
-  const attachment = await prisma.attachment.create({
-    data: {
-      id: attachmentId,
-      filename: sanitizedFilename,
-      contentType,
-      sizeBytes: file.size,
-      encryptedData: blobStore.toStored(encrypted.ciphertext),
-      iv: encrypted.iv,
-      authTag: encrypted.authTag,
-      aadVersion: AAD_VERSION,
-      orgPasswordEntryId: id,
-      createdById: session.user.id,
-    },
-    select: {
-      id: true,
-      filename: true,
-      contentType: true,
-      sizeBytes: true,
-      createdAt: true,
-    },
-  });
+  let attachment;
+  try {
+    attachment = await prisma.attachment.create({
+      data: {
+        id: attachmentId,
+        filename: sanitizedFilename,
+        contentType,
+        sizeBytes: file.size,
+        encryptedData: Buffer.from(storedBlob),
+        iv: encrypted.iv,
+        authTag: encrypted.authTag,
+        aadVersion: AAD_VERSION,
+        orgPasswordEntryId: id,
+        createdById: session.user.id,
+      },
+      select: {
+        id: true,
+        filename: true,
+        contentType: true,
+        sizeBytes: true,
+        createdAt: true,
+      },
+    });
+  } catch (error) {
+    await blobStore.deleteObject(storedBlob, blobContext).catch(() => {});
+    throw error;
+  }
 
   logAudit({
     scope: "ORG",

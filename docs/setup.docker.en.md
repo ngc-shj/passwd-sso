@@ -94,6 +94,10 @@ Edit `.env.local` and set the following values:
 | `SAML_PROVIDER_NAME` | SAML IdP display name on sign-in page | e.g., `HENNGE`, `Okta`, `Azure AD` |
 | `ORG_MASTER_KEY` | Master key for organization vault encryption (256-bit hex) | `openssl rand -hex 32` |
 | `REDIS_URL` | (Optional) Redis URL for shared rate limiting | e.g., `redis://host:6379` |
+| `BLOB_BACKEND` | Attachment storage backend | `db`, `s3`, `azure`, or `gcs` |
+| `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | Required if `BLOB_BACKEND=s3` | e.g., `ap-northeast-1`, bucket name |
+| `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` | Required if `BLOB_BACKEND=azure` | Azure Storage account / container |
+| `GCS_ATTACHMENTS_BUCKET` | Required if `BLOB_BACKEND=gcs` | GCS bucket name |
 
 > **Redis is optional.** If `REDIS_URL` is not set, the app runs without Redis and rate limiting on vault unlock is disabled. For single-instance deployments, you can safely omit Redis.
 

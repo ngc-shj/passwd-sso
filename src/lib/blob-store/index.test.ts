@@ -25,10 +25,37 @@ describe("resolveBlobBackend", () => {
 });
 
 describe("getAttachmentBlobStore", () => {
-  it("returns db blob store for all currently supported runtime backends", async () => {
+  it("returns s3 blob store when backend is s3", async () => {
     vi.stubEnv("BLOB_BACKEND", "s3");
+    vi.stubEnv("AWS_REGION", "ap-northeast-1");
+    vi.stubEnv("S3_ATTACHMENTS_BUCKET", "bucket");
     const mod = await import("./index");
     const store = mod.getAttachmentBlobStore();
-    expect(store.backend).toBe(mod.BLOB_STORAGE.DB);
+    expect(store.backend).toBe(mod.BLOB_STORAGE.S3);
+  });
+
+  it("returns azure blob store when backend is azure", async () => {
+    vi.stubEnv("BLOB_BACKEND", "azure");
+    vi.stubEnv("AZURE_STORAGE_ACCOUNT", "acct");
+    vi.stubEnv("AZURE_BLOB_CONTAINER", "attachments");
+    const mod = await import("./index");
+    const store = mod.getAttachmentBlobStore();
+    expect(store.backend).toBe(mod.BLOB_STORAGE.AZURE);
+  });
+
+  it("returns gcs blob store when backend is gcs", async () => {
+    vi.stubEnv("BLOB_BACKEND", "gcs");
+    vi.stubEnv("GCS_ATTACHMENTS_BUCKET", "bucket");
+    const mod = await import("./index");
+    const store = mod.getAttachmentBlobStore();
+    expect(store.backend).toBe(mod.BLOB_STORAGE.GCS);
+  });
+
+  it("throws when s3 config is missing", async () => {
+    vi.stubEnv("BLOB_BACKEND", "s3");
+    const mod = await import("./index");
+    expect(() => mod.getAttachmentBlobStore()).toThrow(
+      "S3 backend requires AWS_REGION and S3_ATTACHMENTS_BUCKET",
+    );
   });
 });

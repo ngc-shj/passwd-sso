@@ -93,6 +93,10 @@ cp .env.example .env.local
 | `SAML_PROVIDER_NAME` | SAML IdP のログイン画面表示名 | 例: `HENNGE`, `Okta`, `Azure AD` |
 | `ORG_MASTER_KEY` | 組織用暗号化のマスターキー (256bit, hex) | `openssl rand -hex 32` |
 | `REDIS_URL` | （任意）共有レート制限用の Redis URL | 例: `redis://host:6379` |
+| `BLOB_BACKEND` | 添付ファイル保存バックエンド | `db`, `s3`, `azure`, `gcs` |
+| `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | `BLOB_BACKEND=s3` の場合に必須 | 例: `ap-northeast-1`、バケット名 |
+| `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` | `BLOB_BACKEND=azure` の場合に必須 | Azure Storage アカウント / コンテナ |
+| `GCS_ATTACHMENTS_BUCKET` | `BLOB_BACKEND=gcs` の場合に必須 | GCS バケット名 |
 
 > **Redis はオプションです。** `REDIS_URL` が未設定の場合、Redis なしで動作し、Vault アンロックのレート制限は無効になります。単一インスタンスで運用する場合は Redis を省略できます。
 
