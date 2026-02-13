@@ -31,15 +31,14 @@ import {
 import {
   Eye,
   EyeOff,
-  Loader2,
   Dices,
   Plus,
   X,
   ShieldCheck,
   Tags,
   Rows3,
-  BadgeCheck,
 } from "lucide-react";
+import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { toast } from "sonner";
 import {
   CARD_BRANDS,
@@ -634,7 +633,7 @@ export function OrgPasswordForm({
         </DialogHeader>
 
         <form onSubmit={handleFormSubmit} className="space-y-5">
-          <div className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4 space-y-4 transition-colors">
+          <EntryPrimaryCard>
           {/* Title */}
           <div className="space-y-2">
             <Label>{isPasskey ? tpk("title") : isIdentity ? ti("title") : isCreditCard ? tcc("title") : isNote ? tn("title") : t("title")}</Label>
@@ -740,7 +739,7 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags */}
-              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+              <EntrySectionCard>
                 <div className="space-y-1">
                   <Label className="flex items-center gap-2">
                     <Tags className="h-3.5 w-3.5" />
@@ -753,7 +752,7 @@ export function OrgPasswordForm({
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </div>
+              </EntrySectionCard>
             </>
           ) : isIdentity ? (
             <>
@@ -899,7 +898,7 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags */}
-              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+              <EntrySectionCard>
                 <div className="space-y-1">
                   <Label className="flex items-center gap-2">
                     <Tags className="h-3.5 w-3.5" />
@@ -912,7 +911,7 @@ export function OrgPasswordForm({
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </div>
+              </EntrySectionCard>
             </>
           ) : isCreditCard ? (
             <>
@@ -1082,7 +1081,7 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags */}
-              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+              <EntrySectionCard>
                 <div className="space-y-1">
                   <Label className="flex items-center gap-2">
                     <Tags className="h-3.5 w-3.5" />
@@ -1095,7 +1094,7 @@ export function OrgPasswordForm({
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </div>
+              </EntrySectionCard>
             </>
           ) : isNote ? (
             <>
@@ -1113,7 +1112,7 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags (org tags) */}
-              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+              <EntrySectionCard>
                 <div className="space-y-1">
                   <Label className="flex items-center gap-2">
                     <Tags className="h-3.5 w-3.5" />
@@ -1126,7 +1125,7 @@ export function OrgPasswordForm({
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </div>
+              </EntrySectionCard>
             </>
           ) : (
             <>
@@ -1227,7 +1226,7 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags (org tags) */}
-              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+              <EntrySectionCard>
                 <div className="space-y-1">
                   <Label className="flex items-center gap-2">
                     <Tags className="h-3.5 w-3.5" />
@@ -1240,10 +1239,10 @@ export function OrgPasswordForm({
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </div>
+              </EntrySectionCard>
 
               {/* Custom Fields */}
-              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+              <EntrySectionCard>
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
                     <Label className="flex items-center gap-2">
@@ -1344,10 +1343,10 @@ export function OrgPasswordForm({
                     </Button>
                   </div>
                 ))}
-              </div>
+              </EntrySectionCard>
 
               {/* TOTP */}
-              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+              <EntrySectionCard>
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
                     <Label className="flex items-center gap-1">
@@ -1377,48 +1376,27 @@ export function OrgPasswordForm({
                     onRemove={() => setShowTotpInput(false)}
                   />
                 )}
-              </div>
+              </EntrySectionCard>
             </>
           )}
-          </div>
+          </EntryPrimaryCard>
 
         {/* Actions */}
-        <div className="sticky bottom-0 z-10 -mx-1 rounded-lg border bg-background/90 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-          <div className="flex items-center justify-between gap-3">
-            <div
-              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] ${
-                hasChanges
-                  ? "bg-amber-100 text-amber-800"
-                  : "bg-emerald-100 text-emerald-800"
-              }`}
-            >
-              <BadgeCheck className="h-3.5 w-3.5" />
-              {hasChanges ? t("statusUnsaved") : t("statusSaved")}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="submit"
-                disabled={
-                  saving ||
-                  !title.trim() ||
-                  (isPasskey && !relyingPartyId.trim()) ||
-                  (!isNote && !isCreditCard && !isIdentity && !isPasskey && !password) ||
-                  (isCreditCard && !cardNumberValid)
-                }
-              >
-                {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {isEdit ? tc("update") : tc("save")}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => handleOpenChange(false)}
-              >
-                {tc("cancel")}
-              </Button>
-            </div>
-          </div>
-        </div>
+        <EntryActionBar
+          hasChanges={hasChanges}
+          submitting={saving}
+          submitDisabled={
+            !title.trim() ||
+            (isPasskey && !relyingPartyId.trim()) ||
+            (!isNote && !isCreditCard && !isIdentity && !isPasskey && !password) ||
+            (isCreditCard && !cardNumberValid)
+          }
+          saveLabel={isEdit ? tc("update") : tc("save")}
+          cancelLabel={tc("cancel")}
+          statusUnsavedLabel={t("statusUnsaved")}
+          statusSavedLabel={t("statusSaved")}
+          onCancel={() => handleOpenChange(false)}
+        />
         </form>
 
         {/* Attachments (edit mode only) */}

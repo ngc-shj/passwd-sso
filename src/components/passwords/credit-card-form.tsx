@@ -29,7 +29,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
-import { Loader2, ArrowLeft, Eye, EyeOff, Tags, BadgeCheck } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, Tags } from "lucide-react";
+import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { toast } from "sonner";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 
@@ -244,7 +245,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
 
   const formContent = (
     <form onSubmit={handleSubmit} className="space-y-5">
-      <div className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4 space-y-4 transition-colors">
+      <EntryPrimaryCard>
       <div className="space-y-2">
         <Label htmlFor="title">{t("title")}</Label>
         <Input
@@ -419,9 +420,9 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
         />
       </div>
 
-      </div>
+      </EntryPrimaryCard>
 
-      <div className="space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+      <EntrySectionCard>
         <div className="space-y-1">
           <Label className="flex items-center gap-2">
             <Tags className="h-3.5 w-3.5" />
@@ -433,37 +434,18 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
           selectedTags={selectedTags}
           onChange={setSelectedTags}
         />
-      </div>
+      </EntrySectionCard>
 
-      <div className="sticky bottom-0 z-10 -mx-1 rounded-lg border bg-background/90 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-        <div className="flex items-center justify-between gap-3">
-          <div
-            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] ${
-              hasChanges
-                ? "bg-amber-100 text-amber-800"
-                : "bg-emerald-100 text-emerald-800"
-            }`}
-          >
-            <BadgeCheck className="h-3.5 w-3.5" />
-            {hasChanges ? tPw("statusUnsaved") : tPw("statusSaved")}
-          </div>
-          <div className="flex gap-2">
-            <Button type="submit" disabled={submitting || !cardNumberValid}>
-              {submitting && (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              )}
-              {mode === "create" ? tc("save") : tc("update")}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleCancel}
-            >
-              {tc("cancel")}
-            </Button>
-          </div>
-        </div>
-      </div>
+      <EntryActionBar
+        hasChanges={hasChanges}
+        submitting={submitting}
+        submitDisabled={!cardNumberValid}
+        saveLabel={mode === "create" ? tc("save") : tc("update")}
+        cancelLabel={tc("cancel")}
+        statusUnsavedLabel={tPw("statusUnsaved")}
+        statusSavedLabel={tPw("statusSaved")}
+        onCancel={handleCancel}
+      />
     </form>
   );
 
