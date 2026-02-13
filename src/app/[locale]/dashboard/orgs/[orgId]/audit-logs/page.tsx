@@ -37,13 +37,14 @@ import {
   AUDIT_ACTION_GROUP,
   AUDIT_ACTION_GROUPS_ORG,
   AUDIT_TARGET_TYPE,
+  type AuditTargetType,
   type AuditActionValue,
 } from "@/lib/constants";
 
 interface OrgAuditLogItem {
   id: string;
-  action: string;
-  targetType: string | null;
+  action: AuditActionValue;
+  targetType: AuditTargetType | null;
   targetId: string | null;
   metadata: Record<string, unknown> | null;
   ip: string | null;
