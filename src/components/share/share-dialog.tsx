@@ -207,7 +207,7 @@ export function ShareDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <LinkIcon className="h-5 w-5" />
@@ -278,7 +278,7 @@ export function ShareDialog({
               />
             </div>
 
-            <DialogFooter className="pt-1">
+            <DialogFooter className="border-t pt-4">
               <Button onClick={handleCreate} disabled={creating}>
                 {creating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 {t("create")}
@@ -289,15 +289,16 @@ export function ShareDialog({
 
         {/* Existing links */}
         {links.length > 0 && (
-          <div className="border-t pt-4 space-y-3">
+          <div className="space-y-3 border-t pt-4">
             <h3 className="text-sm font-medium tracking-tight">{t("existingLinks")}</h3>
             {loadingLinks ? (
               <div className="flex justify-center py-2">
                 <Loader2 className="h-4 w-4 animate-spin" />
               </div>
             ) : (
-              links.map((link) => (
-                <div key={link.id} className="rounded-xl border bg-card text-xs">
+              <div className="space-y-2 rounded-xl border bg-card/80 p-2">
+              {links.map((link) => (
+                <div key={link.id} className="rounded-xl border bg-background/80 text-xs transition-colors hover:bg-muted/30">
                   <div className="flex items-center justify-between p-3">
                     <div className="space-y-1">
                       <p className="text-muted-foreground leading-none">
@@ -402,7 +403,8 @@ export function ShareDialog({
                     </div>
                   )}
                 </div>
-              ))
+              ))}
+              </div>
             )}
           </div>
         )}

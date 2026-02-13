@@ -290,7 +290,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                   </div>
                 </div>
               </div>
-              <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
+              <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
                 <p className="text-xs text-muted-foreground">{generatorSummary}</p>
                 <Button
                   type="button"
@@ -334,7 +334,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder={t("notesPlaceholder")}
                 rows={3}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
             </EntryPrimaryCard>
@@ -383,7 +383,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                 </Button>
               </div>
               {customFields.map((field, idx) => (
-                <div key={idx} className="flex items-start gap-2 rounded-md border p-2">
+                <div key={idx} className="flex items-start gap-2 rounded-lg border p-2">
                   <div className="flex-1 space-y-2">
                     <div className="flex gap-2">
                       <Input
@@ -497,7 +497,8 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-4 md:p-6">
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-4">
       <Button
         variant="ghost"
         className="mb-4 gap-2"
@@ -507,7 +508,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
         {tc("back")}
       </Button>
 
-      <Card>
+      <Card className="rounded-xl border">
         <CardHeader>
           <CardTitle>
             {mode === "create" ? t("newPassword") : t("editPassword")}
@@ -517,6 +518,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
           {formContent}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

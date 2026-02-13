@@ -5,10 +5,10 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { OrgRoleBadge } from "@/components/org/org-role-badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/avatar";
 import { CopyButton } from "@/components/passwords/copy-button";
 import { Link } from "@/i18n/navigation";
-import { ArrowLeft, Loader2, UserPlus, Trash2, X, LinkIcon, Crown } from "lucide-react";
+import { ArrowLeft, Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
 
@@ -260,19 +260,21 @@ export default function OrgSettingsPage({
   if (!org) {
     if (loadError) {
       return (
-        <div className="p-4 md:p-6">
-          <div className="mx-auto max-w-2xl">
-            <div className="flex flex-col items-start gap-3">
-              <h1 className="text-xl font-semibold">{t("forbidden")}</h1>
-              <p className="text-sm text-muted-foreground">
-                {t("noOrgsDesc")}
-              </p>
-              <Button variant="ghost" asChild>
-                <Link href="/dashboard/orgs">
-                  {t("manage")}
-                </Link>
-              </Button>
-            </div>
+        <div className="flex-1 overflow-auto p-4 md:p-6">
+          <div className="mx-auto max-w-4xl">
+            <Card className="rounded-xl border bg-card/80 p-6">
+              <div className="flex flex-col items-start gap-3">
+                <h1 className="text-xl font-semibold">{t("forbidden")}</h1>
+                <p className="text-sm text-muted-foreground">
+                  {t("noOrgsDesc")}
+                </p>
+                <Button variant="ghost" asChild>
+                  <Link href="/dashboard/orgs">
+                    {t("manage")}
+                  </Link>
+                </Button>
+              </div>
+            </Card>
           </div>
         </div>
       );
@@ -285,9 +287,9 @@ export default function OrgSettingsPage({
   }
 
   return (
-    <div className="p-4 md:p-6">
-      <div className="mx-auto max-w-2xl">
-        <div className="flex flex-col gap-2 mb-6">
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-6">
+        <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
           <div className="flex flex-col items-start gap-2 min-w-0">
             <Button
               variant="ghost"
@@ -300,30 +302,38 @@ export default function OrgSettingsPage({
                 {t("backToOrg", { name: org.name })}
               </Link>
             </Button>
-            <h1 className="text-xl font-semibold truncate">
+            <h1 className="truncate text-2xl font-bold">
               {org.name} - {t("settings")}
             </h1>
+            <p className="text-sm text-muted-foreground">
+              {t("generalSettings")}
+            </p>
           </div>
-        </div>
+        </Card>
 
         {/* General Settings */}
         {isAdmin && (
-          <section className="space-y-4">
-            <h2 className="text-lg font-semibold">{t("generalSettings")}</h2>
-            <div className="space-y-3">
-              <div className="space-y-2">
-                <Label>{t("orgName")}</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>{t("slug")}</Label>
-                <div className="flex items-center gap-2">
-                  <Input value={org.slug} readOnly />
-                  <CopyButton getValue={() => org.slug} />
+          <Card className="rounded-xl border bg-card/80 p-4">
+            <section className="space-y-4">
+              <h2 className="flex items-center gap-2 text-lg font-semibold">
+                <Settings2 className="h-5 w-5 text-muted-foreground" />
+                {t("generalSettings")}
+              </h2>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>{t("orgName")}</Label>
+                  <Input value={name} onChange={(e) => setName(e.target.value)} />
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {t("slugHelp")}
-                </p>
+                <div className="space-y-2">
+                  <Label>{t("slug")}</Label>
+                  <div className="flex items-center gap-2">
+                    <Input value={org.slug} readOnly />
+                    <CopyButton getValue={() => org.slug} />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {t("slugHelp")}
+                  </p>
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>{t("description")}</Label>
@@ -334,28 +344,32 @@ export default function OrgSettingsPage({
                 />
               </div>
               {isAdmin && (
-                <Button
-                  onClick={handleUpdateOrg}
-                  disabled={saving || !name.trim()}
-                >
-                  {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  {t("updateOrg")}
-                </Button>
+                <div className="flex justify-end pt-1">
+                  <Button
+                    onClick={handleUpdateOrg}
+                    disabled={saving || !name.trim()}
+                  >
+                    {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    {t("updateOrg")}
+                  </Button>
+                </div>
               )}
-            </div>
-          </section>
+            </section>
+          </Card>
         )}
 
-        <Separator className="my-6" />
-
         {/* Members */}
-        <section className="space-y-4">
-          <h2 className="text-lg font-semibold">{t("members")}</h2>
+        <Card className="rounded-xl border bg-card/80 p-4">
+          <section className="space-y-4">
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            <Users className="h-5 w-5 text-muted-foreground" />
+            {t("members")}
+          </h2>
           <div className="space-y-2">
             {members.map((m) => (
               <div
                 key={m.id}
-                className="flex items-center gap-3 rounded-lg border p-3"
+                className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-muted/30"
               >
                 <Avatar className="h-8 w-8">
                   <AvatarImage src={m.image ?? undefined} />
@@ -434,12 +448,12 @@ export default function OrgSettingsPage({
               </div>
             ))}
           </div>
-        </section>
+          </section>
+        </Card>
 
         {/* Transfer Ownership */}
         {isOwner && members.filter((m) => m.role !== ORG_ROLE.OWNER).length > 0 && (
-          <>
-            <Separator className="my-6" />
+          <Card className="rounded-xl border bg-card/80 p-4">
             <section className="space-y-4">
               <h2 className="text-lg font-semibold flex items-center gap-2">
                 <Crown className="h-5 w-5" />
@@ -454,7 +468,7 @@ export default function OrgSettingsPage({
                   .map((m) => (
                     <div
                       key={m.id}
-                      className="flex items-center gap-3 rounded-lg border p-3"
+                      className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-muted/30"
                     >
                       <Avatar className="h-8 w-8">
                         <AvatarImage src={m.image ?? undefined} />
@@ -502,16 +516,19 @@ export default function OrgSettingsPage({
                   ))}
               </div>
             </section>
-          </>
+          </Card>
         )}
 
         {/* Invite */}
         {isAdmin && (
           <>
-            <Separator className="my-6" />
-            <section className="space-y-4">
-              <h2 className="text-lg font-semibold">{t("inviteMember")}</h2>
-              <div className="flex items-end gap-2">
+            <Card className="rounded-xl border bg-card/80 p-4">
+              <section className="space-y-4">
+              <h2 className="flex items-center gap-2 text-lg font-semibold">
+                <Mail className="h-5 w-5 text-muted-foreground" />
+                {t("inviteMember")}
+              </h2>
+              <div className="flex flex-col gap-3 md:flex-row md:items-end">
                 <div className="flex-1 space-y-2">
                   <Label>{t("inviteEmail")}</Label>
                   <Input
@@ -521,10 +538,10 @@ export default function OrgSettingsPage({
                     placeholder={t("inviteEmailPlaceholder")}
                   />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 md:w-32">
                   <Label>{t("inviteRole")}</Label>
                   <Select value={invRole} onValueChange={setInvRole}>
-                    <SelectTrigger className="w-28">
+                    <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -537,6 +554,7 @@ export default function OrgSettingsPage({
                 <Button
                   onClick={handleInvite}
                   disabled={inviting || !invEmail.trim()}
+                  className="md:self-end"
                 >
                   {inviting ? (
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -546,22 +564,20 @@ export default function OrgSettingsPage({
                   {t("inviteSend")}
                 </Button>
               </div>
-            </section>
+              </section>
+            </Card>
 
             {/* Pending invitations */}
             {invitations.length > 0 && (
-              <>
-                <Separator className="my-6" />
+              <Card className="rounded-xl border bg-card/80 p-4">
                 <section className="space-y-4">
-                  <h2 className="text-lg font-semibold">
+                  <h2 className="flex items-center gap-2 text-lg font-semibold">
+                    <LinkIcon className="h-5 w-5 text-muted-foreground" />
                     {t("pendingInvitations")}
                   </h2>
                   <div className="space-y-2">
                     {invitations.map((inv) => (
-                      <div
-                        key={inv.id}
-                        className="flex items-center gap-3 rounded-lg border p-3"
-                      >
+                      <div key={inv.id} className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-muted/30">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium">{inv.email}</p>
                           <p className="text-xs text-muted-foreground">
@@ -588,17 +604,17 @@ export default function OrgSettingsPage({
                     ))}
                   </div>
                 </section>
-              </>
+              </Card>
             )}
           </>
         )}
 
         {/* Delete org */}
         {isOwner && (
-          <>
-            <Separator className="my-6" />
+          <Card className="rounded-xl border border-destructive/30 p-4">
             <section className="space-y-4">
-              <h2 className="text-lg font-semibold text-destructive">
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-destructive">
+                <ShieldAlert className="h-5 w-5" />
                 {t("deleteOrg")}
               </h2>
               <AlertDialog>
@@ -621,7 +637,7 @@ export default function OrgSettingsPage({
                 </AlertDialogContent>
               </AlertDialog>
             </section>
-          </>
+          </Card>
         )}
       </div>
     </div>

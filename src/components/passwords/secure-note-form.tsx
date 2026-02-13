@@ -167,7 +167,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
             rows={10}
             maxLength={50000}
             required
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
       </EntryPrimaryCard>
@@ -203,7 +203,8 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-4 md:p-6">
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-4">
       <Button
         variant="ghost"
         className="mb-4 gap-2"
@@ -213,7 +214,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
         {tc("back")}
       </Button>
 
-      <Card>
+      <Card className="rounded-xl border">
         <CardHeader>
           <CardTitle>
             {mode === "create" ? t("newNote") : t("editNote")}
@@ -223,6 +224,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
           {formContent}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

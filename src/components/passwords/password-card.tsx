@@ -423,7 +423,7 @@ export function PasswordCard({
     <>
       <Card className="transition-colors">
         <CardContent
-          className="flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-muted/50 transition-colors"
+          className="flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-muted/60 transition-colors"
           onClick={() => onToggleExpand(id)}
         >
           <div className="shrink-0 text-muted-foreground">

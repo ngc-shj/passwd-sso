@@ -454,7 +454,8 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-4 md:p-6">
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-4">
       <Button
         variant="ghost"
         className="mb-4 gap-2"
@@ -464,7 +465,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
         {tc("back")}
       </Button>
 
-      <Card>
+      <Card className="rounded-xl border">
         <CardHeader>
           <CardTitle>
             {mode === "create" ? t("newCard") : t("editCard")}
@@ -474,6 +475,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
           {formContent}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

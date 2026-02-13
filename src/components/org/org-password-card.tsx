@@ -50,11 +50,11 @@ export function OrgPasswordCard({
 
   return (
     <div
-      className="flex items-center gap-3 rounded-lg border px-4 py-2 cursor-pointer hover:bg-muted/50 transition-colors"
+      className="flex cursor-pointer items-center gap-3 rounded-xl border bg-card/80 px-4 py-2 transition-colors hover:bg-muted/40"
       onClick={onClick}
     >
       {/* Favicon placeholder */}
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted text-sm font-medium">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted/70 text-sm font-medium">
         {entry.title.charAt(0).toUpperCase()}
       </div>
 

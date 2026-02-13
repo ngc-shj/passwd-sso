@@ -49,29 +49,32 @@ export default function WatchtowerPage() {
     : 0;
 
   return (
-    <div className="p-4 md:p-6">
-      <div className="mx-auto max-w-3xl">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-xl font-semibold">{t("title")}</h1>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={analyze}
-            disabled={loading}
-          >
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-            ) : (
-              <RefreshCw className="h-4 w-4 mr-2" />
-            )}
-            {t("refresh")}
-          </Button>
-        </div>
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-6">
+        <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold">{t("title")}</h1>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={analyze}
+              disabled={loading}
+            >
+              {loading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              {t("refresh")}
+            </Button>
+          </div>
+        </Card>
 
         {/* Loading state */}
         {loading && (
-          <Card className="mb-6">
+          <Card className="rounded-xl border bg-card/80">
             <CardContent className="flex flex-col items-center py-12 gap-4">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               <p className="text-sm text-muted-foreground">
@@ -96,7 +99,7 @@ export default function WatchtowerPage() {
         {report && !loading && (
           <>
             {/* Score Card */}
-            <Card className="mb-6">
+            <Card className="rounded-xl border bg-card/80">
               <CardContent className="flex flex-col items-center py-8 gap-4">
                 <ScoreGauge
                   score={report.overallScore}
@@ -126,7 +129,7 @@ export default function WatchtowerPage() {
 
             {/* No issues state */}
             {totalIssues === 0 && report.totalPasswords > 0 && (
-              <Card>
+              <Card className="rounded-xl border bg-card/80">
                 <CardContent className="flex flex-col items-center py-12 gap-3">
                   <Shield className="h-12 w-12 text-green-500" />
                   <p className="text-sm text-muted-foreground text-center">
@@ -138,7 +141,7 @@ export default function WatchtowerPage() {
 
             {/* Issue Sections */}
             {totalIssues > 0 && (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <IssueSection
                   type="breached"
                   title={t("breached")}
@@ -178,7 +181,7 @@ export default function WatchtowerPage() {
 
             {/* Empty vault */}
             {report.totalPasswords === 0 && (
-              <Card>
+              <Card className="rounded-xl border bg-card/80">
                 <CardContent className="flex flex-col items-center py-12 gap-3">
                   <Shield className="h-12 w-12 text-muted-foreground/50" />
                   <p className="text-sm text-muted-foreground">

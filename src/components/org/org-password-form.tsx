@@ -1169,7 +1169,7 @@ export function OrgPasswordForm({
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
+                <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
                   <p className="text-xs text-muted-foreground">{generatorSummary}</p>
                   <Button
                     type="button"
@@ -1263,7 +1263,7 @@ export function OrgPasswordForm({
                 {customFields.map((field, idx) => (
                   <div
                     key={idx}
-                    className="flex items-start gap-2 rounded-md border p-2"
+                    className="flex items-start gap-2 rounded-lg border p-2"
                   >
                     <div className="flex-1 space-y-2">
                       <div className="flex gap-2">

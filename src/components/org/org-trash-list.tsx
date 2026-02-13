@@ -100,15 +100,15 @@ export function OrgTrashList({ refreshKey }: OrgTrashListProps) {
 
   return (
     <div className="mt-6">
-      <div className="flex items-center gap-2 mb-3">
+      <div className="mb-3 flex items-center gap-2">
         <Building2 className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-sm font-medium text-muted-foreground">
           {tOrg("organizationTrash")}
         </h2>
       </div>
-      <div className="space-y-2">
+      <div className="space-y-2 rounded-xl border bg-card/80 p-2">
         {entries.map((entry) => (
-          <Card key={entry.id}>
+          <Card key={entry.id} className="rounded-xl border bg-background/80 transition-colors hover:bg-muted/30">
             <CardContent className="flex items-center gap-4 p-4">
               {entry.entryType === ENTRY_TYPE.IDENTITY ? (
                 <IdCard className="h-4 w-4 shrink-0 text-muted-foreground" />

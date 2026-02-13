@@ -170,7 +170,7 @@ export function OrgTagInput({ orgId, selectedTags, onChange }: OrgTagInputProps)
         </Button>
 
         {showDropdown && (
-          <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-md border bg-popover p-2 shadow-md">
+          <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-lg border bg-popover p-2 shadow-md">
             <Input
               ref={inputRef}
               value={inputValue}
@@ -187,7 +187,7 @@ export function OrgTagInput({ orgId, selectedTags, onChange }: OrgTagInputProps)
                   <button
                     key={tag.id}
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-accent"
                     onClick={() => addTag(tag)}
                   >
                     {tag.color && (
@@ -206,7 +206,7 @@ export function OrgTagInput({ orgId, selectedTags, onChange }: OrgTagInputProps)
               {canCreate && (
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent text-primary"
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-primary hover:bg-accent"
                   onClick={createAndAddTag}
                   disabled={creating}
                 >

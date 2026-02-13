@@ -414,7 +414,8 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-4 md:p-6">
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-4">
       <Button
         variant="ghost"
         className="mb-4 gap-2"
@@ -424,7 +425,7 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
         {tc("back")}
       </Button>
 
-      <Card>
+      <Card className="rounded-xl border">
         <CardHeader>
           <CardTitle>
             {mode === "create" ? t("newIdentity") : t("editIdentity")}
@@ -434,6 +435,7 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
           {formContent}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

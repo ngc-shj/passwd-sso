@@ -93,14 +93,14 @@ export function ChangePassphraseDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("changePassphrase")}</DialogTitle>
           <DialogDescription>
             {t("changePassphraseDescription")}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border bg-muted/20 p-4">
           <div className="space-y-2">
             <Label htmlFor="cp-current">{t("currentPassphrase")}</Label>
             <Input

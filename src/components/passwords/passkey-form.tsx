@@ -325,7 +325,8 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-4 md:p-6">
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-4">
       <Button
         variant="ghost"
         className="mb-4 gap-2"
@@ -335,7 +336,7 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
         {tc("back")}
       </Button>
 
-      <Card>
+      <Card className="rounded-xl border">
         <CardHeader>
           <CardTitle>
             {mode === "create" ? t("newPasskey") : t("editPasskey")}
@@ -345,6 +346,7 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
           {formContent}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

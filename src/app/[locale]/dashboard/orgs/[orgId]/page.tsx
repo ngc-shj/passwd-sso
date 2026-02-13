@@ -9,6 +9,7 @@ import type { InlineDetailData } from "@/components/passwords/password-detail-in
 import { OrgPasswordForm } from "@/components/org/org-password-form";
 import { OrgRoleBadge } from "@/components/org/org-role-badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
@@ -292,9 +293,10 @@ export default function OrgDashboardPage({
 
   if (loadError) {
     return (
-      <div className="p-4 md:p-6">
-        <div className="mx-auto max-w-3xl">
-          <div className="flex flex-col items-start gap-3">
+      <div className="flex-1 overflow-auto p-4 md:p-6">
+        <div className="mx-auto max-w-4xl">
+          <Card className="rounded-xl border bg-card/80 p-6">
+            <div className="flex flex-col items-start gap-3">
             <h1 className="text-xl font-semibold">{t("forbidden")}</h1>
             <p className="text-sm text-muted-foreground">
               {t("noOrgsDesc")}
@@ -305,109 +307,119 @@ export default function OrgDashboardPage({
               </Link>
             </Button>
           </div>
+          </Card>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-4 md:p-6">
-      <div className="mx-auto max-w-3xl">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3 min-w-0">
-            <h1 className="text-xl font-semibold truncate">
-              {org?.name ?? "..."}
-              {activeEntryType && (
-                <span className="text-muted-foreground font-normal text-base ml-2">
-                  / {({
-                    LOGIN: tDash("catLogin"),
-                    SECURE_NOTE: tDash("catSecureNote"),
-                    CREDIT_CARD: tDash("catCreditCard"),
-                    IDENTITY: tDash("catIdentity"),
-                    PASSKEY: tDash("catPasskey"),
-                  } as Record<string, string>)[activeEntryType] ?? activeEntryType}
-                </span>
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-6">
+        <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <div className="flex min-w-0 items-center gap-3">
+                <h1 className="truncate text-2xl font-bold">
+                  {org?.name ?? "..."}
+                  {activeEntryType && (
+                    <span className="ml-2 text-base font-normal text-muted-foreground">
+                      / {({
+                        LOGIN: tDash("catLogin"),
+                        SECURE_NOTE: tDash("catSecureNote"),
+                        CREDIT_CARD: tDash("catCreditCard"),
+                        IDENTITY: tDash("catIdentity"),
+                        PASSKEY: tDash("catPasskey"),
+                      } as Record<string, string>)[activeEntryType] ?? activeEntryType}
+                    </span>
+                  )}
+                </h1>
+                {org && <OrgRoleBadge role={org.role} />}
+              </div>
+              <p className="text-sm text-muted-foreground">{t("allPasswords")}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {(org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN) && (
+                <OrgExportDialog
+                  orgId={orgId}
+                  trigger={
+                    <Button variant="ghost" size="icon">
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  }
+                />
               )}
-            </h1>
-            {org && <OrgRoleBadge role={org.role} />}
+              {(org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN) && (
+                <Button variant="ghost" size="icon" asChild>
+                  <Link href={`/dashboard/orgs/${orgId}/settings`}>
+                    <Settings className="h-4 w-4" />
+                  </Link>
+                </Button>
+              )}
+              {canCreate && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm">
+                      <Plus className="mr-2 h-4 w-4" />
+                      {t("newItem")}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.LOGIN); setFormOpen(true); }}>
+                      <KeyRound className="mr-2 h-4 w-4" />
+                      {t("newPassword")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setFormOpen(true); }}>
+                      <FileText className="mr-2 h-4 w-4" />
+                      {t("newSecureNote")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setFormOpen(true); }}>
+                      <CreditCard className="mr-2 h-4 w-4" />
+                      {t("newCreditCard")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.IDENTITY); setFormOpen(true); }}>
+                      <IdCard className="mr-2 h-4 w-4" />
+                      {t("newIdentity")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.PASSKEY); setFormOpen(true); }}>
+                      <Fingerprint className="mr-2 h-4 w-4" />
+                      {t("newPasskey")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {(org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN) && (
-              <OrgExportDialog
-                orgId={orgId}
-                trigger={
-                  <Button variant="ghost" size="icon">
-                    <Download className="h-4 w-4" />
-                  </Button>
-                }
-              />
-            )}
-            {(org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN) && (
-              <Button variant="ghost" size="icon" asChild>
-                <Link href={`/dashboard/orgs/${orgId}/settings`}>
-                  <Settings className="h-4 w-4" />
-                </Link>
-              </Button>
-            )}
-            {canCreate && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm">
-                    <Plus className="h-4 w-4 mr-2" />
-                    {t("newItem")}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.LOGIN); setFormOpen(true); }}>
-                    <KeyRound className="h-4 w-4 mr-2" />
-                    {t("newPassword")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setFormOpen(true); }}>
-                    <FileText className="h-4 w-4 mr-2" />
-                    {t("newSecureNote")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setFormOpen(true); }}>
-                    <CreditCard className="h-4 w-4 mr-2" />
-                    {t("newCreditCard")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.IDENTITY); setFormOpen(true); }}>
-                    <IdCard className="h-4 w-4 mr-2" />
-                    {t("newIdentity")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.PASSKEY); setFormOpen(true); }}>
-                    <Fingerprint className="h-4 w-4 mr-2" />
-                    {t("newPasskey")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
-        </div>
+        </Card>
 
-        <div className="relative mb-4">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            placeholder={t("allPasswords")}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
+        <Card className="rounded-xl border bg-card/80 p-3">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              className="pl-9"
+              placeholder={t("allPasswords")}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+        </Card>
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <KeyRound className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">{t("noPasswords")}</p>
-            {!searchQuery && canCreate && (
-              <p className="text-sm text-muted-foreground mt-1">
-                {t("noPasswordsDesc")}
-              </p>
-            )}
-          </div>
+          <Card className="rounded-xl border bg-card/80 p-10">
+            <div className="flex flex-col items-center justify-center text-center">
+              <KeyRound className="mb-4 h-12 w-12 text-muted-foreground" />
+              <p className="text-muted-foreground">{t("noPasswords")}</p>
+              {!searchQuery && canCreate && (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t("noPasswordsDesc")}
+                </p>
+              )}
+            </div>
+          </Card>
         ) : (
           <div className="space-y-2">
             {filtered.map((entry) => (

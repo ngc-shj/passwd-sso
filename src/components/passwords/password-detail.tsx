@@ -150,7 +150,8 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
   };
 
   return (
-    <div className="mx-auto max-w-2xl p-4 md:p-6">
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-4">
       <Button
         variant="ghost"
         className="mb-4 gap-2"
@@ -160,7 +161,7 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
         {tc("back")}
       </Button>
 
-      <Card>
+      <Card className="rounded-xl border">
         <CardHeader className="flex flex-row items-center justify-between">
           <div className="space-y-1">
             <CardTitle className="text-xl flex items-center gap-2">
@@ -298,7 +299,7 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
           {data.notes && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("notes")}</label>
-              <p className="text-sm whitespace-pre-wrap rounded-md bg-muted p-3">
+              <p className="rounded-lg border bg-muted/30 p-3 text-sm whitespace-pre-wrap">
                 {data.notes}
               </p>
             </div>
@@ -373,7 +374,7 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
                   {data.passwordHistory.map((entry, idx) => (
                     <div
                       key={idx}
-                      className="flex items-center gap-2 rounded-md bg-muted p-2"
+                      className="flex items-center gap-2 rounded-lg border bg-muted/30 p-2"
                     >
                       <div className="flex-1 min-w-0">
                         <span className="font-mono text-xs">
@@ -425,6 +426,7 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
           </div>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

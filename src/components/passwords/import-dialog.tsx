@@ -633,9 +633,12 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <FileUp className="h-4 w-4" />
+            {t("title")}
+          </DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
@@ -649,8 +652,8 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
           </div>
         ) : encryptedFile ? (
           // Decryption step
-          <div className="space-y-4">
-            <div className="flex items-start gap-3 rounded-md border border-blue-500/30 bg-blue-500/10 p-3">
+          <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+            <div className="flex items-start gap-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3">
               <Lock className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
               <p className="text-sm text-blue-800 dark:text-blue-200">
                 {t("encryptedFileDetected")}
@@ -676,7 +679,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
               />
             </div>
             {decryptError && (
-              <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3">
+              <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3">
                 <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
                 <p className="text-xs text-destructive">
                   {decryptError}
@@ -702,13 +705,13 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
           </div>
         ) : entries.length === 0 ? (
           // File selection step
-          <div className="space-y-4">
+          <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
             <p className="text-sm text-muted-foreground">{t("supportedFormats")}</p>
             <label
               className={`flex flex-col items-center gap-3 rounded-lg border-2 border-dashed p-8 cursor-pointer transition-colors ${
                 dragOver
                   ? "border-primary bg-primary/10"
-                  : "hover:bg-muted/50"
+                  : "hover:bg-muted/60"
               }`}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
@@ -727,14 +730,14 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
           </div>
         ) : (
           // Preview step
-          <div className="space-y-4">
+          <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
             <div className="flex items-center gap-2 text-sm">
               <span className="text-muted-foreground">{t("detectedFormat")}:</span>
               <span className="font-medium">{formatLabels[format]}</span>
             </div>
 
             {format === "unknown" && (
-              <div className="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3">
+              <div className="flex items-start gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
                 <AlertCircle className="h-4 w-4 text-yellow-600 shrink-0 mt-0.5" />
                 <p className="text-xs text-yellow-800 dark:text-yellow-200">
                   {t("unknownFormat")}
@@ -742,9 +745,9 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
               </div>
             )}
 
-            <div className="max-h-60 overflow-auto rounded-md border">
+            <div className="max-h-60 overflow-auto rounded-lg border">
               <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-muted">
+                <thead className="sticky top-0 bg-muted/80 backdrop-blur">
                   <tr>
                     <th className="px-2 py-1 text-left font-medium">{t("colTitle")}</th>
                     <th className="px-2 py-1 text-left font-medium">{t("colType")}</th>
@@ -792,7 +795,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
         )}
 
         {!done && entries.length > 0 && (
-          <DialogFooter>
+          <DialogFooter className="border-t pt-4">
             <Button variant="outline" onClick={reset} disabled={importing}>
               {t("back")}
             </Button>

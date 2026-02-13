@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Download, Loader2, AlertTriangle, Lock } from "lucide-react";
+import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -182,20 +182,23 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent>
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <Building2 className="h-4 w-4" />
+            {t("title")}
+          </DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-start gap-3 rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3">
+        <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
           <AlertTriangle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
           <p className="text-sm text-yellow-800 dark:text-yellow-200">
             {passwordProtect ? t("encryptedWarning") : t("warning")}
           </p>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Lock className="h-4 w-4 text-muted-foreground" />
@@ -262,9 +265,10 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
           )}
         </div>
 
-        <DialogFooter className="flex gap-2 sm:gap-2">
+        <DialogFooter className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:justify-end sm:gap-2">
           <Button
             variant="outline"
+            className="w-full sm:w-auto"
             onClick={() => handleExport("csv")}
             disabled={exporting}
           >
@@ -276,7 +280,7 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
             {t("exportCsv")}
           </Button>
           <Button
-            variant="outline"
+            className="w-full sm:w-auto"
             onClick={() => handleExport("json")}
             disabled={exporting}
           >

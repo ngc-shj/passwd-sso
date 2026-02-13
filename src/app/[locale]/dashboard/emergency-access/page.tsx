@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { HeartPulse, Users, Shield } from "lucide-react";
 import { CreateGrantDialog } from "@/components/emergency-access/create-grant-dialog";
 import { GrantCard } from "@/components/emergency-access/grant-card";
+import { Card } from "@/components/ui/card";
 import type { EaStatusValue } from "@/lib/constants";
 import { API_PATH } from "@/lib/constants";
 
@@ -52,74 +53,80 @@ export default function EmergencyAccessPage() {
   const granteeGrants = grants.filter((g) => g.ownerId !== userId);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8 p-4">
-      <div className="flex items-center gap-3">
-        <HeartPulse className="h-6 w-6" />
-        <div>
-          <h1 className="text-2xl font-bold">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground">{t("description")}</p>
-        </div>
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-6">
+        <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
+          <div className="flex items-center gap-3">
+            <HeartPulse className="h-6 w-6" />
+            <div>
+              <h1 className="text-2xl font-bold">{t("title")}</h1>
+              <p className="text-sm text-muted-foreground">{t("description")}</p>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="rounded-xl border bg-card/80 p-4">
+          <section className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Users className="h-5 w-5" />
+                <h2 className="text-lg font-semibold">{t("trustedContacts")}</h2>
+              </div>
+              <CreateGrantDialog onCreated={fetchGrants} />
+            </div>
+            <p className="text-sm text-muted-foreground">{t("trustedContactsDesc")}</p>
+
+            {loading ? (
+              <div className="py-8 text-center text-muted-foreground">...</div>
+            ) : ownerGrants.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-8 text-center">
+                <p className="text-muted-foreground">{t("noGrants")}</p>
+                <p className="text-xs text-muted-foreground">{t("noGrantsDesc")}</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {ownerGrants.map((grant) => (
+                  <GrantCard
+                    key={grant.id}
+                    grant={grant}
+                    currentUserId={userId}
+                    onRefresh={fetchGrants}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        </Card>
+
+        <Card className="rounded-xl border bg-card/80 p-4">
+          <section className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Shield className="h-5 w-5" />
+              <h2 className="text-lg font-semibold">{t("trustedByOthers")}</h2>
+            </div>
+            <p className="text-sm text-muted-foreground">{t("trustedByOthersDesc")}</p>
+
+            {loading ? (
+              <div className="py-8 text-center text-muted-foreground">...</div>
+            ) : granteeGrants.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-8 text-center">
+                <p className="text-muted-foreground">{t("noTrustedBy")}</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {granteeGrants.map((grant) => (
+                  <GrantCard
+                    key={grant.id}
+                    grant={grant}
+                    currentUserId={userId}
+                    onRefresh={fetchGrants}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        </Card>
       </div>
-
-      {/* Owner section: People I trust */}
-      <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            <h2 className="text-lg font-semibold">{t("trustedContacts")}</h2>
-          </div>
-          <CreateGrantDialog onCreated={fetchGrants} />
-        </div>
-        <p className="text-sm text-muted-foreground">{t("trustedContactsDesc")}</p>
-
-        {loading ? (
-          <div className="py-8 text-center text-muted-foreground">...</div>
-        ) : ownerGrants.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-8 text-center">
-            <p className="text-muted-foreground">{t("noGrants")}</p>
-            <p className="text-xs text-muted-foreground">{t("noGrantsDesc")}</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {ownerGrants.map((grant) => (
-              <GrantCard
-                key={grant.id}
-                grant={grant}
-                currentUserId={userId}
-                onRefresh={fetchGrants}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Grantee section: People who trust me */}
-      <section className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Shield className="h-5 w-5" />
-          <h2 className="text-lg font-semibold">{t("trustedByOthers")}</h2>
-        </div>
-        <p className="text-sm text-muted-foreground">{t("trustedByOthersDesc")}</p>
-
-        {loading ? (
-          <div className="py-8 text-center text-muted-foreground">...</div>
-        ) : granteeGrants.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-8 text-center">
-            <p className="text-muted-foreground">{t("noTrustedBy")}</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {granteeGrants.map((grant) => (
-              <GrantCard
-                key={grant.id}
-                grant={grant}
-                currentUserId={userId}
-                onRefresh={fetchGrants}
-              />
-            ))}
-          </div>
-        )}
-      </section>
     </div>
   );
 }

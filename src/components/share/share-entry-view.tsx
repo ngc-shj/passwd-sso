@@ -117,7 +117,7 @@ export function ShareEntryView({
     return (
       <div className="space-y-1">
         <label className="text-sm text-muted-foreground">{t("notes")}</label>
-        <div className="rounded-md bg-muted p-3">
+        <div className="rounded-lg border bg-muted/30 p-3">
           <p className="text-sm whitespace-pre-wrap break-words">
             {String(value)}
           </p>
@@ -195,7 +195,7 @@ export function ShareEntryView({
           <label className="text-sm text-muted-foreground">
             {t("content")}
           </label>
-          <div className="rounded-md bg-muted p-3">
+          <div className="rounded-lg border bg-muted/30 p-3">
             <p className="text-sm whitespace-pre-wrap break-words">
               {String(data.content)}
             </p>
@@ -263,26 +263,29 @@ export function ShareEntryView({
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-      <Card className="max-w-lg w-full p-6 space-y-5">
+    <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background p-4">
+      <div className="mx-auto max-w-4xl py-6">
+      <Card className="w-full space-y-5 rounded-xl border bg-card/80 p-6">
         {/* Header */}
-        <div className="flex items-center gap-3">
-          <div className="text-muted-foreground">
+        <div className="flex items-center gap-3 rounded-lg border bg-muted/20 p-3">
+          <div className="text-muted-foreground shrink-0">
             {ENTRY_TYPE_ICONS[entryType] ?? ENTRY_TYPE_ICONS.LOGIN}
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg font-semibold truncate">
+            <h1 className="text-lg font-semibold truncate tracking-tight">
               {String(data.title || t("sharedEntry"))}
             </h1>
           </div>
-          <Shield className="h-5 w-5 text-muted-foreground" />
+          <Shield className="h-5 w-5 text-muted-foreground shrink-0" />
         </div>
 
         {/* Fields */}
-        <div className="space-y-4">{renderFields()}</div>
+        <div className="space-y-4 rounded-lg border bg-gradient-to-b from-muted/20 to-background p-4">
+          {renderFields()}
+        </div>
 
         {/* Footer metadata */}
-        <div className="border-t pt-3 space-y-1">
+        <div className="border-t pt-3 space-y-1 rounded-lg bg-muted/10 px-3 py-2">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Clock className="h-3.5 w-3.5" />
             <span>
@@ -301,6 +304,7 @@ export function ShareEntryView({
           )}
         </div>
       </Card>
+      </div>
     </div>
   );
 }
