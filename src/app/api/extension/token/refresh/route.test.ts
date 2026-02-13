@@ -7,14 +7,14 @@ const {
   mockValidateExtensionToken,
   mockCheck,
   mockSessionFindFirst,
-  mockExtTokenUpdate,
+  mockExtTokenUpdateMany,
   mockExtTokenCreate,
   mockTransaction,
 } = vi.hoisted(() => ({
   mockValidateExtensionToken: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue(true),
   mockSessionFindFirst: vi.fn(),
-  mockExtTokenUpdate: vi.fn(),
+  mockExtTokenUpdateMany: vi.fn(),
   mockExtTokenCreate: vi.fn(),
   mockTransaction: vi.fn(),
 }));
@@ -27,7 +27,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     session: { findFirst: mockSessionFindFirst },
     extensionToken: {
-      update: mockExtTokenUpdate,
+      updateMany: mockExtTokenUpdateMany,
       create: mockExtTokenCreate,
     },
     $transaction: mockTransaction,
@@ -70,10 +70,10 @@ function validTokenResult(overrides?: Record<string, unknown>) {
 describe("POST /api/extension/token/refresh", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockExtTokenUpdate.mockResolvedValue({});
+    mockExtTokenUpdateMany.mockResolvedValue({ count: 1 });
     mockExtTokenCreate.mockResolvedValue({});
-    mockTransaction.mockImplementation(async (operations: unknown[]) => {
-      return operations;
+    mockTransaction.mockImplementation(async (operations: Promise<unknown>[]) => {
+      return Promise.all(operations);
     });
   });
 
@@ -195,5 +195,21 @@ describe("POST /api/extension/token/refresh", () => {
     const { json } = await parseResponse(res);
 
     expect(json.scope).toEqual(["passwords:read"]);
+  });
+
+  it("returns 401 on concurrent refresh (optimistic lock)", async () => {
+    mockValidateExtensionToken.mockResolvedValue(validTokenResult());
+    mockSessionFindFirst.mockResolvedValue({ id: "session-1" });
+    // updateMany returns count: 0 — already revoked by concurrent request
+    mockExtTokenUpdateMany.mockResolvedValue({ count: 0 });
+
+    const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
+      headers: { Authorization: "Bearer valid-token" },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(401);
+    expect(json.error).toBe("EXTENSION_TOKEN_REVOKED");
   });
 });

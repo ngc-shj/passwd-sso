@@ -85,6 +85,28 @@ describe("session-storage", () => {
       const result = await loadSession();
       expect(result).toBeNull();
     });
+
+    it("returns state without userId (pre-unlock)", async () => {
+      mockStorage.authState = {
+        token: "tok-1",
+        expiresAt: 1700000000000,
+      };
+      const result = await loadSession();
+      expect(result).toEqual({
+        token: "tok-1",
+        expiresAt: 1700000000000,
+      });
+    });
+
+    it("returns null when userId is wrong type", async () => {
+      mockStorage.authState = {
+        token: "tok-1",
+        expiresAt: 1700000000000,
+        userId: 123,
+      };
+      const result = await loadSession();
+      expect(result).toBeNull();
+    });
   });
 
   describe("clearSession", () => {

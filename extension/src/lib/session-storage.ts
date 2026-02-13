@@ -6,7 +6,7 @@
 export interface SessionState {
   token: string;
   expiresAt: number; // ms timestamp
-  userId: string;
+  userId?: string;
 }
 
 const SESSION_KEY = "authState";
@@ -22,9 +22,12 @@ export async function loadSession(): Promise<SessionState | null> {
     !raw ||
     typeof raw !== "object" ||
     typeof raw.token !== "string" ||
-    typeof raw.expiresAt !== "number" ||
-    typeof raw.userId !== "string"
+    typeof raw.expiresAt !== "number"
   ) {
+    return null;
+  }
+  // userId is optional (may not be set before vault unlock)
+  if (raw.userId !== undefined && typeof raw.userId !== "string") {
     return null;
   }
   return raw as SessionState;

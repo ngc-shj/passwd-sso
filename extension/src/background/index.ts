@@ -92,11 +92,11 @@ async function updateBadge(): Promise<void> {
 
 /** Fire-and-forget persist of token state to chrome.storage.session */
 function persistState(): void {
-  if (currentToken && tokenExpiresAt && currentUserId) {
+  if (currentToken && tokenExpiresAt) {
     persistSession({
       token: currentToken,
       expiresAt: tokenExpiresAt,
-      userId: currentUserId,
+      userId: currentUserId ?? undefined,
     }).catch(() => {});
   }
 }
@@ -113,7 +113,7 @@ async function hydrateFromSession(): Promise<void> {
 
   currentToken = state.token;
   tokenExpiresAt = state.expiresAt;
-  currentUserId = state.userId;
+  currentUserId = state.userId ?? null;
 
   // Re-create TTL expiry alarm
   chrome.alarms.create(ALARM_NAME, { when: state.expiresAt });
@@ -165,9 +165,16 @@ async function attemptTokenRefresh(): Promise<void> {
       chrome.alarms.create(ALARM_NAME, { when: newExpiresAt });
       scheduleRefreshAlarm(newExpiresAt);
       persistState();
-    } else {
-      // Server explicitly rejected — token is invalid/revoked
+    } else if (res.status === 401 || res.status === 403 || res.status === 404) {
+      // Permanent rejection — token is invalid/revoked/session gone
       clearToken();
+    } else {
+      // Transient error (429, 5xx) — retry if enough TTL remains
+      if (tokenExpiresAt && tokenExpiresAt - Date.now() > 60_000) {
+        chrome.alarms.create(REFRESH_ALARM, {
+          delayInMinutes: 1,
+        });
+      }
     }
   } catch {
     // Network error — keep current token, retry if enough TTL remains

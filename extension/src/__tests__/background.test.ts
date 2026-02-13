@@ -742,6 +742,63 @@ describe("token refresh alarm", () => {
     );
   });
 
+  it("retries on transient server error (500) instead of clearing token", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/api/extension/token/refresh")) {
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({ error: "INTERNAL_SERVER_ERROR" }),
+          };
+        }
+        if (url.includes("/api/vault/unlock/data")) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      })
+    );
+
+    await loadBackground();
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "tok",
+      expiresAt: Date.now() + 600_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    chromeMock?.alarms.create.mockClear();
+
+    const handler = alarmHandlers[0];
+    handler({ name: "extension-token-refresh" });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Token should still be valid (not cleared on transient error)
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({ hasToken: true })
+    );
+
+    // Should schedule a retry
+    expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
+      "extension-token-refresh",
+      expect.objectContaining({ delayInMinutes: 1 })
+    );
+  });
+
   it("retries on network error if TTL remains", async () => {
     vi.stubGlobal(
       "fetch",

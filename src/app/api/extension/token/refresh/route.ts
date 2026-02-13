@@ -54,16 +54,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Atomic: revoke old, create new
+  // Atomic: revoke old (with optimistic lock), create new
   const now = new Date();
   const expiresAt = new Date(now.getTime() + EXTENSION_TOKEN_TTL_MS);
   const plaintext = generateShareToken();
   const newTokenHash = hashToken(plaintext);
   const scopeCsv = scopes.join(",");
 
-  await prisma.$transaction([
-    prisma.extensionToken.update({
-      where: { id: tokenId },
+  const [revoked] = await prisma.$transaction([
+    prisma.extensionToken.updateMany({
+      where: { id: tokenId, revokedAt: null, expiresAt: { gt: now } },
       data: { revokedAt: now },
     }),
     prisma.extensionToken.create({
@@ -75,6 +75,14 @@ export async function POST(req: NextRequest) {
       },
     }),
   ]);
+
+  // Concurrent refresh already revoked this token — reject
+  if ((revoked as { count: number }).count === 0) {
+    return NextResponse.json(
+      { error: API_ERROR.EXTENSION_TOKEN_REVOKED },
+      { status: 401 },
+    );
+  }
 
   return NextResponse.json({
     token: plaintext,
