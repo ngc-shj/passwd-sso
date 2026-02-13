@@ -4,6 +4,8 @@ import { API_PATH, apiPath } from "@/lib/constants";
 describe("API_PATH", () => {
   it("keeps core paths stable", () => {
     expect(API_PATH.EXTENSION_TOKEN).toBe("/api/extension/token");
+    expect(API_PATH.PASSWORDS).toBe("/api/passwords");
+    expect(API_PATH.PASSWORDS_GENERATE).toBe("/api/passwords/generate");
     expect(API_PATH.SHARE_LINKS).toBe("/api/share-links");
     expect(API_PATH.SHARE_LINKS_MINE).toBe("/api/share-links/mine");
     expect(API_PATH.AUDIT_LOGS_EXPORT).toBe("/api/audit-logs/export");
@@ -29,6 +31,17 @@ describe("API_PATH", () => {
     expect(apiPath.shareLinkById("share-1")).toBe("/api/share-links/share-1");
     expect(apiPath.shareLinkAccessLogs("share-1")).toBe(
       "/api/share-links/share-1/access-logs"
+    );
+  });
+
+  it("builds password paths", () => {
+    expect(apiPath.passwordById("pw-1")).toBe("/api/passwords/pw-1");
+    expect(apiPath.passwordRestore("pw-1")).toBe("/api/passwords/pw-1/restore");
+    expect(apiPath.passwordAttachments("pw-1")).toBe(
+      "/api/passwords/pw-1/attachments"
+    );
+    expect(apiPath.passwordAttachmentById("pw-1", "att-1")).toBe(
+      "/api/passwords/pw-1/attachments/att-1"
     );
   });
 });

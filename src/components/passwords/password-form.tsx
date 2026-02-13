@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Eye, EyeOff, Loader2, ArrowLeft, Dices, Plus, X, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
+import { API_PATH, CUSTOM_FIELD_TYPE, apiPath } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
 
 export interface CustomField {
@@ -162,8 +162,8 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
 
       const endpoint =
         mode === "create"
-          ? "/api/passwords"
-          : `/api/passwords/${initialData!.id}`;
+          ? API_PATH.PASSWORDS
+          : apiPath.passwordById(initialData!.id);
       const method = mode === "create" ? "POST" : "PUT";
 
       const res = await fetch(endpoint, {

@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Upload, Loader2, FileUp, CheckCircle2, AlertCircle, Lock } from "lucide-react";
 import { toast } from "sonner";
-import { ENTRY_TYPE } from "@/lib/constants";
+import { API_PATH, ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 // ─── CSV Parsing ────────────────────────────────────────────
@@ -596,7 +596,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
         const encryptedBlob = await encryptData(fullBlob, encryptionKey, aad);
         const encryptedOverview = await encryptData(overviewBlob, encryptionKey, aad);
 
-        const res = await fetch("/api/passwords", {
+        const res = await fetch(API_PATH.PASSWORDS, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

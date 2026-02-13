@@ -15,6 +15,7 @@ import {
 import type { TagData } from "@/components/tags/tag-input";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import { Loader2 } from "lucide-react";
+import { apiPath } from "@/lib/constants";
 
 interface VaultEntryFull {
   title: string;
@@ -56,7 +57,7 @@ export default function EditPasswordPage() {
 
     async function load() {
       try {
-        const res = await fetch(`/api/passwords/${id}`);
+        const res = await fetch(apiPath.passwordById(id));
         if (!res.ok) throw new Error(t("notFound"));
         const raw = await res.json();
 

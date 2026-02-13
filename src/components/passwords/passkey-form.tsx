@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { Loader2, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
-import { ENTRY_TYPE } from "@/lib/constants";
+import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 
 interface PasskeyFormProps {
   mode: "create" | "edit";
@@ -102,8 +102,8 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
 
       const endpoint =
         mode === "create"
-          ? "/api/passwords"
-          : `/api/passwords/${initialData!.id}`;
+          ? API_PATH.PASSWORDS
+          : apiPath.passwordById(initialData!.id);
       const method = mode === "create" ? "POST" : "PUT";
 
       const res = await fetch(endpoint, {

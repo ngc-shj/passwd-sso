@@ -25,7 +25,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";
-import { ENTRY_TYPE } from "@/lib/constants";
+import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 interface VaultEntryFull {
@@ -134,7 +134,7 @@ export function PasswordEditDialog({
 
     async function load() {
       try {
-        const res = await fetch(`/api/passwords/${id}`);
+        const res = await fetch(apiPath.passwordById(id));
         if (!res.ok) throw new Error(td("notFound"));
         const raw = await res.json();
 
@@ -150,7 +150,7 @@ export function PasswordEditDialog({
 
         const [tagsRes, attachRes] = await Promise.all([
           fetch("/api/tags"),
-          fetch(`/api/passwords/${id}/attachments`),
+          fetch(apiPath.passwordAttachments(id)),
         ]);
         const allTags: TagData[] = tagsRes.ok ? await tagsRes.json() : [];
         const tagIdsSet = new Set<string>(raw.tagIds ?? []);

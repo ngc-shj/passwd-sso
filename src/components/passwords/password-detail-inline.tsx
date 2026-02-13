@@ -14,6 +14,7 @@ import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
+import { apiPath } from "@/lib/constants";
 import {
   Edit,
   Eye,
@@ -106,7 +107,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
       try {
         const url = orgId
           ? `/api/orgs/${orgId}/passwords/${data.id}/attachments`
-          : `/api/passwords/${data.id}/attachments`;
+          : apiPath.passwordAttachments(data.id);
         const res = await fetch(url);
         if (res.ok && !cancelled) {
           const loaded = await res.json();

@@ -100,7 +100,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
 
     try {
       // 1. Fetch personal entries (E2E encrypted, decrypt client-side)
-      const res = await fetch("/api/passwords?include=blob");
+      const res = await fetch(`${API_PATH.PASSWORDS}?include=blob`);
       if (!res.ok) throw new Error("Failed to fetch");
       const rawEntries = await res.json();
 
