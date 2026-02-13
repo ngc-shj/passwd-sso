@@ -100,6 +100,10 @@ cp .env.example .env.local
 | `SAML_PROVIDER_NAME` | サインインページの表示名（例: "HENNGE"） |
 | `ORG_MASTER_KEY` | 組織 Vault マスターキー — `openssl rand -hex 32` |
 | `REDIS_URL` | レート制限用 Redis URL（本番必須） |
+| `BLOB_BACKEND` | 添付ファイルの保存先バックエンド（`db` / `s3` / `azure` / `gcs`） |
+| `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | `BLOB_BACKEND=s3` の場合に必須 |
+| `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` | `BLOB_BACKEND=azure` の場合に必須 |
+| `GCS_ATTACHMENTS_BUCKET` | `BLOB_BACKEND=gcs` の場合に必須 |
 
 > **Redis は本番必須です。** 開発/テスト環境では `REDIS_URL` 未設定時に in-memory フォールバックを利用できます。
 
