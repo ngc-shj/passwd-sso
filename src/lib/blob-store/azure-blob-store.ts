@@ -2,6 +2,7 @@ import {
   BLOB_STORAGE,
   type AttachmentBlobStore,
 } from "@/lib/blob-store/types";
+import { loadCloudBlobConfig } from "@/lib/blob-store/config";
 
 /**
  * Transitional adapter:
@@ -11,11 +12,7 @@ import {
 export const azureBlobStore: AttachmentBlobStore = {
   backend: BLOB_STORAGE.AZURE,
   validateConfig() {
-    if (!process.env.AZURE_STORAGE_ACCOUNT || !process.env.AZURE_BLOB_CONTAINER) {
-      throw new Error(
-        "Azure backend requires AZURE_STORAGE_ACCOUNT and AZURE_BLOB_CONTAINER",
-      );
-    }
+    loadCloudBlobConfig(BLOB_STORAGE.AZURE);
   },
   toStored(data) {
     return data instanceof Uint8Array ? data : new Uint8Array(data);

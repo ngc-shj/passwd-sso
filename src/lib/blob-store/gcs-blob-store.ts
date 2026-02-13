@@ -2,6 +2,7 @@ import {
   BLOB_STORAGE,
   type AttachmentBlobStore,
 } from "@/lib/blob-store/types";
+import { loadCloudBlobConfig } from "@/lib/blob-store/config";
 
 /**
  * Transitional adapter:
@@ -11,9 +12,7 @@ import {
 export const gcsBlobStore: AttachmentBlobStore = {
   backend: BLOB_STORAGE.GCS,
   validateConfig() {
-    if (!process.env.GCS_ATTACHMENTS_BUCKET) {
-      throw new Error("GCS backend requires GCS_ATTACHMENTS_BUCKET");
-    }
+    loadCloudBlobConfig(BLOB_STORAGE.GCS);
   },
   toStored(data) {
     return data instanceof Uint8Array ? data : new Uint8Array(data);
