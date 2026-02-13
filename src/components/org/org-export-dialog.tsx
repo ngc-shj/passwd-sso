@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Download, Loader2, AlertTriangle, Lock } from "lucide-react";
+import { API_PATH } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
@@ -157,7 +158,7 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
       URL.revokeObjectURL(url);
 
       // Fire-and-forget audit log
-      fetch("/api/audit-logs/export", {
+      fetch(API_PATH.AUDIT_LOGS_EXPORT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orgId, entryCount: entries.length, format }),

@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react";
-import { ENTRY_TYPE } from "@/lib/constants";
+import { API_PATH, ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 type ExportFormat = "csv" | "json";
@@ -237,7 +237,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
       URL.revokeObjectURL(url);
 
       // Fire-and-forget audit log
-      fetch("/api/audit-logs/export", {
+      fetch(API_PATH.AUDIT_LOGS_EXPORT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ entryCount: entries.length, format }),

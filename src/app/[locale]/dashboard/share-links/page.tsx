@@ -29,6 +29,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
+import { API_PATH, apiPath, ENTRY_TYPE } from "@/lib/constants";
 
 interface ShareLinkItem {
   id: string;
@@ -46,10 +47,10 @@ interface ShareLinkItem {
 }
 
 const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
-  LOGIN: <KeyRound className="h-4 w-4" />,
-  SECURE_NOTE: <FileText className="h-4 w-4" />,
-  CREDIT_CARD: <CreditCard className="h-4 w-4" />,
-  IDENTITY: <IdCard className="h-4 w-4" />,
+  [ENTRY_TYPE.LOGIN]: <KeyRound className="h-4 w-4" />,
+  [ENTRY_TYPE.SECURE_NOTE]: <FileText className="h-4 w-4" />,
+  [ENTRY_TYPE.CREDIT_CARD]: <CreditCard className="h-4 w-4" />,
+  [ENTRY_TYPE.IDENTITY]: <IdCard className="h-4 w-4" />,
 };
 
 export default function ShareLinksPage() {
@@ -74,7 +75,7 @@ export default function ShareLinksPage() {
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (cursor) params.set("cursor", cursor);
 
-      const res = await fetch(`/api/share-links/mine?${params.toString()}`);
+      const res = await fetch(`${API_PATH.SHARE_LINKS_MINE}?${params.toString()}`);
       if (!res.ok) return null;
       return res.json();
     },
@@ -107,7 +108,7 @@ export default function ShareLinksPage() {
     async (shareId: string, cursor?: string | null) => {
       setLoadingLogs(true);
       try {
-        const url = `/api/share-links/${shareId}/access-logs${cursor ? `?cursor=${cursor}` : ""}`;
+        const url = `${apiPath.shareLinkAccessLogs(shareId)}${cursor ? `?cursor=${cursor}` : ""}`;
         const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();
@@ -141,7 +142,7 @@ export default function ShareLinksPage() {
   const handleRevoke = async (id: string) => {
     setRevokingId(id);
     try {
-      const res = await fetch(`/api/share-links/${id}`, { method: "DELETE" });
+      const res = await fetch(apiPath.shareLinkById(id), { method: "DELETE" });
       if (res.ok) {
         toast.success(tShare("revokeSuccess"));
         // Update in-place

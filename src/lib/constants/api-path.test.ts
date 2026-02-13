@@ -4,6 +4,9 @@ import { API_PATH, apiPath } from "@/lib/constants";
 describe("API_PATH", () => {
   it("keeps core paths stable", () => {
     expect(API_PATH.EXTENSION_TOKEN).toBe("/api/extension/token");
+    expect(API_PATH.SHARE_LINKS).toBe("/api/share-links");
+    expect(API_PATH.SHARE_LINKS_MINE).toBe("/api/share-links/mine");
+    expect(API_PATH.AUDIT_LOGS_EXPORT).toBe("/api/audit-logs/export");
     expect(API_PATH.VAULT_STATUS).toBe("/api/vault/status");
     expect(API_PATH.VAULT_SETUP).toBe("/api/vault/setup");
     expect(API_PATH.VAULT_UNLOCK_DATA).toBe("/api/vault/unlock/data");
@@ -19,6 +22,13 @@ describe("API_PATH", () => {
   it("builds emergency confirm path", () => {
     expect(apiPath.emergencyConfirm("grant-1")).toBe(
       "/api/emergency-access/grant-1/confirm"
+    );
+  });
+
+  it("builds share link paths", () => {
+    expect(apiPath.shareLinkById("share-1")).toBe("/api/share-links/share-1");
+    expect(apiPath.shareLinkAccessLogs("share-1")).toBe(
+      "/api/share-links/share-1/access-logs"
     );
   });
 });
