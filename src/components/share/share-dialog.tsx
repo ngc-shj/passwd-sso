@@ -207,7 +207,7 @@ export function ShareDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <LinkIcon className="h-5 w-5" />
@@ -218,7 +218,7 @@ export function ShareDialog({
 
         {/* Warning for personal entries */}
         {passwordEntryId && (
-          <div className="flex items-start gap-2 rounded-md bg-amber-50 dark:bg-amber-950/30 p-3 text-sm">
+          <div className="flex items-start gap-2 rounded-xl border border-amber-200/60 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm">
             <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
             <p className="text-amber-700 dark:text-amber-400">
               {t("personalShareWarning")}
@@ -228,12 +228,12 @@ export function ShareDialog({
 
         {/* Created URL display */}
         {createdUrl ? (
-          <div className="space-y-3">
-            <div className="space-y-1">
+          <div className="space-y-3 rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
+            <div className="space-y-2">
               <Label className="text-xs">{t("shareUrl")}</Label>
               <div className="flex items-center gap-2">
                 <Input value={createdUrl} readOnly className="font-mono text-xs" />
-                <Button variant="outline" size="icon" onClick={handleCopyUrl}>
+                <Button variant="outline" size="icon" className="h-9 w-9" onClick={handleCopyUrl}>
                   {copied ? (
                     <Check className="h-4 w-4 text-green-500" />
                   ) : (
@@ -242,18 +242,14 @@ export function ShareDialog({
                 </Button>
               </div>
             </div>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => setCreatedUrl(null)}
-            >
+            <Button variant="outline" className="w-full" onClick={() => setCreatedUrl(null)}>
               {t("createAnother")}
             </Button>
           </div>
         ) : (
-          <>
+          <div className="space-y-4 rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
             {/* Expiry */}
-            <div className="space-y-1">
+            <div className="space-y-2">
               <Label className="text-xs">{t("expiresInLabel")}</Label>
               <Select value={expiresIn} onValueChange={setExpiresIn}>
                 <SelectTrigger>
@@ -270,7 +266,7 @@ export function ShareDialog({
             </div>
 
             {/* Max views */}
-            <div className="space-y-1">
+            <div className="space-y-2">
               <Label className="text-xs">{t("maxViewsLabel")}</Label>
               <Input
                 type="number"
@@ -282,29 +278,29 @@ export function ShareDialog({
               />
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="pt-1">
               <Button onClick={handleCreate} disabled={creating}>
                 {creating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 {t("create")}
               </Button>
             </DialogFooter>
-          </>
+          </div>
         )}
 
         {/* Existing links */}
         {links.length > 0 && (
-          <div className="border-t pt-3 space-y-2">
-            <h3 className="text-sm font-medium">{t("existingLinks")}</h3>
+          <div className="border-t pt-4 space-y-3">
+            <h3 className="text-sm font-medium tracking-tight">{t("existingLinks")}</h3>
             {loadingLinks ? (
               <div className="flex justify-center py-2">
                 <Loader2 className="h-4 w-4 animate-spin" />
               </div>
             ) : (
               links.map((link) => (
-                <div key={link.id} className="rounded-md border text-xs">
-                  <div className="flex items-center justify-between p-2">
-                    <div className="space-y-0.5">
-                      <p className="text-muted-foreground">
+                <div key={link.id} className="rounded-xl border bg-card text-xs">
+                  <div className="flex items-center justify-between p-3">
+                    <div className="space-y-1">
+                      <p className="text-muted-foreground leading-none">
                         {new Date(link.createdAt).toLocaleString()}
                       </p>
                       <p className="text-muted-foreground">
@@ -316,7 +312,7 @@ export function ShareDialog({
                           : `${link.viewCount} ${t("views")}`}
                       </p>
                       {!link.isActive && (
-                        <p className="text-destructive font-medium">
+                        <p className="inline-flex rounded-full bg-destructive/10 px-2 py-0.5 text-destructive font-medium">
                           {link.revokedAt ? t("revoked") : t("expired")}
                         </p>
                       )}
@@ -355,7 +351,7 @@ export function ShareDialog({
                   </div>
                   {/* Access logs */}
                   {expandedLogId === link.id && (
-                    <div className="border-t px-2 py-1.5 space-y-1">
+                    <div className="border-t px-3 py-2 space-y-1.5">
                       <p className="font-medium text-muted-foreground">
                         {t("accessLogs")}
                       </p>
