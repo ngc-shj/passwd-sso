@@ -6,6 +6,7 @@ import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { unwrapOrgKey, encryptServerBinary } from "@/lib/crypto-server";
 import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto-aad";
+import { getAttachmentBlobStore } from "@/lib/blob-store";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -192,6 +193,7 @@ export async function POST(
   const attachmentId = crypto.randomUUID();
   const aad = Buffer.from(buildAttachmentAAD(id, attachmentId));
   const encrypted = encryptServerBinary(plainBuffer, orgKey, aad);
+  const blobStore = getAttachmentBlobStore();
 
   const attachment = await prisma.attachment.create({
     data: {
@@ -199,7 +201,7 @@ export async function POST(
       filename: sanitizedFilename,
       contentType,
       sizeBytes: file.size,
-      encryptedData: new Uint8Array(encrypted.ciphertext),
+      encryptedData: blobStore.toStored(encrypted.ciphertext),
       iv: encrypted.iv,
       authTag: encrypted.authTag,
       aadVersion: AAD_VERSION,

@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { getAttachmentBlobStore } from "@/lib/blob-store";
 
 type RouteContext = {
   params: Promise<{ id: string; attachmentId: string }>;
@@ -40,13 +41,14 @@ export async function GET(
     return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
   }
 
+  const blobStore = getAttachmentBlobStore();
   // Return encrypted data + crypto metadata for client-side decryption
   return NextResponse.json({
     id: attachment.id,
     filename: attachment.filename,
     contentType: attachment.contentType,
     sizeBytes: attachment.sizeBytes,
-    encryptedData: Buffer.from(attachment.encryptedData).toString("base64"),
+    encryptedData: blobStore.toBase64(attachment.encryptedData),
     iv: attachment.iv,
     authTag: attachment.authTag,
     keyVersion: attachment.keyVersion,

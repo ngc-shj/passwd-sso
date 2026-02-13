@@ -9,6 +9,7 @@ import {
   MAX_ATTACHMENTS_PER_ENTRY,
 } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { getAttachmentBlobStore } from "@/lib/blob-store";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -173,6 +174,7 @@ export async function POST(
     );
   }
 
+  const blobStore = getAttachmentBlobStore();
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 0;
   const attachment = await prisma.attachment.create({
     data: {
@@ -180,7 +182,7 @@ export async function POST(
       filename: sanitizedFilename,
       contentType,
       sizeBytes: originalSize,
-      encryptedData: buffer,
+      encryptedData: blobStore.toStored(buffer),
       iv,
       authTag,
       keyVersion: keyVersion ? parseInt(keyVersion, 10) : null,
