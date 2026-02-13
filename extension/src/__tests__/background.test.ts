@@ -6,6 +6,9 @@ import {
   EXT_ENTRY_TYPE,
   SESSION_KEY,
 } from "../lib/constants";
+import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
+
+const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
 
 const cryptoMocks = vi.hoisted(() => ({
   deriveWrappingKey: vi.fn().mockResolvedValue("wrap-key"),
@@ -124,7 +127,7 @@ describe("background message flow", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url.includes("/api/extension/token/refresh")) {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
           return {
             ok: true,
             json: async () => ({
@@ -134,7 +137,7 @@ describe("background message flow", () => {
             }),
           };
         }
-        if (url.includes("/api/vault/unlock/data")) {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
             json: async () => ({
@@ -147,7 +150,7 @@ describe("background message flow", () => {
             }),
           };
         }
-        if (url.includes("/api/passwords/")) {
+        if (url.includes(PASSWORD_BY_ID_PREFIX)) {
           return {
             ok: true,
             json: async () => ({
@@ -158,7 +161,7 @@ describe("background message flow", () => {
             }),
           };
         }
-        if (url.includes("/api/passwords")) {
+        if (url.includes(EXT_API_PATH.PASSWORDS)) {
           return {
             ok: true,
             json: async () => [
@@ -372,7 +375,7 @@ describe("background message flow", () => {
 
   it("returns error when COPY_PASSWORD fetch fails", async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url.includes("/api/extension/token/refresh")) {
+      if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
         return {
           ok: true,
           json: async () => ({
@@ -382,7 +385,7 @@ describe("background message flow", () => {
           }),
         };
       }
-      if (url.includes("/api/vault/unlock/data")) {
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
         return {
           ok: true,
           json: async () => ({
@@ -443,7 +446,7 @@ describe("background message flow", () => {
 
   it("returns error when AUTOFILL fetch fails", async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url.includes("/api/extension/token/refresh")) {
+      if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
         return {
           ok: true,
           json: async () => ({
@@ -453,7 +456,7 @@ describe("background message flow", () => {
           }),
         };
       }
-      if (url.includes("/api/vault/unlock/data")) {
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
         return {
           ok: true,
           json: async () => ({
@@ -510,7 +513,7 @@ describe("session persistence", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url.includes("/api/vault/unlock/data")) {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
             json: async () => ({
@@ -523,7 +526,7 @@ describe("session persistence", () => {
             }),
           };
         }
-        if (url.includes("/api/passwords")) {
+        if (url.includes(EXT_API_PATH.PASSWORDS)) {
           return {
             ok: true,
             json: async () => [],
@@ -646,7 +649,7 @@ describe("token refresh alarm", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url.includes("/api/extension/token/refresh")) {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
           return {
             ok: true,
             json: async () => ({
@@ -656,7 +659,7 @@ describe("token refresh alarm", () => {
             }),
           };
         }
-        if (url.includes("/api/vault/unlock/data")) {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
             json: async () => ({
@@ -703,14 +706,14 @@ describe("token refresh alarm", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url.includes("/api/extension/token/refresh")) {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
           return {
             ok: false,
             status: 401,
             json: async () => ({ error: "UNAUTHORIZED" }),
           };
         }
-        if (url.includes("/api/vault/unlock/data")) {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
             json: async () => ({
@@ -753,14 +756,14 @@ describe("token refresh alarm", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url.includes("/api/extension/token/refresh")) {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
           return {
             ok: false,
             status: 500,
             json: async () => ({ error: "INTERNAL_SERVER_ERROR" }),
           };
         }
-        if (url.includes("/api/vault/unlock/data")) {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
             json: async () => ({
@@ -810,10 +813,10 @@ describe("token refresh alarm", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url.includes("/api/extension/token/refresh")) {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
           throw new Error("NetworkError");
         }
-        if (url.includes("/api/vault/unlock/data")) {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
             json: async () => ({
