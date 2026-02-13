@@ -7,15 +7,29 @@ import { MatchList } from "./components/MatchList";
 
 type AppState = "loading" | "not_logged_in" | "logged_in" | "vault_unlocked";
 
+async function checkHostPermission(url: string): Promise<boolean> {
+  try {
+    const origin = new URL(url).origin;
+    return await chrome.permissions.contains({ origins: [`${origin}/*`] });
+  } catch {
+    return true; // non-http URLs — don't show button
+  }
+}
+
 export function App() {
   const [state, setState] = useState<AppState>("loading");
   const [tabUrl, setTabUrl] = useState<string | null>(null);
+  const [hasHostPermission, setHasHostPermission] = useState(true);
 
   useEffect(() => {
     chrome.tabs
       .query({ active: true, currentWindow: true })
       .then((tabs) => {
-        setTabUrl(tabs[0]?.url ?? null);
+        const url = tabs[0]?.url ?? null;
+        setTabUrl(url);
+        if (url) {
+          checkHostPermission(url).then(setHasHostPermission).catch(() => {});
+        }
       })
       .catch(() => {
         setTabUrl(null);
@@ -56,7 +70,28 @@ export function App() {
           <VaultUnlock onUnlocked={() => setState("vault_unlocked")} />
         )}
         {state === "vault_unlocked" && (
-          <MatchList tabUrl={tabUrl} onLock={() => setState("logged_in")} />
+          <>
+            {!hasHostPermission && tabUrl && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const origin = new URL(tabUrl).origin;
+                    const granted = await chrome.permissions.request({
+                      origins: [`${origin}/*`],
+                    });
+                    if (granted) setHasHostPermission(true);
+                  } catch {
+                    // ignore
+                  }
+                }}
+                className="mb-3 w-full px-3 py-2 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+              >
+                {t("popup.enableAutofill")}
+              </button>
+            )}
+            <MatchList tabUrl={tabUrl} onLock={() => setState("logged_in")} />
+          </>
         )}
       </main>
     </div>

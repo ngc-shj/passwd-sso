@@ -23,7 +23,9 @@
     "fill": "Fill",
     "copy": "Copy",
     "autofillSent": "Autofill sent",
-    "passwordCopied": "Password copied"
+    "passwordCopied": "Password copied",
+    "enableAutofill": "Enable autofill for this site",
+    "autofillEnabled": "Autofill enabled for this site"
   },
   "options": {
     "title": "Settings",
@@ -34,7 +36,14 @@
     "autoLock": "Auto-lock (minutes)",
     "never": "Never",
     "save": "Save",
-    "saved": "Saved!"
+    "saved": "Saved!",
+    "enableAutofillAll": "Enable autofill on all sites",
+    "enableAutofillAllDescription": "Allow the extension to detect login forms on all HTTPS sites."
+  },
+  "contentScript": {
+    "vaultLocked": "Vault is locked",
+    "noMatches": "No matches for this site",
+    "logins": "Logins"
   },
   "errors": {
     "invalidPassphrase": "Passphrase is incorrect.",

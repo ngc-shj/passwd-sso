@@ -23,7 +23,9 @@
     "fill": "入力",
     "copy": "コピー",
     "autofillSent": "自動入力を送信しました",
-    "passwordCopied": "パスワードをコピーしました"
+    "passwordCopied": "パスワードをコピーしました",
+    "enableAutofill": "このサイトで自動入力を有効にする",
+    "autofillEnabled": "このサイトで自動入力が有効です"
   },
   "options": {
     "title": "設定",
@@ -34,7 +36,14 @@
     "autoLock": "自動ロック（分）",
     "never": "しない",
     "save": "保存",
-    "saved": "保存しました"
+    "saved": "保存しました",
+    "enableAutofillAll": "全サイトで自動入力を有効にする",
+    "enableAutofillAllDescription": "すべての HTTPS サイトでログインフォームの検出を許可します。"
+  },
+  "contentScript": {
+    "vaultLocked": "保管庫がロックされています",
+    "noMatches": "一致するエントリがありません",
+    "logins": "ログイン候補"
   },
   "errors": {
     "invalidPassphrase": "パスフレーズが正しくありません。",

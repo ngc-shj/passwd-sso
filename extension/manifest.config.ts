@@ -6,7 +6,7 @@ export default defineManifest({
   version: "0.1.0",
   description: "Browser extension for passwd-sso password manager",
   permissions: ["storage", "alarms", "activeTab", "scripting"],
-  optional_host_permissions: ["https://*/*"],
+  optional_host_permissions: ["https://*/*", "http://localhost/*"],
   background: {
     service_worker: "src/background/index.ts",
     type: "module",
@@ -39,6 +39,13 @@ export default defineManifest({
       description: "Autofill current page",
     },
   },
+  content_scripts: [
+    {
+      matches: ["https://*/*", "http://localhost/*"],
+      js: ["src/content/form-detector.ts"],
+      run_at: "document_idle",
+    },
+  ],
   web_accessible_resources: [
     {
       resources: ["src/content/autofill.js", "src/content/token-bridge.js"],

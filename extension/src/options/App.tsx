@@ -26,12 +26,17 @@ export function App() {
   const [autoLockMinutes, setAutoLockMinutes] = useState(15);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [autofillAllEnabled, setAutofillAllEnabled] = useState(false);
 
   useEffect(() => {
     getSettings().then((s: StorageSchema) => {
       setServerUrl(s.serverUrl);
       setAutoLockMinutes(s.autoLockMinutes);
     });
+    chrome.permissions
+      .contains({ origins: ["https://*/*"] })
+      .then(setAutofillAllEnabled)
+      .catch(() => {});
   }, []);
 
   const handleSave = async () => {
@@ -63,13 +68,13 @@ export function App() {
   };
 
   return (
-    <div className="min-h-[520px] bg-white text-gray-900 p-5">
-      <header className="mb-6">
+    <div className="bg-white text-gray-900 p-5">
+      <header className="mb-4">
         <h1 className="text-xl font-semibold">{t("options.title")}</h1>
         <p className="text-sm text-gray-500">{t("options.description")}</p>
       </header>
 
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-4">
         <label className="flex flex-col gap-2">
           <span className="text-sm font-medium text-gray-700">{t("options.serverUrl")}</span>
           <input
@@ -102,15 +107,56 @@ export function App() {
           </select>
         </label>
 
-        {error && <p className="text-sm text-red-600">{humanizeError(error)}</p>}
-        {saved && <p className="text-sm text-green-600">{t("options.saved")}</p>}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <span className="text-sm font-medium text-gray-700">
+              {t("options.enableAutofillAll")}
+            </span>
+            <p className="text-xs text-gray-500">
+              {t("options.enableAutofillAllDescription")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              if (autofillAllEnabled) {
+                const removed = await chrome.permissions.remove({
+                  origins: ["https://*/*"],
+                });
+                if (removed) setAutofillAllEnabled(false);
+              } else {
+                const granted = await chrome.permissions.request({
+                  origins: ["https://*/*"],
+                });
+                setAutofillAllEnabled(granted);
+              }
+            }}
+            className={`relative flex-shrink-0 inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              autofillAllEnabled ? "bg-blue-600" : "bg-gray-300"
+            }`}
+            role="switch"
+            aria-checked={autofillAllEnabled}
+            aria-label={t("options.enableAutofillAll")}
+          >
+            <span
+              className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
+                autofillAllEnabled ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
+        </div>
 
-        <button
-          onClick={handleSave}
-          className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors"
-        >
-          {t("options.save")}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleSave}
+            className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors"
+          >
+            {t("options.save")}
+          </button>
+          {error && <span className="text-sm text-red-600">{humanizeError(error)}</span>}
+          {saved && <span className="text-sm text-green-600">{t("options.saved")}</span>}
+        </div>
       </div>
     </div>
   );

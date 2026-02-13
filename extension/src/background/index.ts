@@ -25,6 +25,30 @@ let currentUserId: string | null = null;
 const ALARM_NAME = "extension-token-ttl";
 const VAULT_ALARM = "vault-auto-lock";
 const TOKEN_BRIDGE_SCRIPT_ID = "token-bridge";
+const CACHE_TTL_MS = 60_000; // 1 minute
+
+// ── Entry cache (TTL-based) ─────────────────────────────────
+
+let cachedEntries: DecryptedEntry[] | null = null;
+let cacheTimestamp = 0;
+
+function invalidateCache(): void {
+  cachedEntries = null;
+  cacheTimestamp = 0;
+}
+
+async function getCachedEntries(): Promise<DecryptedEntry[]> {
+  if (cachedEntries && Date.now() - cacheTimestamp < CACHE_TTL_MS) {
+    return cachedEntries;
+  }
+  const res = await swFetch("/api/passwords");
+  if (!res.ok) return [];
+  const raw = (await res.json()) as RawEntry[];
+  const entries = await decryptOverviews(raw);
+  cachedEntries = entries;
+  cacheTimestamp = Date.now();
+  return entries;
+}
 
 /** Securely clear token from memory */
 function clearToken(): void {
@@ -37,6 +61,7 @@ function clearToken(): void {
 function clearVault(): void {
   encryptionKey = null;
   currentUserId = null;
+  invalidateCache();
   chrome.alarms.clear(VAULT_ALARM);
   void updateBadge();
 }
@@ -123,10 +148,7 @@ chrome.commands.onCommand.addListener(async (command) => {
   const tabHost = extractHost(tab.url);
   if (!tabHost) return;
 
-  const res = await swFetch("/api/passwords");
-  if (!res.ok) return;
-  const raw = (await res.json()) as RawEntry[];
-  const entries = await decryptOverviews(raw);
+  const entries = await getCachedEntries();
   const match = entries.find(
     (e) => e.entryType === "LOGIN" && e.urlHost && isHostMatch(e.urlHost, tabHost)
   );
@@ -529,6 +551,94 @@ chrome.runtime.onMessage.addListener(
           } catch (err) {
             sendResponse({
               type: "AUTOFILL",
+              ok: false,
+              error: err instanceof Error ? err.message : "AUTOFILL_FAILED",
+            });
+          }
+        })();
+
+        return true;
+      }
+
+      case "GET_MATCHES_FOR_URL": {
+        const vaultLocked = !encryptionKey || !currentUserId;
+        if (vaultLocked || !currentToken) {
+          sendResponse({
+            type: "GET_MATCHES_FOR_URL",
+            entries: [],
+            vaultLocked: true,
+          });
+          break;
+        }
+
+        (async () => {
+          try {
+            const tabHost = extractHost(message.url);
+            if (!tabHost) {
+              sendResponse({
+                type: "GET_MATCHES_FOR_URL",
+                entries: [],
+                vaultLocked: false,
+              });
+              return;
+            }
+            const entries = await getCachedEntries();
+            const matches = entries.filter(
+              (e) =>
+                e.entryType === "LOGIN" &&
+                e.urlHost &&
+                isHostMatch(e.urlHost, tabHost),
+            );
+            sendResponse({
+              type: "GET_MATCHES_FOR_URL",
+              entries: matches,
+              vaultLocked: false,
+            });
+          } catch {
+            sendResponse({
+              type: "GET_MATCHES_FOR_URL",
+              entries: [],
+              vaultLocked: false,
+            });
+          }
+        })();
+
+        return true;
+      }
+
+      case "AUTOFILL_FROM_CONTENT": {
+        if (!encryptionKey || !currentUserId) {
+          sendResponse({
+            type: "AUTOFILL_FROM_CONTENT",
+            ok: false,
+            error: "VAULT_LOCKED",
+          });
+          break;
+        }
+
+        (async () => {
+          try {
+            const tabId = _sender.tab?.id;
+            if (!tabId) {
+              sendResponse({
+                type: "AUTOFILL_FROM_CONTENT",
+                ok: false,
+                error: "NO_TAB",
+              });
+              return;
+            }
+            const result = await performAutofillForEntry(
+              message.entryId,
+              tabId,
+            );
+            sendResponse({
+              type: "AUTOFILL_FROM_CONTENT",
+              ok: result.ok,
+              error: result.error,
+            });
+          } catch (err) {
+            sendResponse({
+              type: "AUTOFILL_FROM_CONTENT",
               ok: false,
               error: err instanceof Error ? err.message : "AUTOFILL_FAILED",
             });
