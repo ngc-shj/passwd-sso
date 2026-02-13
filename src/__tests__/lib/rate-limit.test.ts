@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { validateRedisConfig } from "@/lib/redis";
 
@@ -52,42 +52,34 @@ describe("createRateLimiter", () => {
 });
 
 describe("validateRedisConfig", () => {
-  const originalNodeEnv = process.env.NODE_ENV;
-  const originalRedisUrl = process.env.REDIS_URL;
-
-  beforeEach(() => {
-    process.env.NODE_ENV = originalNodeEnv;
-    if (originalRedisUrl !== undefined) {
-      process.env.REDIS_URL = originalRedisUrl;
-    } else {
-      delete process.env.REDIS_URL;
-    }
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("throws in production when REDIS_URL is not set", () => {
-    process.env.NODE_ENV = "production";
-    delete process.env.REDIS_URL;
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("REDIS_URL", "");
 
     expect(() => validateRedisConfig()).toThrow("REDIS_URL is required");
   });
 
   it("does not throw in production when REDIS_URL is set", () => {
-    process.env.NODE_ENV = "production";
-    process.env.REDIS_URL = "redis://localhost:6379";
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("REDIS_URL", "redis://localhost:6379");
 
     expect(() => validateRedisConfig()).not.toThrow();
   });
 
   it("does not throw in development when REDIS_URL is not set", () => {
-    process.env.NODE_ENV = "development";
-    delete process.env.REDIS_URL;
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("REDIS_URL", "");
 
     expect(() => validateRedisConfig()).not.toThrow();
   });
 
   it("does not throw in test when REDIS_URL is not set", () => {
-    process.env.NODE_ENV = "test";
-    delete process.env.REDIS_URL;
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("REDIS_URL", "");
 
     expect(() => validateRedisConfig()).not.toThrow();
   });
