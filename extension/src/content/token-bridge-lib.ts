@@ -1,6 +1,12 @@
+function isContextValid(): boolean {
+  try { return !!chrome.runtime?.id; }
+  catch { return false; }
+}
+
 export function tryReadToken(): boolean {
   const el = document.getElementById("passwd-sso-ext-token");
   if (!el) return false;
+  if (!isContextValid()) return false;
   const token = el.getAttribute("data-token");
   const expiresAtRaw = el.getAttribute("data-expires-at");
   const expiresAt = expiresAtRaw ? Number(expiresAtRaw) : NaN;

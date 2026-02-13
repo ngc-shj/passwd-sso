@@ -14,6 +14,15 @@ import {
 } from "./ui/suggestion-dropdown";
 import { removeShadowHost } from "./ui/shadow-host";
 
+/** Returns false when the extension has been reloaded/updated and this content script is orphaned. */
+function isContextValid(): boolean {
+  try {
+    return !!chrome.runtime?.id;
+  } catch {
+    return false;
+  }
+}
+
 // ── Form field detection ────────────────────────────────────
 
 const trackedInputs = new WeakSet<HTMLInputElement>();
@@ -90,7 +99,9 @@ function showForInput(
     vaultLocked,
     onSelect: (entryId) => {
       hideDropdown();
-      chrome.runtime.sendMessage({ type: "AUTOFILL_FROM_CONTENT", entryId });
+      if (isContextValid()) {
+        chrome.runtime.sendMessage({ type: "AUTOFILL_FROM_CONTENT", entryId });
+      }
     },
     onDismiss: () => {
       currentContext = null;
@@ -182,6 +193,10 @@ export function initFormDetector(): FormDetectorCleanup {
   }
 
   function requestMatches(input: HTMLInputElement): void {
+    if (!isContextValid()) {
+      destroy();
+      return;
+    }
     const url = window.location.href;
     chrome.runtime.sendMessage(
       { type: "GET_MATCHES_FOR_URL", url },

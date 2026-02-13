@@ -9,6 +9,7 @@ describe("token bridge", () => {
     document.body.innerHTML = "";
     vi.stubGlobal("chrome", {
       runtime: {
+        id: "test-extension-id",
         sendMessage: vi.fn(),
       },
     });
