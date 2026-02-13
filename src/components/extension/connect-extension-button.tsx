@@ -3,22 +3,9 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { injectExtensionToken } from "@/lib/inject-extension-token";
 
 type Status = "idle" | "connecting" | "connected" | "failed";
-
-function injectToken(token: string, expiresAt: number) {
-  const existing = document.getElementById("passwd-sso-ext-token");
-  if (existing) existing.remove();
-  const el = document.createElement("div");
-  el.id = "passwd-sso-ext-token";
-  el.setAttribute("data-token", token);
-  el.setAttribute("data-expires-at", String(expiresAt));
-  el.style.display = "none";
-  document.body.appendChild(el);
-  setTimeout(() => {
-    el.remove();
-  }, 10_000);
-}
 
 export function ConnectExtensionButton() {
   const t = useTranslations("Extension");
@@ -35,7 +22,7 @@ export function ConnectExtensionButton() {
         return;
       }
       const json = await res.json();
-      injectToken(json.token, Date.parse(json.expiresAt));
+      injectExtensionToken(json.token, Date.parse(json.expiresAt));
       setStatus("connected");
       setTimeout(() => setStatus("idle"), 3000);
     } catch {

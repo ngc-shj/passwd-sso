@@ -744,7 +744,16 @@
     "connect": "拡張機能を接続",
     "connecting": "接続中...",
     "connected": "接続完了",
-    "failed": "接続失敗"
+    "failed": "接続失敗",
+    "autoConnected": "拡張機能に接続しました",
+    "autoConnectFailed": "拡張機能の接続に失敗しました",
+    "connectedTitle": "接続が完了しました",
+    "connectedDescription": "ブラウザ拡張機能との接続が完了しました。このタブは閉じて問題ありません。",
+    "connectFailedTitle": "接続に失敗しました",
+    "connectFailedDescription": "拡張機能との接続に失敗しました。もう一度お試しください。",
+    "closeTab": "タブを閉じる",
+    "goToDashboard": "ダッシュボードへ",
+    "retry": "再試行"
   },
   "ApiErrors": {
     "unauthorized": "認証が必要です。",

@@ -2,9 +2,15 @@
 // CRXJS copies web_accessible_resources as-is without transpilation.
 // Typed version: token-bridge-lib.ts (for tests).
 
+function isContextValid() {
+  try { return !!chrome.runtime && !!chrome.runtime.id; }
+  catch (e) { return false; }
+}
+
 function tryReadToken() {
   var el = document.getElementById("passwd-sso-ext-token");
   if (!el) return false;
+  if (!isContextValid()) return false;
   var token = el.getAttribute("data-token");
   var expiresAtRaw = el.getAttribute("data-expires-at");
   var expiresAt = expiresAtRaw ? Number(expiresAtRaw) : NaN;
@@ -34,4 +40,9 @@ if (typeof document !== "undefined") {
   if (!tryReadToken()) {
     startObserver();
   }
+  // Listen for custom event dispatched by injectExtensionToken()
+  // This survives after the MutationObserver's 30s timeout
+  document.addEventListener("passwd-sso-token-ready", function () {
+    tryReadToken();
+  });
 }

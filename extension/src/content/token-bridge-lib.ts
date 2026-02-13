@@ -1,6 +1,12 @@
+function isContextValid(): boolean {
+  try { return !!chrome.runtime?.id; }
+  catch { return false; }
+}
+
 export function tryReadToken(): boolean {
   const el = document.getElementById("passwd-sso-ext-token");
   if (!el) return false;
+  if (!isContextValid()) return false;
   const token = el.getAttribute("data-token");
   const expiresAtRaw = el.getAttribute("data-expires-at");
   const expiresAt = expiresAtRaw ? Number(expiresAtRaw) : NaN;
@@ -24,4 +30,11 @@ export function startObserver(): void {
   });
   observer.observe(document.body, { childList: true, subtree: true });
   setTimeout(() => observer.disconnect(), 30_000);
+}
+
+/** Listen for custom event dispatched by injectExtensionToken(). Survives after observer timeout. */
+export function listenForTokenEvent(): void {
+  document.addEventListener("passwd-sso-token-ready", () => {
+    tryReadToken();
+  });
 }
