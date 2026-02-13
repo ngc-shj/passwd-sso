@@ -24,6 +24,7 @@ import {
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { eaErrorToI18nKey } from "@/lib/api-error-codes";
+import { API_PATH } from "@/lib/constants";
 
 interface CreateGrantDialogProps {
   onCreated: () => void;
@@ -47,7 +48,7 @@ export function CreateGrantDialog({ onCreated }: CreateGrantDialogProps) {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/emergency-access", {
+      const res = await fetch(API_PATH.EMERGENCY_ACCESS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ granteeEmail: email, waitDays: Number(waitDays) }),

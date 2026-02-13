@@ -37,6 +37,7 @@ import {
   AUDIT_ACTION_GROUP,
   AUDIT_ACTION_GROUPS_ORG,
   AUDIT_TARGET_TYPE,
+  apiPath,
   type AuditActionValue,
 } from "@/lib/constants";
 
@@ -99,7 +100,7 @@ export default function OrgAuditLogsPage({
   const [dateTo, setDateTo] = useState("");
 
   useEffect(() => {
-    fetch(`/api/orgs/${orgId}`)
+    fetch(apiPath.orgById(orgId))
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.name) setOrgName(data.name);
@@ -122,7 +123,7 @@ export default function OrgAuditLogsPage({
       if (cursor) params.set("cursor", cursor);
 
       const res = await fetch(
-        `/api/orgs/${orgId}/audit-logs?${params.toString()}`
+        `${apiPath.orgAuditLogs(orgId)}?${params.toString()}`
       );
       if (!res.ok) return null;
       return res.json();

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { CONNECT_STATUS, type ConnectStatus } from "@/lib/constants";
+import { API_PATH, CONNECT_STATUS, type ConnectStatus } from "@/lib/constants";
 import { injectExtensionToken } from "@/lib/inject-extension-token";
 
 export function ConnectExtensionButton() {
@@ -14,7 +14,7 @@ export function ConnectExtensionButton() {
     if (status === CONNECT_STATUS.CONNECTING) return;
     setStatus(CONNECT_STATUS.CONNECTING);
     try {
-      const res = await fetch("/api/extension/token", { method: "POST" });
+      const res = await fetch(API_PATH.EXTENSION_TOKEN, { method: "POST" });
       if (!res.ok) {
         setStatus(CONNECT_STATUS.FAILED);
         setTimeout(() => setStatus(CONNECT_STATUS.IDLE), 3000);

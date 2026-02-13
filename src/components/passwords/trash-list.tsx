@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Trash2, Loader2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
 import { toast } from "sonner";
-import { ENTRY_TYPE } from "@/lib/constants";
+import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 interface TrashEntry {
@@ -49,7 +49,7 @@ export function TrashList({ refreshKey }: TrashListProps) {
     if (!encryptionKey) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/passwords?trash=true");
+      const res = await fetch(`${API_PATH.PASSWORDS}?trash=true`);
       if (!res.ok) return;
       const data = await res.json();
 
@@ -97,7 +97,7 @@ export function TrashList({ refreshKey }: TrashListProps) {
 
   const handleRestore = async (id: string) => {
     try {
-      const res = await fetch(`/api/passwords/${id}/restore`, { method: "POST" });
+      const res = await fetch(apiPath.passwordRestore(id), { method: "POST" });
       if (res.ok) {
         toast.success(t("restored"));
         setEntries((prev) => prev.filter((e) => e.id !== id));
@@ -111,7 +111,9 @@ export function TrashList({ refreshKey }: TrashListProps) {
 
   const handleDeletePermanently = async (id: string) => {
     try {
-      const res = await fetch(`/api/passwords/${id}?permanent=true`, { method: "DELETE" });
+      const res = await fetch(`${apiPath.passwordById(id)}?permanent=true`, {
+        method: "DELETE",
+      });
       if (res.ok) {
         toast.success(t("deletedPermanently"));
         setEntries((prev) => prev.filter((e) => e.id !== id));
@@ -126,7 +128,9 @@ export function TrashList({ refreshKey }: TrashListProps) {
   const handleEmptyTrash = async () => {
     try {
       for (const entry of entries) {
-        await fetch(`/api/passwords/${entry.id}?permanent=true`, { method: "DELETE" });
+        await fetch(`${apiPath.passwordById(entry.id)}?permanent=true`, {
+          method: "DELETE",
+        });
       }
       toast.success(t("emptyTrashSuccess"));
       setEntries([]);

@@ -1,5 +1,6 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
+import { API_PATH } from "@/lib/constants";
 
 export default {
   providers: [
@@ -50,7 +51,7 @@ export default {
       const isLoggedIn = !!auth?.user;
       const isProtected =
         nextUrl.pathname.startsWith("/dashboard") ||
-        nextUrl.pathname.startsWith("/api/passwords");
+        nextUrl.pathname.startsWith(API_PATH.PASSWORDS);
 
       if (isProtected) {
         return isLoggedIn;

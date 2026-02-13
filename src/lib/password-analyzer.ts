@@ -172,7 +172,7 @@ export async function checkHIBP(
   const suffix = hash.slice(5);
 
   try {
-    const res = await fetch(`/api/watchtower/hibp?prefix=${prefix}`);
+    const res = await fetch(`?prefix=`);
     if (!res.ok) return { breached: false, count: 0 };
 
     const text = await res.text();

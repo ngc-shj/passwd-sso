@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { API_PATH, apiPath } from "@/lib/constants";
 
 interface ShareLink {
   id: string;
@@ -85,7 +86,7 @@ export function ShareDialog({
   const fetchLinks = useCallback(async () => {
     setLoadingLinks(true);
     try {
-      const res = await fetch(`/api/share-links?${entryParam}`);
+      const res = await fetch(`${API_PATH.SHARE_LINKS}?${entryParam}`);
       if (res.ok) {
         const data = await res.json();
         setLinks(data.items);
@@ -121,7 +122,7 @@ export function ShareDialog({
         if (mv >= 1 && mv <= 100) body.maxViews = mv;
       }
 
-      const res = await fetch("/api/share-links", {
+      const res = await fetch(API_PATH.SHARE_LINKS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -156,7 +157,7 @@ export function ShareDialog({
     async (shareId: string, cursor?: string | null) => {
       setLoadingLogs(true);
       try {
-        const url = `/api/share-links/${shareId}/access-logs${cursor ? `?cursor=${cursor}` : ""}`;
+        const url = `${apiPath.shareLinkAccessLogs(shareId)}${cursor ? `?cursor=${cursor}` : ""}`;
         const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();
@@ -190,7 +191,7 @@ export function ShareDialog({
   const handleRevoke = async (id: string) => {
     setRevokingId(id);
     try {
-      const res = await fetch(`/api/share-links/${id}`, { method: "DELETE" });
+      const res = await fetch(apiPath.shareLinkById(id), { method: "DELETE" });
       if (res.ok) {
         toast.success(t("revokeSuccess"));
         fetchLinks();

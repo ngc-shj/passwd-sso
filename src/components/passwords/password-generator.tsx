@@ -18,6 +18,7 @@ import {
   DEFAULT_GENERATOR_SETTINGS,
   buildSymbolString,
 } from "@/lib/generator-prefs";
+import { API_PATH } from "@/lib/constants";
 
 interface PasswordGeneratorProps {
   open: boolean;
@@ -53,7 +54,7 @@ export function PasswordGenerator({
 
   const generate = useCallback(async () => {
     if (settings.mode === "passphrase") {
-      const res = await fetch("/api/passwords/generate", {
+      const res = await fetch(API_PATH.PASSWORDS_GENERATE, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -67,7 +68,7 @@ export function PasswordGenerator({
       }
     } else {
       const symbols = buildSymbolString(settings.symbolGroups);
-      const res = await fetch("/api/passwords/generate", {
+      const res = await fetch(API_PATH.PASSWORDS_GENERATE, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

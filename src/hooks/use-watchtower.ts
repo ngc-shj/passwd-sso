@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
-import { ENTRY_TYPE } from "@/lib/constants";
+import { API_PATH, ENTRY_TYPE } from "@/lib/constants";
 import {
   analyzeStrength,
   checkHIBP,
@@ -78,7 +78,7 @@ export function useWatchtower() {
     try {
       // Step 1: Fetch all encrypted passwords (including blobs)
       setProgress({ current: 0, total: 4, step: "fetching" });
-      const res = await fetch("/api/passwords?include=blob");
+      const res = await fetch(`${API_PATH.PASSWORDS}?include=blob`);
       if (!res.ok) throw new Error("Failed to fetch passwords");
       const rawEntries = await res.json();
 

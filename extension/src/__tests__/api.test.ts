@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { EXT_API_PATH } from "../lib/api-paths";
 
 const mockSendMessage = vi.fn();
 const mockGetSettings = vi.fn();
@@ -53,7 +54,7 @@ describe("apiFetch", () => {
 
   it("returns null when no token", async () => {
     mockSendMessage.mockResolvedValue({ token: null });
-    const res = await apiFetch("/api/passwords");
+    const res = await apiFetch(EXT_API_PATH.PASSWORDS);
     expect(res).toBeNull();
   });
 
@@ -62,7 +63,7 @@ describe("apiFetch", () => {
     chromeMock.permissions.contains.mockResolvedValue(false);
     chromeMock.permissions.request.mockResolvedValue(false);
     mockSendMessage.mockResolvedValue({ token: "t" });
-    const res = await apiFetch("/api/passwords");
+    const res = await apiFetch(EXT_API_PATH.PASSWORDS);
     expect(res).toBeNull();
   });
 
@@ -77,7 +78,7 @@ describe("apiFetch", () => {
       }))
     );
 
-    const res = (await apiFetch("/api/passwords")) as unknown as {
+    const res = (await apiFetch(EXT_API_PATH.PASSWORDS)) as unknown as {
       url: string;
       init?: RequestInit;
     };

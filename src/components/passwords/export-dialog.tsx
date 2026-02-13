@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react";
-import { ENTRY_TYPE } from "@/lib/constants";
+import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 type ExportFormat = "csv" | "json";
@@ -100,7 +100,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
 
     try {
       // 1. Fetch personal entries (E2E encrypted, decrypt client-side)
-      const res = await fetch("/api/passwords?include=blob");
+      const res = await fetch(`${API_PATH.PASSWORDS}?include=blob`);
       if (!res.ok) throw new Error("Failed to fetch");
       const rawEntries = await res.json();
 
@@ -154,17 +154,17 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
 
       // 2. Fetch org entries (server-side decrypted via detail API)
       if (includeOrgs) try {
-        const orgsRes = await fetch("/api/orgs");
+        const orgsRes = await fetch(API_PATH.ORGS);
         if (orgsRes.ok) {
           const orgs: { id: string }[] = await orgsRes.json();
           for (const org of orgs) {
             try {
-              const listRes = await fetch(`/api/orgs/${org.id}/passwords`);
+              const listRes = await fetch(apiPath.orgPasswords(org.id));
               if (!listRes.ok) continue;
               const list: { id: string; entryType: string }[] = await listRes.json();
               for (const item of list) {
                 try {
-                  const detailRes = await fetch(`/api/orgs/${org.id}/passwords/${item.id}`);
+                  const detailRes = await fetch(apiPath.orgPasswordById(org.id, item.id));
                   if (!detailRes.ok) continue;
                   const data = await detailRes.json();
                   entries.push({
@@ -237,7 +237,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
       URL.revokeObjectURL(url);
 
       // Fire-and-forget audit log
-      fetch("/api/audit-logs/export", {
+      fetch(API_PATH.AUDIT_LOGS_EXPORT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ entryCount: entries.length, format }),

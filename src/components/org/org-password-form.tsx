@@ -48,7 +48,7 @@ import {
   normalizeCardBrand,
   normalizeCardNumber,
 } from "@/lib/credit-card";
-import { ENTRY_TYPE, CUSTOM_FIELD_TYPE } from "@/lib/constants";
+import { ENTRY_TYPE, CUSTOM_FIELD_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
 
 export interface CustomField {
@@ -212,7 +212,7 @@ export function OrgPasswordForm({
       setDeviceInfo(editData.deviceInfo ?? "");
 
       // Load attachments for edit mode
-      fetch(`/api/orgs/${orgId}/passwords/${editData.id}/attachments`)
+      fetch(apiPath.orgPasswordAttachments(orgId, editData.id))
         .then((res) => (res.ok ? res.json() : []))
         .then((loaded: OrgAttachmentMeta[]) => setAttachments(loaded))
         .catch(() => setAttachments([]));
@@ -361,8 +361,8 @@ export function OrgPasswordForm({
 
     try {
       const endpoint = isEdit
-        ? `/api/orgs/${orgId}/passwords/${editData.id}`
-        : `/api/orgs/${orgId}/passwords`;
+        ? apiPath.orgPasswordById(orgId, editData.id)
+        : apiPath.orgPasswords(orgId);
 
       let body: Record<string, unknown>;
 

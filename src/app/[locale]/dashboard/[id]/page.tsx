@@ -9,7 +9,7 @@ import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { PasswordDetail } from "@/components/passwords/password-detail";
 import type { TOTPEntry } from "@/components/passwords/totp-field";
 import { Loader2 } from "lucide-react";
-import type { CustomFieldType } from "@/lib/constants";
+import { apiPath, type CustomFieldType } from "@/lib/constants";
 
 interface PasswordHistoryEntry {
   password: string;
@@ -64,7 +64,7 @@ export default function PasswordDetailPage() {
 
     async function load() {
       try {
-        const res = await fetch(`/api/passwords/${id}`);
+        const res = await fetch(apiPath.passwordById(id));
         if (!res.ok) throw new Error(t("notFound"));
         const raw = await res.json();
 

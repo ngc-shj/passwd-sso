@@ -19,7 +19,7 @@ import { TagBadge } from "@/components/tags/tag-badge";
 import { CopyButton } from "./copy-button";
 import { Favicon } from "./favicon";
 import { TOTPField, type TOTPEntry } from "./totp-field";
-import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
+import { CUSTOM_FIELD_TYPE, apiPath } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
 import {
   ArrowLeft,
@@ -99,7 +99,7 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
     const next = !isFavorite;
     setIsFavorite(next);
     try {
-      const res = await fetch(`/api/passwords/${data.id}`, {
+      const res = await fetch(apiPath.passwordById(data.id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isFavorite: next }),
@@ -114,7 +114,7 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
     const next = !isArchived;
     setIsArchived(next);
     try {
-      const res = await fetch(`/api/passwords/${data.id}`, {
+      const res = await fetch(apiPath.passwordById(data.id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isArchived: next }),
@@ -132,7 +132,7 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      const res = await fetch(`/api/passwords/${data.id}`, {
+      const res = await fetch(apiPath.passwordById(data.id), {
         method: "DELETE",
       });
       if (res.ok) {

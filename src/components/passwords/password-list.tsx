@@ -8,7 +8,7 @@ import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { PasswordCard } from "./password-card";
 import { Archive, KeyRound, Loader2, Star } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
-import { ENTRY_TYPE } from "@/lib/constants";
+import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 
 interface DecryptedOverview {
   title: string;
@@ -87,7 +87,7 @@ export function PasswordList({
       if (favoritesOnly) params.set("favorites", "true");
       if (archivedOnly) params.set("archived", "true");
 
-      const res = await fetch(`/api/passwords?${params}`);
+      const res = await fetch(`${API_PATH.PASSWORDS}?${params}`);
       if (!res.ok) return;
       const data = await res.json();
 
@@ -183,7 +183,7 @@ export function PasswordList({
     );
 
     try {
-      const res = await fetch(`/api/passwords/${id}`, {
+      const res = await fetch(apiPath.passwordById(id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isFavorite: !current }),
@@ -203,7 +203,7 @@ export function PasswordList({
   const handleToggleArchive = async (id: string, current: boolean) => {
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(`/api/passwords/${id}`, {
+      const res = await fetch(apiPath.passwordById(id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isArchived: !current }),
@@ -218,7 +218,7 @@ export function PasswordList({
   const handleDelete = async (id: string) => {
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(`/api/passwords/${id}`, { method: "DELETE" });
+      const res = await fetch(apiPath.passwordById(id), { method: "DELETE" });
       if (!res.ok) fetchPasswords();
     } catch {
       fetchPasswords();

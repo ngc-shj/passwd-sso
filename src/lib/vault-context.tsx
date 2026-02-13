@@ -25,7 +25,7 @@ import {
   type EncryptedData,
 } from "./crypto-client";
 import { createKeyEscrow } from "./crypto-emergency";
-import { VAULT_STATUS } from "@/lib/constants";
+import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 
 // Re-export so existing consumers can keep importing from vault-context
@@ -67,7 +67,7 @@ function hexEncode(buf: Uint8Array): string {
 // ─── Emergency Access Auto-Confirm ──────────────────────────
 
 async function confirmPendingEmergencyGrants(secretKey: Uint8Array, ownerId: string, keyVersion: number): Promise<void> {
-  const res = await fetch("/api/emergency-access/pending-confirmations");
+  const res = await fetch(API_PATH.EMERGENCY_PENDING_CONFIRMATIONS);
   if (!res.ok) return;
   const grants: Array<{
     id: string;
@@ -83,7 +83,7 @@ async function confirmPendingEmergencyGrants(secretKey: Uint8Array, ownerId: str
         granteeId: grant.granteeId,
         keyVersion,
       });
-      await fetch(`/api/emergency-access/${grant.id}/confirm`, {
+      await fetch(apiPath.emergencyConfirm(grant.id), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(escrow),
@@ -118,7 +118,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
     async function checkVaultStatus() {
       try {
-        const res = await fetch("/api/vault/status");
+        const res = await fetch(API_PATH.VAULT_STATUS);
         if (!res.ok) {
           setVaultStatus((prev) => prev === VAULT_STATUS.UNLOCKED ? prev : VAULT_STATUS.LOCKED);
           return;
@@ -281,7 +281,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     const verifierHash = await computePassphraseVerifier(passphrase, accountSalt);
 
     // 8. Send to server
-    const res = await fetch("/api/vault/setup", {
+    const res = await fetch(API_PATH.VAULT_SETUP, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -312,7 +312,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const unlock = useCallback(async (passphrase: string): Promise<boolean> => {
     try {
       // 1. Fetch encrypted secret key + verification artifact (session-protected)
-      const dataRes = await fetch("/api/vault/unlock/data");
+      const dataRes = await fetch(API_PATH.VAULT_UNLOCK_DATA);
       if (!dataRes.ok) return false;
       const vaultData = await dataRes.json();
 
@@ -360,7 +360,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         );
       }
 
-      await fetch("/api/vault/unlock", {
+      await fetch(API_PATH.VAULT_UNLOCK, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(unlockBody),
@@ -419,7 +419,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       );
 
       // 5. Send to server
-      const res = await fetch("/api/vault/change-passphrase", {
+      const res = await fetch(API_PATH.VAULT_CHANGE_PASSPHRASE, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

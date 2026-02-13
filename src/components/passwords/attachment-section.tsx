@@ -33,6 +33,7 @@ import {
   type EncryptedBinary,
 } from "@/lib/crypto-client";
 import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto-aad";
+import { apiPath } from "@/lib/constants";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -145,7 +146,7 @@ export function AttachmentSection({
       formData.append("aadVersion", String(AAD_VERSION));
       if (keyVersion) formData.append("keyVersion", keyVersion.toString());
 
-      const res = await fetch(`/api/passwords/${entryId}/attachments`, {
+      const res = await fetch(apiPath.passwordAttachments(entryId), {
         method: "POST",
         body: formData,
       });
@@ -172,7 +173,7 @@ export function AttachmentSection({
     setDownloading(attachment.id);
     try {
       const res = await fetch(
-        `/api/passwords/${entryId}/attachments/${attachment.id}`
+        apiPath.passwordAttachmentById(entryId, attachment.id)
       );
       if (!res.ok) throw new Error("Download failed");
 
@@ -218,7 +219,7 @@ export function AttachmentSection({
     setDeleting(true);
     try {
       const res = await fetch(
-        `/api/passwords/${entryId}/attachments/${deleteTarget.id}`,
+        apiPath.passwordAttachmentById(entryId, deleteTarget.id),
         { method: "DELETE" }
       );
       if (!res.ok) throw new Error("Delete failed");

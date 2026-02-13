@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { OrgCreateDialog } from "@/components/org/org-create-dialog";
 import { OrgRoleBadge } from "@/components/org/org-role-badge";
 import { Plus, Building2, Users, KeyRound } from "lucide-react";
+import { API_PATH } from "@/lib/constants";
 
 interface OrgListItem {
   id: string;
@@ -24,7 +25,7 @@ export default function OrgsPage() {
 
   const fetchOrgs = () => {
     setLoading(true);
-    fetch("/api/orgs")
+    fetch(API_PATH.ORGS)
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data)) setOrgs(data);

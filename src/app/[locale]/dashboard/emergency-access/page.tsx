@@ -7,6 +7,7 @@ import { HeartPulse, Users, Shield } from "lucide-react";
 import { CreateGrantDialog } from "@/components/emergency-access/create-grant-dialog";
 import { GrantCard } from "@/components/emergency-access/grant-card";
 import type { EaStatusValue } from "@/lib/constants";
+import { API_PATH } from "@/lib/constants";
 
 interface Grant {
   id: string;
@@ -31,7 +32,7 @@ export default function EmergencyAccessPage() {
 
   const fetchGrants = useCallback(async () => {
     try {
-      const res = await fetch("/api/emergency-access");
+      const res = await fetch(API_PATH.EMERGENCY_ACCESS);
       if (res.ok) {
         setGrants(await res.json());
       }

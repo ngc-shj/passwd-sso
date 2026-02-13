@@ -41,6 +41,7 @@ import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import {
+  API_PATH,
   AUDIT_ACTION,
   AUDIT_ACTION_EMERGENCY_PREFIX,
   AUDIT_ACTION_GROUP,
@@ -162,7 +163,7 @@ export default function AuditLogsPage() {
       }
       if (cursor) params.set("cursor", cursor);
 
-      const res = await fetch(`/api/audit-logs?${params.toString()}`);
+      const res = await fetch(`${API_PATH.AUDIT_LOGS}?${params.toString()}`);
       if (!res.ok) return null;
       return res.json();
     },

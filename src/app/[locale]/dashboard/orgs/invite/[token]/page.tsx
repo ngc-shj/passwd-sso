@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { OrgRoleBadge } from "@/components/org/org-role-badge";
 import { Building2, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { API_PATH } from "@/lib/constants";
 
 interface InviteInfo {
   org: { id: string; name: string; slug: string };
@@ -32,7 +33,7 @@ export default function AcceptInvitePage({
     setError(null);
 
     try {
-      const res = await fetch("/api/orgs/invitations/accept", {
+      const res = await fetch(API_PATH.ORGS_INVITATIONS_ACCEPT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),

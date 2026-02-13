@@ -18,7 +18,7 @@ import { formatCardNumber } from "@/lib/credit-card";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { Eye, EyeOff, ExternalLink } from "lucide-react";
-import { ENTRY_TYPE } from "@/lib/constants";
+import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
 
@@ -98,12 +98,12 @@ export function OrgPasswordDetail({
     setAttachments([]);
 
     Promise.all([
-      fetch(`/api/orgs/${orgId}/passwords/${passwordId}`)
+      fetch(apiPath.orgPasswordById(orgId, passwordId))
         .then((res) => {
           if (!res.ok) throw new Error("Not found");
           return res.json();
         }),
-      fetch(`/api/orgs/${orgId}/passwords/${passwordId}/attachments`)
+      fetch(apiPath.orgPasswordAttachments(orgId, passwordId))
         .then((res) => (res.ok ? res.json() : []))
         .catch(() => []),
     ])

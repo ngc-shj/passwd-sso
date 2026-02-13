@@ -53,7 +53,7 @@ import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { ShareDialog } from "@/components/share/share-dialog";
-import { ENTRY_TYPE } from "@/lib/constants";
+import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
 
 interface PasswordCardProps {
@@ -177,7 +177,7 @@ export function PasswordCard({
 
   const fetchDecryptedEntry = async (): Promise<{ entry: VaultEntryFull; raw: Record<string, unknown> }> => {
     if (!encryptionKey) throw new Error("Vault locked");
-    const res = await fetch(`/api/passwords/${id}`);
+    const res = await fetch(apiPath.passwordById(id));
     if (!res.ok) throw new Error("Failed to fetch");
     const raw = await res.json();
     const aad = raw.aadVersion >= 1 && userId

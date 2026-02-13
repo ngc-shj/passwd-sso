@@ -3,7 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { injectExtensionToken } from "@/lib/inject-extension-token";
-import { EXT_CONNECT_PARAM, CONNECT_STATUS, type ConnectStatus } from "@/lib/constants";
+import {
+  API_PATH,
+  EXT_CONNECT_PARAM,
+  CONNECT_STATUS,
+  type ConnectStatus,
+} from "@/lib/constants";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
@@ -22,7 +27,7 @@ export function AutoExtensionConnect() {
   const connect = async () => {
     setStatus(CONNECT_STATUS.CONNECTING);
     try {
-      const res = await fetch("/api/extension/token", { method: "POST" });
+      const res = await fetch(API_PATH.EXTENSION_TOKEN, { method: "POST" });
       if (!res.ok) {
         setStatus(CONNECT_STATUS.FAILED);
         return;

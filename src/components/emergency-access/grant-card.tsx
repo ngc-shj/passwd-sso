@@ -20,7 +20,7 @@ import { toast } from "sonner";
 import { Copy, ShieldOff, ShieldAlert, ShieldCheck, ShieldX, KeyRound, Lock, Loader2 } from "lucide-react";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
-import { VAULT_STATUS, EA_STATUS } from "@/lib/constants";
+import { VAULT_STATUS, EA_STATUS, apiPath } from "@/lib/constants";
 import type { EaStatusValue } from "@/lib/constants";
 import {
   generateECDHKeyPair,
@@ -94,7 +94,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
 
   const handleRevoke = async (permanent: boolean) => {
     try {
-      const res = await fetch(`/api/emergency-access/${grant.id}/revoke`, {
+      const res = await fetch(apiPath.emergencyGrantAction(grant.id, "revoke"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ permanent }),
@@ -113,7 +113,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
 
   const handleApprove = async () => {
     try {
-      const res = await fetch(`/api/emergency-access/${grant.id}/approve`, {
+      const res = await fetch(apiPath.emergencyGrantAction(grant.id, "approve"), {
         method: "POST",
       });
       if (res.ok) {
@@ -130,7 +130,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
 
   const handleRequest = async () => {
     try {
-      const res = await fetch(`/api/emergency-access/${grant.id}/request`, {
+      const res = await fetch(apiPath.emergencyGrantAction(grant.id, "request"), {
         method: "POST",
       });
       if (res.ok) {
@@ -157,7 +157,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
       const privateKeyBytes = await exportPrivateKey(keyPair.privateKey);
       const encryptedPrivKey = await encryptPrivateKey(privateKeyBytes, encryptionKey);
 
-      const res = await fetch(`/api/emergency-access/${grant.id}/accept`, {
+      const res = await fetch(apiPath.emergencyGrantAction(grant.id, "accept"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -186,7 +186,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
 
   const handleDeclineGrant = async () => {
     try {
-      const res = await fetch(`/api/emergency-access/${grant.id}/decline`, {
+      const res = await fetch(apiPath.emergencyGrantAction(grant.id, "decline"), {
         method: "POST",
       });
       if (res.ok) {

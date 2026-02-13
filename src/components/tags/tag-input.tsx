@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { API_PATH } from "@/lib/constants";
 
 export interface TagData {
   id: string;
@@ -34,7 +35,7 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
 
   const fetchTags = useCallback(async () => {
     try {
-      const res = await fetch("/api/tags");
+      const res = await fetch(API_PATH.TAGS);
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data)) setAllTags(data);
@@ -89,7 +90,7 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
     if (!inputValue.trim() || creating) return;
     setCreating(true);
     try {
-      const res = await fetch("/api/tags", {
+      const res = await fetch(API_PATH.TAGS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: inputValue.trim() }),
