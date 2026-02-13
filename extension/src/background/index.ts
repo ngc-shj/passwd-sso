@@ -14,8 +14,13 @@ import {
 } from "../lib/crypto";
 import { getSettings } from "../lib/storage";
 import { extractHost, isHostMatch } from "../lib/url-matching";
+import {
+  persistSession,
+  loadSession,
+  clearSession,
+} from "../lib/session-storage";
 
-// ── In-memory token storage (never persisted to disk) ────────
+// ── In-memory state (token/userId persisted to chrome.storage.session) ──
 
 let currentToken: string | null = null;
 let tokenExpiresAt: number | null = null;
@@ -24,8 +29,10 @@ let currentUserId: string | null = null;
 
 const ALARM_NAME = "extension-token-ttl";
 const VAULT_ALARM = "vault-auto-lock";
+const REFRESH_ALARM = "extension-token-refresh";
 const TOKEN_BRIDGE_SCRIPT_ID = "token-bridge";
 const CACHE_TTL_MS = 60_000; // 1 minute
+const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
 
 // ── Entry cache (TTL-based) ─────────────────────────────────
 
@@ -50,11 +57,13 @@ async function getCachedEntries(): Promise<DecryptedEntry[]> {
   return entries;
 }
 
-/** Securely clear token from memory */
+/** Securely clear token from memory and session storage */
 function clearToken(): void {
   currentToken = null;
   tokenExpiresAt = null;
   clearVault();
+  chrome.alarms.clear(REFRESH_ALARM);
+  clearSession().catch(() => {});
   void updateBadge();
 }
 
@@ -79,6 +88,107 @@ async function updateBadge(): Promise<void> {
   await chrome.action.setBadgeText({ text: "" });
 }
 
+// ── Session persistence & token refresh ──────────────────────
+
+/** Fire-and-forget persist of token state to chrome.storage.session */
+function persistState(): void {
+  if (currentToken && tokenExpiresAt) {
+    persistSession({
+      token: currentToken,
+      expiresAt: tokenExpiresAt,
+      userId: currentUserId ?? undefined,
+    }).catch(() => {});
+  }
+}
+
+/** Restore in-memory state from chrome.storage.session on SW startup */
+async function hydrateFromSession(): Promise<void> {
+  const state = await loadSession();
+  if (!state) return;
+
+  if (Date.now() >= state.expiresAt) {
+    await clearSession();
+    return;
+  }
+
+  currentToken = state.token;
+  tokenExpiresAt = state.expiresAt;
+  currentUserId = state.userId ?? null;
+
+  // Re-create TTL expiry alarm
+  chrome.alarms.create(ALARM_NAME, { when: state.expiresAt });
+  // Schedule refresh
+  scheduleRefreshAlarm(state.expiresAt);
+  void updateBadge();
+}
+
+function scheduleRefreshAlarm(expiresAt: number): void {
+  const refreshAt = expiresAt - REFRESH_BUFFER_MS;
+  if (refreshAt <= Date.now()) {
+    // Already within the refresh window — attempt immediately
+    attemptTokenRefresh().catch(() => {});
+  } else {
+    chrome.alarms.create(REFRESH_ALARM, { when: refreshAt });
+  }
+}
+
+async function attemptTokenRefresh(): Promise<void> {
+  if (!currentToken || !tokenExpiresAt) return;
+  if (Date.now() >= tokenExpiresAt) return;
+
+  try {
+    const { serverUrl } = await chrome.storage.local.get({
+      serverUrl: "https://localhost:3000",
+    });
+    let origin: string;
+    try {
+      origin = new URL(serverUrl).origin;
+    } catch {
+      return;
+    }
+
+    const res = await fetch(`${origin}/api/extension/token/refresh`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${currentToken}` },
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as {
+        token: string;
+        expiresAt: string;
+        scope: string[];
+      };
+      const newExpiresAt = new Date(data.expiresAt).getTime();
+      currentToken = data.token;
+      tokenExpiresAt = newExpiresAt;
+
+      chrome.alarms.create(ALARM_NAME, { when: newExpiresAt });
+      scheduleRefreshAlarm(newExpiresAt);
+      persistState();
+    } else if (res.status === 401 || res.status === 403 || res.status === 404) {
+      // Permanent rejection — token is invalid/revoked/session gone
+      clearToken();
+    } else {
+      // Transient error (429, 5xx) — retry if enough TTL remains
+      if (tokenExpiresAt && tokenExpiresAt - Date.now() > 60_000) {
+        chrome.alarms.create(REFRESH_ALARM, {
+          delayInMinutes: 1,
+        });
+      }
+    }
+  } catch {
+    // Network error — keep current token, retry if enough TTL remains
+    if (tokenExpiresAt && tokenExpiresAt - Date.now() > 60_000) {
+      chrome.alarms.create(REFRESH_ALARM, {
+        delayInMinutes: 1,
+      });
+    }
+  }
+}
+
+// Hydrate on SW startup
+hydrateFromSession().catch(() => {});
+
 // ── Alarm: auto-clear on expiry ──────────────────────────────
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -87,6 +197,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name === VAULT_ALARM) {
     clearVault();
+  }
+  if (alarm.name === REFRESH_ALARM) {
+    attemptTokenRefresh().catch(() => {});
   }
 });
 
@@ -298,6 +411,8 @@ chrome.runtime.onMessage.addListener(
           chrome.alarms.create(ALARM_NAME, {
             when: message.expiresAt,
           });
+          scheduleRefreshAlarm(message.expiresAt);
+          persistState();
         } else {
           // Already expired
           clearToken();
@@ -403,6 +518,7 @@ chrome.runtime.onMessage.addListener(
 
             encryptionKey = encKey;
             currentUserId = data.userId || null;
+            persistState();
             const { autoLockMinutes } = await getSettings();
             if (autoLockMinutes > 0) {
               chrome.alarms.create(VAULT_ALARM, {
