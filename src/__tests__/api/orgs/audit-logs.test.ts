@@ -164,6 +164,27 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     );
   });
 
+  it("applies ENTRY_BULK_DELETE action filter", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.OWNER });
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest(
+      "GET",
+      `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_DELETE}`
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          action: { in: [AUDIT_ACTION.ENTRY_BULK_DELETE] },
+        }),
+      })
+    );
+  });
+
   it("returns 400 for invalid actions filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.OWNER });

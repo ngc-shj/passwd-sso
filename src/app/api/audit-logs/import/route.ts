@@ -1,21 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { z } from "zod/v4";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 const bodySchema = z.object({
-  orgId: z.string().optional(),
-  entryCount: z.number().int().min(0),
-  format: z.enum(["csv", "json"]),
+  requestedCount: z.number().int().min(0),
+  successCount: z.number().int().min(0),
+  failedCount: z.number().int().min(0),
   filename: z.string().trim().min(1).max(255).optional(),
+  format: z.enum(["csv", "json"]).optional(),
   encrypted: z.boolean().optional(),
-  includeOrgs: z.boolean().optional(),
 });
 
-// POST /api/audit-logs/export — Record export audit event
+// POST /api/audit-logs/import — Record import summary audit event
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -34,31 +33,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
   }
 
-  const { orgId, entryCount, format, filename, encrypted, includeOrgs } = result.data;
-
-  // Verify org membership when orgId is specified
-  if (orgId) {
-    try {
-      await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.ORG_UPDATE);
-    } catch (e) {
-      if (e instanceof OrgAuthError) {
-        return NextResponse.json({ error: e.message }, { status: e.status });
-      }
-      throw e;
-    }
-  }
+  const { requestedCount, successCount, failedCount, filename, format, encrypted } = result.data;
 
   logAudit({
-    scope: orgId ? AUDIT_SCOPE.ORG : AUDIT_SCOPE.PERSONAL,
-    action: AUDIT_ACTION.ENTRY_EXPORT,
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.ENTRY_IMPORT,
     userId: session.user.id,
-    orgId: orgId ?? undefined,
     metadata: {
-      entryCount,
-      format,
+      requestedCount,
+      successCount,
+      failedCount,
       ...(filename ? { filename } : {}),
+      ...(format ? { format } : {}),
       ...(typeof encrypted === "boolean" ? { encrypted } : {}),
-      ...(typeof includeOrgs === "boolean" ? { includeOrgs } : {}),
     },
     ...extractRequestMeta(req),
   });

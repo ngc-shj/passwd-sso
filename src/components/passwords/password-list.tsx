@@ -9,6 +9,24 @@ import { PasswordCard } from "./password-card";
 import { Archive, KeyRound, Loader2, Star } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  reconcileSelectedIds,
+  toggleSelectAllIds,
+  toggleSelectOneId,
+} from "./password-list-selection";
 
 interface DecryptedOverview {
   title: string;
@@ -57,6 +75,7 @@ interface PasswordListProps {
   onDataChange?: () => void;
 }
 
+
 export function PasswordList({
   searchQuery,
   tagId,
@@ -72,6 +91,9 @@ export function PasswordList({
   const [entries, setEntries] = useState<DisplayEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const handleToggleExpand = (id: string) => {
     setExpandedId((prev) => (prev === id ? null : id));
@@ -176,6 +198,12 @@ export function PasswordList({
     fetchPasswords();
   }, [fetchPasswords, refreshKey]);
 
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      return reconcileSelectedIds(prev, entries.map((e) => e.id));
+    });
+  }, [entries]);
+
   const handleToggleFavorite = async (id: string, current: boolean) => {
     // Optimistic update
     setEntries((prev) =>
@@ -226,6 +254,40 @@ export function PasswordList({
     onDataChange?.();
   };
 
+  const allSelected = entries.length > 0 && selectedIds.size === entries.length;
+
+  const toggleSelectAll = (checked: boolean) => {
+    setSelectedIds(toggleSelectAllIds(entries.map((e) => e.id), checked));
+  };
+
+  const toggleSelectOne = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => toggleSelectOneId(prev, id, checked));
+  };
+
+  const handleBulkMoveToTrash = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkDeleting(true);
+    try {
+      const res = await fetch(apiPath.passwordsBulkTrash(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+      });
+
+      if (!res.ok) throw new Error("bulk trash failed");
+      const json = await res.json();
+      toast.success(t("bulkMovedToTrash", { count: json.movedCount ?? selectedIds.size }));
+      setBulkDialogOpen(false);
+      setSelectedIds(new Set());
+      fetchPasswords();
+      onDataChange?.();
+    } catch {
+      toast.error(t("bulkMoveFailed"));
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -264,32 +326,87 @@ export function PasswordList({
 
   return (
     <div className="space-y-2">
+      <div className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2">
+        <div className="flex items-center gap-3">
+          <Checkbox
+            checked={allSelected}
+            onCheckedChange={(v) => toggleSelectAll(Boolean(v))}
+            aria-label={t("selectAll")}
+          />
+          <span className="text-sm text-muted-foreground">
+            {selectedIds.size > 0
+              ? t("selectedCount", { count: selectedIds.size })
+              : t("selectHint")}
+          </span>
+        </div>
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={selectedIds.size === 0}
+          onClick={() => setBulkDialogOpen(true)}
+        >
+          {t("moveSelectedToTrash")}
+        </Button>
+      </div>
+
       {entries.map((entry) => (
-        <PasswordCard
-          key={entry.id}
-          id={entry.id}
-          entryType={entry.entryType}
-          title={entry.title}
-          username={entry.username}
-          urlHost={entry.urlHost}
-          snippet={entry.snippet}
-          brand={entry.brand}
-          lastFour={entry.lastFour}
-          cardholderName={entry.cardholderName}
-          fullName={entry.fullName}
-          idNumberLast4={entry.idNumberLast4}
-          relyingPartyId={entry.relyingPartyId}
-          tags={entry.tags}
-          isFavorite={entry.isFavorite}
-          isArchived={entry.isArchived}
-          expanded={expandedId === entry.id}
-          onToggleFavorite={handleToggleFavorite}
-          onToggleArchive={handleToggleArchive}
-          onDelete={handleDelete}
-          onToggleExpand={handleToggleExpand}
-          onRefresh={() => { fetchPasswords(); onDataChange?.(); }}
-        />
+        <div key={entry.id} className="flex items-start gap-2">
+          <Checkbox
+            className="mt-4"
+            checked={selectedIds.has(entry.id)}
+            onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
+            aria-label={t("selectEntry", { title: entry.title })}
+          />
+          <div className="flex-1">
+            <PasswordCard
+              id={entry.id}
+              entryType={entry.entryType}
+              title={entry.title}
+              username={entry.username}
+              urlHost={entry.urlHost}
+              snippet={entry.snippet}
+              brand={entry.brand}
+              lastFour={entry.lastFour}
+              cardholderName={entry.cardholderName}
+              fullName={entry.fullName}
+              idNumberLast4={entry.idNumberLast4}
+              relyingPartyId={entry.relyingPartyId}
+              tags={entry.tags}
+              isFavorite={entry.isFavorite}
+              isArchived={entry.isArchived}
+              expanded={expandedId === entry.id}
+              onToggleFavorite={handleToggleFavorite}
+              onToggleArchive={handleToggleArchive}
+              onDelete={handleDelete}
+              onToggleExpand={handleToggleExpand}
+              onRefresh={() => { fetchPasswords(); onDataChange?.(); }}
+            />
+          </div>
+        </div>
       ))}
+
+      <AlertDialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("moveSelectedToTrash")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("bulkMoveConfirm", { count: selectedIds.size })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleting}>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleBulkMoveToTrash();
+              }}
+              disabled={bulkDeleting}
+            >
+              {bulkDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : t("confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

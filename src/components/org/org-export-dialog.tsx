@@ -181,7 +181,14 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
       fetch(API_PATH.AUDIT_LOGS_EXPORT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orgId, entryCount: entries.length, format }),
+        body: JSON.stringify({
+          orgId,
+          entryCount: entries.length,
+          format,
+          filename,
+          encrypted: passwordProtect,
+          includeOrgs: false,
+        }),
       }).catch(() => {});
 
       setOpen(false);

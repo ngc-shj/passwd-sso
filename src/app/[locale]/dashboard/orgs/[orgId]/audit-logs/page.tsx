@@ -57,6 +57,8 @@ interface OrgAuditLogItem {
 const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
   [AUDIT_ACTION.AUTH_LOGIN]: <LogIn className="h-4 w-4" />,
   [AUDIT_ACTION.AUTH_LOGOUT]: <LogOut className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_BULK_DELETE]: <Trash2 className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_IMPORT]: <Upload className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_CREATE]: <Plus className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_UPDATE]: <Pencil className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_DELETE]: <Trash2 className="h-4 w-4" />,
@@ -76,6 +78,11 @@ const ACTION_GROUPS = [
     label: "groupEntry",
     value: AUDIT_ACTION_GROUP.ENTRY,
     actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.ENTRY],
+  },
+  {
+    label: "groupTransfer",
+    value: AUDIT_ACTION_GROUP.TRANSFER,
+    actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.TRANSFER],
   },
   { label: "groupAttachment", value: AUDIT_ACTION_GROUP.ATTACHMENT, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.ATTACHMENT] },
   { label: "groupOrg", value: AUDIT_ACTION_GROUP.ORG, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.ORG] },
@@ -164,16 +171,78 @@ export default function OrgAuditLogsPage({
   const formatDate = (iso: string) => formatDateTime(iso, locale);
 
   const getTargetLabel = (log: OrgAuditLogItem): string | null => {
-    const meta = log.metadata;
+    const meta =
+      log.metadata && typeof log.metadata === "object"
+        ? (log.metadata as Record<string, unknown>)
+        : null;
+
+    if (log.action === AUDIT_ACTION.ENTRY_BULK_DELETE && meta) {
+      const requestedCount =
+        typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
+      const movedCount =
+        typeof meta.movedCount === "number" ? meta.movedCount : 0;
+      const notMovedCount = Math.max(0, requestedCount - movedCount);
+      return t("bulkDeleteMeta", {
+        requestedCount,
+        movedCount,
+        notMovedCount,
+      });
+    }
+
+    if (log.action === AUDIT_ACTION.ENTRY_IMPORT && meta) {
+      const requestedCount = typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
+      const successCount = typeof meta.successCount === "number" ? meta.successCount : 0;
+      const failedCount = typeof meta.failedCount === "number" ? meta.failedCount : 0;
+      const filename = typeof meta.filename === "string" ? meta.filename : "-";
+      const format = typeof meta.format === "string" ? meta.format : "-";
+      const encrypted = meta.encrypted === true;
+      return t("importMeta", {
+        requestedCount,
+        successCount,
+        failedCount,
+        filename,
+        format,
+        encrypted: encrypted ? t("yes") : t("no"),
+      });
+    }
+
+    if (log.action === AUDIT_ACTION.ENTRY_EXPORT && meta) {
+      const filename = typeof meta.filename === "string" ? meta.filename : null;
+      const encrypted = meta.encrypted === true;
+      const format = typeof meta.format === "string" ? meta.format : "-";
+      const entryCount = typeof meta.entryCount === "number" ? meta.entryCount : 0;
+      return t("exportMetaOrg", {
+        filename: filename ?? "-",
+        format,
+        entryCount,
+        encrypted: encrypted ? t("yes") : t("no"),
+      });
+    }
+
+    const importFilename =
+      log.action === AUDIT_ACTION.ENTRY_CREATE &&
+      meta?.source === "import" &&
+      typeof meta.filename === "string"
+        ? meta.filename
+        : null;
+    const parentAction =
+      typeof meta?.parentAction === "string" ? meta.parentAction : null;
+    const parentActionText = parentAction
+      ? t("fromAction", { action: t(parentAction as never) })
+      : null;
 
     // Entry operations: show resolved entry name
     if (log.targetType === AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY && log.targetId) {
       const name = entryNames[log.targetId];
       if (name) {
-        if (log.action === AUDIT_ACTION.ENTRY_DELETE && meta?.permanent) {
+        if (log.action === AUDIT_ACTION.ENTRY_DELETE && meta?.permanent === true) {
           return `${name}（${t("permanentDelete")}）`;
         }
-        return name;
+        const suffixParts = [
+          importFilename ? t("fromFile", { filename: importFilename }) : null,
+          parentActionText,
+        ].filter(Boolean);
+        return suffixParts.length > 0 ? `${name} ${suffixParts.join(" ")}` : name;
       }
       return t("deletedEntry");
     }
@@ -203,6 +272,10 @@ export default function OrgAuditLogsPage({
   };
 
   const actionLabel = (action: AuditActionValue | string) => t(action as never);
+  const getActionLabel = (log: OrgAuditLogItem) =>
+    log.action === AUDIT_ACTION.ENTRY_BULK_DELETE
+      ? t("ENTRY_BULK_DELETE")
+      : actionLabel(log.action);
 
   const filteredActions = (actions: readonly AuditActionValue[]) => {
     if (!actionSearch) return actions;
@@ -366,7 +439,7 @@ export default function OrgAuditLogsPage({
                     <p className="text-sm font-medium">
                       <span className="text-muted-foreground">{log.user.name}</span>
                       {" · "}
-                      {t(log.action as never)}
+                      {getActionLabel(log)}
                     </p>
                     {targetLabel && (
                       <p className="text-xs text-muted-foreground truncate">

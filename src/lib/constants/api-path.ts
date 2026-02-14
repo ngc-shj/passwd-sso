@@ -3,6 +3,7 @@ export const API_PATH = {
   AUTH_SESSION: "/api/auth/session",
   EXTENSION_TOKEN: "/api/extension/token",
   PASSWORDS: "/api/passwords",
+  PASSWORDS_BULK_TRASH: "/api/passwords/bulk-trash",
   PASSWORDS_GENERATE: "/api/passwords/generate",
   TAGS: "/api/tags",
   ORGS: "/api/orgs",
@@ -13,6 +14,7 @@ export const API_PATH = {
   AUDIT_LOGS: "/api/audit-logs",
   SHARE_LINKS: "/api/share-links",
   SHARE_LINKS_MINE: "/api/share-links/mine",
+  AUDIT_LOGS_IMPORT: "/api/audit-logs/import",
   AUDIT_LOGS_EXPORT: "/api/audit-logs/export",
   VAULT_STATUS: "/api/vault/status",
   VAULT_SETUP: "/api/vault/setup",
@@ -58,6 +60,7 @@ export const apiPath = {
   orgTags: (orgId: string) => `${API_PATH.ORGS}/${orgId}/tags`,
   orgAuditLogs: (orgId: string) => `${API_PATH.ORGS}/${orgId}/audit-logs`,
   passwordById: (entryId: string) => `${API_PATH.PASSWORDS}/${entryId}`,
+  passwordsBulkTrash: () => API_PATH.PASSWORDS_BULK_TRASH,
   passwordRestore: (entryId: string) =>
     `${API_PATH.PASSWORDS}/${entryId}/restore`,
   passwordAttachments: (entryId: string) =>

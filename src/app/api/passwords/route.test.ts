@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-const { mockAuth, mockPrismaPasswordEntry, mockExtTokenFindUnique, mockExtTokenUpdate } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaPasswordEntry, mockExtTokenFindUnique, mockExtTokenUpdate, mockAuditCreate } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: {
     findMany: vi.fn(),
@@ -11,12 +11,13 @@ const { mockAuth, mockPrismaPasswordEntry, mockExtTokenFindUnique, mockExtTokenU
   },
   mockExtTokenFindUnique: vi.fn(),
   mockExtTokenUpdate: vi.fn(),
+  mockAuditCreate: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: mockPrismaPasswordEntry,
-    auditLog: { create: vi.fn().mockResolvedValue({}) },
+    auditLog: { create: mockAuditCreate },
     extensionToken: { findUnique: mockExtTokenFindUnique, update: mockExtTokenUpdate },
   },
 }));
@@ -255,6 +256,7 @@ describe("POST /api/passwords", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockAuditCreate.mockResolvedValue({});
   });
 
   const validBody = {
@@ -378,6 +380,73 @@ describe("POST /api/passwords", () => {
     const json = await res.json();
     expect(res.status).toBe(201);
     expect(json.entryType).toBe("SECURE_NOTE");
+  });
+
+  it("marks ENTRY_CREATE audit metadata when source is import", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      entryType: ENTRY_TYPE.LOGIN,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: validBody,
+      headers: { "x-passwd-sso-source": "import" },
+    }));
+
+    expect(res.status).toBe(201);
+    expect(mockAuditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "ENTRY_CREATE",
+          metadata: {
+            source: "import",
+            parentAction: "ENTRY_IMPORT",
+          },
+        }),
+      }),
+    );
+  });
+
+  it("stores import filename in audit metadata when provided", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      entryType: ENTRY_TYPE.LOGIN,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: validBody,
+      headers: {
+        "x-passwd-sso-source": "import",
+        "x-passwd-sso-filename": "passwd-sso-import.csv",
+      },
+    }));
+
+    expect(res.status).toBe(201);
+    expect(mockAuditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: {
+            source: "import",
+            filename: "passwd-sso-import.csv",
+            parentAction: "ENTRY_IMPORT",
+          },
+        }),
+      }),
+    );
   });
 
   it("creates CREDIT_CARD entry (201)", async () => {
