@@ -130,4 +130,15 @@ describe("handleDropdownKeydown", () => {
     expect(handled).toBe(true);
     expect(isDropdownVisible()).toBe(false);
   });
+
+  it("selects active item with Enter", () => {
+    const opts = makeOptions();
+    showDropdown(opts);
+    handleDropdownKeydown(new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true }));
+    const handled = handleDropdownKeydown(
+      new KeyboardEvent("keydown", { key: "Enter", cancelable: true }),
+    );
+    expect(handled).toBe(true);
+    expect(opts.onSelect).toHaveBeenCalledWith("1");
+  });
 });
