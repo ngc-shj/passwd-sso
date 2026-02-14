@@ -155,6 +155,9 @@ export default function OrgDashboardPage({
     org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN || org?.role === ORG_ROLE.MEMBER;
   const canDeletePerm = org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN;
   const canEditPerm = canCreate;
+  const contextualEntryType = activeEntryType && Object.values(ENTRY_TYPE).includes(activeEntryType as EntryTypeValue)
+    ? (activeEntryType as EntryTypeValue)
+    : null;
   const activeCategoryLabel = activeEntryType
     ? ({
         [ENTRY_TYPE.LOGIN]: tDash("catLogin"),
@@ -357,36 +360,50 @@ export default function OrgDashboardPage({
                 </Button>
               )}
               {canCreate && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm">
-                      <Plus className="mr-2 h-4 w-4" />
-                      {t("newItem")}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.LOGIN); setFormOpen(true); }}>
-                      <KeyRound className="mr-2 h-4 w-4" />
-                      {t("newPassword")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setFormOpen(true); }}>
-                      <FileText className="mr-2 h-4 w-4" />
-                      {t("newSecureNote")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setFormOpen(true); }}>
-                      <CreditCard className="mr-2 h-4 w-4" />
-                      {t("newCreditCard")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.IDENTITY); setFormOpen(true); }}>
-                      <IdCard className="mr-2 h-4 w-4" />
-                      {t("newIdentity")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.PASSKEY); setFormOpen(true); }}>
-                      <Fingerprint className="mr-2 h-4 w-4" />
-                      {t("newPasskey")}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                contextualEntryType ? (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setEditData(null);
+                      setNewEntryType(contextualEntryType);
+                      setFormOpen(true);
+                    }}
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    {t("newItem")}
+                  </Button>
+                ) : (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button size="sm">
+                        <Plus className="mr-2 h-4 w-4" />
+                        {t("newItem")}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.LOGIN); setFormOpen(true); }}>
+                        <KeyRound className="mr-2 h-4 w-4" />
+                        {t("newPassword")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setFormOpen(true); }}>
+                        <FileText className="mr-2 h-4 w-4" />
+                        {t("newSecureNote")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setFormOpen(true); }}>
+                        <CreditCard className="mr-2 h-4 w-4" />
+                        {t("newCreditCard")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.IDENTITY); setFormOpen(true); }}>
+                        <IdCard className="mr-2 h-4 w-4" />
+                        {t("newIdentity")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.PASSKEY); setFormOpen(true); }}>
+                        <Fingerprint className="mr-2 h-4 w-4" />
+                        {t("newPasskey")}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )
               )}
             </div>
           </div>
