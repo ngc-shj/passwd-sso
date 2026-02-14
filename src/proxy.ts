@@ -49,7 +49,9 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
     if (!hasSession) {
       const signInUrl = new URL(`/${locale}/auth/signin`, request.url);
       signInUrl.searchParams.set("callbackUrl", request.url);
-      return applySecurityHeaders(NextResponse.redirect(signInUrl), options);
+      const redirectResponse = NextResponse.redirect(signInUrl);
+      clearAuthSessionCookies(redirectResponse);
+      return applySecurityHeaders(redirectResponse, options);
     }
   }
 
@@ -163,4 +165,17 @@ function applySecurityHeaders(
   });
 
   return response;
+}
+
+function clearAuthSessionCookies(response: NextResponse): void {
+  const authSessionCookieNames = [
+    "authjs.session-token",
+    "__Secure-authjs.session-token",
+    "next-auth.session-token",
+    "__Secure-next-auth.session-token",
+  ] as const;
+
+  for (const name of authSessionCookieNames) {
+    response.cookies.delete(name);
+  }
 }
