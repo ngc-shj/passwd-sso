@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry } = vi.hoisted(() => ({
+const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockAuditCreate } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockAuthOrToken: vi.fn(),
   mockPrismaPasswordEntry: {
@@ -10,11 +10,12 @@ const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry } = vi.hoisted(() => 
     update: vi.fn(),
     delete: vi.fn(),
   },
+  mockAuditCreate: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { passwordEntry: mockPrismaPasswordEntry, auditLog: { create: vi.fn().mockResolvedValue({}) } },
+  prisma: { passwordEntry: mockPrismaPasswordEntry, auditLog: { create: mockAuditCreate } },
 }));
 
 import { GET, PUT, DELETE } from "./route";
@@ -45,6 +46,7 @@ describe("GET /api/passwords/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
+    mockAuditCreate.mockResolvedValue({});
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -167,6 +169,7 @@ describe("PUT /api/passwords/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockAuditCreate.mockResolvedValue({});
   });
 
   const updateBody = {
@@ -286,6 +289,7 @@ describe("DELETE /api/passwords/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockAuditCreate.mockResolvedValue({});
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -332,6 +336,13 @@ describe("DELETE /api/passwords/[id]", () => {
       }),
     );
     expect(mockPrismaPasswordEntry.delete).not.toHaveBeenCalled();
+    expect(mockAuditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "ENTRY_TRASH",
+        }),
+      })
+    );
   });
 
   it("permanently deletes when permanent=true", async () => {
@@ -348,6 +359,13 @@ describe("DELETE /api/passwords/[id]", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockPrismaPasswordEntry.delete).toHaveBeenCalledWith({ where: { id: PW_ID } });
+    expect(mockAuditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "ENTRY_PERMANENT_DELETE",
+        }),
+      })
+    );
   });
 
   it("soft deletes PASSKEY entry", async () => {

@@ -93,7 +93,8 @@ export function PasswordList({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
-  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkAction, setBulkAction] = useState<"trash" | "archive" | "unarchive">("trash");
+  const [bulkProcessing, setBulkProcessing] = useState(false);
 
   const handleToggleExpand = (id: string) => {
     setExpandedId((prev) => (prev === id ? null : id));
@@ -264,27 +265,60 @@ export function PasswordList({
     setSelectedIds((prev) => toggleSelectOneId(prev, id, checked));
   };
 
-  const handleBulkMoveToTrash = async () => {
+  const handleBulkAction = async () => {
     if (selectedIds.size === 0) return;
-    setBulkDeleting(true);
+    setBulkProcessing(true);
     try {
-      const res = await fetch(apiPath.passwordsBulkTrash(), {
+      const endpoint =
+        bulkAction === "archive" || bulkAction === "unarchive"
+          ? apiPath.passwordsBulkArchive()
+          : apiPath.passwordsBulkTrash();
+      const body =
+        bulkAction === "archive" || bulkAction === "unarchive"
+          ? { ids: Array.from(selectedIds), operation: bulkAction }
+          : { ids: Array.from(selectedIds) };
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+        body: JSON.stringify(body),
       });
 
-      if (!res.ok) throw new Error("bulk trash failed");
+      if (!res.ok) throw new Error("bulk action failed");
       const json = await res.json();
-      toast.success(t("bulkMovedToTrash", { count: json.movedCount ?? selectedIds.size }));
+      if (bulkAction === "archive") {
+        toast.success(
+          t("bulkArchived", {
+            count: json.processedCount ?? json.archivedCount ?? selectedIds.size,
+          })
+        );
+      } else if (bulkAction === "unarchive") {
+        toast.success(
+          t("bulkUnarchived", {
+            count:
+              json.processedCount ?? json.unarchivedCount ?? selectedIds.size,
+          })
+        );
+      } else {
+        toast.success(
+          t("bulkMovedToTrash", {
+            count: json.movedCount ?? selectedIds.size,
+          })
+        );
+      }
       setBulkDialogOpen(false);
       setSelectedIds(new Set());
       fetchPasswords();
       onDataChange?.();
     } catch {
-      toast.error(t("bulkMoveFailed"));
+      toast.error(
+        bulkAction === "archive"
+          ? t("bulkArchiveFailed")
+          : bulkAction === "unarchive"
+            ? t("bulkUnarchiveFailed")
+            : t("bulkMoveFailed")
+      );
     } finally {
-      setBulkDeleting(false);
+      setBulkProcessing(false);
     }
   };
 
@@ -326,28 +360,62 @@ export function PasswordList({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2">
-        <div className="flex items-center gap-3">
-          <Checkbox
-            checked={allSelected}
-            onCheckedChange={(v) => toggleSelectAll(Boolean(v))}
-            aria-label={t("selectAll")}
-          />
-          <span className="text-sm text-muted-foreground">
-            {selectedIds.size > 0
-              ? t("selectedCount", { count: selectedIds.size })
-              : t("selectHint")}
-          </span>
+      {selectedIds.size > 0 && (
+        <div className="sticky top-4 z-40 mb-2 flex items-center justify-between rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <div className="flex items-center gap-3">
+            <Checkbox
+              checked={allSelected}
+              onCheckedChange={(v) => toggleSelectAll(Boolean(v))}
+              aria-label={t("selectAll")}
+            />
+            <span className="text-sm text-muted-foreground">
+              {t("selectedCount", { count: selectedIds.size })}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              {t("clearSelection")}
+            </Button>
+            {archivedOnly ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setBulkAction("unarchive");
+                  setBulkDialogOpen(true);
+                }}
+              >
+                {t("moveSelectedToUnarchive")}
+              </Button>
+            ) : (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setBulkAction("archive");
+                  setBulkDialogOpen(true);
+                }}
+              >
+                {t("moveSelectedToArchive")}
+              </Button>
+            )}
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                setBulkAction("trash");
+                setBulkDialogOpen(true);
+              }}
+            >
+              {t("moveSelectedToTrash")}
+            </Button>
+          </div>
         </div>
-        <Button
-          variant="destructive"
-          size="sm"
-          disabled={selectedIds.size === 0}
-          onClick={() => setBulkDialogOpen(true)}
-        >
-          {t("moveSelectedToTrash")}
-        </Button>
-      </div>
+      )}
 
       {entries.map((entry) => (
         <div key={entry.id} className="flex items-start gap-2">
@@ -388,21 +456,37 @@ export function PasswordList({
       <AlertDialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("moveSelectedToTrash")}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {bulkAction === "archive"
+                ? t("moveSelectedToArchive")
+                : bulkAction === "unarchive"
+                  ? t("moveSelectedToUnarchive")
+                : t("moveSelectedToTrash")}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {t("bulkMoveConfirm", { count: selectedIds.size })}
+              {bulkAction === "archive"
+                ? t("bulkArchiveConfirm", { count: selectedIds.size })
+                : bulkAction === "unarchive"
+                  ? t("bulkUnarchiveConfirm", { count: selectedIds.size })
+                : t("bulkMoveConfirm", { count: selectedIds.size })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={bulkDeleting}>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogCancel disabled={bulkProcessing}>
+              {t("cancel")}
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
-                void handleBulkMoveToTrash();
+                void handleBulkAction();
               }}
-              disabled={bulkDeleting}
+              disabled={bulkProcessing}
             >
-              {bulkDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : t("confirm")}
+              {bulkProcessing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                t("confirm")
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

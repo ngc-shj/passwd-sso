@@ -191,7 +191,9 @@ export async function DELETE(
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
-    action: AUDIT_ACTION.ENTRY_DELETE,
+    action: permanent
+      ? AUDIT_ACTION.ENTRY_PERMANENT_DELETE
+      : AUDIT_ACTION.ENTRY_TRASH,
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: id,
