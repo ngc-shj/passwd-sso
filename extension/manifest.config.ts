@@ -45,6 +45,7 @@ export default defineManifest({
       matches: ["https://*/*", "http://localhost/*"],
       js: ["src/content/form-detector.ts"],
       run_at: "document_idle",
+      all_frames: true,
     },
   ],
   web_accessible_resources: [

@@ -19,7 +19,7 @@ async function checkHostPermission(url: string): Promise<boolean> {
 async function injectFormDetector(tabId: number): Promise<void> {
   try {
     await chrome.scripting.executeScript({
-      target: { tabId },
+      target: { tabId, allFrames: true },
       files: ["src/content/form-detector.js"],
     });
   } catch {
