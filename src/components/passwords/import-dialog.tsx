@@ -78,6 +78,8 @@ interface ExistingTag {
   color: string | null;
 }
 
+type FetchLike = typeof fetch;
+
 type CsvFormat = "bitwarden" | "onepassword" | "chrome" | "passwd-sso" | "unknown";
 
 function extraDefaults(): Pick<
@@ -134,6 +136,72 @@ function parsePasswdSsoPayload(raw: string | undefined): Partial<ParsedEntry> {
   } catch {
     return {};
   }
+}
+
+function resolveEntryTagIds(
+  entry: ParsedEntry,
+  tagNameToId: Map<string, string>
+): string[] {
+  return Array.from(
+    new Set(
+      entry.tags
+        .map((tag) => tag.name?.trim())
+        .filter((name): name is string => !!name)
+        .map((name) => tagNameToId.get(name))
+        .filter((id): id is string => !!id)
+    )
+  );
+}
+
+async function resolveTagNameToIdForImport(
+  entries: ParsedEntry[],
+  fetcher: FetchLike = fetch
+): Promise<Map<string, string>> {
+  const tagNameToId = new Map<string, string>();
+
+  try {
+    const tagsRes = await fetcher(API_PATH.TAGS);
+    if (tagsRes.ok) {
+      const existingTags = (await tagsRes.json()) as ExistingTag[];
+      for (const tag of existingTags) {
+        const name = tag.name?.trim();
+        if (name && tag.id) {
+          tagNameToId.set(name, tag.id);
+        }
+      }
+    }
+  } catch {
+    // Ignore and continue without tag linkage.
+  }
+
+  const missingTags = new Map<string, string | null>();
+  for (const entry of entries) {
+    for (const tag of entry.tags) {
+      const name = tag.name?.trim();
+      if (!name || tagNameToId.has(name) || missingTags.has(name)) continue;
+      missingTags.set(name, tag.color ?? null);
+    }
+  }
+
+  for (const [name, color] of missingTags) {
+    try {
+      const createRes = await fetcher(API_PATH.TAGS, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, color }),
+      });
+      if (createRes.ok) {
+        const created = (await createRes.json()) as ExistingTag;
+        if (created?.id) {
+          tagNameToId.set(name, created.id);
+        }
+      }
+    } catch {
+      // Ignore and proceed without this tag.
+    }
+  }
+
+  return tagNameToId;
 }
 
 function detectFormat(headers: string[]): CsvFormat {
@@ -592,50 +660,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
     setProgress({ current: 0, total: entries.length });
 
     let successCount = 0;
-    const tagNameToId = new Map<string, string>();
-
-    // Resolve tags once (existing + create missing) to attach tagIds during import.
-    try {
-      const tagsRes = await fetch(API_PATH.TAGS);
-      if (tagsRes.ok) {
-        const existingTags = (await tagsRes.json()) as ExistingTag[];
-        for (const tag of existingTags) {
-          const name = tag.name?.trim();
-          if (name && tag.id) {
-            tagNameToId.set(name, tag.id);
-          }
-        }
-      }
-    } catch {
-      // Ignore and continue without tag linkage.
-    }
-
-    const missingTags = new Map<string, string | null>();
-    for (const entry of entries) {
-      for (const tag of entry.tags) {
-        const name = tag.name?.trim();
-        if (!name || tagNameToId.has(name) || missingTags.has(name)) continue;
-        missingTags.set(name, tag.color ?? null);
-      }
-    }
-
-    for (const [name, color] of missingTags) {
-      try {
-        const createRes = await fetch(API_PATH.TAGS, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, color }),
-        });
-        if (createRes.ok) {
-          const created = (await createRes.json()) as ExistingTag;
-          if (created?.id) {
-            tagNameToId.set(name, created.id);
-          }
-        }
-      } catch {
-        // Ignore and proceed without this tag.
-      }
-    }
+    const tagNameToId = await resolveTagNameToIdForImport(entries);
 
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
@@ -756,11 +781,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
 
         const encryptedBlob = await encryptData(fullBlob, encryptionKey, aad);
         const encryptedOverview = await encryptData(overviewBlob, encryptionKey, aad);
-        const tagIds = entry.tags
-          .map((tag) => tag.name?.trim())
-          .filter((name): name is string => !!name)
-          .map((name) => tagNameToId.get(name))
-          .filter((id): id is string => !!id);
+        const tagIds = resolveEntryTagIds(entry, tagNameToId);
 
         const res = await fetch(API_PATH.PASSWORDS, {
           method: "POST",
@@ -1009,4 +1030,6 @@ export const __testablesImport = {
   parseCsv,
   parseJson,
   parsePasswdSsoPayload,
+  resolveTagNameToIdForImport,
+  resolveEntryTagIds,
 };
