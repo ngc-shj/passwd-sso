@@ -37,6 +37,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import { formatDateTime } from "@/lib/format-datetime";
 
 interface PasswordHistoryEntry {
   password: string;
@@ -383,9 +384,7 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
                             : "••••••••••••"}
                         </span>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          {new Date(entry.changedAt).toLocaleString(
-                            locale === "ja" ? "ja-JP" : "en-US"
-                          )}
+                          {formatDateTime(entry.changedAt, locale)}
                         </p>
                       </div>
                       <Button
@@ -418,10 +417,10 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
 
           <div className="pt-4 text-xs text-muted-foreground">
             <p>
-              {t("created")}: {new Date(data.createdAt).toLocaleString(locale === "ja" ? "ja-JP" : "en-US")}
+              {t("created")}: {formatDateTime(data.createdAt, locale)}
             </p>
             <p>
-              {t("updated")}: {new Date(data.updatedAt).toLocaleString(locale === "ja" ? "ja-JP" : "en-US")}
+              {t("updated")}: {formatDateTime(data.updatedAt, locale)}
             </p>
           </div>
         </CardContent>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { OrgRoleBadge } from "@/components/org/org-role-badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,7 @@ import { Link } from "@/i18n/navigation";
 import { ArrowLeft, Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
+import { formatDate } from "@/lib/format-datetime";
 
 interface OrgInfo {
   id: string;
@@ -72,6 +73,7 @@ export default function OrgSettingsPage({
 }) {
   const { orgId } = use(params);
   const t = useTranslations("Org");
+  const locale = useLocale();
   const router = useRouter();
 
   const [org, setOrg] = useState<OrgInfo | null>(null);
@@ -582,7 +584,7 @@ export default function OrgSettingsPage({
                           <p className="text-sm font-medium">{inv.email}</p>
                           <p className="text-xs text-muted-foreground">
                             {t("expiresAt", {
-                              date: new Date(inv.expiresAt).toLocaleDateString(),
+                              date: formatDate(inv.expiresAt, locale),
                             })}
                           </p>
                         </div>

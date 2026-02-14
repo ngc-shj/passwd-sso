@@ -15,6 +15,7 @@ import type { CustomFieldType } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { apiPath } from "@/lib/constants";
+import { formatDateTime } from "@/lib/format-datetime";
 import {
   Edit,
   Eye,
@@ -581,9 +582,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
                             : "••••••••••••"}
                         </span>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          {new Date(entry.changedAt).toLocaleString(
-                            locale === "ja" ? "ja-JP" : "en-US"
-                          )}
+                          {formatDateTime(entry.changedAt, locale)}
                         </p>
                       </div>
                       <Button
@@ -639,15 +638,11 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
         <div className="text-xs text-muted-foreground">
           <p>
             {t("created")}:{" "}
-            {new Date(data.createdAt).toLocaleString(
-              locale === "ja" ? "ja-JP" : "en-US"
-            )}
+            {formatDateTime(data.createdAt, locale)}
           </p>
           <p>
             {t("updated")}:{" "}
-            {new Date(data.updatedAt).toLocaleString(
-              locale === "ja" ? "ja-JP" : "en-US"
-            )}
+            {formatDateTime(data.updatedAt, locale)}
           </p>
         </div>
         {onEdit && (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, apiPath, ENTRY_TYPE } from "@/lib/constants";
+import { formatDateTime } from "@/lib/format-datetime";
 
 interface ShareLinkItem {
   id: string;
@@ -56,6 +57,7 @@ const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
 export default function ShareLinksPage() {
   const t = useTranslations("ShareLinks");
   const tShare = useTranslations("Share");
+  const locale = useLocale();
   const [links, setLinks] = useState<ShareLinkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -163,7 +165,7 @@ export default function ShareLinksPage() {
     }
   };
 
-  const formatDate = (iso: string) => new Date(iso).toLocaleString();
+  const formatDate = (iso: string) => formatDateTime(iso, locale);
 
   const getStatusBadge = (link: ShareLinkItem) => {
     if (link.revokedAt) {

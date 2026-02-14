@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/passwords/copy-button";
@@ -17,6 +17,7 @@ import {
   UserSquare,
   Fingerprint,
 } from "lucide-react";
+import { formatDateTime } from "@/lib/format-datetime";
 
 const REVEAL_TIMEOUT = 30_000;
 
@@ -44,6 +45,7 @@ export function ShareEntryView({
   maxViews,
 }: ShareEntryViewProps) {
   const t = useTranslations("Share");
+  const locale = useLocale();
   const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
 
   // Auto-hide revealed fields after timeout
@@ -290,7 +292,7 @@ export function ShareEntryView({
             <Clock className="h-3.5 w-3.5" />
             <span>
               {t("expiresAt", {
-                date: new Date(expiresAt).toLocaleString(),
+                date: formatDateTime(expiresAt, locale),
               })}
             </span>
           </div>

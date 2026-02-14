@@ -16,6 +16,7 @@ import { useLocalStorage } from "@/hooks/use-local-storage";
 import { ExportDialog } from "@/components/passwords/export-dialog";
 import { ImportDialog } from "@/components/passwords/import-dialog";
 import { ORG_ROLE, ENTRY_TYPE, API_PATH, apiPath } from "@/lib/constants";
+import { stripLocalePrefix } from "@/i18n/locale-utils";
 
 // ─── Section keys ────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const searchParams = useSearchParams();
 
   // Strip locale prefix for route matching
-  const cleanPath = pathname.replace(/^\/(ja|en)/, "");
+  const cleanPath = stripLocalePrefix(pathname);
 
   // Active state detection (all path-based)
   const activeTypeFilter = cleanPath === "/dashboard" ? searchParams.get("type") : null;

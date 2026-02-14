@@ -1,10 +1,9 @@
 import en from "../messages/en.json";
 import ja from "../messages/ja.json";
 
-type Locale = "en" | "ja";
-type Messages = typeof en;
-
-const MESSAGES: Record<Locale, Messages> = { en, ja };
+const MESSAGES = { en, ja } as const;
+type Locale = keyof typeof MESSAGES;
+type Messages = (typeof MESSAGES)[Locale];
 
 function getLocale(): Locale {
   let raw: string | false = false;
@@ -21,7 +20,12 @@ function getLocale(): Locale {
     raw = typeof navigator !== "undefined" ? navigator.language : "en";
   }
   const normalized = (raw || "en").toLowerCase();
-  return normalized.startsWith("ja") ? "ja" : "en";
+  const locales = Object.keys(MESSAGES) as Locale[];
+  const exact = locales.find((loc) => normalized === loc);
+  if (exact) return exact;
+  const prefix = locales.find((loc) => normalized.startsWith(`${loc}-`));
+  if (prefix) return prefix;
+  return "en";
 }
 
 function resolveMessage(path: string, locale: Locale): string | null {

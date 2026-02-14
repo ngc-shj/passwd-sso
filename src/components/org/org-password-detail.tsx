@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +21,7 @@ import { Eye, EyeOff, ExternalLink } from "lucide-react";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
+import { formatDateTime } from "@/lib/format-datetime";
 
 interface CustomField {
   label: string;
@@ -76,6 +77,7 @@ export function OrgPasswordDetail({
 }: OrgPasswordDetailProps) {
   const t = useTranslations("PasswordDetail");
   const tf = useTranslations("PasswordForm");
+  const locale = useLocale();
   const [data, setData] = useState<PasswordData | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showCardNumber, setShowCardNumber] = useState(false);
@@ -543,12 +545,12 @@ export function OrgPasswordDetail({
             <div className="border-t pt-3 space-y-1 text-xs text-muted-foreground">
               <p>
                 {t("created")}:{" "}
-                {new Date(data.createdAt).toLocaleString()}
+                {formatDateTime(data.createdAt, locale)}
                 {data.createdBy.name && ` (${data.createdBy.name})`}
               </p>
               <p>
                 {t("updated")}:{" "}
-                {new Date(data.updatedAt).toLocaleString()}
+                {formatDateTime(data.updatedAt, locale)}
                 {data.updatedBy.name && ` (${data.updatedBy.name})`}
               </p>
             </div>

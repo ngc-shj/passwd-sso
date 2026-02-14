@@ -2,6 +2,7 @@ import createIntlMiddleware from "next-intl/middleware";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { routing } from "./i18n/routing";
+import { getLocaleFromPathname, stripLocalePrefix } from "./i18n/locale-utils";
 import { API_PATH } from "./lib/constants";
 
 const intlMiddleware = createIntlMiddleware(routing);
@@ -37,11 +38,8 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
   }
 
   // Extract locale and path without locale prefix
-  const segments = pathname.split("/");
-  const locale = routing.locales.includes(segments[1] as "ja" | "en")
-    ? segments[1]
-    : routing.defaultLocale;
-  const pathWithoutLocale = "/" + segments.slice(2).join("/");
+  const locale = getLocaleFromPathname(pathname);
+  const pathWithoutLocale = stripLocalePrefix(pathname);
 
   // Auth check for protected routes
   if (pathWithoutLocale.startsWith("/dashboard")) {
