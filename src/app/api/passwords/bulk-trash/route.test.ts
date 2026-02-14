@@ -68,6 +68,16 @@ describe("POST /api/passwords/bulk-trash", () => {
         }),
       })
     );
+    expect(mockFindMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: "user-1",
+          id: { in: ["p1", "p2"] },
+          deletedAt: expect.any(Date),
+        }),
+      })
+    );
     expect(mockAuditCreate).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -88,7 +98,10 @@ describe("POST /api/passwords/bulk-trash", () => {
         data: expect.objectContaining({
           action: "ENTRY_DELETE",
           targetId: "p1",
-          metadata: expect.objectContaining({ source: "bulk-trash" }),
+          metadata: expect.objectContaining({
+            source: "bulk-trash",
+            parentAction: "ENTRY_BULK_DELETE",
+          }),
         }),
       })
     );
@@ -98,7 +111,10 @@ describe("POST /api/passwords/bulk-trash", () => {
         data: expect.objectContaining({
           action: "ENTRY_DELETE",
           targetId: "p2",
-          metadata: expect.objectContaining({ source: "bulk-trash" }),
+          metadata: expect.objectContaining({
+            source: "bulk-trash",
+            parentAction: "ENTRY_BULK_DELETE",
+          }),
         }),
       })
     );
@@ -121,6 +137,7 @@ describe("POST /api/passwords/bulk-trash", () => {
   it("creates summary log only when nothing matches", async () => {
     mockFindMany.mockResolvedValueOnce([]);
     mockUpdateMany.mockResolvedValueOnce({ count: 0 });
+    mockFindMany.mockResolvedValueOnce([]);
 
     const res = await POST(
       createRequest("POST", "http://localhost:3000/api/passwords/bulk-trash", {
@@ -143,6 +160,7 @@ describe("POST /api/passwords/bulk-trash", () => {
   });
 
   it("propagates db errors (framework handles 500)", async () => {
+    mockFindMany.mockResolvedValueOnce([{ id: "p1" }]);
     mockUpdateMany.mockRejectedValueOnce(new Error("db down"));
     await expect(
       POST(
@@ -151,5 +169,44 @@ describe("POST /api/passwords/bulk-trash", () => {
         })
       )
     ).rejects.toThrow("db down");
+  });
+
+  it("logs per-entry delete only for actually moved entries", async () => {
+    mockFindMany
+      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }])
+      .mockResolvedValueOnce([{ id: "p1" }]);
+    mockUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    const res = await POST(
+      createRequest("POST", "http://localhost:3000/api/passwords/bulk-trash", {
+        body: { ids: ["p1", "p2"] },
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.movedCount).toBe(1);
+    expect(mockAuditCreate).toHaveBeenCalledTimes(2);
+    expect(mockAuditCreate).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "ENTRY_BULK_DELETE",
+          metadata: expect.objectContaining({ entryIds: ["p1"], movedCount: 1 }),
+        }),
+      })
+    );
+    expect(mockAuditCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "ENTRY_DELETE",
+          targetId: "p1",
+          metadata: expect.objectContaining({
+            parentAction: "ENTRY_BULK_DELETE",
+          }),
+        }),
+      })
+    );
   });
 });

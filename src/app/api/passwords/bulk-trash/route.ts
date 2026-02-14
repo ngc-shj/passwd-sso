@@ -41,6 +41,7 @@ export async function POST(req: NextRequest) {
   });
   const entryIds = entriesToTrash.map((entry) => entry.id);
 
+  const deletedAt = new Date();
   const result = await prisma.passwordEntry.updateMany({
     where: {
       userId: session.user.id,
@@ -48,9 +49,18 @@ export async function POST(req: NextRequest) {
       deletedAt: null,
     },
     data: {
-      deletedAt: new Date(),
+      deletedAt,
     },
   });
+  const movedEntries = await prisma.passwordEntry.findMany({
+    where: {
+      userId: session.user.id,
+      id: { in: entryIds },
+      deletedAt,
+    },
+    select: { id: true },
+  });
+  const movedEntryIds = movedEntries.map((entry) => entry.id);
   const requestMeta = extractRequestMeta(req);
 
   logAudit({
@@ -63,12 +73,12 @@ export async function POST(req: NextRequest) {
       bulk: true,
       requestedCount: ids.length,
       movedCount: result.count,
-      entryIds,
+      entryIds: movedEntryIds,
     },
     ...requestMeta,
   });
 
-  for (const entryId of entryIds) {
+  for (const entryId of movedEntryIds) {
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.ENTRY_DELETE,
@@ -77,6 +87,7 @@ export async function POST(req: NextRequest) {
       targetId: entryId,
       metadata: {
         source: "bulk-trash",
+        parentAction: AUDIT_ACTION.ENTRY_BULK_DELETE,
       },
       ...requestMeta,
     });

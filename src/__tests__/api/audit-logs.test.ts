@@ -185,6 +185,26 @@ describe("GET /api/audit-logs", () => {
     );
   });
 
+  it("applies ENTRY_BULK_DELETE action filter", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest(
+      "GET",
+      `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_DELETE}`
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await GET(req as any);
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          action: { in: [AUDIT_ACTION.ENTRY_BULK_DELETE] },
+        }),
+      })
+    );
+  });
+
   it("ignores invalid action filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindMany.mockResolvedValue([]);

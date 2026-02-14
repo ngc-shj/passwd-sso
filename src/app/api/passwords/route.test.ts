@@ -405,7 +405,10 @@ describe("POST /api/passwords", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           action: "ENTRY_CREATE",
-          metadata: { source: "import" },
+          metadata: {
+            source: "import",
+            parentAction: "ENTRY_IMPORT",
+          },
         }),
       }),
     );
@@ -436,7 +439,11 @@ describe("POST /api/passwords", () => {
     expect(mockAuditCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          metadata: { source: "import", filename: "passwd-sso-import.csv" },
+          metadata: {
+            source: "import",
+            filename: "passwd-sso-import.csv",
+            parentAction: "ENTRY_IMPORT",
+          },
         }),
       }),
     );

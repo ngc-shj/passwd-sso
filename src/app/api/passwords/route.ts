@@ -143,7 +143,16 @@ export async function POST(req: NextRequest) {
       if (req.headers.get("x-passwd-sso-source") !== "import") return undefined;
       const rawFilename = req.headers.get("x-passwd-sso-filename")?.trim() ?? "";
       const filename = rawFilename ? rawFilename.slice(0, 255) : undefined;
-      return filename ? { source: "import", filename } : { source: "import" };
+      return filename
+        ? {
+            source: "import",
+            filename,
+            parentAction: AUDIT_ACTION.ENTRY_IMPORT,
+          }
+        : {
+            source: "import",
+            parentAction: AUDIT_ACTION.ENTRY_IMPORT,
+          };
     })(),
     ...extractRequestMeta(req),
   });
