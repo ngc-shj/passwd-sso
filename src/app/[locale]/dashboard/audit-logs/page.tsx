@@ -380,9 +380,16 @@ export default function AuditLogsPage() {
         : null;
     const parentAction =
       typeof meta?.parentAction === "string" ? meta.parentAction : null;
-    const parentActionText = parentAction
-      ? t("fromAction", { action: t(parentAction as never) })
-      : null;
+    let parentActionText: string | null = null;
+    if (parentAction) {
+      let parentActionLabel = parentAction;
+      try {
+        parentActionLabel = t(parentAction as never);
+      } catch {
+        // fallback to action key when the translation does not exist
+      }
+      parentActionText = t("fromAction", { action: parentActionLabel });
+    }
 
     // Entry operations: show resolved entry name
     if (
@@ -422,7 +429,13 @@ export default function AuditLogsPage() {
     return null;
   };
 
-  const actionLabel = (action: AuditActionValue | string) => t(action as never);
+  const actionLabel = (action: AuditActionValue | string) => {
+    try {
+      return t(action as never);
+    } catch {
+      return String(action);
+    }
+  };
   const getActionLabel = (log: AuditLogItem) =>
     log.action === AUDIT_ACTION.ENTRY_BULK_TRASH
       ? t("ENTRY_BULK_TRASH")

@@ -31,4 +31,24 @@ describe("audit log target labels", () => {
       expect(page).toContain('t("fromAction"');
     }
   });
+
+  it("has i18n fallback when action key translation is missing", () => {
+    const personalPage = readFileSync(
+      join(process.cwd(), "src/app/[locale]/dashboard/audit-logs/page.tsx"),
+      "utf8"
+    );
+    const orgPage = readFileSync(
+      join(
+        process.cwd(),
+        "src/app/[locale]/dashboard/orgs/[orgId]/audit-logs/page.tsx"
+      ),
+      "utf8"
+    );
+
+    for (const page of [personalPage, orgPage]) {
+      expect(page).toContain("try {");
+      expect(page).toContain("parentActionLabel = t(parentAction as never)");
+      expect(page).toContain("return String(action)");
+    }
+  });
 });
