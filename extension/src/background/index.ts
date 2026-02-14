@@ -46,6 +46,17 @@ const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
 let cachedEntries: DecryptedEntry[] | null = null;
 let cacheTimestamp = 0;
 
+async function configureSessionStorageAccess(): Promise<void> {
+  try {
+    // Limit session storage to trusted extension contexts.
+    await chrome.storage.session.setAccessLevel({
+      accessLevel: "TRUSTED_CONTEXTS",
+    });
+  } catch {
+    // Best effort: older browsers or restricted environments may not support this.
+  }
+}
+
 function invalidateCache(): void {
   cachedEntries = null;
   cacheTimestamp = 0;
@@ -261,6 +272,9 @@ async function shouldSuppressInlineMatches(url: string): Promise<boolean> {
   // Suppress inline suggestions on the passwd-sso app origin.
   return true;
 }
+
+// Harden session storage visibility on SW startup (best-effort).
+void configureSessionStorageAccess();
 
 // Hydrate on SW startup
 const hydrationPromise = hydrateFromSession().catch(() => {});

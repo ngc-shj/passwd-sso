@@ -87,6 +87,7 @@ function installChromeMock() {
         get: vi.fn().mockResolvedValue({}),
         set: vi.fn().mockResolvedValue(undefined),
         remove: vi.fn().mockResolvedValue(undefined),
+        setAccessLevel: vi.fn().mockResolvedValue(undefined),
       },
       onChanged: {
         addListener: (fn: (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, areaName: string) => void) => {
@@ -199,6 +200,12 @@ describe("background message flow", () => {
       ALARM_VAULT_LOCK,
       expect.objectContaining({ delayInMinutes: 15 })
     );
+  });
+
+  it("configures storage.session access level to trusted contexts on startup", async () => {
+    expect(chromeMock?.storage.session.setAccessLevel).toHaveBeenCalledWith({
+      accessLevel: "TRUSTED_CONTEXTS",
+    });
   });
 
   it("relocks vault when token value changes", async () => {
