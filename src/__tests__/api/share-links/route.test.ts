@@ -210,6 +210,71 @@ describe("POST /api/share-links", () => {
     expect(decryptCall[2]).toBeUndefined();
   });
 
+  it("returns 400 on malformed JSON", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    const { NextRequest } = await import("next/server");
+    const req = new NextRequest("http://localhost/api/share-links", {
+      method: "POST",
+      body: "not-json",
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("INVALID_JSON");
+  });
+
+  it("returns 404 when org entry not found", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique.mockResolvedValue(null);
+
+    const req = createRequest("POST", "http://localhost/api/share-links", {
+      body: {
+        orgPasswordEntryId: VALID_ENTRY_ID,
+        expiresIn: "1d",
+      },
+    });
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(404);
+    expect(json.error).toBe("NOT_FOUND");
+  });
+
+  it("returns OrgAuthError status for org entry permission denied", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique.mockResolvedValueOnce({
+      id: "org-entry-1",
+      entryType: ENTRY_TYPE.LOGIN,
+      aadVersion: 1,
+      encryptedBlob: "blob",
+      blobIv: "iv",
+      blobAuthTag: "tag",
+      org: {
+        id: "org-123",
+        encryptedOrgKey: "ek",
+        orgKeyIv: "oiv",
+        orgKeyAuthTag: "otag",
+      },
+    });
+
+    const { requireOrgPermission } = await import("@/lib/org-auth");
+    const { OrgAuthError: RealOrgAuthError } = await import("@/lib/org-auth");
+    vi.mocked(requireOrgPermission).mockRejectedValueOnce(
+      new RealOrgAuthError("INSUFFICIENT_PERMISSION", 403)
+    );
+
+    const req = createRequest("POST", "http://localhost/api/share-links", {
+      body: {
+        orgPasswordEntryId: VALID_ENTRY_ID,
+        expiresIn: "1d",
+      },
+    });
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("INSUFFICIENT_PERMISSION");
+  });
+
   it("returns 404 when entry not owned by user", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue({
