@@ -46,6 +46,17 @@ const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
 let cachedEntries: DecryptedEntry[] | null = null;
 let cacheTimestamp = 0;
 
+async function configureSessionStorageAccess(): Promise<void> {
+  try {
+    // Limit session storage to trusted extension contexts.
+    await chrome.storage.session.setAccessLevel({
+      accessLevel: "TRUSTED_CONTEXTS",
+    });
+  } catch {
+    // Best effort: older browsers or restricted environments may not support this.
+  }
+}
+
 function invalidateCache(): void {
   cachedEntries = null;
   cacheTimestamp = 0;
@@ -261,6 +272,9 @@ async function shouldSuppressInlineMatches(url: string): Promise<boolean> {
   // Suppress inline suggestions on the passwd-sso app origin.
   return true;
 }
+
+// Harden session storage visibility on SW startup (best-effort).
+void configureSessionStorageAccess();
 
 // Hydrate on SW startup
 const hydrationPromise = hydrateFromSession().catch(() => {});
@@ -694,6 +708,13 @@ async function handleMessage(
 
   switch (message.type) {
     case "SET_TOKEN": {
+      const tokenChanged = currentToken !== null && currentToken !== message.token;
+      if (tokenChanged) {
+        // A new token may represent a different auth session/user.
+        // Force vault relock to avoid carrying unlocked state across token rotation.
+        clearVault();
+      }
+
       currentToken = message.token;
       tokenExpiresAt = message.expiresAt;
 
