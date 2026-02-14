@@ -26,17 +26,12 @@ export function App() {
   const [autoLockMinutes, setAutoLockMinutes] = useState(15);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
-  const [autofillAllEnabled, setAutofillAllEnabled] = useState(false);
 
   useEffect(() => {
     getSettings().then((s: StorageSchema) => {
       setServerUrl(s.serverUrl);
       setAutoLockMinutes(s.autoLockMinutes);
     });
-    chrome.permissions
-      .contains({ origins: ["https://*/*"] })
-      .then(setAutofillAllEnabled)
-      .catch(() => {});
   }, []);
 
   const handleSave = async () => {
@@ -68,40 +63,52 @@ export function App() {
   };
 
   return (
-    <div className="bg-gray-50 text-gray-900 p-4 min-h-full">
-      <header className="mb-3">
-        <h1 className="text-base font-semibold tracking-tight">{t("options.title")}</h1>
-        <p className="text-xs text-gray-500 mt-0.5">{t("options.description")}</p>
+    <div className="max-w-lg mx-auto text-gray-900 px-6 py-10">
+      <header className="flex items-start justify-between mb-5">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">{t("options.title")}</h1>
+          <p className="text-sm text-gray-500 mt-1">{t("options.description")}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => window.close()}
+          className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-md transition-colors"
+          aria-label={t("options.close")}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+          </svg>
+        </button>
       </header>
 
-      <div className="flex flex-col gap-2.5">
+      <div className="flex flex-col gap-4">
         {/* Server URL */}
-        <div className="rounded-lg border border-gray-200 bg-white px-3 py-3 shadow-sm">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-gray-700">{t("options.serverUrl")}</span>
+        <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 shadow-sm">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-gray-700">{t("options.serverUrl")}</span>
             <input
               type="text"
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
               placeholder={t("options.serverUrlPlaceholder")}
-              className="h-8 px-2.5 rounded-md border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+              className="h-9 px-3 rounded-md border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
             />
-            <span className="text-[11px] text-gray-400">
+            <span className="text-xs text-gray-400">
               {t("options.httpsRequired")}
             </span>
           </label>
         </div>
 
         {/* Auto-lock */}
-        <div className="rounded-lg border border-gray-200 bg-white px-3 py-3 shadow-sm">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-gray-700">
+        <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 shadow-sm">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-gray-700">
               {t("options.autoLock")}
             </span>
             <select
               value={autoLockMinutes}
               onChange={(e) => setAutoLockMinutes(Number(e.target.value))}
-              className="h-8 px-2.5 rounded-md border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+              className="h-9 px-3 rounded-md border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
             >
               <option value={0}>{t("options.never")}</option>
               <option value={1}>1</option>
@@ -113,63 +120,17 @@ export function App() {
           </label>
         </div>
 
-        {/* Autofill toggle */}
-        <div className="rounded-lg border border-gray-200 bg-white px-3 py-3 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <span className="text-xs font-medium text-gray-700">
-                {t("options.enableAutofillAll")}
-              </span>
-              <p className="text-[11px] text-gray-400 mt-0.5">
-                {t("options.enableAutofillAllDescription")}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={async () => {
-                if (autofillAllEnabled) {
-                  try {
-                    const removed = await chrome.permissions.remove({
-                      origins: ["https://*/*"],
-                    });
-                    if (removed) setAutofillAllEnabled(false);
-                  } catch {
-                    // content_scripts declares https://*/* as required — cannot remove
-                  }
-                } else {
-                  const granted = await chrome.permissions.request({
-                    origins: ["https://*/*"],
-                  });
-                  setAutofillAllEnabled(granted);
-                }
-              }}
-              className={`relative flex-shrink-0 inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                autofillAllEnabled ? "bg-blue-600" : "bg-gray-300"
-              }`}
-              role="switch"
-              aria-checked={autofillAllEnabled ? "true" : "false"}
-              aria-label={t("options.enableAutofillAll")}
-            >
-              <span
-                className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-                  autofillAllEnabled ? "translate-x-6" : "translate-x-1"
-                }`}
-              />
-            </button>
-          </div>
-        </div>
-
         {/* Save */}
-        <div className="flex items-center gap-3 pt-1">
+        <div className="flex items-center gap-3 pt-2">
           <button
             type="button"
             onClick={handleSave}
-            className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-sm"
+            className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-sm"
           >
             {t("options.save")}
           </button>
-          {error && <span className="text-xs text-red-600">{humanizeError(error)}</span>}
-          {saved && <span className="text-xs text-green-600 font-medium">{t("options.saved")}</span>}
+          {error && <span className="text-sm text-red-600">{humanizeError(error)}</span>}
+          {saved && <span className="text-sm text-green-600 font-medium">{t("options.saved")}</span>}
         </div>
       </div>
     </div>
