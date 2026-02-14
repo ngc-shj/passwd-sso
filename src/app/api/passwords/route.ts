@@ -142,7 +142,13 @@ export async function POST(req: NextRequest) {
     metadata: (() => {
       if (req.headers.get("x-passwd-sso-source") !== "import") return undefined;
       const rawFilename = req.headers.get("x-passwd-sso-filename")?.trim() ?? "";
-      const filename = rawFilename ? rawFilename.slice(0, 255) : undefined;
+      const filename = rawFilename
+        ? rawFilename
+            .replace(/[\0\x01-\x1f\x7f-\x9f]/g, "") // null bytes + control chars
+            .replace(/[/\\]/g, "_")                    // path separators → underscore
+            .trim()
+            .slice(0, 255) || undefined
+        : undefined;
       return filename
         ? {
             source: "import",
