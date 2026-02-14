@@ -147,7 +147,15 @@ function showForInput(
   input: HTMLInputElement,
   entries: DecryptedEntry[],
   vaultLocked: boolean,
+  suppressInline: boolean,
 ): void {
+  // Suppress inline UI on passwd-sso application pages.
+  if (suppressInline) {
+    hideDropdown();
+    currentContext = null;
+    return;
+  }
+
   const rect = input.getBoundingClientRect();
   const msgs = getMessages();
 
@@ -344,15 +352,26 @@ export function initFormDetector(): FormDetectorCleanup {
       return;
     }
     const url = window.location.href;
+    let topUrl: string | undefined;
+    try {
+      topUrl = window.top?.location?.href;
+    } catch {
+      topUrl = undefined;
+    }
     try {
       chrome.runtime.sendMessage(
-        { type: "GET_MATCHES_FOR_URL", url },
+        { type: "GET_MATCHES_FOR_URL", url, topUrl },
         (response) => {
           if (destroyed) return;
           if (!isContextValid()) { destroy(); return; }
           if (chrome.runtime.lastError) return;
           if (!response) return;
-          showForInput(input, response.entries ?? [], response.vaultLocked ?? false);
+          showForInput(
+            input,
+            response.entries ?? [],
+            response.vaultLocked ?? false,
+            response.suppressInline ?? false,
+          );
         },
       );
     } catch {

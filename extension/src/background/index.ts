@@ -218,12 +218,13 @@ async function shouldSuppressInlineMatches(url: string): Promise<boolean> {
   }
   if (!/^https?:$/.test(pageUrl.protocol)) return false;
 
-  const { serverUrl } = await chrome.storage.local.get({
-    serverUrl: "https://localhost:3000",
-  });
+  const { serverUrl } = await chrome.storage.local.get("serverUrl");
+  if (typeof serverUrl !== "string" || !serverUrl) {
+    return false;
+  }
   let serverOrigin: string;
   try {
-    serverOrigin = new URL(String(serverUrl)).origin;
+    serverOrigin = new URL(serverUrl).origin;
   } catch {
     return false;
   }
@@ -909,26 +910,30 @@ chrome.runtime.onMessage.addListener(
             type: "GET_MATCHES_FOR_URL",
             entries: [],
             vaultLocked: true,
+            suppressInline: false,
           });
           break;
         }
 
         (async () => {
           try {
-            if (await shouldSuppressInlineMatches(message.url)) {
+            const effectiveUrl = message.topUrl ?? message.url;
+            if (await shouldSuppressInlineMatches(effectiveUrl)) {
               sendResponse({
                 type: "GET_MATCHES_FOR_URL",
                 entries: [],
                 vaultLocked: false,
+                suppressInline: true,
               });
               return;
             }
-            const tabHost = extractHost(message.url);
+            const tabHost = extractHost(effectiveUrl);
             if (!tabHost) {
               sendResponse({
                 type: "GET_MATCHES_FOR_URL",
                 entries: [],
                 vaultLocked: false,
+                suppressInline: false,
               });
               return;
             }
@@ -943,12 +948,14 @@ chrome.runtime.onMessage.addListener(
               type: "GET_MATCHES_FOR_URL",
               entries: matches,
               vaultLocked: false,
+              suppressInline: false,
             });
           } catch {
             sendResponse({
               type: "GET_MATCHES_FOR_URL",
               entries: [],
               vaultLocked: false,
+              suppressInline: false,
             });
           }
         })();

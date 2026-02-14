@@ -547,7 +547,100 @@ describe("background message flow", () => {
       type: "GET_MATCHES_FOR_URL",
       entries: [],
       vaultLocked: false,
+      suppressInline: true,
     });
+  });
+
+  it("does not suppress inline matches when origin differs from serverUrl", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({
+      type: "GET_MATCHES_FOR_URL",
+      url: "http://localhost:3000/ja/dashboard",
+    });
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "GET_MATCHES_FOR_URL",
+        vaultLocked: false,
+        suppressInline: false,
+      }),
+    );
+  });
+
+  it("suppresses inline matches using topUrl from iframe context", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({
+      type: "GET_MATCHES_FOR_URL",
+      url: "about:blank",
+      topUrl: "https://localhost:3000/ja/dashboard",
+    });
+
+    expect(res).toEqual({
+      type: "GET_MATCHES_FOR_URL",
+      entries: [],
+      vaultLocked: false,
+      suppressInline: true,
+    });
+  });
+
+  it("suppresses using topUrl even when frame url is external", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({
+      type: "GET_MATCHES_FOR_URL",
+      url: "https://example.com/login",
+      topUrl: "https://localhost:3000/ja/auth/signin",
+    });
+
+    expect(res).toEqual({
+      type: "GET_MATCHES_FOR_URL",
+      entries: [],
+      vaultLocked: false,
+      suppressInline: true,
+    });
+  });
+
+  it("does not suppress when serverUrl is missing", async () => {
+    chromeMock?.storage.local.get.mockImplementation(async (arg?: unknown) => {
+      if (arg === "serverUrl") return {};
+      return { serverUrl: "https://localhost:3000", autoLockMinutes: 15 };
+    });
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({
+      type: "GET_MATCHES_FOR_URL",
+      url: "https://localhost:3000/ja/dashboard",
+    });
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "GET_MATCHES_FOR_URL",
+        suppressInline: false,
+      }),
+    );
   });
 
   it("returns error when AUTOFILL fetch fails", async () => {

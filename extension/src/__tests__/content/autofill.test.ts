@@ -8,11 +8,11 @@ function setupForm(html: string) {
   document.body.innerHTML = html;
 }
 
-function mockAwsHost() {
+function mockHost(hostname: string) {
   Object.defineProperty(window, "location", {
     value: {
       ...window.location,
-      hostname: "signin.aws.amazon.com",
+      hostname,
     },
     configurable: true,
   });
@@ -131,7 +131,7 @@ describe("performAutofill", () => {
   });
 
   it("fills AWS account alias + IAM username + password", () => {
-    mockAwsHost();
+    mockHost("signin.aws.amazon.com");
     setupForm(`
       <label for="acct">Account ID or alias</label>
       <input id="acct" type="text" />
@@ -150,6 +150,45 @@ describe("performAutofill", () => {
 
     expect((document.getElementById("acct") as HTMLInputElement).value).toBe("123456789012");
     expect((document.getElementById("iam-user") as HTMLInputElement).value).toBe("alice-iam");
+    expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
+  });
+
+  it("falls back to normal username fill on AWS when aws-specific values are empty", () => {
+    mockHost("signin.aws.amazon.com");
+    setupForm(`
+      <label for="iam-user">IAM user name</label>
+      <input id="iam-user" type="text" />
+      <input id="pw" type="password" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "fallback-user",
+      password: "secret",
+      awsAccountIdOrAlias: "",
+      awsIamUsername: "",
+    });
+
+    expect((document.getElementById("iam-user") as HTMLInputElement).value).toBe("fallback-user");
+    expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
+  });
+
+  it("ignores aws-specific payload on non-AWS pages", () => {
+    mockHost("example.com");
+    setupForm(`
+      <input id="user" type="text" name="username" />
+      <input id="pw" type="password" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "normal-user",
+      password: "secret",
+      awsAccountIdOrAlias: "123456789012",
+      awsIamUsername: "alice-iam",
+    });
+
+    expect((document.getElementById("user") as HTMLInputElement).value).toBe("normal-user");
     expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
   });
 });
