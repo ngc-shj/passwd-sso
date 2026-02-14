@@ -35,10 +35,12 @@ interface OrgTrashEntry {
 }
 
 interface OrgTrashListProps {
+  orgId?: string;
+  searchQuery?: string;
   refreshKey: number;
 }
 
-export function OrgTrashList({ refreshKey }: OrgTrashListProps) {
+export function OrgTrashList({ orgId, searchQuery = "", refreshKey }: OrgTrashListProps) {
   const t = useTranslations("Trash");
   const tOrg = useTranslations("Org");
   const [entries, setEntries] = useState<OrgTrashEntry[]>([]);
@@ -96,18 +98,36 @@ export function OrgTrashList({ refreshKey }: OrgTrashListProps) {
     }
   };
 
-  if (loading || entries.length === 0) return null;
+  const filtered = entries.filter((entry) => {
+    if (orgId && entry.orgId !== orgId) return false;
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      entry.title.toLowerCase().includes(q) ||
+      entry.username?.toLowerCase().includes(q) ||
+      entry.snippet?.toLowerCase().includes(q) ||
+      entry.brand?.toLowerCase().includes(q) ||
+      entry.lastFour?.includes(q) ||
+      entry.fullName?.toLowerCase().includes(q) ||
+      entry.idNumberLast4?.includes(q) ||
+      entry.orgName.toLowerCase().includes(q)
+    );
+  });
+
+  if (loading || filtered.length === 0) return null;
 
   return (
     <div className="mt-6">
-      <div className="mb-3 flex items-center gap-2">
-        <Building2 className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-sm font-medium text-muted-foreground">
-          {tOrg("organizationTrash")}
-        </h2>
-      </div>
-      <div className="space-y-2 rounded-xl border bg-card/80 p-2">
-        {entries.map((entry) => (
+      {!orgId && (
+        <div className="mb-3 flex items-center gap-2">
+          <Building2 className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium text-muted-foreground">
+            {tOrg("organizationTrash")}
+          </h2>
+        </div>
+      )}
+      <div className="space-y-2">
+        {filtered.map((entry) => (
           <Card key={entry.id} className="rounded-xl border bg-background/80 transition-colors hover:bg-muted/30">
             <CardContent className="flex items-center gap-4 p-4">
               {entry.entryType === ENTRY_TYPE.IDENTITY ? (

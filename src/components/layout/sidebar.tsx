@@ -93,6 +93,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const activeOrgId = orgMatch && !isAuditLog ? orgMatch[1] : null;
   const activeOrgTagId = activeOrgId ? searchParams.get("tag") : null;
   const activeOrgTypeFilter = activeOrgId ? searchParams.get("type") : null;
+  const activeOrgScope = activeOrgId ? searchParams.get("scope") : null;
   const isOrgsManage = cleanPath === "/dashboard/orgs";
   const isShareLinks = cleanPath === "/dashboard/share-links";
   const isEmergencyAccess = cleanPath === "/dashboard/emergency-access" || cleanPath.startsWith("/dashboard/emergency-access/");
@@ -103,11 +104,16 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     "sidebar-collapsed",
     COLLAPSE_DEFAULTS
   );
+  const [orgMenuOpen, setOrgMenuOpen] = useState<Record<string, boolean>>({});
 
   const isOpen = (k: SidebarSection) => !collapsed[k];
 
   const toggleSection = (k: SidebarSection) => (open: boolean) =>
     setCollapsed((prev) => ({ ...prev, [k]: !open }));
+  const isOrgMenuOpen = (orgId: string) =>
+    orgMenuOpen[orgId] ?? (activeOrgId === orgId);
+  const setOrgMenuSection = (orgId: string, open: boolean) =>
+    setOrgMenuOpen((prev) => ({ ...prev, [orgId]: open }));
 
   // Auto-expand section when navigating to a route within it.
   // One-time per navigation — user can manually close afterward.
@@ -196,7 +202,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       {/* ── Vault ──────────────────────────────────────────── */}
       <Collapsible open={isOpen("vault")} onOpenChange={toggleSection("vault")}>
         <CollapsibleSectionHeader isOpen={isOpen("vault")}>
-          {t("vault")}
+          {t("personalVault")}
         </CollapsibleSectionHeader>
         <CollapsibleContent>
           <div className="space-y-1">
@@ -227,7 +233,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
             >
               <Link href="/dashboard/archive" onClick={() => onOpenChange(false)}>
                 <Archive className="h-4 w-4" />
-                {t("archive")}
+                {t("personalArchive")}
               </Link>
             </Button>
             <Button
@@ -237,7 +243,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
             >
               <Link href="/dashboard/trash" onClick={() => onOpenChange(false)}>
                 <Trash2 className="h-4 w-4" />
-                {t("trash")}
+                {t("personalTrash")}
               </Link>
             </Button>
           </div>
@@ -317,20 +323,43 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
           <div className="space-y-1">
             {orgs.map((org) => (
               <div key={org.id}>
-                <Button
-                  variant={activeOrgId === org.id && !activeOrgTypeFilter ? "secondary" : "ghost"}
-                  className="w-full justify-start gap-2"
-                  asChild
-                >
-                  <Link
-                    href={`/dashboard/orgs/${org.id}`}
-                    onClick={() => onOpenChange(false)}
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant={
+                      activeOrgId === org.id &&
+                      !activeOrgTypeFilter &&
+                      !activeOrgScope
+                        ? "secondary"
+                        : "ghost"
+                    }
+                    className="flex-1 justify-start gap-2"
+                    asChild
                   >
-                    <Building2 className="h-4 w-4" />
-                    <span className="truncate">{org.name}</span>
-                  </Link>
-                </Button>
-                {activeOrgId === org.id && (
+                    <Link
+                      href={`/dashboard/orgs/${org.id}`}
+                      onClick={() => onOpenChange(false)}
+                    >
+                      <Building2 className="h-4 w-4" />
+                      <span className="truncate">{org.name}</span>
+                    </Link>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() =>
+                      setOrgMenuSection(org.id, !isOrgMenuOpen(org.id))
+                    }
+                    aria-label={`toggle-${org.id}`}
+                  >
+                    {isOrgMenuOpen(org.id) ? (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </Button>
+                </div>
+                {isOrgMenuOpen(org.id) && (
                   <div className="ml-6 space-y-0.5">
                     <Button
                       variant={activeOrgTypeFilter === ENTRY_TYPE.LOGIN ? "secondary" : "ghost"}
@@ -385,6 +414,29 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                       <Link href={`/dashboard/orgs/${org.id}?type=PASSKEY`} onClick={() => onOpenChange(false)}>
                         <Fingerprint className="h-3.5 w-3.5" />
                         {t("catPasskey")}
+                      </Link>
+                    </Button>
+                    <Separator className="my-1" />
+                    <Button
+                      variant={activeOrgScope === "archive" ? "secondary" : "ghost"}
+                      size="sm"
+                      className="w-full justify-start gap-2 h-8"
+                      asChild
+                    >
+                      <Link href={`/dashboard/orgs/${org.id}?scope=archive`} onClick={() => onOpenChange(false)}>
+                        <Archive className="h-3.5 w-3.5" />
+                        {t("archive")}
+                      </Link>
+                    </Button>
+                    <Button
+                      variant={activeOrgScope === "trash" ? "secondary" : "ghost"}
+                      size="sm"
+                      className="w-full justify-start gap-2 h-8"
+                      asChild
+                    >
+                      <Link href={`/dashboard/orgs/${org.id}?scope=trash`} onClick={() => onOpenChange(false)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {t("trash")}
                       </Link>
                     </Button>
                   </div>

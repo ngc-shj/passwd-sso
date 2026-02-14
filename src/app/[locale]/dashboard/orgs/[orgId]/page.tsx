@@ -7,6 +7,8 @@ import { Link } from "@/i18n/navigation";
 import { PasswordCard } from "@/components/passwords/password-card";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { OrgPasswordForm } from "@/components/org/org-password-form";
+import { OrgArchivedList } from "@/components/org/org-archived-list";
+import { OrgTrashList } from "@/components/org/org-trash-list";
 import { OrgRoleBadge } from "@/components/org/org-role-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -63,10 +65,12 @@ export default function OrgDashboardPage({
   const searchParams = useSearchParams();
   const activeTagId = searchParams.get("tag");
   const activeEntryType = searchParams.get("type");
+  const activeScope = searchParams.get("scope");
   const t = useTranslations("Org");
   const tDash = useTranslations("Dashboard");
   const [org, setOrg] = useState<OrgInfo | null>(null);
   const [passwords, setPasswords] = useState<OrgPasswordEntry[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -106,6 +110,9 @@ export default function OrgDashboardPage({
     creationDate?: string | null;
     deviceInfo?: string | null;
   } | null>(null);
+  const isOrgArchive = activeScope === "archive";
+  const isOrgTrash = activeScope === "trash";
+  const isOrgSpecialView = isOrgArchive || isOrgTrash;
 
   const fetchOrg = async (): Promise<boolean> => {
     try {
@@ -146,10 +153,10 @@ export default function OrgDashboardPage({
     setLoadError(false);
     (async () => {
       const ok = await fetchOrg();
-      if (ok) fetchPasswords();
+      if (ok && !isOrgSpecialView) fetchPasswords();
       else setLoading(false);
     })();
-  }, [orgId, fetchPasswords]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [orgId, fetchPasswords, isOrgSpecialView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const canCreate =
     org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN || org?.role === ORG_ROLE.MEMBER;
@@ -167,6 +174,11 @@ export default function OrgDashboardPage({
         [ENTRY_TYPE.PASSKEY]: tDash("catPasskey"),
       } as Record<string, string>)[activeEntryType] ?? activeEntryType
     : null;
+  const subtitle = isOrgTrash
+    ? t("organizationTrash")
+    : isOrgArchive
+      ? t("organizationArchive")
+      : (activeCategoryLabel ?? t("allPasswords"));
 
   const handleToggleFavorite = async (id: string, current: boolean) => {
     // Optimistic update
@@ -338,7 +350,7 @@ export default function OrgDashboardPage({
                 {org && <OrgRoleBadge role={org.role} />}
               </div>
               <p className="text-sm text-muted-foreground">
-                {activeCategoryLabel ?? t("allPasswords")}
+                {subtitle}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -359,7 +371,7 @@ export default function OrgDashboardPage({
                   </Link>
                 </Button>
               )}
-              {canCreate && (
+              {canCreate && !isOrgSpecialView && (
                 contextualEntryType ? (
                   <Button
                     size="sm"
@@ -414,14 +426,26 @@ export default function OrgDashboardPage({
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               className="pl-9"
-              placeholder={t("allPasswords")}
+              placeholder={subtitle}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
         </Card>
 
-        {loading ? (
+        {isOrgArchive ? (
+          <OrgArchivedList
+            orgId={orgId}
+            searchQuery={searchQuery}
+            refreshKey={refreshKey}
+          />
+        ) : isOrgTrash ? (
+          <OrgTrashList
+            orgId={orgId}
+            searchQuery={searchQuery}
+            refreshKey={refreshKey}
+          />
+        ) : loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
@@ -493,6 +517,7 @@ export default function OrgDashboardPage({
         onSaved={() => {
           fetchPasswords();
           setExpandedId(null);
+          setRefreshKey((k) => k + 1);
         }}
         editData={editData}
         entryType={editData?.entryType ?? newEntryType}

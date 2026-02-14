@@ -6,8 +6,6 @@ import { SearchBar } from "@/components/layout/search-bar";
 import { PasswordList, type SortOption } from "@/components/passwords/password-list";
 import { TrashList } from "@/components/passwords/trash-list";
 import { OrgFavoritesList } from "@/components/org/org-favorites-list";
-import { OrgArchivedList } from "@/components/org/org-archived-list";
-import { OrgTrashList } from "@/components/org/org-trash-list";
 import { PasswordNewDialog } from "@/components/passwords/password-new-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,7 +59,7 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
     PASSKEY: t("catPasskey"),
   };
 
-  const title = isTrash
+  const subtitle = isTrash
     ? t("trash")
     : isFavorites
       ? t("favorites")
@@ -147,8 +145,13 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
     <div className="flex-1 overflow-auto p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-4">
         <div className="mb-4 rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <h1 className="truncate text-2xl font-bold tracking-tight">
+                {t("personalVault")}
+              </h1>
+              <p className="text-sm text-muted-foreground">{subtitle}</p>
+            </div>
             <div className="flex items-center gap-2">
               {!isTrash && !isArchive && (
                 <DropdownMenu>
@@ -217,6 +220,11 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
               )}
             </div>
           </div>
+          {(isTrash || isArchive) && (
+            <p className="mt-2 text-sm text-muted-foreground">
+              {t("personalVaultScopeNote")}
+            </p>
+          )}
         </div>
 
         <div className="mb-4 rounded-xl border bg-card/80 p-3">
@@ -227,7 +235,6 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
           {isTrash ? (
             <>
               <TrashList refreshKey={refreshKey} />
-              <OrgTrashList refreshKey={refreshKey} />
             </>
           ) : (
             <>
@@ -243,12 +250,6 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
               />
               {isFavorites && (
                 <OrgFavoritesList
-                  searchQuery={searchQuery}
-                  refreshKey={refreshKey}
-                />
-              )}
-              {isArchive && (
-                <OrgArchivedList
                   searchQuery={searchQuery}
                   refreshKey={refreshKey}
                 />
