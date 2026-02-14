@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
-import { useTranslations } from "next-intl";
+import { useEffect, useRef, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
+import { useRouter } from "@/i18n/navigation";
 import { useWatchtower, OLD_THRESHOLD_DAYS } from "@/hooks/use-watchtower";
 import { ScoreGauge } from "@/components/watchtower/score-gauge";
 import {
@@ -10,15 +11,38 @@ import {
 } from "@/components/watchtower/issue-section";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { RefreshCw, Loader2, Shield } from "lucide-react";
+import {
+  calculateTotalIssues,
+  getWatchtowerVisibility,
+} from "@/lib/watchtower/state";
+import { resolveNavigationTarget } from "@/lib/client-navigation";
 
 export default function WatchtowerPage() {
   const t = useTranslations("Watchtower");
-  const { report, loading, progress, analyze } = useWatchtower();
-
-  useEffect(() => {
-    analyze();
-  }, [analyze]);
+  const locale = useLocale();
+  const router = useRouter();
+  const {
+    report,
+    loading,
+    progress,
+    analyze,
+    canAnalyze,
+    cooldownRemainingMs,
+  } = useWatchtower();
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const allowLeaveRef = useRef(false);
 
   const formatBreachDetails = (details: string) => {
     const count = details.replace("count:", "");
@@ -40,16 +64,75 @@ export default function WatchtowerPage() {
     return url;
   };
 
-  const totalIssues = report
-    ? report.breached.length +
-      report.weak.length +
-      report.reused.reduce((s, g) => s + g.entries.length, 0) +
-      report.old.length +
-      report.unsecured.length
-    : 0;
+  useEffect(() => {
+    if (!loading) return;
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (allowLeaveRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    const onClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      const anchor = target?.closest("a[href]") as HTMLAnchorElement | null;
+      if (!anchor) return;
+
+      const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const targetInfo = resolveNavigationTarget(
+        anchor.href,
+        window.location.origin,
+        locale
+      );
+      if (!targetInfo.isInternal || !targetInfo.internalPath) return;
+      const currentInfo = resolveNavigationTarget(
+        currentPath,
+        window.location.origin,
+        locale
+      );
+      if (targetInfo.internalPath === currentInfo.internalPath) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      setPendingHref(targetInfo.internalPath);
+      setLeaveDialogOpen(true);
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [loading, t, locale]);
+
+  const handleConfirmLeave = () => {
+    if (!pendingHref) return;
+    setLeaveDialogOpen(false);
+    setPendingHref(null);
+    allowLeaveRef.current = true;
+    router.push(pendingHref);
+  };
+
+  const totalIssues = report ? calculateTotalIssues(report) : 0;
+  const visibility = getWatchtowerVisibility(report, loading, totalIssues);
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
+      <AlertDialog open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("leaveTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("leaveConfirm")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("leaveStay")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmLeave}>
+              {t("leaveNow")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className="mx-auto max-w-4xl space-y-6">
         <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
           <div className="flex items-center justify-between gap-3">
@@ -60,23 +143,45 @@ export default function WatchtowerPage() {
               variant="outline"
               size="sm"
               onClick={analyze}
-              disabled={loading}
+              disabled={!canAnalyze}
             >
               {loading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <RefreshCw className="mr-2 h-4 w-4" />
               )}
-              {t("refresh")}
+              {canAnalyze
+                ? t("refresh")
+                : t("cooldown", {
+                    seconds: Math.ceil(cooldownRemainingMs / 1000),
+                  })}
             </Button>
           </div>
         </Card>
+
+        {visibility.showRunHint && (
+          <Card className="rounded-xl border bg-card/80">
+            <CardContent className="flex flex-col items-center py-12 gap-3">
+              <Shield className="h-12 w-12 text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground text-center">
+                {canAnalyze
+                  ? t("runHint")
+                  : t("runHintCooldown", {
+                      seconds: Math.ceil(cooldownRemainingMs / 1000),
+                    })}
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Loading state */}
         {loading && (
           <Card className="rounded-xl border bg-card/80">
             <CardContent className="flex flex-col items-center py-12 gap-4">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <p className="text-xs text-muted-foreground text-center">
+                {t("leaveDuringAnalysis")}
+              </p>
               <p className="text-sm text-muted-foreground">
                 {progress.step.startsWith("hibp:")
                   ? t("checkingBreaches") +
@@ -128,7 +233,7 @@ export default function WatchtowerPage() {
             </Card>
 
             {/* No issues state */}
-            {totalIssues === 0 && report.totalPasswords > 0 && (
+            {visibility.showNoIssuesCard && (
               <Card className="rounded-xl border bg-card/80">
                 <CardContent className="flex flex-col items-center py-12 gap-3">
                   <Shield className="h-12 w-12 text-green-500" />
@@ -139,8 +244,8 @@ export default function WatchtowerPage() {
               </Card>
             )}
 
-            {/* Issue Sections */}
-            {totalIssues > 0 && (
+            {/* Issue Sections (always show category results) */}
+            {visibility.showIssueSections && (
               <div className="space-y-4">
                 <IssueSection
                   type="breached"
@@ -180,7 +285,7 @@ export default function WatchtowerPage() {
             )}
 
             {/* Empty vault */}
-            {report.totalPasswords === 0 && (
+            {visibility.showEmptyVault && (
               <Card className="rounded-xl border bg-card/80">
                 <CardContent className="flex flex-col items-center py-12 gap-3">
                   <Shield className="h-12 w-12 text-muted-foreground/50" />

@@ -172,7 +172,7 @@ export async function checkHIBP(
   const suffix = hash.slice(5);
 
   try {
-    const res = await fetch(`?prefix=`);
+    const res = await fetch(`${API_PATH.WATCHTOWER_HIBP}?prefix=${prefix}`);
     if (!res.ok) return { breached: false, count: 0 };
 
     const text = await res.text();
@@ -193,3 +193,4 @@ export async function checkHIBP(
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+import { API_PATH } from "@/lib/constants";

@@ -23,6 +23,7 @@ export const API_PATH = {
   EMERGENCY_ACCESS_ACCEPT: "/api/emergency-access/accept",
   EMERGENCY_ACCESS_REJECT: "/api/emergency-access/reject",
   EMERGENCY_PENDING_CONFIRMATIONS: "/api/emergency-access/pending-confirmations",
+  WATCHTOWER_START: "/api/watchtower/start",
   WATCHTOWER_HIBP: "/api/watchtower/hibp",
   CSP_REPORT: "/api/csp-report",
 } as const;
