@@ -82,7 +82,7 @@ describe("POST /api/passwords/bulk-trash", () => {
       1,
       expect.objectContaining({
         data: expect.objectContaining({
-          action: "ENTRY_BULK_DELETE",
+          action: "ENTRY_BULK_TRASH",
           metadata: expect.objectContaining({
             bulk: true,
             requestedCount: 2,
@@ -96,11 +96,11 @@ describe("POST /api/passwords/bulk-trash", () => {
       2,
       expect.objectContaining({
         data: expect.objectContaining({
-          action: "ENTRY_DELETE",
+          action: "ENTRY_TRASH",
           targetId: "p1",
           metadata: expect.objectContaining({
             source: "bulk-trash",
-            parentAction: "ENTRY_BULK_DELETE",
+            parentAction: "ENTRY_BULK_TRASH",
           }),
         }),
       })
@@ -109,11 +109,11 @@ describe("POST /api/passwords/bulk-trash", () => {
       3,
       expect.objectContaining({
         data: expect.objectContaining({
-          action: "ENTRY_DELETE",
+          action: "ENTRY_TRASH",
           targetId: "p2",
           metadata: expect.objectContaining({
             source: "bulk-trash",
-            parentAction: "ENTRY_BULK_DELETE",
+            parentAction: "ENTRY_BULK_TRASH",
           }),
         }),
       })
@@ -152,7 +152,7 @@ describe("POST /api/passwords/bulk-trash", () => {
     expect(mockAuditCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          action: "ENTRY_BULK_DELETE",
+          action: "ENTRY_BULK_TRASH",
           metadata: expect.objectContaining({ entryIds: [] }),
         }),
       })
@@ -191,7 +191,7 @@ describe("POST /api/passwords/bulk-trash", () => {
       1,
       expect.objectContaining({
         data: expect.objectContaining({
-          action: "ENTRY_BULK_DELETE",
+          action: "ENTRY_BULK_TRASH",
           metadata: expect.objectContaining({ entryIds: ["p1"], movedCount: 1 }),
         }),
       })
@@ -200,10 +200,10 @@ describe("POST /api/passwords/bulk-trash", () => {
       2,
       expect.objectContaining({
         data: expect.objectContaining({
-          action: "ENTRY_DELETE",
+          action: "ENTRY_TRASH",
           targetId: "p1",
           metadata: expect.objectContaining({
-            parentAction: "ENTRY_BULK_DELETE",
+            parentAction: "ENTRY_BULK_TRASH",
           }),
         }),
       })

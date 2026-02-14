@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 describe("audit log target labels", () => {
-  it("uses parentAction and bulk delete/archive/unarchive/restore meta in personal/org pages", () => {
+  it("uses parentAction and bulk trash/archive/unarchive/restore meta in personal/org pages", () => {
     const personalPage = readFileSync(
       join(process.cwd(), "src/app/[locale]/dashboard/audit-logs/page.tsx"),
       "utf8"
@@ -17,11 +17,13 @@ describe("audit log target labels", () => {
     );
 
     for (const page of [personalPage, orgPage]) {
-      expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_DELETE");
+      expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_TRASH");
+      expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_EMPTY_TRASH");
       expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_ARCHIVE");
       expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_UNARCHIVE");
       expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_RESTORE");
-      expect(page).toContain('t("bulkDeleteMeta"');
+      expect(page).toContain('t("bulkTrashMeta"');
+      expect(page).toContain('t("emptyTrashMeta"');
       expect(page).toContain('t("bulkArchiveMeta"');
       expect(page).toContain('t("bulkUnarchiveMeta"');
       expect(page).toContain('t("bulkRestoreMeta"');

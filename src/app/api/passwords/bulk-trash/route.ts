@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
-    action: AUDIT_ACTION.ENTRY_BULK_DELETE,
+    action: AUDIT_ACTION.ENTRY_BULK_TRASH,
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: "bulk",
@@ -81,13 +81,13 @@ export async function POST(req: NextRequest) {
   for (const entryId of movedEntryIds) {
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
-      action: AUDIT_ACTION.ENTRY_DELETE,
+      action: AUDIT_ACTION.ENTRY_TRASH,
       userId: session.user.id,
       targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
       targetId: entryId,
       metadata: {
         source: "bulk-trash",
-        parentAction: AUDIT_ACTION.ENTRY_BULK_DELETE,
+        parentAction: AUDIT_ACTION.ENTRY_BULK_TRASH,
       },
       ...requestMeta,
     });

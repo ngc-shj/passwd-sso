@@ -141,13 +141,14 @@ export function TrashList({ refreshKey }: TrashListProps) {
 
   const handleEmptyTrash = async () => {
     try {
-      for (const entry of entries) {
-        await fetch(`${apiPath.passwordById(entry.id)}?permanent=true`, {
-          method: "DELETE",
-        });
+      const res = await fetch(apiPath.passwordsEmptyTrash(), { method: "POST" });
+      if (!res.ok) {
+        toast.error(t("failedAction"));
+        return;
       }
       toast.success(t("emptyTrashSuccess"));
       setEntries([]);
+      setSelectedIds(new Set());
     } catch {
       toast.error(t("networkError"));
     }
