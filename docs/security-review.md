@@ -221,11 +221,12 @@ Evidence:
 ### Covered by tests
 - Proxy Bearer bypass scope and non-bypass behavior: `src/__tests__/proxy.test.ts`.
 - Import filename sanitization path: `src/app/api/passwords/route.test.ts`.
+- Extension refresh failure/retry branches (`429`/`5xx`): `extension/src/__tests__/background.test.ts`.
+- Extension `CLEAR_TOKEN` revoke + local clear flow: `extension/src/__tests__/background.test.ts`.
+- Exact-match restriction regression for extension token child paths: `src/__tests__/proxy.test.ts`.
 
 ### Remaining recommended additions (non-blocking)
-1. Add a direct test for extension token refresh path failure branches (429/5xx retry semantics).
-2. Add integration test asserting `CLEAR_TOKEN` triggers revoke + local clear (background message flow).
-3. Add regression test for exact-match restriction on extension token child paths across future route additions.
+- None for the findings in this review cycle.
 
 ### Final conclusion
 - Current state is acceptable for continuing development.
