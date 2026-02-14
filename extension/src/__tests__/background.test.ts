@@ -351,11 +351,33 @@ describe("background message flow", () => {
     expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "" });
   });
 
-  it("handles trigger-autofill command with url match", async () => {
-    cryptoMocks.decryptData
-      .mockResolvedValueOnce(JSON.stringify({ title: "GitHub", username: "alice", urlHost: "github.com" }))
-      .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
-      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+  it("handles trigger-autofill command by requesting inline suggestions", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const handler = commandHandlers[0];
+    await handler(CMD_TRIGGER_AUTOFILL);
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(
+      1,
+      { type: "PSSO_TRIGGER_INLINE_SUGGESTIONS" },
+    );
+  });
+
+  it("does nothing when command has no active tab url", async () => {
+    chromeMock?.tabs.query.mockResolvedValueOnce([{ id: 1, url: undefined }]);
+    const handler = commandHandlers[0];
+    await handler(CMD_TRIGGER_AUTOFILL);
+    expect(chromeMock?.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
+  it("injects form detector and retries when command message has no receiver", async () => {
+    chromeMock?.tabs.sendMessage
+      .mockRejectedValueOnce(new Error("Could not establish connection. Receiving end does not exist."))
+      .mockResolvedValueOnce({});
 
     await sendMessage({
       type: "SET_TOKEN",
@@ -366,14 +388,14 @@ describe("background message flow", () => {
 
     const handler = commandHandlers[0];
     await handler(CMD_TRIGGER_AUTOFILL);
-    expect(chromeMock?.scripting.executeScript).toHaveBeenCalled();
-  });
 
-  it("does nothing when command has no active tab url", async () => {
-    chromeMock?.tabs.query.mockResolvedValueOnce([{ id: 1, url: undefined }]);
-    const handler = commandHandlers[0];
-    await handler(CMD_TRIGGER_AUTOFILL);
-    expect(chromeMock?.scripting.executeScript).not.toHaveBeenCalled();
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 1, allFrames: true },
+        files: ["src/content/form-detector.js"],
+      }),
+    );
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(2);
   });
 
   it("fetches and decrypts password overviews", async () => {

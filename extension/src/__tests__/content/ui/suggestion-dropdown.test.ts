@@ -67,7 +67,7 @@ describe("showDropdown", () => {
     showDropdown(makeOptions());
     expect(isDropdownVisible()).toBe(true);
 
-    const host = document.getElementById("passwd-sso-shadow-host");
+    const host = document.querySelector("[data-passwd-sso-shadow-host]");
     expect(host).not.toBeNull();
   });
 
@@ -129,5 +129,16 @@ describe("handleDropdownKeydown", () => {
     const handled = handleDropdownKeydown(e);
     expect(handled).toBe(true);
     expect(isDropdownVisible()).toBe(false);
+  });
+
+  it("selects active item with Enter", () => {
+    const opts = makeOptions();
+    showDropdown(opts);
+    handleDropdownKeydown(new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true }));
+    const handled = handleDropdownKeydown(
+      new KeyboardEvent("keydown", { key: "Enter", cancelable: true }),
+    );
+    expect(handled).toBe(true);
+    expect(opts.onSelect).toHaveBeenCalledWith("1");
   });
 });
