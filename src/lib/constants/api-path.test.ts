@@ -31,6 +31,7 @@ describe("API_PATH", () => {
     expect(API_PATH.EMERGENCY_PENDING_CONFIRMATIONS).toBe(
       "/api/emergency-access/pending-confirmations"
     );
+    expect(API_PATH.WATCHTOWER_START).toBe("/api/watchtower/start");
     expect(API_PATH.WATCHTOWER_HIBP).toBe("/api/watchtower/hibp");
     expect(API_PATH.CSP_REPORT).toBe("/api/csp-report");
   });

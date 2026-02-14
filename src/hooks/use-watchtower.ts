@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
-import { API_PATH, ENTRY_TYPE } from "@/lib/constants";
+import { API_PATH, ENTRY_TYPE, LOCAL_STORAGE_KEY } from "@/lib/constants";
+import { getCooldownState } from "@/lib/watchtower/state";
 import {
   analyzeStrength,
   checkHIBP,
@@ -15,6 +16,7 @@ import {
 // ─── Constants ──────────────────────────────────────────────
 
 export const OLD_THRESHOLD_DAYS = 90;
+export const WATCHTOWER_COOLDOWN_MS = 5 * 60 * 1000;
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -64,16 +66,69 @@ export function useWatchtower() {
   const { encryptionKey, userId } = useVault();
   const [report, setReport] = useState<WatchtowerReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const [lastAnalyzedAt, setLastAnalyzedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [progress, setProgress] = useState<WatchtowerProgress>({
     current: 0,
     total: 0,
     step: "",
   });
 
+  useEffect(() => {
+    const stored = window.localStorage.getItem(
+      LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT
+    );
+    if (!stored) return;
+    const parsed = Number(stored);
+    if (Number.isFinite(parsed)) setLastAnalyzedAt(parsed);
+  }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const { nextAllowedAt, cooldownRemainingMs, canAnalyze } = getCooldownState(
+    lastAnalyzedAt,
+    now,
+    loading,
+    WATCHTOWER_COOLDOWN_MS
+  );
+
   const analyze = useCallback(async () => {
-    if (!encryptionKey) return;
+    if (!encryptionKey || loading || cooldownRemainingMs > 0) return;
+
+    const startRes = await fetch(API_PATH.WATCHTOWER_START, { method: "POST" });
+    if (!startRes.ok) {
+      if (startRes.status === 429) {
+        const body = await startRes.json().catch(() => null) as { retryAt?: number } | null;
+        if (typeof body?.retryAt === "number") {
+          const startedAt = body.retryAt - WATCHTOWER_COOLDOWN_MS;
+          setLastAnalyzedAt(startedAt);
+          window.localStorage.setItem(
+            LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
+            String(startedAt)
+          );
+        } else {
+          const fallbackStartedAt = Date.now();
+          setLastAnalyzedAt(fallbackStartedAt);
+          window.localStorage.setItem(
+            LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
+            String(fallbackStartedAt)
+          );
+        }
+      }
+      return;
+    }
+
+    const startedAt = Date.now();
+    setLastAnalyzedAt(startedAt);
+    window.localStorage.setItem(
+      LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
+      String(startedAt)
+    );
+
     setLoading(true);
-    setReport(null);
 
     try {
       // Step 1: Fetch all encrypted passwords (including blobs)
@@ -268,9 +323,17 @@ export function useWatchtower() {
     } finally {
       setLoading(false);
     }
-  }, [encryptionKey]);
+  }, [encryptionKey, userId, loading, cooldownRemainingMs]);
 
-  return { report, loading, progress, analyze };
+  return {
+    report,
+    loading,
+    progress,
+    analyze,
+    canAnalyze,
+    cooldownRemainingMs,
+    nextAllowedAt,
+  };
 }
 
 // ─── Score Calculation ───────────────────────────────────────
