@@ -87,6 +87,7 @@ function installChromeMock() {
         get: vi.fn().mockResolvedValue({}),
         set: vi.fn().mockResolvedValue(undefined),
         remove: vi.fn().mockResolvedValue(undefined),
+        setAccessLevel: vi.fn().mockResolvedValue(undefined),
       },
       onChanged: {
         addListener: (fn: (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, areaName: string) => void) => {
@@ -199,6 +200,38 @@ describe("background message flow", () => {
       ALARM_VAULT_LOCK,
       expect.objectContaining({ delayInMinutes: 15 })
     );
+  });
+
+  it("configures storage.session access level to trusted contexts on startup", async () => {
+    expect(chromeMock?.storage.session.setAccessLevel).toHaveBeenCalledWith({
+      accessLevel: "TRUSTED_CONTEXTS",
+    });
+  });
+
+  it("relocks vault when token value changes", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t-1",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const before = await sendMessage({ type: "GET_STATUS" });
+    expect(before).toEqual(
+      expect.objectContaining({ type: "GET_STATUS", hasToken: true, vaultUnlocked: true }),
+    );
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t-2",
+      expiresAt: Date.now() + 60_000,
+    });
+
+    const after = await sendMessage({ type: "GET_STATUS" });
+    expect(after).toEqual(
+      expect.objectContaining({ type: "GET_STATUS", hasToken: true, vaultUnlocked: false }),
+    );
+    expect(chromeMock?.alarms.clear).toHaveBeenCalledWith(ALARM_VAULT_LOCK);
   });
 
   it("returns error on invalid passphrase", async () => {
@@ -1126,6 +1159,59 @@ describe("token refresh alarm", () => {
     );
 
     // Should schedule a retry
+    expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
+      ALARM_TOKEN_REFRESH,
+      expect.objectContaining({ delayInMinutes: 1 })
+    );
+  });
+
+  it("retries on rate limit (429) instead of clearing token", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+          return {
+            ok: false,
+            status: 429,
+            json: async () => ({ error: "TOO_MANY_REQUESTS" }),
+          };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      })
+    );
+
+    await loadBackground();
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "tok",
+      expiresAt: Date.now() + 600_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    chromeMock?.alarms.create.mockClear();
+
+    const handler = alarmHandlers[0];
+    handler({ name: ALARM_TOKEN_REFRESH });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ hasToken: true }));
+
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
       ALARM_TOKEN_REFRESH,
       expect.objectContaining({ delayInMinutes: 1 })
