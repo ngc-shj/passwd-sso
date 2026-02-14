@@ -72,6 +72,12 @@ interface ParsedEntry {
   passwordHistory: Array<{ password: string; changedAt: string }>;
 }
 
+interface ExistingTag {
+  id: string;
+  name: string;
+  color: string | null;
+}
+
 type CsvFormat = "bitwarden" | "onepassword" | "chrome" | "passwd-sso" | "unknown";
 
 function extraDefaults(): Pick<
@@ -586,6 +592,50 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
     setProgress({ current: 0, total: entries.length });
 
     let successCount = 0;
+    const tagNameToId = new Map<string, string>();
+
+    // Resolve tags once (existing + create missing) to attach tagIds during import.
+    try {
+      const tagsRes = await fetch(API_PATH.TAGS);
+      if (tagsRes.ok) {
+        const existingTags = (await tagsRes.json()) as ExistingTag[];
+        for (const tag of existingTags) {
+          const name = tag.name?.trim();
+          if (name && tag.id) {
+            tagNameToId.set(name, tag.id);
+          }
+        }
+      }
+    } catch {
+      // Ignore and continue without tag linkage.
+    }
+
+    const missingTags = new Map<string, string | null>();
+    for (const entry of entries) {
+      for (const tag of entry.tags) {
+        const name = tag.name?.trim();
+        if (!name || tagNameToId.has(name) || missingTags.has(name)) continue;
+        missingTags.set(name, tag.color ?? null);
+      }
+    }
+
+    for (const [name, color] of missingTags) {
+      try {
+        const createRes = await fetch(API_PATH.TAGS, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, color }),
+        });
+        if (createRes.ok) {
+          const created = (await createRes.json()) as ExistingTag;
+          if (created?.id) {
+            tagNameToId.set(name, created.id);
+          }
+        }
+      } catch {
+        // Ignore and proceed without this tag.
+      }
+    }
 
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
@@ -706,6 +756,11 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
 
         const encryptedBlob = await encryptData(fullBlob, encryptionKey, aad);
         const encryptedOverview = await encryptData(overviewBlob, encryptionKey, aad);
+        const tagIds = entry.tags
+          .map((tag) => tag.name?.trim())
+          .filter((name): name is string => !!name)
+          .map((name) => tagNameToId.get(name))
+          .filter((id): id is string => !!id);
 
         const res = await fetch(API_PATH.PASSWORDS, {
           method: "POST",
@@ -723,6 +778,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             entryType: entry.entryType,
             keyVersion: 1,
             aadVersion: aad ? AAD_VERSION : 0,
+            tagIds,
           }),
         });
 
