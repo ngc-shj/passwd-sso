@@ -32,6 +32,100 @@ export function isUsableInput(input: HTMLInputElement): boolean {
   return !input.disabled && !input.readOnly;
 }
 
+function resolveOpacity(value: string): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 1;
+}
+
+export function isElementVisuallySafe(element: HTMLElement): boolean {
+  const style = getComputedStyle(element);
+  if (style.display === "none" || style.visibility === "hidden") return false;
+  // Block only near-invisible elements to reduce false positives on heavily styled forms.
+  if (resolveOpacity(style.opacity) <= 0.05) return false;
+  const clipPath = (style.clipPath || "").toLowerCase();
+  if (clipPath.includes("inset(100%") || clipPath.includes("circle(0")) return false;
+  const transform = (style.transform || "").toLowerCase();
+  if (transform.includes("scale(0")) return false;
+  return true;
+}
+
+export function isPageVisuallySafe(): boolean {
+  const htmlStyle = getComputedStyle(document.documentElement);
+  const bodyStyle = getComputedStyle(document.body);
+  if (
+    htmlStyle.display === "none" ||
+    htmlStyle.visibility === "hidden" ||
+    bodyStyle.display === "none" ||
+    bodyStyle.visibility === "hidden"
+  ) {
+    return false;
+  }
+  // Guard against full-page transparency attacks while allowing subtle UI opacity effects.
+  return resolveOpacity(htmlStyle.opacity) > 0.3 && resolveOpacity(bodyStyle.opacity) > 0.3;
+}
+
+export function isInputHitTestSafe(input: HTMLInputElement): boolean {
+  const rect = input.getBoundingClientRect();
+  // In layout-less environments (e.g., jsdom), skip hit-test gating.
+  if (rect.width < 1 || rect.height < 1) return true;
+  if (typeof document.elementFromPoint !== "function") return true;
+  const x = rect.left + rect.width / 2;
+  const y = rect.top + rect.height / 2;
+  const top = document.elementFromPoint(x, y);
+  if (!top) return true;
+  if (top === input || input.contains(top) || (top instanceof HTMLElement && top.contains(input))) {
+    return true;
+  }
+  const nearestLabel = input.closest("label");
+  if (nearestLabel && nearestLabel.contains(top)) return true;
+  return false;
+}
+
+function getOpenPopovers(): HTMLElement[] {
+  const legacy = Array.from(
+    document.querySelectorAll<HTMLElement>('[popover][open]'),
+  );
+  let openByPseudo: HTMLElement[] = [];
+  try {
+    openByPseudo = Array.from(
+      document.querySelectorAll<HTMLElement>(':popover-open'),
+    );
+  } catch {
+    // Selector unsupported in this runtime.
+  }
+  const uniq = new Set<HTMLElement>([...legacy, ...openByPseudo]);
+  return Array.from(uniq);
+}
+
+export function hasVisiblePopoverOverlayNear(input: HTMLInputElement): boolean {
+  const rect = input.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) return false;
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+
+  for (const popover of getOpenPopovers()) {
+    const style = getComputedStyle(popover);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      resolveOpacity(style.opacity) < 0.98 ||
+      style.pointerEvents === "none"
+    ) {
+      continue;
+    }
+    const pRect = popover.getBoundingClientRect();
+    if (pRect.width < 1 || pRect.height < 1) continue;
+    const overlapsCenter =
+      centerX >= pRect.left &&
+      centerX <= pRect.right &&
+      centerY >= pRect.top &&
+      centerY <= pRect.bottom;
+    if (overlapsCenter) return true;
+  }
+
+  return false;
+}
+
 export function findPasswordInputs(root: ParentNode): HTMLInputElement[] {
   return Array.from(root.querySelectorAll<HTMLInputElement>('input[type="password"]')).filter(
     isUsableInput,
@@ -255,8 +349,21 @@ export interface FormDetectorCleanup {
 
 export function initFormDetector(): FormDetectorCleanup {
   let destroyed = false;
+  const isCrossOriginSubframe = (() => {
+    if (window.top === window.self) return false;
+    try {
+      void window.top?.location.href;
+      return false;
+    } catch {
+      return true;
+    }
+  })();
+  if (isCrossOriginSubframe) {
+    return { destroy: () => {} };
+  }
 
   const shouldTriggerForInput = (input: HTMLInputElement): boolean => {
+    if (!isElementVisuallySafe(input)) return false;
     const isPasswordInput = input.type === "password";
     const isAssociatedUsername = findAssociatedPasswordInput(input) !== null;
     const isLikelyUsername = isLikelyUsernameInput(input);
@@ -273,20 +380,6 @@ export function initFormDetector(): FormDetectorCleanup {
     if (!shouldTriggerForInput(input)) return;
 
     requestMatches(input);
-  };
-
-  const mouseoverHandler = (e: MouseEvent) => {
-    if (destroyed) return;
-    const target = e.target;
-    if (!(target instanceof HTMLInputElement)) return;
-    if (!isUsableInput(target)) return;
-
-    if (!shouldTriggerForInput(target)) return;
-
-    // Some legacy forms suppress focus flows; hover fallback keeps UX usable.
-    if (!currentContext || currentContext.input !== target) {
-      requestMatches(target);
-    }
   };
 
   const blurHandler = (e: FocusEvent) => {
@@ -351,6 +444,16 @@ export function initFormDetector(): FormDetectorCleanup {
       destroy();
       return;
     }
+    if (
+      !isPageVisuallySafe() ||
+      !isElementVisuallySafe(input) ||
+      !isInputHitTestSafe(input) ||
+      hasVisiblePopoverOverlayNear(input)
+    ) {
+      hideDropdown();
+      currentContext = null;
+      return;
+    }
     const url = window.location.href;
     let topUrl: string | undefined;
     try {
@@ -382,17 +485,26 @@ export function initFormDetector(): FormDetectorCleanup {
   // Listen for vault state changes (sent from popup after unlock/lock)
   const runtimeMessageHandler = (message: { type?: string }) => {
     if (destroyed) return;
-    if (message?.type !== "PSSO_VAULT_STATE_CHANGED") return;
+    if (message?.type !== "PSSO_VAULT_STATE_CHANGED" && message?.type !== "PSSO_TRIGGER_INLINE_SUGGESTIONS") return;
     const active = document.activeElement;
     if (active instanceof HTMLInputElement && shouldTriggerForInput(active)) {
       requestMatches(active);
+      return;
+    }
+    if (message?.type === "PSSO_TRIGGER_INLINE_SUGGESTIONS") {
+      const firstCandidate = Array.from(document.querySelectorAll<HTMLInputElement>("input")).find(
+        (i) => shouldTriggerForInput(i),
+      );
+      if (firstCandidate) {
+        firstCandidate.focus();
+        requestMatches(firstCandidate);
+      }
     }
   };
   chrome.runtime.onMessage.addListener(runtimeMessageHandler);
 
   // Start
   document.addEventListener("focusin", focusHandler, true);
-  document.addEventListener("mouseover", mouseoverHandler, true);
   document.addEventListener("focusout", blurHandler, true);
   document.addEventListener("keydown", keydownHandler, true);
   scanInputs();
@@ -410,7 +522,6 @@ export function initFormDetector(): FormDetectorCleanup {
     destroyed = true;
     chrome.runtime.onMessage.removeListener(runtimeMessageHandler);
     document.removeEventListener("focusin", focusHandler, true);
-    document.removeEventListener("mouseover", mouseoverHandler, true);
     document.removeEventListener("focusout", blurHandler, true);
     document.removeEventListener("keydown", keydownHandler, true);
     observer.disconnect();

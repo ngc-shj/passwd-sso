@@ -51,7 +51,7 @@ export default defineManifest({
   web_accessible_resources: [
     {
       resources: ["src/content/autofill.js", "src/content/token-bridge.js"],
-      matches: ["<all_urls>"],
+      matches: ["https://*/*", "http://localhost/*"],
     },
   ],
   icons: {

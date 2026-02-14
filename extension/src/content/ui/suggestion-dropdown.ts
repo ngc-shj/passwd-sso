@@ -21,7 +21,16 @@ let currentDropdown: HTMLDivElement | null = null;
 let activeIndex = -1;
 let itemElements: HTMLDivElement[] = [];
 let currentOnDismiss: (() => void) | null = null;
+let currentOnSelect: ((entryId: string) => void) | null = null;
 let outsideClickHandler: ((e: MouseEvent) => void) | null = null;
+
+function isSafeSelectClick(e: MouseEvent, item: HTMLDivElement): boolean {
+  if (!e.isTrusted) return false;
+  const path = e.composedPath?.() ?? [];
+  if (path.includes(item)) return true;
+  const topEl = document.elementFromPoint(e.clientX, e.clientY);
+  return topEl === item || (topEl instanceof Node && item.contains(topEl));
+}
 
 export function showDropdown(opts: DropdownOptions): void {
   hideDropdown();
@@ -73,6 +82,7 @@ export function showDropdown(opts: DropdownOptions): void {
       // Use mousedown + preventDefault to prevent input blur
       item.addEventListener("mousedown", (e) => {
         e.preventDefault();
+        if (!isSafeSelectClick(e, item)) return;
         try {
           opts.onSelect(entry.id);
         } catch {
@@ -93,6 +103,7 @@ export function showDropdown(opts: DropdownOptions): void {
   root.appendChild(dropdown);
   currentDropdown = dropdown;
   currentOnDismiss = opts.onDismiss;
+  currentOnSelect = opts.onSelect;
 
   // Click outside to dismiss (delayed to avoid triggering on the same click)
   requestAnimationFrame(() => {
@@ -126,6 +137,7 @@ export function hideDropdown(): void {
     currentOnDismiss = null;
     fn();
   }
+  currentOnSelect = null;
 }
 
 export function isDropdownVisible(): boolean {
@@ -149,12 +161,13 @@ export function handleDropdownKeydown(e: KeyboardEvent): boolean {
     case "Enter": {
       if (activeIndex >= 0 && activeIndex < itemElements.length) {
         e.preventDefault();
-        const entryId = itemElements[activeIndex].getAttribute("data-entry-id");
-        if (entryId) {
-          // Find the onSelect callback via a synthetic mousedown
-          itemElements[activeIndex].dispatchEvent(
-            new MouseEvent("mousedown", { bubbles: true }),
-          );
+        const entryId = itemElements[activeIndex]?.getAttribute("data-entry-id");
+        if (entryId && currentOnSelect) {
+          try {
+            currentOnSelect(entryId);
+          } catch {
+            // Extension context may have been invalidated — swallow silently
+          }
         }
         return true;
       }
