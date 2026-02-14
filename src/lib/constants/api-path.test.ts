@@ -9,6 +9,7 @@ describe("API_PATH", () => {
     expect(API_PATH.PASSWORDS).toBe("/api/passwords");
     expect(API_PATH.PASSWORDS_BULK_TRASH).toBe("/api/passwords/bulk-trash");
     expect(API_PATH.PASSWORDS_BULK_ARCHIVE).toBe("/api/passwords/bulk-archive");
+    expect(API_PATH.PASSWORDS_BULK_RESTORE).toBe("/api/passwords/bulk-restore");
     expect(API_PATH.PASSWORDS_GENERATE).toBe("/api/passwords/generate");
     expect(API_PATH.TAGS).toBe("/api/tags");
     expect(API_PATH.ORGS).toBe("/api/orgs");
@@ -56,6 +57,7 @@ describe("API_PATH", () => {
     expect(apiPath.passwordById("pw-1")).toBe("/api/passwords/pw-1");
     expect(apiPath.passwordsBulkTrash()).toBe("/api/passwords/bulk-trash");
     expect(apiPath.passwordsBulkArchive()).toBe("/api/passwords/bulk-archive");
+    expect(apiPath.passwordsBulkRestore()).toBe("/api/passwords/bulk-restore");
     expect(apiPath.passwordRestore("pw-1")).toBe("/api/passwords/pw-1/restore");
     expect(apiPath.passwordAttachments("pw-1")).toBe(
       "/api/passwords/pw-1/attachments"
