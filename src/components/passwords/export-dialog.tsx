@@ -24,6 +24,7 @@ import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 type ExportFormat = "csv" | "json";
+type ExportProfile = "compatible" | "passwd-sso";
 
 interface DecryptedExport {
   entryType: EntryTypeValue;
@@ -54,6 +55,18 @@ interface DecryptedExport {
   credentialId: string | null;
   creationDate: string | null;
   deviceInfo: string | null;
+  tags: Array<{ name: string; color: string | null }>;
+  customFields: Array<{ label: string; value: string; type: string }>;
+  totpConfig: {
+    secret: string;
+    issuer?: string;
+    label?: string;
+    period?: number;
+    digits?: number;
+    algorithm?: string;
+  } | null;
+  generatorSettings: Record<string, unknown> | null;
+  passwordHistory: Array<{ password: string; changedAt: string }>;
 }
 
 interface ExportDialogProps {
@@ -70,6 +83,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [includeOrgs, setIncludeOrgs] = useState(true);
+  const [exportProfile, setExportProfile] = useState<ExportProfile>("compatible");
 
   const resetState = () => {
     setPasswordProtect(true);
@@ -77,6 +91,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
     setConfirmPassword("");
     setPasswordError("");
     setIncludeOrgs(true);
+    setExportProfile("compatible");
   };
 
   const validatePassword = (): boolean => {
@@ -146,6 +161,11 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
             credentialId: parsed.credentialId ?? null,
             creationDate: parsed.creationDate ?? null,
             deviceInfo: parsed.deviceInfo ?? null,
+            tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+            customFields: Array.isArray(parsed.customFields) ? parsed.customFields : [],
+            totpConfig: parsed.totp ?? null,
+            generatorSettings: parsed.generatorSettings ?? null,
+            passwordHistory: Array.isArray(parsed.passwordHistory) ? parsed.passwordHistory : [],
           });
         } catch {
           // Skip entries that fail to decrypt
@@ -196,6 +216,11 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
                     credentialId: data.credentialId ?? null,
                     creationDate: data.creationDate ?? null,
                     deviceInfo: data.deviceInfo ?? null,
+                    tags: Array.isArray(data.tags) ? data.tags : [],
+                    customFields: Array.isArray(data.customFields) ? data.customFields : [],
+                    totpConfig: data.totp ?? null,
+                    generatorSettings: data.generatorSettings ?? null,
+                    passwordHistory: Array.isArray(data.passwordHistory) ? data.passwordHistory : [],
                   });
                 } catch {
                   // Skip entries that fail to fetch
@@ -210,7 +235,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
         // Org fetch failed — continue with personal entries only
       }
 
-      const content = formatExportContent(entries, format);
+      const content = formatExportContent(entries, format, exportProfile);
 
       let blob: Blob;
       let filename: string;
@@ -278,6 +303,26 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
         </div>
 
         <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="export-profile" className="text-sm font-medium">
+              {t("profileLabel")}
+            </Label>
+            <select
+              id="export-profile"
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={exportProfile}
+              onChange={(e) => setExportProfile(e.target.value as ExportProfile)}
+            >
+              <option value="compatible">{t("profileCompatible")}</option>
+              <option value="passwd-sso">{t("profilePasswdSso")}</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              {exportProfile === "compatible"
+                ? t("profileCompatibleDesc")
+                : t("profilePasswdSsoDesc")}
+            </p>
+          </div>
+
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Building2 className="h-4 w-4 text-muted-foreground" />
@@ -396,16 +441,22 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
 
 // ─── Formatting helpers ─────────────────────────────────────
 
-function formatExportContent(entries: DecryptedExport[], format: ExportFormat): string {
+function formatExportContent(
+  entries: DecryptedExport[],
+  format: ExportFormat,
+  profile: ExportProfile
+): string {
   if (format === "csv") {
-    return formatCsv(entries);
+    return formatCsv(entries, profile);
   }
-  return formatJson(entries);
+  return formatJson(entries, profile);
 }
 
-function formatCsv(entries: DecryptedExport[]): string {
+function formatCsv(entries: DecryptedExport[], profile: ExportProfile): string {
   const header =
-    "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp";
+    profile === "passwd-sso"
+      ? "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp,passwd_sso"
+      : "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp";
   const escapeCsv = (val: string | null) => {
     if (!val) return "";
     if (val.includes(",") || val.includes('"') || val.includes("\n")) {
@@ -420,6 +471,34 @@ function formatCsv(entries: DecryptedExport[]): string {
     const isPasskey = e.entryType === ENTRY_TYPE.PASSKEY;
     const type = isPasskey ? "passkey" : isIdentity ? "identity" : isCard ? "card" : isNote ? "securenote" : "login";
     const isLogin = !isNote && !isCard && !isIdentity && !isPasskey;
+    const passwdSso = JSON.stringify({
+      entryType: e.entryType,
+      tags: e.tags,
+      customFields: e.customFields,
+      totp: e.totpConfig,
+      generatorSettings: e.generatorSettings,
+      passwordHistory: e.passwordHistory,
+      cardholderName: e.cardholderName,
+      cardNumber: e.cardNumber,
+      brand: e.brand,
+      expiryMonth: e.expiryMonth,
+      expiryYear: e.expiryYear,
+      cvv: e.cvv,
+      fullName: e.fullName,
+      address: e.address,
+      phone: e.phone,
+      email: e.email,
+      dateOfBirth: e.dateOfBirth,
+      nationality: e.nationality,
+      idNumber: e.idNumber,
+      issueDate: e.issueDate,
+      expiryDate: e.expiryDate,
+      relyingPartyId: e.relyingPartyId,
+      relyingPartyName: e.relyingPartyName,
+      credentialId: e.credentialId,
+      creationDate: e.creationDate,
+      deviceInfo: e.deviceInfo,
+    });
     return [
       "", // folder
       "", // favorite
@@ -432,14 +511,16 @@ function formatCsv(entries: DecryptedExport[]): string {
       isLogin ? escapeCsv(e.username) : "",
       isLogin ? escapeCsv(e.password) : "",
       isLogin ? escapeCsv(e.totp) : "",
+      ...(profile === "passwd-sso" ? [escapeCsv(passwdSso)] : []),
     ].join(",");
   });
   return [header, ...rows].join("\n");
 }
 
-function formatJson(entries: DecryptedExport[]): string {
+function formatJson(entries: DecryptedExport[], profile: ExportProfile): string {
   return JSON.stringify(
     {
+      ...(profile === "passwd-sso" ? { format: "passwd-sso", version: 1 } : {}),
       exportedAt: new Date().toISOString(),
       entries: entries.map((e) => {
         if (e.entryType === ENTRY_TYPE.PASSKEY) {
@@ -455,6 +536,9 @@ function formatJson(entries: DecryptedExport[]): string {
               deviceInfo: e.deviceInfo,
             },
             notes: e.notes,
+            ...(profile === "passwd-sso"
+              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
+              : {}),
           };
         }
         if (e.entryType === ENTRY_TYPE.IDENTITY) {
@@ -473,6 +557,9 @@ function formatJson(entries: DecryptedExport[]): string {
               expiryDate: e.expiryDate,
             },
             notes: e.notes,
+            ...(profile === "passwd-sso"
+              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
+              : {}),
           };
         }
         if (e.entryType === ENTRY_TYPE.CREDIT_CARD) {
@@ -488,6 +575,9 @@ function formatJson(entries: DecryptedExport[]): string {
               code: e.cvv,
             },
             notes: e.notes,
+            ...(profile === "passwd-sso"
+              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
+              : {}),
           };
         }
         if (e.entryType === ENTRY_TYPE.SECURE_NOTE) {
@@ -495,6 +585,9 @@ function formatJson(entries: DecryptedExport[]): string {
             type: "securenote",
             name: e.title,
             notes: e.content,
+            ...(profile === "passwd-sso"
+              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
+              : {}),
           };
         }
         return {
@@ -507,6 +600,18 @@ function formatJson(entries: DecryptedExport[]): string {
             totp: e.totp,
           },
           notes: e.notes,
+          ...(profile === "passwd-sso"
+            ? {
+                passwdSso: {
+                  entryType: e.entryType,
+                  tags: e.tags,
+                  customFields: e.customFields,
+                  totp: e.totpConfig,
+                  generatorSettings: e.generatorSettings,
+                  passwordHistory: e.passwordHistory,
+                },
+              }
+            : {}),
         };
       }),
     },
@@ -519,3 +624,9 @@ function formatDate(): string {
   const d = new Date();
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
 }
+
+export const __testablesPersonalExport = {
+  formatExportContent,
+  formatCsv,
+  formatJson,
+};

@@ -407,6 +407,11 @@
   "Export": {
     "title": "パスワードのエクスポート",
     "description": "パスワードデータを CSV / JSON でダウンロードします。パスワード保護を有効にすると暗号化して保存できます。",
+    "profileLabel": "エクスポートプロファイル",
+    "profileCompatible": "互換（Bitwarden形式）",
+    "profilePasswdSso": "passwd-sso（完全復元向け）",
+    "profileCompatibleDesc": "他アプリへの取り込み向け。passwd-sso 固有項目は一部省略されます。",
+    "profilePasswdSsoDesc": "passwd-sso 固有項目を含めて、passwd-sso でロスなく復元できます。",
     "warning": "パスワード保護をオフにすると、エクスポートファイルには平文でデータが含まれます。安全に保管し、不要になったら削除してください。",
     "exportCsv": "CSV でエクスポート",
     "exportJson": "JSON でエクスポート",
