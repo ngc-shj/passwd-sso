@@ -404,6 +404,7 @@ async function performAutofillForEntry(
     loginId?: string | null;
     userId?: string | null;
     email?: string | null;
+    customFields?: Array<{ label?: string; value?: string; type?: string }>;
   };
   const overview = JSON.parse(overviewPlain) as { username?: string | null };
   const password = blob.password ?? null;
@@ -414,6 +415,25 @@ async function performAutofillForEntry(
     blob.userId ??
     blob.email ??
     "";
+
+  const customFields = Array.isArray(blob.customFields) ? blob.customFields : [];
+  const findCustomFieldValue = (pattern: RegExp): string | null => {
+    for (const field of customFields) {
+      const label = (field?.label ?? "").toString();
+      const value = (field?.value ?? "").toString();
+      if (!label || !value) continue;
+      if (pattern.test(label)) return value;
+    }
+    return null;
+  };
+  const awsAccountIdOrAlias =
+    findCustomFieldValue(
+      /(aws.*account|account.*(id|alias)|account id|account alias|アカウント|アカウントID|エイリアス)/i,
+    ) ?? "";
+  const awsIamUsername =
+    findCustomFieldValue(
+      /(iam.*(user|username)|user ?name|iamユーザー|iamユーザ|ユーザー名)/i,
+    ) ?? "";
 
   if (!password) {
     return { ok: false, error: "NO_PASSWORD" };
@@ -429,6 +449,8 @@ async function performAutofillForEntry(
       username,
       password,
       ...(targetHint ? { targetHint } : {}),
+      ...(awsAccountIdOrAlias ? { awsAccountIdOrAlias } : {}),
+      ...(awsIamUsername ? { awsIamUsername } : {}),
     });
   } catch {
     // Continue to direct fallback injection below.
@@ -438,11 +460,13 @@ async function performAutofillForEntry(
   // Runs in all frames so login forms inside iframes are also covered.
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
-    args: [username, password, targetHint],
+    args: [username, password, targetHint, awsAccountIdOrAlias, awsIamUsername],
     func: (
       usernameArg: string,
       passwordArg: string,
       targetHintArg?: { id?: string; name?: string; type?: string; autocomplete?: string },
+      awsAccountIdOrAliasArg?: string,
+      awsIamUsernameArg?: string,
     ) => {
       const isUsableInput = (input: HTMLInputElement) =>
         !input.disabled && !input.readOnly;
@@ -467,6 +491,9 @@ async function performAutofillForEntry(
       const inputs = Array.from(
         document.querySelectorAll("input"),
       ) as HTMLInputElement[];
+      const isAwsSignInPage =
+        window.location.hostname.includes("signin.aws.amazon.com") ||
+        window.location.hostname.includes("sign-in.aws.amazon.com");
 
       const findInputByHint = () => {
         if (!targetHintArg) return null;
@@ -534,6 +561,28 @@ async function performAutofillForEntry(
       }
 
       if (fallbackUsername && usernameArg) setInputValue(fallbackUsername, usernameArg);
+      if (isAwsSignInPage) {
+        const readHints = (input: HTMLInputElement) => {
+          const labelText =
+            (input.id
+              ? document.querySelector(`label[for="${input.id.replace(/["\\]/g, "\\$&")}"]`)
+                  ?.textContent ?? ""
+              : "") + (input.getAttribute("aria-label") ?? "") + (input.placeholder ?? "");
+          return `${input.name} ${input.id} ${labelText}`.toLowerCase();
+        };
+        const accountInput = inputs.find((i) => {
+          if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
+          const hints = readHints(i);
+          return /(account|alias|アカウント|エイリアス)/.test(hints);
+        });
+        const iamInput = inputs.find((i) => {
+          if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
+          const hints = readHints(i);
+          return /(iam|username|user.?name|ユーザー名|ユーザ名)/.test(hints);
+        });
+        if (accountInput && awsAccountIdOrAliasArg) setInputValue(accountInput, awsAccountIdOrAliasArg);
+        if (iamInput && awsIamUsernameArg) setInputValue(iamInput, awsIamUsernameArg);
+      }
       if (passwordInput) setInputValue(passwordInput, passwordArg);
     },
   });

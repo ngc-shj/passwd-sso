@@ -43,6 +43,8 @@ export interface AutofillPayload {
   username: string;
   password: string;
   targetHint?: AutofillTargetHint;
+  awsAccountIdOrAlias?: string;
+  awsIamUsername?: string;
 }
 
 export interface AutofillTargetHint {

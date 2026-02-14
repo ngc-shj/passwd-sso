@@ -8,6 +8,16 @@ function setupForm(html: string) {
   document.body.innerHTML = html;
 }
 
+function mockAwsHost() {
+  Object.defineProperty(window, "location", {
+    value: {
+      ...window.location,
+      hostname: "signin.aws.amazon.com",
+    },
+    configurable: true,
+  });
+}
+
 describe("performAutofill", () => {
   it("fills inputs with autocomplete attributes", () => {
     setupForm(`
@@ -118,5 +128,28 @@ describe("performAutofill", () => {
     const pw = document.getElementById("pw") as HTMLInputElement;
     expect(user.value).toBe("hint-user");
     expect(pw.value).toBe("secret");
+  });
+
+  it("fills AWS account alias + IAM username + password", () => {
+    mockAwsHost();
+    setupForm(`
+      <label for="acct">Account ID or alias</label>
+      <input id="acct" type="text" />
+      <label for="iam-user">IAM user name</label>
+      <input id="iam-user" type="text" />
+      <input id="pw" type="password" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "fallback",
+      password: "secret",
+      awsAccountIdOrAlias: "123456789012",
+      awsIamUsername: "alice-iam",
+    });
+
+    expect((document.getElementById("acct") as HTMLInputElement).value).toBe("123456789012");
+    expect((document.getElementById("iam-user") as HTMLInputElement).value).toBe("alice-iam");
+    expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
   });
 });

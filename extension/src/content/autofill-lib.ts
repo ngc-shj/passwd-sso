@@ -166,7 +166,57 @@ export function performAutofill(payload: AutofillPayload) {
     hintedUsernameInput ??
     findUsernameInput(inputs, passwordInput);
 
-  if (usernameInput && payload.username) {
+  const isAwsSignInPage =
+    window.location.hostname.includes("signin.aws.amazon.com") ||
+    window.location.hostname.includes("sign-in.aws.amazon.com");
+
+  const getHints = (input: HTMLInputElement): string => {
+    const id = input.id;
+    const label =
+      (id
+        ? document.querySelector(`label[for="${escapeSelectorValue(id)}"]`)?.textContent ?? ""
+        : "") +
+      (input.getAttribute("aria-label") ?? "") +
+      (input.placeholder ?? "") +
+      (input.name ?? "") +
+      (input.id ?? "") +
+      (input.getAttribute("formcontrolname") ?? "");
+    return label.toLowerCase();
+  };
+
+  const findAwsAccountInput = (): HTMLInputElement | null => {
+    return (
+      inputs.find((i) => {
+        if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
+        return /(account|alias|アカウント|エイリアス)/.test(getHints(i));
+      }) ?? null
+    );
+  };
+
+  const findAwsIamInput = (): HTMLInputElement | null => {
+    return (
+      inputs.find((i) => {
+        if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
+        return /(iam|username|user.?name|ユーザー名|ユーザ名)/.test(getHints(i));
+      }) ?? null
+    );
+  };
+
+  if (isAwsSignInPage) {
+    const awsAccountInput = findAwsAccountInput();
+    const awsIamInput = findAwsIamInput();
+    if (awsAccountInput && payload.awsAccountIdOrAlias) {
+      setInputValue(awsAccountInput, payload.awsAccountIdOrAlias);
+    }
+    if (awsIamInput && (payload.awsIamUsername || payload.username)) {
+      setInputValue(awsIamInput, payload.awsIamUsername || payload.username);
+    }
+  }
+
+  const hasAwsSpecificValues =
+    isAwsSignInPage && Boolean(payload.awsAccountIdOrAlias || payload.awsIamUsername);
+
+  if (!hasAwsSpecificValues && usernameInput && payload.username) {
     setInputValue(usernameInput, payload.username);
   }
   if (passwordInput) {
