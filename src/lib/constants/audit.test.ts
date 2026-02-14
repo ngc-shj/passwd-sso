@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AUDIT_ACTION,
   AUDIT_ACTION_EMERGENCY_PREFIX,
+  AUDIT_ACTION_GROUP,
   AUDIT_ACTION_GROUPS_ORG,
   AUDIT_ACTION_GROUPS_PERSONAL,
   AUDIT_ACTION_VALUES,
@@ -26,6 +27,35 @@ describe("audit constants", () => {
     for (const action of grouped) {
       expect(valid.has(action)).toBe(true);
     }
+  });
+
+  it("defines transfer and entry groups with expected actions", () => {
+    expect(AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ENTRY]).toEqual([
+      AUDIT_ACTION.ENTRY_CREATE,
+      AUDIT_ACTION.ENTRY_UPDATE,
+      AUDIT_ACTION.ENTRY_DELETE,
+      AUDIT_ACTION.ENTRY_RESTORE,
+    ]);
+    expect(AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.TRANSFER]).toEqual([
+      AUDIT_ACTION.ENTRY_IMPORT,
+      AUDIT_ACTION.ENTRY_EXPORT,
+    ]);
+    expect(AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.TRANSFER]).toEqual([
+      AUDIT_ACTION.ENTRY_EXPORT,
+    ]);
+  });
+
+  it("does not overlap ENTRY and TRANSFER groups", () => {
+    const personalEntry = new Set(
+      AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ENTRY]
+    );
+    const personalTransfer = new Set(
+      AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.TRANSFER]
+    );
+
+    expect(
+      [...personalEntry].filter((action) => personalTransfer.has(action))
+    ).toEqual([]);
   });
 
   it("uses EMERGENCY_ prefix consistently for emergency actions", () => {
