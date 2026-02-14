@@ -462,6 +462,24 @@ async function performAutofillForEntry(
       /(iam.*(user|username)|user ?name|iamユーザー|iamユーザ|ユーザー名)/i,
     ) ?? "";
 
+  const serializableTargetHint = targetHint
+    ? {
+        ...(typeof targetHint.id === "string" && targetHint.id
+          ? { id: targetHint.id }
+          : {}),
+        ...(typeof targetHint.name === "string" && targetHint.name
+          ? { name: targetHint.name }
+          : {}),
+        ...(typeof targetHint.type === "string" && targetHint.type
+          ? { type: targetHint.type }
+          : {}),
+        ...(typeof targetHint.autocomplete === "string" &&
+        targetHint.autocomplete
+          ? { autocomplete: targetHint.autocomplete }
+          : {}),
+      }
+    : null;
+
   if (!password) {
     return { ok: false, error: "NO_PASSWORD" };
   }
@@ -475,7 +493,7 @@ async function performAutofillForEntry(
       type: "AUTOFILL_FILL",
       username,
       password,
-      ...(targetHint ? { targetHint } : {}),
+      ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
       ...(awsAccountIdOrAlias ? { awsAccountIdOrAlias } : {}),
       ...(awsIamUsername ? { awsIamUsername } : {}),
     });
@@ -487,7 +505,13 @@ async function performAutofillForEntry(
   // Runs in all frames so login forms inside iframes are also covered.
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
-    args: [username, password, targetHint, awsAccountIdOrAlias, awsIamUsername],
+    args: [
+      username,
+      password,
+      serializableTargetHint,
+      awsAccountIdOrAlias,
+      awsIamUsername,
+    ],
     func: (
       usernameArg: string,
       passwordArg: string,

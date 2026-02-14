@@ -466,6 +466,10 @@ describe("background message flow", () => {
       username: "alice",
       password: "secret",
     });
+    const directFallbackCall = chromeMock?.scripting.executeScript.mock.calls.find(
+      (call) => Array.isArray((call[0] as { args?: unknown[] }).args),
+    )?.[0] as { args?: unknown[] } | undefined;
+    expect(directFallbackCall?.args?.[2]).toBeNull();
   });
 
   it("autofills with blob username fallback when overview username is missing", async () => {
