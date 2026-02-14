@@ -142,6 +142,15 @@ async function hydrateFromSession(): Promise<void> {
   chrome.alarms.create(ALARM_TOKEN_TTL, { when: state.expiresAt });
   // Schedule refresh
   scheduleRefreshAlarm(state.expiresAt);
+
+  // Restore vault auto-lock alarm if vault is unlocked
+  if (encryptionKey) {
+    const { autoLockMinutes } = await getSettings();
+    if (autoLockMinutes > 0) {
+      chrome.alarms.create(ALARM_VAULT_LOCK, { delayInMinutes: autoLockMinutes });
+    }
+  }
+
   void updateBadge();
 }
 
@@ -237,7 +246,7 @@ async function shouldSuppressInlineMatches(url: string): Promise<boolean> {
 }
 
 // Hydrate on SW startup
-hydrateFromSession().catch(() => {});
+const hydrationPromise = hydrateFromSession().catch(() => {});
 
 // ── Alarm: auto-clear on expiry ──────────────────────────────
 
@@ -658,400 +667,413 @@ async function performAutofillForEntry(
 
 // ── Message handler ──────────────────────────────────────────
 
+async function handleMessage(
+  message: ExtensionMessage,
+  _sender: chrome.runtime.MessageSender,
+  sendResponse: (response: ExtensionResponse) => void,
+): Promise<void> {
+  // Wait for session hydration to complete before processing any message.
+  // This prevents race conditions where the SW restarts and messages arrive
+  // before in-memory state (token, encryptionKey) is restored.
+  await hydrationPromise;
+
+  switch (message.type) {
+    case "SET_TOKEN": {
+      currentToken = message.token;
+      tokenExpiresAt = message.expiresAt;
+
+      // Set alarm for TTL expiry
+      const delayMs = message.expiresAt - Date.now();
+      if (delayMs > 0) {
+        chrome.alarms.create(ALARM_TOKEN_TTL, {
+          when: message.expiresAt,
+        });
+        scheduleRefreshAlarm(message.expiresAt);
+        persistState();
+      } else {
+        // Already expired
+        clearToken();
+      }
+
+      sendResponse({ type: "SET_TOKEN", ok: true });
+      void updateBadge();
+      return;
+    }
+
+    case "GET_TOKEN": {
+      if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
+        clearToken();
+      }
+      sendResponse({ type: "GET_TOKEN", token: currentToken });
+      return;
+    }
+
+    case "CLEAR_TOKEN": {
+      clearToken();
+      chrome.alarms.clear(ALARM_TOKEN_TTL);
+      sendResponse({ type: "CLEAR_TOKEN", ok: true });
+      return;
+    }
+
+    case "GET_STATUS": {
+      if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
+        clearToken();
+      }
+      sendResponse({
+        type: "GET_STATUS",
+        hasToken: currentToken !== null,
+        expiresAt: tokenExpiresAt,
+        vaultUnlocked: encryptionKey !== null,
+      });
+      return;
+    }
+
+    case "UNLOCK_VAULT": {
+      if (!currentToken) {
+        sendResponse({
+          type: "UNLOCK_VAULT",
+          ok: false,
+          error: "NO_TOKEN",
+        });
+        return;
+      }
+
+      try {
+        const res = await swFetch(EXT_API_PATH.VAULT_UNLOCK_DATA);
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          sendResponse({
+            type: "UNLOCK_VAULT",
+            ok: false,
+            error: json.error || "UNLOCK_FAILED",
+          });
+          return;
+        }
+
+        const data = await res.json();
+        const wrappingKey = await deriveWrappingKey(
+          message.passphrase,
+          hexDecode(data.accountSalt)
+        );
+
+        let secretKey: Uint8Array;
+        try {
+          secretKey = await unwrapSecretKey(
+            {
+              ciphertext: data.encryptedSecretKey,
+              iv: data.secretKeyIv,
+              authTag: data.secretKeyAuthTag,
+            },
+            wrappingKey
+          );
+        } catch {
+          sendResponse({
+            type: "UNLOCK_VAULT",
+            ok: false,
+            error: "INVALID_PASSPHRASE",
+          });
+          return;
+        }
+
+        const encKey = await deriveEncryptionKey(secretKey);
+        currentVaultSecretKeyHex = Array.from(secretKey)
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+        secretKey.fill(0);
+
+        if (data.verificationArtifact) {
+          const ok = await verifyKey(encKey, data.verificationArtifact);
+          if (!ok) {
+            sendResponse({
+              type: "UNLOCK_VAULT",
+              ok: false,
+              error: "INVALID_PASSPHRASE",
+            });
+            return;
+          }
+        }
+
+        encryptionKey = encKey;
+        currentUserId = data.userId || null;
+        persistState();
+        const { autoLockMinutes } = await getSettings();
+        if (autoLockMinutes > 0) {
+          chrome.alarms.create(ALARM_VAULT_LOCK, {
+            delayInMinutes: autoLockMinutes,
+          });
+        }
+
+        sendResponse({ type: "UNLOCK_VAULT", ok: true });
+        void updateBadge();
+      } catch (err) {
+        sendResponse({
+          type: "UNLOCK_VAULT",
+          ok: false,
+          error: err instanceof Error ? err.message : "UNLOCK_FAILED",
+        });
+      }
+      return;
+    }
+
+    case "LOCK_VAULT": {
+      clearVault();
+      sendResponse({ type: "LOCK_VAULT", ok: true });
+      return;
+    }
+
+    case "FETCH_PASSWORDS": {
+      if (!encryptionKey || !currentUserId) {
+        sendResponse({
+          type: "FETCH_PASSWORDS",
+          entries: null,
+          error: "VAULT_LOCKED",
+        });
+        return;
+      }
+
+      try {
+        const res = await swFetch(EXT_API_PATH.PASSWORDS);
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          sendResponse({
+            type: "FETCH_PASSWORDS",
+            entries: null,
+            error: json.error || "FETCH_FAILED",
+          });
+          return;
+        }
+
+        const raw = (await res.json()) as RawEntry[];
+        const entries = await decryptOverviews(raw);
+        sendResponse({ type: "FETCH_PASSWORDS", entries });
+      } catch (err) {
+        sendResponse({
+          type: "FETCH_PASSWORDS",
+          entries: null,
+          error: err instanceof Error ? err.message : "FETCH_FAILED",
+        });
+      }
+      return;
+    }
+
+    case "COPY_PASSWORD": {
+      if (!encryptionKey || !currentUserId) {
+        sendResponse({
+          type: "COPY_PASSWORD",
+          password: null,
+          error: "VAULT_LOCKED",
+        });
+        return;
+      }
+
+      try {
+        const res = await swFetch(extApiPath.passwordById(message.entryId));
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          sendResponse({
+            type: "COPY_PASSWORD",
+            password: null,
+            error: json.error || "FETCH_FAILED",
+          });
+          return;
+        }
+
+        const data = (await res.json()) as {
+          encryptedBlob: { ciphertext: string; iv: string; authTag: string };
+          aadVersion?: number;
+          id: string;
+        };
+
+        const aad =
+          (data.aadVersion ?? 0) >= 1
+            ? buildPersonalEntryAAD(currentUserId, data.id)
+            : undefined;
+        const plaintext = await decryptData(
+          data.encryptedBlob,
+          encryptionKey,
+          aad
+        );
+        let password: string | null = null;
+        try {
+          const blob = JSON.parse(plaintext) as { password?: string | null };
+          password = blob.password ?? null;
+        } catch {
+          password = null;
+        }
+
+        if (!password) {
+          sendResponse({
+            type: "COPY_PASSWORD",
+            password: null,
+            error: "NO_PASSWORD",
+          });
+          return;
+        }
+
+        sendResponse({ type: "COPY_PASSWORD", password });
+      } catch (err) {
+        sendResponse({
+          type: "COPY_PASSWORD",
+          password: null,
+          error: err instanceof Error ? err.message : "FETCH_FAILED",
+        });
+      }
+      return;
+    }
+
+    case "AUTOFILL": {
+      try {
+        const result = await performAutofillForEntry(
+          message.entryId,
+          message.tabId,
+        );
+        sendResponse({
+          type: "AUTOFILL",
+          ok: result.ok,
+          error: result.error,
+        });
+      } catch (err) {
+        sendResponse({
+          type: "AUTOFILL",
+          ok: false,
+          error: err instanceof Error ? err.message : "AUTOFILL_FAILED",
+        });
+      }
+      return;
+    }
+
+    case "GET_MATCHES_FOR_URL": {
+      if (!encryptionKey || !currentUserId || !currentToken) {
+        sendResponse({
+          type: "GET_MATCHES_FOR_URL",
+          entries: [],
+          vaultLocked: true,
+          suppressInline: false,
+        });
+        return;
+      }
+
+      try {
+        const effectiveUrl = message.topUrl ?? message.url;
+        if (await shouldSuppressInlineMatches(effectiveUrl)) {
+          sendResponse({
+            type: "GET_MATCHES_FOR_URL",
+            entries: [],
+            vaultLocked: false,
+            suppressInline: true,
+          });
+          return;
+        }
+        const tabHost = extractHost(effectiveUrl);
+        if (!tabHost) {
+          sendResponse({
+            type: "GET_MATCHES_FOR_URL",
+            entries: [],
+            vaultLocked: false,
+            suppressInline: false,
+          });
+          return;
+        }
+        const entries = await getCachedEntries();
+        const matches = entries.filter(
+          (e) =>
+            e.entryType === EXT_ENTRY_TYPE.LOGIN &&
+            e.urlHost &&
+            isHostMatch(e.urlHost, tabHost),
+        );
+        sendResponse({
+          type: "GET_MATCHES_FOR_URL",
+          entries: matches,
+          vaultLocked: false,
+          suppressInline: false,
+        });
+      } catch {
+        sendResponse({
+          type: "GET_MATCHES_FOR_URL",
+          entries: [],
+          vaultLocked: false,
+          suppressInline: false,
+        });
+      }
+      return;
+    }
+
+    case "AUTOFILL_FROM_CONTENT": {
+      if (!encryptionKey || !currentUserId) {
+        sendResponse({
+          type: "AUTOFILL_FROM_CONTENT",
+          ok: false,
+          error: "VAULT_LOCKED",
+        });
+        return;
+      }
+
+      try {
+        const tabId = _sender.tab?.id;
+        if (!tabId) {
+          sendResponse({
+            type: "AUTOFILL_FROM_CONTENT",
+            ok: false,
+            error: "NO_TAB",
+          });
+          return;
+        }
+        const result = await performAutofillForEntry(
+          message.entryId,
+          tabId,
+          message.targetHint,
+        );
+        sendResponse({
+          type: "AUTOFILL_FROM_CONTENT",
+          ok: result.ok,
+          error: result.error,
+        });
+      } catch (err) {
+        sendResponse({
+          type: "AUTOFILL_FROM_CONTENT",
+          ok: false,
+          error: err instanceof Error ? err.message : "AUTOFILL_FAILED",
+        });
+      }
+      return;
+    }
+  }
+}
+
 chrome.runtime.onMessage.addListener(
   (
     message: ExtensionMessage,
     _sender: chrome.runtime.MessageSender,
     sendResponse: (response: ExtensionResponse) => void,
   ) => {
-    switch (message.type) {
-      case "SET_TOKEN": {
-        currentToken = message.token;
-        tokenExpiresAt = message.expiresAt;
-
-        // Set alarm for TTL expiry
-        const delayMs = message.expiresAt - Date.now();
-        if (delayMs > 0) {
-          chrome.alarms.create(ALARM_TOKEN_TTL, {
-            when: message.expiresAt,
-          });
-          scheduleRefreshAlarm(message.expiresAt);
-          persistState();
-        } else {
-          // Already expired
-          clearToken();
+    handleMessage(message, _sender, sendResponse).catch(() => {
+      // Failsafe: ensure sendResponse is called even on unexpected errors
+      // to prevent the caller (popup/content script) from hanging.
+      // Each branch returns the correct response shape for the message type.
+      try {
+        switch (message.type) {
+          case "GET_STATUS":
+            sendResponse({ type: "GET_STATUS", hasToken: false, expiresAt: null, vaultUnlocked: false } as ExtensionResponse);
+            break;
+          case "GET_TOKEN":
+            sendResponse({ type: "GET_TOKEN", token: null } as ExtensionResponse);
+            break;
+          case "GET_MATCHES_FOR_URL":
+            sendResponse({ type: "GET_MATCHES_FOR_URL", entries: [], vaultLocked: true, suppressInline: false } as ExtensionResponse);
+            break;
+          case "FETCH_PASSWORDS":
+            sendResponse({ type: "FETCH_PASSWORDS", entries: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
+            break;
+          case "COPY_PASSWORD":
+            sendResponse({ type: "COPY_PASSWORD", password: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
+            break;
+          default:
+            sendResponse({ type: message.type, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
         }
-
-        sendResponse({ type: "SET_TOKEN", ok: true });
-        void updateBadge();
-        break;
+      } catch {
+        // sendResponse may already have been called or the port may be closed
       }
-
-      case "GET_TOKEN": {
-        // Check if expired
-        if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
-          clearToken();
-        }
-        sendResponse({ type: "GET_TOKEN", token: currentToken });
-        break;
-      }
-
-      case "CLEAR_TOKEN": {
-        clearToken();
-        chrome.alarms.clear(ALARM_TOKEN_TTL);
-        sendResponse({ type: "CLEAR_TOKEN", ok: true });
-        break;
-      }
-
-      case "GET_STATUS": {
-        // Check if expired
-        if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
-          clearToken();
-        }
-        sendResponse({
-          type: "GET_STATUS",
-          hasToken: currentToken !== null,
-          expiresAt: tokenExpiresAt,
-          vaultUnlocked: encryptionKey !== null,
-        });
-        break;
-      }
-
-      case "UNLOCK_VAULT": {
-        if (!currentToken) {
-          sendResponse({
-            type: "UNLOCK_VAULT",
-            ok: false,
-            error: "NO_TOKEN",
-          });
-          break;
-        }
-
-        (async () => {
-          try {
-            const res = await swFetch(EXT_API_PATH.VAULT_UNLOCK_DATA);
-            if (!res.ok) {
-              const json = await res.json().catch(() => ({}));
-              sendResponse({
-                type: "UNLOCK_VAULT",
-                ok: false,
-                error: json.error || "UNLOCK_FAILED",
-              });
-              return;
-            }
-
-            const data = await res.json();
-            const wrappingKey = await deriveWrappingKey(
-              message.passphrase,
-              hexDecode(data.accountSalt)
-            );
-
-            let secretKey: Uint8Array;
-            try {
-              secretKey = await unwrapSecretKey(
-                {
-                  ciphertext: data.encryptedSecretKey,
-                  iv: data.secretKeyIv,
-                  authTag: data.secretKeyAuthTag,
-                },
-                wrappingKey
-              );
-            } catch {
-              sendResponse({
-                type: "UNLOCK_VAULT",
-                ok: false,
-                error: "INVALID_PASSPHRASE",
-              });
-              return;
-            }
-
-            const encKey = await deriveEncryptionKey(secretKey);
-            currentVaultSecretKeyHex = Array.from(secretKey)
-              .map((b) => b.toString(16).padStart(2, "0"))
-              .join("");
-            secretKey.fill(0);
-
-            if (data.verificationArtifact) {
-              const ok = await verifyKey(encKey, data.verificationArtifact);
-              if (!ok) {
-                sendResponse({
-                  type: "UNLOCK_VAULT",
-                  ok: false,
-                  error: "INVALID_PASSPHRASE",
-                });
-                return;
-              }
-            }
-
-            encryptionKey = encKey;
-            currentUserId = data.userId || null;
-            persistState();
-            const { autoLockMinutes } = await getSettings();
-            if (autoLockMinutes > 0) {
-              chrome.alarms.create(ALARM_VAULT_LOCK, {
-                delayInMinutes: autoLockMinutes,
-              });
-            }
-
-            sendResponse({ type: "UNLOCK_VAULT", ok: true });
-            void updateBadge();
-          } catch (err) {
-            sendResponse({
-              type: "UNLOCK_VAULT",
-              ok: false,
-              error: err instanceof Error ? err.message : "UNLOCK_FAILED",
-            });
-          }
-        })();
-
-        return true;
-      }
-
-      case "LOCK_VAULT": {
-        clearVault();
-        sendResponse({ type: "LOCK_VAULT", ok: true });
-        break;
-      }
-
-      case "FETCH_PASSWORDS": {
-        if (!encryptionKey || !currentUserId) {
-          sendResponse({
-            type: "FETCH_PASSWORDS",
-            entries: null,
-            error: "VAULT_LOCKED",
-          });
-          break;
-        }
-
-        (async () => {
-          try {
-            const res = await swFetch(EXT_API_PATH.PASSWORDS);
-            if (!res.ok) {
-              const json = await res.json().catch(() => ({}));
-              sendResponse({
-                type: "FETCH_PASSWORDS",
-                entries: null,
-                error: json.error || "FETCH_FAILED",
-              });
-              return;
-            }
-
-            const raw = (await res.json()) as RawEntry[];
-            const entries = await decryptOverviews(raw);
-            sendResponse({ type: "FETCH_PASSWORDS", entries });
-          } catch (err) {
-            sendResponse({
-              type: "FETCH_PASSWORDS",
-              entries: null,
-              error: err instanceof Error ? err.message : "FETCH_FAILED",
-            });
-          }
-        })();
-
-        return true;
-      }
-
-      case "COPY_PASSWORD": {
-        if (!encryptionKey || !currentUserId) {
-          sendResponse({
-            type: "COPY_PASSWORD",
-            password: null,
-            error: "VAULT_LOCKED",
-          });
-          break;
-        }
-
-        (async () => {
-          try {
-            const res = await swFetch(extApiPath.passwordById(message.entryId));
-            if (!res.ok) {
-              const json = await res.json().catch(() => ({}));
-              sendResponse({
-                type: "COPY_PASSWORD",
-                password: null,
-                error: json.error || "FETCH_FAILED",
-              });
-              return;
-            }
-
-            const data = (await res.json()) as {
-              encryptedBlob: { ciphertext: string; iv: string; authTag: string };
-              aadVersion?: number;
-              id: string;
-            };
-
-            const aad =
-              (data.aadVersion ?? 0) >= 1
-                ? buildPersonalEntryAAD(currentUserId, data.id)
-                : undefined;
-            const plaintext = await decryptData(
-              data.encryptedBlob,
-              encryptionKey,
-              aad
-            );
-            let password: string | null = null;
-            try {
-              const blob = JSON.parse(plaintext) as { password?: string | null };
-              password = blob.password ?? null;
-            } catch {
-              password = null;
-            }
-
-            if (!password) {
-              sendResponse({
-                type: "COPY_PASSWORD",
-                password: null,
-                error: "NO_PASSWORD",
-              });
-              return;
-            }
-
-            sendResponse({ type: "COPY_PASSWORD", password });
-          } catch (err) {
-            sendResponse({
-              type: "COPY_PASSWORD",
-              password: null,
-              error: err instanceof Error ? err.message : "FETCH_FAILED",
-            });
-          }
-        })();
-
-        return true;
-      }
-
-      case "AUTOFILL": {
-        (async () => {
-          try {
-            const result = await performAutofillForEntry(
-              message.entryId,
-              message.tabId,
-            );
-            sendResponse({
-              type: "AUTOFILL",
-              ok: result.ok,
-              error: result.error,
-            });
-          } catch (err) {
-            sendResponse({
-              type: "AUTOFILL",
-              ok: false,
-              error: err instanceof Error ? err.message : "AUTOFILL_FAILED",
-            });
-          }
-        })();
-
-        return true;
-      }
-
-      case "GET_MATCHES_FOR_URL": {
-        const vaultLocked = !encryptionKey || !currentUserId;
-        if (vaultLocked || !currentToken) {
-          sendResponse({
-            type: "GET_MATCHES_FOR_URL",
-            entries: [],
-            vaultLocked: true,
-            suppressInline: false,
-          });
-          break;
-        }
-
-        (async () => {
-          try {
-            const effectiveUrl = message.topUrl ?? message.url;
-            if (await shouldSuppressInlineMatches(effectiveUrl)) {
-              sendResponse({
-                type: "GET_MATCHES_FOR_URL",
-                entries: [],
-                vaultLocked: false,
-                suppressInline: true,
-              });
-              return;
-            }
-            const tabHost = extractHost(effectiveUrl);
-            if (!tabHost) {
-              sendResponse({
-                type: "GET_MATCHES_FOR_URL",
-                entries: [],
-                vaultLocked: false,
-                suppressInline: false,
-              });
-              return;
-            }
-            const entries = await getCachedEntries();
-            const matches = entries.filter(
-              (e) =>
-                e.entryType === EXT_ENTRY_TYPE.LOGIN &&
-                e.urlHost &&
-                isHostMatch(e.urlHost, tabHost),
-            );
-            sendResponse({
-              type: "GET_MATCHES_FOR_URL",
-              entries: matches,
-              vaultLocked: false,
-              suppressInline: false,
-            });
-          } catch {
-            sendResponse({
-              type: "GET_MATCHES_FOR_URL",
-              entries: [],
-              vaultLocked: false,
-              suppressInline: false,
-            });
-          }
-        })();
-
-        return true;
-      }
-
-      case "AUTOFILL_FROM_CONTENT": {
-        if (!encryptionKey || !currentUserId) {
-          sendResponse({
-            type: "AUTOFILL_FROM_CONTENT",
-            ok: false,
-            error: "VAULT_LOCKED",
-          });
-          break;
-        }
-
-        (async () => {
-          try {
-            const tabId = _sender.tab?.id;
-            if (!tabId) {
-              sendResponse({
-                type: "AUTOFILL_FROM_CONTENT",
-                ok: false,
-                error: "NO_TAB",
-              });
-              return;
-            }
-            const result = await performAutofillForEntry(
-              message.entryId,
-              tabId,
-              message.targetHint,
-            );
-            sendResponse({
-              type: "AUTOFILL_FROM_CONTENT",
-              ok: result.ok,
-              error: result.error,
-            });
-          } catch (err) {
-            sendResponse({
-              type: "AUTOFILL_FROM_CONTENT",
-              ok: false,
-              error: err instanceof Error ? err.message : "AUTOFILL_FAILED",
-            });
-          }
-        })();
-
-        return true;
-      }
-
-      default:
-        // Unknown message — do not hold the channel open
-        return false;
-    }
-
-    // Return true to indicate async sendResponse
+    });
     return true;
   },
 );
