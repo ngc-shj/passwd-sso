@@ -4,6 +4,7 @@ export const API_PATH = {
   EXTENSION_TOKEN: "/api/extension/token",
   PASSWORDS: "/api/passwords",
   PASSWORDS_BULK_TRASH: "/api/passwords/bulk-trash",
+  PASSWORDS_BULK_ARCHIVE: "/api/passwords/bulk-archive",
   PASSWORDS_GENERATE: "/api/passwords/generate",
   TAGS: "/api/tags",
   ORGS: "/api/orgs",
@@ -61,6 +62,7 @@ export const apiPath = {
   orgAuditLogs: (orgId: string) => `${API_PATH.ORGS}/${orgId}/audit-logs`,
   passwordById: (entryId: string) => `${API_PATH.PASSWORDS}/${entryId}`,
   passwordsBulkTrash: () => API_PATH.PASSWORDS_BULK_TRASH,
+  passwordsBulkArchive: () => API_PATH.PASSWORDS_BULK_ARCHIVE,
   passwordRestore: (entryId: string) =>
     `${API_PATH.PASSWORDS}/${entryId}/restore`,
   passwordAttachments: (entryId: string) =>

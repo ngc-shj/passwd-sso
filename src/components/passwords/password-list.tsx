@@ -93,7 +93,8 @@ export function PasswordList({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
-  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkAction, setBulkAction] = useState<"trash" | "archive">("trash");
+  const [bulkProcessing, setBulkProcessing] = useState(false);
 
   const handleToggleExpand = (id: string) => {
     setExpandedId((prev) => (prev === id ? null : id));
@@ -264,27 +265,45 @@ export function PasswordList({
     setSelectedIds((prev) => toggleSelectOneId(prev, id, checked));
   };
 
-  const handleBulkMoveToTrash = async () => {
+  const handleBulkAction = async () => {
     if (selectedIds.size === 0) return;
-    setBulkDeleting(true);
+    setBulkProcessing(true);
     try {
-      const res = await fetch(apiPath.passwordsBulkTrash(), {
+      const endpoint =
+        bulkAction === "archive"
+          ? apiPath.passwordsBulkArchive()
+          : apiPath.passwordsBulkTrash();
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: Array.from(selectedIds) }),
       });
 
-      if (!res.ok) throw new Error("bulk trash failed");
+      if (!res.ok) throw new Error("bulk action failed");
       const json = await res.json();
-      toast.success(t("bulkMovedToTrash", { count: json.movedCount ?? selectedIds.size }));
+      if (bulkAction === "archive") {
+        toast.success(
+          t("bulkArchived", {
+            count: json.archivedCount ?? selectedIds.size,
+          })
+        );
+      } else {
+        toast.success(
+          t("bulkMovedToTrash", {
+            count: json.movedCount ?? selectedIds.size,
+          })
+        );
+      }
       setBulkDialogOpen(false);
       setSelectedIds(new Set());
       fetchPasswords();
       onDataChange?.();
     } catch {
-      toast.error(t("bulkMoveFailed"));
+      toast.error(
+        bulkAction === "archive" ? t("bulkArchiveFailed") : t("bulkMoveFailed")
+      );
     } finally {
-      setBulkDeleting(false);
+      setBulkProcessing(false);
     }
   };
 
@@ -339,14 +358,32 @@ export function PasswordList({
               : t("selectHint")}
           </span>
         </div>
-        <Button
-          variant="destructive"
-          size="sm"
-          disabled={selectedIds.size === 0}
-          onClick={() => setBulkDialogOpen(true)}
-        >
-          {t("moveSelectedToTrash")}
-        </Button>
+        <div className="flex items-center gap-2">
+          {!archivedOnly && (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={selectedIds.size === 0}
+              onClick={() => {
+                setBulkAction("archive");
+                setBulkDialogOpen(true);
+              }}
+            >
+              {t("moveSelectedToArchive")}
+            </Button>
+          )}
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={selectedIds.size === 0}
+            onClick={() => {
+              setBulkAction("trash");
+              setBulkDialogOpen(true);
+            }}
+          >
+            {t("moveSelectedToTrash")}
+          </Button>
+        </div>
       </div>
 
       {entries.map((entry) => (
@@ -388,21 +425,33 @@ export function PasswordList({
       <AlertDialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("moveSelectedToTrash")}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {bulkAction === "archive"
+                ? t("moveSelectedToArchive")
+                : t("moveSelectedToTrash")}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {t("bulkMoveConfirm", { count: selectedIds.size })}
+              {bulkAction === "archive"
+                ? t("bulkArchiveConfirm", { count: selectedIds.size })
+                : t("bulkMoveConfirm", { count: selectedIds.size })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={bulkDeleting}>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogCancel disabled={bulkProcessing}>
+              {t("cancel")}
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
-                void handleBulkMoveToTrash();
+                void handleBulkAction();
               }}
-              disabled={bulkDeleting}
+              disabled={bulkProcessing}
             >
-              {bulkDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : t("confirm")}
+              {bulkProcessing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                t("confirm")
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
