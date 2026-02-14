@@ -26,6 +26,8 @@ let outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 
 function isSafeSelectClick(e: MouseEvent, item: HTMLDivElement): boolean {
   if (!e.isTrusted) return false;
+  const path = e.composedPath?.() ?? [];
+  if (path.includes(item)) return true;
   const topEl = document.elementFromPoint(e.clientX, e.clientY);
   return topEl === item || (topEl instanceof Node && item.contains(topEl));
 }
