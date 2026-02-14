@@ -694,6 +694,13 @@ async function handleMessage(
 
   switch (message.type) {
     case "SET_TOKEN": {
+      const tokenChanged = currentToken !== null && currentToken !== message.token;
+      if (tokenChanged) {
+        // A new token may represent a different auth session/user.
+        // Force vault relock to avoid carrying unlocked state across token rotation.
+        clearVault();
+      }
+
       currentToken = message.token;
       tokenExpiresAt = message.expiresAt;
 

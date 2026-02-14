@@ -201,6 +201,32 @@ describe("background message flow", () => {
     );
   });
 
+  it("relocks vault when token value changes", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t-1",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const before = await sendMessage({ type: "GET_STATUS" });
+    expect(before).toEqual(
+      expect.objectContaining({ type: "GET_STATUS", hasToken: true, vaultUnlocked: true }),
+    );
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t-2",
+      expiresAt: Date.now() + 60_000,
+    });
+
+    const after = await sendMessage({ type: "GET_STATUS" });
+    expect(after).toEqual(
+      expect.objectContaining({ type: "GET_STATUS", hasToken: true, vaultUnlocked: false }),
+    );
+    expect(chromeMock?.alarms.clear).toHaveBeenCalledWith(ALARM_VAULT_LOCK);
+  });
+
   it("returns error on invalid passphrase", async () => {
     cryptoMocks.unwrapSecretKey.mockRejectedValueOnce(new Error("bad passphrase"));
     await sendMessage({
