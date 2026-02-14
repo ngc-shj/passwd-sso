@@ -32,6 +32,46 @@ export function isUsableInput(input: HTMLInputElement): boolean {
   return !input.disabled && !input.readOnly;
 }
 
+function resolveOpacity(value: string): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 1;
+}
+
+export function isElementVisuallySafe(element: HTMLElement): boolean {
+  const style = getComputedStyle(element);
+  if (style.display === "none" || style.visibility === "hidden") return false;
+  if (resolveOpacity(style.opacity) < 0.98) return false;
+  const clipPath = (style.clipPath || "").toLowerCase();
+  if (clipPath.includes("inset(100%") || clipPath.includes("circle(0")) return false;
+  const transform = (style.transform || "").toLowerCase();
+  if (transform.includes("scale(0")) return false;
+  return true;
+}
+
+export function isPageVisuallySafe(): boolean {
+  return (
+    isElementVisuallySafe(document.documentElement) &&
+    isElementVisuallySafe(document.body)
+  );
+}
+
+export function isInputHitTestSafe(input: HTMLInputElement): boolean {
+  const rect = input.getBoundingClientRect();
+  // In layout-less environments (e.g., jsdom), skip hit-test gating.
+  if (rect.width < 1 || rect.height < 1) return true;
+  if (typeof document.elementFromPoint !== "function") return true;
+  const x = rect.left + rect.width / 2;
+  const y = rect.top + rect.height / 2;
+  const top = document.elementFromPoint(x, y);
+  if (!top) return true;
+  if (top === input || input.contains(top) || (top instanceof HTMLElement && top.contains(input))) {
+    return true;
+  }
+  const nearestLabel = input.closest("label");
+  if (nearestLabel && nearestLabel.contains(top)) return true;
+  return false;
+}
+
 export function findPasswordInputs(root: ParentNode): HTMLInputElement[] {
   return Array.from(root.querySelectorAll<HTMLInputElement>('input[type="password"]')).filter(
     isUsableInput,
@@ -257,6 +297,7 @@ export function initFormDetector(): FormDetectorCleanup {
   let destroyed = false;
 
   const shouldTriggerForInput = (input: HTMLInputElement): boolean => {
+    if (!isElementVisuallySafe(input)) return false;
     const isPasswordInput = input.type === "password";
     const isAssociatedUsername = findAssociatedPasswordInput(input) !== null;
     const isLikelyUsername = isLikelyUsernameInput(input);
@@ -335,6 +376,11 @@ export function initFormDetector(): FormDetectorCleanup {
   function requestMatches(input: HTMLInputElement): void {
     if (!isContextValid()) {
       destroy();
+      return;
+    }
+    if (!isPageVisuallySafe() || !isElementVisuallySafe(input) || !isInputHitTestSafe(input)) {
+      hideDropdown();
+      currentContext = null;
       return;
     }
     const url = window.location.href;
