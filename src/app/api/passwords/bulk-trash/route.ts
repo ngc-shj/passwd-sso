@@ -31,20 +31,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
   }
 
-  const result = await prisma.passwordEntry.updateMany({
+  const entriesToTrash = await prisma.passwordEntry.findMany({
     where: {
       userId: session.user.id,
       id: { in: ids },
+      deletedAt: null,
+    },
+    select: { id: true },
+  });
+  const entryIds = entriesToTrash.map((entry) => entry.id);
+
+  const result = await prisma.passwordEntry.updateMany({
+    where: {
+      userId: session.user.id,
+      id: { in: entryIds },
       deletedAt: null,
     },
     data: {
       deletedAt: new Date(),
     },
   });
+  const requestMeta = extractRequestMeta(req);
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
-    action: AUDIT_ACTION.ENTRY_DELETE,
+    action: AUDIT_ACTION.ENTRY_BULK_DELETE,
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: "bulk",
@@ -52,9 +63,24 @@ export async function POST(req: NextRequest) {
       bulk: true,
       requestedCount: ids.length,
       movedCount: result.count,
+      entryIds,
     },
-    ...extractRequestMeta(req),
+    ...requestMeta,
   });
+
+  for (const entryId of entryIds) {
+    logAudit({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.ENTRY_DELETE,
+      userId: session.user.id,
+      targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+      targetId: entryId,
+      metadata: {
+        source: "bulk-trash",
+      },
+      ...requestMeta,
+    });
+  }
 
   return NextResponse.json({ success: true, movedCount: result.count });
 }

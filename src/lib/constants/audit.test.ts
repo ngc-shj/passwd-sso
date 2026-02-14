@@ -31,6 +31,7 @@ describe("audit constants", () => {
 
   it("defines transfer and entry groups with expected actions", () => {
     expect(AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ENTRY]).toEqual([
+      AUDIT_ACTION.ENTRY_BULK_DELETE,
       AUDIT_ACTION.ENTRY_CREATE,
       AUDIT_ACTION.ENTRY_UPDATE,
       AUDIT_ACTION.ENTRY_DELETE,
