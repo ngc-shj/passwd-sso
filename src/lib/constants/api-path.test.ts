@@ -18,6 +18,7 @@ describe("API_PATH", () => {
     expect(API_PATH.AUDIT_LOGS).toBe("/api/audit-logs");
     expect(API_PATH.SHARE_LINKS).toBe("/api/share-links");
     expect(API_PATH.SHARE_LINKS_MINE).toBe("/api/share-links/mine");
+    expect(API_PATH.AUDIT_LOGS_IMPORT).toBe("/api/audit-logs/import");
     expect(API_PATH.AUDIT_LOGS_EXPORT).toBe("/api/audit-logs/export");
     expect(API_PATH.VAULT_STATUS).toBe("/api/vault/status");
     expect(API_PATH.VAULT_SETUP).toBe("/api/vault/setup");

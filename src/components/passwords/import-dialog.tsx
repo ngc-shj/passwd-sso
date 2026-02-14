@@ -492,6 +492,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
   const [decrypting, setDecrypting] = useState(false);
   const [decryptError, setDecryptError] = useState("");
   const [sourceFilename, setSourceFilename] = useState("");
+  const [encryptedInput, setEncryptedInput] = useState(false);
 
   const reset = () => {
     setEntries([]);
@@ -505,6 +506,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
     setDecrypting(false);
     setDecryptError("");
     setSourceFilename("");
+    setEncryptedInput(false);
     if (fileRef.current) fileRef.current.value = "";
   };
 
@@ -532,6 +534,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
           const parsed = JSON.parse(text);
           if (isEncryptedExport(parsed)) {
             setEncryptedFile(parsed);
+            setEncryptedInput(true);
             return;
           }
         } catch {
@@ -731,6 +734,20 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
 
     setDone(true);
     setImporting(false);
+
+    const failedCount = Math.max(0, entries.length - successCount);
+    fetch(API_PATH.AUDIT_LOGS_IMPORT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestedCount: entries.length,
+        successCount,
+        failedCount,
+        filename: sourceFilename || undefined,
+        format: sourceFilename.toLowerCase().endsWith(".json") ? "json" : "csv",
+        encrypted: encryptedInput,
+      }),
+    }).catch(() => {});
 
     if (successCount > 0) {
       toast.success(t("importedCount", { count: successCount }));

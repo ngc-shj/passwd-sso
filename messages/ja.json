@@ -597,7 +597,7 @@
     "AUTH_LOGIN": "ログイン",
     "AUTH_LOGOUT": "ログアウト",
     "ENTRY_CREATE": "エントリー作成",
-    "ENTRY_IMPORT_CREATE": "インポートでエントリー作成",
+    "ENTRY_IMPORT": "インポート実行",
     "ENTRY_UPDATE": "エントリー更新",
     "ENTRY_DELETE": "エントリー削除",
     "ENTRY_BULK_DELETE": "エントリー一括削除",
@@ -636,6 +636,7 @@
     "eaAccessRevokedFor": "{user} のアクセスを取り消し",
     "groupAuth": "認証",
     "groupEntry": "エントリー",
+    "groupTransfer": "インポート / エクスポート",
     "groupAttachment": "添付ファイル",
     "groupOrg": "組織",
     "groupShare": "共有リンク",
@@ -644,8 +645,9 @@
     "no": "なし",
     "included": "含む",
     "notIncluded": "含まない",
-    "exportMeta": "ファイル: {filename} / 暗号化: {encrypted} / 組織: {orgs}",
-    "exportMetaOrg": "ファイル: {filename} / 暗号化: {encrypted}"
+    "exportMeta": "ファイル: {filename} / 件数: {entryCount} / 形式: {format} / 暗号化: {encrypted} / 組織: {orgs}",
+    "exportMetaOrg": "ファイル: {filename} / 件数: {entryCount} / 形式: {format} / 暗号化: {encrypted}"
+    ,"importMeta": "ファイル: {filename} / 形式: {format} / 暗号化: {encrypted} / 成功: {successCount} / 失敗: {failedCount} / 合計: {requestedCount}"
   },
   "Share": {
     "createShareLink": "リンクで共有",

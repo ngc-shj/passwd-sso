@@ -14,6 +14,7 @@ export const API_PATH = {
   AUDIT_LOGS: "/api/audit-logs",
   SHARE_LINKS: "/api/share-links",
   SHARE_LINKS_MINE: "/api/share-links/mine",
+  AUDIT_LOGS_IMPORT: "/api/audit-logs/import",
   AUDIT_LOGS_EXPORT: "/api/audit-logs/export",
   VAULT_STATUS: "/api/vault/status",
   VAULT_SETUP: "/api/vault/setup",

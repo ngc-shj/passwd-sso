@@ -597,7 +597,7 @@
     "AUTH_LOGIN": "Logged in",
     "AUTH_LOGOUT": "Logged out",
     "ENTRY_CREATE": "Created entry",
-    "ENTRY_IMPORT_CREATE": "Created entry via import",
+    "ENTRY_IMPORT": "Import run",
     "ENTRY_UPDATE": "Updated entry",
     "ENTRY_DELETE": "Deleted entry",
     "ENTRY_BULK_DELETE": "Bulk deleted entries",
@@ -636,6 +636,7 @@
     "eaAccessRevokedFor": "Access revoked for {user}",
     "groupAuth": "Authentication",
     "groupEntry": "Entries",
+    "groupTransfer": "Import / Export",
     "groupAttachment": "Attachments",
     "groupOrg": "Organization",
     "groupShare": "Share Links",
@@ -644,8 +645,9 @@
     "no": "no",
     "included": "included",
     "notIncluded": "not included",
-    "exportMeta": "File: {filename} / Encrypted: {encrypted} / Orgs: {orgs}",
-    "exportMetaOrg": "File: {filename} / Encrypted: {encrypted}"
+    "exportMeta": "File: {filename} / Count: {entryCount} / Format: {format} / Encrypted: {encrypted} / Orgs: {orgs}",
+    "exportMetaOrg": "File: {filename} / Count: {entryCount} / Format: {format} / Encrypted: {encrypted}",
+    "importMeta": "File: {filename} / Format: {format} / Encrypted: {encrypted} / Success: {successCount} / Failed: {failedCount} / Total: {requestedCount}"
   },
   "Share": {
     "createShareLink": "Share via Link",

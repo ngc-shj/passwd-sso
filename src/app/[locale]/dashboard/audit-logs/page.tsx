@@ -75,6 +75,7 @@ type UserMap = Record<
 const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
   [AUDIT_ACTION.AUTH_LOGIN]: <LogIn className="h-4 w-4" />,
   [AUDIT_ACTION.AUTH_LOGOUT]: <LogOut className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_IMPORT]: <Upload className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_CREATE]: <Plus className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_UPDATE]: <Pencil className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_DELETE]: <Trash2 className="h-4 w-4" />,
@@ -103,6 +104,11 @@ const ACTION_GROUPS = [
     label: "groupEntry",
     value: AUDIT_ACTION_GROUP.ENTRY,
     actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ENTRY],
+  },
+  {
+    label: "groupTransfer",
+    value: AUDIT_ACTION_GROUP.TRANSFER,
+    actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.TRANSFER],
   },
   { label: "groupAttachment", value: AUDIT_ACTION_GROUP.ATTACHMENT, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ATTACHMENT] },
   { label: "groupOrg", value: AUDIT_ACTION_GROUP.ORG, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ORG] },
@@ -259,6 +265,10 @@ export default function AuditLogsPage() {
 
   const getTargetLabel = (log: AuditLogItem): string | null => {
     const meta = log.metadata;
+    const isImportSummary =
+      log.action === AUDIT_ACTION.ENTRY_IMPORT &&
+      meta &&
+      typeof meta === "object";
     const importFilename =
       log.action === AUDIT_ACTION.ENTRY_CREATE &&
       meta &&
@@ -286,12 +296,33 @@ export default function AuditLogsPage() {
       return t("bulkDeleteTarget", { count });
     }
 
+    if (isImportSummary) {
+      const requestedCount = typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
+      const successCount = typeof meta.successCount === "number" ? meta.successCount : 0;
+      const failedCount = typeof meta.failedCount === "number" ? meta.failedCount : 0;
+      const filename = typeof meta.filename === "string" ? meta.filename : "-";
+      const format = typeof meta.format === "string" ? meta.format : "-";
+      const encrypted = meta.encrypted === true;
+      return t("importMeta", {
+        requestedCount,
+        successCount,
+        failedCount,
+        filename,
+        format,
+        encrypted: encrypted ? t("yes") : t("no"),
+      });
+    }
+
     if (log.action === AUDIT_ACTION.ENTRY_EXPORT && meta && typeof meta === "object") {
       const filename = typeof meta.filename === "string" ? meta.filename : null;
       const encrypted = meta.encrypted === true;
       const includeOrgs = meta.includeOrgs === true;
+      const format = typeof meta.format === "string" ? meta.format : "-";
+      const entryCount = typeof meta.entryCount === "number" ? meta.entryCount : 0;
       return t("exportMeta", {
         filename: filename ?? "-",
+        format,
+        entryCount,
         encrypted: encrypted ? t("yes") : t("no"),
         orgs: includeOrgs ? t("included") : t("notIncluded"),
       });
@@ -333,20 +364,12 @@ export default function AuditLogsPage() {
 
   const actionLabel = (action: AuditActionValue | string) => t(action as never);
   const getActionLabel = (log: AuditLogItem) => {
-    const meta = log.metadata;
-    const isImportCreate =
-      log.action === AUDIT_ACTION.ENTRY_CREATE &&
-      meta &&
-      typeof meta === "object" &&
-      "source" in meta &&
-      meta.source === "import";
     const isBulkDelete =
       log.action === AUDIT_ACTION.ENTRY_DELETE &&
-      meta &&
-      typeof meta === "object" &&
-      "bulk" in meta &&
-      meta.bulk === true;
-    if (isImportCreate) return t("ENTRY_IMPORT_CREATE");
+      log.metadata &&
+      typeof log.metadata === "object" &&
+      "bulk" in log.metadata &&
+      log.metadata.bulk === true;
     if (isBulkDelete) return t("ENTRY_BULK_DELETE");
     return actionLabel(log.action);
   };
@@ -429,7 +452,7 @@ export default function AuditLogsPage() {
                 >
                   {t("allActions")}
                 </DropdownMenuCheckboxItem>
-                <DropdownMenuSeparator />
+              <DropdownMenuSeparator />
                 {ACTION_GROUPS.map((group) => {
                   const actions = filteredActions(group.actions);
                   if (actions.length === 0) return null;

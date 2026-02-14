@@ -377,6 +377,7 @@ model ShareAccessLog {
 enum AuditAction {
   AUTH_LOGIN
   AUTH_LOGOUT
+  ENTRY_IMPORT
   ENTRY_CREATE
   ENTRY_UPDATE
   ENTRY_DELETE
