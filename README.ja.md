@@ -174,9 +174,24 @@ npm run build
 - passwd-sso JSON サンプル: [`docs/samples/passwd-sso.json`](docs/samples/passwd-sso.json)
 - passwd-sso CSV サンプル: [`docs/samples/passwd-sso.csv`](docs/samples/passwd-sso.csv)
 
-サンプルを取り込んだあとの画面キャプチャを `docs/images/passwd-sso-import.png` に置くと、以下に表示されます。
+## スクリーンショット
 
-![passwd-sso インポート結果](docs/images/passwd-sso-import.png)
+### ダッシュボード
+
+<img src="docs/images/passwd-sso-dashboard.png" alt="passwd-sso ダッシュボード" width="900" />
+
+### エントリー詳細（AWS 3フィールド例）
+
+<img src="docs/images/passwd-sso-entry-detail.png" alt="passwd-sso エントリー詳細" width="900" />
+
+### パスワードジェネレーター
+
+<img src="docs/images/passwd-sso-password-generator.png" alt="passwd-sso パスワードジェネレーター" width="900" />
+
+### 拡張スクリーンショット（AWS IAM 3フィールド補完）
+
+<img src="docs/images/passwd-sso-extension-aws-fill-1.png" alt="passwd-sso 拡張 aws 補完 1" width="420" />
+<img src="docs/images/passwd-sso-extension-aws-fill-2.png" alt="passwd-sso 拡張 aws 補完 2" width="420" />
 
 ## スクリプト
 

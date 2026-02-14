@@ -174,9 +174,24 @@ npm run build
 - passwd-sso JSON sample: [`docs/samples/passwd-sso.json`](docs/samples/passwd-sso.json)
 - passwd-sso CSV sample: [`docs/samples/passwd-sso.csv`](docs/samples/passwd-sso.csv)
 
-After importing the sample, place your screenshot at `docs/images/passwd-sso-import.png` and it will be shown below.
+## Screenshots
 
-![passwd-sso import result](docs/images/passwd-sso-import.png)
+### Dashboard
+
+<img src="docs/images/passwd-sso-dashboard.png" alt="passwd-sso dashboard" width="900" />
+
+### Entry Detail (AWS 3-field example)
+
+<img src="docs/images/passwd-sso-entry-detail.png" alt="passwd-sso entry detail" width="900" />
+
+### Password Generator
+
+<img src="docs/images/passwd-sso-password-generator.png" alt="passwd-sso password generator" width="900" />
+
+### Extension Screenshots (AWS IAM 3-field fill)
+
+<img src="docs/images/passwd-sso-extension-aws-fill-1.png" alt="passwd-sso extension aws fill 1" width="420" />
+<img src="docs/images/passwd-sso-extension-aws-fill-2.png" alt="passwd-sso extension aws fill 2" width="420" />
 
 ## Scripts
 
