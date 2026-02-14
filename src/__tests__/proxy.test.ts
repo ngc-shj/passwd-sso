@@ -78,7 +78,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     const res = await proxy(
       createApiRequest("/api/tags", {
         Authorization: "Bearer tok123",
-        Cookie: "authjs.session-token=sess",
+        Cookie: "authjs.session-token=sess-tags",
       }),
       dummyOptions,
     );
@@ -92,7 +92,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     const res = await proxy(
       createApiRequest("/api/orgs", {
         Authorization: "Bearer tok123",
-        Cookie: "authjs.session-token=sess",
+        Cookie: "authjs.session-token=sess-orgs",
       }),
       dummyOptions,
     );
@@ -102,7 +102,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
   it("does NOT bypass without Bearer header on /api/passwords", async () => {
     const res = await proxy(
       createApiRequest("/api/passwords", {
-        Cookie: "authjs.session-token=sess",
+        Cookie: "authjs.session-token=sess-passwords",
       }),
       dummyOptions,
     );
@@ -112,7 +112,18 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
   it("returns 401 for protected API route without session", async () => {
     const res = await proxy(
       createApiRequest("/api/extension/token", {
-        Cookie: "authjs.session-token=sess",
+        Cookie: "authjs.session-token=sess-token",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("does NOT bypass for Bearer + unknown child of /api/extension/token", async () => {
+    const res = await proxy(
+      createApiRequest("/api/extension/token/extra", {
+        Authorization: "Bearer tok123",
+        Cookie: "authjs.session-token=sess-token-child",
       }),
       dummyOptions,
     );
