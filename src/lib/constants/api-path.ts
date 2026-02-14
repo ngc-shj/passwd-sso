@@ -2,6 +2,7 @@ export const API_PATH = {
   API_ROOT: "/api",
   AUTH_SESSION: "/api/auth/session",
   EXTENSION_TOKEN: "/api/extension/token",
+  EXTENSION_TOKEN_REFRESH: "/api/extension/token/refresh",
   PASSWORDS: "/api/passwords",
   PASSWORDS_BULK_TRASH: "/api/passwords/bulk-trash",
   PASSWORDS_BULK_ARCHIVE: "/api/passwords/bulk-archive",

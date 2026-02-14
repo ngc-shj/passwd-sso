@@ -6,6 +6,9 @@ describe("API_PATH", () => {
     expect(API_PATH.API_ROOT).toBe("/api");
     expect(API_PATH.AUTH_SESSION).toBe("/api/auth/session");
     expect(API_PATH.EXTENSION_TOKEN).toBe("/api/extension/token");
+    expect(API_PATH.EXTENSION_TOKEN_REFRESH).toBe(
+      "/api/extension/token/refresh"
+    );
     expect(API_PATH.PASSWORDS).toBe("/api/passwords");
     expect(API_PATH.PASSWORDS_BULK_TRASH).toBe("/api/passwords/bulk-trash");
     expect(API_PATH.PASSWORDS_BULK_ARCHIVE).toBe("/api/passwords/bulk-archive");
