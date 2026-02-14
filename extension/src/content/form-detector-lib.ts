@@ -40,7 +40,8 @@ function resolveOpacity(value: string): number {
 export function isElementVisuallySafe(element: HTMLElement): boolean {
   const style = getComputedStyle(element);
   if (style.display === "none" || style.visibility === "hidden") return false;
-  if (resolveOpacity(style.opacity) < 0.98) return false;
+  // Block only near-invisible elements to reduce false positives on heavily styled forms.
+  if (resolveOpacity(style.opacity) <= 0.05) return false;
   const clipPath = (style.clipPath || "").toLowerCase();
   if (clipPath.includes("inset(100%") || clipPath.includes("circle(0")) return false;
   const transform = (style.transform || "").toLowerCase();
@@ -49,10 +50,18 @@ export function isElementVisuallySafe(element: HTMLElement): boolean {
 }
 
 export function isPageVisuallySafe(): boolean {
-  return (
-    isElementVisuallySafe(document.documentElement) &&
-    isElementVisuallySafe(document.body)
-  );
+  const htmlStyle = getComputedStyle(document.documentElement);
+  const bodyStyle = getComputedStyle(document.body);
+  if (
+    htmlStyle.display === "none" ||
+    htmlStyle.visibility === "hidden" ||
+    bodyStyle.display === "none" ||
+    bodyStyle.visibility === "hidden"
+  ) {
+    return false;
+  }
+  // Guard against full-page transparency attacks while allowing subtle UI opacity effects.
+  return resolveOpacity(htmlStyle.opacity) > 0.05 && resolveOpacity(bodyStyle.opacity) > 0.05;
 }
 
 export function isInputHitTestSafe(input: HTMLInputElement): boolean {
