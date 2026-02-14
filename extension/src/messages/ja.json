@@ -37,8 +37,7 @@
     "never": "しない",
     "save": "保存",
     "saved": "保存しました",
-    "enableAutofillAll": "全サイトで自動入力を有効にする",
-    "enableAutofillAllDescription": "すべての HTTPS サイトでログインフォームの検出を許可します。"
+    "close": "閉じる"
   },
   "contentScript": {
     "vaultLocked": "保管庫がロックされています",

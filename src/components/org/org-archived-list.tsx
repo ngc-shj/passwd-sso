@@ -34,11 +34,12 @@ interface OrgArchivedEntry {
 }
 
 interface OrgArchivedListProps {
+  orgId?: string;
   searchQuery: string;
   refreshKey: number;
 }
 
-export function OrgArchivedList({ searchQuery, refreshKey }: OrgArchivedListProps) {
+export function OrgArchivedList({ orgId, searchQuery, refreshKey }: OrgArchivedListProps) {
   const t = useTranslations("Org");
   const [entries, setEntries] = useState<OrgArchivedEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -204,6 +205,7 @@ export function OrgArchivedList({ searchQuery, refreshKey }: OrgArchivedListProp
   );
 
   const filtered = entries.filter((p) => {
+    if (orgId && p.orgId !== orgId) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -224,13 +226,15 @@ export function OrgArchivedList({ searchQuery, refreshKey }: OrgArchivedListProp
 
   return (
     <div className="mt-6">
-      <div className="mb-3 flex items-center gap-2">
-        <Building2 className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-sm font-medium text-muted-foreground">
-          {t("organizationArchive")}
-        </h2>
-      </div>
-      <div className="space-y-2 rounded-xl border bg-card/80 p-2">
+      {!orgId && (
+        <div className="mb-3 flex items-center gap-2">
+          <Building2 className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium text-muted-foreground">
+            {t("organizationArchive")}
+          </h2>
+        </div>
+      )}
+      <div className="space-y-2">
         {filtered.map((entry) => (
           <PasswordCard
             key={entry.id}

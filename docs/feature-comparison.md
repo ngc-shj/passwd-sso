@@ -72,7 +72,7 @@
 | 機能 | passwd-sso | 1Password | Bitwarden | 備考 |
 |---|---|---|---|---|
 | Web UI | Done | Yes | Yes | |
-| ブラウザ拡張 | --- | Yes | Yes | |
+| ブラウザ拡張 | Done | Yes | Yes | Chrome MV3 |
 | デスクトップアプリ | --- | Yes | Yes | |
 | モバイルアプリ | --- | Yes | Yes | |
 
@@ -85,4 +85,4 @@
 
 ---
 
-*最終更新: 2026-02-11*
+*最終更新: 2026-02-14*

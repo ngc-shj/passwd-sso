@@ -22,7 +22,7 @@ export default defineManifest({
   },
   options_ui: {
     page: "src/options/index.html",
-    open_in_tab: false,
+    open_in_tab: true,
   },
   commands: {
     _execute_action: {

@@ -37,8 +37,7 @@
     "never": "Never",
     "save": "Save",
     "saved": "Saved!",
-    "enableAutofillAll": "Enable autofill on all sites",
-    "enableAutofillAllDescription": "Allow the extension to detect login forms on all HTTPS sites."
+    "close": "Close"
   },
   "contentScript": {
     "vaultLocked": "Vault is locked",
