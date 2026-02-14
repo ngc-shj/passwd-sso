@@ -9,6 +9,7 @@ export interface SessionState {
   token: string;
   expiresAt: number; // ms timestamp
   userId?: string;
+  vaultSecretKey?: string;
 }
 
 export async function persistSession(state: SessionState): Promise<void> {
@@ -28,6 +29,10 @@ export async function loadSession(): Promise<SessionState | null> {
   }
   // userId is optional (may not be set before vault unlock)
   if (raw.userId !== undefined && typeof raw.userId !== "string") {
+    return null;
+  }
+  // vaultSecretKey is optional (hex string)
+  if (raw.vaultSecretKey !== undefined && typeof raw.vaultSecretKey !== "string") {
     return null;
   }
   return raw as SessionState;

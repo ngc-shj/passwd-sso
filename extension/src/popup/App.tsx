@@ -16,6 +16,28 @@ async function checkHostPermission(url: string): Promise<boolean> {
   }
 }
 
+async function injectFormDetector(tabId: number): Promise<void> {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ["src/content/form-detector.js"],
+    });
+  } catch {
+    // ignore injection errors on restricted pages
+  }
+}
+
+async function notifyVaultStateChanged(): Promise<void> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      await chrome.tabs.sendMessage(tab.id, { type: "PSSO_VAULT_STATE_CHANGED" });
+    }
+  } catch {
+    // content script may not be present on this tab
+  }
+}
+
 export function App() {
   const [state, setState] = useState<AppState>("loading");
   const [tabUrl, setTabUrl] = useState<string | null>(null);
@@ -25,10 +47,20 @@ export function App() {
     chrome.tabs
       .query({ active: true, currentWindow: true })
       .then((tabs) => {
+        const tabId = tabs[0]?.id;
         const url = tabs[0]?.url ?? null;
         setTabUrl(url);
         if (url) {
-          checkHostPermission(url).then(setHasHostPermission).catch(() => {});
+          checkHostPermission(url)
+            .then(async (has) => {
+              setHasHostPermission(has);
+              // static content_scripts are not guaranteed to attach to already-open tabs
+              // right after permission grant; inject once for immediate UX.
+              if (has && tabId) {
+                await injectFormDetector(tabId);
+              }
+            })
+            .catch(() => {});
         }
       })
       .catch(() => {
@@ -67,7 +99,7 @@ export function App() {
         )}
         {state === "not_logged_in" && <LoginPrompt />}
         {state === "logged_in" && (
-          <VaultUnlock onUnlocked={() => setState("vault_unlocked")} />
+          <VaultUnlock onUnlocked={() => { setState("vault_unlocked"); notifyVaultStateChanged(); }} tabUrl={tabUrl} />
         )}
         {state === "vault_unlocked" && (
           <>
@@ -76,11 +108,21 @@ export function App() {
                 type="button"
                 onClick={async () => {
                   try {
+                    const tabs = await chrome.tabs.query({
+                      active: true,
+                      currentWindow: true,
+                    });
+                    const tabId = tabs[0]?.id;
                     const origin = new URL(tabUrl).origin;
                     const granted = await chrome.permissions.request({
                       origins: [`${origin}/*`],
                     });
-                    if (granted) setHasHostPermission(true);
+                    if (granted) {
+                      setHasHostPermission(true);
+                      if (tabId) {
+                        await injectFormDetector(tabId);
+                      }
+                    }
                   } catch {
                     // ignore
                   }

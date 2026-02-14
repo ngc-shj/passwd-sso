@@ -5,6 +5,7 @@
 declare const navigation: EventTarget | undefined;
 
 import type { DecryptedEntry } from "../types/messages";
+import type { AutofillTargetHint } from "../types/messages";
 import { t } from "../lib/i18n";
 import {
   showDropdown,
@@ -12,7 +13,7 @@ import {
   isDropdownVisible,
   handleDropdownKeydown,
 } from "./ui/suggestion-dropdown";
-import { removeShadowHost } from "./ui/shadow-host";
+import { getShadowHost, removeShadowHost } from "./ui/shadow-host";
 
 /** Returns false when the extension has been reloaded/updated and this content script is orphaned. */
 function isContextValid(): boolean {
@@ -65,6 +66,64 @@ export function findUsernameInput(
   return null;
 }
 
+const USERNAME_HINT_RE =
+  /\b(user(name)?|login|email|e-?mail|identifier|account|member|contract|customer)\b/i;
+const USERNAME_HINT_JA_RE =
+  /(ログイン|ユーザー|メール|アカウント|会員|契約番号|ご契約番号|お客さま番号|顧客番号|店番|口座番号)/;
+const NON_LOGIN_HINT_RE = /\b(search|query|keyword|coupon|promo|otp|code|verification)\b/i;
+const NON_LOGIN_HINT_JA_RE = /(検索|クーポン|認証コード|確認コード|ワンタイム)/;
+
+function escapeSelectorValue(value: string): string {
+  // jsdom in tests may not implement CSS.escape.
+  const esc = (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS?.escape;
+  if (esc) return esc(value);
+  return value.replace(/["\\]/g, "\\$&");
+}
+
+export function isLikelyUsernameInput(input: HTMLInputElement): boolean {
+  if (!isUsableInput(input)) return false;
+  if (input.type === "password") return false;
+
+  const type = (input.type || "text").toLowerCase();
+  if (!["text", "email", "tel"].includes(type)) return false;
+
+  const autocomplete = (input.autocomplete || "").toLowerCase().trim();
+  if (autocomplete === "username") return true;
+  if (autocomplete === "email") return true;
+  if (
+    autocomplete.includes("one-time-code") ||
+    autocomplete.includes("new-password") ||
+    autocomplete.includes("current-password")
+  ) {
+    return false;
+  }
+
+  const hints = [
+    input.name,
+    input.id,
+    input.placeholder,
+    input.getAttribute("formcontrolname"),
+    input.getAttribute("ng-reflect-name"),
+    input.getAttribute("aria-label"),
+    input.getAttribute("aria-labelledby"),
+    input.getAttribute("data-testid"),
+    input.getAttribute("data-test"),
+    (input.closest("label")?.textContent ?? ""),
+    (() => {
+      const id = input.id;
+      if (!id) return "";
+      return document.querySelector(`label[for="${escapeSelectorValue(id)}"]`)?.textContent ?? "";
+    })(),
+  ]
+    .filter((v): v is string => Boolean(v && v.trim()))
+    .join(" ");
+
+  if (!hints) return false;
+  if (!USERNAME_HINT_RE.test(hints) && !USERNAME_HINT_JA_RE.test(hints)) return false;
+  if (NON_LOGIN_HINT_RE.test(hints) || NON_LOGIN_HINT_JA_RE.test(hints)) return false;
+  return true;
+}
+
 // ── Dropdown integration ────────────────────────────────────
 
 interface DropdownContext {
@@ -74,6 +133,7 @@ interface DropdownContext {
 }
 
 let currentContext: DropdownContext | null = null;
+let noticeTimer: number | null = null;
 
 function getMessages(): { locked: string; noMatches: string; header: string } {
   return {
@@ -87,7 +147,15 @@ function showForInput(
   input: HTMLInputElement,
   entries: DecryptedEntry[],
   vaultLocked: boolean,
+  suppressInline: boolean,
 ): void {
+  // Suppress inline UI on passwd-sso application pages.
+  if (suppressInline) {
+    hideDropdown();
+    currentContext = null;
+    return;
+  }
+
   const rect = input.getBoundingClientRect();
   const msgs = getMessages();
 
@@ -98,9 +166,34 @@ function showForInput(
     entries,
     vaultLocked,
     onSelect: (entryId) => {
-      hideDropdown();
       if (isContextValid()) {
-        chrome.runtime.sendMessage({ type: "AUTOFILL_FROM_CONTENT", entryId });
+        const targetHint: AutofillTargetHint = {
+          id: input.id || undefined,
+          name: input.name || undefined,
+          type: input.type || undefined,
+          autocomplete: input.autocomplete || undefined,
+        };
+        chrome.runtime.sendMessage(
+          { type: "AUTOFILL_FROM_CONTENT", entryId, targetHint },
+          (response?: { ok?: boolean; error?: string }) => {
+            if (!isContextValid()) return;
+            if (chrome.runtime.lastError) {
+              showInlineNotice(input, t("errors.autofillFailed"));
+              return;
+            }
+            if (!response?.ok) {
+              if (response?.error === "VAULT_LOCKED") {
+                showInlineNotice(input, t("contentScript.vaultLocked"));
+              } else if (response?.error === "NO_PASSWORD") {
+                showInlineNotice(input, t("errors.noPassword"));
+              } else {
+                showInlineNotice(input, t("errors.autofillFailed"));
+              }
+              return;
+            }
+            hideDropdown();
+          },
+        );
       }
     },
     onDismiss: () => {
@@ -112,6 +205,48 @@ function showForInput(
   });
 }
 
+function showInlineNotice(input: HTMLInputElement, message: string): void {
+  const { root } = getShadowHost();
+  const existing = root.querySelector(".psso-inline-notice");
+  if (existing) existing.remove();
+
+  const style = document.createElement("style");
+  style.textContent = `
+    .psso-inline-notice {
+      position: fixed;
+      z-index: 2147483647;
+      background: #111827;
+      color: #fff;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.3;
+      box-shadow: 0 8px 20px rgba(0,0,0,.25);
+      max-width: min(360px, calc(100vw - 24px));
+      pointer-events: none;
+    }
+  `;
+  root.appendChild(style);
+
+  const notice = document.createElement("div");
+  notice.className = "psso-inline-notice";
+  notice.textContent = message;
+  root.appendChild(notice);
+
+  const rect = input.getBoundingClientRect();
+  notice.style.top = `${Math.max(8, rect.top - 40)}px`;
+  notice.style.left = `${Math.max(8, rect.left)}px`;
+
+  if (noticeTimer) {
+    window.clearTimeout(noticeTimer);
+  }
+  noticeTimer = window.setTimeout(() => {
+    notice.remove();
+    style.remove();
+    noticeTimer = null;
+  }, 2200);
+}
+
 // ── Core initialization ─────────────────────────────────────
 
 export interface FormDetectorCleanup {
@@ -121,18 +256,37 @@ export interface FormDetectorCleanup {
 export function initFormDetector(): FormDetectorCleanup {
   let destroyed = false;
 
+  const shouldTriggerForInput = (input: HTMLInputElement): boolean => {
+    const isPasswordInput = input.type === "password";
+    const isAssociatedUsername = findAssociatedPasswordInput(input) !== null;
+    const isLikelyUsername = isLikelyUsernameInput(input);
+    return isPasswordInput || isAssociatedUsername || isLikelyUsername;
+  };
+
   const focusHandler = (e: FocusEvent) => {
     if (destroyed) return;
     const input = e.target;
     if (!(input instanceof HTMLInputElement)) return;
     if (!isUsableInput(input)) return;
 
-    // Only trigger for password inputs or their associated username inputs
-    const isPasswordInput = input.type === "password";
-    const isAssociatedUsername = findAssociatedPasswordInput(input) !== null;
-    if (!isPasswordInput && !isAssociatedUsername) return;
+    // Trigger for password inputs, associated usernames, and likely login IDs.
+    if (!shouldTriggerForInput(input)) return;
 
     requestMatches(input);
+  };
+
+  const mouseoverHandler = (e: MouseEvent) => {
+    if (destroyed) return;
+    const target = e.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (!isUsableInput(target)) return;
+
+    if (!shouldTriggerForInput(target)) return;
+
+    // Some legacy forms suppress focus flows; hover fallback keeps UX usable.
+    if (!currentContext || currentContext.input !== target) {
+      requestMatches(target);
+    }
   };
 
   const blurHandler = (e: FocusEvent) => {
@@ -198,15 +352,26 @@ export function initFormDetector(): FormDetectorCleanup {
       return;
     }
     const url = window.location.href;
+    let topUrl: string | undefined;
+    try {
+      topUrl = window.top?.location?.href;
+    } catch {
+      topUrl = undefined;
+    }
     try {
       chrome.runtime.sendMessage(
-        { type: "GET_MATCHES_FOR_URL", url },
+        { type: "GET_MATCHES_FOR_URL", url, topUrl },
         (response) => {
           if (destroyed) return;
           if (!isContextValid()) { destroy(); return; }
           if (chrome.runtime.lastError) return;
           if (!response) return;
-          showForInput(input, response.entries ?? [], response.vaultLocked ?? false);
+          showForInput(
+            input,
+            response.entries ?? [],
+            response.vaultLocked ?? false,
+            response.suppressInline ?? false,
+          );
         },
       );
     } catch {
@@ -214,8 +379,20 @@ export function initFormDetector(): FormDetectorCleanup {
     }
   }
 
+  // Listen for vault state changes (sent from popup after unlock/lock)
+  const runtimeMessageHandler = (message: { type?: string }) => {
+    if (destroyed) return;
+    if (message?.type !== "PSSO_VAULT_STATE_CHANGED") return;
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement && shouldTriggerForInput(active)) {
+      requestMatches(active);
+    }
+  };
+  chrome.runtime.onMessage.addListener(runtimeMessageHandler);
+
   // Start
   document.addEventListener("focusin", focusHandler, true);
+  document.addEventListener("mouseover", mouseoverHandler, true);
   document.addEventListener("focusout", blurHandler, true);
   document.addEventListener("keydown", keydownHandler, true);
   scanInputs();
@@ -231,7 +408,9 @@ export function initFormDetector(): FormDetectorCleanup {
   function destroy(): void {
     if (destroyed) return;
     destroyed = true;
+    chrome.runtime.onMessage.removeListener(runtimeMessageHandler);
     document.removeEventListener("focusin", focusHandler, true);
+    document.removeEventListener("mouseover", mouseoverHandler, true);
     document.removeEventListener("focusout", blurHandler, true);
     document.removeEventListener("keydown", keydownHandler, true);
     observer.disconnect();

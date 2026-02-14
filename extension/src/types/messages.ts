@@ -10,8 +10,12 @@ export type ExtensionMessage =
   | { type: "FETCH_PASSWORDS" }
   | { type: "COPY_PASSWORD"; entryId: string }
   | { type: "AUTOFILL"; entryId: string; tabId: number }
-  | { type: "GET_MATCHES_FOR_URL"; url: string }
-  | { type: "AUTOFILL_FROM_CONTENT"; entryId: string };
+  | { type: "GET_MATCHES_FOR_URL"; url: string; topUrl?: string }
+  | {
+      type: "AUTOFILL_FROM_CONTENT";
+      entryId: string;
+      targetHint?: AutofillTargetHint;
+    };
 
 export interface DecryptedEntry {
   id: string;
@@ -31,11 +35,26 @@ export type ExtensionResponse =
   | { type: "FETCH_PASSWORDS"; entries: DecryptedEntry[] | null; error?: string }
   | { type: "COPY_PASSWORD"; password: string | null; error?: string }
   | { type: "AUTOFILL"; ok: boolean; error?: string }
-  | { type: "GET_MATCHES_FOR_URL"; entries: DecryptedEntry[]; vaultLocked: boolean }
+  | {
+      type: "GET_MATCHES_FOR_URL";
+      entries: DecryptedEntry[];
+      vaultLocked: boolean;
+      suppressInline?: boolean;
+    }
   | { type: "AUTOFILL_FROM_CONTENT"; ok: boolean; error?: string };
 
 export interface AutofillPayload {
   type: "AUTOFILL_FILL";
   username: string;
   password: string;
+  targetHint?: AutofillTargetHint;
+  awsAccountIdOrAlias?: string;
+  awsIamUsername?: string;
+}
+
+export interface AutofillTargetHint {
+  id?: string;
+  name?: string;
+  type?: string;
+  autocomplete?: string;
 }

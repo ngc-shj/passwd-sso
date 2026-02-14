@@ -8,6 +8,16 @@ function setupForm(html: string) {
   document.body.innerHTML = html;
 }
 
+function mockHost(hostname: string) {
+  Object.defineProperty(window, "location", {
+    value: {
+      ...window.location,
+      hostname,
+    },
+    configurable: true,
+  });
+}
+
 describe("performAutofill", () => {
   it("fills inputs with autocomplete attributes", () => {
     setupForm(`
@@ -61,5 +71,124 @@ describe("performAutofill", () => {
     const pw = document.getElementById("pw") as HTMLInputElement;
     expect(user.value).toBe("");
     expect(pw.value).toBe("secret");
+  });
+
+  it("fills id-like username field before password", () => {
+    setupForm(`
+      <input type="text" id="userId" name="userId" />
+      <input type="password" id="pw" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "myjcb-user",
+      password: "secret",
+    });
+
+    const user = document.getElementById("userId") as HTMLInputElement;
+    const pw = document.getElementById("pw") as HTMLInputElement;
+    expect(user.value).toBe("myjcb-user");
+    expect(pw.value).toBe("secret");
+  });
+
+  it("fills focused text input first (inline dropdown selection case)", () => {
+    setupForm(`
+      <input type="text" id="focusedUser" />
+      <input type="password" id="pw" />
+    `);
+
+    const focusedUser = document.getElementById("focusedUser") as HTMLInputElement;
+    focusedUser.focus();
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "focus-user",
+      password: "secret",
+    });
+
+    const pw = document.getElementById("pw") as HTMLInputElement;
+    expect(focusedUser.value).toBe("focus-user");
+    expect(pw.value).toBe("secret");
+  });
+
+  it("fills using target hint even when no field is focused", () => {
+    setupForm(`
+      <input type="text" id="userId" name="userId" />
+      <input type="password" id="pw" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "hint-user",
+      password: "secret",
+      targetHint: { id: "userId", name: "userId", type: "text" },
+    });
+
+    const user = document.getElementById("userId") as HTMLInputElement;
+    const pw = document.getElementById("pw") as HTMLInputElement;
+    expect(user.value).toBe("hint-user");
+    expect(pw.value).toBe("secret");
+  });
+
+  it("fills AWS account alias + IAM username + password", () => {
+    mockHost("signin.aws.amazon.com");
+    setupForm(`
+      <label for="acct">Account ID or alias</label>
+      <input id="acct" type="text" />
+      <label for="iam-user">IAM user name</label>
+      <input id="iam-user" type="text" />
+      <input id="pw" type="password" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "fallback",
+      password: "secret",
+      awsAccountIdOrAlias: "123456789012",
+      awsIamUsername: "alice-iam",
+    });
+
+    expect((document.getElementById("acct") as HTMLInputElement).value).toBe("123456789012");
+    expect((document.getElementById("iam-user") as HTMLInputElement).value).toBe("alice-iam");
+    expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
+  });
+
+  it("falls back to normal username fill on AWS when aws-specific values are empty", () => {
+    mockHost("signin.aws.amazon.com");
+    setupForm(`
+      <label for="iam-user">IAM user name</label>
+      <input id="iam-user" type="text" />
+      <input id="pw" type="password" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "fallback-user",
+      password: "secret",
+      awsAccountIdOrAlias: "",
+      awsIamUsername: "",
+    });
+
+    expect((document.getElementById("iam-user") as HTMLInputElement).value).toBe("fallback-user");
+    expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
+  });
+
+  it("ignores aws-specific payload on non-AWS pages", () => {
+    mockHost("example.com");
+    setupForm(`
+      <input id="user" type="text" name="username" />
+      <input id="pw" type="password" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "normal-user",
+      password: "secret",
+      awsAccountIdOrAlias: "123456789012",
+      awsIamUsername: "alice-iam",
+    });
+
+    expect((document.getElementById("user") as HTMLInputElement).value).toBe("normal-user");
+    expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
   });
 });

@@ -215,6 +215,30 @@ describe("background message flow", () => {
     );
   });
 
+  it("removes persisted vault secret on LOCK_VAULT", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    await sendMessage({ type: "LOCK_VAULT" });
+
+    expect(chromeMock?.storage.session.set).toHaveBeenCalledWith({
+      authState: expect.objectContaining({
+        token: "t",
+        expiresAt: expect.any(Number),
+      }),
+    });
+    const calls = (chromeMock?.storage.session.set as ReturnType<typeof vi.fn>).mock.calls;
+    const lastState = calls[calls.length - 1]?.[0]?.authState as {
+      userId?: string;
+      vaultSecretKey?: string;
+    };
+    expect(lastState.userId).toBeUndefined();
+    expect(lastState.vaultSecretKey).toBeUndefined();
+  });
+
   it("does not create auto-lock alarm when disabled", async () => {
     chromeMock?.storage.local.get.mockResolvedValue({
       serverUrl: "https://localhost:3000",
@@ -442,6 +466,185 @@ describe("background message flow", () => {
       username: "alice",
       password: "secret",
     });
+    const directFallbackCall = chromeMock?.scripting.executeScript.mock.calls.find(
+      (call) => Array.isArray((call[0] as { args?: unknown[] }).args),
+    )?.[0] as { args?: unknown[] } | undefined;
+    expect(directFallbackCall?.args?.[2]).toBeNull();
+  });
+
+  it("autofills with blob username fallback when overview username is missing", async () => {
+    cryptoMocks.decryptData
+      .mockResolvedValueOnce(
+        JSON.stringify({ password: "secret", loginId: "fallback-user" }),
+      )
+      .mockResolvedValueOnce(JSON.stringify({ username: null }));
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    expect(res).toEqual({ type: "AUTOFILL", ok: true });
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(1, {
+      type: "AUTOFILL_FILL",
+      username: "fallback-user",
+      password: "secret",
+    });
+  });
+
+  it("includes AWS fields from custom fields when available", async () => {
+    cryptoMocks.decryptData
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          password: "secret",
+          customFields: [
+            { label: "AWS Account ID / Alias", value: "123456789012" },
+            { label: "IAM username", value: "alice-iam" },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    expect(res).toEqual({ type: "AUTOFILL", ok: true });
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(1, {
+      type: "AUTOFILL_FILL",
+      username: "alice",
+      password: "secret",
+      awsAccountIdOrAlias: "123456789012",
+      awsIamUsername: "alice-iam",
+    });
+  });
+
+  it("suppresses inline matches on passwd-sso app pages", async () => {
+    cryptoMocks.decryptData.mockResolvedValueOnce(
+      JSON.stringify({
+        title: "Local entry",
+        username: "local-user",
+        urlHost: "localhost",
+      }),
+    );
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({
+      type: "GET_MATCHES_FOR_URL",
+      url: "https://localhost:3000/ja/dashboard",
+    });
+
+    expect(res).toEqual({
+      type: "GET_MATCHES_FOR_URL",
+      entries: [],
+      vaultLocked: false,
+      suppressInline: true,
+    });
+  });
+
+  it("does not suppress inline matches when origin differs from serverUrl", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({
+      type: "GET_MATCHES_FOR_URL",
+      url: "http://localhost:3000/ja/dashboard",
+    });
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "GET_MATCHES_FOR_URL",
+        vaultLocked: false,
+        suppressInline: false,
+      }),
+    );
+  });
+
+  it("suppresses inline matches using topUrl from iframe context", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({
+      type: "GET_MATCHES_FOR_URL",
+      url: "about:blank",
+      topUrl: "https://localhost:3000/ja/dashboard",
+    });
+
+    expect(res).toEqual({
+      type: "GET_MATCHES_FOR_URL",
+      entries: [],
+      vaultLocked: false,
+      suppressInline: true,
+    });
+  });
+
+  it("suppresses using topUrl even when frame url is external", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({
+      type: "GET_MATCHES_FOR_URL",
+      url: "https://example.com/login",
+      topUrl: "https://localhost:3000/ja/auth/signin",
+    });
+
+    expect(res).toEqual({
+      type: "GET_MATCHES_FOR_URL",
+      entries: [],
+      vaultLocked: false,
+      suppressInline: true,
+    });
+  });
+
+  it("does not suppress when serverUrl is missing", async () => {
+    chromeMock?.storage.local.get.mockImplementation(async (arg?: unknown) => {
+      if (arg === "serverUrl") return {};
+      return { serverUrl: "https://localhost:3000", autoLockMinutes: 15 };
+    });
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({
+      type: "GET_MATCHES_FOR_URL",
+      url: "https://localhost:3000/ja/dashboard",
+    });
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "GET_MATCHES_FOR_URL",
+        suppressInline: false,
+      }),
+    );
   });
 
   it("returns error when AUTOFILL fetch fails", async () => {
@@ -485,7 +688,8 @@ describe("background message flow", () => {
   });
 
   it("returns error when AUTOFILL script injection fails", async () => {
-    chromeMock?.scripting.executeScript.mockRejectedValueOnce(new Error("CSP"));
+    chromeMock?.scripting.executeScript.mockRejectedValue(new Error("CSP"));
+    cryptoMocks.decryptData.mockReset();
     cryptoMocks.decryptData
       .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
       .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
@@ -499,6 +703,42 @@ describe("background message flow", () => {
 
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
     expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "CSP" });
+  });
+
+  it("retries direct inject without hint when args are unserializable", async () => {
+    cryptoMocks.decryptData
+      .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
+      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+
+    // 1st call: inject file, 2nd call: direct fallback with hint -> unserializable, 3rd: retry with null hint
+    chromeMock?.scripting.executeScript
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error("Value is unserializable"))
+      .mockResolvedValueOnce([]);
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1", targetHint: { id: "user" } },
+        { tab: { id: 1 } },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+
+    const calls = chromeMock?.scripting.executeScript.mock.calls ?? [];
+    const argsList = calls
+      .map((call) => (call[0] as { args?: unknown[] }).args)
+      .filter((v): v is unknown[] => Array.isArray(v));
+    expect(argsList.length).toBeGreaterThanOrEqual(2);
+    expect(argsList[argsList.length - 1]?.[2]).toBeNull();
   });
 });
 
@@ -588,14 +828,19 @@ describe("session persistence", () => {
 });
 
 describe("session hydration", () => {
-  it("restores state from session storage on startup", async () => {
+  it("restores token and unlocked vault state from session storage on startup", async () => {
     vi.resetModules();
     vi.clearAllMocks();
     chromeMock = installChromeMock();
 
     const expiresAt = Date.now() + 600_000;
     chromeMock.storage.session.get.mockResolvedValue({
-      authState: { token: "hydrated-tok", expiresAt, userId: "u-1" },
+      authState: {
+        token: "hydrated-tok",
+        expiresAt,
+        userId: "u-1",
+        vaultSecretKey: "010203",
+      },
     });
 
     vi.stubGlobal(
@@ -607,7 +852,7 @@ describe("session hydration", () => {
 
     const status = await sendMessage({ type: "GET_STATUS" });
     expect(status).toEqual(
-      expect.objectContaining({ hasToken: true, expiresAt })
+      expect.objectContaining({ hasToken: true, expiresAt, vaultUnlocked: true })
     );
   });
 

@@ -4,8 +4,13 @@
 
 import { initFormDetector } from "./form-detector-lib";
 
-// iframe guard — only run in top-level frames
-if (window === window.top) {
+// Guard against double-injection per frame: manifest content_scripts may already be
+// attached, but programmatic executeScript (from popup after permission grant)
+// can inject a second instance.
+const GUARD_KEY = "__passwdSsoFormDetector";
+if (!(window as unknown as Record<string, boolean>)[GUARD_KEY]) {
+  (window as unknown as Record<string, boolean>)[GUARD_KEY] = true;
+
   const { destroy } = initFormDetector();
 
   // Self-destruct when extension context is invalidated (extension reload/update).

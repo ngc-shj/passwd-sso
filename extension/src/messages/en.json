@@ -25,7 +25,9 @@
     "autofillSent": "Autofill sent",
     "passwordCopied": "Password copied",
     "enableAutofill": "Enable autofill for this site",
-    "autofillEnabled": "Autofill enabled for this site"
+    "autofillEnabled": "Autofill enabled for this site",
+    "httpWarning": "This page uses HTTP. Filling credentials on insecure pages is risky.",
+    "unlockSite": "Current site: {host}"
   },
   "options": {
     "title": "Settings",

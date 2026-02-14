@@ -1,4 +1,5 @@
 import type {
+  AutofillTargetHint,
   DecryptedEntry,
   ExtensionMessage,
   ExtensionResponse,
@@ -35,6 +36,7 @@ let currentToken: string | null = null;
 let tokenExpiresAt: number | null = null;
 let encryptionKey: CryptoKey | null = null;
 let currentUserId: string | null = null;
+let currentVaultSecretKeyHex: string | null = null;
 
 const CACHE_TTL_MS = 60_000; // 1 minute
 const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
@@ -75,8 +77,10 @@ function clearToken(): void {
 function clearVault(): void {
   encryptionKey = null;
   currentUserId = null;
+  currentVaultSecretKeyHex = null;
   invalidateCache();
   chrome.alarms.clear(ALARM_VAULT_LOCK);
+  persistState();
   void updateBadge();
 }
 
@@ -102,6 +106,7 @@ function persistState(): void {
       token: currentToken,
       expiresAt: tokenExpiresAt,
       userId: currentUserId ?? undefined,
+      vaultSecretKey: currentVaultSecretKeyHex ?? undefined,
     }).catch(() => {});
   }
 }
@@ -119,6 +124,19 @@ async function hydrateFromSession(): Promise<void> {
   currentToken = state.token;
   tokenExpiresAt = state.expiresAt;
   currentUserId = state.userId ?? null;
+  currentVaultSecretKeyHex = state.vaultSecretKey ?? null;
+
+  if (currentVaultSecretKeyHex) {
+    try {
+      const secretKey = hexDecode(currentVaultSecretKeyHex);
+      encryptionKey = await deriveEncryptionKey(secretKey);
+      secretKey.fill(0);
+    } catch {
+      encryptionKey = null;
+      currentVaultSecretKeyHex = null;
+      persistState();
+    }
+  }
 
   // Re-create TTL expiry alarm
   chrome.alarms.create(ALARM_TOKEN_TTL, { when: state.expiresAt });
@@ -189,6 +207,33 @@ async function attemptTokenRefresh(): Promise<void> {
       });
     }
   }
+}
+
+async function shouldSuppressInlineMatches(url: string): Promise<boolean> {
+  let pageUrl: URL;
+  try {
+    pageUrl = new URL(url);
+  } catch {
+    return false;
+  }
+  if (!/^https?:$/.test(pageUrl.protocol)) return false;
+
+  const { serverUrl } = await chrome.storage.local.get("serverUrl");
+  if (typeof serverUrl !== "string" || !serverUrl) {
+    return false;
+  }
+  let serverOrigin: string;
+  try {
+    serverOrigin = new URL(serverUrl).origin;
+  } catch {
+    return false;
+  }
+  if (pageUrl.origin !== serverOrigin) return false;
+
+  // Avoid noisy inline suggestions inside passwd-sso application pages.
+  return /^\/(?:[a-z]{2}(?:-[A-Z]{2})?)?\/?(dashboard|auth)(\/|$)/.test(
+    pageUrl.pathname,
+  );
 }
 
 // Hydrate on SW startup
@@ -352,6 +397,7 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
 async function performAutofillForEntry(
   entryId: string,
   tabId: number,
+  targetHint?: AutofillTargetHint,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!encryptionKey || !currentUserId) {
     return { ok: false, error: "VAULT_LOCKED" };
@@ -379,24 +425,234 @@ async function performAutofillForEntry(
     aad,
   );
 
-  const blob = JSON.parse(blobPlain) as { password?: string | null };
+  const blob = JSON.parse(blobPlain) as {
+    password?: string | null;
+    username?: string | null;
+    loginId?: string | null;
+    userId?: string | null;
+    email?: string | null;
+    customFields?: Array<{ label?: string; value?: string; type?: string }>;
+  };
   const overview = JSON.parse(overviewPlain) as { username?: string | null };
   const password = blob.password ?? null;
-  const username = overview.username ?? "";
+  const username =
+    overview.username ??
+    blob.username ??
+    blob.loginId ??
+    blob.userId ??
+    blob.email ??
+    "";
+
+  const customFields = Array.isArray(blob.customFields) ? blob.customFields : [];
+  const findCustomFieldValue = (pattern: RegExp): string | null => {
+    for (const field of customFields) {
+      const label = (field?.label ?? "").toString();
+      const value = (field?.value ?? "").toString();
+      if (!label || !value) continue;
+      if (pattern.test(label)) return value;
+    }
+    return null;
+  };
+  const awsAccountIdOrAlias =
+    findCustomFieldValue(
+      /(aws.*account|account.*(id|alias)|account id|account alias|アカウント|アカウントID|エイリアス)/i,
+    ) ?? "";
+  const awsIamUsername =
+    findCustomFieldValue(
+      /(iam.*(user|username)|user ?name|iamユーザー|iamユーザ|ユーザー名)/i,
+    ) ?? "";
+
+  const serializableTargetHint = targetHint
+    ? {
+        ...(typeof targetHint.id === "string" && targetHint.id
+          ? { id: targetHint.id }
+          : {}),
+        ...(typeof targetHint.name === "string" && targetHint.name
+          ? { name: targetHint.name }
+          : {}),
+        ...(typeof targetHint.type === "string" && targetHint.type
+          ? { type: targetHint.type }
+          : {}),
+        ...(typeof targetHint.autocomplete === "string" &&
+        targetHint.autocomplete
+          ? { autocomplete: targetHint.autocomplete }
+          : {}),
+      }
+    : null;
 
   if (!password) {
     return { ok: false, error: "NO_PASSWORD" };
   }
 
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    files: ["src/content/autofill.js"],
-  });
-  await chrome.tabs.sendMessage(tabId, {
-    type: "AUTOFILL_FILL",
-    username,
-    password,
-  });
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["src/content/autofill.js"],
+    });
+    await chrome.tabs.sendMessage(tabId, {
+      type: "AUTOFILL_FILL",
+      username,
+      password,
+      ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
+      ...(awsAccountIdOrAlias ? { awsAccountIdOrAlias } : {}),
+      ...(awsIamUsername ? { awsIamUsername } : {}),
+    });
+  } catch {
+    // Continue to direct fallback injection below.
+  }
+
+  // Direct fallback for pages where content-script messaging is blocked/unstable.
+  // Runs in all frames so login forms inside iframes are also covered.
+  const injectDirectAutofill = async (
+    hintArg: { id?: string; name?: string; type?: string; autocomplete?: string } | null,
+  ) =>
+    chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      args: [
+        username,
+        password,
+        hintArg,
+        awsAccountIdOrAlias,
+        awsIamUsername,
+      ],
+      func: (
+        usernameArg: string,
+        passwordArg: string,
+        targetHintArg?: {
+          id?: string;
+          name?: string;
+          type?: string;
+          autocomplete?: string;
+        } | null,
+        awsAccountIdOrAliasArg?: string,
+        awsIamUsernameArg?: string,
+      ) => {
+      const isUsableInput = (input: HTMLInputElement) =>
+        !input.disabled && !input.readOnly;
+      const isVisible = (input: HTMLInputElement) =>
+        getComputedStyle(input).display !== "none" &&
+        getComputedStyle(input).visibility !== "hidden";
+
+      const setInputValue = (input: HTMLInputElement, value: string) => {
+        input.focus();
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        )?.set;
+        if (setter) setter.call(input, value);
+        else input.value = value;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+        input.dispatchEvent(new Event("blur", { bubbles: true }));
+      };
+
+      const inputs = Array.from(
+        document.querySelectorAll("input"),
+      ) as HTMLInputElement[];
+      const isAwsSignInPage =
+        window.location.hostname.includes("signin.aws.amazon.com") ||
+        window.location.hostname.includes("sign-in.aws.amazon.com");
+
+      const findInputByHint = () => {
+        if (!targetHintArg) return null;
+        return (
+          inputs.find((i) => !!targetHintArg.id && i.id === targetHintArg.id) ??
+          inputs.find((i) => !!targetHintArg.name && i.name === targetHintArg.name) ??
+          inputs.find(
+            (i) =>
+              !!targetHintArg.autocomplete &&
+              i.autocomplete === targetHintArg.autocomplete &&
+              (!targetHintArg.type || i.type === targetHintArg.type),
+          ) ??
+          null
+        );
+      };
+
+      const active = document.activeElement;
+      const hintedInput = findInputByHint();
+      const usernameInput: HTMLInputElement | null =
+        hintedInput instanceof HTMLInputElement &&
+        isUsableInput(hintedInput) &&
+        ["text", "email", "tel"].includes(hintedInput.type)
+          ? hintedInput
+          : active instanceof HTMLInputElement &&
+              isUsableInput(active) &&
+              ["text", "email", "tel"].includes(active.type)
+            ? active
+            : null;
+
+      const findPasswordInScope = (scopeInputs: HTMLInputElement[]) => {
+        const byAutocomplete = scopeInputs.find(
+          (i) =>
+            isUsableInput(i) &&
+            i.type === "password" &&
+            isVisible(i) &&
+            i.autocomplete === "current-password",
+        );
+        if (byAutocomplete) return byAutocomplete;
+        const pwInputs = scopeInputs.filter(
+          (i) => isUsableInput(i) && i.type === "password" && isVisible(i),
+        );
+        return pwInputs.length ? pwInputs[pwInputs.length - 1] : null;
+      };
+
+      const scopeForm = (usernameInput ?? hintedInput)?.form ?? null;
+      const scopedInputs = scopeForm
+        ? (Array.from(scopeForm.querySelectorAll("input")) as HTMLInputElement[])
+        : inputs;
+      const passwordInput =
+        findPasswordInScope(scopedInputs) ?? findPasswordInScope(inputs);
+
+      let fallbackUsername = usernameInput;
+      if (!fallbackUsername && passwordInput) {
+        const pwIndex = inputs.indexOf(passwordInput);
+        for (let i = pwIndex - 1; i >= 0; i -= 1) {
+          const c = inputs[i];
+          if (
+            isUsableInput(c) &&
+            ["text", "email", "tel"].includes(c.type)
+          ) {
+            fallbackUsername = c;
+            break;
+          }
+        }
+      }
+
+      if (fallbackUsername && usernameArg) setInputValue(fallbackUsername, usernameArg);
+      if (isAwsSignInPage) {
+        const readHints = (input: HTMLInputElement) => {
+          const labelText =
+            (input.id
+              ? document.querySelector(`label[for="${input.id.replace(/["\\]/g, "\\$&")}"]`)
+                  ?.textContent ?? ""
+              : "") + (input.getAttribute("aria-label") ?? "") + (input.placeholder ?? "");
+          return `${input.name} ${input.id} ${labelText}`.toLowerCase();
+        };
+        const accountInput = inputs.find((i) => {
+          if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
+          const hints = readHints(i);
+          return /(account|alias|アカウント|エイリアス)/.test(hints);
+        });
+        const iamInput = inputs.find((i) => {
+          if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
+          const hints = readHints(i);
+          return /(iam|username|user.?name|ユーザー名|ユーザ名)/.test(hints);
+        });
+        if (accountInput && awsAccountIdOrAliasArg) setInputValue(accountInput, awsAccountIdOrAliasArg);
+        if (iamInput && awsIamUsernameArg) setInputValue(iamInput, awsIamUsernameArg);
+      }
+      if (passwordInput) setInputValue(passwordInput, passwordArg);
+      },
+    });
+
+  try {
+    await injectDirectAutofill(serializableTargetHint);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!/unserializable/i.test(message)) throw err;
+    await injectDirectAutofill(null);
+  }
   return { ok: true };
 }
 
@@ -510,6 +766,9 @@ chrome.runtime.onMessage.addListener(
             }
 
             const encKey = await deriveEncryptionKey(secretKey);
+            currentVaultSecretKeyHex = Array.from(secretKey)
+              .map((b) => b.toString(16).padStart(2, "0"))
+              .join("");
             secretKey.fill(0);
 
             if (data.verificationArtifact) {
@@ -691,18 +950,30 @@ chrome.runtime.onMessage.addListener(
             type: "GET_MATCHES_FOR_URL",
             entries: [],
             vaultLocked: true,
+            suppressInline: false,
           });
           break;
         }
 
         (async () => {
           try {
-            const tabHost = extractHost(message.url);
+            const effectiveUrl = message.topUrl ?? message.url;
+            if (await shouldSuppressInlineMatches(effectiveUrl)) {
+              sendResponse({
+                type: "GET_MATCHES_FOR_URL",
+                entries: [],
+                vaultLocked: false,
+                suppressInline: true,
+              });
+              return;
+            }
+            const tabHost = extractHost(effectiveUrl);
             if (!tabHost) {
               sendResponse({
                 type: "GET_MATCHES_FOR_URL",
                 entries: [],
                 vaultLocked: false,
+                suppressInline: false,
               });
               return;
             }
@@ -717,12 +988,14 @@ chrome.runtime.onMessage.addListener(
               type: "GET_MATCHES_FOR_URL",
               entries: matches,
               vaultLocked: false,
+              suppressInline: false,
             });
           } catch {
             sendResponse({
               type: "GET_MATCHES_FOR_URL",
               entries: [],
               vaultLocked: false,
+              suppressInline: false,
             });
           }
         })();
@@ -754,6 +1027,7 @@ chrome.runtime.onMessage.addListener(
             const result = await performAutofillForEntry(
               message.entryId,
               tabId,
+              message.targetHint,
             );
             sendResponse({
               type: "AUTOFILL_FROM_CONTENT",

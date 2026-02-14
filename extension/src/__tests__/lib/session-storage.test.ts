@@ -34,12 +34,14 @@ describe("session-storage", () => {
         token: "tok-1",
         expiresAt: 1700000000000,
         userId: "u-1",
+        vaultSecretKey: "a1b2",
       });
       expect(chrome.storage.session.set).toHaveBeenCalledWith({
         authState: {
           token: "tok-1",
           expiresAt: 1700000000000,
           userId: "u-1",
+          vaultSecretKey: "a1b2",
         },
       });
     });
@@ -51,12 +53,14 @@ describe("session-storage", () => {
         token: "tok-1",
         expiresAt: 1700000000000,
         userId: "u-1",
+        vaultSecretKey: "a1b2",
       };
       const result = await loadSession();
       expect(result).toEqual({
         token: "tok-1",
         expiresAt: 1700000000000,
         userId: "u-1",
+        vaultSecretKey: "a1b2",
       });
     });
 
@@ -104,6 +108,16 @@ describe("session-storage", () => {
         token: "tok-1",
         expiresAt: 1700000000000,
         userId: 123,
+      };
+      const result = await loadSession();
+      expect(result).toBeNull();
+    });
+
+    it("returns null when vaultSecretKey is wrong type", async () => {
+      mockStorage[SESSION_KEY] = {
+        token: "tok-1",
+        expiresAt: 1700000000000,
+        vaultSecretKey: 123,
       };
       const result = await loadSession();
       expect(result).toBeNull();
