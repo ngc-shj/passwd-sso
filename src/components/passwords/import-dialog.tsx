@@ -57,12 +57,83 @@ interface ParsedEntry {
   credentialId: string;
   creationDate: string;
   deviceInfo: string;
+  tags: Array<{ name: string; color: string | null }>;
+  customFields: Array<{ label: string; value: string; type: string }>;
+  totp: {
+    secret: string;
+    issuer?: string;
+    label?: string;
+    period?: number;
+    digits?: number;
+    algorithm?: string;
+  } | null;
+  generatorSettings: Record<string, unknown> | null;
+  passwordHistory: Array<{ password: string; changedAt: string }>;
 }
 
-type CsvFormat = "bitwarden" | "onepassword" | "chrome" | "unknown";
+type CsvFormat = "bitwarden" | "onepassword" | "chrome" | "passwd-sso" | "unknown";
+
+function extraDefaults(): Pick<
+  ParsedEntry,
+  "tags" | "customFields" | "totp" | "generatorSettings" | "passwordHistory"
+> {
+  return {
+    tags: [],
+    customFields: [],
+    totp: null,
+    generatorSettings: null,
+    passwordHistory: [],
+  };
+}
+
+function parsePasswdSsoPayload(raw: string | undefined): Partial<ParsedEntry> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return {
+      tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+      customFields: Array.isArray(parsed.customFields) ? parsed.customFields : [],
+      totp:
+        parsed.totp && typeof parsed.totp === "object" && typeof parsed.totp.secret === "string"
+          ? parsed.totp
+          : null,
+      generatorSettings:
+        parsed.generatorSettings && typeof parsed.generatorSettings === "object"
+          ? parsed.generatorSettings
+          : null,
+      passwordHistory: Array.isArray(parsed.passwordHistory) ? parsed.passwordHistory : [],
+      cardholderName: typeof parsed.cardholderName === "string" ? parsed.cardholderName : "",
+      cardNumber: typeof parsed.cardNumber === "string" ? parsed.cardNumber : "",
+      brand: typeof parsed.brand === "string" ? parsed.brand : "",
+      expiryMonth: typeof parsed.expiryMonth === "string" ? parsed.expiryMonth : "",
+      expiryYear: typeof parsed.expiryYear === "string" ? parsed.expiryYear : "",
+      cvv: typeof parsed.cvv === "string" ? parsed.cvv : "",
+      fullName: typeof parsed.fullName === "string" ? parsed.fullName : "",
+      address: typeof parsed.address === "string" ? parsed.address : "",
+      phone: typeof parsed.phone === "string" ? parsed.phone : "",
+      email: typeof parsed.email === "string" ? parsed.email : "",
+      dateOfBirth: typeof parsed.dateOfBirth === "string" ? parsed.dateOfBirth : "",
+      nationality: typeof parsed.nationality === "string" ? parsed.nationality : "",
+      idNumber: typeof parsed.idNumber === "string" ? parsed.idNumber : "",
+      issueDate: typeof parsed.issueDate === "string" ? parsed.issueDate : "",
+      expiryDate: typeof parsed.expiryDate === "string" ? parsed.expiryDate : "",
+      relyingPartyId: typeof parsed.relyingPartyId === "string" ? parsed.relyingPartyId : "",
+      relyingPartyName: typeof parsed.relyingPartyName === "string" ? parsed.relyingPartyName : "",
+      credentialId: typeof parsed.credentialId === "string" ? parsed.credentialId : "",
+      creationDate: typeof parsed.creationDate === "string" ? parsed.creationDate : "",
+      deviceInfo: typeof parsed.deviceInfo === "string" ? parsed.deviceInfo : "",
+    };
+  } catch {
+    return {};
+  }
+}
 
 function detectFormat(headers: string[]): CsvFormat {
   const lower = headers.map((h) => h.toLowerCase().trim());
+  if (lower.includes("passwd_sso")) {
+    return "passwd-sso";
+  }
   if (lower.includes("login_password") && lower.includes("login_username")) {
     return "bitwarden";
   }
@@ -133,6 +204,7 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
     const isNote = rowType === "securenote" || rowType === "note";
     const isCard = rowType === "card";
     const isIdentity = rowType === "identity";
+    const passwdSso = parsePasswdSsoPayload(row["passwd_sso"]);
 
     const cardDefaults = {
       cardholderName: "", cardNumber: "", brand: "",
@@ -161,6 +233,7 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
           ...cardDefaults,
           ...identityDefaults,
           ...passkeyDefaults,
+          ...extraDefaults(),
         };
         break;
       case "chrome":
@@ -175,6 +248,7 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
           ...cardDefaults,
           ...identityDefaults,
           ...passkeyDefaults,
+          ...extraDefaults(),
         };
         break;
       case "onepassword":
@@ -189,6 +263,7 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
           ...cardDefaults,
           ...identityDefaults,
           ...passkeyDefaults,
+          ...extraDefaults(),
         };
         break;
       default:
@@ -203,8 +278,14 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
           ...cardDefaults,
           ...identityDefaults,
           ...passkeyDefaults,
+          ...extraDefaults(),
         };
     }
+
+    if (!entry.totp && typeof row["login_totp"] === "string" && row["login_totp"]) {
+      entry.totp = { secret: row["login_totp"] };
+    }
+    entry = { ...entry, ...passwdSso };
 
     // Login entries need title+password, notes/cards/identities/passkeys need title only
     const valid = entry.entryType === ENTRY_TYPE.LOGIN
@@ -225,6 +306,10 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
     const data = JSON.parse(text);
     const items = Array.isArray(data) ? data : (data.entries ?? data.items ?? []);
     if (!Array.isArray(items)) return { entries: [], format: "unknown" };
+    const exportFormat: CsvFormat =
+      data && typeof data === "object" && data.format === "passwd-sso"
+        ? "passwd-sso"
+        : "bitwarden";
 
     const entries: ParsedEntry[] = [];
 
@@ -232,6 +317,10 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
       const type = typeof item.type === "number"
         ? item.type
         : (item.type ?? "").toLowerCase();
+      const passwdSso =
+        item.passwdSso && typeof item.passwdSso === "object"
+          ? parsePasswdSsoPayload(JSON.stringify(item.passwdSso))
+          : {};
 
       const cardDefaults = {
         cardholderName: "", cardNumber: "", brand: "",
@@ -263,6 +352,8 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
           credentialId: passkey.credentialId ?? "",
           creationDate: passkey.creationDate ?? "",
           deviceInfo: passkey.deviceInfo ?? "",
+          ...extraDefaults(),
+          ...passwdSso,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -290,6 +381,8 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
           idNumber: identity.idNumber ?? identity.ssn ?? identity.passportNumber ?? "",
           issueDate: identity.issueDate ?? "",
           expiryDate: identity.expiryDate ?? "",
+          ...extraDefaults(),
+          ...passwdSso,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -312,6 +405,8 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
           cvv: card.code ?? "",
           ...identityDefaults,
           ...passkeyDefaults,
+          ...extraDefaults(),
+          ...passwdSso,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -329,6 +424,8 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
           ...cardDefaults,
           ...identityDefaults,
           ...passkeyDefaults,
+          ...extraDefaults(),
+          ...passwdSso,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -348,11 +445,14 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
         ...cardDefaults,
         ...identityDefaults,
         ...passkeyDefaults,
+        ...extraDefaults(),
+        totp: typeof login.totp === "string" && login.totp ? { secret: login.totp } : null,
+        ...passwdSso,
       };
       if (entry.title && entry.password) entries.push(entry);
     }
 
-    return { entries, format: "bitwarden" };
+    return { entries, format: exportFormat };
   } catch {
     return { entries: [], format: "unknown" };
   }
@@ -364,6 +464,7 @@ const formatLabels: Record<CsvFormat, string> = {
   bitwarden: "Bitwarden",
   onepassword: "1Password",
   chrome: "Chrome",
+  "passwd-sso": "passwd-sso",
   unknown: "CSV",
 };
 
@@ -501,13 +602,13 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             creationDate: entry.creationDate || null,
             deviceInfo: entry.deviceInfo || null,
             notes: entry.notes || null,
-            tags: [],
+            tags: entry.tags,
           });
           overviewBlob = JSON.stringify({
             title: entry.title,
             relyingPartyId: entry.relyingPartyId || null,
             username: entry.username || null,
-            tags: [],
+            tags: entry.tags,
           });
         } else if (isIdentity) {
           const idNumberLast4 = entry.idNumber ? entry.idNumber.slice(-4) : null;
@@ -523,13 +624,13 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             issueDate: entry.issueDate || null,
             expiryDate: entry.expiryDate || null,
             notes: entry.notes || null,
-            tags: [],
+            tags: entry.tags,
           });
           overviewBlob = JSON.stringify({
             title: entry.title,
             fullName: entry.fullName || null,
             idNumberLast4,
-            tags: [],
+            tags: entry.tags,
           });
         } else if (isCard) {
           const lastFour = entry.cardNumber
@@ -544,25 +645,25 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             expiryYear: entry.expiryYear || null,
             cvv: entry.cvv || null,
             notes: entry.notes || null,
-            tags: [],
+            tags: entry.tags,
           });
           overviewBlob = JSON.stringify({
             title: entry.title,
             cardholderName: entry.cardholderName || null,
             brand: entry.brand || null,
             lastFour,
-            tags: [],
+            tags: entry.tags,
           });
         } else if (isNote) {
           fullBlob = JSON.stringify({
             title: entry.title,
             content: entry.content || "",
-            tags: [],
+            tags: entry.tags,
           });
           overviewBlob = JSON.stringify({
             title: entry.title,
             snippet: (entry.content || "").slice(0, 100),
-            tags: [],
+            tags: entry.tags,
           });
         } else {
           let urlHost: string | null = null;
@@ -579,14 +680,17 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             password: entry.password,
             url: entry.url || null,
             notes: entry.notes || null,
-            tags: [],
-            generatorSettings: null,
+            tags: entry.tags,
+            generatorSettings: entry.generatorSettings,
+            ...(entry.passwordHistory.length > 0 && { passwordHistory: entry.passwordHistory }),
+            ...(entry.customFields.length > 0 && { customFields: entry.customFields }),
+            ...(entry.totp && { totp: entry.totp }),
           });
           overviewBlob = JSON.stringify({
             title: entry.title,
             username: entry.username || null,
             urlHost,
-            tags: [],
+            tags: entry.tags,
           });
         }
 
@@ -813,3 +917,11 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
     </Dialog>
   );
 }
+
+export const __testablesImport = {
+  detectFormat,
+  parseCsvLine,
+  parseCsv,
+  parseJson,
+  parsePasswdSsoPayload,
+};

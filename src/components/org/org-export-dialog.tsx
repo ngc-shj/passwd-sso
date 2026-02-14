@@ -22,6 +22,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
 type ExportFormat = "csv" | "json";
+type ExportProfile = "compatible" | "passwd-sso";
 
 interface OrgExportEntry {
   entryType: EntryTypeValue;
@@ -47,6 +48,18 @@ interface OrgExportEntry {
   idNumber: string | null;
   issueDate: string | null;
   expiryDate: string | null;
+  tags: Array<{ name: string; color: string | null }>;
+  customFields: Array<{ label: string; value: string; type: string }>;
+  totpConfig: {
+    secret: string;
+    issuer?: string;
+    label?: string;
+    period?: number;
+    digits?: number;
+    algorithm?: string;
+  } | null;
+  generatorSettings: Record<string, unknown> | null;
+  passwordHistory: Array<{ password: string; changedAt: string }>;
 }
 
 interface OrgExportDialogProps {
@@ -62,12 +75,14 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
   const [exportPassword, setExportPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const [exportProfile, setExportProfile] = useState<ExportProfile>("compatible");
 
   const resetState = () => {
     setPasswordProtect(true);
     setExportPassword("");
     setConfirmPassword("");
     setPasswordError("");
+    setExportProfile("compatible");
   };
 
   const validatePassword = (): boolean => {
@@ -126,13 +141,18 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
             idNumber: data.idNumber ?? null,
             issueDate: data.issueDate ?? null,
             expiryDate: data.expiryDate ?? null,
+            tags: Array.isArray(data.tags) ? data.tags : [],
+            customFields: Array.isArray(data.customFields) ? data.customFields : [],
+            totpConfig: data.totp ?? null,
+            generatorSettings: data.generatorSettings ?? null,
+            passwordHistory: Array.isArray(data.passwordHistory) ? data.passwordHistory : [],
           });
         } catch {
           // Skip entries that fail to fetch
         }
       }
 
-      const content = formatExportContent(entries, format);
+      const content = formatExportContent(entries, format, exportProfile);
 
       let blob: Blob;
       let filename: string;
@@ -199,6 +219,26 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
         </div>
 
         <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="org-export-profile" className="text-sm font-medium">
+              {t("profileLabel")}
+            </Label>
+            <select
+              id="org-export-profile"
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={exportProfile}
+              onChange={(e) => setExportProfile(e.target.value as ExportProfile)}
+            >
+              <option value="compatible">{t("profileCompatible")}</option>
+              <option value="passwd-sso">{t("profilePasswdSso")}</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              {exportProfile === "compatible"
+                ? t("profileCompatibleDesc")
+                : t("profilePasswdSsoDesc")}
+            </p>
+          </div>
+
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Lock className="h-4 w-4 text-muted-foreground" />
@@ -298,16 +338,22 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
 
 // ─── Formatting helpers ─────────────────────────────────────
 
-function formatExportContent(entries: OrgExportEntry[], format: ExportFormat): string {
+function formatExportContent(
+  entries: OrgExportEntry[],
+  format: ExportFormat,
+  profile: ExportProfile
+): string {
   if (format === "csv") {
-    return formatCsv(entries);
+    return formatCsv(entries, profile);
   }
-  return formatJson(entries);
+  return formatJson(entries, profile);
 }
 
-function formatCsv(entries: OrgExportEntry[]): string {
+function formatCsv(entries: OrgExportEntry[], profile: ExportProfile): string {
   const header =
-    "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp";
+    profile === "passwd-sso"
+      ? "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp,passwd_sso"
+      : "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp";
   const escapeCsv = (val: string | null) => {
     if (!val) return "";
     if (val.includes(",") || val.includes('"') || val.includes("\n")) {
@@ -321,6 +367,29 @@ function formatCsv(entries: OrgExportEntry[]): string {
     const isIdentity = e.entryType === ENTRY_TYPE.IDENTITY;
     const type = isIdentity ? "identity" : isCard ? "card" : isNote ? "securenote" : "login";
     const isLogin = !isNote && !isCard && !isIdentity;
+    const passwdSso = JSON.stringify({
+      entryType: e.entryType,
+      tags: e.tags,
+      customFields: e.customFields,
+      totp: e.totpConfig,
+      generatorSettings: e.generatorSettings,
+      passwordHistory: e.passwordHistory,
+      cardholderName: e.cardholderName,
+      cardNumber: e.cardNumber,
+      brand: e.brand,
+      expiryMonth: e.expiryMonth,
+      expiryYear: e.expiryYear,
+      cvv: e.cvv,
+      fullName: e.fullName,
+      address: e.address,
+      phone: e.phone,
+      email: e.email,
+      dateOfBirth: e.dateOfBirth,
+      nationality: e.nationality,
+      idNumber: e.idNumber,
+      issueDate: e.issueDate,
+      expiryDate: e.expiryDate,
+    });
     return [
       "", // folder
       "", // favorite
@@ -333,14 +402,16 @@ function formatCsv(entries: OrgExportEntry[]): string {
       isLogin ? escapeCsv(e.username) : "",
       isLogin ? escapeCsv(e.password) : "",
       isLogin ? escapeCsv(e.totp) : "",
+      ...(profile === "passwd-sso" ? [escapeCsv(passwdSso)] : []),
     ].join(",");
   });
   return [header, ...rows].join("\n");
 }
 
-function formatJson(entries: OrgExportEntry[]): string {
+function formatJson(entries: OrgExportEntry[], profile: ExportProfile): string {
   return JSON.stringify(
     {
+      ...(profile === "passwd-sso" ? { format: "passwd-sso", version: 1 } : {}),
       exportedAt: new Date().toISOString(),
       entries: entries.map((e) => {
         if (e.entryType === ENTRY_TYPE.IDENTITY) {
@@ -359,6 +430,9 @@ function formatJson(entries: OrgExportEntry[]): string {
               expiryDate: e.expiryDate,
             },
             notes: e.notes,
+            ...(profile === "passwd-sso"
+              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
+              : {}),
           };
         }
         if (e.entryType === ENTRY_TYPE.CREDIT_CARD) {
@@ -374,6 +448,9 @@ function formatJson(entries: OrgExportEntry[]): string {
               code: e.cvv,
             },
             notes: e.notes,
+            ...(profile === "passwd-sso"
+              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
+              : {}),
           };
         }
         if (e.entryType === ENTRY_TYPE.SECURE_NOTE) {
@@ -381,6 +458,9 @@ function formatJson(entries: OrgExportEntry[]): string {
             type: "securenote",
             name: e.title,
             notes: e.content,
+            ...(profile === "passwd-sso"
+              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
+              : {}),
           };
         }
         return {
@@ -393,6 +473,18 @@ function formatJson(entries: OrgExportEntry[]): string {
             totp: e.totp,
           },
           notes: e.notes,
+          ...(profile === "passwd-sso"
+            ? {
+                passwdSso: {
+                  entryType: e.entryType,
+                  tags: e.tags,
+                  customFields: e.customFields,
+                  totp: e.totpConfig,
+                  generatorSettings: e.generatorSettings,
+                  passwordHistory: e.passwordHistory,
+                },
+              }
+            : {}),
         };
       }),
     },
@@ -405,3 +497,9 @@ function formatDate(): string {
   const d = new Date();
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
 }
+
+export const __testablesOrgExport = {
+  formatExportContent,
+  formatCsv,
+  formatJson,
+};
