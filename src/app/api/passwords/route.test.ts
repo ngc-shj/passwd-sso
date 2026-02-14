@@ -449,6 +449,112 @@ describe("POST /api/passwords", () => {
     );
   });
 
+  it("sanitizes path separators in import filename", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      entryType: ENTRY_TYPE.LOGIN,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: validBody,
+      headers: {
+        "x-passwd-sso-source": "import",
+        "x-passwd-sso-filename": "../../etc/passwd",
+      },
+    }));
+
+    expect(res.status).toBe(201);
+    expect(mockAuditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            filename: ".._.._etc_passwd",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("strips null bytes and control chars from import filename", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      entryType: ENTRY_TYPE.LOGIN,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST({
+      headers: {
+        get: (key: string) => {
+          if (key.toLowerCase() === "x-passwd-sso-source") return "import";
+          if (key.toLowerCase() === "x-passwd-sso-filename") return "file\0name\x1f.csv";
+          return null;
+        },
+      },
+      json: async () => validBody,
+    } as never);
+
+    expect(res.status).toBe(201);
+    expect(mockAuditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            filename: "filename.csv",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("returns no filename when sanitized result is empty", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      entryType: ENTRY_TYPE.LOGIN,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST({
+      headers: {
+        get: (key: string) => {
+          if (key.toLowerCase() === "x-passwd-sso-source") return "import";
+          if (key.toLowerCase() === "x-passwd-sso-filename") return "\0\x01\x02";
+          return null;
+        },
+      },
+      json: async () => validBody,
+    } as never);
+
+    expect(res.status).toBe(201);
+    expect(mockAuditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: {
+            source: "import",
+            parentAction: "ENTRY_IMPORT",
+          },
+        }),
+      }),
+    );
+  });
+
   it("creates CREDIT_CARD entry (201)", async () => {
     mockPrismaPasswordEntry.create.mockResolvedValue({
       id: "new-card",
