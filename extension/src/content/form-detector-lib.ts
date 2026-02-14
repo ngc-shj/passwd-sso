@@ -72,6 +72,51 @@ export function isInputHitTestSafe(input: HTMLInputElement): boolean {
   return false;
 }
 
+function getOpenPopovers(): HTMLElement[] {
+  const legacy = Array.from(
+    document.querySelectorAll<HTMLElement>('[popover][open]'),
+  );
+  let openByPseudo: HTMLElement[] = [];
+  try {
+    openByPseudo = Array.from(
+      document.querySelectorAll<HTMLElement>(':popover-open'),
+    );
+  } catch {
+    // Selector unsupported in this runtime.
+  }
+  const uniq = new Set<HTMLElement>([...legacy, ...openByPseudo]);
+  return Array.from(uniq);
+}
+
+export function hasVisiblePopoverOverlayNear(input: HTMLInputElement): boolean {
+  const rect = input.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) return false;
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+
+  for (const popover of getOpenPopovers()) {
+    const style = getComputedStyle(popover);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      resolveOpacity(style.opacity) < 0.98 ||
+      style.pointerEvents === "none"
+    ) {
+      continue;
+    }
+    const pRect = popover.getBoundingClientRect();
+    if (pRect.width < 1 || pRect.height < 1) continue;
+    const overlapsCenter =
+      centerX >= pRect.left &&
+      centerX <= pRect.right &&
+      centerY >= pRect.top &&
+      centerY <= pRect.bottom;
+    if (overlapsCenter) return true;
+  }
+
+  return false;
+}
+
 export function findPasswordInputs(root: ParentNode): HTMLInputElement[] {
   return Array.from(root.querySelectorAll<HTMLInputElement>('input[type="password"]')).filter(
     isUsableInput,
@@ -295,6 +340,18 @@ export interface FormDetectorCleanup {
 
 export function initFormDetector(): FormDetectorCleanup {
   let destroyed = false;
+  const isCrossOriginSubframe = (() => {
+    if (window.top === window.self) return false;
+    try {
+      void window.top?.location.href;
+      return false;
+    } catch {
+      return true;
+    }
+  })();
+  if (isCrossOriginSubframe) {
+    return { destroy: () => {} };
+  }
 
   const shouldTriggerForInput = (input: HTMLInputElement): boolean => {
     if (!isElementVisuallySafe(input)) return false;
@@ -378,7 +435,12 @@ export function initFormDetector(): FormDetectorCleanup {
       destroy();
       return;
     }
-    if (!isPageVisuallySafe() || !isElementVisuallySafe(input) || !isInputHitTestSafe(input)) {
+    if (
+      !isPageVisuallySafe() ||
+      !isElementVisuallySafe(input) ||
+      !isInputHitTestSafe(input) ||
+      hasVisiblePopoverOverlayNear(input)
+    ) {
       hideDropdown();
       currentContext = null;
       return;
@@ -414,10 +476,20 @@ export function initFormDetector(): FormDetectorCleanup {
   // Listen for vault state changes (sent from popup after unlock/lock)
   const runtimeMessageHandler = (message: { type?: string }) => {
     if (destroyed) return;
-    if (message?.type !== "PSSO_VAULT_STATE_CHANGED") return;
+    if (message?.type !== "PSSO_VAULT_STATE_CHANGED" && message?.type !== "PSSO_TRIGGER_INLINE_SUGGESTIONS") return;
     const active = document.activeElement;
     if (active instanceof HTMLInputElement && shouldTriggerForInput(active)) {
       requestMatches(active);
+      return;
+    }
+    if (message?.type === "PSSO_TRIGGER_INLINE_SUGGESTIONS") {
+      const firstCandidate = Array.from(document.querySelectorAll<HTMLInputElement>("input")).find(
+        (i) => shouldTriggerForInput(i),
+      );
+      if (firstCandidate) {
+        firstCandidate.focus();
+        requestMatches(firstCandidate);
+      }
     }
   };
   chrome.runtime.onMessage.addListener(runtimeMessageHandler);

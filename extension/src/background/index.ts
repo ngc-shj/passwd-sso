@@ -348,18 +348,22 @@ chrome.commands.onCommand.addListener(async (command) => {
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id || !tab.url) return;
-  const tabHost = extractHost(tab.url);
-  if (!tabHost) return;
+  if (!extractHost(tab.url)) return;
 
-  const entries = await getCachedEntries();
-  const match = entries.find(
-    (e) =>
-      e.entryType === EXT_ENTRY_TYPE.LOGIN &&
-      e.urlHost &&
-      isHostMatch(e.urlHost, tabHost)
-  );
-  if (!match) return;
-  await performAutofillForEntry(match.id, tab.id);
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: "PSSO_TRIGGER_INLINE_SUGGESTIONS" });
+  } catch {
+    // Ensure content script is present on already-open tabs, then retry.
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: true },
+        files: ["src/content/form-detector.js"],
+      });
+      await chrome.tabs.sendMessage(tab.id, { type: "PSSO_TRIGGER_INLINE_SUGGESTIONS" });
+    } catch {
+      // ignore on restricted pages
+    }
+  }
 });
 
 async function swFetch(path: string): Promise<Response> {
