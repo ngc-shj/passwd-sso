@@ -61,7 +61,12 @@ async function handleApiAuth(request: NextRequest) {
 
   // Routes that accept extension token (Bearer) as alternative auth.
   // Let the route handler validate the token instead of checking session.
-  const extensionTokenRoutes = [API_PATH.PASSWORDS, API_PATH.VAULT_UNLOCK_DATA];
+  const extensionTokenRoutes = [
+    API_PATH.PASSWORDS,
+    API_PATH.VAULT_UNLOCK_DATA,
+    API_PATH.EXTENSION_TOKEN,         // DELETE (revoke) — validated by route handler
+    API_PATH.EXTENSION_TOKEN_REFRESH, // POST (refresh) — validated by route handler
+  ];
   const hasBearer = request.headers
     .get("authorization")
     ?.startsWith("Bearer ");
