@@ -182,7 +182,7 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Building2 className="h-4 w-4" />
