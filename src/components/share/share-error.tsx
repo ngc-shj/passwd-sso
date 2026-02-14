@@ -19,12 +19,16 @@ export function ShareError({ reason }: { reason: string }) {
   const descKey = `error_${reason}_desc` as never;
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-      <Card className="max-w-md w-full p-8 text-center space-y-4">
-        <div className="flex justify-center">{ICONS[reason] ?? ICONS.notFound}</div>
-        <h1 className="text-xl font-semibold">{t(titleKey)}</h1>
+    <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background p-4">
+      <div className="mx-auto flex max-w-md items-center justify-center py-16">
+      <Card className="w-full space-y-4 rounded-xl border p-8 text-center">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border bg-muted/30">
+          {ICONS[reason] ?? ICONS.notFound}
+        </div>
+        <h1 className="text-xl font-semibold tracking-tight">{t(titleKey)}</h1>
         <p className="text-sm text-muted-foreground">{t(descKey)}</p>
       </Card>
+      </div>
     </div>
   );
 }

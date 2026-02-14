@@ -276,7 +276,7 @@ export function PasswordGenerator({
 
       {/* Generated password display */}
       {generated && (
-        <div className="rounded-md border bg-muted/40 px-3 py-2 space-y-2 transition-all duration-200">
+        <div className="space-y-2 rounded-lg border bg-muted/40 px-3 py-2 transition-all duration-200">
           <div className="flex items-start justify-between gap-2">
             <p className="font-mono text-sm break-all leading-relaxed flex-1">
               {generated}

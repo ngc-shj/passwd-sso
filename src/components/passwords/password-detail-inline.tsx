@@ -230,7 +230,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           {data.notes && (
             <div className="col-span-2 space-y-1">
               <label className="text-sm text-muted-foreground">{t("notes")}</label>
-              <p className="text-sm whitespace-pre-wrap rounded-md bg-muted p-3">
+              <p className="rounded-lg border bg-muted/30 p-3 text-sm whitespace-pre-wrap">
                 {data.notes}
               </p>
             </div>
@@ -339,7 +339,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           {data.notes && (
             <div className="col-span-2 space-y-1">
               <label className="text-sm text-muted-foreground">{t("notes")}</label>
-              <p className="text-sm whitespace-pre-wrap rounded-md bg-muted p-3">
+              <p className="rounded-lg border bg-muted/30 p-3 text-sm whitespace-pre-wrap">
                 {data.notes}
               </p>
             </div>
@@ -424,7 +424,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           {data.notes && (
             <div className="col-span-2 space-y-1">
               <label className="text-sm text-muted-foreground">{t("notes")}</label>
-              <p className="text-sm whitespace-pre-wrap rounded-md bg-muted p-3">
+              <p className="rounded-lg border bg-muted/30 p-3 text-sm whitespace-pre-wrap">
                 {data.notes}
               </p>
             </div>
@@ -435,7 +435,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
         <div className="space-y-1">
           <label className="text-sm text-muted-foreground">{t("content")}</label>
           <div className="flex items-start gap-2">
-            <p className="flex-1 text-sm whitespace-pre-wrap font-mono rounded-md bg-muted p-3 max-h-96 overflow-y-auto">
+            <p className="flex-1 max-h-96 overflow-y-auto rounded-lg border bg-muted/30 p-3 text-sm font-mono whitespace-pre-wrap">
               {data.content}
             </p>
             <CopyButton getValue={() => data.content ?? ""} />
@@ -496,7 +496,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           {data.notes && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("notes")}</label>
-              <p className="text-sm whitespace-pre-wrap rounded-md bg-muted p-3">
+              <p className="rounded-lg border bg-muted/30 p-3 text-sm whitespace-pre-wrap">
                 {data.notes}
               </p>
             </div>
@@ -572,7 +572,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
                   {data.passwordHistory.map((entry, idx) => (
                     <div
                       key={idx}
-                      className="flex items-center gap-2 rounded-md bg-muted p-2"
+                      className="flex items-center gap-2 rounded-lg border bg-muted/30 p-2"
                     >
                       <div className="flex-1 min-w-0">
                         <span className="font-mono text-xs">

@@ -138,102 +138,106 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
   };
 
   return (
-    <div className="p-4 md:p-6">
-      <div className="mx-auto max-w-3xl">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-xl font-semibold">{title}</h1>
-          <div className="flex items-center gap-2">
-            {!isTrash && !isArchive && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    <ArrowUpDown className="h-4 w-4 mr-1" />
-                    {sortBy === "title" ? t("sortTitle") : sortBy === "createdAt" ? t("sortCreated") : t("sortUpdated")}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setSortBy("updatedAt")}>
-                    {t("sortUpdated")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSortBy("createdAt")}>
-                    {t("sortCreated")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSortBy("title")}>
-                    {t("sortTitle")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-            {!isTrash && !isArchive && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button>
-                    <Plus className="h-4 w-4 mr-2" />
-                    {t("newItem")}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.LOGIN); setNewDialogOpen(true); }}>
-                    <KeyRound className="h-4 w-4 mr-2" />
-                    {t("newPassword")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setNewDialogOpen(true); }}>
-                    <FileText className="h-4 w-4 mr-2" />
-                    {t("newSecureNote")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setNewDialogOpen(true); }}>
-                    <CreditCard className="h-4 w-4 mr-2" />
-                    {t("newCreditCard")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.IDENTITY); setNewDialogOpen(true); }}>
-                    <IdCard className="h-4 w-4 mr-2" />
-                    {t("newIdentity")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.PASSKEY); setNewDialogOpen(true); }}>
-                    <Fingerprint className="h-4 w-4 mr-2" />
-                    {t("newPasskey")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-4">
+        <div className="mb-4 rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+            <div className="flex items-center gap-2">
+              {!isTrash && !isArchive && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <ArrowUpDown className="h-4 w-4 mr-1" />
+                      {sortBy === "title" ? t("sortTitle") : sortBy === "createdAt" ? t("sortCreated") : t("sortUpdated")}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setSortBy("updatedAt")}>
+                      {t("sortUpdated")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSortBy("createdAt")}>
+                      {t("sortCreated")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSortBy("title")}>
+                      {t("sortTitle")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              {!isTrash && !isArchive && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button>
+                      <Plus className="h-4 w-4 mr-2" />
+                      {t("newItem")}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.LOGIN); setNewDialogOpen(true); }}>
+                      <KeyRound className="h-4 w-4 mr-2" />
+                      {t("newPassword")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setNewDialogOpen(true); }}>
+                      <FileText className="h-4 w-4 mr-2" />
+                      {t("newSecureNote")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setNewDialogOpen(true); }}>
+                      <CreditCard className="h-4 w-4 mr-2" />
+                      {t("newCreditCard")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.IDENTITY); setNewDialogOpen(true); }}>
+                      <IdCard className="h-4 w-4 mr-2" />
+                      {t("newIdentity")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.PASSKEY); setNewDialogOpen(true); }}>
+                      <Fingerprint className="h-4 w-4 mr-2" />
+                      {t("newPasskey")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="mb-4">
+        <div className="mb-4 rounded-xl border bg-card/80 p-3">
           <SearchBar ref={searchRef} value={searchQuery} onChange={setSearchQuery} />
         </div>
 
-        {isTrash ? (
-          <>
-            <TrashList refreshKey={refreshKey} />
-            <OrgTrashList refreshKey={refreshKey} />
-          </>
-        ) : (
-          <>
-            <PasswordList
-              searchQuery={searchQuery}
-              tagId={tagId ?? null}
-              entryType={entryType}
-              refreshKey={refreshKey}
-              favoritesOnly={isFavorites}
-              archivedOnly={isArchive}
-              sortBy={sortBy}
-              onDataChange={handleDataChange}
-            />
-            {isFavorites && (
-              <OrgFavoritesList
+        <div className="space-y-4">
+          {isTrash ? (
+            <>
+              <TrashList refreshKey={refreshKey} />
+              <OrgTrashList refreshKey={refreshKey} />
+            </>
+          ) : (
+            <>
+              <PasswordList
                 searchQuery={searchQuery}
+                tagId={tagId ?? null}
+                entryType={entryType}
                 refreshKey={refreshKey}
+                favoritesOnly={isFavorites}
+                archivedOnly={isArchive}
+                sortBy={sortBy}
+                onDataChange={handleDataChange}
               />
-            )}
-            {isArchive && (
-              <OrgArchivedList
-                searchQuery={searchQuery}
-                refreshKey={refreshKey}
-              />
-            )}
-          </>
-        )}
+              {isFavorites && (
+                <OrgFavoritesList
+                  searchQuery={searchQuery}
+                  refreshKey={refreshKey}
+                />
+              )}
+              {isArchive && (
+                <OrgArchivedList
+                  searchQuery={searchQuery}
+                  refreshKey={refreshKey}
+                />
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       <PasswordNewDialog
@@ -244,11 +248,11 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
       />
 
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{ts("title")}</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+          <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 rounded-lg border bg-muted/20 p-4 text-sm">
             {shortcuts.map(([keys, label]) => (
               <Fragment key={keys}>
                 <kbd className="inline-flex items-center justify-end gap-0.5 font-mono text-xs text-muted-foreground">

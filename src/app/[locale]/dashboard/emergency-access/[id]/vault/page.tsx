@@ -175,121 +175,129 @@ export default function EmergencyVaultPage() {
 
   if (vaultStatus !== VAULT_STATUS.UNLOCKED) {
     return (
-      <div className="mx-auto flex max-w-md items-center justify-center p-4 pt-20">
-        <Card className="w-full text-center">
+      <div className="flex-1 overflow-auto p-4 md:p-6">
+        <div className="mx-auto flex max-w-md items-center justify-center pt-16">
+          <Card className="w-full rounded-xl border text-center">
           <CardContent className="flex items-center justify-center gap-2 py-8">
             <Lock className="h-5 w-5" />
             <span>{t("vaultUnlockRequired")}</span>
           </CardContent>
         </Card>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-4">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => router.push("/dashboard/emergency-access")}>
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-bold">
-            <KeyRound className="h-5 w-5" />
-            {t("readOnlyVault")}
-          </h1>
-          {ownerName && (
-            <p className="text-sm text-muted-foreground">
-              {t("readOnlyVaultDesc", { ownerName })}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {loading && (
-        <div className="py-8 text-center text-muted-foreground">...</div>
-      )}
-
-      {error && (
-        <div className="rounded-lg bg-red-500/10 p-4 text-center text-red-700 dark:text-red-400">
-          {error}
-        </div>
-      )}
-
-      {!loading && !error && entries.length === 0 && (
-        <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
-          {t("noEntries")}
-        </div>
-      )}
-
-      <div className="space-y-2">
-        {entries.map((entry) => (
-          <Card key={entry.id}>
-            <CardHeader className="py-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{entry.title}</span>
-                  <Badge variant="outline" className="text-xs">
-                    {entry.entryType}
-                  </Badge>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-1 py-2 text-sm">
-              {entry.username && (
-                <div className="flex items-center gap-2">
-                  <span className="w-20 text-muted-foreground">{t("username")}:</span>
-                  <button
-                    className="cursor-pointer font-mono hover:underline"
-                    onClick={() => {
-                      navigator.clipboard.writeText(entry.username!);
-                      toast.success(t("copied"));
-                    }}
-                  >
-                    {entry.username}
-                  </button>
-                </div>
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-6">
+        <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" onClick={() => router.push("/dashboard/emergency-access")}>
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <div>
+              <h1 className="flex items-center gap-2 text-2xl font-bold">
+                <KeyRound className="h-5 w-5" />
+                {t("readOnlyVault")}
+              </h1>
+              {ownerName && (
+                <p className="text-sm text-muted-foreground">
+                  {t("readOnlyVaultDesc", { ownerName })}
+                </p>
               )}
-              {entry.password && (
-                <div className="flex items-center gap-2">
-                  <span className="w-20 text-muted-foreground">{t("password")}:</span>
-                  <button
-                    className="cursor-pointer font-mono hover:underline"
-                    onClick={() => {
-                      navigator.clipboard.writeText(entry.password!);
-                      toast.success(t("copied"));
-                    }}
-                  >
-                    {visiblePasswords.has(entry.id) ? entry.password : "••••••••"}
-                  </button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => togglePassword(entry.id)}
-                  >
-                    {visiblePasswords.has(entry.id) ? (
-                      <EyeOff className="h-3 w-3" />
-                    ) : (
-                      <Eye className="h-3 w-3" />
-                    )}
-                  </Button>
-                </div>
-              )}
-              {entry.url && (
-                <div className="flex items-center gap-2">
-                  <span className="w-20 text-muted-foreground">URL:</span>
-                  <span className="truncate font-mono text-xs">{entry.url}</span>
-                </div>
-              )}
-              {entry.notes && (
-                <div className="flex gap-2">
-                  <span className="w-20 text-muted-foreground">{t("notes")}:</span>
-                  <span className="whitespace-pre-wrap text-xs">{entry.notes}</span>
-                </div>
-              )}
-            </CardContent>
+            </div>
+          </div>
+        </Card>
+
+        {loading && (
+          <Card className="rounded-xl border bg-card/80 p-10">
+            <div className="py-8 text-center text-muted-foreground">...</div>
           </Card>
-        ))}
+        )}
+
+        {error && (
+          <Card className="rounded-xl border border-red-500/40 bg-red-500/5 p-4 text-center text-red-700 dark:text-red-400">
+            {error}
+          </Card>
+        )}
+
+        {!loading && !error && entries.length === 0 && (
+          <Card className="rounded-xl border border-dashed p-8 text-center text-muted-foreground">
+            {t("noEntries")}
+          </Card>
+        )}
+
+        <div className="space-y-2">
+          {entries.map((entry) => (
+            <Card key={entry.id} className="rounded-xl border bg-card/80">
+              <CardHeader className="py-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{entry.title}</span>
+                    <Badge variant="outline" className="text-xs">
+                      {entry.entryType}
+                    </Badge>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-1 py-2 text-sm">
+                {entry.username && (
+                  <div className="flex items-center gap-2">
+                    <span className="w-20 text-muted-foreground">{t("username")}:</span>
+                    <button
+                      className="cursor-pointer font-mono hover:underline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(entry.username!);
+                        toast.success(t("copied"));
+                      }}
+                    >
+                      {entry.username}
+                    </button>
+                  </div>
+                )}
+                {entry.password && (
+                  <div className="flex items-center gap-2">
+                    <span className="w-20 text-muted-foreground">{t("password")}:</span>
+                    <button
+                      className="cursor-pointer font-mono hover:underline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(entry.password!);
+                        toast.success(t("copied"));
+                      }}
+                    >
+                      {visiblePasswords.has(entry.id) ? entry.password : "••••••••"}
+                    </button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => togglePassword(entry.id)}
+                    >
+                      {visiblePasswords.has(entry.id) ? (
+                        <EyeOff className="h-3 w-3" />
+                      ) : (
+                        <Eye className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </div>
+                )}
+                {entry.url && (
+                  <div className="flex items-center gap-2">
+                    <span className="w-20 text-muted-foreground">URL:</span>
+                    <span className="truncate font-mono text-xs">{entry.url}</span>
+                  </div>
+                )}
+                {entry.notes && (
+                  <div className="flex gap-2">
+                    <span className="w-20 text-muted-foreground">{t("notes")}:</span>
+                    <span className="whitespace-pre-wrap text-xs">{entry.notes}</span>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
     </div>
   );

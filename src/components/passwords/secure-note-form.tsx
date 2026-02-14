@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
@@ -11,7 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
-import { Loader2, ArrowLeft } from "lucide-react";
+import { ArrowLeft, Tags } from "lucide-react";
+import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { toast } from "sonner";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 
@@ -29,6 +30,7 @@ interface SecureNoteFormProps {
 
 export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }: SecureNoteFormProps) {
   const t = useTranslations("SecureNoteForm");
+  const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
   const router = useRouter();
   const { encryptionKey, userId } = useVault();
@@ -39,6 +41,28 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
   const [selectedTags, setSelectedTags] = useState<TagData[]>(
     initialData?.tags ?? []
   );
+
+  const baselineSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        title: initialData?.title ?? "",
+        content: initialData?.content ?? "",
+        selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
+      }),
+    [initialData]
+  );
+
+  const currentSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        title,
+        content,
+        selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
+      }),
+    [title, content, selectedTags]
+  );
+
+  const hasChanges = currentSnapshot !== baselineSnapshot;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,55 +144,57 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
   };
 
   const formContent = (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="title">{t("title")}</Label>
-        <Input
-          id="title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder={t("titlePlaceholder")}
-          required
-        />
-      </div>
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <EntryPrimaryCard>
+        <div className="space-y-2">
+          <Label htmlFor="title">{t("title")}</Label>
+          <Input
+            id="title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={t("titlePlaceholder")}
+            required
+          />
+        </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="content">{t("content")}</Label>
-        <textarea
-          id="content"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder={t("contentPlaceholder")}
-          rows={10}
-          maxLength={50000}
-          required
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
-      </div>
+        <div className="space-y-2">
+          <Label htmlFor="content">{t("content")}</Label>
+          <textarea
+            id="content"
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder={t("contentPlaceholder")}
+            rows={10}
+            maxLength={50000}
+            required
+            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </div>
+      </EntryPrimaryCard>
 
-      <div className="space-y-2">
-        <Label>{t("tags")}</Label>
+      <EntrySectionCard>
+        <div className="space-y-1">
+          <Label className="flex items-center gap-2">
+            <Tags className="h-3.5 w-3.5" />
+            {t("tags")}
+          </Label>
+          <p className="text-xs text-muted-foreground">{tPw("tagsHint")}</p>
+        </div>
         <TagInput
           selectedTags={selectedTags}
           onChange={setSelectedTags}
         />
-      </div>
+      </EntrySectionCard>
 
-      <div className="flex gap-2 pt-4">
-        <Button type="submit" disabled={submitting}>
-          {submitting && (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          )}
-          {mode === "create" ? tc("save") : tc("update")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={handleCancel}
-        >
-          {tc("cancel")}
-        </Button>
-      </div>
+      <EntryActionBar
+        hasChanges={hasChanges}
+        submitting={submitting}
+        saveLabel={mode === "create" ? tc("save") : tc("update")}
+        cancelLabel={tc("cancel")}
+        statusUnsavedLabel={tPw("statusUnsaved")}
+        statusSavedLabel={tPw("statusSaved")}
+        onCancel={handleCancel}
+      />
     </form>
   );
 
@@ -177,7 +203,8 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-4 md:p-6">
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-4">
       <Button
         variant="ghost"
         className="mb-4 gap-2"
@@ -187,7 +214,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
         {tc("back")}
       </Button>
 
-      <Card>
+      <Card className="rounded-xl border">
         <CardHeader>
           <CardTitle>
             {mode === "create" ? t("newNote") : t("editNote")}
@@ -197,6 +224,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
           {formContent}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

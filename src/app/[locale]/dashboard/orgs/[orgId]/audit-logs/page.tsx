@@ -244,104 +244,113 @@ export default function OrgAuditLogsPage({
         : t("actionsSelected", { count: selectedCount });
 
   return (
-    <div className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
-      <div className="flex items-center gap-3">
-        <ScrollText className="h-6 w-6" />
-        <div>
-          <h1 className="text-2xl font-bold">{t("orgAuditLog", { orgName: orgName || "..." })}</h1>
-          <p className="text-sm text-muted-foreground">{t("orgAuditLogDesc", { orgName: orgName || "..." })}</p>
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-6">
+      <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
+        <div className="flex items-center gap-3">
+          <ScrollText className="h-6 w-6" />
+          <div>
+            <h1 className="text-2xl font-bold">{t("orgAuditLog", { orgName: orgName || "..." })}</h1>
+            <p className="text-sm text-muted-foreground">{t("orgAuditLogDesc", { orgName: orgName || "..." })}</p>
+          </div>
         </div>
-      </div>
+      </Card>
 
-      <div className="flex flex-wrap gap-3 items-end">
-        <div className="space-y-1">
-          <Label className="text-xs">{t("action")}</Label>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="w-[240px] justify-between">
-                <span className="truncate">{actionSummary}</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-[280px] p-2" align="start">
-              <div className="px-2 pb-2">
-                <Input
-                  placeholder={t("actionSearch")}
-                  value={actionSearch}
-                  onChange={(e) => setActionSearch(e.target.value)}
-                />
-              </div>
-              <DropdownMenuCheckboxItem
-                checked={selectedActions.size === 0}
-                onCheckedChange={() => clearActions()}
-              >
-                {t("allActions")}
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuSeparator />
-              {ACTION_GROUPS.map((group) => {
-                const actions = filteredActions(group.actions);
-                if (actions.length === 0) return null;
-                const allSelected = group.actions.every((a) => selectedActions.has(a));
-                return (
-                  <div key={group.value}>
-                    <DropdownMenuLabel className="px-2 pt-2 text-xs">
-                      {t(group.label as never)}
-                    </DropdownMenuLabel>
-                    <DropdownMenuCheckboxItem
-                      checked={allSelected}
-                      onCheckedChange={(checked) => setGroupSelection(group.actions, !!checked)}
-                      className="font-medium"
-                    >
-                      {t("selectGroup")}
-                    </DropdownMenuCheckboxItem>
-                    {actions.map((action) => (
+      <Card className="rounded-xl border bg-card/80 p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">{t("action")}</Label>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="w-[240px] justify-between">
+                  <span className="truncate">{actionSummary}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-[280px] p-2" align="start">
+                <div className="px-2 pb-2">
+                  <Input
+                    placeholder={t("actionSearch")}
+                    value={actionSearch}
+                    onChange={(e) => setActionSearch(e.target.value)}
+                  />
+                </div>
+                <DropdownMenuCheckboxItem
+                  checked={selectedActions.size === 0}
+                  onCheckedChange={() => clearActions()}
+                >
+                  {t("allActions")}
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuSeparator />
+                {ACTION_GROUPS.map((group) => {
+                  const actions = filteredActions(group.actions);
+                  if (actions.length === 0) return null;
+                  const allSelected = group.actions.every((a) => selectedActions.has(a));
+                  return (
+                    <div key={group.value}>
+                      <DropdownMenuLabel className="px-2 pt-2 text-xs">
+                        {t(group.label as never)}
+                      </DropdownMenuLabel>
                       <DropdownMenuCheckboxItem
-                        key={action}
-                        checked={isActionSelected(action)}
-                        onCheckedChange={(checked) => toggleAction(action, !!checked)}
-                        className="pl-6"
+                        checked={allSelected}
+                        onCheckedChange={(checked) => setGroupSelection(group.actions, !!checked)}
+                        className="font-medium"
                       >
-                        {actionLabel(action)}
+                        {t("selectGroup")}
                       </DropdownMenuCheckboxItem>
-                    ))}
-                  </div>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                      {actions.map((action) => (
+                        <DropdownMenuCheckboxItem
+                          key={action}
+                          checked={isActionSelected(action)}
+                          onCheckedChange={(checked) => toggleAction(action, !!checked)}
+                          className="pl-6"
+                        >
+                          {actionLabel(action)}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                    </div>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("dateFrom")}</Label>
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="w-[160px]"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("dateTo")}</Label>
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="w-[160px]"
+            />
+          </div>
         </div>
-        <div className="space-y-1">
-          <Label className="text-xs">{t("dateFrom")}</Label>
-          <Input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="w-[160px]"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">{t("dateTo")}</Label>
-          <Input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="w-[160px]"
-          />
-        </div>
-      </div>
+      </Card>
 
       {loading ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
+        <Card className="rounded-xl border bg-card/80 p-10">
+          <div className="flex justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        </Card>
       ) : logs.length === 0 ? (
-        <p className="text-center text-muted-foreground py-12">{t("noLogs")}</p>
+        <Card className="rounded-xl border bg-card/80 p-10">
+          <p className="text-center text-muted-foreground">{t("noLogs")}</p>
+        </Card>
       ) : (
         <>
-          <Card className="divide-y">
+          <Card className="rounded-xl border bg-card/80 divide-y">
             {logs.map((log) => {
               const targetLabel = getTargetLabel(log);
               return (
-                <div key={log.id} className="px-4 py-2 flex items-start gap-3">
+                <div key={log.id} className="px-4 py-3 flex items-start gap-3 transition-colors hover:bg-muted/30">
                   <div className="shrink-0 text-muted-foreground mt-0.5">
                     {ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
                   </div>
@@ -390,6 +399,7 @@ export default function OrgAuditLogsPage({
           )}
         </>
       )}
+      </div>
     </div>
   );
 }

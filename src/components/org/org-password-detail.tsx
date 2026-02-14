@@ -136,7 +136,7 @@ export function OrgPasswordDetail({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-h-[85vh] sm:max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{data?.title ?? "..."}</DialogTitle>
           <DialogDescription className="sr-only">
@@ -149,7 +149,7 @@ export function OrgPasswordDetail({
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
         ) : data ? (
-          <div className="space-y-4">
+          <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
             {data.entryType === ENTRY_TYPE.IDENTITY ? (
               <>
                 {/* Full Name */}
@@ -359,7 +359,7 @@ export function OrgPasswordDetail({
                   {t("content")}
                 </p>
                 <div className="flex items-start gap-2">
-                  <p className="flex-1 text-sm whitespace-pre-wrap font-mono rounded-md bg-muted p-3 max-h-96 overflow-y-auto">
+                  <p className="flex-1 max-h-96 overflow-y-auto rounded-lg border bg-muted/30 p-3 text-sm font-mono whitespace-pre-wrap">
                     {data.content}
                   </p>
                   <CopyButton getValue={() => data.content ?? ""} />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -31,12 +31,14 @@ import {
 import {
   Eye,
   EyeOff,
-  Loader2,
   Dices,
   Plus,
   X,
   ShieldCheck,
+  Tags,
+  Rows3,
 } from "lucide-react";
+import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { toast } from "sonner";
 import {
   CARD_BRANDS,
@@ -107,6 +109,7 @@ export function OrgPasswordForm({
   editData,
 }: OrgPasswordFormProps) {
   const t = useTranslations("PasswordForm");
+  const tGen = useTranslations("PasswordGenerator");
   const tn = useTranslations("SecureNoteForm");
   const tcc = useTranslations("CreditCardForm");
   const ti = useTranslations("IdentityForm");
@@ -455,9 +458,155 @@ export function OrgPasswordForm({
     }
   };
 
+  const generatorSummary =
+    generatorSettings.mode === "passphrase"
+      ? `${tGen("modePassphrase")} · ${generatorSettings.passphrase.wordCount}`
+      : `${tGen("modePassword")} · ${generatorSettings.length}`;
+
+  const baselineSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        entryType: effectiveEntryType,
+        title: editData?.title ?? "",
+        notes: editData?.notes ?? "",
+        selectedTagIds: (editData?.tags ?? []).map((tag) => tag.id).sort(),
+        login: isNote || isCreditCard || isIdentity || isPasskey
+          ? null
+          : {
+              username: editData?.username ?? "",
+              password: editData?.password ?? "",
+              url: editData?.url ?? "",
+              customFields: editData?.customFields ?? [],
+              totp: editData?.totp ?? null,
+            },
+        secureNote: isNote
+          ? {
+              content: editData?.content ?? "",
+            }
+          : null,
+        creditCard: isCreditCard
+          ? {
+              cardholderName: editData?.cardholderName ?? "",
+              cardNumber: formatCardNumber(editData?.cardNumber ?? "", editData?.brand ?? ""),
+              brand: editData?.brand ?? "",
+              expiryMonth: editData?.expiryMonth ?? "",
+              expiryYear: editData?.expiryYear ?? "",
+              cvv: editData?.cvv ?? "",
+            }
+          : null,
+        identity: isIdentity
+          ? {
+              fullName: editData?.fullName ?? "",
+              address: editData?.address ?? "",
+              phone: editData?.phone ?? "",
+              email: editData?.email ?? "",
+              dateOfBirth: editData?.dateOfBirth ?? "",
+              nationality: editData?.nationality ?? "",
+              idNumber: editData?.idNumber ?? "",
+              issueDate: editData?.issueDate ?? "",
+              expiryDate: editData?.expiryDate ?? "",
+            }
+          : null,
+        passkey: isPasskey
+          ? {
+              relyingPartyId: editData?.relyingPartyId ?? "",
+              relyingPartyName: editData?.relyingPartyName ?? "",
+              username: editData?.username ?? "",
+              credentialId: editData?.credentialId ?? "",
+              creationDate: editData?.creationDate ?? "",
+              deviceInfo: editData?.deviceInfo ?? "",
+            }
+          : null,
+      }),
+    [editData, effectiveEntryType, isNote, isCreditCard, isIdentity, isPasskey]
+  );
+
+  const currentSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        entryType: effectiveEntryType,
+        title,
+        notes,
+        selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
+        login: isNote || isCreditCard || isIdentity || isPasskey
+          ? null
+          : { username, password, url, customFields, totp },
+        secureNote: isNote ? { content } : null,
+        creditCard: isCreditCard
+          ? { cardholderName, cardNumber, brand, expiryMonth, expiryYear, cvv }
+          : null,
+        identity: isIdentity
+          ? {
+              fullName,
+              address,
+              phone,
+              email,
+              dateOfBirth,
+              nationality,
+              idNumber,
+              issueDate,
+              expiryDate,
+            }
+          : null,
+        passkey: isPasskey
+          ? {
+              relyingPartyId,
+              relyingPartyName,
+              username,
+              credentialId,
+              creationDate,
+              deviceInfo,
+            }
+          : null,
+      }),
+    [
+      effectiveEntryType,
+      title,
+      notes,
+      selectedTags,
+      isNote,
+      isCreditCard,
+      isIdentity,
+      isPasskey,
+      username,
+      password,
+      url,
+      customFields,
+      totp,
+      content,
+      cardholderName,
+      cardNumber,
+      brand,
+      expiryMonth,
+      expiryYear,
+      cvv,
+      fullName,
+      address,
+      phone,
+      email,
+      dateOfBirth,
+      nationality,
+      idNumber,
+      issueDate,
+      expiryDate,
+      relyingPartyId,
+      relyingPartyName,
+      credentialId,
+      creationDate,
+      deviceInfo,
+    ]
+  );
+
+  const hasChanges = currentSnapshot !== baselineSnapshot;
+
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void handleSubmit();
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {isPasskey
@@ -483,7 +632,8 @@ export function OrgPasswordForm({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <form onSubmit={handleFormSubmit} className="space-y-5">
+          <EntryPrimaryCard>
           {/* Title */}
           <div className="space-y-2">
             <Label>{isPasskey ? tpk("title") : isIdentity ? ti("title") : isCreditCard ? tcc("title") : isNote ? tn("title") : t("title")}</Label>
@@ -589,14 +739,20 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags */}
-              <div className="space-y-2">
-                <Label>{tpk("tags")}</Label>
+              <EntrySectionCard>
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <Tags className="h-3.5 w-3.5" />
+                    {tpk("tags")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
+                </div>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </div>
+              </EntrySectionCard>
             </>
           ) : isIdentity ? (
             <>
@@ -742,14 +898,20 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags */}
-              <div className="space-y-2">
-                <Label>{ti("tags")}</Label>
+              <EntrySectionCard>
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <Tags className="h-3.5 w-3.5" />
+                    {ti("tags")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
+                </div>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </div>
+              </EntrySectionCard>
             </>
           ) : isCreditCard ? (
             <>
@@ -919,14 +1081,20 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags */}
-              <div className="space-y-2">
-                <Label>{tcc("tags")}</Label>
+              <EntrySectionCard>
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <Tags className="h-3.5 w-3.5" />
+                    {tcc("tags")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
+                </div>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </div>
+              </EntrySectionCard>
             </>
           ) : isNote ? (
             <>
@@ -944,14 +1112,20 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags (org tags) */}
-              <div className="space-y-2">
-                <Label>{tn("tags")}</Label>
+              <EntrySectionCard>
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <Tags className="h-3.5 w-3.5" />
+                    {tn("tags")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
+                </div>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </div>
+              </EntrySectionCard>
             </>
           ) : (
             <>
@@ -967,7 +1141,7 @@ export function OrgPasswordForm({
               </div>
 
               {/* Password with show/hide and generator */}
-              <div className="space-y-2">
+              <div className="space-y-2 rounded-lg border bg-background/70 p-3">
                 <Label>{t("password")}</Label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
@@ -992,17 +1166,21 @@ export function OrgPasswordForm({
                           <Eye className="h-4 w-4" />
                         )}
                       </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => setShowGenerator(!showGenerator)}
-                      >
-                        <Dices className="h-4 w-4" />
-                      </Button>
                     </div>
                   </div>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">{generatorSummary}</p>
+                  <Button
+                    type="button"
+                    variant={showGenerator ? "secondary" : "outline"}
+                    size="sm"
+                    className="h-7 gap-1.5 text-xs"
+                    onClick={() => setShowGenerator((v) => !v)}
+                  >
+                    <Dices className="h-3.5 w-3.5" />
+                    {showGenerator ? t("closeGenerator") : t("openGenerator")}
+                  </Button>
                 </div>
                 <PasswordGenerator
                   open={showGenerator}
@@ -1039,19 +1217,33 @@ export function OrgPasswordForm({
               </div>
 
               {/* Tags (org tags) */}
-              <div className="space-y-2">
-                <Label>{t("tags")}</Label>
+              <EntrySectionCard>
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <Tags className="h-3.5 w-3.5" />
+                    {t("tags")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
+                </div>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </div>
+              </EntrySectionCard>
 
               {/* Custom Fields */}
-              <div className="space-y-2">
+              <EntrySectionCard>
                 <div className="flex items-center justify-between">
-                  <Label>{t("customFields")}</Label>
+                  <div className="space-y-1">
+                    <Label className="flex items-center gap-2">
+                      <Rows3 className="h-3.5 w-3.5" />
+                      {t("customFields")}
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      {t("customFieldsHint")}
+                    </p>
+                  </div>
                   <Button
                     type="button"
                     variant="ghost"
@@ -1071,7 +1263,7 @@ export function OrgPasswordForm({
                 {customFields.map((field, idx) => (
                   <div
                     key={idx}
-                    className="flex items-start gap-2 rounded-md border p-2"
+                    className="flex items-start gap-2 rounded-lg border p-2"
                   >
                     <div className="flex-1 space-y-2">
                       <div className="flex gap-2">
@@ -1142,15 +1334,18 @@ export function OrgPasswordForm({
                     </Button>
                   </div>
                 ))}
-              </div>
+              </EntrySectionCard>
 
               {/* TOTP */}
-              <div className="space-y-2">
+              <EntrySectionCard>
                 <div className="flex items-center justify-between">
-                  <Label className="flex items-center gap-1">
-                    <ShieldCheck className="h-3.5 w-3.5" />
-                    {t("totp")}
-                  </Label>
+                  <div className="space-y-1">
+                    <Label className="flex items-center gap-1">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      {t("totp")}
+                    </Label>
+                    <p className="text-xs text-muted-foreground">{t("totpHint")}</p>
+                  </div>
                   {!showTotpInput && (
                     <Button
                       type="button"
@@ -1172,33 +1367,28 @@ export function OrgPasswordForm({
                     onRemove={() => setShowTotpInput(false)}
                   />
                 )}
-              </div>
+              </EntrySectionCard>
             </>
           )}
-        </div>
+          </EntryPrimaryCard>
 
         {/* Actions */}
-        <div className="flex gap-2 pt-2">
-          <Button
-            onClick={handleSubmit}
-            disabled={
-              saving ||
-              !title.trim() ||
-              (isPasskey && !relyingPartyId.trim()) ||
-              (!isNote && !isCreditCard && !isIdentity && !isPasskey && !password) ||
-              (isCreditCard && !cardNumberValid)
-            }
-          >
-            {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {isEdit ? tc("update") : tc("save")}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => handleOpenChange(false)}
-          >
-            {tc("cancel")}
-          </Button>
-        </div>
+        <EntryActionBar
+          hasChanges={hasChanges}
+          submitting={saving}
+          submitDisabled={
+            !title.trim() ||
+            (isPasskey && !relyingPartyId.trim()) ||
+            (!isNote && !isCreditCard && !isIdentity && !isPasskey && !password) ||
+            (isCreditCard && !cardNumberValid)
+          }
+          saveLabel={isEdit ? tc("update") : tc("save")}
+          cancelLabel={tc("cancel")}
+          statusUnsavedLabel={t("statusUnsaved")}
+          statusSavedLabel={t("statusSaved")}
+          onCancel={() => handleOpenChange(false)}
+        />
+        </form>
 
         {/* Attachments (edit mode only) */}
         {isEdit && editData && (

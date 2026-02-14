@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
@@ -12,7 +12,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
-import { Loader2, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, Tags } from "lucide-react";
+import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { toast } from "sonner";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 
@@ -36,6 +37,7 @@ interface PasskeyFormProps {
 
 export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: PasskeyFormProps) {
   const t = useTranslations("PasskeyForm");
+  const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
   const router = useRouter();
   const { encryptionKey, userId } = useVault();
@@ -53,6 +55,50 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
   const [selectedTags, setSelectedTags] = useState<TagData[]>(
     initialData?.tags ?? []
   );
+
+  const baselineSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        title: initialData?.title ?? "",
+        relyingPartyId: initialData?.relyingPartyId ?? "",
+        relyingPartyName: initialData?.relyingPartyName ?? "",
+        username: initialData?.username ?? "",
+        credentialId: initialData?.credentialId ?? "",
+        creationDate: initialData?.creationDate ?? "",
+        deviceInfo: initialData?.deviceInfo ?? "",
+        notes: initialData?.notes ?? "",
+        selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
+      }),
+    [initialData]
+  );
+
+  const currentSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        title,
+        relyingPartyId,
+        relyingPartyName,
+        username,
+        credentialId,
+        creationDate,
+        deviceInfo,
+        notes,
+        selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
+      }),
+    [
+      title,
+      relyingPartyId,
+      relyingPartyName,
+      username,
+      credentialId,
+      creationDate,
+      deviceInfo,
+      notes,
+      selectedTags,
+    ]
+  );
+
+  const hasChanges = currentSnapshot !== baselineSnapshot;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,7 +185,8 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
   };
 
   const formContent = (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <EntryPrimaryCard>
       <div className="space-y-2">
         <Label htmlFor="title">{t("title")}</Label>
         <Input
@@ -245,30 +292,31 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
           rows={3}
         />
       </div>
+      </EntryPrimaryCard>
 
-      <div className="space-y-2">
-        <Label>{t("tags")}</Label>
+      <EntrySectionCard>
+        <div className="space-y-1">
+          <Label className="flex items-center gap-2">
+            <Tags className="h-3.5 w-3.5" />
+            {t("tags")}
+          </Label>
+          <p className="text-xs text-muted-foreground">{tPw("tagsHint")}</p>
+        </div>
         <TagInput
           selectedTags={selectedTags}
           onChange={setSelectedTags}
         />
-      </div>
+      </EntrySectionCard>
 
-      <div className="flex gap-2 pt-4">
-        <Button type="submit" disabled={submitting}>
-          {submitting && (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          )}
-          {mode === "create" ? tc("save") : tc("update")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={handleCancel}
-        >
-          {tc("cancel")}
-        </Button>
-      </div>
+      <EntryActionBar
+        hasChanges={hasChanges}
+        submitting={submitting}
+        saveLabel={mode === "create" ? tc("save") : tc("update")}
+        cancelLabel={tc("cancel")}
+        statusUnsavedLabel={tPw("statusUnsaved")}
+        statusSavedLabel={tPw("statusSaved")}
+        onCancel={handleCancel}
+      />
     </form>
   );
 
@@ -277,7 +325,8 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-4 md:p-6">
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-4">
       <Button
         variant="ghost"
         className="mb-4 gap-2"
@@ -287,7 +336,7 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
         {tc("back")}
       </Button>
 
-      <Card>
+      <Card className="rounded-xl border">
         <CardHeader>
           <CardTitle>
             {mode === "create" ? t("newPasskey") : t("editPasskey")}
@@ -297,6 +346,7 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
           {formContent}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

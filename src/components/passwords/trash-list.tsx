@@ -141,18 +141,22 @@ export function TrashList({ refreshKey }: TrashListProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
+      <Card className="rounded-xl border bg-card/80 p-10">
+        <div className="flex items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      </Card>
     );
   }
 
   if (entries.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-center">
-        <Trash2 className="h-12 w-12 text-muted-foreground/50 mb-4" />
-        <p className="text-muted-foreground">{tl("noTrash")}</p>
-      </div>
+      <Card className="rounded-xl border bg-card/80 p-10">
+        <div className="flex flex-col items-center justify-center text-center">
+          <Trash2 className="mb-4 h-12 w-12 text-muted-foreground/50" />
+          <p className="text-muted-foreground">{tl("noTrash")}</p>
+        </div>
+      </Card>
     );
   }
 
@@ -180,9 +184,9 @@ export function TrashList({ refreshKey }: TrashListProps) {
         </Dialog>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2 rounded-xl border bg-card/80 p-2">
         {entries.map((entry) => (
-          <Card key={entry.id}>
+          <Card key={entry.id} className="rounded-xl border bg-background/80 transition-colors hover:bg-muted/30">
             <CardContent className="flex items-center gap-4 p-4">
               {entry.entryType === ENTRY_TYPE.IDENTITY ? (
                 <IdCard className="h-4 w-4 shrink-0 text-muted-foreground" />
