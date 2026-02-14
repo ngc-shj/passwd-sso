@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +33,7 @@ import {
 import { toast } from "sonner";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH, apiPath } from "@/lib/constants";
+import { formatDateTime } from "@/lib/format-datetime";
 
 interface ShareLink {
   id: string;
@@ -64,6 +65,7 @@ export function ShareDialog({
 }: ShareDialogProps) {
   const t = useTranslations("Share");
   const tApi = useTranslations("ApiErrors");
+  const locale = useLocale();
   const [expiresIn, setExpiresIn] = useState<string>("1d");
   const [maxViews, setMaxViews] = useState<string>("");
   const [creating, setCreating] = useState(false);
@@ -302,7 +304,7 @@ export function ShareDialog({
                   <div className="flex items-center justify-between p-3">
                     <div className="space-y-1">
                       <p className="text-muted-foreground leading-none">
-                        {new Date(link.createdAt).toLocaleString()}
+                        {formatDateTime(link.createdAt, locale)}
                       </p>
                       <p className="text-muted-foreground">
                         {link.maxViews
@@ -373,7 +375,7 @@ export function ShareDialog({
                                 className="flex items-center justify-between text-muted-foreground py-0.5"
                               >
                                 <span>
-                                  {new Date(log.createdAt).toLocaleString()}
+                                  {formatDateTime(log.createdAt, locale)}
                                 </span>
                                 <span className="font-mono">
                                   {log.ip ?? "-"}

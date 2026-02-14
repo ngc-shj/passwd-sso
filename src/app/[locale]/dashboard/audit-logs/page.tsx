@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -49,6 +49,7 @@ import {
   AUDIT_TARGET_TYPE,
   type AuditActionValue,
 } from "@/lib/constants";
+import { formatDateTime } from "@/lib/format-datetime";
 
 interface AuditLogItem {
   id: string;
@@ -115,6 +116,7 @@ const ACTION_GROUPS = [
 
 export default function AuditLogsPage() {
   const t = useTranslations("AuditLog");
+  const locale = useLocale();
   const { data: session } = useSession();
   const { encryptionKey } = useVault();
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
@@ -206,7 +208,7 @@ export default function AuditLogsPage() {
     setLoadingMore(false);
   };
 
-  const formatDate = (iso: string) => new Date(iso).toLocaleString();
+  const formatDate = (iso: string) => formatDateTime(iso, locale);
   const formatUser = (user?: { name: string | null; email: string | null } | null) => {
     if (!user) return null;
     const name = user.name?.trim();

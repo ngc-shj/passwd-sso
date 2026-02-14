@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -40,6 +40,7 @@ import {
   apiPath,
   type AuditActionValue,
 } from "@/lib/constants";
+import { formatDateTime } from "@/lib/format-datetime";
 
 interface OrgAuditLogItem {
   id: string;
@@ -88,6 +89,7 @@ export default function OrgAuditLogsPage({
 }) {
   const { orgId } = use(params);
   const t = useTranslations("AuditLog");
+  const locale = useLocale();
   const [orgName, setOrgName] = useState<string>("");
   const [logs, setLogs] = useState<OrgAuditLogItem[]>([]);
   const [entryNames, setEntryNames] = useState<Record<string, string>>({});
@@ -159,7 +161,7 @@ export default function OrgAuditLogsPage({
     setLoadingMore(false);
   };
 
-  const formatDate = (iso: string) => new Date(iso).toLocaleString();
+  const formatDate = (iso: string) => formatDateTime(iso, locale);
 
   const getTargetLabel = (log: OrgAuditLogItem): string | null => {
     const meta = log.metadata;
