@@ -169,9 +169,7 @@ async function attemptTokenRefresh(): Promise<void> {
   if (Date.now() >= tokenExpiresAt) return;
 
   try {
-    const { serverUrl } = await chrome.storage.local.get({
-      serverUrl: "https://localhost:3000",
-    });
+    const { serverUrl } = await getSettings();
     let origin: string;
     try {
       origin = new URL(serverUrl).origin;
@@ -237,12 +235,12 @@ async function shouldSuppressInlineMatches(url: string): Promise<boolean> {
   } catch {
     return false;
   }
-  if (pageUrl.origin !== serverOrigin) return false;
+  if (pageUrl.origin !== serverOrigin) {
+    return false;
+  }
 
-  // Avoid noisy inline suggestions inside passwd-sso application pages.
-  return /^\/(?:[a-z]{2}(?:-[A-Z]{2})?)?\/?(dashboard|auth)(\/|$)/.test(
-    pageUrl.pathname,
-  );
+  // Suppress inline suggestions on the passwd-sso app origin.
+  return true;
 }
 
 // Hydrate on SW startup
@@ -335,9 +333,7 @@ async function swFetch(path: string): Promise<Response> {
   if (!currentToken) {
     throw new Error("NO_TOKEN");
   }
-  const { serverUrl } = await chrome.storage.local.get({
-    serverUrl: "https://localhost:3000",
-  });
+  const { serverUrl } = await getSettings();
   let origin: string;
   try {
     origin = new URL(serverUrl).origin;
@@ -943,6 +939,16 @@ async function handleMessage(
     }
 
     case "GET_MATCHES_FOR_URL": {
+      const effectiveUrl = message.topUrl ?? message.url;
+      if (await shouldSuppressInlineMatches(effectiveUrl)) {
+        sendResponse({
+          type: "GET_MATCHES_FOR_URL",
+          entries: [],
+          vaultLocked: false,
+          suppressInline: true,
+        });
+        return;
+      }
       if (!encryptionKey || !currentUserId || !currentToken) {
         sendResponse({
           type: "GET_MATCHES_FOR_URL",
@@ -954,16 +960,6 @@ async function handleMessage(
       }
 
       try {
-        const effectiveUrl = message.topUrl ?? message.url;
-        if (await shouldSuppressInlineMatches(effectiveUrl)) {
-          sendResponse({
-            type: "GET_MATCHES_FOR_URL",
-            entries: [],
-            vaultLocked: false,
-            suppressInline: true,
-          });
-          return;
-        }
         const tabHost = extractHost(effectiveUrl);
         if (!tabHost) {
           sendResponse({

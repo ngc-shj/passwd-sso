@@ -526,7 +526,7 @@ describe("background message flow", () => {
     });
   });
 
-  it("suppresses inline matches on passwd-sso app pages", async () => {
+  it("suppresses inline matches on passwd-sso origin", async () => {
     cryptoMocks.decryptData.mockResolvedValueOnce(
       JSON.stringify({
         title: "Local entry",
@@ -544,6 +544,20 @@ describe("background message flow", () => {
 
     const res = await sendMessage({
       type: "GET_MATCHES_FOR_URL",
+      url: "https://localhost:3000/ja/passwords/new",
+    });
+
+    expect(res).toEqual({
+      type: "GET_MATCHES_FOR_URL",
+      entries: [],
+      vaultLocked: false,
+      suppressInline: true,
+    });
+  });
+
+  it("suppresses inline matches on passwd-sso origin even when vault is locked", async () => {
+    const res = await sendMessage({
+      type: "GET_MATCHES_FOR_URL",
       url: "https://localhost:3000/ja/dashboard",
     });
 
@@ -555,7 +569,7 @@ describe("background message flow", () => {
     });
   });
 
-  it("does not suppress inline matches when origin differs from serverUrl", async () => {
+  it("does not suppress inline matches when scheme differs from serverUrl", async () => {
     await sendMessage({
       type: "SET_TOKEN",
       token: "t",
