@@ -42,6 +42,8 @@ export function App() {
   const [state, setState] = useState<AppState>("loading");
   const [tabUrl, setTabUrl] = useState<string | null>(null);
   const [hasHostPermission, setHasHostPermission] = useState(true);
+  const containerMinHeight =
+    state === "vault_unlocked" ? "min-h-[480px]" : "min-h-[260px]";
 
   useEffect(() => {
     chrome.tabs
@@ -78,7 +80,7 @@ export function App() {
   }, []);
 
   return (
-    <div className="flex flex-col min-h-[480px] bg-white text-gray-900">
+    <div className={`flex flex-col ${containerMinHeight} bg-white text-gray-900`}>
       <header className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200">
         <h1 className="text-lg font-semibold">{t("popup.title")}</h1>
         <button
