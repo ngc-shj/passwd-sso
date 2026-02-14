@@ -95,6 +95,22 @@ describe("POST /api/share-links", () => {
     expect(status).toBe(400);
   });
 
+  it("returns 400 VALIDATION_ERROR when personal share request omits data", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+
+    const req = createRequest("POST", "http://localhost/api/share-links", {
+      body: {
+        passwordEntryId: VALID_ENTRY_ID,
+        expiresIn: "1d",
+      },
+    });
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
   it("creates a personal share link successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue({

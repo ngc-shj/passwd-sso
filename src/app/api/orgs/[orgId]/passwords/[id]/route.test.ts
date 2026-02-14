@@ -450,6 +450,28 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     expect(json.error).toBe("INVALID_JSON");
   });
 
+  it("returns 400 when updating LOGIN with invalid tagIds", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: ENTRY_TYPE.LOGIN,
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { tagIds: ["tag-1"] },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+
+    expect(res.status).toBe(400);
+  });
+
   it("returns 500 when decrypt fails during PUT", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
