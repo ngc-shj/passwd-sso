@@ -169,6 +169,15 @@ npm run build
 4. Vault をアンロックして、手動補完 / インライン候補を利用
 5. 必要時はポップアップの **Disconnect** で拡張トークンを失効（`DELETE /api/extension/token`）
 
+## インポート用サンプル
+
+- passwd-sso JSON サンプル: [`docs/samples/passwd-sso.json`](docs/samples/passwd-sso.json)
+- passwd-sso CSV サンプル: [`docs/samples/passwd-sso.csv`](docs/samples/passwd-sso.csv)
+
+サンプルを取り込んだあとの画面キャプチャを `docs/images/passwd-sso-import.png` に置くと、以下に表示されます。
+
+![passwd-sso インポート結果](docs/images/passwd-sso-import.png)
+
 ## スクリプト
 
 | コマンド | 説明 |

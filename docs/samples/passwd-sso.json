@@ -1,0 +1,191 @@
+{
+  "format": "passwd-sso",
+  "version": 1,
+  "exportedAt": "2026-02-14T12:00:00.000Z",
+  "entries": [
+    {
+      "type": "login",
+      "name": "AWS Console (IAM)",
+      "login": {
+        "username": "alice@example.com",
+        "password": "ChangeMe-Example-123!",
+        "uris": [
+          {
+            "uri": "https://signin.aws.amazon.com/console"
+          }
+        ],
+        "totp": "JBSWY3DPEHPK3PXP"
+      },
+      "notes": "Sample login entry for import testing",
+      "passwdSso": {
+        "entryType": "LOGIN",
+        "tags": [
+          {
+            "name": "aws",
+            "color": "#ff9900"
+          },
+          {
+            "name": "work",
+            "color": "#2563eb"
+          }
+        ],
+        "customFields": [
+          {
+            "label": "accountIdOrAlias",
+            "value": "123456789012",
+            "type": "text"
+          },
+          {
+            "label": "iamUsername",
+            "value": "alice",
+            "type": "text"
+          }
+        ],
+        "totp": {
+          "secret": "JBSWY3DPEHPK3PXP",
+          "issuer": "AWS",
+          "label": "alice@example.com",
+          "period": 30,
+          "digits": 6,
+          "algorithm": "SHA1"
+        },
+        "generatorSettings": {
+          "length": 20,
+          "includeUppercase": true,
+          "includeLowercase": true,
+          "includeNumbers": true,
+          "includeSymbols": true
+        },
+        "passwordHistory": [
+          {
+            "password": "OldPassword-Example-001",
+            "changedAt": "2025-12-01T00:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "type": "login",
+      "name": "Azure Portal",
+      "login": {
+        "username": "alice@contoso.com",
+        "password": "Example-Portal-Password-456!",
+        "uris": [
+          {
+            "uri": "https://portal.azure.com"
+          }
+        ],
+        "totp": null
+      },
+      "notes": "Tenant A",
+      "passwdSso": {
+        "entryType": "LOGIN",
+        "tags": [
+          {
+            "name": "azure",
+            "color": "#0078d4"
+          }
+        ],
+        "customFields": [
+          {
+            "label": "tenant",
+            "value": "contoso.onmicrosoft.com",
+            "type": "text"
+          }
+        ],
+        "totp": null,
+        "generatorSettings": {
+          "length": 24,
+          "includeUppercase": true,
+          "includeLowercase": true,
+          "includeNumbers": true,
+          "includeSymbols": true
+        },
+        "passwordHistory": []
+      }
+    },
+    {
+      "type": "card",
+      "name": "Corporate VISA",
+      "card": {
+        "cardholderName": "ALICE EXAMPLE",
+        "brand": "VISA",
+        "number": "4111111111111111",
+        "expMonth": "12",
+        "expYear": "2030",
+        "code": "123"
+      },
+      "notes": "Sample test card",
+      "passwdSso": {
+        "entryType": "CREDIT_CARD",
+        "tags": [
+          {
+            "name": "finance",
+            "color": "#8b5cf6"
+          }
+        ]
+      }
+    },
+    {
+      "type": "identity",
+      "name": "Alice Example Identity",
+      "identity": {
+        "fullName": "Alice Example",
+        "address": "1-2-3 Chiyoda, Tokyo",
+        "phone": "+81-90-1234-5678",
+        "email": "alice@example.com",
+        "dateOfBirth": "1990-01-02",
+        "nationality": "JP",
+        "idNumber": "A1234567",
+        "issueDate": "2020-01-01",
+        "expiryDate": "2030-01-01"
+      },
+      "notes": "Identity sample",
+      "passwdSso": {
+        "entryType": "IDENTITY",
+        "tags": [
+          {
+            "name": "identity",
+            "color": "#16a34a"
+          }
+        ]
+      }
+    },
+    {
+      "type": "passkey",
+      "name": "GitHub Passkey",
+      "passkey": {
+        "relyingPartyId": "github.com",
+        "relyingPartyName": "GitHub",
+        "username": "alice",
+        "credentialId": "cred-sample-001",
+        "creationDate": "2025-10-01T10:00:00.000Z",
+        "deviceInfo": "macOS / Touch ID"
+      },
+      "notes": "Passkey sample",
+      "passwdSso": {
+        "entryType": "PASSKEY",
+        "tags": [
+          {
+            "name": "passkey",
+            "color": "#0ea5e9"
+          }
+        ]
+      }
+    },
+    {
+      "type": "securenote",
+      "name": "VPN Recovery Notes",
+      "notes": "This is a secure note sample.",
+      "passwdSso": {
+        "entryType": "SECURE_NOTE",
+        "tags": [
+          {
+            "name": "infra",
+            "color": "#16a34a"
+          }
+        ]
+      }
+    }
+  ]
+}
