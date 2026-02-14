@@ -13,7 +13,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Password Generator** - Random passwords (8-128 chars) and diceware passphrases (3-10 words)
 - **TOTP Authenticator** - Store and generate 2FA codes (otpauth:// URI support)
 - **Security Audit (Watchtower)** - Breached (HIBP), weak, reused, old, and HTTP-URL detection with security score
-- **Import / Export** - Bitwarden, 1Password, Chrome CSV import; CSV and JSON export
+- **Import / Export** - Bitwarden, 1Password, Chrome CSV import; CSV/JSON export profiles: compatible and passwd-sso (full-fidelity)
 - **Password-Protected Export** - AES-256-GCM encrypted exports with PBKDF2 (600k)
 - **Attachments** - Encrypted file attachments (personal E2E, org server-side)
 - **Share Links** - Time-limited read-only sharing with access logs
@@ -28,6 +28,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Rate Limiting** - Redis-backed vault unlock rate limiting
 - **CSP & Security Headers** - Content Security Policy with nonce, CSP violation reporting
 - **Self-Hosted** - Docker Compose with PostgreSQL, SAML Jackson, and Redis
+- **Browser Extension (Chrome/Edge, MV3)** - Manual autofill, inline suggestions, and AWS 3-field fill (Account ID/Alias + IAM username + password)
 
 ## Tech Stack
 
@@ -141,6 +142,33 @@ docker compose up -d
 2. Set up your master passphrase (used to derive the encryption key)
 3. Start adding passwords
 
+## Browser Extension (Chrome/Edge)
+
+This repository includes an MV3 extension in `extension/`.
+
+### Build
+
+```bash
+cd extension
+npm install
+npm run build
+```
+
+### Load (Unpacked)
+
+1. Open `chrome://extensions` (or `edge://extensions`)
+2. Enable **Developer mode**
+3. Click **Load unpacked**
+4. Select `extension/dist`
+
+### Basic Flow
+
+1. Open the extension popup
+2. Set `serverUrl` in extension settings if needed
+3. Connect/sign in to your passwd-sso instance
+4. Unlock vault, then use manual fill / inline suggestions
+5. Use **Disconnect** in popup to revoke extension token (`DELETE /api/extension/token`) when needed
+
 ## Scripts
 
 | Command | Description |
@@ -207,6 +235,11 @@ src/
 │   ├── redis.ts              # Redis client (rate limiting)
 │   └── validations.ts        # Zod schemas
 └── i18n/                     # next-intl routing
+extension/
+├── src/background/           # Service Worker (token, unlock, autofill orchestration)
+├── src/content/              # Form detection and in-page fill logic
+├── src/popup/                # Extension popup UI
+└── manifest.config.ts        # MV3 manifest definition
 ```
 
 ## Security Model
@@ -229,7 +262,13 @@ src/
 
 - [Docker Compose Setup (English)](docs/setup.docker.en.md) / [日本語](docs/setup.docker.ja.md)
 - [AWS Deployment (English)](docs/setup.aws.en.md) / [日本語](docs/setup.aws.ja.md)
+- [Vercel Deployment (English)](docs/setup.vercel.en.md) / [日本語](docs/setup.vercel.ja.md)
 - [Terraform (AWS) — English](infra/terraform/README.md) / [日本語](infra/terraform/README.ja.md)
+
+## Security Documentation
+
+- [Security Policy](SECURITY.md)
+- [Security Considerations (English)](docs/security-considerations.en.md) / [日本語](docs/security-considerations.ja.md)
 
 ## License
 

@@ -6,7 +6,9 @@ Active docs:
 - `setup.aws.en.md` / `setup.aws.ja.md` — AWS deployment
 - `setup.azure.en.md` / `setup.azure.ja.md` — Azure deployment
 - `setup.gcp.en.md` / `setup.gcp.ja.md` — Google Cloud deployment
+- `setup.vercel.en.md` / `setup.vercel.ja.md` — Vercel deployment
 - `setup.docker.en.md` / `setup.docker.ja.md` — Docker setup
+- `security-considerations.en.md` / `security-considerations.ja.md` — Security considerations
 - `samples/` — Example files
 
 Archived:

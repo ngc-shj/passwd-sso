@@ -13,7 +13,7 @@ SSO 認証とエンドツーエンド暗号化を備えたセルフホスト型�
 - **パスワード生成** - ランダムパスワード（8-128 文字）、diceware パスフレーズ（3-10 単語）
 - **TOTP 認証** - 2FA コードの保存と生成（otpauth:// URI 対応）
 - **セキュリティ監査（Watchtower）** - 漏洩（HIBP）、弱い、再利用、古い、HTTP URL の検出とスコア表示
-- **インポート / エクスポート** - Bitwarden、1Password、Chrome CSV インポート; CSV・JSON エクスポート
+- **インポート / エクスポート** - Bitwarden、1Password、Chrome CSV インポート; CSV/JSON エクスポート（互換 / passwd-sso 完全復元プロファイル）
 - **パスワード保護エクスポート** - AES-256-GCM + PBKDF2（600k）で暗号化
 - **ファイル添付** - 暗号化ファイル添付（個人: E2E、組織: サーバーサイド）
 - **共有リンク** - 期限付きの読み取り専用共有 + アクセスログ
@@ -28,6 +28,7 @@ SSO 認証とエンドツーエンド暗号化を備えたセルフホスト型�
 - **レート制限** - Redis による Vault アンロック試行制限
 - **CSP & セキュリティヘッダー** - nonce ベースの Content Security Policy、CSP 違反レポート
 - **セルフホスト** - Docker Compose（PostgreSQL + SAML Jackson + Redis）
+- **ブラウザ拡張（Chrome/Edge, MV3）** - 手動補完、インライン候補、AWS 3 フィールド補完（Account ID/Alias + IAM username + Password）
 
 ## 技術スタック
 
@@ -141,6 +142,33 @@ docker compose up -d
 2. マスターパスフレーズを設定（暗号化鍵の導出に使用）
 3. パスワードの登録を開始
 
+## ブラウザ拡張（Chrome/Edge）
+
+本リポジトリには `extension/` 配下に MV3 拡張が含まれています。
+
+### ビルド
+
+```bash
+cd extension
+npm install
+npm run build
+```
+
+### 読み込み（Unpacked）
+
+1. `chrome://extensions`（または `edge://extensions`）を開く
+2. **デベロッパーモード**を有効化
+3. **パッケージ化されていない拡張機能を読み込む** をクリック
+4. `extension/dist` を選択
+
+### 基本フロー
+
+1. 拡張ポップアップを開く
+2. 必要に応じて拡張設定で `serverUrl` を設定
+3. passwd-sso に接続/サインイン
+4. Vault をアンロックして、手動補完 / インライン候補を利用
+5. 必要時はポップアップの **Disconnect** で拡張トークンを失効（`DELETE /api/extension/token`）
+
 ## スクリプト
 
 | コマンド | 説明 |
@@ -207,6 +235,11 @@ src/
 │   ├── redis.ts              # Redis クライアント（レート制限）
 │   └── validations.ts        # Zod スキーマ
 └── i18n/                     # next-intl ルーティング
+extension/
+├── src/background/           # Service Worker（トークン・アンロック・補完制御）
+├── src/content/              # フォーム検知とページ内補完ロジック
+├── src/popup/                # 拡張ポップアップ UI
+└── manifest.config.ts        # MV3 マニフェスト定義
 ```
 
 ## セキュリティモデル
@@ -229,7 +262,13 @@ src/
 
 - [Docker Compose セットアップ（日本語）](docs/setup.docker.ja.md) / [English](docs/setup.docker.en.md)
 - [AWS デプロイ（日本語）](docs/setup.aws.ja.md) / [English](docs/setup.aws.en.md)
+- [Vercel デプロイ（日本語）](docs/setup.vercel.ja.md) / [English](docs/setup.vercel.en.md)
 - [Terraform (AWS)（日本語）](infra/terraform/README.ja.md) / [English](infra/terraform/README.md)
+
+## セキュリティドキュメント
+
+- [Security Policy](SECURITY.md)
+- [セキュリティ考慮事項（日本語）](docs/security-considerations.ja.md) / [English](docs/security-considerations.en.md)
 
 ## ライセンス
 
