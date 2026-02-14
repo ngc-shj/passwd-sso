@@ -66,8 +66,19 @@ export function findUsernameInput(
   return null;
 }
 
-const USERNAME_HINT_RE = /\b(user(name)?|login|email|e-?mail|identifier|account|member)\b/i;
+const USERNAME_HINT_RE =
+  /\b(user(name)?|login|email|e-?mail|identifier|account|member|contract|customer)\b/i;
+const USERNAME_HINT_JA_RE =
+  /(ログイン|ユーザー|メール|アカウント|会員|契約番号|ご契約番号|お客さま番号|顧客番号|店番|口座番号)/;
 const NON_LOGIN_HINT_RE = /\b(search|query|keyword|coupon|promo|otp|code|verification)\b/i;
+const NON_LOGIN_HINT_JA_RE = /(検索|クーポン|認証コード|確認コード|ワンタイム)/;
+
+function escapeSelectorValue(value: string): string {
+  // jsdom in tests may not implement CSS.escape.
+  const esc = (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS?.escape;
+  if (esc) return esc(value);
+  return value.replace(/["\\]/g, "\\$&");
+}
 
 export function isLikelyUsernameInput(input: HTMLInputElement): boolean {
   if (!isUsableInput(input)) return false;
@@ -91,16 +102,25 @@ export function isLikelyUsernameInput(input: HTMLInputElement): boolean {
     input.name,
     input.id,
     input.placeholder,
+    input.getAttribute("formcontrolname"),
+    input.getAttribute("ng-reflect-name"),
     input.getAttribute("aria-label"),
+    input.getAttribute("aria-labelledby"),
     input.getAttribute("data-testid"),
     input.getAttribute("data-test"),
+    (input.closest("label")?.textContent ?? ""),
+    (() => {
+      const id = input.id;
+      if (!id) return "";
+      return document.querySelector(`label[for="${escapeSelectorValue(id)}"]`)?.textContent ?? "";
+    })(),
   ]
     .filter((v): v is string => Boolean(v && v.trim()))
     .join(" ");
 
   if (!hints) return false;
-  if (!USERNAME_HINT_RE.test(hints)) return false;
-  if (NON_LOGIN_HINT_RE.test(hints)) return false;
+  if (!USERNAME_HINT_RE.test(hints) && !USERNAME_HINT_JA_RE.test(hints)) return false;
+  if (NON_LOGIN_HINT_RE.test(hints) || NON_LOGIN_HINT_JA_RE.test(hints)) return false;
   return true;
 }
 
@@ -340,6 +360,17 @@ export function initFormDetector(): FormDetectorCleanup {
     }
   }
 
+  // Listen for vault state changes (sent from popup after unlock/lock)
+  const runtimeMessageHandler = (message: { type?: string }) => {
+    if (destroyed) return;
+    if (message?.type !== "PSSO_VAULT_STATE_CHANGED") return;
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement && shouldTriggerForInput(active)) {
+      requestMatches(active);
+    }
+  };
+  chrome.runtime.onMessage.addListener(runtimeMessageHandler);
+
   // Start
   document.addEventListener("focusin", focusHandler, true);
   document.addEventListener("mouseover", mouseoverHandler, true);
@@ -358,6 +389,7 @@ export function initFormDetector(): FormDetectorCleanup {
   function destroy(): void {
     if (destroyed) return;
     destroyed = true;
+    chrome.runtime.onMessage.removeListener(runtimeMessageHandler);
     document.removeEventListener("focusin", focusHandler, true);
     document.removeEventListener("mouseover", mouseoverHandler, true);
     document.removeEventListener("focusout", blurHandler, true);

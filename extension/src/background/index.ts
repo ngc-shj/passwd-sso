@@ -36,6 +36,7 @@ let currentToken: string | null = null;
 let tokenExpiresAt: number | null = null;
 let encryptionKey: CryptoKey | null = null;
 let currentUserId: string | null = null;
+let currentVaultSecretKeyHex: string | null = null;
 
 const CACHE_TTL_MS = 60_000; // 1 minute
 const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
@@ -76,8 +77,10 @@ function clearToken(): void {
 function clearVault(): void {
   encryptionKey = null;
   currentUserId = null;
+  currentVaultSecretKeyHex = null;
   invalidateCache();
   chrome.alarms.clear(ALARM_VAULT_LOCK);
+  persistState();
   void updateBadge();
 }
 
@@ -103,6 +106,7 @@ function persistState(): void {
       token: currentToken,
       expiresAt: tokenExpiresAt,
       userId: currentUserId ?? undefined,
+      vaultSecretKey: currentVaultSecretKeyHex ?? undefined,
     }).catch(() => {});
   }
 }
@@ -120,6 +124,19 @@ async function hydrateFromSession(): Promise<void> {
   currentToken = state.token;
   tokenExpiresAt = state.expiresAt;
   currentUserId = state.userId ?? null;
+  currentVaultSecretKeyHex = state.vaultSecretKey ?? null;
+
+  if (currentVaultSecretKeyHex) {
+    try {
+      const secretKey = hexDecode(currentVaultSecretKeyHex);
+      encryptionKey = await deriveEncryptionKey(secretKey);
+      secretKey.fill(0);
+    } catch {
+      encryptionKey = null;
+      currentVaultSecretKeyHex = null;
+      persistState();
+    }
+  }
 
   // Re-create TTL expiry alarm
   chrome.alarms.create(ALARM_TOKEN_TTL, { when: state.expiresAt });
@@ -633,6 +650,9 @@ chrome.runtime.onMessage.addListener(
             }
 
             const encKey = await deriveEncryptionKey(secretKey);
+            currentVaultSecretKeyHex = Array.from(secretKey)
+              .map((b) => b.toString(16).padStart(2, "0"))
+              .join("");
             secretKey.fill(0);
 
             if (data.verificationArtifact) {

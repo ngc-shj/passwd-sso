@@ -22,6 +22,12 @@ function isUsableInput(input: HTMLInputElement) {
   return !input.disabled && !input.readOnly;
 }
 
+function escapeSelectorValue(value: string): string {
+  const esc = (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS?.escape;
+  if (esc) return esc(value);
+  return value.replace(/["\\]/g, "\\$&");
+}
+
 function findPasswordInput(inputs: HTMLInputElement[]) {
   const isVisible = (input: HTMLInputElement) =>
     getComputedStyle(input).display !== "none" &&
@@ -59,18 +65,35 @@ function findUsernameInput(
       candidate.name,
       candidate.id,
       candidate.placeholder,
+      candidate.getAttribute("formcontrolname"),
+      candidate.getAttribute("ng-reflect-name"),
       candidate.getAttribute("aria-label"),
+      candidate.getAttribute("aria-labelledby"),
+      candidate.closest("label")?.textContent ?? "",
+      (() => {
+        const id = candidate.id;
+        if (!id) return "";
+        return document.querySelector(`label[for="${escapeSelectorValue(id)}"]`)?.textContent ?? "";
+      })(),
     ]
       .filter((v): v is string => Boolean(v && v.trim()))
       .join(" ")
       .toLowerCase();
 
     if (!hints) return false;
-    if (/\b(search|query|keyword|coupon|promo|otp|code|verification)\b/.test(hints)) {
+    if (
+      /\b(search|query|keyword|coupon|promo|otp|code|verification)\b/.test(hints) ||
+      /(検索|クーポン|認証コード|確認コード|ワンタイム)/.test(hints)
+    ) {
       return false;
     }
-    return /\b(user(name)?|userid|login|email|e-?mail|identifier|account|member|id)\b/.test(
-      hints,
+    return (
+      /\b(user(name)?|userid|login|email|e-?mail|identifier|account|member|id|contract|customer)\b/.test(
+        hints,
+      ) ||
+      /(ログイン|ユーザー|メール|アカウント|会員|契約番号|ご契約番号|お客さま番号|顧客番号|店番|口座番号)/.test(
+        hints,
+      )
     );
   };
 

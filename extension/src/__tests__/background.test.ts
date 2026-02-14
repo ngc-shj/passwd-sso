@@ -215,6 +215,30 @@ describe("background message flow", () => {
     );
   });
 
+  it("removes persisted vault secret on LOCK_VAULT", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    await sendMessage({ type: "LOCK_VAULT" });
+
+    expect(chromeMock?.storage.session.set).toHaveBeenCalledWith({
+      authState: expect.objectContaining({
+        token: "t",
+        expiresAt: expect.any(Number),
+      }),
+    });
+    const calls = (chromeMock?.storage.session.set as ReturnType<typeof vi.fn>).mock.calls;
+    const lastState = calls[calls.length - 1]?.[0]?.authState as {
+      userId?: string;
+      vaultSecretKey?: string;
+    };
+    expect(lastState.userId).toBeUndefined();
+    expect(lastState.vaultSecretKey).toBeUndefined();
+  });
+
   it("does not create auto-lock alarm when disabled", async () => {
     chromeMock?.storage.local.get.mockResolvedValue({
       serverUrl: "https://localhost:3000",
@@ -611,14 +635,19 @@ describe("session persistence", () => {
 });
 
 describe("session hydration", () => {
-  it("restores state from session storage on startup", async () => {
+  it("restores token and unlocked vault state from session storage on startup", async () => {
     vi.resetModules();
     vi.clearAllMocks();
     chromeMock = installChromeMock();
 
     const expiresAt = Date.now() + 600_000;
     chromeMock.storage.session.get.mockResolvedValue({
-      authState: { token: "hydrated-tok", expiresAt, userId: "u-1" },
+      authState: {
+        token: "hydrated-tok",
+        expiresAt,
+        userId: "u-1",
+        vaultSecretKey: "010203",
+      },
     });
 
     vi.stubGlobal(
@@ -630,7 +659,7 @@ describe("session hydration", () => {
 
     const status = await sendMessage({ type: "GET_STATUS" });
     expect(status).toEqual(
-      expect.objectContaining({ hasToken: true, expiresAt })
+      expect.objectContaining({ hasToken: true, expiresAt, vaultUnlocked: true })
     );
   });
 

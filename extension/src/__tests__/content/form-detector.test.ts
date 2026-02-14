@@ -169,4 +169,22 @@ describe("isLikelyUsernameInput", () => {
     const input = document.getElementById("age") as HTMLInputElement;
     expect(isLikelyUsernameInput(input)).toBe(false);
   });
+
+  it("detects Japanese contract-number login id fields", () => {
+    document.body.innerHTML = `
+      <label for="tx-contract-number">ご契約番号</label>
+      <input id="tx-contract-number" type="tel" formcontrolname="keiyakuNum" placeholder="半角数字" />
+    `;
+    const input = document.getElementById("tx-contract-number") as HTMLInputElement;
+    expect(isLikelyUsernameInput(input)).toBe(true);
+  });
+
+  it("does not detect Japanese search fields", () => {
+    document.body.innerHTML = `
+      <label for="q">検索</label>
+      <input id="q" type="text" placeholder="検索キーワード" />
+    `;
+    const input = document.getElementById("q") as HTMLInputElement;
+    expect(isLikelyUsernameInput(input)).toBe(false);
+  });
 });
