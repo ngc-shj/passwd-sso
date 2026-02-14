@@ -879,6 +879,41 @@ describe("session hydration", () => {
       expect.objectContaining({ hasToken: false })
     );
   });
+
+  it("waits for hydration before responding to GET_STATUS", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    const expiresAt = Date.now() + 600_000;
+    let resolveSessionGet: ((value: unknown) => void) | null = null;
+    const delayedSession = new Promise((resolve) => {
+      resolveSessionGet = resolve;
+    });
+    chromeMock.storage.session.get.mockReturnValueOnce(delayedSession as Promise<unknown>);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+
+    await loadBackground();
+
+    const statusPromise = sendMessage({ type: "GET_STATUS" });
+    resolveSessionGet?.({
+      authState: {
+        token: "hydrated-tok",
+        expiresAt,
+        userId: "u-1",
+        vaultSecretKey: "010203",
+      },
+    });
+    const status = await statusPromise;
+
+    expect(status).toEqual(
+      expect.objectContaining({ hasToken: true, expiresAt, vaultUnlocked: true }),
+    );
+  });
 });
 
 describe("token refresh alarm", () => {
@@ -1105,6 +1140,160 @@ describe("token refresh alarm", () => {
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
       ALARM_TOKEN_REFRESH,
       expect.objectContaining({ delayInMinutes: 1 })
+    );
+  });
+});
+
+describe("hydration edge cases", () => {
+  it("restores vault auto-lock alarm during hydration when vault key is present", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    const expiresAt = Date.now() + 600_000;
+    chromeMock.storage.session.get.mockResolvedValue({
+      authState: {
+        token: "hydrated-tok",
+        expiresAt,
+        userId: "u-1",
+        vaultSecretKey: "010203",
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+
+    await loadBackground();
+    // Wait for hydration to complete
+    await sendMessage({ type: "GET_STATUS" });
+
+    expect(chromeMock.alarms.create).toHaveBeenCalledWith(
+      ALARM_VAULT_LOCK,
+      expect.objectContaining({ delayInMinutes: 15 }),
+    );
+  });
+
+  it("does not hang when storage.session.get rejects", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    chromeMock.storage.session.get.mockRejectedValue(new Error("storage unavailable"));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+
+    await loadBackground();
+
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({ hasToken: false, vaultUnlocked: false }),
+    );
+  });
+});
+
+describe("failsafe responses", () => {
+  it("returns type-safe failsafe when handleMessage throws for GET_STATUS", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    // Make hydration promise reject to trigger the failsafe catch
+    chromeMock.storage.session.get.mockImplementation(async () => {
+      throw new Error("fatal");
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+
+    await loadBackground();
+
+    // Patch handleMessage to throw after hydration by making
+    // the hydration itself fail — the failsafe catch should fire.
+    // Since hydrationPromise.catch(() => {}) swallows the error,
+    // hydration resolves normally but with empty state.
+    // To truly trigger the failsafe, we need handleMessage itself to throw.
+    // We can achieve this by corrupting the message handler's dependencies.
+    const handler = messageHandlers[0];
+
+    // Send a message with a type that will cause a runtime error inside handleMessage
+    // by temporarily breaking a dependency after hydration
+    const originalCreateAlarm = chromeMock.alarms.create;
+    chromeMock.alarms.create = vi.fn(() => {
+      throw new Error("simulated crash");
+    });
+
+    const res = await new Promise((resolve) => {
+      handler(
+        { type: "SET_TOKEN", token: "t", expiresAt: Date.now() + 60_000 },
+        {},
+        (resp) => resolve(resp),
+      );
+    });
+
+    // The failsafe should return a generic error for SET_TOKEN (default branch)
+    expect(res).toEqual(
+      expect.objectContaining({ ok: false, error: "INTERNAL_ERROR" }),
+    );
+
+    chromeMock.alarms.create = originalCreateAlarm;
+  });
+
+  it("returns type-safe failsafe for FETCH_PASSWORDS on unexpected error", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        if (url.includes(EXT_API_PATH.PASSWORDS)) {
+          return {
+            ok: true,
+            // json() throws to simulate an unexpected error inside handleMessage
+            json: async () => { throw new Error("simulated JSON crash"); },
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+
+    await loadBackground();
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({ type: "FETCH_PASSWORDS" });
+    // The inner catch in FETCH_PASSWORDS handles this, returning the correct shape
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "FETCH_PASSWORDS",
+        entries: null,
+        error: expect.any(String),
+      }),
     );
   });
 });
