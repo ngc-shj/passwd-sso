@@ -429,10 +429,12 @@ export function PasswordCard({
 
   return (
     <>
-      <Card className="transition-colors">
+      <Card
+        className={`transition-colors hover:bg-muted/30 ${expanded ? "" : "cursor-pointer"}`}
+        onClick={() => onToggleExpand(id)}
+      >
         <CardContent
-          className="flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-muted/60 transition-colors"
-          onClick={() => onToggleExpand(id)}
+          className="flex cursor-pointer items-center gap-3 px-4 py-2"
         >
           <div className="shrink-0 text-muted-foreground">
             {expanded ? (
@@ -529,20 +531,30 @@ export function PasswordCard({
               ))}
             </div>
           )}
-          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
-          <div className="flex items-center shrink-0" onClick={(e) => e.stopPropagation()}>
-          {!isNote && !isCreditCard && !isIdentity && !isPasskey && <CopyButton getValue={fetchPassword} />}
-          {isCreditCard && <CopyButton getValue={() => fetchCardField("cardNumber")} />}
-          {isIdentity && <CopyButton getValue={() => fetchIdentityField("idNumber")} />}
-          {isPasskey && <CopyButton getValue={() => fetchPasskeyField("credentialId")} />}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0">
-                <MoreVertical className="h-4 w-4" />
-                <span className="sr-only">{t("moreActions")}</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+          <div className="flex items-center shrink-0 pointer-events-none">
+            <div
+              className="pointer-events-auto"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              {!isNote && !isCreditCard && !isIdentity && !isPasskey && <CopyButton getValue={fetchPassword} />}
+              {isCreditCard && <CopyButton getValue={() => fetchCardField("cardNumber")} />}
+              {isIdentity && <CopyButton getValue={() => fetchIdentityField("idNumber")} />}
+              {isPasskey && <CopyButton getValue={() => fetchPasskeyField("credentialId")} />}
+            </div>
+            <div
+              className="pointer-events-auto"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0">
+                    <MoreVertical className="h-4 w-4" />
+                    <span className="sr-only">{t("moreActions")}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
               {isPasskey ? (
                 <>
                   {username && (
@@ -659,26 +671,32 @@ export function PasswordCard({
                   </DropdownMenuItem>
                 </>
               )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </CardContent>
 
         {/* Expanded inline detail */}
         {expanded && (
           detailLoading ? (
-            <div className="flex items-center justify-center py-6 border-t">
+            <div
+              className="flex items-center justify-center py-6 border-t"
+              onClick={(e) => e.stopPropagation()}
+            >
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           ) : detailData ? (
-            <PasswordDetailInline
-              data={detailData}
-              onEdit={canEdit ? () => {
-                if (onEditClick) onEditClick();
-                else setEditDialogOpen(true);
-              } : undefined}
-              orgId={orgId}
-            />
+            <div className="cursor-default" onClick={(e) => e.stopPropagation()}>
+              <PasswordDetailInline
+                data={detailData}
+                onEdit={canEdit ? () => {
+                  if (onEditClick) onEditClick();
+                  else setEditDialogOpen(true);
+                } : undefined}
+                orgId={orgId}
+              />
+            </div>
           ) : null
         )}
       </Card>

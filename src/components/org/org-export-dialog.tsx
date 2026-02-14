@@ -58,13 +58,13 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
   const t = useTranslations("Export");
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [passwordProtect, setPasswordProtect] = useState(false);
+  const [passwordProtect, setPasswordProtect] = useState(true);
   const [exportPassword, setExportPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
 
   const resetState = () => {
-    setPasswordProtect(false);
+    setPasswordProtect(true);
     setExportPassword("");
     setConfirmPassword("");
     setPasswordError("");
@@ -202,9 +202,14 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Lock className="h-4 w-4 text-muted-foreground" />
-              <Label htmlFor="org-password-protect" className="text-sm font-medium">
-                {t("passwordProtect")}
-              </Label>
+              <div>
+                <Label htmlFor="org-password-protect" className="text-sm font-medium">
+                  {t("passwordProtect")}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {t("passwordProtectDesc")}
+                </p>
+              </div>
             </div>
             <Switch
               id="org-password-protect"
@@ -219,12 +224,6 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
               }}
             />
           </div>
-
-          {passwordProtect && (
-            <p className="text-xs text-muted-foreground">
-              {t("passwordProtectDesc")}
-            </p>
-          )}
 
           {passwordProtect && (
             <div className="space-y-3">

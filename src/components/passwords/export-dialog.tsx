@@ -65,18 +65,18 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
   const { encryptionKey, userId } = useVault();
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [passwordProtect, setPasswordProtect] = useState(false);
+  const [passwordProtect, setPasswordProtect] = useState(true);
   const [exportPassword, setExportPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
-  const [includeOrgs, setIncludeOrgs] = useState(false);
+  const [includeOrgs, setIncludeOrgs] = useState(true);
 
   const resetState = () => {
-    setPasswordProtect(false);
+    setPasswordProtect(true);
     setExportPassword("");
     setConfirmPassword("");
     setPasswordError("");
-    setIncludeOrgs(false);
+    setIncludeOrgs(true);
   };
 
   const validatePassword = (): boolean => {
@@ -297,12 +297,17 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
             />
           </div>
 
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between border-t pt-3">
             <div className="flex items-center gap-2">
               <Lock className="h-4 w-4 text-muted-foreground" />
-              <Label htmlFor="password-protect" className="text-sm font-medium">
-                {t("passwordProtect")}
-              </Label>
+              <div>
+                <Label htmlFor="password-protect" className="text-sm font-medium">
+                  {t("passwordProtect")}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {t("passwordProtectDesc")}
+                </p>
+              </div>
             </div>
             <Switch
               id="password-protect"
@@ -317,12 +322,6 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
               }}
             />
           </div>
-
-          {passwordProtect && (
-            <p className="text-xs text-muted-foreground">
-              {t("passwordProtectDesc")}
-            </p>
-          )}
 
           {passwordProtect && (
             <div className="space-y-3">
