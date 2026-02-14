@@ -26,6 +26,7 @@ import {
   calculateTotalIssues,
   getWatchtowerVisibility,
 } from "@/lib/watchtower/state";
+import { resolveNavigationTarget } from "@/lib/client-navigation";
 
 export default function WatchtowerPage() {
   const t = useTranslations("Watchtower");
@@ -76,8 +77,14 @@ export default function WatchtowerPage() {
       const anchor = target?.closest("a[href]") as HTMLAnchorElement | null;
       if (!anchor) return;
 
-      const nextUrl = new URL(anchor.href, window.location.origin);
-      if (nextUrl.pathname === window.location.pathname) return;
+      const targetInfo = resolveNavigationTarget(
+        anchor.href,
+        window.location.origin
+      );
+      if (targetInfo.isInternal) {
+        const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        if (targetInfo.internalPath === current) return;
+      }
 
       event.preventDefault();
       event.stopPropagation();
@@ -95,17 +102,17 @@ export default function WatchtowerPage() {
 
   const handleConfirmLeave = () => {
     if (!pendingHref) return;
-    const nextUrl = new URL(pendingHref, window.location.origin);
+    const targetInfo = resolveNavigationTarget(pendingHref, window.location.origin);
     setLeaveDialogOpen(false);
     setPendingHref(null);
 
-    if (nextUrl.origin === window.location.origin) {
-      router.push(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+    if (targetInfo.isInternal && targetInfo.internalPath) {
+      router.push(targetInfo.internalPath);
       return;
     }
 
     allowLeaveRef.current = true;
-    window.location.assign(pendingHref);
+    window.location.assign(targetInfo.externalHref);
   };
 
   const totalIssues = report ? calculateTotalIssues(report) : 0;
