@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { API_PATH, CONNECT_STATUS, type ConnectStatus } from "@/lib/constants";
 import { injectExtensionToken } from "@/lib/inject-extension-token";
+import { toast } from "sonner";
 
 export function ConnectExtensionButton() {
   const t = useTranslations("Extension");
@@ -17,15 +18,22 @@ export function ConnectExtensionButton() {
       const res = await fetch(API_PATH.EXTENSION_TOKEN, { method: "POST" });
       if (!res.ok) {
         setStatus(CONNECT_STATUS.FAILED);
+        toast.error(t("connectFailedTitle"), {
+          description: t("connectFailedDescription"),
+        });
         setTimeout(() => setStatus(CONNECT_STATUS.IDLE), 3000);
         return;
       }
       const json = await res.json();
       injectExtensionToken(json.token, Date.parse(json.expiresAt));
       setStatus(CONNECT_STATUS.CONNECTED);
+      toast.success(t("autoConnected"));
       setTimeout(() => setStatus(CONNECT_STATUS.IDLE), 3000);
     } catch {
       setStatus(CONNECT_STATUS.FAILED);
+      toast.error(t("connectFailedTitle"), {
+        description: t("connectFailedDescription"),
+      });
       setTimeout(() => setStatus(CONNECT_STATUS.IDLE), 3000);
     }
   };
