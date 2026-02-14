@@ -482,6 +482,39 @@ describe("POST /api/passwords", () => {
     );
   });
 
+  it("sanitizes backslashes in import filename", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      entryType: ENTRY_TYPE.LOGIN,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: validBody,
+      headers: {
+        "x-passwd-sso-source": "import",
+        "x-passwd-sso-filename": "..\\..\\etc\\passwd",
+      },
+    }));
+
+    expect(res.status).toBe(201);
+    expect(mockAuditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            filename: ".._.._etc_passwd",
+          }),
+        }),
+      }),
+    );
+  });
+
   it("strips null bytes and control chars from import filename", async () => {
     mockPrismaPasswordEntry.create.mockResolvedValue({
       id: "new-pw",
@@ -550,6 +583,40 @@ describe("POST /api/passwords", () => {
             source: "import",
             parentAction: "ENTRY_IMPORT",
           },
+        }),
+      }),
+    );
+  });
+
+  it("truncates sanitized filename to 255 chars", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      entryType: ENTRY_TYPE.LOGIN,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const longName = `${"a".repeat(400)}.csv`;
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: validBody,
+      headers: {
+        "x-passwd-sso-source": "import",
+        "x-passwd-sso-filename": longName,
+      },
+    }));
+
+    expect(res.status).toBe(201);
+    expect(mockAuditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            filename: "a".repeat(255),
+          }),
         }),
       }),
     );

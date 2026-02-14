@@ -70,10 +70,19 @@ async function handleApiAuth(request: NextRequest) {
   const hasBearer = request.headers
     .get("authorization")
     ?.startsWith("Bearer ");
-  const isExactOrChild = (route: string) =>
-    pathname === route || pathname.startsWith(route + "/");
+  const isBearerBypassRoute = (route: string) => {
+    // Extension token endpoints should be exact only.
+    if (
+      route === API_PATH.EXTENSION_TOKEN ||
+      route === API_PATH.EXTENSION_TOKEN_REFRESH
+    ) {
+      return pathname === route;
+    }
+    // Password/vault routes allow child paths.
+    return pathname === route || pathname.startsWith(route + "/");
+  };
 
-  if (hasBearer && extensionTokenRoutes.some(isExactOrChild)) {
+  if (hasBearer && extensionTokenRoutes.some(isBearerBypassRoute)) {
     return NextResponse.next();
   }
 
