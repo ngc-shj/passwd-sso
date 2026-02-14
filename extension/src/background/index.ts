@@ -503,22 +503,30 @@ async function performAutofillForEntry(
 
   // Direct fallback for pages where content-script messaging is blocked/unstable.
   // Runs in all frames so login forms inside iframes are also covered.
-  await chrome.scripting.executeScript({
-    target: { tabId, allFrames: true },
-    args: [
-      username,
-      password,
-      serializableTargetHint,
-      awsAccountIdOrAlias,
-      awsIamUsername,
-    ],
-    func: (
-      usernameArg: string,
-      passwordArg: string,
-      targetHintArg?: { id?: string; name?: string; type?: string; autocomplete?: string },
-      awsAccountIdOrAliasArg?: string,
-      awsIamUsernameArg?: string,
-    ) => {
+  const injectDirectAutofill = async (
+    hintArg: { id?: string; name?: string; type?: string; autocomplete?: string } | null,
+  ) =>
+    chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      args: [
+        username,
+        password,
+        hintArg,
+        awsAccountIdOrAlias,
+        awsIamUsername,
+      ],
+      func: (
+        usernameArg: string,
+        passwordArg: string,
+        targetHintArg?: {
+          id?: string;
+          name?: string;
+          type?: string;
+          autocomplete?: string;
+        } | null,
+        awsAccountIdOrAliasArg?: string,
+        awsIamUsernameArg?: string,
+      ) => {
       const isUsableInput = (input: HTMLInputElement) =>
         !input.disabled && !input.readOnly;
       const isVisible = (input: HTMLInputElement) =>
@@ -635,8 +643,16 @@ async function performAutofillForEntry(
         if (iamInput && awsIamUsernameArg) setInputValue(iamInput, awsIamUsernameArg);
       }
       if (passwordInput) setInputValue(passwordInput, passwordArg);
-    },
-  });
+      },
+    });
+
+  try {
+    await injectDirectAutofill(serializableTargetHint);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!/unserializable/i.test(message)) throw err;
+    await injectDirectAutofill(null);
+  }
   return { ok: true };
 }
 

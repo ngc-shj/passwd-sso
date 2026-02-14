@@ -704,6 +704,42 @@ describe("background message flow", () => {
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
     expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "CSP" });
   });
+
+  it("retries direct inject without hint when args are unserializable", async () => {
+    cryptoMocks.decryptData
+      .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
+      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+
+    // 1st call: inject file, 2nd call: direct fallback with hint -> unserializable, 3rd: retry with null hint
+    chromeMock?.scripting.executeScript
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error("Value is unserializable"))
+      .mockResolvedValueOnce([]);
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1", targetHint: { id: "user" } },
+        { tab: { id: 1 } },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+
+    const calls = chromeMock?.scripting.executeScript.mock.calls ?? [];
+    const argsList = calls
+      .map((call) => (call[0] as { args?: unknown[] }).args)
+      .filter((v): v is unknown[] => Array.isArray(v));
+    expect(argsList.length).toBeGreaterThanOrEqual(2);
+    expect(argsList[argsList.length - 1]?.[2]).toBeNull();
+  });
 });
 
 // ── Session persistence & token refresh ──────────────────────
