@@ -27,6 +27,17 @@ async function injectFormDetector(tabId: number): Promise<void> {
   }
 }
 
+async function notifyVaultStateChanged(): Promise<void> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      await chrome.tabs.sendMessage(tab.id, { type: "PSSO_VAULT_STATE_CHANGED" });
+    }
+  } catch {
+    // content script may not be present on this tab
+  }
+}
+
 export function App() {
   const [state, setState] = useState<AppState>("loading");
   const [tabUrl, setTabUrl] = useState<string | null>(null);
@@ -88,7 +99,7 @@ export function App() {
         )}
         {state === "not_logged_in" && <LoginPrompt />}
         {state === "logged_in" && (
-          <VaultUnlock onUnlocked={() => setState("vault_unlocked")} tabUrl={tabUrl} />
+          <VaultUnlock onUnlocked={() => { setState("vault_unlocked"); notifyVaultStateChanged(); }} tabUrl={tabUrl} />
         )}
         {state === "vault_unlocked" && (
           <>
