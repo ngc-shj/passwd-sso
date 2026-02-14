@@ -522,6 +522,34 @@ describe("background message flow", () => {
     });
   });
 
+  it("suppresses inline matches on passwd-sso app pages", async () => {
+    cryptoMocks.decryptData.mockResolvedValueOnce(
+      JSON.stringify({
+        title: "Local entry",
+        username: "local-user",
+        urlHost: "localhost",
+      }),
+    );
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({
+      type: "GET_MATCHES_FOR_URL",
+      url: "https://localhost:3000/ja/dashboard",
+    });
+
+    expect(res).toEqual({
+      type: "GET_MATCHES_FOR_URL",
+      entries: [],
+      vaultLocked: false,
+    });
+  });
+
   it("returns error when AUTOFILL fetch fails", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {

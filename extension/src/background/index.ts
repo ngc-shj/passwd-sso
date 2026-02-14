@@ -209,6 +209,32 @@ async function attemptTokenRefresh(): Promise<void> {
   }
 }
 
+async function shouldSuppressInlineMatches(url: string): Promise<boolean> {
+  let pageUrl: URL;
+  try {
+    pageUrl = new URL(url);
+  } catch {
+    return false;
+  }
+  if (!/^https?:$/.test(pageUrl.protocol)) return false;
+
+  const { serverUrl } = await chrome.storage.local.get({
+    serverUrl: "https://localhost:3000",
+  });
+  let serverOrigin: string;
+  try {
+    serverOrigin = new URL(String(serverUrl)).origin;
+  } catch {
+    return false;
+  }
+  if (pageUrl.origin !== serverOrigin) return false;
+
+  // Avoid noisy inline suggestions inside passwd-sso application pages.
+  return /^\/(?:[a-z]{2}(?:-[A-Z]{2})?)?\/?(dashboard|auth)(\/|$)/.test(
+    pageUrl.pathname,
+  );
+}
+
 // Hydrate on SW startup
 hydrateFromSession().catch(() => {});
 
@@ -889,6 +915,14 @@ chrome.runtime.onMessage.addListener(
 
         (async () => {
           try {
+            if (await shouldSuppressInlineMatches(message.url)) {
+              sendResponse({
+                type: "GET_MATCHES_FOR_URL",
+                entries: [],
+                vaultLocked: false,
+              });
+              return;
+            }
             const tabHost = extractHost(message.url);
             if (!tabHost) {
               sendResponse({
