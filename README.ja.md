@@ -13,7 +13,7 @@ SSO 認証とエンドツーエンド暗号化を備えたセルフホスト型�
 - **パスワード生成** - ランダムパスワード（8-128 文字）、diceware パスフレーズ（3-10 単語）
 - **TOTP 認証** - 2FA コードの保存と生成（otpauth:// URI 対応）
 - **セキュリティ監査（Watchtower）** - 漏洩（HIBP）、弱い、再利用、古い、HTTP URL の検出とスコア表示
-- **インポート / エクスポート** - Bitwarden、1Password、Chrome CSV インポート; CSV・JSON エクスポート
+- **インポート / エクスポート** - Bitwarden、1Password、Chrome CSV インポート; CSV/JSON エクスポート（互換 / passwd-sso 完全復元プロファイル）
 - **パスワード保護エクスポート** - AES-256-GCM + PBKDF2（600k）で暗号化
 - **ファイル添付** - 暗号化ファイル添付（個人: E2E、組織: サーバーサイド）
 - **共有リンク** - 期限付きの読み取り専用共有 + アクセスログ
@@ -167,6 +167,7 @@ npm run build
 2. 必要に応じて拡張設定で `serverUrl` を設定
 3. passwd-sso に接続/サインイン
 4. Vault をアンロックして、手動補完 / インライン候補を利用
+5. 必要時はポップアップの **Disconnect** で拡張トークンを失効（`DELETE /api/extension/token`）
 
 ## スクリプト
 

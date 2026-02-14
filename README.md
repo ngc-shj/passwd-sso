@@ -13,7 +13,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Password Generator** - Random passwords (8-128 chars) and diceware passphrases (3-10 words)
 - **TOTP Authenticator** - Store and generate 2FA codes (otpauth:// URI support)
 - **Security Audit (Watchtower)** - Breached (HIBP), weak, reused, old, and HTTP-URL detection with security score
-- **Import / Export** - Bitwarden, 1Password, Chrome CSV import; CSV and JSON export
+- **Import / Export** - Bitwarden, 1Password, Chrome CSV import; CSV/JSON export profiles: compatible and passwd-sso (full-fidelity)
 - **Password-Protected Export** - AES-256-GCM encrypted exports with PBKDF2 (600k)
 - **Attachments** - Encrypted file attachments (personal E2E, org server-side)
 - **Share Links** - Time-limited read-only sharing with access logs
@@ -167,6 +167,7 @@ npm run build
 2. Set `serverUrl` in extension settings if needed
 3. Connect/sign in to your passwd-sso instance
 4. Unlock vault, then use manual fill / inline suggestions
+5. Use **Disconnect** in popup to revoke extension token (`DELETE /api/extension/token`) when needed
 
 ## Scripts
 
