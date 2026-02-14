@@ -52,6 +52,27 @@ describe("DELETE /api/orgs/[orgId]/invitations/[invId]", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns OrgAuthError status when permission denied", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/invitations/${INV_ID}`),
+      createParams({ orgId: ORG_ID, invId: INV_ID }),
+    );
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("INSUFFICIENT_PERMISSION");
+  });
+
+  it("rethrows non-OrgAuthError", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
+    await expect(
+      DELETE(
+        createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/invitations/${INV_ID}`),
+        createParams({ orgId: ORG_ID, invId: INV_ID }),
+      ),
+    ).rejects.toThrow("unexpected");
+  });
+
   it("returns 404 when invitation not found", async () => {
     mockPrismaOrgInvitation.findUnique.mockResolvedValue(null);
     const res = await DELETE(

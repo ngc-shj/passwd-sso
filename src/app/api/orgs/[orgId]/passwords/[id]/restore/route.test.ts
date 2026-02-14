@@ -43,6 +43,27 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/restore", () => {
     mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
   });
 
+  it("returns OrgAuthError status when permission denied", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}/restore`),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("INSUFFICIENT_PERMISSION");
+  });
+
+  it("rethrows non-OrgAuthError", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
+    await expect(
+      POST(
+        createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}/restore`),
+        createParams({ orgId: ORG_ID, id: PW_ID }),
+      ),
+    ).rejects.toThrow("unexpected");
+  });
+
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
