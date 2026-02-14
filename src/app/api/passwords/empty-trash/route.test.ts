@@ -90,4 +90,38 @@ describe("POST /api/passwords/empty-trash", () => {
     );
     expect(mockAuditCreate).toHaveBeenCalledTimes(3);
   });
+
+  it("returns deletedCount=0 when trash is empty", async () => {
+    mockFindMany.mockResolvedValueOnce([]);
+    mockDeleteMany.mockResolvedValueOnce({ count: 0 });
+
+    const res = await POST(
+      createRequest("POST", "http://localhost:3000/api/passwords/empty-trash")
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(json.deletedCount).toBe(0);
+    expect(mockAuditCreate).toHaveBeenCalledTimes(1);
+    expect(mockAuditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "ENTRY_EMPTY_TRASH",
+          metadata: expect.objectContaining({
+            deletedCount: 0,
+            entryIds: [],
+          }),
+        }),
+      })
+    );
+  });
+
+  it("propagates db errors (framework handles 500)", async () => {
+    mockDeleteMany.mockRejectedValueOnce(new Error("db down"));
+
+    await expect(
+      POST(createRequest("POST", "http://localhost:3000/api/passwords/empty-trash"))
+    ).rejects.toThrow("db down");
+  });
 });
