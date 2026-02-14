@@ -5,11 +5,11 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
-interface BulkTrashBody {
+interface BulkRestoreBody {
   ids: string[];
 }
 
-// POST /api/passwords/bulk-trash - Soft delete multiple entries (move to trash)
+// POST /api/passwords/bulk-restore - Restore multiple entries from trash
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -23,75 +23,73 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
-  const ids = Array.isArray((body as BulkTrashBody)?.ids)
-    ? Array.from(new Set((body as BulkTrashBody).ids.filter((id) => typeof id === "string" && id.length > 0)))
+  const ids = Array.isArray((body as BulkRestoreBody)?.ids)
+    ? Array.from(
+        new Set(
+          (body as BulkRestoreBody).ids.filter(
+            (id) => typeof id === "string" && id.length > 0
+          )
+        )
+      )
     : [];
 
   if (ids.length === 0) {
     return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
   }
 
-  const entriesToTrash = await prisma.passwordEntry.findMany({
+  const entriesToRestore = await prisma.passwordEntry.findMany({
     where: {
       userId: session.user.id,
       id: { in: ids },
-      deletedAt: null,
+      deletedAt: { not: null },
     },
     select: { id: true },
   });
-  const entryIds = entriesToTrash.map((entry) => entry.id);
+  const entryIds = entriesToRestore.map((entry) => entry.id);
 
-  const deletedAt = new Date();
   const result = await prisma.passwordEntry.updateMany({
     where: {
       userId: session.user.id,
       id: { in: entryIds },
-      deletedAt: null,
+      deletedAt: { not: null },
     },
     data: {
-      deletedAt,
+      deletedAt: null,
     },
   });
-  const movedEntries = await prisma.passwordEntry.findMany({
-    where: {
-      userId: session.user.id,
-      id: { in: entryIds },
-      deletedAt,
-    },
-    select: { id: true },
-  });
-  const movedEntryIds = movedEntries.map((entry) => entry.id);
+
   const requestMeta = extractRequestMeta(req);
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
-    action: AUDIT_ACTION.ENTRY_BULK_TRASH,
+    action: AUDIT_ACTION.ENTRY_BULK_RESTORE,
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: "bulk",
     metadata: {
       bulk: true,
+      operation: "restore",
       requestedCount: ids.length,
-      movedCount: result.count,
-      entryIds: movedEntryIds,
+      restoredCount: result.count,
+      entryIds,
     },
     ...requestMeta,
   });
 
-  for (const entryId of movedEntryIds) {
+  for (const entryId of entryIds) {
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
-      action: AUDIT_ACTION.ENTRY_TRASH,
+      action: AUDIT_ACTION.ENTRY_RESTORE,
       userId: session.user.id,
       targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
       targetId: entryId,
       metadata: {
-        source: "bulk-trash",
-        parentAction: AUDIT_ACTION.ENTRY_BULK_TRASH,
+        source: "bulk-restore",
+        parentAction: AUDIT_ACTION.ENTRY_BULK_RESTORE,
       },
       ...requestMeta,
     });
   }
 
-  return NextResponse.json({ success: true, movedCount: result.count });
+  return NextResponse.json({ success: true, restoredCount: result.count });
 }

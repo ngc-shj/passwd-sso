@@ -19,6 +19,7 @@ import {
   LogIn,
   LogOut,
   Plus,
+  Archive,
   Pencil,
   Trash2,
   RotateCcw,
@@ -75,11 +76,17 @@ type UserMap = Record<
 const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
   [AUDIT_ACTION.AUTH_LOGIN]: <LogIn className="h-4 w-4" />,
   [AUDIT_ACTION.AUTH_LOGOUT]: <LogOut className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_BULK_DELETE]: <Trash2 className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_BULK_TRASH]: <Trash2 className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_EMPTY_TRASH]: <Trash2 className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_BULK_ARCHIVE]: <Archive className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_BULK_UNARCHIVE]: <RotateCcw className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_BULK_RESTORE]: <RotateCcw className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_IMPORT]: <Upload className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_CREATE]: <Plus className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_UPDATE]: <Pencil className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_DELETE]: <Trash2 className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_TRASH]: <Trash2 className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_PERMANENT_DELETE]: <Trash2 className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_RESTORE]: <RotateCcw className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_EXPORT]: <Download className="h-4 w-4" />,
   [AUDIT_ACTION.ATTACHMENT_UPLOAD]: <Upload className="h-4 w-4" />,
@@ -105,6 +112,11 @@ const ACTION_GROUPS = [
     label: "groupEntry",
     value: AUDIT_ACTION_GROUP.ENTRY,
     actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ENTRY],
+  },
+  {
+    label: "groupBulk",
+    value: AUDIT_ACTION_GROUP.BULK,
+    actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.BULK],
   },
   {
     label: "groupTransfer",
@@ -270,16 +282,61 @@ export default function AuditLogsPage() {
         ? (log.metadata as Record<string, unknown>)
         : null;
 
-    if (log.action === AUDIT_ACTION.ENTRY_BULK_DELETE && meta) {
+    if (log.action === AUDIT_ACTION.ENTRY_BULK_TRASH && meta) {
       const requestedCount =
         typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
       const movedCount =
         typeof meta.movedCount === "number" ? meta.movedCount : 0;
       const notMovedCount = Math.max(0, requestedCount - movedCount);
-      return t("bulkDeleteMeta", {
+      return t("bulkTrashMeta", {
         requestedCount,
         movedCount,
         notMovedCount,
+      });
+    }
+
+    if (log.action === AUDIT_ACTION.ENTRY_EMPTY_TRASH && meta) {
+      const deletedCount =
+        typeof meta.deletedCount === "number" ? meta.deletedCount : 0;
+      return t("emptyTrashMeta", { deletedCount });
+    }
+
+    if (log.action === AUDIT_ACTION.ENTRY_BULK_ARCHIVE && meta) {
+      const requestedCount =
+        typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
+      const archivedCount =
+        typeof meta.archivedCount === "number" ? meta.archivedCount : 0;
+      const notArchivedCount = Math.max(0, requestedCount - archivedCount);
+      return t("bulkArchiveMeta", {
+        requestedCount,
+        archivedCount,
+        notArchivedCount,
+      });
+    }
+
+    if (log.action === AUDIT_ACTION.ENTRY_BULK_UNARCHIVE && meta) {
+      const requestedCount =
+        typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
+      const unarchivedCount =
+        typeof meta.unarchivedCount === "number" ? meta.unarchivedCount : 0;
+      const alreadyActiveCount = Math.max(0, requestedCount - unarchivedCount);
+      return t("bulkUnarchiveMeta", {
+        requestedCount,
+        unarchivedCount,
+        alreadyActiveCount,
+      });
+    }
+
+    if (log.action === AUDIT_ACTION.ENTRY_BULK_RESTORE && meta) {
+      const requestedCount =
+        typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
+      const restoredCount =
+        typeof meta.restoredCount === "number" ? meta.restoredCount : 0;
+      const notRestoredCount = Math.max(0, requestedCount - restoredCount);
+      return t("bulkRestoreMeta", {
+        requestedCount,
+        restoredCount,
+        notRestoredCount,
       });
     }
 
@@ -334,7 +391,10 @@ export default function AuditLogsPage() {
     ) {
       const name = entryNames.get(log.targetId);
       if (name) {
-        if (log.action === AUDIT_ACTION.ENTRY_DELETE && meta?.permanent === true) {
+        if (
+          log.action === AUDIT_ACTION.ENTRY_PERMANENT_DELETE ||
+          (log.action === AUDIT_ACTION.ENTRY_DELETE && meta?.permanent === true)
+        ) {
           return `${name}（${t("permanentDelete")}）`;
         }
         const suffixParts = [
@@ -364,9 +424,21 @@ export default function AuditLogsPage() {
 
   const actionLabel = (action: AuditActionValue | string) => t(action as never);
   const getActionLabel = (log: AuditLogItem) =>
-    log.action === AUDIT_ACTION.ENTRY_BULK_DELETE
-      ? t("ENTRY_BULK_DELETE")
-      : actionLabel(log.action);
+    log.action === AUDIT_ACTION.ENTRY_BULK_TRASH
+      ? t("ENTRY_BULK_TRASH")
+      : log.action === AUDIT_ACTION.ENTRY_EMPTY_TRASH
+        ? t("ENTRY_EMPTY_TRASH")
+      : log.action === AUDIT_ACTION.ENTRY_BULK_ARCHIVE
+        ? t("ENTRY_BULK_ARCHIVE")
+        : log.action === AUDIT_ACTION.ENTRY_BULK_UNARCHIVE
+          ? t("ENTRY_BULK_UNARCHIVE")
+          : log.action === AUDIT_ACTION.ENTRY_BULK_RESTORE
+            ? t("ENTRY_BULK_RESTORE")
+            : log.action === AUDIT_ACTION.ENTRY_TRASH
+              ? t("ENTRY_TRASH")
+              : log.action === AUDIT_ACTION.ENTRY_PERMANENT_DELETE
+                ? t("ENTRY_PERMANENT_DELETE")
+        : actionLabel(log.action);
 
   const filteredActions = (actions: readonly AuditActionValue[]) => {
     if (!actionSearch) return actions;

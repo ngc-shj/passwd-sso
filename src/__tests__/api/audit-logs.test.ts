@@ -185,13 +185,13 @@ describe("GET /api/audit-logs", () => {
     );
   });
 
-  it("applies ENTRY_BULK_DELETE action filter", async () => {
+  it("applies ENTRY_BULK_TRASH action filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_DELETE}`
+      `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_TRASH}`
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await GET(req as any);
@@ -199,7 +199,67 @@ describe("GET /api/audit-logs", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          action: { in: [AUDIT_ACTION.ENTRY_BULK_DELETE] },
+          action: { in: [AUDIT_ACTION.ENTRY_BULK_TRASH] },
+        }),
+      })
+    );
+  });
+
+  it("applies ENTRY_BULK_ARCHIVE action filter", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest(
+      "GET",
+      `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_ARCHIVE}`
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await GET(req as any);
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          action: { in: [AUDIT_ACTION.ENTRY_BULK_ARCHIVE] },
+        }),
+      })
+    );
+  });
+
+  it("applies ENTRY_BULK_UNARCHIVE action filter", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest(
+      "GET",
+      `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_UNARCHIVE}`
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await GET(req as any);
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          action: { in: [AUDIT_ACTION.ENTRY_BULK_UNARCHIVE] },
+        }),
+      })
+    );
+  });
+
+  it("applies ENTRY_BULK_RESTORE action filter", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest(
+      "GET",
+      `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_RESTORE}`
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await GET(req as any);
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          action: { in: [AUDIT_ACTION.ENTRY_BULK_RESTORE] },
         }),
       })
     );

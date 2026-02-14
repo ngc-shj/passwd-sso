@@ -7,6 +7,7 @@ import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +20,11 @@ import {
 import { Trash2, Loader2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import {
+  reconcileTrashSelectedIds,
+  toggleTrashSelectAllIds,
+  toggleTrashSelectOneId,
+} from "./trash-list-selection";
 import type { EntryTypeValue } from "@/lib/constants";
 
 interface TrashEntry {
@@ -44,6 +50,8 @@ export function TrashList({ refreshKey }: TrashListProps) {
   const { encryptionKey, userId } = useVault();
   const [entries, setEntries] = useState<TrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const allSelected = entries.length > 0 && selectedIds.size === entries.length;
 
   const fetchTrash = useCallback(async () => {
     if (!encryptionKey) return;
@@ -95,6 +103,12 @@ export function TrashList({ refreshKey }: TrashListProps) {
     fetchTrash();
   }, [fetchTrash, refreshKey]);
 
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      return reconcileTrashSelectedIds(prev, entries.map((entry) => entry.id));
+    });
+  }, [entries]);
+
   const handleRestore = async (id: string) => {
     try {
       const res = await fetch(apiPath.passwordRestore(id), { method: "POST" });
@@ -127,15 +141,47 @@ export function TrashList({ refreshKey }: TrashListProps) {
 
   const handleEmptyTrash = async () => {
     try {
-      for (const entry of entries) {
-        await fetch(`${apiPath.passwordById(entry.id)}?permanent=true`, {
-          method: "DELETE",
-        });
+      const res = await fetch(apiPath.passwordsEmptyTrash(), { method: "POST" });
+      if (!res.ok) {
+        toast.error(t("failedAction"));
+        return;
       }
       toast.success(t("emptyTrashSuccess"));
       setEntries([]);
+      setSelectedIds(new Set());
     } catch {
       toast.error(t("networkError"));
+    }
+  };
+
+  const toggleSelectOne = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => toggleTrashSelectOneId(prev, id, checked));
+  };
+
+  const toggleSelectAll = (checked: boolean) => {
+    setSelectedIds(toggleTrashSelectAllIds(entries.map((entry) => entry.id), checked));
+  };
+
+  const handleBulkRestore = async () => {
+    if (selectedIds.size === 0) return;
+    try {
+      const res = await fetch(apiPath.passwordsBulkRestore(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+      });
+      if (!res.ok) {
+        toast.error(t("bulkRestoreFailed"));
+        return;
+      }
+      const json = await res.json();
+      toast.success(
+        t("bulkRestored", { count: json.restoredCount ?? selectedIds.size })
+      );
+      setEntries((prev) => prev.filter((entry) => !selectedIds.has(entry.id)));
+      setSelectedIds(new Set());
+    } catch {
+      toast.error(t("bulkRestoreFailed"));
     }
   };
 
@@ -184,10 +230,43 @@ export function TrashList({ refreshKey }: TrashListProps) {
         </Dialog>
       </div>
 
-      <div className="space-y-2 rounded-xl border bg-card/80 p-2">
+      {selectedIds.size > 0 && (
+        <div className="sticky top-4 z-40 flex items-center justify-between rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <div className="flex items-center gap-3">
+            <Checkbox
+              checked={allSelected}
+              onCheckedChange={(v) => toggleSelectAll(Boolean(v))}
+              aria-label={tl("selectAll")}
+            />
+            <span className="text-sm text-muted-foreground">
+              {tl("selectedCount", { count: selectedIds.size })}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              {tl("clearSelection")}
+            </Button>
+            <Button size="sm" onClick={handleBulkRestore}>
+              <RotateCcw className="h-3.5 w-3.5 mr-1" />
+              {t("restoreSelected")}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
         {entries.map((entry) => (
           <Card key={entry.id} className="rounded-xl border bg-background/80 transition-colors hover:bg-muted/30">
             <CardContent className="flex items-center gap-4 p-4">
+              <Checkbox
+                checked={selectedIds.has(entry.id)}
+                onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
+                aria-label={tl("selectEntry", { title: entry.title })}
+              />
               {entry.entryType === ENTRY_TYPE.IDENTITY ? (
                 <IdCard className="h-4 w-4 shrink-0 text-muted-foreground" />
               ) : entry.entryType === ENTRY_TYPE.CREDIT_CARD ? (

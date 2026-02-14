@@ -31,11 +31,18 @@ describe("audit constants", () => {
 
   it("defines transfer and entry groups with expected actions", () => {
     expect(AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ENTRY]).toEqual([
-      AUDIT_ACTION.ENTRY_BULK_DELETE,
       AUDIT_ACTION.ENTRY_CREATE,
       AUDIT_ACTION.ENTRY_UPDATE,
-      AUDIT_ACTION.ENTRY_DELETE,
+      AUDIT_ACTION.ENTRY_TRASH,
+      AUDIT_ACTION.ENTRY_PERMANENT_DELETE,
       AUDIT_ACTION.ENTRY_RESTORE,
+    ]);
+    expect(AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.BULK]).toEqual([
+      AUDIT_ACTION.ENTRY_BULK_TRASH,
+      AUDIT_ACTION.ENTRY_EMPTY_TRASH,
+      AUDIT_ACTION.ENTRY_BULK_ARCHIVE,
+      AUDIT_ACTION.ENTRY_BULK_UNARCHIVE,
+      AUDIT_ACTION.ENTRY_BULK_RESTORE,
     ]);
     expect(AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.TRANSFER]).toEqual([
       AUDIT_ACTION.ENTRY_IMPORT,
@@ -44,16 +51,27 @@ describe("audit constants", () => {
     expect(AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.TRANSFER]).toEqual([
       AUDIT_ACTION.ENTRY_EXPORT,
     ]);
+    expect(AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.BULK]).toEqual([
+      AUDIT_ACTION.ENTRY_BULK_TRASH,
+      AUDIT_ACTION.ENTRY_EMPTY_TRASH,
+      AUDIT_ACTION.ENTRY_BULK_ARCHIVE,
+      AUDIT_ACTION.ENTRY_BULK_UNARCHIVE,
+      AUDIT_ACTION.ENTRY_BULK_RESTORE,
+    ]);
   });
 
   it("does not overlap ENTRY and TRANSFER groups", () => {
     const personalEntry = new Set(
       AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ENTRY]
     );
+    const personalBulk = new Set(
+      AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.BULK]
+    );
     const personalTransfer = new Set(
       AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.TRANSFER]
     );
 
+    expect([...personalEntry].filter((action) => personalBulk.has(action))).toEqual([]);
     expect(
       [...personalEntry].filter((action) => personalTransfer.has(action))
     ).toEqual([]);
