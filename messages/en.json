@@ -78,7 +78,17 @@
     "noFavorites": "No favorites yet.",
     "noArchive": "No archived items.",
     "noTrash": "Trash is empty.",
-    "addFirst": "Click \"New Item\" to add your first entry."
+    "addFirst": "Click \"New Item\" to add your first entry.",
+    "selectAll": "Select all",
+    "selectHint": "Select entries for bulk actions",
+    "selectedCount": "{count} selected",
+    "selectEntry": "Select {title}",
+    "moveSelectedToTrash": "Move selected to trash",
+    "bulkMoveConfirm": "Move {count} selected entries to trash?",
+    "bulkMovedToTrash": "{count} entries moved to trash",
+    "bulkMoveFailed": "Failed to move selected entries to trash",
+    "cancel": "Cancel",
+    "confirm": "Confirm"
   },
   "Trash": {
     "title": "Trash",
@@ -587,8 +597,10 @@
     "AUTH_LOGIN": "Logged in",
     "AUTH_LOGOUT": "Logged out",
     "ENTRY_CREATE": "Created entry",
+    "ENTRY_IMPORT_CREATE": "Created entry via import",
     "ENTRY_UPDATE": "Updated entry",
     "ENTRY_DELETE": "Deleted entry",
+    "ENTRY_BULK_DELETE": "Bulk deleted entries",
     "ENTRY_RESTORE": "Restored entry",
     "ENTRY_EXPORT": "Exported entries",
     "ATTACHMENT_UPLOAD": "Uploaded attachment",
@@ -609,6 +621,8 @@
     "orgAuditLog": "Audit Log — {orgName}",
     "orgAuditLogDesc": "View activity for {orgName}",
     "deletedEntry": "Deleted entry",
+    "bulkDeleteTarget": "Moved {count} entries to trash",
+    "fromFile": "(file: {filename})",
     "permanentDelete": "Permanently deleted",
     "roleChange": "{from} → {to}",
     "viewedByOwner": "{viewer} viewed {owner}'s vault",
@@ -625,7 +639,13 @@
     "groupAttachment": "Attachments",
     "groupOrg": "Organization",
     "groupShare": "Share Links",
-    "groupEmergency": "Emergency Access"
+    "groupEmergency": "Emergency Access",
+    "yes": "yes",
+    "no": "no",
+    "included": "included",
+    "notIncluded": "not included",
+    "exportMeta": "File: {filename} / Encrypted: {encrypted} / Orgs: {orgs}",
+    "exportMetaOrg": "File: {filename} / Encrypted: {encrypted}"
   },
   "Share": {
     "createShareLink": "Share via Link",

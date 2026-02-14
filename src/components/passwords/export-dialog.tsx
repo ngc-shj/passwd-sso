@@ -265,7 +265,13 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
       fetch(API_PATH.AUDIT_LOGS_EXPORT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entryCount: entries.length, format }),
+        body: JSON.stringify({
+          entryCount: entries.length,
+          format,
+          filename,
+          encrypted: passwordProtect,
+          includeOrgs,
+        }),
       }).catch(() => {});
 
       setOpen(false);

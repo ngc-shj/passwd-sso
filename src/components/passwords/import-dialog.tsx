@@ -12,6 +12,7 @@ import {
 } from "@/lib/export-crypto";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -490,6 +491,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
   const [decryptPassword, setDecryptPassword] = useState("");
   const [decrypting, setDecrypting] = useState(false);
   const [decryptError, setDecryptError] = useState("");
+  const [sourceFilename, setSourceFilename] = useState("");
 
   const reset = () => {
     setEntries([]);
@@ -502,6 +504,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
     setDecryptPassword("");
     setDecrypting(false);
     setDecryptError("");
+    setSourceFilename("");
     if (fileRef.current) fileRef.current.value = "";
   };
 
@@ -518,6 +521,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
   };
 
   const loadFile = (file: File) => {
+    setSourceFilename(file.name);
     const reader = new FileReader();
     reader.onload = (ev) => {
       const text = ev.target?.result as string;
@@ -702,7 +706,13 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
 
         const res = await fetch(API_PATH.PASSWORDS, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-passwd-sso-source": "import",
+            ...(sourceFilename
+              ? { "x-passwd-sso-filename": sourceFilename }
+              : {}),
+          },
           body: JSON.stringify({
             id: entryId,
             encryptedBlob,
@@ -752,7 +762,9 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             <p className="text-sm text-muted-foreground">
               {t("importedCount", { count: progress.total })}
             </p>
-            <Button onClick={() => setOpen(false)}>{t("close")}</Button>
+            <DialogClose asChild>
+              <Button type="button">{t("close")}</Button>
+            </DialogClose>
           </div>
         ) : encryptedFile ? (
           // Decryption step

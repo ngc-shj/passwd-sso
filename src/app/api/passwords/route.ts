@@ -139,6 +139,12 @@ export async function POST(req: NextRequest) {
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: entry.id,
+    metadata: (() => {
+      if (req.headers.get("x-passwd-sso-source") !== "import") return undefined;
+      const rawFilename = req.headers.get("x-passwd-sso-filename")?.trim() ?? "";
+      const filename = rawFilename ? rawFilename.slice(0, 255) : undefined;
+      return filename ? { source: "import", filename } : { source: "import" };
+    })(),
     ...extractRequestMeta(req),
   });
 

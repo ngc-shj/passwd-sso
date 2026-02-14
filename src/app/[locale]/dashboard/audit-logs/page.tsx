@@ -259,6 +259,43 @@ export default function AuditLogsPage() {
 
   const getTargetLabel = (log: AuditLogItem): string | null => {
     const meta = log.metadata;
+    const importFilename =
+      log.action === AUDIT_ACTION.ENTRY_CREATE &&
+      meta &&
+      typeof meta === "object" &&
+      "source" in meta &&
+      meta.source === "import" &&
+      "filename" in meta &&
+      typeof meta.filename === "string"
+        ? meta.filename
+        : null;
+    const isBulkDelete =
+      log.action === AUDIT_ACTION.ENTRY_DELETE &&
+      meta &&
+      typeof meta === "object" &&
+      "bulk" in meta &&
+      meta.bulk === true;
+
+    if (isBulkDelete) {
+      const count =
+        typeof meta?.movedCount === "number"
+          ? meta.movedCount
+          : typeof meta?.requestedCount === "number"
+            ? meta.requestedCount
+            : 0;
+      return t("bulkDeleteTarget", { count });
+    }
+
+    if (log.action === AUDIT_ACTION.ENTRY_EXPORT && meta && typeof meta === "object") {
+      const filename = typeof meta.filename === "string" ? meta.filename : null;
+      const encrypted = meta.encrypted === true;
+      const includeOrgs = meta.includeOrgs === true;
+      return t("exportMeta", {
+        filename: filename ?? "-",
+        encrypted: encrypted ? t("yes") : t("no"),
+        orgs: includeOrgs ? t("included") : t("notIncluded"),
+      });
+    }
 
     // Entry operations: show resolved entry name
     if (
@@ -269,6 +306,9 @@ export default function AuditLogsPage() {
       if (name) {
         if (log.action === AUDIT_ACTION.ENTRY_DELETE && meta?.permanent) {
           return `${name}（${t("permanentDelete")}）`;
+        }
+        if (importFilename) {
+          return `${name} ${t("fromFile", { filename: importFilename })}`;
         }
         return name;
       }
@@ -292,6 +332,24 @@ export default function AuditLogsPage() {
   };
 
   const actionLabel = (action: AuditActionValue | string) => t(action as never);
+  const getActionLabel = (log: AuditLogItem) => {
+    const meta = log.metadata;
+    const isImportCreate =
+      log.action === AUDIT_ACTION.ENTRY_CREATE &&
+      meta &&
+      typeof meta === "object" &&
+      "source" in meta &&
+      meta.source === "import";
+    const isBulkDelete =
+      log.action === AUDIT_ACTION.ENTRY_DELETE &&
+      meta &&
+      typeof meta === "object" &&
+      "bulk" in meta &&
+      meta.bulk === true;
+    if (isImportCreate) return t("ENTRY_IMPORT_CREATE");
+    if (isBulkDelete) return t("ENTRY_BULK_DELETE");
+    return actionLabel(log.action);
+  };
 
   const filteredActions = (actions: readonly AuditActionValue[]) => {
     if (!actionSearch) return actions;
@@ -446,7 +504,7 @@ export default function AuditLogsPage() {
                     {ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{t(log.action as never)}</p>
+                    <p className="text-sm font-medium">{getActionLabel(log)}</p>
                     {targetLabel && (
                       <p className="text-xs text-muted-foreground truncate">
                         {targetLabel}

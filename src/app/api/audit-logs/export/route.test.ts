@@ -87,6 +87,32 @@ describe("POST /api/audit-logs/export", () => {
     expect(mockRequireOrgPermission).not.toHaveBeenCalled();
   });
 
+  it("logs filename when provided", async () => {
+    const res = await POST(
+      createRequest("POST", URL, {
+        body: {
+          entryCount: 2,
+          format: "json",
+          filename: "passwd-sso-export-20260214.json",
+          encrypted: true,
+          includeOrgs: true,
+        },
+      })
+    );
+    expect(res.status).toBe(200);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          entryCount: 2,
+          format: "json",
+          filename: "passwd-sso-export-20260214.json",
+          encrypted: true,
+          includeOrgs: true,
+        },
+      })
+    );
+  });
+
   it("logs org export when orgId provided and user is member", async () => {
     const res = await POST(
       createRequest("POST", URL, {

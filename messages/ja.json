@@ -78,7 +78,17 @@
     "noFavorites": "お気に入りはまだありません。",
     "noArchive": "アーカイブされたアイテムはありません。",
     "noTrash": "ゴミ箱は空です。",
-    "addFirst": "「新規アイテム」をクリックして最初のエントリを追加してください。"
+    "addFirst": "「新規アイテム」をクリックして最初のエントリを追加してください。",
+    "selectAll": "すべて選択",
+    "selectHint": "一括操作するエントリを選択",
+    "selectedCount": "{count} 件選択中",
+    "selectEntry": "{title} を選択",
+    "moveSelectedToTrash": "選択項目をゴミ箱へ移動",
+    "bulkMoveConfirm": "選択した {count} 件をゴミ箱へ移動しますか？",
+    "bulkMovedToTrash": "{count} 件をゴミ箱へ移動しました",
+    "bulkMoveFailed": "選択項目のゴミ箱移動に失敗しました",
+    "cancel": "キャンセル",
+    "confirm": "実行"
   },
   "Trash": {
     "title": "ゴミ箱",
@@ -587,8 +597,10 @@
     "AUTH_LOGIN": "ログイン",
     "AUTH_LOGOUT": "ログアウト",
     "ENTRY_CREATE": "エントリー作成",
+    "ENTRY_IMPORT_CREATE": "インポートでエントリー作成",
     "ENTRY_UPDATE": "エントリー更新",
     "ENTRY_DELETE": "エントリー削除",
+    "ENTRY_BULK_DELETE": "エントリー一括削除",
     "ENTRY_RESTORE": "エントリー復元",
     "ENTRY_EXPORT": "エクスポート",
     "ATTACHMENT_UPLOAD": "添付ファイルのアップロード",
@@ -609,6 +621,8 @@
     "orgAuditLog": "監査ログ — {orgName}",
     "orgAuditLogDesc": "{orgName} のアクティビティを表示",
     "deletedEntry": "削除済みエントリー",
+    "bulkDeleteTarget": "{count} 件をゴミ箱へ移動",
+    "fromFile": "（ファイル: {filename}）",
     "permanentDelete": "完全削除",
     "roleChange": "{from} → {to}",
     "viewedByOwner": "{viewer} が {owner} の保管庫を閲覧",
@@ -625,7 +639,13 @@
     "groupAttachment": "添付ファイル",
     "groupOrg": "組織",
     "groupShare": "共有リンク",
-    "groupEmergency": "緊急アクセス"
+    "groupEmergency": "緊急アクセス",
+    "yes": "あり",
+    "no": "なし",
+    "included": "含む",
+    "notIncluded": "含まない",
+    "exportMeta": "ファイル: {filename} / 暗号化: {encrypted} / 組織: {orgs}",
+    "exportMetaOrg": "ファイル: {filename} / 暗号化: {encrypted}"
   },
   "Share": {
     "createShareLink": "リンクで共有",

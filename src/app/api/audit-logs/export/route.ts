@@ -10,6 +10,9 @@ const bodySchema = z.object({
   orgId: z.string().optional(),
   entryCount: z.number().int().min(0),
   format: z.enum(["csv", "json"]),
+  filename: z.string().trim().min(1).max(255).optional(),
+  encrypted: z.boolean().optional(),
+  includeOrgs: z.boolean().optional(),
 });
 
 // POST /api/audit-logs/export — Record export audit event
@@ -31,7 +34,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
   }
 
-  const { orgId, entryCount, format } = result.data;
+  const { orgId, entryCount, format, filename, encrypted, includeOrgs } = result.data;
 
   // Verify org membership when orgId is specified
   if (orgId) {
@@ -50,7 +53,13 @@ export async function POST(req: NextRequest) {
     action: AUDIT_ACTION.ENTRY_EXPORT,
     userId: session.user.id,
     orgId: orgId ?? undefined,
-    metadata: { entryCount, format },
+    metadata: {
+      entryCount,
+      format,
+      ...(filename ? { filename } : {}),
+      ...(typeof encrypted === "boolean" ? { encrypted } : {}),
+      ...(typeof includeOrgs === "boolean" ? { includeOrgs } : {}),
+    },
     ...extractRequestMeta(req),
   });
 
