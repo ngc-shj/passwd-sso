@@ -11,6 +11,8 @@ import {
   hashToken,
   encryptShareData,
   decryptShareData,
+  hmacVerifier,
+  verifyPassphraseVerifier,
 } from "./crypto-server";
 
 describe("crypto-server", () => {
@@ -275,6 +277,170 @@ describe("crypto-server", () => {
       const e1 = encryptShareData("same");
       const e2 = encryptShareData("same");
       expect(e1.ciphertext).not.toBe(e2.ciphertext);
+    });
+  });
+
+  describe("hmacVerifier", () => {
+    const validHex = "a".repeat(64);
+
+    it("returns a 64-char hex string", () => {
+      const result = hmacVerifier(validHex);
+      expect(result).toHaveLength(64);
+      expect(/^[0-9a-f]{64}$/.test(result)).toBe(true);
+    });
+
+    it("is deterministic for the same input", () => {
+      const r1 = hmacVerifier(validHex);
+      const r2 = hmacVerifier(validHex);
+      expect(r1).toBe(r2);
+    });
+
+    it("produces different output for different input", () => {
+      const r1 = hmacVerifier("a".repeat(64));
+      const r2 = hmacVerifier("b".repeat(64));
+      expect(r1).not.toBe(r2);
+    });
+
+    it("normalizes uppercase input to lowercase", () => {
+      const lower = hmacVerifier("a".repeat(64));
+      const upper = hmacVerifier("A".repeat(64));
+      expect(lower).toBe(upper);
+    });
+
+    it("throws on non-hex input", () => {
+      expect(() => hmacVerifier("xyz" + "0".repeat(61))).toThrow(
+        "verifierHash must be a 64-char lowercase hex string"
+      );
+    });
+
+    it("throws on too-short input", () => {
+      expect(() => hmacVerifier("aa")).toThrow(
+        "verifierHash must be a 64-char lowercase hex string"
+      );
+    });
+
+    it("throws on empty string", () => {
+      expect(() => hmacVerifier("")).toThrow(
+        "verifierHash must be a 64-char lowercase hex string"
+      );
+    });
+  });
+
+  describe("hmacVerifier — getVerifierPepper env handling", () => {
+    it("uses VERIFIER_PEPPER_KEY when set", () => {
+      const saved = process.env.VERIFIER_PEPPER_KEY;
+      process.env.VERIFIER_PEPPER_KEY = "b".repeat(64);
+
+      const result = hmacVerifier("a".repeat(64));
+      expect(result).toHaveLength(64);
+
+      // Change pepper → different HMAC
+      process.env.VERIFIER_PEPPER_KEY = "c".repeat(64);
+      const result2 = hmacVerifier("a".repeat(64));
+      expect(result).not.toBe(result2);
+
+      if (saved) {
+        process.env.VERIFIER_PEPPER_KEY = saved;
+      } else {
+        delete process.env.VERIFIER_PEPPER_KEY;
+      }
+    });
+
+    it("throws when VERIFIER_PEPPER_KEY is invalid hex", () => {
+      const saved = process.env.VERIFIER_PEPPER_KEY;
+      process.env.VERIFIER_PEPPER_KEY = "not-valid-hex";
+
+      expect(() => hmacVerifier("a".repeat(64))).toThrow(
+        "VERIFIER_PEPPER_KEY must be a 64-char hex string"
+      );
+
+      if (saved) {
+        process.env.VERIFIER_PEPPER_KEY = saved;
+      } else {
+        delete process.env.VERIFIER_PEPPER_KEY;
+      }
+    });
+
+    it("throws in production when VERIFIER_PEPPER_KEY is missing", () => {
+      const savedPepper = process.env.VERIFIER_PEPPER_KEY;
+      const savedEnv = process.env.NODE_ENV;
+      delete process.env.VERIFIER_PEPPER_KEY;
+      process.env.NODE_ENV = "production";
+
+      expect(() => hmacVerifier("a".repeat(64))).toThrow(
+        "VERIFIER_PEPPER_KEY is required in production"
+      );
+
+      process.env.NODE_ENV = savedEnv;
+      if (savedPepper) {
+        process.env.VERIFIER_PEPPER_KEY = savedPepper;
+      }
+    });
+
+    it("falls back to derived pepper in dev/test when VERIFIER_PEPPER_KEY is missing", () => {
+      const savedPepper = process.env.VERIFIER_PEPPER_KEY;
+      delete process.env.VERIFIER_PEPPER_KEY;
+      // NODE_ENV is "test" by default in vitest
+
+      const result = hmacVerifier("a".repeat(64));
+      expect(result).toHaveLength(64);
+
+      if (savedPepper) {
+        process.env.VERIFIER_PEPPER_KEY = savedPepper;
+      }
+    });
+  });
+
+  describe("verifyPassphraseVerifier", () => {
+    const verifierHash = "a".repeat(64);
+
+    it("returns true for matching verifier", () => {
+      const stored = hmacVerifier(verifierHash);
+      expect(verifyPassphraseVerifier(verifierHash, stored)).toBe(true);
+    });
+
+    it("returns true with uppercase client input (normalizes)", () => {
+      const stored = hmacVerifier(verifierHash);
+      expect(verifyPassphraseVerifier("A".repeat(64), stored)).toBe(true);
+    });
+
+    it("returns false for non-matching verifier", () => {
+      const stored = hmacVerifier(verifierHash);
+      expect(verifyPassphraseVerifier("b".repeat(64), stored)).toBe(false);
+    });
+
+    it("returns false for invalid client verifier (non-hex)", () => {
+      const stored = hmacVerifier(verifierHash);
+      expect(verifyPassphraseVerifier("not-hex", stored)).toBe(false);
+    });
+
+    it("returns false for invalid client verifier (too short)", () => {
+      const stored = hmacVerifier(verifierHash);
+      expect(verifyPassphraseVerifier("aa", stored)).toBe(false);
+    });
+
+    it("returns false for invalid stored HMAC (non-hex)", () => {
+      expect(verifyPassphraseVerifier(verifierHash, "corrupted-data")).toBe(false);
+    });
+
+    it("returns false for invalid stored HMAC (wrong length)", () => {
+      expect(verifyPassphraseVerifier(verifierHash, "ab".repeat(16))).toBe(false);
+    });
+
+    it("returns false (not throws) on pepper failure", () => {
+      const savedPepper = process.env.VERIFIER_PEPPER_KEY;
+      const savedEnv = process.env.NODE_ENV;
+      delete process.env.VERIFIER_PEPPER_KEY;
+      process.env.NODE_ENV = "production";
+
+      // In production without pepper, hmacVerifier would throw,
+      // but verifyPassphraseVerifier catches and returns false
+      expect(verifyPassphraseVerifier(verifierHash, "a".repeat(64))).toBe(false);
+
+      process.env.NODE_ENV = savedEnv;
+      if (savedPepper) {
+        process.env.VERIFIER_PEPPER_KEY = savedPepper;
+      }
     });
   });
 });
