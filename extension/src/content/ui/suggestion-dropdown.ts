@@ -23,6 +23,12 @@ let itemElements: HTMLDivElement[] = [];
 let currentOnDismiss: (() => void) | null = null;
 let outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 
+function isSafeSelectClick(e: MouseEvent, item: HTMLDivElement): boolean {
+  if (!e.isTrusted) return false;
+  const topEl = document.elementFromPoint(e.clientX, e.clientY);
+  return topEl === item || (topEl instanceof Node && item.contains(topEl));
+}
+
 export function showDropdown(opts: DropdownOptions): void {
   hideDropdown();
 
@@ -73,6 +79,7 @@ export function showDropdown(opts: DropdownOptions): void {
       // Use mousedown + preventDefault to prevent input blur
       item.addEventListener("mousedown", (e) => {
         e.preventDefault();
+        if (!isSafeSelectClick(e, item)) return;
         try {
           opts.onSelect(entry.id);
         } catch {

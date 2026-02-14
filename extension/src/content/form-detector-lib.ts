@@ -275,20 +275,6 @@ export function initFormDetector(): FormDetectorCleanup {
     requestMatches(input);
   };
 
-  const mouseoverHandler = (e: MouseEvent) => {
-    if (destroyed) return;
-    const target = e.target;
-    if (!(target instanceof HTMLInputElement)) return;
-    if (!isUsableInput(target)) return;
-
-    if (!shouldTriggerForInput(target)) return;
-
-    // Some legacy forms suppress focus flows; hover fallback keeps UX usable.
-    if (!currentContext || currentContext.input !== target) {
-      requestMatches(target);
-    }
-  };
-
   const blurHandler = (e: FocusEvent) => {
     if (destroyed) return;
     // Only hide if focus left the dropdown context input
@@ -392,7 +378,6 @@ export function initFormDetector(): FormDetectorCleanup {
 
   // Start
   document.addEventListener("focusin", focusHandler, true);
-  document.addEventListener("mouseover", mouseoverHandler, true);
   document.addEventListener("focusout", blurHandler, true);
   document.addEventListener("keydown", keydownHandler, true);
   scanInputs();
@@ -410,7 +395,6 @@ export function initFormDetector(): FormDetectorCleanup {
     destroyed = true;
     chrome.runtime.onMessage.removeListener(runtimeMessageHandler);
     document.removeEventListener("focusin", focusHandler, true);
-    document.removeEventListener("mouseover", mouseoverHandler, true);
     document.removeEventListener("focusout", blurHandler, true);
     document.removeEventListener("keydown", keydownHandler, true);
     observer.disconnect();
