@@ -169,6 +169,15 @@ npm run build
 4. Unlock vault, then use manual fill / inline suggestions
 5. Use **Disconnect** in popup to revoke extension token (`DELETE /api/extension/token`) when needed
 
+## Import Samples
+
+- passwd-sso JSON sample: [`docs/samples/passwd-sso.json`](docs/samples/passwd-sso.json)
+- passwd-sso CSV sample: [`docs/samples/passwd-sso.csv`](docs/samples/passwd-sso.csv)
+
+After importing the sample, place your screenshot at `docs/images/passwd-sso-import.png` and it will be shown below.
+
+![passwd-sso import result](docs/images/passwd-sso-import.png)
+
 ## Scripts
 
 | Command | Description |
