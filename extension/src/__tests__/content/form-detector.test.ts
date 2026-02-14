@@ -66,6 +66,13 @@ describe("clickjacking hardening guards", () => {
     document.body.style.opacity = original;
   });
 
+  it("treats page as unsafe when body opacity is below threshold", () => {
+    const original = document.body.style.opacity;
+    document.body.style.opacity = "0.2";
+    expect(isPageVisuallySafe()).toBe(false);
+    document.body.style.opacity = original;
+  });
+
   it("fails hit-test safety when another element is on top", () => {
     const input = document.createElement("input");
     input.type = "password";

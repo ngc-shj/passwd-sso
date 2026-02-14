@@ -61,7 +61,7 @@ export function isPageVisuallySafe(): boolean {
     return false;
   }
   // Guard against full-page transparency attacks while allowing subtle UI opacity effects.
-  return resolveOpacity(htmlStyle.opacity) > 0.05 && resolveOpacity(bodyStyle.opacity) > 0.05;
+  return resolveOpacity(htmlStyle.opacity) > 0.3 && resolveOpacity(bodyStyle.opacity) > 0.3;
 }
 
 export function isInputHitTestSafe(input: HTMLInputElement): boolean {
