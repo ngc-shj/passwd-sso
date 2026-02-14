@@ -216,6 +216,25 @@ async function attemptTokenRefresh(): Promise<void> {
   }
 }
 
+async function revokeCurrentTokenOnServer(): Promise<void> {
+  if (!currentToken) return;
+  try {
+    const { serverUrl } = await getSettings();
+    let origin: string;
+    try {
+      origin = new URL(serverUrl).origin;
+    } catch {
+      return;
+    }
+    await fetch(`${origin}${EXT_API_PATH.EXTENSION_TOKEN}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${currentToken}` },
+    });
+  } catch {
+    // Best-effort revoke; local clear still proceeds.
+  }
+}
+
 async function shouldSuppressInlineMatches(url: string): Promise<boolean> {
   let pageUrl: URL;
   try {
@@ -705,6 +724,7 @@ async function handleMessage(
     }
 
     case "CLEAR_TOKEN": {
+      await revokeCurrentTokenOnServer();
       clearToken();
       chrome.alarms.clear(ALARM_TOKEN_TTL);
       sendResponse({ type: "CLEAR_TOKEN", ok: true });

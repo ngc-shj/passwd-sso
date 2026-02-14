@@ -8,10 +8,11 @@ import { t } from "../../lib/i18n";
 
 interface Props {
   onUnlocked: () => void;
+  onDisconnect: () => void;
   tabUrl?: string | null;
 }
 
-export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
+export function VaultUnlock({ onUnlocked, onDisconnect, tabUrl }: Props) {
   const tabHost = tabUrl ? extractHost(tabUrl) : null;
   const [passphrase, setPassphrase] = useState("");
   const [error, setError] = useState("");
@@ -40,6 +41,11 @@ export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
     } else {
       setError(res.error || "INVALID_PASSPHRASE");
     }
+  };
+
+  const handleDisconnect = async () => {
+    await sendMessage({ type: "CLEAR_TOKEN" });
+    onDisconnect();
   };
 
   return (
@@ -79,6 +85,13 @@ export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
         className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 active:bg-blue-800 transition-colors disabled:opacity-60"
       >
         {loading ? t("popup.unlocking") : t("popup.unlock")}
+      </button>
+      <button
+        type="button"
+        onClick={handleDisconnect}
+        className="px-4 py-2 text-sm font-medium text-red-600 rounded-md border border-red-200 hover:bg-red-50 active:bg-red-100 transition-colors"
+      >
+        {t("popup.disconnect")}
       </button>
     </form>
   );

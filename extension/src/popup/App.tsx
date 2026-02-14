@@ -101,7 +101,14 @@ export function App() {
         )}
         {state === "not_logged_in" && <LoginPrompt />}
         {state === "logged_in" && (
-          <VaultUnlock onUnlocked={() => { setState("vault_unlocked"); notifyVaultStateChanged(); }} tabUrl={tabUrl} />
+          <VaultUnlock
+            onUnlocked={() => {
+              setState("vault_unlocked");
+              notifyVaultStateChanged();
+            }}
+            onDisconnect={() => setState("not_logged_in")}
+            tabUrl={tabUrl}
+          />
         )}
         {state === "vault_unlocked" && (
           <>
@@ -134,7 +141,11 @@ export function App() {
                 {t("popup.enableAutofill")}
               </button>
             )}
-            <MatchList tabUrl={tabUrl} onLock={() => setState("logged_in")} />
+            <MatchList
+              tabUrl={tabUrl}
+              onLock={() => setState("logged_in")}
+              onDisconnect={() => setState("not_logged_in")}
+            />
           </>
         )}
       </main>

@@ -817,6 +817,16 @@ describe("session persistence", () => {
     await sendMessage({ type: "CLEAR_TOKEN" });
 
     expect(chromeMock?.storage.session.remove).toHaveBeenCalledWith(SESSION_KEY);
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/extension/token"),
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({
+          Authorization: "Bearer tok-1",
+        }),
+      }),
+    );
   });
 
   it("clears refresh alarm on CLEAR_TOKEN", async () => {
@@ -827,6 +837,25 @@ describe("session persistence", () => {
     });
     await sendMessage({ type: "CLEAR_TOKEN" });
 
+    expect(chromeMock?.alarms.clear).toHaveBeenCalledWith(ALARM_TOKEN_REFRESH);
+  });
+
+  it("still clears local state when revoke API fails on CLEAR_TOKEN", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "tok-1",
+      expiresAt: Date.now() + 600_000,
+    });
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValue({ ok: false, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await sendMessage({ type: "CLEAR_TOKEN" });
+
+    expect(res).toEqual({ type: "CLEAR_TOKEN", ok: true });
+    expect(chromeMock?.storage.session.remove).toHaveBeenCalledWith(SESSION_KEY);
     expect(chromeMock?.alarms.clear).toHaveBeenCalledWith(ALARM_TOKEN_REFRESH);
   });
 
