@@ -3,13 +3,16 @@ import { sendMessage } from "../../lib/messaging";
 import { getSettings } from "../../lib/storage";
 import { ensureHostPermission } from "../../lib/api";
 import { humanizeError } from "../../lib/error-messages";
+import { extractHost } from "../../lib/url-matching";
 import { t } from "../../lib/i18n";
 
 interface Props {
   onUnlocked: () => void;
+  tabUrl?: string | null;
 }
 
-export function VaultUnlock({ onUnlocked }: Props) {
+export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
+  const tabHost = tabUrl ? extractHost(tabUrl) : null;
   const [passphrase, setPassphrase] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -44,6 +47,12 @@ export function VaultUnlock({ onUnlocked }: Props) {
       <p className="text-sm text-gray-600">
         {t("popup.unlockDescription")}
       </p>
+      {tabHost && (
+        <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-md">
+          <span className="shrink-0">🌐</span>
+          <span>{t("popup.unlockSite", { host: tabHost })}</span>
+        </div>
+      )}
       <div className="flex items-center gap-2">
         <input
           type={showPassphrase ? "text" : "password"}

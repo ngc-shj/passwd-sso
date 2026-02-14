@@ -25,6 +25,20 @@ export function MatchList({ tabUrl, onLock }: Props) {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const hasTabUrl = Boolean(tabUrl);
   const tabHost = tabUrl ? extractHost(tabUrl) : null;
+  const isInsecurePage = tabUrl
+    ? (() => {
+        try {
+          const url = new URL(tabUrl);
+          return (
+            url.protocol === "http:" &&
+            url.hostname !== "localhost" &&
+            url.hostname !== "127.0.0.1"
+          );
+        } catch {
+          return false;
+        }
+      })()
+    : false;
 
   useEffect(() => {
     sendMessage({ type: "FETCH_PASSWORDS" }).then((res) => {
@@ -110,6 +124,12 @@ export function MatchList({ tabUrl, onLock }: Props) {
         message={toast?.message || ""}
         type={toast?.type}
       />
+      {isInsecurePage && (
+        <div className="flex items-start gap-2 px-3 py-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md">
+          <span className="shrink-0 mt-0.5">⚠</span>
+          <span>{t("popup.httpWarning")}</span>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-700">{t("popup.passwords")}</h2>
         <button
