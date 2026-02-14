@@ -444,6 +444,29 @@ describe("background message flow", () => {
     });
   });
 
+  it("autofills with blob username fallback when overview username is missing", async () => {
+    cryptoMocks.decryptData
+      .mockResolvedValueOnce(
+        JSON.stringify({ password: "secret", loginId: "fallback-user" }),
+      )
+      .mockResolvedValueOnce(JSON.stringify({ username: null }));
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    expect(res).toEqual({ type: "AUTOFILL", ok: true });
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(1, {
+      type: "AUTOFILL_FILL",
+      username: "fallback-user",
+      password: "secret",
+    });
+  });
+
   it("returns error when AUTOFILL fetch fails", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
@@ -485,7 +508,7 @@ describe("background message flow", () => {
   });
 
   it("returns error when AUTOFILL script injection fails", async () => {
-    chromeMock?.scripting.executeScript.mockRejectedValueOnce(new Error("CSP"));
+    chromeMock?.scripting.executeScript.mockRejectedValue(new Error("CSP"));
     cryptoMocks.decryptData
       .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
       .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));

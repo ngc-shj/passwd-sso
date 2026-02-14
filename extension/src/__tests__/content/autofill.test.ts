@@ -62,4 +62,61 @@ describe("performAutofill", () => {
     expect(user.value).toBe("");
     expect(pw.value).toBe("secret");
   });
+
+  it("fills id-like username field before password", () => {
+    setupForm(`
+      <input type="text" id="userId" name="userId" />
+      <input type="password" id="pw" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "myjcb-user",
+      password: "secret",
+    });
+
+    const user = document.getElementById("userId") as HTMLInputElement;
+    const pw = document.getElementById("pw") as HTMLInputElement;
+    expect(user.value).toBe("myjcb-user");
+    expect(pw.value).toBe("secret");
+  });
+
+  it("fills focused text input first (inline dropdown selection case)", () => {
+    setupForm(`
+      <input type="text" id="focusedUser" />
+      <input type="password" id="pw" />
+    `);
+
+    const focusedUser = document.getElementById("focusedUser") as HTMLInputElement;
+    focusedUser.focus();
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "focus-user",
+      password: "secret",
+    });
+
+    const pw = document.getElementById("pw") as HTMLInputElement;
+    expect(focusedUser.value).toBe("focus-user");
+    expect(pw.value).toBe("secret");
+  });
+
+  it("fills using target hint even when no field is focused", () => {
+    setupForm(`
+      <input type="text" id="userId" name="userId" />
+      <input type="password" id="pw" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "hint-user",
+      password: "secret",
+      targetHint: { id: "userId", name: "userId", type: "text" },
+    });
+
+    const user = document.getElementById("userId") as HTMLInputElement;
+    const pw = document.getElementById("pw") as HTMLInputElement;
+    expect(user.value).toBe("hint-user");
+    expect(pw.value).toBe("secret");
+  });
 });

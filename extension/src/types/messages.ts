@@ -11,7 +11,11 @@ export type ExtensionMessage =
   | { type: "COPY_PASSWORD"; entryId: string }
   | { type: "AUTOFILL"; entryId: string; tabId: number }
   | { type: "GET_MATCHES_FOR_URL"; url: string }
-  | { type: "AUTOFILL_FROM_CONTENT"; entryId: string };
+  | {
+      type: "AUTOFILL_FROM_CONTENT";
+      entryId: string;
+      targetHint?: AutofillTargetHint;
+    };
 
 export interface DecryptedEntry {
   id: string;
@@ -38,4 +42,12 @@ export interface AutofillPayload {
   type: "AUTOFILL_FILL";
   username: string;
   password: string;
+  targetHint?: AutofillTargetHint;
+}
+
+export interface AutofillTargetHint {
+  id?: string;
+  name?: string;
+  type?: string;
+  autocomplete?: string;
 }

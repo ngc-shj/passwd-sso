@@ -1,4 +1,5 @@
 import type {
+  AutofillTargetHint,
   DecryptedEntry,
   ExtensionMessage,
   ExtensionResponse,
@@ -352,6 +353,7 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
 async function performAutofillForEntry(
   entryId: string,
   tabId: number,
+  targetHint?: AutofillTargetHint,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!encryptionKey || !currentUserId) {
     return { ok: false, error: "VAULT_LOCKED" };
@@ -379,23 +381,144 @@ async function performAutofillForEntry(
     aad,
   );
 
-  const blob = JSON.parse(blobPlain) as { password?: string | null };
+  const blob = JSON.parse(blobPlain) as {
+    password?: string | null;
+    username?: string | null;
+    loginId?: string | null;
+    userId?: string | null;
+    email?: string | null;
+  };
   const overview = JSON.parse(overviewPlain) as { username?: string | null };
   const password = blob.password ?? null;
-  const username = overview.username ?? "";
+  const username =
+    overview.username ??
+    blob.username ??
+    blob.loginId ??
+    blob.userId ??
+    blob.email ??
+    "";
 
   if (!password) {
     return { ok: false, error: "NO_PASSWORD" };
   }
 
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["src/content/autofill.js"],
+    });
+    await chrome.tabs.sendMessage(tabId, {
+      type: "AUTOFILL_FILL",
+      username,
+      password,
+      ...(targetHint ? { targetHint } : {}),
+    });
+  } catch {
+    // Continue to direct fallback injection below.
+  }
+
+  // Direct fallback for pages where content-script messaging is blocked/unstable.
+  // Runs in all frames so login forms inside iframes are also covered.
   await chrome.scripting.executeScript({
-    target: { tabId },
-    files: ["src/content/autofill.js"],
-  });
-  await chrome.tabs.sendMessage(tabId, {
-    type: "AUTOFILL_FILL",
-    username,
-    password,
+    target: { tabId, allFrames: true },
+    args: [username, password, targetHint],
+    func: (
+      usernameArg: string,
+      passwordArg: string,
+      targetHintArg?: { id?: string; name?: string; type?: string; autocomplete?: string },
+    ) => {
+      const isUsableInput = (input: HTMLInputElement) =>
+        !input.disabled && !input.readOnly;
+      const isVisible = (input: HTMLInputElement) =>
+        getComputedStyle(input).display !== "none" &&
+        getComputedStyle(input).visibility !== "hidden";
+
+      const setInputValue = (input: HTMLInputElement, value: string) => {
+        input.focus();
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        )?.set;
+        if (setter) setter.call(input, value);
+        else input.value = value;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+        input.dispatchEvent(new Event("blur", { bubbles: true }));
+      };
+
+      const inputs = Array.from(
+        document.querySelectorAll("input"),
+      ) as HTMLInputElement[];
+
+      const findInputByHint = () => {
+        if (!targetHintArg) return null;
+        return (
+          inputs.find((i) => !!targetHintArg.id && i.id === targetHintArg.id) ??
+          inputs.find((i) => !!targetHintArg.name && i.name === targetHintArg.name) ??
+          inputs.find(
+            (i) =>
+              !!targetHintArg.autocomplete &&
+              i.autocomplete === targetHintArg.autocomplete &&
+              (!targetHintArg.type || i.type === targetHintArg.type),
+          ) ??
+          null
+        );
+      };
+
+      const active = document.activeElement;
+      const hintedInput = findInputByHint();
+      const usernameInput: HTMLInputElement | null =
+        hintedInput instanceof HTMLInputElement &&
+        isUsableInput(hintedInput) &&
+        ["text", "email", "tel"].includes(hintedInput.type)
+          ? hintedInput
+          : active instanceof HTMLInputElement &&
+              isUsableInput(active) &&
+              ["text", "email", "tel"].includes(active.type)
+            ? active
+            : null;
+
+      const findPasswordInScope = (scopeInputs: HTMLInputElement[]) => {
+        const byAutocomplete = scopeInputs.find(
+          (i) =>
+            isUsableInput(i) &&
+            i.type === "password" &&
+            isVisible(i) &&
+            i.autocomplete === "current-password",
+        );
+        if (byAutocomplete) return byAutocomplete;
+        const pwInputs = scopeInputs.filter(
+          (i) => isUsableInput(i) && i.type === "password" && isVisible(i),
+        );
+        return pwInputs.length ? pwInputs[pwInputs.length - 1] : null;
+      };
+
+      const scopeForm = (usernameInput ?? hintedInput)?.form ?? null;
+      const scopedInputs = scopeForm
+        ? (Array.from(scopeForm.querySelectorAll("input")) as HTMLInputElement[])
+        : inputs;
+      const passwordInput =
+        findPasswordInScope(scopedInputs) ?? findPasswordInScope(inputs);
+
+      let fallbackUsername = usernameInput;
+      if (!fallbackUsername && passwordInput) {
+        const pwIndex = inputs.indexOf(passwordInput);
+        for (let i = pwIndex - 1; i >= 0; i -= 1) {
+          const c = inputs[i];
+          if (
+            isUsableInput(c) &&
+            ["text", "email", "tel"].includes(c.type)
+          ) {
+            fallbackUsername = c;
+            break;
+          }
+        }
+      }
+
+      if (fallbackUsername && usernameArg) setInputValue(fallbackUsername, usernameArg);
+      if (passwordInput) setInputValue(passwordInput, passwordArg);
+    },
   });
   return { ok: true };
 }
@@ -754,6 +877,7 @@ chrome.runtime.onMessage.addListener(
             const result = await performAutofillForEntry(
               message.entryId,
               tabId,
+              message.targetHint,
             );
             sendResponse({
               type: "AUTOFILL_FROM_CONTENT",
