@@ -178,20 +178,20 @@ npm run build
 
 ### ダッシュボード
 
-<img src="docs/images/passwd-sso-dashboard.png" alt="passwd-sso ダッシュボード" width="900" />
+![passwd-sso ダッシュボード](docs/images/passwd-sso-dashboard.png)
 
 ### エントリー詳細（AWS 3フィールド例）
 
-<img src="docs/images/passwd-sso-entry-detail.png" alt="passwd-sso エントリー詳細" width="900" />
+![passwd-sso エントリー詳細](docs/images/passwd-sso-entry-detail.png)
 
 ### パスワードジェネレーター
 
-<img src="docs/images/passwd-sso-password-generator.png" alt="passwd-sso パスワードジェネレーター" width="900" />
+![passwd-sso パスワードジェネレーター](docs/images/passwd-sso-password-generator.png)
 
 ### 拡張スクリーンショット（AWS IAM 3フィールド補完）
 
-<img src="docs/images/passwd-sso-extension-aws-fill-1.png" alt="passwd-sso 拡張 aws 補完 1" width="420" />
-<img src="docs/images/passwd-sso-extension-aws-fill-2.png" alt="passwd-sso 拡張 aws 補完 2" width="420" />
+![passwd-sso 拡張 aws 補完 1](docs/images/passwd-sso-extension-aws-fill-1.png)
+![passwd-sso 拡張 aws 補完 2](docs/images/passwd-sso-extension-aws-fill-2.png)
 
 ## スクリプト
 

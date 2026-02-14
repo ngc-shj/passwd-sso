@@ -178,20 +178,20 @@ npm run build
 
 ### Dashboard
 
-<img src="docs/images/passwd-sso-dashboard.png" alt="passwd-sso dashboard" width="900" />
+![passwd-sso dashboard](docs/images/passwd-sso-dashboard.png)
 
 ### Entry Detail (AWS 3-field example)
 
-<img src="docs/images/passwd-sso-entry-detail.png" alt="passwd-sso entry detail" width="900" />
+![passwd-sso entry detail](docs/images/passwd-sso-entry-detail.png)
 
 ### Password Generator
 
-<img src="docs/images/passwd-sso-password-generator.png" alt="passwd-sso password generator" width="900" />
+![passwd-sso password generator](docs/images/passwd-sso-password-generator.png)
 
 ### Extension Screenshots (AWS IAM 3-field fill)
 
-<img src="docs/images/passwd-sso-extension-aws-fill-1.png" alt="passwd-sso extension aws fill 1" width="420" />
-<img src="docs/images/passwd-sso-extension-aws-fill-2.png" alt="passwd-sso extension aws fill 2" width="420" />
+![passwd-sso extension aws fill 1](docs/images/passwd-sso-extension-aws-fill-1.png)
+![passwd-sso extension aws fill 2](docs/images/passwd-sso-extension-aws-fill-2.png)
 
 ## Scripts
 
