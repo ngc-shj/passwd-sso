@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useWatchtower, OLD_THRESHOLD_DAYS } from "@/hooks/use-watchtower";
 import { ScoreGauge } from "@/components/watchtower/score-gauge";
@@ -30,6 +30,7 @@ import { resolveNavigationTarget } from "@/lib/client-navigation";
 
 export default function WatchtowerPage() {
   const t = useTranslations("Watchtower");
+  const locale = useLocale();
   const router = useRouter();
   const {
     report,
@@ -77,18 +78,23 @@ export default function WatchtowerPage() {
       const anchor = target?.closest("a[href]") as HTMLAnchorElement | null;
       if (!anchor) return;
 
+      const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       const targetInfo = resolveNavigationTarget(
         anchor.href,
-        window.location.origin
+        window.location.origin,
+        locale
       );
-      if (targetInfo.isInternal) {
-        const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-        if (targetInfo.internalPath === current) return;
-      }
+      if (!targetInfo.isInternal || !targetInfo.internalPath) return;
+      const currentInfo = resolveNavigationTarget(
+        currentPath,
+        window.location.origin,
+        locale
+      );
+      if (targetInfo.internalPath === currentInfo.internalPath) return;
 
       event.preventDefault();
       event.stopPropagation();
-      setPendingHref(anchor.href);
+      setPendingHref(targetInfo.internalPath);
       setLeaveDialogOpen(true);
     };
 
@@ -98,21 +104,14 @@ export default function WatchtowerPage() {
       window.removeEventListener("beforeunload", onBeforeUnload);
       document.removeEventListener("click", onClick, true);
     };
-  }, [loading, t]);
+  }, [loading, t, locale]);
 
   const handleConfirmLeave = () => {
     if (!pendingHref) return;
-    const targetInfo = resolveNavigationTarget(pendingHref, window.location.origin);
     setLeaveDialogOpen(false);
     setPendingHref(null);
-
-    if (targetInfo.isInternal && targetInfo.internalPath) {
-      router.push(targetInfo.internalPath);
-      return;
-    }
-
     allowLeaveRef.current = true;
-    window.location.assign(targetInfo.externalHref);
+    router.push(pendingHref);
   };
 
   const totalIssues = report ? calculateTotalIssues(report) : 0;
