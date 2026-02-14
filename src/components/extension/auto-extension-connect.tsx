@@ -13,6 +13,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
 
+const SKIP_BEFOREUNLOAD_ONCE_KEY = "psso:skip-beforeunload-once";
+
 /**
  * Automatically connects the browser extension after vault unlock
  * when the page was opened from the extension (indicated by ?ext_connect=1).
@@ -60,6 +62,15 @@ export function AutoExtensionConnect() {
 
   const handleRetry = () => {
     connect();
+  };
+
+  const handleCloseTab = () => {
+    try {
+      sessionStorage.setItem(SKIP_BEFOREUNLOAD_ONCE_KEY, "1");
+    } catch {
+      // ignore storage failures; close will still be attempted
+    }
+    window.close();
   };
 
   // No ext_connect param — render nothing, let dashboard show
@@ -119,7 +130,7 @@ export function AutoExtensionConnect() {
           {status === CONNECT_STATUS.CONNECTED && (
             <div className="flex flex-col gap-3 w-full max-w-xs">
               <Button
-                onClick={() => window.close()}
+                onClick={handleCloseTab}
                 className="w-full"
               >
                 {t("closeTab")}
