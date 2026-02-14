@@ -78,6 +78,7 @@ const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
   [AUDIT_ACTION.AUTH_LOGOUT]: <LogOut className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_BULK_DELETE]: <Trash2 className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_BULK_ARCHIVE]: <Archive className="h-4 w-4" />,
+  [AUDIT_ACTION.ENTRY_BULK_UNARCHIVE]: <RotateCcw className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_IMPORT]: <Upload className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_CREATE]: <Plus className="h-4 w-4" />,
   [AUDIT_ACTION.ENTRY_UPDATE]: <Pencil className="h-4 w-4" />,
@@ -298,6 +299,19 @@ export default function AuditLogsPage() {
       });
     }
 
+    if (log.action === AUDIT_ACTION.ENTRY_BULK_UNARCHIVE && meta) {
+      const requestedCount =
+        typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
+      const unarchivedCount =
+        typeof meta.unarchivedCount === "number" ? meta.unarchivedCount : 0;
+      const alreadyActiveCount = Math.max(0, requestedCount - unarchivedCount);
+      return t("bulkUnarchiveMeta", {
+        requestedCount,
+        unarchivedCount,
+        alreadyActiveCount,
+      });
+    }
+
     if (log.action === AUDIT_ACTION.ENTRY_IMPORT && meta) {
       const requestedCount = typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
       const successCount = typeof meta.successCount === "number" ? meta.successCount : 0;
@@ -383,6 +397,8 @@ export default function AuditLogsPage() {
       ? t("ENTRY_BULK_DELETE")
       : log.action === AUDIT_ACTION.ENTRY_BULK_ARCHIVE
         ? t("ENTRY_BULK_ARCHIVE")
+        : log.action === AUDIT_ACTION.ENTRY_BULK_UNARCHIVE
+          ? t("ENTRY_BULK_UNARCHIVE")
         : actionLabel(log.action);
 
   const filteredActions = (actions: readonly AuditActionValue[]) => {

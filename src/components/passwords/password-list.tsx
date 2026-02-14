@@ -93,7 +93,7 @@ export function PasswordList({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
-  const [bulkAction, setBulkAction] = useState<"trash" | "archive">("trash");
+  const [bulkAction, setBulkAction] = useState<"trash" | "archive" | "unarchive">("trash");
   const [bulkProcessing, setBulkProcessing] = useState(false);
 
   const handleToggleExpand = (id: string) => {
@@ -270,13 +270,17 @@ export function PasswordList({
     setBulkProcessing(true);
     try {
       const endpoint =
-        bulkAction === "archive"
+        bulkAction === "archive" || bulkAction === "unarchive"
           ? apiPath.passwordsBulkArchive()
           : apiPath.passwordsBulkTrash();
+      const body =
+        bulkAction === "archive" || bulkAction === "unarchive"
+          ? { ids: Array.from(selectedIds), operation: bulkAction }
+          : { ids: Array.from(selectedIds) };
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) throw new Error("bulk action failed");
@@ -284,7 +288,14 @@ export function PasswordList({
       if (bulkAction === "archive") {
         toast.success(
           t("bulkArchived", {
-            count: json.archivedCount ?? selectedIds.size,
+            count: json.processedCount ?? json.archivedCount ?? selectedIds.size,
+          })
+        );
+      } else if (bulkAction === "unarchive") {
+        toast.success(
+          t("bulkUnarchived", {
+            count:
+              json.processedCount ?? json.unarchivedCount ?? selectedIds.size,
           })
         );
       } else {
@@ -300,7 +311,11 @@ export function PasswordList({
       onDataChange?.();
     } catch {
       toast.error(
-        bulkAction === "archive" ? t("bulkArchiveFailed") : t("bulkMoveFailed")
+        bulkAction === "archive"
+          ? t("bulkArchiveFailed")
+          : bulkAction === "unarchive"
+            ? t("bulkUnarchiveFailed")
+            : t("bulkMoveFailed")
       );
     } finally {
       setBulkProcessing(false);
@@ -365,7 +380,18 @@ export function PasswordList({
             >
               {t("clearSelection")}
             </Button>
-            {!archivedOnly && (
+            {archivedOnly ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setBulkAction("unarchive");
+                  setBulkDialogOpen(true);
+                }}
+              >
+                {t("moveSelectedToUnarchive")}
+              </Button>
+            ) : (
               <Button
                 variant="secondary"
                 size="sm"
@@ -433,11 +459,15 @@ export function PasswordList({
             <AlertDialogTitle>
               {bulkAction === "archive"
                 ? t("moveSelectedToArchive")
+                : bulkAction === "unarchive"
+                  ? t("moveSelectedToUnarchive")
                 : t("moveSelectedToTrash")}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {bulkAction === "archive"
                 ? t("bulkArchiveConfirm", { count: selectedIds.size })
+                : bulkAction === "unarchive"
+                  ? t("bulkUnarchiveConfirm", { count: selectedIds.size })
                 : t("bulkMoveConfirm", { count: selectedIds.size })}
             </AlertDialogDescription>
           </AlertDialogHeader>

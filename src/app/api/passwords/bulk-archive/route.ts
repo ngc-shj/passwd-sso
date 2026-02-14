@@ -7,6 +7,7 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 interface BulkArchiveBody {
   ids: string[];
+  operation?: "archive" | "unarchive";
 }
 
 // POST /api/passwords/bulk-archive - Archive multiple entries
@@ -32,31 +33,36 @@ export async function POST(req: NextRequest) {
         )
       )
     : [];
+  const operation =
+    (body as BulkArchiveBody)?.operation === "unarchive"
+      ? "unarchive"
+      : "archive";
+  const toArchived = operation === "archive";
 
   if (ids.length === 0) {
     return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
   }
 
-  const entriesToArchive = await prisma.passwordEntry.findMany({
+  const entriesToProcess = await prisma.passwordEntry.findMany({
     where: {
       userId: session.user.id,
       id: { in: ids },
       deletedAt: null,
-      isArchived: false,
+      isArchived: !toArchived,
     },
     select: { id: true },
   });
-  const entryIds = entriesToArchive.map((entry) => entry.id);
+  const entryIds = entriesToProcess.map((entry) => entry.id);
 
   const result = await prisma.passwordEntry.updateMany({
     where: {
       userId: session.user.id,
       id: { in: entryIds },
       deletedAt: null,
-      isArchived: false,
+      isArchived: !toArchived,
     },
     data: {
-      isArchived: true,
+      isArchived: toArchived,
     },
   });
 
@@ -64,15 +70,19 @@ export async function POST(req: NextRequest) {
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
-    action: AUDIT_ACTION.ENTRY_BULK_ARCHIVE,
+    action: toArchived
+      ? AUDIT_ACTION.ENTRY_BULK_ARCHIVE
+      : AUDIT_ACTION.ENTRY_BULK_UNARCHIVE,
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: "bulk",
     metadata: {
       bulk: true,
-      operation: "archive",
+      operation,
       requestedCount: ids.length,
-      archivedCount: result.count,
+      processedCount: result.count,
+      archivedCount: toArchived ? result.count : 0,
+      unarchivedCount: toArchived ? 0 : result.count,
       entryIds,
     },
     ...requestMeta,
@@ -87,11 +97,19 @@ export async function POST(req: NextRequest) {
       targetId: entryId,
       metadata: {
         source: "bulk-archive",
-        parentAction: AUDIT_ACTION.ENTRY_BULK_ARCHIVE,
+        parentAction: toArchived
+          ? AUDIT_ACTION.ENTRY_BULK_ARCHIVE
+          : AUDIT_ACTION.ENTRY_BULK_UNARCHIVE,
       },
       ...requestMeta,
     });
   }
 
-  return NextResponse.json({ success: true, archivedCount: result.count });
+  return NextResponse.json({
+    success: true,
+    operation,
+    processedCount: result.count,
+    archivedCount: toArchived ? result.count : 0,
+    unarchivedCount: toArchived ? 0 : result.count,
+  });
 }
