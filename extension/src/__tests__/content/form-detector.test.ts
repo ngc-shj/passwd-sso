@@ -10,6 +10,7 @@ import {
   isElementVisuallySafe,
   isPageVisuallySafe,
   isInputHitTestSafe,
+  hasVisiblePopoverOverlayNear,
 } from "../../content/form-detector-lib";
 
 // Mock chrome.runtime for the module import
@@ -96,6 +97,42 @@ describe("clickjacking hardening guards", () => {
       writable: true,
       value: original,
     });
+  });
+
+  it("detects visible popover overlapping input center", () => {
+    const input = document.createElement("input");
+    input.type = "password";
+    document.body.appendChild(input);
+
+    vi.spyOn(input, "getBoundingClientRect").mockReturnValue({
+      top: 10,
+      left: 10,
+      bottom: 40,
+      right: 210,
+      width: 200,
+      height: 30,
+      x: 10,
+      y: 10,
+      toJSON: () => ({}),
+    });
+
+    const popover = document.createElement("div");
+    popover.setAttribute("popover", "manual");
+    popover.setAttribute("open", "");
+    document.body.appendChild(popover);
+    vi.spyOn(popover, "getBoundingClientRect").mockReturnValue({
+      top: 0,
+      left: 0,
+      bottom: 100,
+      right: 300,
+      width: 300,
+      height: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    expect(hasVisiblePopoverOverlayNear(input)).toBe(true);
   });
 });
 
