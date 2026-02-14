@@ -67,7 +67,7 @@ describe("showDropdown", () => {
     showDropdown(makeOptions());
     expect(isDropdownVisible()).toBe(true);
 
-    const host = document.getElementById("passwd-sso-shadow-host");
+    const host = document.querySelector("[data-passwd-sso-shadow-host]");
     expect(host).not.toBeNull();
   });
 
