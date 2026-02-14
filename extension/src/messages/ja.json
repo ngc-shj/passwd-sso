@@ -13,6 +13,7 @@
     "unlocking": "アンロック中...",
     "passwords": "パスワード",
     "lock": "ロック",
+    "disconnect": "接続解除",
     "noEntries": "エントリがありません。",
     "searchPlaceholder": "検索...",
     "noResults": "「{query}」に一致する結果はありません",

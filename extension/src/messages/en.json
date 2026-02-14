@@ -13,6 +13,7 @@
     "unlocking": "Unlocking...",
     "passwords": "Passwords",
     "lock": "Lock",
+    "disconnect": "Disconnect",
     "noEntries": "No entries found.",
     "searchPlaceholder": "Search...",
     "noResults": "No results for \"{query}\"",

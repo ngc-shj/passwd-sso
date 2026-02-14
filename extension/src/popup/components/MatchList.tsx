@@ -14,9 +14,10 @@ import { Toast } from "./Toast";
 interface Props {
   tabUrl: string | null;
   onLock: () => void;
+  onDisconnect: () => void;
 }
 
-export function MatchList({ tabUrl, onLock }: Props) {
+export function MatchList({ tabUrl, onLock, onDisconnect }: Props) {
   const [entries, setEntries] = useState<DecryptedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -54,6 +55,11 @@ export function MatchList({ tabUrl, onLock }: Props) {
   const handleLock = async () => {
     await sendMessage({ type: "LOCK_VAULT" });
     onLock();
+  };
+
+  const handleDisconnect = async () => {
+    await sendMessage({ type: "CLEAR_TOKEN" });
+    onDisconnect();
   };
 
   const handleCopy = async (entryId: string) => {
@@ -132,12 +138,20 @@ export function MatchList({ tabUrl, onLock }: Props) {
       )}
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-700">{t("popup.passwords")}</h2>
-        <button
-          onClick={handleLock}
-          className="text-xs text-gray-600 px-2 py-1 rounded hover:bg-gray-100 hover:text-gray-800 active:bg-gray-200 transition-colors"
-        >
-          {t("popup.lock")}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleLock}
+            className="text-xs text-gray-600 px-2 py-1 rounded hover:bg-gray-100 hover:text-gray-800 active:bg-gray-200 transition-colors"
+          >
+            {t("popup.lock")}
+          </button>
+          <button
+            onClick={handleDisconnect}
+            className="text-xs text-red-600 px-2 py-1 rounded hover:bg-red-50 hover:text-red-700 active:bg-red-100 transition-colors"
+          >
+            {t("popup.disconnect")}
+          </button>
+        </div>
       </div>
 
       {loading && <p className="text-sm text-gray-500">{t("popup.loading")}</p>}

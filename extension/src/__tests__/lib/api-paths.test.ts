@@ -3,6 +3,7 @@ import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
 
 describe("api paths", () => {
   it("defines stable extension api paths", () => {
+    expect(EXT_API_PATH.EXTENSION_TOKEN).toBe("/api/extension/token");
     expect(EXT_API_PATH.EXTENSION_TOKEN_REFRESH).toBe(
       "/api/extension/token/refresh"
     );
@@ -14,4 +15,3 @@ describe("api paths", () => {
     expect(extApiPath.passwordById("pw-1")).toBe("/api/passwords/pw-1");
   });
 });
-
