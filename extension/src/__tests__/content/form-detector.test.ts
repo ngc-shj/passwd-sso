@@ -7,6 +7,9 @@ import {
   findUsernameInput,
   isUsableInput,
   isLikelyUsernameInput,
+  isElementVisuallySafe,
+  isPageVisuallySafe,
+  isInputHitTestSafe,
 } from "../../content/form-detector-lib";
 
 // Mock chrome.runtime for the module import
@@ -43,6 +46,56 @@ describe("isUsableInput", () => {
     input.type = "text";
     input.readOnly = true;
     expect(isUsableInput(input)).toBe(false);
+  });
+});
+
+describe("clickjacking hardening guards", () => {
+  it("treats opacity:0 input as visually unsafe", () => {
+    const input = document.createElement("input");
+    input.type = "password";
+    input.style.opacity = "0";
+    document.body.appendChild(input);
+    expect(isElementVisuallySafe(input)).toBe(false);
+  });
+
+  it("treats page as unsafe when body opacity is reduced", () => {
+    const original = document.body.style.opacity;
+    document.body.style.opacity = "0";
+    expect(isPageVisuallySafe()).toBe(false);
+    document.body.style.opacity = original;
+  });
+
+  it("fails hit-test safety when another element is on top", () => {
+    const input = document.createElement("input");
+    input.type = "password";
+    document.body.appendChild(input);
+
+    vi.spyOn(input, "getBoundingClientRect").mockReturnValue({
+      top: 10,
+      left: 10,
+      bottom: 40,
+      right: 210,
+      width: 200,
+      height: 30,
+      x: 10,
+      y: 10,
+      toJSON: () => ({}),
+    });
+
+    const overlay = document.createElement("div");
+    document.body.appendChild(overlay);
+    const original = (document as Document & { elementFromPoint?: (x: number, y: number) => Element | null }).elementFromPoint;
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      writable: true,
+      value: () => overlay,
+    });
+    expect(isInputHitTestSafe(input)).toBe(false);
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      writable: true,
+      value: original,
+    });
   });
 });
 
