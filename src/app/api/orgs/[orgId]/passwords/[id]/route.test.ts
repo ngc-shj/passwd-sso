@@ -73,6 +73,25 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns OrgAuthError status when permission denied", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("rethrows non-OrgAuthError from GET", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
+    await expect(
+      GET(
+        createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+        createParams({ orgId: ORG_ID, id: PW_ID }),
+      ),
+    ).rejects.toThrow("unexpected");
+  });
+
   it("returns 404 when entry not found", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(null);
     const res = await GET(
@@ -80,6 +99,34 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(404);
+  });
+
+  it("returns 500 when decryption fails", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "LOGIN",
+      encryptedBlob: "bad-cipher",
+      blobIv: "iv",
+      blobAuthTag: "tag",
+      isArchived: false,
+      org: orgKeyData,
+      tags: [],
+      createdBy: { id: "u1", name: "User", image: null },
+      updatedBy: { id: "u1", name: "User" },
+      favorites: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    mockDecryptServerData.mockImplementation(() => { throw new Error("decrypt failed"); });
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(500);
+    const json = await res.json();
+    expect(json.error).toBe("DECRYPT_FAILED");
   });
 
   it("returns decrypted password details", async () => {
@@ -331,6 +378,131 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(401);
+  });
+
+  it("returns OrgAuthError status when not a member", async () => {
+    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("NOT_ORG_MEMBER", 403));
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { title: "New" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("rethrows non-OrgAuthError from PUT", async () => {
+    mockRequireOrgMember.mockRejectedValue(new Error("unexpected"));
+    await expect(
+      PUT(
+        createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+          body: { title: "New" },
+        }),
+        createParams({ orgId: ORG_ID, id: PW_ID }),
+      ),
+    ).rejects.toThrow("unexpected");
+  });
+
+  it("returns 404 when entry not found for PUT", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(null);
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { title: "New" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 403 when user lacks PASSWORD_UPDATE permission", async () => {
+    mockHasOrgPermission.mockReturnValue(false);
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      createdById: "test-user-id",
+      org: orgKeyData,
+    });
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { title: "New" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 400 on malformed JSON for PUT", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      createdById: "test-user-id",
+      org: orgKeyData,
+    });
+    const { NextRequest } = await import("next/server");
+    const req = new NextRequest(`http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      method: "PUT",
+      body: "not-json",
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PUT(req, createParams({ orgId: ORG_ID, id: PW_ID }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("INVALID_JSON");
+  });
+
+  it("returns 500 when decrypt fails during PUT", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "LOGIN",
+      createdById: "test-user-id",
+      encryptedBlob: "bad",
+      blobIv: "iv",
+      blobAuthTag: "tag",
+      org: orgKeyData,
+    });
+    mockDecryptServerData.mockImplementation(() => { throw new Error("decrypt failed"); });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { title: "New" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(500);
+  });
+
+  it("updates SECURE_NOTE entry with re-encryption", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: "SECURE_NOTE",
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({ title: "Old Note", content: "Old content" })
+    );
+    mockPrismaOrgPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      entryType: "SECURE_NOTE",
+      tags: [],
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { title: "Updated Note", content: "New content" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.title).toBe("Updated Note");
+    expect(mockEncryptServerData).toHaveBeenCalledTimes(2);
   });
 
   it("returns 403 when MEMBER tries to update another's entry", async () => {
@@ -679,6 +851,25 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]", () => {
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(401);
+  });
+
+  it("returns OrgAuthError status when permission denied for DELETE", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("rethrows non-OrgAuthError from DELETE", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
+    await expect(
+      DELETE(
+        createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+        createParams({ orgId: ORG_ID, id: PW_ID }),
+      ),
+    ).rejects.toThrow("unexpected");
   });
 
   it("returns 404 when entry not found", async () => {
