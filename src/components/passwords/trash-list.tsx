@@ -184,7 +184,7 @@ export function TrashList({ refreshKey }: TrashListProps) {
         </Dialog>
       </div>
 
-      <div className="space-y-2 rounded-xl border bg-card/80 p-2">
+      <div className="space-y-2">
         {entries.map((entry) => (
           <Card key={entry.id} className="rounded-xl border bg-background/80 transition-colors hover:bg-muted/30">
             <CardContent className="flex items-center gap-4 p-4">

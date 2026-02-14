@@ -345,46 +345,51 @@ export function PasswordList({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2">
-        <div className="flex items-center gap-3">
-          <Checkbox
-            checked={allSelected}
-            onCheckedChange={(v) => toggleSelectAll(Boolean(v))}
-            aria-label={t("selectAll")}
-          />
-          <span className="text-sm text-muted-foreground">
-            {selectedIds.size > 0
-              ? t("selectedCount", { count: selectedIds.size })
-              : t("selectHint")}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          {!archivedOnly && (
+      {selectedIds.size > 0 && (
+        <div className="sticky top-4 z-40 mb-2 flex items-center justify-between rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <div className="flex items-center gap-3">
+            <Checkbox
+              checked={allSelected}
+              onCheckedChange={(v) => toggleSelectAll(Boolean(v))}
+              aria-label={t("selectAll")}
+            />
+            <span className="text-sm text-muted-foreground">
+              {t("selectedCount", { count: selectedIds.size })}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
             <Button
-              variant="secondary"
+              variant="ghost"
               size="sm"
-              disabled={selectedIds.size === 0}
+              onClick={() => setSelectedIds(new Set())}
+            >
+              {t("clearSelection")}
+            </Button>
+            {!archivedOnly && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setBulkAction("archive");
+                  setBulkDialogOpen(true);
+                }}
+              >
+                {t("moveSelectedToArchive")}
+              </Button>
+            )}
+            <Button
+              variant="destructive"
+              size="sm"
               onClick={() => {
-                setBulkAction("archive");
+                setBulkAction("trash");
                 setBulkDialogOpen(true);
               }}
             >
-              {t("moveSelectedToArchive")}
+              {t("moveSelectedToTrash")}
             </Button>
-          )}
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={selectedIds.size === 0}
-            onClick={() => {
-              setBulkAction("trash");
-              setBulkDialogOpen(true);
-            }}
-          >
-            {t("moveSelectedToTrash")}
-          </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {entries.map((entry) => (
         <div key={entry.id} className="flex items-start gap-2">

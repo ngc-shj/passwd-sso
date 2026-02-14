@@ -91,6 +91,7 @@
     "bulkArchiveConfirm": "選択した {count} 件をアーカイブしますか？",
     "bulkArchived": "{count} 件をアーカイブしました",
     "bulkArchiveFailed": "選択項目のアーカイブに失敗しました",
+    "clearSelection": "選択解除",
     "cancel": "キャンセル",
     "confirm": "実行"
   },

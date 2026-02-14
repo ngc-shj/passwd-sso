@@ -91,6 +91,7 @@
     "bulkArchiveConfirm": "Archive {count} selected entries?",
     "bulkArchived": "{count} entries archived",
     "bulkArchiveFailed": "Failed to archive selected entries",
+    "clearSelection": "Clear selection",
     "cancel": "Cancel",
     "confirm": "Confirm"
   },
