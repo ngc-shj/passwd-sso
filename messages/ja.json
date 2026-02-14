@@ -602,7 +602,7 @@
     "ENTRY_DELETE": "エントリー削除",
     "ENTRY_BULK_DELETE": "エントリー一括削除",
     "ENTRY_RESTORE": "エントリー復元",
-    "ENTRY_EXPORT": "エクスポート",
+    "ENTRY_EXPORT": "エクスポート実行",
     "ATTACHMENT_UPLOAD": "添付ファイルのアップロード",
     "ATTACHMENT_DELETE": "添付ファイルの削除",
     "ORG_MEMBER_INVITE": "メンバー招待",
