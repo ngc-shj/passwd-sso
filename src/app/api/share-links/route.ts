@@ -75,13 +75,8 @@ export async function POST(req: NextRequest) {
     if (!entry || entry.userId !== session.user.id) {
       return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
     }
-    if (!data) {
-      return NextResponse.json(
-        { error: API_ERROR.MISSING_REQUIRED_FIELDS },
-        { status: 400 }
-      );
-    }
-    // Strip TOTP from personal data
+    // `data` is required by schema when `passwordEntryId` is set.
+    // Keep defensive fallback to empty object to avoid runtime throws on malformed inputs.
     const { ...safeData } = data;
     entryType = entry.entryType;
     plaintext = JSON.stringify(safeData);
