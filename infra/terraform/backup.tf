@@ -170,7 +170,8 @@ resource "aws_cloudwatch_event_rule" "backup_job_failure" {
     source      = ["aws.backup"]
     detail-type = ["Backup Job State Change"]
     detail = {
-      state = ["FAILED", "ABORTED", "EXPIRED"]
+      state           = ["FAILED", "ABORTED", "EXPIRED"]
+      backupVaultName = [aws_backup_vault.main[0].name]
     }
   })
 
@@ -194,7 +195,8 @@ resource "aws_cloudwatch_event_rule" "backup_copy_failure" {
     source      = ["aws.backup"]
     detail-type = ["Copy Job State Change"]
     detail = {
-      state = ["FAILED", "ABORTED", "EXPIRED"]
+      state           = ["FAILED", "ABORTED", "EXPIRED"]
+      backupVaultName = [aws_backup_vault.main[0].name]
     }
   })
 

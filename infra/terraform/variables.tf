@@ -347,6 +347,11 @@ variable "db_backup_window" {
   type        = string
   default     = "18:00-19:00"
   description = "RDS preferred backup window (UTC). 03:00-04:00 JST"
+
+  validation {
+    condition     = can(regex("^\\d{2}:\\d{2}-\\d{2}:\\d{2}$", var.db_backup_window))
+    error_message = "db_backup_window must be in HH:MM-HH:MM format (e.g. 18:00-19:00)."
+  }
 }
 
 variable "enable_s3_object_lock" {
