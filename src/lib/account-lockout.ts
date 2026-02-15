@@ -263,21 +263,43 @@ export async function resetLockout(userId: string): Promise<void> {
 /**
  * Check if an error is a PostgreSQL lock_timeout error.
  * PG error code 55P03 = lock_not_available.
+ *
+ * Prisma may surface this in multiple formats:
+ *  1. Direct PG error: err.code === "55P03"
+ *  2. Prisma wrapped:  err.cause.code === "55P03"
+ *  3. PrismaClientKnownRequestError: err.code === "P2010" && err.meta.code === "55P03"
  */
 function isLockTimeoutError(err: unknown): boolean {
-  if (err && typeof err === "object" && "code" in err) {
-    return (err as { code: string }).code === "55P03";
+  if (!err || typeof err !== "object") return false;
+
+  // Direct PG error: err.code === "55P03"
+  if ("code" in err && (err as { code: string }).code === "55P03") {
+    return true;
   }
-  // Prisma may wrap the error
+
+  // Prisma P2010 (Raw query failed): err.meta.code === "55P03"
   if (
-    err &&
-    typeof err === "object" &&
+    "code" in err &&
+    (err as { code: string }).code === "P2010" &&
+    "meta" in err &&
+    err.meta &&
+    typeof err.meta === "object" &&
+    "code" in err.meta &&
+    (err.meta as { code: string }).code === "55P03"
+  ) {
+    return true;
+  }
+
+  // Prisma wrapped error: err.cause.code === "55P03"
+  if (
     "cause" in err &&
     err.cause &&
     typeof err.cause === "object" &&
-    "code" in err.cause
+    "code" in err.cause &&
+    (err.cause as { code: string }).code === "55P03"
   ) {
-    return (err.cause as { code: string }).code === "55P03";
+    return true;
   }
+
   return false;
 }

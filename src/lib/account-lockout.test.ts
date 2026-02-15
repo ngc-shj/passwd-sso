@@ -169,7 +169,10 @@ describe("recordFailure", () => {
     expect(result!.locked).toBe(true);
   });
 
-  it("preserves monotonic increase of accountLockedUntil", async () => {
+  it("does not shorten existing accountLockedUntil (max of existing vs new)", async () => {
+    // Simulates: existing 48h lock should not be replaced by a shorter 15min lock.
+    // This verifies the max(existing, new) logic, not actual concurrent transactions
+    // (which require integration tests with real DB row locking).
     const farFuture = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48h from now
     setupTransaction({
       failed_unlock_attempts: 4,
@@ -179,7 +182,7 @@ describe("recordFailure", () => {
 
     const result = await recordFailure("user-1");
     expect(result).not.toBeNull();
-    // 5 failures = 15 min lock, but existing 48h lock is longer
+    // 5 failures = 15 min lock, but existing 48h lock is longer → preserved
     expect(result!.lockedUntil).toEqual(farFuture);
   });
 
@@ -235,7 +238,7 @@ describe("recordFailure", () => {
     expect(result!.locked).toBe(false);
   });
 
-  it("returns null on lock_timeout (counter not incremented)", async () => {
+  it("returns null on lock_timeout with direct PG error (55P03)", async () => {
     const lockTimeoutError = Object.assign(new Error("lock timeout"), {
       code: "55P03",
     });
@@ -247,6 +250,31 @@ describe("recordFailure", () => {
       { userId: "user-1" },
       "vault.unlock.lockTimeout",
     );
+  });
+
+  it("returns null on lock_timeout with Prisma P2010 wrapper (meta.code 55P03)", async () => {
+    const prismaError = Object.assign(new Error("Raw query failed"), {
+      code: "P2010",
+      meta: { code: "55P03" },
+    });
+    mockPrismaTransaction.mockRejectedValue(prismaError);
+
+    const result = await recordFailure("user-1");
+    expect(result).toBeNull();
+    expect(mockLoggerInstance.warn).toHaveBeenCalledWith(
+      { userId: "user-1" },
+      "vault.unlock.lockTimeout",
+    );
+  });
+
+  it("returns null on lock_timeout with cause-wrapped error (cause.code 55P03)", async () => {
+    const wrappedError = Object.assign(new Error("transaction failed"), {
+      cause: Object.assign(new Error("lock timeout"), { code: "55P03" }),
+    });
+    mockPrismaTransaction.mockRejectedValue(wrappedError);
+
+    const result = await recordFailure("user-1");
+    expect(result).toBeNull();
   });
 
   it("records audit with reason: lock_timeout on lock_timeout", async () => {
