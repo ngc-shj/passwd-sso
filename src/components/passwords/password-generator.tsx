@@ -82,6 +82,7 @@ export function PasswordGenerator({
   // Sync when initialSettings changes (e.g. editing a different entry)
   useEffect(() => {
     if (initialSettings) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSettings(initialSettings);
     }
   }, [initialSettings]);
@@ -124,6 +125,7 @@ export function PasswordGenerator({
 
   // Auto-generate when opened or settings change
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (open) generate();
   }, [open, generate]);
 

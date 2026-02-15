@@ -4,7 +4,6 @@ import { useEffect, useState, use } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
-import { OrgRoleBadge } from "@/components/org/org-role-badge";
 import { Building2, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH } from "@/lib/constants";
@@ -24,7 +23,8 @@ export default function AcceptInvitePage({
   const t = useTranslations("Org");
   const router = useRouter();
 
-  const [loading, setLoading] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<InviteInfo | null>(null);
 
@@ -63,6 +63,7 @@ export default function AcceptInvitePage({
 
   useEffect(() => {
     // Auto-accept when page loads
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     handleAccept();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

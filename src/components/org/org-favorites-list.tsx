@@ -75,6 +75,7 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
     fetchFavorites();
   }, [fetchFavorites, refreshKey]);
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleToggleFavorite = async (id: string, _current: boolean) => {
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;

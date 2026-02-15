@@ -17,6 +17,7 @@ export function Favicon({ host, size = 16, className }: FaviconProps) {
   }
 
   return (
+    /* eslint-disable-next-line @next/next/no-img-element */
     <img
       src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=${size * 2}`}
       alt=""

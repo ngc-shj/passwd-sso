@@ -350,6 +350,7 @@ describe("POST /api/passwords", () => {
       updatedAt: now,
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id: _, ...bodyWithoutId } = validBody;
     const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
       body: { ...bodyWithoutId, aadVersion: 0 },

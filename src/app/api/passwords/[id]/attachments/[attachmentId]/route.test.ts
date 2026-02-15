@@ -31,8 +31,6 @@ function createRequest(method: string, url: string) {
   return new NextRequest(url, { method });
 }
 
-const now = new Date("2025-01-01T00:00:00Z");
-
 describe("GET /api/passwords/[id]/attachments/[attachmentId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();

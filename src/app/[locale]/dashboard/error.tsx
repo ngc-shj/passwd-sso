@@ -11,6 +11,7 @@ export default function DashboardError({
   error: Error;
   reset: () => void;
 }) {
+  void error;
   const t = useTranslations("Error");
   const tc = useTranslations("Common");
 

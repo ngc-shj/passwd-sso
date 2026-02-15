@@ -193,7 +193,7 @@ export function PasswordList({
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, tagId, entryType, encryptionKey, favoritesOnly, archivedOnly, sortBy]);
+  }, [searchQuery, tagId, entryType, encryptionKey, favoritesOnly, archivedOnly, sortBy, userId]);
 
   useEffect(() => {
     fetchPasswords();

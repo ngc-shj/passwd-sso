@@ -26,7 +26,6 @@ vi.mock("@/lib/prisma", () => ({
 import { POST } from "./route";
 import { ORG_ROLE, INVITATION_STATUS } from "@/lib/constants";
 
-const now = new Date("2025-01-01T00:00:00Z");
 const futureDate = new Date("2099-01-01T00:00:00Z");
 
 const validInvitation = {

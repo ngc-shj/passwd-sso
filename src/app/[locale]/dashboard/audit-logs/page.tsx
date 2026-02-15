@@ -167,7 +167,7 @@ export default function AuditLogsPage() {
       }
       return names;
     },
-    [encryptionKey, session?.user?.id]
+    [encryptionKey, session]
   );
 
   const fetchLogs = useCallback(
@@ -192,6 +192,7 @@ export default function AuditLogsPage() {
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     fetchLogs().then(async (data) => {
       if (data) {
