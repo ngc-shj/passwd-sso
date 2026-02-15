@@ -162,6 +162,8 @@ export async function recordFailure(
     });
 
     // Fire-and-forget audit: VAULT_UNLOCK_FAILED (every failure)
+    // NOTE: logAudit() internally swallows exceptions, so this catch is
+    // unlikely to fire. Kept as a safety net in case logAudit's contract changes.
     try {
       const meta = request ? extractRequestMeta(request) : { ip: null, userAgent: null };
       logAudit({
@@ -177,6 +179,7 @@ export async function recordFailure(
     }
 
     // Fire-and-forget audit: VAULT_LOCKOUT_TRIGGERED (threshold crossed)
+    // NOTE: Same as above — logAudit() swallows internally; catch kept as safety net.
     if (result.lockMinutes !== null) {
       try {
         const meta = request ? extractRequestMeta(request) : { ip: null, userAgent: null };
@@ -218,6 +221,7 @@ export async function recordFailure(
       getLogger().warn({ userId }, "vault.unlock.lockTimeout");
 
       // Record audit even on lock_timeout (fire-and-forget, outside transaction)
+      // NOTE: logAudit() swallows internally; catch kept as safety net.
       try {
         const meta = request ? extractRequestMeta(request) : { ip: null, userAgent: null };
         logAudit({
