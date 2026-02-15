@@ -154,6 +154,29 @@ describe("withRequestLog", () => {
     expect(typeof (loggerInsideHandler as { info: unknown }).info).toBe("function");
   });
 
+  it("inherits incoming x-request-id header", async () => {
+    const { withRequestLog } = await import("@/lib/with-request-log");
+
+    const handler = vi.fn().mockResolvedValue(
+      NextResponse.json({ ok: true }),
+    );
+    const wrapped = withRequestLog(handler);
+
+    const incomingId = "abc-123-incoming-id";
+    const req = new Request("http://localhost:3000/api/vault/status", {
+      method: "GET",
+      headers: { "x-request-id": incomingId },
+    });
+    const response = await wrapped(req);
+
+    // Response should carry the incoming id
+    expect(response.headers.get("X-Request-Id")).toBe(incomingId);
+
+    // child() should have been called with the incoming id
+    const childArgs = mockChild.mock.calls[0][0];
+    expect(childArgs.requestId).toBe(incomingId);
+  });
+
   it("preserves handler context argument for routes with params", async () => {
     const { withRequestLog } = await import("@/lib/with-request-log");
 

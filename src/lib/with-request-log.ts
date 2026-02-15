@@ -20,7 +20,8 @@ type RouteHandler = (...args: any[]) => Promise<Response>;
 export function withRequestLog<H extends RouteHandler>(handler: H): H {
   const loggedHandler = async function loggedHandler(...args: Parameters<H>) {
     const request = args[0] as NextRequest;
-    const requestId = crypto.randomUUID();
+    const requestId =
+      request.headers.get("x-request-id") || crypto.randomUUID();
     const start = performance.now();
     const url = new URL(request.url);
 

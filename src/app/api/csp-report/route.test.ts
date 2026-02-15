@@ -39,26 +39,90 @@ describe("POST /api/csp-report", () => {
     mockWarn.mockClear();
   });
 
-  it("returns 204 on valid csp-report", async () => {
+  it("returns 204 and logs sanitized csp-report", async () => {
     const res = await POST(
-      createCspRequest({ "csp-report": { "document-uri": "https://example.com" } })
+      createCspRequest({
+        "csp-report": {
+          "document-uri": "https://example.com/page?token=secret",
+          "blocked-uri": "https://evil.com/script.js?k=v",
+          "violated-directive": "script-src 'self'",
+          "effective-directive": "script-src",
+          "disposition": "enforce",
+          "status-code": 200,
+          "referrer": "https://example.com/prev?session=abc",
+          "script-sample": "alert(1)",
+        },
+      }),
     );
     expect(res.status).toBe(204);
     expect(mockWarn).toHaveBeenCalledWith(
-      { cspReport: { "csp-report": { "document-uri": "https://example.com" } } },
+      {
+        cspReport: {
+          "document-uri": "https://example.com/page",
+          "blocked-uri": "https://evil.com/script.js",
+          "violated-directive": "script-src 'self'",
+          "effective-directive": "script-src",
+          disposition: "enforce",
+          "status-code": 200,
+        },
+      },
+      "csp.violation",
+    );
+    // referrer and script-sample are NOT in the sanitized output
+    const logged = mockWarn.mock.calls[0][0].cspReport;
+    expect(logged.referrer).toBeUndefined();
+    expect(logged["script-sample"]).toBeUndefined();
+  });
+
+  it("strips query strings from URIs", async () => {
+    const res = await POST(
+      createCspRequest({
+        "csp-report": {
+          "document-uri": "https://app.example.com/dashboard?auth_token=xyz123&user=admin",
+          "blocked-uri": "inline",
+          "violated-directive": "style-src",
+        },
+      }),
+    );
+    expect(res.status).toBe(204);
+    const logged = mockWarn.mock.calls[0][0].cspReport;
+    expect(logged["document-uri"]).toBe("https://app.example.com/dashboard");
+    expect(logged["blocked-uri"]).toBe("inline");
+  });
+
+  it("handles reports+json format", async () => {
+    const res = await POST(
+      createCspRequest(
+        [{ type: "csp-violation", body: {
+          documentURL: "https://example.com/page?t=secret",
+          blockedURL: "https://cdn.example.com/lib.js",
+          effectiveDirective: "script-src",
+          disposition: "enforce",
+        }}],
+        { contentType: "application/reports+json" },
+      ),
+    );
+    expect(res.status).toBe(204);
+    expect(mockWarn).toHaveBeenCalledWith(
+      {
+        cspReport: {
+          type: "csp-violation",
+          documentURL: "https://example.com/page",
+          blockedURL: "https://cdn.example.com/lib.js",
+          effectiveDirective: "script-src",
+          disposition: "enforce",
+        },
+      },
       "csp.violation",
     );
   });
 
-  it("returns 204 on application/reports+json content type", async () => {
+  it("does not log unknown format", async () => {
     const res = await POST(
-      createCspRequest([{ type: "csp-violation" }], { contentType: "application/reports+json" })
+      createCspRequest({ unknownField: "data" }),
     );
     expect(res.status).toBe(204);
-    expect(mockWarn).toHaveBeenCalledWith(
-      { cspReport: [{ type: "csp-violation" }] },
-      "csp.violation",
-    );
+    expect(mockWarn).not.toHaveBeenCalled();
   });
 
   it("returns 204 on unsupported content type (no logging)", async () => {
@@ -85,7 +149,6 @@ describe("POST /api/csp-report", () => {
 
   it("rate limits after exceeding max requests", async () => {
     const ip = "10.0.0.99";
-    // Send 61 requests — the 61st should still return 204 (rate limited silently)
     let lastRes: Response | undefined;
     for (let i = 0; i < 61; i++) {
       lastRes = await POST(createCspRequest({ i }, { ip }));
