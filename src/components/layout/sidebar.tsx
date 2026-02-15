@@ -20,10 +20,7 @@ import { stripLocalePrefix } from "@/i18n/locale-utils";
 
 // ─── Section keys ────────────────────────────────────────────────
 
-const SIDEBAR_SECTIONS = [
-  "vault", "categories", "organizations", "organize", "security", "utilities",
-] as const;
-type SidebarSection = typeof SIDEBAR_SECTIONS[number];
+type SidebarSection = "vault" | "categories" | "organizations" | "organize" | "security" | "utilities";
 
 const COLLAPSE_DEFAULTS: Record<SidebarSection, boolean> = {
   vault: false,         // open
@@ -178,7 +175,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   // Fetch data on mount and when pathname changes
   useEffect(() => {
     fetchData();
-  }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   // Listen for data-changed events (import, create, etc.)
   useEffect(() => {
@@ -189,7 +186,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       window.removeEventListener("vault-data-changed", handler);
       window.removeEventListener("org-data-changed", handler);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleImportComplete = () => {
     window.dispatchEvent(new CustomEvent("vault-data-changed"));

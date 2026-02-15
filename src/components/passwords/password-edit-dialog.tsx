@@ -206,7 +206,7 @@ export function PasswordEditDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, id, encryptionKey, td]);
+  }, [open, id, encryptionKey, td, userId]);
 
   const handleSaved = () => {
     onOpenChange(false);

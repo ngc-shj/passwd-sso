@@ -616,6 +616,7 @@ export function PasswordCard({
                     // Personal: decrypt entry data, strip TOTP
                     try {
                       const { entry } = await fetchDecryptedEntry();
+                      // eslint-disable-next-line @typescript-eslint/no-unused-vars
                       const { totp: _t, passwordHistory: _ph, tags: _tags, ...safe } = entry;
                       setShareData(safe as Record<string, unknown>);
                     } catch {

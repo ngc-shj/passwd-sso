@@ -29,7 +29,6 @@ import { useVault } from "@/lib/vault-context";
 import {
   encryptBinary,
   decryptBinary,
-  hexEncode,
   type EncryptedBinary,
 } from "@/lib/crypto-client";
 import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto-aad";

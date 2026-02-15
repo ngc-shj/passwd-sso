@@ -32,6 +32,7 @@ export function useLocalStorage<T>(
           parsed !== null &&
           !Array.isArray(parsed)
         ) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           setStoredValue({ ...defaultValue, ...parsed } as T);
         } else {
           setStoredValue(parsed);

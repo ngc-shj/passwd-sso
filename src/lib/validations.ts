@@ -5,7 +5,7 @@ import {
   normalizeCardNumber,
 } from "@/lib/credit-card";
 import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
-import { INVITE_ROLE_VALUES, ORG_ROLE, ORG_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, TOTP_ALGORITHM, TOTP_ALGORITHM_VALUES, CUSTOM_FIELD_TYPE_VALUES } from "@/lib/constants";
+import { INVITE_ROLE_VALUES, ORG_ROLE, ORG_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, TOTP_ALGORITHM_VALUES, CUSTOM_FIELD_TYPE_VALUES } from "@/lib/constants";
 
 export const generatePasswordSchema = z.object({
   length: z.number().int().min(8).max(128).default(16),

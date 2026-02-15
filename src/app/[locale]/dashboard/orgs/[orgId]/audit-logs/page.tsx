@@ -153,6 +153,7 @@ export default function OrgAuditLogsPage({
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     fetchLogs().then((data) => {
       if (data) {

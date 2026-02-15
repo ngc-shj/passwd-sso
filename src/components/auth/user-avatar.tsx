@@ -21,6 +21,7 @@ export function UserAvatar() {
     : "??";
 
   return session.user.image ? (
+    /* eslint-disable-next-line @next/next/no-img-element */
     <img
       src={session.user.image}
       alt={session.user.name ?? "User"}
