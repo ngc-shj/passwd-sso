@@ -264,6 +264,30 @@ variable "log_retention_days" {
   description = "CloudWatch log retention in days"
 }
 
+variable "enable_monitoring" {
+  type        = bool
+  default     = true
+  description = "Enable CloudWatch metric filters and alarms"
+}
+
+variable "alarm_email" {
+  type        = string
+  default     = ""
+  description = "Email address for alarm notifications. Empty = no SNS subscription."
+}
+
+variable "alarm_5xx_threshold" {
+  type        = number
+  default     = 5
+  description = "5xx error count threshold per 5-minute period"
+}
+
+variable "alarm_latency_threshold_ms" {
+  type        = number
+  default     = 5000
+  description = "API latency threshold in milliseconds"
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

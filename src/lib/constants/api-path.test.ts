@@ -42,6 +42,8 @@ describe("API_PATH", () => {
     expect(API_PATH.WATCHTOWER_START).toBe("/api/watchtower/start");
     expect(API_PATH.WATCHTOWER_HIBP).toBe("/api/watchtower/hibp");
     expect(API_PATH.CSP_REPORT).toBe("/api/csp-report");
+    expect(API_PATH.HEALTH_LIVE).toBe("/api/health/live");
+    expect(API_PATH.HEALTH_READY).toBe("/api/health/ready");
   });
 
   it("builds emergency confirm path", () => {

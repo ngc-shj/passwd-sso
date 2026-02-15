@@ -82,6 +82,7 @@ Optional:
 - `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` (when `BLOB_BACKEND=s3`)
 - `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` (when `BLOB_BACKEND=azure`)
 - `GCS_ATTACHMENTS_BUCKET` (when `BLOB_BACKEND=gcs`)
+- `HEALTH_REDIS_REQUIRED=true` (fail health check when Redis is down)
 
 Generate:
 ```
@@ -138,6 +139,33 @@ Run Prisma migrations from a one-off task:
 ```
 npx prisma migrate deploy
 ```
+
+## Health Checks
+
+| Endpoint | Purpose | Used by |
+|---|---|---|
+| `GET /api/health/live` | Liveness (process alive) | ECS container health check |
+| `GET /api/health/ready` | Readiness (DB + Redis connectivity) | ALB target group |
+
+- Set ALB target group health check path to `/api/health/ready`
+- Use `/api/health/live` for ECS task definition container health check
+- Set `HEALTH_REDIS_REQUIRED=true` to return 503 on Redis failure (default: degraded 200)
+
+## Monitoring & Alerts
+
+Defined in Terraform (`infra/terraform/monitoring.tf`):
+
+- **CloudWatch Metric Filters**: 5xx errors, health check failures, high latency
+- **CloudWatch Alarms**: ALB 5xx, health check failures, unhealthy hosts, high latency
+- **EventBridge**: ECS task stop detection
+- **SNS Topic**: Alarm notifications (email, etc.)
+
+Enable with `enable_monitoring = true`, set `alarm_email` for email notifications.
+
+## Deploy Order
+
+⚠️ When introducing health checks, deploy app code first, then run Terraform apply.
+Reversing this order causes ALB to mark all targets as unhealthy (cannot reach `/api/health/ready`).
 
 ## Notes
 

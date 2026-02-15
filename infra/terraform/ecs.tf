@@ -49,6 +49,13 @@ resource "aws_ecs_task_definition" "app" {
         { name = "ORG_MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:ORG_MASTER_KEY::" },
         { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" },
       ]
+      healthCheck = {
+        command     = ["CMD-SHELL", "node -e \"const c=new AbortController();setTimeout(()=>c.abort(),5000);fetch('http://localhost:3000/api/health/live',{signal:c.signal}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+        interval    = 30
+        timeout     = 10
+        retries     = 3
+        startPeriod = 60
+      }
     }
   ])
   tags = local.tags
