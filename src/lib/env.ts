@@ -52,16 +52,19 @@ const envSchema = z
     AUTH_SECRET: z.string().optional(),
     AUTH_URL: z
       .string()
-      .refine(
-        (s) => {
-          try {
-            new URL(s);
-            return true;
-          } catch {
-            return false;
-          }
-        },
-        { message: "Must be a valid URL" },
+      .transform((s) => s.trim())
+      .pipe(
+        z.string().refine(
+          (s) => {
+            try {
+              new URL(s);
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          { message: "Must be a valid URL" },
+        ),
       )
       .optional(),
 
