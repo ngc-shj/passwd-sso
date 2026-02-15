@@ -57,6 +57,8 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/passwords/generate` | POST | Server-side secure password generation |
 | `/api/tags` | GET, POST | List/create tags |
 | `/api/tags/[id]` | PUT, DELETE | Update/delete tag |
+| `/api/health/live` | GET | Liveness probe (always 200) |
+| `/api/health/ready` | GET | Readiness probe (DB + Redis, 503 if unhealthy) |
 
 ### i18n
 

@@ -229,6 +229,7 @@ src/
 │   ├── audit-logs/           # 監査ログクエリ
 │   ├── emergency-access/     # 緊急アクセスワークフロー
 │   ├── watchtower/           # セキュリティ監査（HIBP、分析）
+│   ├── health/               # ヘルスチェック（liveness + readiness）
 │   └── csp-report/           # CSP 違反レポート
 ├── components/
 │   ├── layout/               # Header, Sidebar, SearchBar
@@ -255,6 +256,7 @@ src/
 │   ├── password-analyzer.ts  # パスワード強度分析
 │   ├── credit-card.ts        # クレジットカード検証 & フォーマット
 │   ├── rate-limit.ts         # レート制限ロジック
+│   ├── health.ts             # ヘルスチェックロジック（DB、Redis、タイムアウト）
 │   ├── api-error-codes.ts    # API エラーコード一元管理 & i18n マッピング
 │   ├── prisma.ts             # Prisma シングルトン
 │   ├── redis.ts              # Redis クライアント（レート制限）
