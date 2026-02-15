@@ -124,8 +124,8 @@ export async function GET(req: NextRequest, { params }: Params) {
     deletedAt: Date | null;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const entries: OrgPasswordListEntry[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const entry of passwords as any[]) {
     try {
       const aad = entry.aadVersion >= 1
