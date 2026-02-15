@@ -27,7 +27,7 @@ export function LoginPrompt() {
       )}
       <button
         onClick={handleLogin}
-        className="cursor-pointer px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-md hover:bg-blue-600 active:bg-blue-700 transition-colors"
+        className="cursor-pointer px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 active:bg-gray-950 transition-colors"
       >
         {t("popup.openApp")}
       </button>

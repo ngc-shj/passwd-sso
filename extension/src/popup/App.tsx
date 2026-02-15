@@ -93,7 +93,7 @@ export function App() {
             <button
               type="button"
               onClick={handleDisconnect}
-              className="cursor-pointer text-xs font-semibold text-white bg-red-500 px-2.5 py-1.5 rounded-md hover:bg-red-600 active:bg-red-700 transition-colors"
+              className="cursor-pointer text-xs font-semibold text-white bg-red-600 px-2.5 py-1.5 rounded-md hover:bg-red-500 active:bg-red-700 transition-colors"
             >
               {t("popup.disconnect")}
             </button>
