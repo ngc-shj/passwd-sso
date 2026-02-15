@@ -32,6 +32,8 @@ export const API_PATH = {
   WATCHTOWER_START: "/api/watchtower/start",
   WATCHTOWER_HIBP: "/api/watchtower/hibp",
   CSP_REPORT: "/api/csp-report",
+  HEALTH_LIVE: "/api/health/live",
+  HEALTH_READY: "/api/health/ready",
 } as const;
 
 export const apiPath = {

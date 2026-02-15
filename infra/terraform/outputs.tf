@@ -89,3 +89,11 @@ output "app_url" {
 output "jackson_url" {
   value = "https://${var.jackson_domain}"
 }
+
+################################################################################
+# Monitoring
+################################################################################
+
+output "sns_alarms_topic_arn" {
+  value = var.enable_monitoring ? aws_sns_topic.alarms[0].arn : null
+}

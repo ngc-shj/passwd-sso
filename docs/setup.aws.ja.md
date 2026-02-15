@@ -82,6 +82,7 @@ Secrets Manager に保存:
 - `AWS_REGION`, `S3_ATTACHMENTS_BUCKET`（`BLOB_BACKEND=s3` の場合）
 - `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER`（`BLOB_BACKEND=azure` の場合）
 - `GCS_ATTACHMENTS_BUCKET`（`BLOB_BACKEND=gcs` の場合）
+- `HEALTH_REDIS_REQUIRED=true`（Redis 障害時にヘルスチェックを fail にする場合）
 
 生成:
 ```
@@ -138,6 +139,33 @@ postgresql://USER:PASSWORD@HOST:PORT/DBNAME
 ```
 npx prisma migrate deploy
 ```
+
+## ヘルスチェック
+
+| エンドポイント | 目的 | 用途 |
+|---|---|---|
+| `GET /api/health/live` | Liveness（プロセス生存確認） | ECS コンテナヘルスチェック |
+| `GET /api/health/ready` | Readiness（DB + Redis 接続確認） | ALB ターゲットグループ |
+
+- ALB ターゲットグループのヘルスチェックパスは `/api/health/ready` に設定
+- ECS タスク定義のコンテナヘルスチェックは `/api/health/live` を使用
+- `HEALTH_REDIS_REQUIRED=true` で Redis 障害時に 503 を返す（デフォルトは degraded 200）
+
+## 監視・アラート
+
+Terraform (`infra/terraform/monitoring.tf`) で以下を定義:
+
+- **CloudWatch メトリクスフィルタ**: 5xx エラー、ヘルスチェック失敗、高レイテンシ
+- **CloudWatch アラーム**: ALB 5xx、ヘルスチェック失敗、Unhealthy ホスト、高レイテンシ
+- **EventBridge**: ECS タスク停止検知
+- **SNS トピック**: アラーム通知（メール等）
+
+`enable_monitoring = true` で有効化、`alarm_email` でメール通知先を設定。
+
+## デプロイ順序
+
+⚠️ ヘルスチェック導入時はアプリコードを先にデプロイし、その後 Terraform apply を実行すること。
+逆にすると ALB が `/api/health/ready` にアクセスできず、全ターゲットを unhealthy と判定する。
 
 ## 補足
 
