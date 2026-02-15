@@ -32,6 +32,8 @@ export const API_ERROR = {
   VERIFIER_NOT_SET: "VERIFIER_NOT_SET",
   VERIFIER_VERSION_UNSUPPORTED: "VERIFIER_VERSION_UNSUPPORTED",
   USER_NOT_FOUND: "USER_NOT_FOUND",
+  ACCOUNT_LOCKED: "ACCOUNT_LOCKED",
+  SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE",
 
   // ── Tags ──────────────────────────────────────────────────
   TAG_ALREADY_EXISTS: "TAG_ALREADY_EXISTS",
@@ -122,6 +124,8 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   VERIFIER_NOT_SET: "verifierNotSet",
   VERIFIER_VERSION_UNSUPPORTED: "verifierVersionUnsupported",
   USER_NOT_FOUND: "userNotFound",
+  ACCOUNT_LOCKED: "accountLocked",
+  SERVICE_UNAVAILABLE: "serviceUnavailable",
   TAG_ALREADY_EXISTS: "tagAlreadyExists",
   NOT_IN_TRASH: "notInTrash",
   ATTACHMENT_NOT_FOUND: "attachmentNotFound",
