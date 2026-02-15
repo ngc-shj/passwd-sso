@@ -9,25 +9,26 @@ resource "aws_db_subnet_group" "main" {
 }
 
 resource "aws_db_instance" "main" {
-  identifier              = "${local.name_prefix}-db"
-  engine                  = "postgres"
-  engine_version          = "16.3"
-  instance_class          = var.db_instance_class
-  allocated_storage       = var.db_allocated_storage
-  db_subnet_group_name    = aws_db_subnet_group.main.name
-  vpc_security_group_ids  = [aws_security_group.rds.id]
-  db_name                 = var.db_name
-  username                = var.db_username
-  password                = var.db_password
-  skip_final_snapshot     = var.db_skip_final_snapshot
+  identifier                = "${local.name_prefix}-db"
+  engine                    = "postgres"
+  engine_version            = "16.3"
+  instance_class            = var.db_instance_class
+  allocated_storage         = var.db_allocated_storage
+  db_subnet_group_name      = aws_db_subnet_group.main.name
+  vpc_security_group_ids    = [aws_security_group.rds.id]
+  db_name                   = var.db_name
+  username                  = var.db_username
+  password                  = var.db_password
+  skip_final_snapshot       = var.db_skip_final_snapshot
   final_snapshot_identifier = var.db_skip_final_snapshot ? null : "${local.name_prefix}-db-final"
-  publicly_accessible     = false
-  multi_az                = var.db_multi_az
-  apply_immediately       = var.db_apply_immediately
-  backup_retention_period = var.db_backup_retention_days
-  deletion_protection     = var.db_deletion_protection
-  storage_encrypted       = true
-  tags                    = merge(local.tags, { Name = "${local.name_prefix}-db" })
+  publicly_accessible       = false
+  multi_az                  = var.db_multi_az
+  apply_immediately         = var.db_apply_immediately
+  backup_retention_period   = var.db_backup_retention_days
+  backup_window             = var.db_backup_window
+  deletion_protection       = var.db_deletion_protection
+  storage_encrypted         = true
+  tags                      = merge(local.tags, { Name = "${local.name_prefix}-db" })
 }
 
 ################################################################################
