@@ -35,7 +35,7 @@ export function EntryPrimaryCard({ children, className = "" }: EntryCardProps) {
 export function EntrySectionCard({ children, className = "" }: EntryCardProps) {
   return (
     <div
-      className={`space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-muted/30 ${className}`.trim()}
+      className={`space-y-2 rounded-xl border bg-muted/20 p-4 transition-colors hover:bg-accent ${className}`.trim()}
     >
       {children}
     </div>

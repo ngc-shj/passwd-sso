@@ -218,7 +218,7 @@ export function OrgAttachmentSection({
             return (
               <div
                 key={att.id}
-                className="flex items-center gap-2 rounded-lg border bg-background/80 px-3 py-2 transition-colors hover:bg-muted/30"
+                className="flex items-center gap-2 rounded-lg border bg-background/80 px-3 py-2 transition-colors hover:bg-accent"
               >
                 <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="flex-1 min-w-0">

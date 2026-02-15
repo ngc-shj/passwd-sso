@@ -300,7 +300,7 @@ export function ShareDialog({
             ) : (
               <div className="space-y-2 rounded-xl border bg-card/80 p-2">
               {links.map((link) => (
-                <div key={link.id} className="rounded-xl border bg-background/80 text-xs transition-colors hover:bg-muted/30">
+                <div key={link.id} className="rounded-xl border bg-background/80 text-xs transition-colors hover:bg-accent">
                   <div className="flex items-center justify-between p-3">
                     <div className="space-y-1">
                       <p className="text-muted-foreground leading-none">

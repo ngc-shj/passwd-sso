@@ -87,7 +87,7 @@ export default function OrgsPage() {
                 <Link
                   key={org.id}
                   href={`/dashboard/orgs/${org.id}`}
-                  className="group block rounded-xl border bg-card/80 p-4 transition-colors hover:bg-muted/30"
+                  className="group block rounded-xl border bg-card/80 p-4 transition-colors hover:bg-accent"
                 >
                   <div className="mb-2 flex items-start justify-between gap-2">
                     <h3 className="truncate font-semibold">{org.name}</h3>

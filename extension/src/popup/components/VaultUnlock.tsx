@@ -65,7 +65,7 @@ export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
         <button
           type="button"
           onClick={() => setShowPassphrase((v) => !v)}
-          className="cursor-pointer text-xs text-gray-600 px-2 py-1 rounded hover:bg-gray-100 hover:text-gray-800 active:bg-gray-200 transition-colors"
+          className="text-xs text-gray-600 px-2 py-1 rounded hover:bg-gray-100 hover:text-gray-800 active:bg-gray-200 transition-colors"
         >
           {showPassphrase ? t("popup.hide") : t("popup.show")}
         </button>
@@ -76,7 +76,7 @@ export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
       <button
         type="submit"
         disabled={loading || !passphrase.trim()}
-        className="cursor-pointer px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 active:bg-gray-950 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 active:bg-gray-950 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {loading ? t("popup.unlocking") : t("popup.unlock")}
       </button>

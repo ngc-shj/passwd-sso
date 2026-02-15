@@ -93,14 +93,14 @@ export function App() {
             <button
               type="button"
               onClick={handleDisconnect}
-              className="cursor-pointer text-xs font-semibold text-white bg-red-600 px-2.5 py-1.5 rounded-md hover:bg-red-500 active:bg-red-700 transition-colors"
+              className="text-xs font-semibold text-white bg-red-600 px-2.5 py-1.5 rounded-md hover:bg-red-500 active:bg-red-700 transition-colors"
             >
               {t("popup.disconnect")}
             </button>
           )}
           <button
             onClick={() => chrome.runtime.openOptionsPage()}
-            className="cursor-pointer text-gray-500 hover:text-gray-700 text-3xl leading-none w-10 h-10 flex items-center justify-center"
+            className="text-gray-500 hover:text-gray-700 text-3xl leading-none w-10 h-10 flex items-center justify-center"
             title={t("popup.settings")}
             aria-label={t("popup.settings")}
           >
@@ -151,7 +151,7 @@ export function App() {
                     // ignore
                   }
                 }}
-                className="cursor-pointer mb-3 w-full px-3 py-2 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+                className="mb-3 w-full px-3 py-2 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
               >
                 {t("popup.enableAutofill")}
               </button>
