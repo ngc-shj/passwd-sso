@@ -88,4 +88,48 @@ describe("App tab URL handling", () => {
     fireEvent.click(button);
     expect(mockOpenOptionsPage).toHaveBeenCalled();
   });
+
+  it("shows header disconnect in unlocked state and clears token", async () => {
+    const chromeMock = (globalThis as unknown as { chrome: { tabs: { query: ReturnType<typeof vi.fn> } } }).chrome;
+    chromeMock.tabs.query.mockResolvedValueOnce([{ url: "https://example.com" }]);
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "GET_STATUS",
+        hasToken: true,
+        vaultUnlocked: true,
+        expiresAt: Date.now() + 1000,
+      })
+      .mockResolvedValueOnce({ type: "CLEAR_TOKEN", ok: true });
+
+    render(<App />);
+
+    const disconnectButton = await screen.findByRole("button", { name: /disconnect/i });
+    fireEvent.click(disconnectButton);
+
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledWith({ type: "CLEAR_TOKEN" });
+    });
+  });
+
+  it("shows header disconnect in locked state and clears token", async () => {
+    const chromeMock = (globalThis as unknown as { chrome: { tabs: { query: ReturnType<typeof vi.fn> } } }).chrome;
+    chromeMock.tabs.query.mockResolvedValueOnce([{ url: "https://example.com" }]);
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "GET_STATUS",
+        hasToken: true,
+        vaultUnlocked: false,
+        expiresAt: Date.now() + 1000,
+      })
+      .mockResolvedValueOnce({ type: "CLEAR_TOKEN", ok: true });
+
+    render(<App />);
+
+    const disconnectButton = await screen.findByRole("button", { name: /disconnect/i });
+    fireEvent.click(disconnectButton);
+
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledWith({ type: "CLEAR_TOKEN" });
+    });
+  });
 });

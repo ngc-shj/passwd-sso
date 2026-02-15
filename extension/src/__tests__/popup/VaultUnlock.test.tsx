@@ -29,8 +29,10 @@ describe("VaultUnlock", () => {
   });
 
   it("does not submit when passphrase is empty", async () => {
-    render(<VaultUnlock onUnlocked={vi.fn()} onDisconnect={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /unlock/i }));
+    render(<VaultUnlock onUnlocked={vi.fn()} />);
+    const button = screen.getByRole("button", { name: /unlock/i });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
     await waitFor(() => {
       expect(mockSendMessage).not.toHaveBeenCalled();
     });
@@ -38,7 +40,7 @@ describe("VaultUnlock", () => {
 
   it("shows error when permission denied", async () => {
     mockEnsureHostPermission.mockResolvedValue(false);
-    render(<VaultUnlock onUnlocked={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<VaultUnlock onUnlocked={vi.fn()} />);
 
     fireEvent.change(screen.getByPlaceholderText("Passphrase"), {
       target: { value: "pw" },
@@ -51,7 +53,7 @@ describe("VaultUnlock", () => {
   it("calls onUnlocked on success", async () => {
     mockSendMessage.mockResolvedValue({ type: "UNLOCK_VAULT", ok: true });
     const onUnlocked = vi.fn();
-    render(<VaultUnlock onUnlocked={onUnlocked} onDisconnect={vi.fn()} />);
+    render(<VaultUnlock onUnlocked={onUnlocked} />);
 
     fireEvent.change(screen.getByPlaceholderText("Passphrase"), {
       target: { value: "pw" },
@@ -69,7 +71,7 @@ describe("VaultUnlock", () => {
       ok: false,
       error: "INVALID_PASSPHRASE",
     });
-    render(<VaultUnlock onUnlocked={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<VaultUnlock onUnlocked={vi.fn()} />);
 
     fireEvent.change(screen.getByPlaceholderText("Passphrase"), {
       target: { value: "pw" },
@@ -80,13 +82,13 @@ describe("VaultUnlock", () => {
   });
 
   it("autofocuses passphrase input", async () => {
-    render(<VaultUnlock onUnlocked={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<VaultUnlock onUnlocked={vi.fn()} />);
     const input = screen.getByPlaceholderText("Passphrase");
     expect(input).toHaveFocus();
   });
 
   it("toggles show/hide passphrase", async () => {
-    render(<VaultUnlock onUnlocked={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<VaultUnlock onUnlocked={vi.fn()} />);
     const input = screen.getByPlaceholderText("Passphrase");
     const toggle = screen.getByRole("button", { name: /show/i });
     expect(input).toHaveAttribute("type", "password");
@@ -94,16 +96,13 @@ describe("VaultUnlock", () => {
     expect(input).toHaveAttribute("type", "text");
   });
 
-  it("disconnects and calls onDisconnect", async () => {
-    mockSendMessage.mockResolvedValueOnce({ type: "CLEAR_TOKEN", ok: true });
-    const onDisconnect = vi.fn();
-    render(<VaultUnlock onUnlocked={vi.fn()} onDisconnect={onDisconnect} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /disconnect/i }));
-
-    await waitFor(() => {
-      expect(mockSendMessage).toHaveBeenCalledWith({ type: "CLEAR_TOKEN" });
-      expect(onDisconnect).toHaveBeenCalled();
+  it("enables unlock button when passphrase is entered", async () => {
+    render(<VaultUnlock onUnlocked={vi.fn()} />);
+    const button = screen.getByRole("button", { name: /unlock/i });
+    expect(button).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText("Passphrase"), {
+      target: { value: "pw" },
     });
+    expect(button).not.toBeDisabled();
   });
 });
