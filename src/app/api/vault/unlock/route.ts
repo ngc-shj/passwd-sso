@@ -116,7 +116,12 @@ async function handlePOST(request: NextRequest) {
   }
 
   // Reset lockout + rate limiter on success
-  await resetLockout(session.user.id);
+  // resetLockout swallows errors internally, but wrap in try/catch for defense-in-depth
+  try {
+    await resetLockout(session.user.id);
+  } catch (err) {
+    getLogger().error({ err, userId: session.user.id }, "vault.unlock.resetLockout.error");
+  }
   await unlockLimiter.clear(rateKey);
 
   // Backfill passphrase verifier for existing users (transparent migration)

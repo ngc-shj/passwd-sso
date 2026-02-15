@@ -286,16 +286,8 @@ describe("POST /api/vault/unlock", () => {
       keyVersion: 1,
     });
 
-    // resetLockout is awaited in route, but it swallows errors internally.
-    // Since we mock the module-level function to reject, the route will throw.
-    // However, the real resetLockout swallows errors — this test verifies
-    // that the route calls resetLockout (already tested above).
-    // We just verify the mock was called.
-    try {
-      await POST(makeUnlockRequest());
-    } catch {
-      // Expected — mock rejects but real implementation swallows
-    }
+    const res = await POST(makeUnlockRequest());
+    expect(res.status).toBe(200);
     expect(mockResetLockout).toHaveBeenCalled();
   });
 });
