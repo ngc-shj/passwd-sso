@@ -70,7 +70,6 @@ describe("POST /api/extension/token", () => {
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const req = createRequest("POST", "http://localhost/api/extension/token");
     const res = await POST();
     const { status, json } = await parseResponse(res);
     expect(status).toBe(401);
@@ -80,7 +79,6 @@ describe("POST /api/extension/token", () => {
   it("returns 429 when rate limited", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockCheck.mockResolvedValueOnce(false);
-    const req = createRequest("POST", "http://localhost/api/extension/token");
     const res = await POST();
     const { status, json } = await parseResponse(res);
     expect(status).toBe(429);

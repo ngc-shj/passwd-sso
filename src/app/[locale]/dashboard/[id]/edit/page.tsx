@@ -96,7 +96,7 @@ export default function EditPasswordPage() {
     }
 
     load();
-  }, [id, t, encryptionKey]);
+  }, [id, t, encryptionKey, userId]);
 
   if (error) {
     return (

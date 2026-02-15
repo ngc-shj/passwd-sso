@@ -59,6 +59,7 @@ export function AutoExtensionConnect() {
       window.location.pathname + (newSearch ? `?${newSearch}` : "") + window.location.hash;
     window.history.replaceState(null, "", newUrl);
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     connect();
   }, []);
 
