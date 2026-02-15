@@ -100,6 +100,7 @@ cp .env.example .env.local
 | `AUTH_JACKSON_SECRET` | Jackson OIDC クライアントシークレット |
 | `SAML_PROVIDER_NAME` | サインインページの表示名（例: "HENNGE"） |
 | `ORG_MASTER_KEY` | 組織 Vault マスターキー — `openssl rand -hex 32` |
+| `VERIFIER_PEPPER_KEY` | パスフレーズ検証用 pepper キー — `openssl rand -hex 32`（**本番必須**） |
 | `REDIS_URL` | レート制限用 Redis URL（本番必須） |
 | `BLOB_BACKEND` | 添付ファイルの保存先バックエンド（`db` / `s3` / `azure` / `gcs`） |
 | `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | `BLOB_BACKEND=s3` の場合に必須 |
