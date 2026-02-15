@@ -404,8 +404,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           wrappingKey
         );
       } catch {
-        await notifyFailure(); // record failure on server for lockout
-        return false; // wrong passphrase
+        // Passphrase is wrong — notify server for lockout tracking.
+        // Network failures are swallowed (VaultUnlockError propagates for lockout UI).
+        try { await notifyFailure(); } catch (e) { if (e instanceof VaultUnlockError) throw e; }
+        return false;
       }
 
       // 4. Derive encryption key and verify with artifact
@@ -414,7 +416,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         const valid = await verifyKey(encKey, vaultData.verificationArtifact);
         if (!valid) {
           secretKey.fill(0);
-          await notifyFailure(); // record failure on server for lockout
+          try { await notifyFailure(); } catch (e) { if (e instanceof VaultUnlockError) throw e; }
           return false;
         }
       }
