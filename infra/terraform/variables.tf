@@ -349,8 +349,8 @@ variable "db_backup_window" {
   description = "RDS preferred backup window (UTC). 03:00-04:00 JST"
 
   validation {
-    condition     = can(regex("^\\d{2}:\\d{2}-\\d{2}:\\d{2}$", var.db_backup_window))
-    error_message = "db_backup_window must be in HH:MM-HH:MM format (e.g. 18:00-19:00)."
+    condition     = can(regex("^([01]\\d|2[0-3]):[0-5]\\d-([01]\\d|2[0-3]):[0-5]\\d$", var.db_backup_window))
+    error_message = "db_backup_window must be in HH:MM-HH:MM format with valid times (e.g. 18:00-19:00)."
   }
 }
 

@@ -195,8 +195,8 @@ resource "aws_cloudwatch_event_rule" "backup_copy_failure" {
     source      = ["aws.backup"]
     detail-type = ["Copy Job State Change"]
     detail = {
-      state           = ["FAILED", "ABORTED", "EXPIRED"]
-      backupVaultName = [aws_backup_vault.main[0].name]
+      state                 = ["FAILED", "ABORTED", "EXPIRED"]
+      sourceBackupVaultName = [aws_backup_vault.main[0].name]
     }
   })
 
