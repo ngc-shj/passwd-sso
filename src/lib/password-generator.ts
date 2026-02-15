@@ -110,7 +110,12 @@ function randomChar(charset: string): string {
 }
 
 function secureRandomInt(max: number): number {
-  const bytes = randomBytes(4);
-  const value = bytes.readUInt32BE(0);
+  if (max <= 0 || max > 0x100000000) throw new RangeError("max must be in (0, 2^32]");
+  // Rejection sampling to eliminate modulo bias.
+  const limit = Math.floor(0x100000000 / max) * max;
+  let value: number;
+  do {
+    value = randomBytes(4).readUInt32BE(0);
+  } while (value >= limit);
   return value % max;
 }
