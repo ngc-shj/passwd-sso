@@ -41,6 +41,16 @@ describe("formatLockedUntil", () => {
     vi.useRealTimers();
   });
 
+  it("returns minutes for 59 min (boundary before hours)", () => {
+    vi.useFakeTimers({ now: new Date("2026-02-16T00:00:00Z") });
+    const in59Min = new Date(Date.now() + 59 * 60_000).toISOString();
+    const result = formatLockedUntil(in59Min, mockT);
+    expect(result).toContain("minutes");
+    expect(result).not.toContain("hours");
+    expect(result).toContain("count=59");
+    vi.useRealTimers();
+  });
+
   it("returns hours for long locks (>= 60 min)", () => {
     vi.useFakeTimers({ now: new Date("2026-02-16T00:00:00Z") });
     const inTwoHours = new Date(Date.now() + 2 * 60 * 60_000).toISOString();
