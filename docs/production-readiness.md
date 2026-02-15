@@ -44,7 +44,7 @@
 
 | # | 優先度 | 項目 | 状態 | 備考 |
 |---|--------|------|------|------|
-| 3.1 | 必須 | バックアップ・リカバリ戦略 | 未着手 | 定期 pg_dump、PITR (WAL アーカイブ)、復元テストの自動化。RPO/RTO 定義 + 月次復元訓練 |
+| 3.1 | 必須 | バックアップ・リカバリ戦略 | 対応済み | AWS Backup Vault Lock (WORM/Compliance) + S3 Object Lock + クロスリージョンコピー + EventBridge 失敗通知。RPO 1h / RTO 2h。PR #23 |
 | 3.2 | 強く推奨 | DB コネクションプール設定 | 未着手 | pg.Pool の max / idleTimeoutMillis / connectionTimeoutMillis をチューニング + 接続数監視 |
 | 3.3 | 強く推奨 | マイグレーション戦略の分離 | 未着手 | Dockerfile CMD での毎回実行 → デプロイパイプラインの独立ステップに分離。複数レプリカ起動時の競合防止 |
 | 3.4 | 推奨 | Redis 高可用性 | 未着手 | 現行は単一 Redis。Redis Sentinel / ElastiCache 等によるフェイルオーバー |
@@ -95,6 +95,7 @@
 - アプリケーション構造化ログ (pino + withRequestLog + CSP report サニタイズ)
 - ヘルスチェック (`/api/health/live` liveness + `/api/health/ready` readiness, DB/Redis チェック, タイムアウト保護)
 - 監視・アラート基盤 (CloudWatch メトリクスフィルタ + アラーム + EventBridge ECS 停止検知 + SNS 通知)
+- バックアップ・リカバリ (AWS Backup Vault Lock WORM + S3 Object Lock Compliance + クロスリージョンコピー + EventBridge 失敗通知)
 - 本番コード `console.log` 0 件、`TODO/FIXME` 1 件
 
 ---

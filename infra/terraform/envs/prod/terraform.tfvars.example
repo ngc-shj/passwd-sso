@@ -67,3 +67,19 @@ attachments_bucket_name    = ""
 enable_cloudfront          = false
 cloudfront_aliases         = []
 cloudfront_certificate_arn = ""
+
+# Backup — production (ransomware-resistant)
+enable_backup                  = true
+backup_vault_lock              = true
+backup_vault_lock_cooloff_days = 3
+backup_retention_days          = 35
+backup_min_retention_days      = 7
+backup_max_retention_days      = 120
+backup_cross_region            = "ap-southeast-1" # DR: Singapore
+
+# Backup failure alerts
+backup_alert_email = "ops@example.com"
+
+# S3 Object Lock (new deployments only, Compliance mode)
+enable_s3_object_lock = true
+s3_object_lock_days   = 90

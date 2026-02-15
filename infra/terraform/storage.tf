@@ -5,7 +5,10 @@
 resource "aws_s3_bucket" "attachments" {
   count  = var.enable_s3_attachments ? 1 : 0
   bucket = local.attachments_bucket_name
-  tags   = merge(local.tags, { Name = "${local.name_prefix}-attachments" })
+
+  object_lock_enabled = var.enable_s3_object_lock
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-attachments" })
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "attachments" {
@@ -36,6 +39,20 @@ resource "aws_s3_bucket_versioning" "attachments" {
 
   versioning_configuration {
     status = "Enabled"
+  }
+}
+
+# S3 Object Lock (ランサムウェア耐性 — Compliance mode)
+# 注意: Object Lock はバケット作成時に object_lock_enabled = true が必要。既存バケットへの後付け不可。
+resource "aws_s3_bucket_object_lock_configuration" "attachments" {
+  count  = var.enable_s3_attachments && var.enable_s3_object_lock ? 1 : 0
+  bucket = aws_s3_bucket.attachments[0].id
+
+  rule {
+    default_retention {
+      mode = "COMPLIANCE"
+      days = var.s3_object_lock_days
+    }
   }
 }
 

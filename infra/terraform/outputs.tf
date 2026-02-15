@@ -97,3 +97,11 @@ output "jackson_url" {
 output "sns_alarms_topic_arn" {
   value = var.enable_monitoring ? aws_sns_topic.alarms[0].arn : null
 }
+
+################################################################################
+# Backup
+################################################################################
+
+output "backup_vault_arn" {
+  value = var.enable_backup ? aws_backup_vault.main[0].arn : null
+}

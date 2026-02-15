@@ -288,6 +288,84 @@ variable "alarm_latency_threshold_ms" {
   description = "API latency threshold in milliseconds"
 }
 
+# ── Backup ─────────────────────────────────────────────
+
+variable "enable_backup" {
+  type        = bool
+  default     = true
+  description = "Enable AWS Backup for RDS"
+}
+
+variable "backup_vault_lock" {
+  type        = bool
+  default     = false
+  description = "Enable Vault Lock (WORM). WARNING: irreversible after cooloff period"
+}
+
+variable "backup_vault_lock_cooloff_days" {
+  type        = number
+  default     = 3
+  description = "Days before Vault Lock becomes immutable (min 3)"
+}
+
+variable "backup_min_retention_days" {
+  type        = number
+  default     = 7
+  description = "Minimum backup retention (Vault Lock enforcement)"
+}
+
+variable "backup_max_retention_days" {
+  type        = number
+  default     = 120
+  description = "Maximum backup retention (Vault Lock enforcement)"
+}
+
+variable "backup_retention_days" {
+  type        = number
+  default     = 35
+  description = "Days to retain AWS Backup recovery points"
+}
+
+variable "backup_cross_region" {
+  type        = string
+  default     = ""
+  description = "DR region for cross-region backup copy. Empty = disabled. (e.g. ap-southeast-1)"
+
+  validation {
+    condition     = var.backup_cross_region == "" || can(regex("^[a-z]{2}-[a-z]+-\\d+$", var.backup_cross_region))
+    error_message = "backup_cross_region must be a valid AWS region (e.g. ap-southeast-1) or empty string."
+  }
+}
+
+variable "backup_alert_email" {
+  type        = string
+  default     = ""
+  description = "Email for backup failure alerts (SNS). Empty = alerts disabled."
+}
+
+variable "db_backup_window" {
+  type        = string
+  default     = "18:00-19:00"
+  description = "RDS preferred backup window (UTC). 03:00-04:00 JST"
+
+  validation {
+    condition     = can(regex("^([01]\\d|2[0-3]):[0-5]\\d-([01]\\d|2[0-3]):[0-5]\\d$", var.db_backup_window))
+    error_message = "db_backup_window must be in HH:MM-HH:MM format with valid times (e.g. 18:00-19:00)."
+  }
+}
+
+variable "enable_s3_object_lock" {
+  type        = bool
+  default     = false
+  description = "Enable S3 Object Lock (WORM/Compliance). Only for new buckets."
+}
+
+variable "s3_object_lock_days" {
+  type        = number
+  default     = 90
+  description = "S3 Object Lock retention days (Compliance mode)"
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
