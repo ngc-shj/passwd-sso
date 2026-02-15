@@ -97,7 +97,7 @@ export function TrashList({ refreshKey }: TrashListProps) {
     } finally {
       setLoading(false);
     }
-  }, [encryptionKey]);
+  }, [encryptionKey, userId]);
 
   useEffect(() => {
     fetchTrash();

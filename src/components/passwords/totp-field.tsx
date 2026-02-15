@@ -85,6 +85,7 @@ function TOTPCodeDisplay({ totp: totpEntry }: { totp: TOTPEntry }) {
   }, [totpEntry]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     generateCode();
     const interval = setInterval(() => {
       const now = Math.floor(Date.now() / 1000);
@@ -127,13 +128,24 @@ function TOTPCodeDisplay({ totp: totpEntry }: { totp: TOTPEntry }) {
 
 export function TOTPField(props: TOTPFieldProps) {
   const t = useTranslations("TOTP");
+  const [inputValue, setInputValue] = useState(
+    props.mode === "input" ? (props.totp?.secret ?? "") : ""
+  );
+
+  // Sync input value when switching from display → input or when secret changes
+  const secret = props.mode === "input" ? (props.totp?.secret ?? "") : "";
+  useEffect(() => {
+    if (props.mode === "input") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setInputValue(secret);
+    }
+  }, [props.mode, secret]);
 
   if (props.mode === "display") {
     return <TOTPCodeDisplay totp={props.totp} />;
   }
 
   const { totp, onChange, onRemove } = props;
-  const [inputValue, setInputValue] = useState(totp?.secret ?? "");
 
   const handleInputChange = (value: string) => {
     setInputValue(value);

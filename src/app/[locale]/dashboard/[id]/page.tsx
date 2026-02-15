@@ -100,7 +100,7 @@ export default function PasswordDetailPage() {
     }
 
     load();
-  }, [id, t, encryptionKey]);
+  }, [id, t, encryptionKey, userId]);
 
   if (error) {
     return (

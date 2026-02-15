@@ -121,7 +121,6 @@ export function ReusedSection({
   formatCount,
 }: ReusedSectionProps) {
   const [expanded, setExpanded] = useState(groups.length > 0);
-  const totalEntries = groups.reduce((sum, g) => sum + g.entries.length, 0);
   const config = issueConfig.reused;
   const Icon = config.icon;
 

@@ -81,7 +81,6 @@ describe("GET /api/watchtower/hibp", () => {
 
     // First 30 should succeed (prefix needs to be different to avoid cache)
     for (let i = 0; i < 30; i++) {
-      const prefix = `${String(i).padStart(5, "0").slice(0, 5).toUpperCase()}`;
       // Generate valid 5-char hex prefix
       const validPrefix = i.toString(16).padStart(5, "0").toUpperCase().slice(0, 5);
       const res = await GET(

@@ -91,6 +91,7 @@ export function OrgPasswordDetail({
 
   useEffect(() => {
     if (!open || !passwordId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setShowPassword(false);
     setShowCardNumber(false);

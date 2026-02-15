@@ -22,7 +22,6 @@ import {
   computePassphraseVerifier,
   createVerificationArtifact,
   verifyKey,
-  type EncryptedData,
 } from "./crypto-client";
 import { createKeyEscrow } from "./crypto-emergency";
 import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
@@ -106,6 +105,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const secretKeyRef = useRef<Uint8Array | null>(null);
   const keyVersionRef = useRef<number>(0);
   const accountSaltRef = useRef<Uint8Array | null>(null);
+  // eslint-disable-next-line react-hooks/purity
   const lastActivityRef = useRef(Date.now());
   const hiddenAtRef = useRef<number | null>(null);
 
@@ -432,7 +432,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     } catch {
       return false;
     }
-  }, []);
+  }, [session?.user?.id]);
 
   // ─── Change Passphrase ────────────────────────────────────────
 
