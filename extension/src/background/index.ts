@@ -592,9 +592,12 @@ async function performAutofillForEntry(
       const inputs = Array.from(
         document.querySelectorAll("input"),
       ) as HTMLInputElement[];
+      const host = window.location.hostname.toLowerCase();
       const isAwsSignInPage =
-        window.location.hostname.includes("signin.aws.amazon.com") ||
-        window.location.hostname.includes("sign-in.aws.amazon.com");
+        host === "signin.aws.amazon.com" ||
+        host.endsWith(".signin.aws.amazon.com") ||
+        host === "sign-in.aws.amazon.com" ||
+        host.endsWith(".sign-in.aws.amazon.com");
 
       const findInputByHint = () => {
         if (!targetHintArg) return null;
