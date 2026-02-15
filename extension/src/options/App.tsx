@@ -91,7 +91,7 @@ export function App() {
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
               placeholder={t("options.serverUrlPlaceholder")}
-              className="h-9 px-3 rounded-md border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+              className="h-9 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-900 transition-shadow"
             />
             <span className="text-xs text-gray-400">
               {t("options.httpsRequired")}
@@ -108,7 +108,7 @@ export function App() {
             <select
               value={autoLockMinutes}
               onChange={(e) => setAutoLockMinutes(Number(e.target.value))}
-              className="h-9 px-3 rounded-md border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+              className="h-9 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-900 transition-shadow"
             >
               <option value={0}>{t("options.never")}</option>
               <option value={1}>1</option>
