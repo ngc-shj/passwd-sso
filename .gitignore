@@ -38,6 +38,7 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+*.textClipping
 
 # TypeScript
 *.tsbuildinfo

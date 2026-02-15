@@ -1,0 +1,58 @@
+# Audit log forwarding overlay — opt-in via:
+#   docker compose -f docker-compose.yml -f docker-compose.logging.yml up
+#
+# Note: The fluentd logging driver replaces Docker's default json-file driver,
+# so `docker logs app` will NOT work. Use `docker compose logs fluent-bit` instead.
+# To restore `docker logs`, run without this overlay.
+
+services:
+  app:
+    environment:
+      - AUDIT_LOG_FORWARD=true
+    depends_on:
+      fluent-bit:
+        condition: service_healthy
+    logging:
+      driver: fluentd
+      options:
+        # Docker Compose bridge network: localhost reaches Fluent Bit.
+        # Docker Desktop (macOS/Windows): may need host.docker.internal.
+        # Kubernetes/ECS: replace with sidecar address.
+        fluentd-address: "localhost:24224"
+        fluentd-async: "true"
+        fluentd-retry-wait: "1s"
+        fluentd-max-retries: "30"
+        tag: "app.passwd-sso"
+
+  fluent-bit:
+    image: fluent/fluent-bit:3.2
+    volumes:
+      - ./infra/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./infra/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:2020/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - internal
+    # Uncomment and set environment variables for your output destination:
+    # environment:
+    #   - SYSLOG_HOST=syslog.example.com
+    #   - SYSLOG_PORT=514
+    #   - ES_HOST=elasticsearch.example.com
+    #   - ES_PORT=9200
+    #   - ES_USER=elastic
+    #   - ES_PASSWORD=changeme
+    #   - LOKI_HOST=loki.example.com
+    #   - LOKI_PORT=3100
+    #   - SPLUNK_HOST=splunk.example.com
+    #   - SPLUNK_PORT=8088
+    #   - SPLUNK_TOKEN=your-hec-token
+    #   - AWS_REGION=ap-northeast-1
+    #   - S3_AUDIT_BUCKET=passwd-sso-audit-logs

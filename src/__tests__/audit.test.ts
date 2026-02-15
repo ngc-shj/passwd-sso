@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
-const { mockCreate } = vi.hoisted(() => ({
+const { mockCreate, mockAuditInfo } = vi.hoisted(() => ({
   mockCreate: vi.fn(),
+  mockAuditInfo: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -11,7 +12,18 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+vi.mock("@/lib/audit-logger", () => ({
+  auditLogger: { info: mockAuditInfo, enabled: true },
+  METADATA_BLOCKLIST: new Set([
+    "password", "passphrase", "secret", "secretKey",
+    "encryptedBlob", "encryptedOverview", "encryptedData", "encryptedSecretKey",
+    "encryptedOrgKey", "masterPasswordServerHash",
+    "token", "tokenHash", "accessToken", "refreshToken", "idToken",
+    "accountSalt", "passphraseVerifierHmac",
+  ]),
+}));
+
+import { logAudit, sanitizeMetadata, extractRequestMeta } from "@/lib/audit";
 
 describe("logAudit", () => {
   it("creates an audit log entry", () => {
@@ -121,6 +133,159 @@ describe("logAudit", () => {
         userId: "user-1",
       })
     ).not.toThrow();
+  });
+
+  it("calls auditLogger.info alongside DB write", () => {
+    mockCreate.mockResolvedValue({});
+    mockAuditInfo.mockReturnValue(undefined);
+
+    logAudit({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.ENTRY_CREATE,
+      userId: "user-1",
+      orgId: "org-1",
+      targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+      targetId: "entry-1",
+      metadata: { filename: "test.csv" },
+      ip: "10.0.0.1",
+      userAgent: "TestAgent/2.0",
+    });
+
+    // DB write
+    expect(mockCreate).toHaveBeenCalled();
+
+    // pino emit
+    expect(mockAuditInfo).toHaveBeenCalledWith(
+      {
+        audit: {
+          scope: AUDIT_SCOPE.PERSONAL,
+          action: AUDIT_ACTION.ENTRY_CREATE,
+          userId: "user-1",
+          orgId: "org-1",
+          targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+          targetId: "entry-1",
+          metadata: { filename: "test.csv" },
+          ip: "10.0.0.1",
+          userAgent: "TestAgent/2.0",
+        },
+      },
+      "audit.ENTRY_CREATE",
+    );
+  });
+
+  it("does not throw when auditLogger.info throws", () => {
+    mockCreate.mockResolvedValue({});
+    mockAuditInfo.mockImplementation(() => {
+      throw new Error("pino error");
+    });
+
+    expect(() =>
+      logAudit({
+        scope: AUDIT_SCOPE.PERSONAL,
+        action: AUDIT_ACTION.AUTH_LOGIN,
+        userId: "user-1",
+      })
+    ).not.toThrow();
+  });
+});
+
+describe("sanitizeMetadata", () => {
+  it("returns null/undefined as-is", () => {
+    expect(sanitizeMetadata(null)).toBeNull();
+    expect(sanitizeMetadata(undefined)).toBeUndefined();
+  });
+
+  it("returns primitive values as-is", () => {
+    expect(sanitizeMetadata("hello")).toBe("hello");
+    expect(sanitizeMetadata(42)).toBe(42);
+    expect(sanitizeMetadata(true)).toBe(true);
+  });
+
+  it("strips top-level blocklist keys", () => {
+    const input = {
+      filename: "export.csv",
+      password: "secret123",
+      count: 5,
+      token: "bearer-xyz",
+    };
+    expect(sanitizeMetadata(input)).toEqual({
+      filename: "export.csv",
+      count: 5,
+    });
+  });
+
+  it("strips nested blocklist keys recursively", () => {
+    const input = {
+      outer: {
+        inner: {
+          token: "hidden",
+          visible: "ok",
+        },
+        secretKey: "also-hidden",
+        name: "keep",
+      },
+    };
+    expect(sanitizeMetadata(input)).toEqual({
+      outer: {
+        inner: {
+          visible: "ok",
+        },
+        name: "keep",
+      },
+    });
+  });
+
+  it("strips blocklist keys inside arrays", () => {
+    const input = {
+      items: [
+        { id: "1", password: "secret" },
+        { id: "2", token: "bearer" },
+        { id: "3" },
+      ],
+    };
+    expect(sanitizeMetadata(input)).toEqual({
+      items: [
+        { id: "1" },
+        { id: "2" },
+        { id: "3" },
+      ],
+    });
+  });
+
+  it("removes undefined from arrays (no holes)", () => {
+    // An object with only blocklist keys becomes undefined,
+    // which should be filtered from the array
+    const input = {
+      items: [
+        { password: "secret" },
+        { id: "keep" },
+        { token: "hidden" },
+      ],
+    };
+    const result = sanitizeMetadata(input) as Record<string, unknown>;
+    const items = result.items as unknown[];
+    expect(items).toEqual([{ id: "keep" }]);
+    expect(items).not.toContain(undefined);
+  });
+
+  it("preserves normal keys at all levels", () => {
+    const input = {
+      filename: "passwords.csv",
+      format: "csv",
+      stats: {
+        entryCount: 42,
+        failedCount: 0,
+      },
+    };
+    expect(sanitizeMetadata(input)).toEqual(input);
+  });
+
+  it("returns undefined when all keys are blocklisted", () => {
+    const input = {
+      password: "secret",
+      token: "xyz",
+    };
+    expect(sanitizeMetadata(input)).toBeUndefined();
   });
 });
 
