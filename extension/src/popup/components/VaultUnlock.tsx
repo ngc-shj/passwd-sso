@@ -8,11 +8,10 @@ import { t } from "../../lib/i18n";
 
 interface Props {
   onUnlocked: () => void;
-  onDisconnect: () => void;
   tabUrl?: string | null;
 }
 
-export function VaultUnlock({ onUnlocked, onDisconnect, tabUrl }: Props) {
+export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
   const tabHost = tabUrl ? extractHost(tabUrl) : null;
   const [passphrase, setPassphrase] = useState("");
   const [error, setError] = useState("");
@@ -43,11 +42,6 @@ export function VaultUnlock({ onUnlocked, onDisconnect, tabUrl }: Props) {
     }
   };
 
-  const handleDisconnect = async () => {
-    await sendMessage({ type: "CLEAR_TOKEN" });
-    onDisconnect();
-  };
-
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4 py-4">
       <p className="text-sm text-gray-600">
@@ -71,7 +65,7 @@ export function VaultUnlock({ onUnlocked, onDisconnect, tabUrl }: Props) {
         <button
           type="button"
           onClick={() => setShowPassphrase((v) => !v)}
-          className="text-xs text-gray-600 px-2 py-1 rounded hover:bg-gray-100 hover:text-gray-800 active:bg-gray-200 transition-colors"
+          className="cursor-pointer text-xs text-gray-600 px-2 py-1 rounded hover:bg-gray-100 hover:text-gray-800 active:bg-gray-200 transition-colors"
         >
           {showPassphrase ? t("popup.hide") : t("popup.show")}
         </button>
@@ -81,17 +75,10 @@ export function VaultUnlock({ onUnlocked, onDisconnect, tabUrl }: Props) {
       )}
       <button
         type="submit"
-        disabled={loading}
-        className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 active:bg-blue-800 transition-colors disabled:opacity-60"
+        disabled={loading || !passphrase.trim()}
+        className="cursor-pointer px-4 py-2 bg-black text-white text-sm font-medium rounded-md hover:bg-gray-900 active:bg-gray-950 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {loading ? t("popup.unlocking") : t("popup.unlock")}
-      </button>
-      <button
-        type="button"
-        onClick={handleDisconnect}
-        className="px-4 py-2 text-sm font-medium text-red-600 rounded-md border border-red-200 hover:bg-red-50 active:bg-red-100 transition-colors"
-      >
-        {t("popup.disconnect")}
       </button>
     </form>
   );

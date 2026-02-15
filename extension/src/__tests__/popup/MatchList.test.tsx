@@ -42,7 +42,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
 
     expect(await screen.findByText("Example")).toBeInTheDocument();
     expect(screen.getByText("alice")).toBeInTheDocument();
@@ -56,7 +56,7 @@ describe("MatchList", () => {
       error: "FETCH_FAILED",
     });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
     expect(await screen.findByText(/failed to load entries/i)).toBeInTheDocument();
   });
 
@@ -66,7 +66,7 @@ describe("MatchList", () => {
       .mockResolvedValueOnce({ type: "FETCH_PASSWORDS", entries: [] })
       .mockResolvedValueOnce({ type: "LOCK_VAULT", ok: true });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={onLock} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" onLock={onLock} />);
 
     const lockButton = await screen.findByRole("button", { name: /lock/i });
     fireEvent.click(lockButton);
@@ -76,29 +76,11 @@ describe("MatchList", () => {
     });
   });
 
-  it("disconnects on button click", async () => {
-    const onDisconnect = vi.fn();
-    mockSendMessage
-      .mockResolvedValueOnce({ type: "FETCH_PASSWORDS", entries: [] })
-      .mockResolvedValueOnce({ type: "CLEAR_TOKEN", ok: true });
-
-    render(
-      <MatchList
-        tabUrl="https://example.com/login"
-        onLock={vi.fn()}
-        onDisconnect={onDisconnect}
-      />
-    );
-
-    const disconnectButton = await screen.findByRole("button", {
-      name: /disconnect/i,
-    });
-    fireEvent.click(disconnectButton);
-
-    await waitFor(() => {
-      expect(mockSendMessage).toHaveBeenCalledWith({ type: "CLEAR_TOKEN" });
-      expect(onDisconnect).toHaveBeenCalled();
-    });
+  it("does not show disconnect button in list header", async () => {
+    mockSendMessage.mockResolvedValueOnce({ type: "FETCH_PASSWORDS", entries: [] });
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    await screen.findByRole("button", { name: /lock/i });
+    expect(screen.queryByRole("button", { name: /disconnect/i })).toBeNull();
   });
 
   it("copies password on button click", async () => {
@@ -120,7 +102,7 @@ describe("MatchList", () => {
         password: "secret",
       });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
 
     const copyButton = await screen.findByRole("button", { name: "Copy" });
     fireEvent.click(copyButton);
@@ -151,7 +133,7 @@ describe("MatchList", () => {
         error: "NO_PASSWORD",
       });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
 
     const copyButton = await screen.findByRole("button", { name: "Copy" });
     fireEvent.click(copyButton);
@@ -183,7 +165,7 @@ describe("MatchList", () => {
       new Error("denied")
     );
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
 
     const copyButton = await screen.findByRole("button", { name: "Copy" });
     fireEvent.click(copyButton);
@@ -205,7 +187,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl="edge://extensions" onLock={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl="edge://extensions" onLock={vi.fn()} />);
     expect(await screen.findByText(/no matches for this page/i)).toBeInTheDocument();
   });
 
@@ -223,7 +205,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} onLock={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
     expect(await screen.findByText("Example")).toBeInTheDocument();
     expect(screen.queryByText(/matches for/i)).toBeNull();
   });
@@ -242,7 +224,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} onLock={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
     await screen.findByText("Note");
     expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Fill" })).toBeNull();
@@ -265,7 +247,7 @@ describe("MatchList", () => {
       })
       .mockResolvedValueOnce({ type: "AUTOFILL", ok: true });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
 
     const fillButton = await screen.findByRole("button", { name: "Fill" });
     fireEvent.click(fillButton);
@@ -291,7 +273,7 @@ describe("MatchList", () => {
       })
       .mockResolvedValueOnce({ type: "AUTOFILL", ok: false, error: "AUTOFILL_FAILED" });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
 
     const fillButton = await screen.findByRole("button", { name: "Fill" });
     fireEvent.click(fillButton);
@@ -318,7 +300,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
 
     const fillButton = await screen.findByRole("button", { name: "Fill" });
     fireEvent.click(fillButton);
@@ -347,7 +329,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} onLock={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
     const input = await screen.findByPlaceholderText("Search...");
     fireEvent.change(input, { target: { value: "git" } });
     expect(await screen.findByText("GitHub")).toBeInTheDocument();
@@ -368,7 +350,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} onLock={vi.fn()} onDisconnect={vi.fn()} />);
+    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
     const input = await screen.findByPlaceholderText("Search...");
     fireEvent.change(input, { target: { value: "nope" } });
     expect(await screen.findByText(/no results for/i)).toBeInTheDocument();

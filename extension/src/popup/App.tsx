@@ -79,18 +79,34 @@ export function App() {
     });
   }, []);
 
+  const handleDisconnect = async () => {
+    await sendMessage({ type: "CLEAR_TOKEN" });
+    setState("not_logged_in");
+  };
+
   return (
     <div className={`flex flex-col ${containerMinHeight} bg-white text-gray-900`}>
       <header className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200">
         <h1 className="text-lg font-semibold">{t("popup.title")}</h1>
-        <button
-          onClick={() => chrome.runtime.openOptionsPage()}
-          className="text-gray-500 hover:text-gray-700 text-3xl leading-none w-10 h-10 flex items-center justify-center"
-          title={t("popup.settings")}
-          aria-label={t("popup.settings")}
-        >
-          ⚙
-        </button>
+        <div className="flex items-center gap-1">
+          {(state === "logged_in" || state === "vault_unlocked") && (
+            <button
+              type="button"
+              onClick={handleDisconnect}
+              className="cursor-pointer text-xs font-semibold text-white bg-red-500 px-2.5 py-1.5 rounded-md hover:bg-red-600 active:bg-red-700 transition-colors"
+            >
+              {t("popup.disconnect")}
+            </button>
+          )}
+          <button
+            onClick={() => chrome.runtime.openOptionsPage()}
+            className="cursor-pointer text-gray-500 hover:text-gray-700 text-3xl leading-none w-10 h-10 flex items-center justify-center"
+            title={t("popup.settings")}
+            aria-label={t("popup.settings")}
+          >
+            ⚙
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 p-4">
@@ -106,7 +122,6 @@ export function App() {
               setState("vault_unlocked");
               notifyVaultStateChanged();
             }}
-            onDisconnect={() => setState("not_logged_in")}
             tabUrl={tabUrl}
           />
         )}
@@ -136,7 +151,7 @@ export function App() {
                     // ignore
                   }
                 }}
-                className="mb-3 w-full px-3 py-2 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+                className="cursor-pointer mb-3 w-full px-3 py-2 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
               >
                 {t("popup.enableAutofill")}
               </button>
@@ -144,7 +159,6 @@ export function App() {
             <MatchList
               tabUrl={tabUrl}
               onLock={() => setState("logged_in")}
-              onDisconnect={() => setState("not_logged_in")}
             />
           </>
         )}

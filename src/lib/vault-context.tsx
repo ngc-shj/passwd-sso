@@ -50,6 +50,8 @@ const HIDDEN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes when tab hidden
 const ACTIVITY_CHECK_INTERVAL_MS = 30_000; // check every 30 seconds
 const EA_CONFIRM_INTERVAL_MS = 2 * 60 * 1000; // check pending EA grants every 2 minutes
 const SKIP_BEFOREUNLOAD_ONCE_KEY = "psso:skip-beforeunload-once";
+const ALLOW_BEFOREUNLOAD_WHILE_CONNECTED_KEY =
+  "psso:allow-beforeunload-while-ext-connect";
 
 function hexDecode(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
@@ -218,6 +220,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       try {
         if (sessionStorage.getItem(SKIP_BEFOREUNLOAD_ONCE_KEY) === "1") {
           sessionStorage.removeItem(SKIP_BEFOREUNLOAD_ONCE_KEY);
+          return;
+        }
+        // Allow tab close while extension-connect completion screen is shown.
+        if (sessionStorage.getItem(ALLOW_BEFOREUNLOAD_WHILE_CONNECTED_KEY) === "1") {
           return;
         }
       } catch {

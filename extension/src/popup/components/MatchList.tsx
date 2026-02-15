@@ -14,10 +14,9 @@ import { Toast } from "./Toast";
 interface Props {
   tabUrl: string | null;
   onLock: () => void;
-  onDisconnect: () => void;
 }
 
-export function MatchList({ tabUrl, onLock, onDisconnect }: Props) {
+export function MatchList({ tabUrl, onLock }: Props) {
   const [entries, setEntries] = useState<DecryptedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -55,11 +54,6 @@ export function MatchList({ tabUrl, onLock, onDisconnect }: Props) {
   const handleLock = async () => {
     await sendMessage({ type: "LOCK_VAULT" });
     onLock();
-  };
-
-  const handleDisconnect = async () => {
-    await sendMessage({ type: "CLEAR_TOKEN" });
-    onDisconnect();
   };
 
   const handleCopy = async (entryId: string) => {
@@ -138,20 +132,12 @@ export function MatchList({ tabUrl, onLock, onDisconnect }: Props) {
       )}
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-700">{t("popup.passwords")}</h2>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleLock}
-            className="text-xs text-gray-600 px-2 py-1 rounded hover:bg-gray-100 hover:text-gray-800 active:bg-gray-200 transition-colors"
-          >
-            {t("popup.lock")}
-          </button>
-          <button
-            onClick={handleDisconnect}
-            className="text-xs text-red-600 px-2 py-1 rounded hover:bg-red-50 hover:text-red-700 active:bg-red-100 transition-colors"
-          >
-            {t("popup.disconnect")}
-          </button>
-        </div>
+        <button
+          onClick={handleLock}
+          className="cursor-pointer text-xs font-semibold text-white bg-black px-2.5 py-1.5 rounded-md hover:bg-gray-900 active:bg-gray-950 transition-colors"
+        >
+          {t("popup.lock")}
+        </button>
       </div>
 
       {loading && <p className="text-sm text-gray-500">{t("popup.loading")}</p>}
@@ -202,13 +188,13 @@ export function MatchList({ tabUrl, onLock, onDisconnect }: Props) {
                         <button
                           onClick={() => handleFill(e.id)}
                           disabled={filling}
-                          className="text-xs text-gray-700 px-2 py-1 rounded hover:bg-gray-100 hover:text-gray-900 active:bg-gray-200 transition-colors disabled:opacity-60"
+                          className="cursor-pointer text-xs font-semibold text-white bg-blue-500 px-2.5 py-1.5 rounded-md hover:bg-blue-600 active:bg-blue-700 transition-colors disabled:opacity-60"
                         >
                           {t("popup.fill")}
                         </button>
                         <button
                           onClick={() => handleCopy(e.id)}
-                          className="text-xs text-blue-700 px-2 py-1 rounded hover:bg-blue-50 hover:text-blue-900 active:bg-blue-100 transition-colors"
+                          className="cursor-pointer text-xs font-semibold text-blue-800 bg-blue-100 border border-blue-200 px-2.5 py-1.5 rounded-md hover:bg-blue-200 active:bg-blue-300 transition-colors"
                         >
                           {t("popup.copy")}
                         </button>
@@ -246,13 +232,13 @@ export function MatchList({ tabUrl, onLock, onDisconnect }: Props) {
                         <button
                           onClick={() => handleFill(e.id)}
                           disabled={filling}
-                          className="text-xs text-gray-700 px-2 py-1 rounded hover:bg-gray-100 hover:text-gray-900 active:bg-gray-200 transition-colors disabled:opacity-60"
+                          className="cursor-pointer text-xs font-semibold text-white bg-blue-500 px-2.5 py-1.5 rounded-md hover:bg-blue-600 active:bg-blue-700 transition-colors disabled:opacity-60"
                         >
                           {t("popup.fill")}
                         </button>
                         <button
                           onClick={() => handleCopy(e.id)}
-                          className="text-xs text-blue-700 px-2 py-1 rounded hover:bg-blue-50 hover:text-blue-900 active:bg-blue-100 transition-colors"
+                          className="cursor-pointer text-xs font-semibold text-blue-800 bg-blue-100 border border-blue-200 px-2.5 py-1.5 rounded-md hover:bg-blue-200 active:bg-blue-300 transition-colors"
                         >
                           {t("popup.copy")}
                         </button>

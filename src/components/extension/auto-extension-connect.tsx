@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
 
 const SKIP_BEFOREUNLOAD_ONCE_KEY = "psso:skip-beforeunload-once";
+const ALLOW_BEFOREUNLOAD_WHILE_CONNECTED_KEY =
+  "psso:allow-beforeunload-while-ext-connect";
 
 /**
  * Automatically connects the browser extension after vault unlock
@@ -72,6 +74,18 @@ export function AutoExtensionConnect() {
     }
     window.close();
   };
+
+  useEffect(() => {
+    try {
+      if (status === CONNECT_STATUS.CONNECTED) {
+        sessionStorage.setItem(ALLOW_BEFOREUNLOAD_WHILE_CONNECTED_KEY, "1");
+      } else {
+        sessionStorage.removeItem(ALLOW_BEFOREUNLOAD_WHILE_CONNECTED_KEY);
+      }
+    } catch {
+      // ignore storage failures
+    }
+  }, [status]);
 
   // No ext_connect param — render nothing, let dashboard show
   if (status === CONNECT_STATUS.IDLE) return null;
