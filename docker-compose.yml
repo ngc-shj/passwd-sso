@@ -32,6 +32,7 @@ services:
       POSTGRES_DB: passwd_sso
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U passwd_user -d passwd_sso"]
       interval: 5s
@@ -48,7 +49,7 @@ services:
       JACKSON_API_KEYS: ${JACKSON_API_KEY:-secret}
       DB_ENGINE: sql
       DB_TYPE: postgres
-      DB_URL: postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
+      DB_URL: postgresql://passwd_user:passwd_pass@db:5432/jackson
       NEXTAUTH_URL: http://localhost:5225
       EXTERNAL_URL: http://localhost:5225
       NEXTAUTH_SECRET: ${AUTH_SECRET:-secret}

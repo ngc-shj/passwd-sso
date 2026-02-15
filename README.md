@@ -100,6 +100,7 @@ Edit `.env.local` and fill in:
 | `AUTH_JACKSON_SECRET` | Jackson OIDC client secret |
 | `SAML_PROVIDER_NAME` | Display name on sign-in page (e.g., "HENNGE") |
 | `ORG_MASTER_KEY` | Org vault master key — `openssl rand -hex 32` |
+| `VERIFIER_PEPPER_KEY` | Passphrase verifier pepper key — `openssl rand -hex 32` (**required in production**) |
 | `REDIS_URL` | Redis URL for rate limiting (required in production) |
 | `BLOB_BACKEND` | Attachment blob backend (`db` / `s3` / `azure` / `gcs`) |
 | `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | Required when `BLOB_BACKEND=s3` |
