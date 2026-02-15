@@ -430,7 +430,7 @@ export function PasswordCard({
   return (
     <>
       <Card
-        className="transition-colors hover:bg-muted/30"
+        className="transition-colors hover:bg-accent"
         onClick={() => onToggleExpand(id)}
       >
         <CardContent

@@ -260,7 +260,7 @@ export function TrashList({ refreshKey }: TrashListProps) {
 
       <div className="space-y-2">
         {entries.map((entry) => (
-          <Card key={entry.id} className="rounded-xl border bg-background/80 transition-colors hover:bg-muted/30">
+          <Card key={entry.id} className="rounded-xl border bg-background/80 transition-colors hover:bg-accent">
             <CardContent className="flex items-center gap-4 p-4">
               <Checkbox
                 checked={selectedIds.has(entry.id)}
