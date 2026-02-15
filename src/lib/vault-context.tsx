@@ -364,6 +364,23 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // ─── Unlock ───────────────────────────────────────────────────
 
   const unlock = useCallback(async (passphrase: string): Promise<boolean> => {
+    // Notify server of a failed unlock attempt (for lockout tracking).
+    // Sends a dummy authHash so the server records the failure and
+    // returns lockout status (403) or rate-limit (429) if applicable.
+    const notifyFailure = async () => {
+      const res = await fetch(API_PATH.VAULT_UNLOCK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authHash: "0".repeat(64) }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        if (body.error) {
+          throw new VaultUnlockError(body.error, body.lockedUntil);
+        }
+      }
+    };
+
     try {
       // 1. Fetch encrypted secret key + verification artifact (session-protected)
       const dataRes = await fetch(API_PATH.VAULT_UNLOCK_DATA);
@@ -388,6 +405,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           wrappingKey
         );
       } catch {
+        await notifyFailure(); // record failure on server for lockout
         return false; // wrong passphrase
       }
 
@@ -397,6 +415,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         const valid = await verifyKey(encKey, vaultData.verificationArtifact);
         if (!valid) {
           secretKey.fill(0);
+          await notifyFailure(); // record failure on server for lockout
           return false;
         }
       }
@@ -448,7 +467,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       lastActivityRef.current = Date.now();
 
       return true;
-    } catch {
+    } catch (err) {
+      if (err instanceof VaultUnlockError) throw err;
       return false;
     }
   }, [session?.user?.id]);
