@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Main App: Lint → Test → Build ────────────────────────
+  app-ci:
+    name: "App: Lint → Test → Build"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+      ORG_MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      AUTH_SECRET: "ci-secret-value-that-is-at-least-32-chars"
+      AUTH_URL: "http://localhost:3000"
+      VERIFIER_PEPPER_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      REDIS_URL: "redis://localhost:6379"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  # ─── Chrome Extension: Test → Build ───────────────────────
+  extension-ci:
+    name: "Extension: Test → Build"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: "extension/package-lock.json"
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  # ─── Security Audit: App ──────────────────────────────────
+  audit-app:
+    name: "Audit: App dependencies"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - run: npm ci
+      - run: npm audit --omit=dev
+
+  # ─── Security Audit: Extension ────────────────────────────
+  audit-ext:
+    name: "Audit: Extension dependencies"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: "extension/package-lock.json"
+
+      - run: npm ci
+      - run: npm audit --omit=dev
