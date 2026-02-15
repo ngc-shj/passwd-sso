@@ -27,6 +27,17 @@ import { createKeyEscrow } from "./crypto-emergency";
 import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 
+/** Error thrown by `unlock()` when the server rejects the request with a specific error code. */
+export class VaultUnlockError extends Error {
+  constructor(
+    public readonly code: string,
+    public readonly lockedUntil?: string | null,
+  ) {
+    super(code);
+    this.name = "VaultUnlockError";
+  }
+}
+
 // Re-export so existing consumers can keep importing from vault-context
 export type { VaultStatus };
 
@@ -403,11 +414,19 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         );
       }
 
-      await fetch(API_PATH.VAULT_UNLOCK, {
+      const unlockRes = await fetch(API_PATH.VAULT_UNLOCK, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(unlockBody),
       });
+
+      if (!unlockRes.ok) {
+        const body = await unlockRes.json().catch(() => ({}));
+        if (body.error) {
+          throw new VaultUnlockError(body.error, body.lockedUntil);
+        }
+        return false;
+      }
 
       // 6. Store secretKey, keyVersion, accountSalt for EA auto-confirm and changePassphrase
       secretKeyRef.current = new Uint8Array(secretKey);
