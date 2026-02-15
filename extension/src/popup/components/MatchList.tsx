@@ -134,7 +134,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
         <h2 className="text-sm font-semibold text-gray-700">{t("popup.passwords")}</h2>
         <button
           onClick={handleLock}
-          className="cursor-pointer text-xs font-semibold text-white bg-black px-2.5 py-1.5 rounded-md hover:bg-gray-900 active:bg-gray-950 transition-colors"
+          className="cursor-pointer text-xs font-semibold text-white bg-gray-900 px-2.5 py-1.5 rounded-md hover:bg-gray-800 active:bg-gray-950 transition-colors"
         >
           {t("popup.lock")}
         </button>
@@ -188,13 +188,13 @@ export function MatchList({ tabUrl, onLock }: Props) {
                         <button
                           onClick={() => handleFill(e.id)}
                           disabled={filling}
-                          className="cursor-pointer text-xs font-semibold text-white bg-blue-500 px-2.5 py-1.5 rounded-md hover:bg-blue-600 active:bg-blue-700 transition-colors disabled:opacity-60"
+                          className="cursor-pointer text-xs font-semibold text-white bg-gray-900 px-2.5 py-1.5 rounded-md hover:bg-gray-800 active:bg-gray-950 transition-colors disabled:opacity-60"
                         >
                           {t("popup.fill")}
                         </button>
                         <button
                           onClick={() => handleCopy(e.id)}
-                          className="cursor-pointer text-xs font-semibold text-blue-800 bg-blue-100 border border-blue-200 px-2.5 py-1.5 rounded-md hover:bg-blue-200 active:bg-blue-300 transition-colors"
+                          className="cursor-pointer text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 px-2.5 py-1.5 rounded-md hover:bg-gray-200 active:bg-gray-300 transition-colors"
                         >
                           {t("popup.copy")}
                         </button>
@@ -232,13 +232,13 @@ export function MatchList({ tabUrl, onLock }: Props) {
                         <button
                           onClick={() => handleFill(e.id)}
                           disabled={filling}
-                          className="cursor-pointer text-xs font-semibold text-white bg-blue-500 px-2.5 py-1.5 rounded-md hover:bg-blue-600 active:bg-blue-700 transition-colors disabled:opacity-60"
+                          className="cursor-pointer text-xs font-semibold text-white bg-gray-900 px-2.5 py-1.5 rounded-md hover:bg-gray-800 active:bg-gray-950 transition-colors disabled:opacity-60"
                         >
                           {t("popup.fill")}
                         </button>
                         <button
                           onClick={() => handleCopy(e.id)}
-                          className="cursor-pointer text-xs font-semibold text-blue-800 bg-blue-100 border border-blue-200 px-2.5 py-1.5 rounded-md hover:bg-blue-200 active:bg-blue-300 transition-colors"
+                          className="cursor-pointer text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 px-2.5 py-1.5 rounded-md hover:bg-gray-200 active:bg-gray-300 transition-colors"
                         >
                           {t("popup.copy")}
                         </button>
