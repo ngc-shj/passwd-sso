@@ -6,9 +6,10 @@ If you discover a security vulnerability in passwd-sso, please report it respons
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email: **[ngc.shj@gmail.com](mailto:ngc.shj@gmail.com)**
+Instead, please email: **[github.com@jpng.jp](mailto:github.com@jpng.jp)**
 
 Include:
+
 - Description of the vulnerability
 - Steps to reproduce
 - Potential impact
