@@ -33,7 +33,9 @@ services:
       - "24224:24224"
       - "24224:24224/udp"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:2020/api/v1/health || exit 1"]
+      # fluent/fluent-bit image does not include /bin/sh or curl.
+      # Use a binary that is guaranteed to exist in the container.
+      test: ["CMD", "/fluent-bit/bin/fluent-bit", "--version"]
       interval: 10s
       timeout: 5s
       retries: 5
