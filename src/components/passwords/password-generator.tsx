@@ -368,7 +368,7 @@ export function PasswordGenerator({
                   />
                   <Label
                     htmlFor="gen-uppercase"
-                    className="text-xs text-muted-foreground cursor-pointer"
+                    className="text-xs text-muted-foreground"
                   >
                     {t("uppercase")}
                   </Label>
@@ -388,7 +388,7 @@ export function PasswordGenerator({
                   />
                   <Label
                     htmlFor="gen-lowercase"
-                    className="text-xs text-muted-foreground cursor-pointer"
+                    className="text-xs text-muted-foreground"
                   >
                     {t("lowercase")}
                   </Label>
@@ -408,7 +408,7 @@ export function PasswordGenerator({
                   />
                   <Label
                     htmlFor="gen-numbers"
-                    className="text-xs text-muted-foreground cursor-pointer"
+                    className="text-xs text-muted-foreground"
                   >
                     {t("numbers")}
                   </Label>
@@ -430,7 +430,7 @@ export function PasswordGenerator({
                     />
                     <Label
                       htmlFor={`gen-sym-${key}`}
-                      className="text-xs font-mono text-muted-foreground cursor-pointer"
+                      className="text-xs font-mono text-muted-foreground"
                     >
                       {SYMBOL_GROUPS[key]}
                     </Label>
@@ -452,7 +452,7 @@ export function PasswordGenerator({
                 />
                 <Label
                   htmlFor="gen-exclude-ambiguous"
-                  className="text-xs text-muted-foreground cursor-pointer"
+                  className="text-xs text-muted-foreground"
                 >
                   {t("excludeAmbiguous")}
                 </Label>
@@ -529,7 +529,7 @@ export function PasswordGenerator({
                 />
                 <Label
                   htmlFor="gen-capitalize"
-                  className="text-xs text-muted-foreground cursor-pointer"
+                  className="text-xs text-muted-foreground"
                 >
                   {t("capitalize")}
                 </Label>
@@ -549,7 +549,7 @@ export function PasswordGenerator({
                 />
                 <Label
                   htmlFor="gen-include-number"
-                  className="text-xs text-muted-foreground cursor-pointer"
+                  className="text-xs text-muted-foreground"
                 >
                   {t("includeNumber")}
                 </Label>

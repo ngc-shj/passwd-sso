@@ -371,7 +371,7 @@ export default function OrgSettingsPage({
             {members.map((m) => (
               <div
                 key={m.id}
-                className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-muted/30"
+                className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent"
               >
                 <Avatar className="h-8 w-8">
                   <AvatarImage src={m.image ?? undefined} />
@@ -470,7 +470,7 @@ export default function OrgSettingsPage({
                   .map((m) => (
                     <div
                       key={m.id}
-                      className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-muted/30"
+                      className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent"
                     >
                       <Avatar className="h-8 w-8">
                         <AvatarImage src={m.image ?? undefined} />
@@ -579,7 +579,7 @@ export default function OrgSettingsPage({
                   </h2>
                   <div className="space-y-2">
                     {invitations.map((inv) => (
-                      <div key={inv.id} className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-muted/30">
+                      <div key={inv.id} className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium">{inv.email}</p>
                           <p className="text-xs text-muted-foreground">

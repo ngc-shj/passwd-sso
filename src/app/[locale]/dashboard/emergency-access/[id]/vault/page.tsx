@@ -246,7 +246,7 @@ export default function EmergencyVaultPage() {
                   <div className="flex items-center gap-2">
                     <span className="w-20 text-muted-foreground">{t("username")}:</span>
                     <button
-                      className="cursor-pointer font-mono hover:underline"
+                      className="font-mono hover:underline"
                       onClick={() => {
                         navigator.clipboard.writeText(entry.username!);
                         toast.success(t("copied"));
@@ -260,7 +260,7 @@ export default function EmergencyVaultPage() {
                   <div className="flex items-center gap-2">
                     <span className="w-20 text-muted-foreground">{t("password")}:</span>
                     <button
-                      className="cursor-pointer font-mono hover:underline"
+                      className="font-mono hover:underline"
                       onClick={() => {
                         navigator.clipboard.writeText(entry.password!);
                         toast.success(t("copied"));

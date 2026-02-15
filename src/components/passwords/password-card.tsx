@@ -430,11 +430,11 @@ export function PasswordCard({
   return (
     <>
       <Card
-        className={`transition-colors hover:bg-muted/30 ${expanded ? "" : "cursor-pointer"}`}
+        className="transition-colors hover:bg-accent"
         onClick={() => onToggleExpand(id)}
       >
         <CardContent
-          className="flex cursor-pointer items-center gap-3 px-4 py-2"
+          className="flex items-center gap-3 px-4 py-2"
         >
           <div className="shrink-0 text-muted-foreground">
             {expanded ? (
@@ -687,7 +687,7 @@ export function PasswordCard({
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           ) : detailData ? (
-            <div className="cursor-default" onClick={(e) => e.stopPropagation()}>
+            <div onClick={(e) => e.stopPropagation()}>
               <PasswordDetailInline
                 data={detailData}
                 onEdit={canEdit ? () => {

@@ -128,7 +128,7 @@ export function OrgTrashList({ orgId, searchQuery = "", refreshKey }: OrgTrashLi
       )}
       <div className="space-y-2">
         {filtered.map((entry) => (
-          <Card key={entry.id} className="rounded-xl border bg-background/80 transition-colors hover:bg-muted/30">
+          <Card key={entry.id} className="rounded-xl border bg-background/80 transition-colors hover:bg-accent">
             <CardContent className="flex items-center gap-4 p-4">
               {entry.entryType === ENTRY_TYPE.IDENTITY ? (
                 <IdCard className="h-4 w-4 shrink-0 text-muted-foreground" />

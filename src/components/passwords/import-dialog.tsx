@@ -918,7 +918,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
           <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
             <p className="text-sm text-muted-foreground">{t("supportedFormats")}</p>
             <label
-              className={`flex flex-col items-center gap-3 rounded-lg border-2 border-dashed p-8 cursor-pointer transition-colors ${
+              className={`flex flex-col items-center gap-3 rounded-lg border-2 border-dashed p-8 transition-colors ${
                 dragOver
                   ? "border-primary bg-primary/10"
                   : "hover:bg-muted/60"

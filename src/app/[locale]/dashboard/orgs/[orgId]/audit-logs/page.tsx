@@ -510,7 +510,7 @@ export default function OrgAuditLogsPage({
             {logs.map((log) => {
               const targetLabel = getTargetLabel(log);
               return (
-                <div key={log.id} className="px-4 py-3 flex items-start gap-3 transition-colors hover:bg-muted/30">
+                <div key={log.id} className="px-4 py-3 flex items-start gap-3 transition-colors hover:bg-accent">
                   <div className="shrink-0 text-muted-foreground mt-0.5">
                     {ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
                   </div>
