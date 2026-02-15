@@ -181,7 +181,7 @@ resource "aws_cloudwatch_event_target" "ecs_task_stopped_sns" {
 }
 
 ################################################################################
-# SNS Topic Policy (allow EventBridge to publish, scoped by SourceArn)
+# SNS Topic Policy (allow EventBridge + CloudWatch Alarms to publish)
 ################################################################################
 
 resource "aws_sns_topic_policy" "alarms" {
@@ -200,6 +200,18 @@ resource "aws_sns_topic_policy" "alarms" {
         Condition = {
           ArnEquals = {
             "aws:SourceArn" = aws_cloudwatch_event_rule.ecs_task_stopped[0].arn
+          }
+        }
+      },
+      {
+        Sid       = "AllowCloudWatchAlarmsPublish"
+        Effect    = "Allow"
+        Principal = { Service = "cloudwatch.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.alarms[0].arn
+        Condition = {
+          ArnLike = {
+            "aws:SourceArn" = "arn:aws:cloudwatch:*:*:alarm:${local.name_prefix}-*"
           }
         }
       }

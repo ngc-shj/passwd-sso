@@ -63,6 +63,10 @@ const redisRequired = process.env.HEALTH_REDIS_REQUIRED === "true";
 async function checkRedis(): Promise<CheckResult> {
   const redis = getRedis();
   if (!redis) {
+    if (redisRequired) {
+      getLogger().warn("health.redis.fail.not_configured");
+      return { status: "fail", responseTimeMs: 0 };
+    }
     return { status: "pass", responseTimeMs: 0 };
   }
   const start = performance.now();
