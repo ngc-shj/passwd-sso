@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
@@ -8,6 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
+import { checkLockout, recordFailure, resetLockout } from "@/lib/account-lockout";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -28,10 +29,19 @@ const unlockLimiter = createRateLimiter({
  * On success, return the encrypted secret key + verification artifact
  * so the client can decrypt the secret key and verify locally.
  */
-async function handlePOST(request: Request) {
+async function handlePOST(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
+
+  // Lockout check — before rate limiter and passphrase verification
+  const lockoutStatus = await checkLockout(session.user.id);
+  if (lockoutStatus.locked) {
+    return NextResponse.json(
+      { error: API_ERROR.ACCOUNT_LOCKED, lockedUntil: lockoutStatus.lockedUntil },
+      { status: 403 },
+    );
   }
 
   const rateKey = `rl:vault_unlock:${session.user.id}`;
@@ -85,11 +95,28 @@ async function handlePOST(request: Request) {
     .digest("hex");
 
   if (computedHash !== user.masterPasswordServerHash) {
-    getLogger().warn({ userId: session.user.id }, "vault.unlock.failure");
+    const failResult = await recordFailure(session.user.id, request);
+    if (failResult === null) {
+      // lock_timeout: counter NOT incremented, temporary contention
+      // Client should retry with Retry-After + random jitter (0-2s)
+      const res = NextResponse.json(
+        { error: API_ERROR.SERVICE_UNAVAILABLE },
+        { status: 503 },
+      );
+      res.headers.set("Retry-After", "1");
+      return res;
+    }
+    if (failResult.locked) {
+      return NextResponse.json(
+        { error: API_ERROR.ACCOUNT_LOCKED, lockedUntil: failResult.lockedUntil },
+        { status: 403 },
+      );
+    }
     return NextResponse.json({ valid: false }, { status: 401 });
   }
 
-  // Reset failure counter on success
+  // Reset lockout + rate limiter on success
+  await resetLockout(session.user.id);
   await unlockLimiter.clear(rateKey);
 
   // Backfill passphrase verifier for existing users (transparent migration)
