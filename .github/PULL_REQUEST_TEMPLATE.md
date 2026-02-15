@@ -8,8 +8,7 @@
 
 ## Testing
 
-- [ ] `npm run lint` passes
-- [ ] `npm run build` succeeds
+- [ ] CI checks pass
 - [ ] Manually tested in browser
 
 ## Related Issues
