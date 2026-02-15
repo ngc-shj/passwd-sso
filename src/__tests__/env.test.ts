@@ -177,6 +177,33 @@ describe("env validation", () => {
     );
   });
 
+  // ─── Whitespace and format checks ──────────────────────
+
+  it("rejects whitespace-only DATABASE_URL", async () => {
+    process.env.DATABASE_URL = "   ";
+    process.env.ORG_MASTER_KEY = "a".repeat(64);
+    await expect(import("@/lib/env")).rejects.toThrow("DATABASE_URL");
+  });
+
+  it("rejects invalid AUTH_URL format in production", async () => {
+    setFullProdEnv();
+    process.env.AUTH_URL = "not-a-url";
+    await expect(import("@/lib/env")).rejects.toThrow("AUTH_URL");
+  });
+
+  it("trims whitespace from VERIFIER_PEPPER_KEY", async () => {
+    setFullProdEnv();
+    process.env.VERIFIER_PEPPER_KEY = `  ${"b".repeat(64)}  `;
+    const { env } = await import("@/lib/env");
+    expect(env.VERIFIER_PEPPER_KEY).toBe("b".repeat(64));
+  });
+
+  it("rejects hex64 with non-hex characters", async () => {
+    process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
+    process.env.ORG_MASTER_KEY = "g".repeat(64); // 'g' is not hex
+    await expect(import("@/lib/env")).rejects.toThrow("ORG_MASTER_KEY");
+  });
+
   // ─── Transforms and defaults ───────────────────────────
 
   it("transforms AUDIT_LOG_FORWARD to boolean true", async () => {
