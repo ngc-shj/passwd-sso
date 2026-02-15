@@ -1,6 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Writable } from "node:stream";
 
+/** Helper: create a Writable stream that collects chunks as strings. */
+function createSink() {
+  const chunks: string[] = [];
+  const stream = new Writable({
+    write(chunk, _encoding, cb) {
+      chunks.push(chunk.toString());
+      cb();
+    },
+  });
+  return { chunks, stream };
+}
+
 describe("createAuditLogger", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -28,54 +40,39 @@ describe("createAuditLogger", () => {
 
   it("does not write to sink when disabled", async () => {
     const { createAuditLogger } = await import("@/lib/audit-logger");
-    const chunks: string[] = [];
-    const sink = new Writable({
-      write(chunk, _encoding, cb) {
-        chunks.push(chunk.toString());
-        cb();
-      },
-    });
-    const logger = createAuditLogger({ enabled: false });
-    // Pipe to our sink (pino writes to its destination)
-    // When disabled, pino short-circuits and never calls write
+    const { chunks, stream } = createSink();
+
+    const logger = createAuditLogger({ enabled: false, destination: stream });
     logger.info({ audit: { action: "TEST" } }, "test");
-    // Flush by ending the stream
-    sink.end();
-    await new Promise((resolve) => sink.on("finish", resolve));
-    // No output should have been produced since logger is disabled
-    // We verify by checking logger.isLevelEnabled returns false
-    expect(logger.isLevelEnabled("info")).toBe(false);
+    logger.flush();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(chunks).toHaveLength(0);
+  });
+
+  it("writes to sink when enabled", async () => {
+    const { createAuditLogger } = await import("@/lib/audit-logger");
+    const { chunks, stream } = createSink();
+
+    const logger = createAuditLogger({ enabled: true, destination: stream });
+    logger.info({ audit: { action: "TEST" } }, "test.msg");
+    logger.flush();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(chunks.length).toBeGreaterThan(0);
   });
 
   it("includes _logType, _app, _version in base fields", async () => {
     const { createAuditLogger } = await import("@/lib/audit-logger");
-    const chunks: string[] = [];
-    const destination = new Writable({
-      write(chunk, _encoding, cb) {
-        chunks.push(chunk.toString());
-        cb();
-      },
+    const { chunks, stream } = createSink();
+
+    const logger = createAuditLogger({
+      enabled: true,
+      appName: "test-app",
+      destination: stream,
     });
-    // Create enabled logger that writes to our writable stream
-    const pino = (await import("pino")).default;
-    const logger = pino(
-      {
-        name: "test-app",
-        level: "info",
-        enabled: true,
-        timestamp: pino.stdTimeFunctions.isoTime,
-        base: { _logType: "audit", _app: "test-app", _version: "1" },
-        formatters: {
-          level(label: string) {
-            return { level: label };
-          },
-        },
-      },
-      destination,
-    );
 
     logger.info({ audit: { action: "TEST" } }, "test.msg");
-    // pino buffers writes, flush by calling logger.flush
     logger.flush();
     await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -87,53 +84,24 @@ describe("createAuditLogger", () => {
     expect(record.name).toBe("test-app");
     expect(record.level).toBe("info");
     expect(record.msg).toBe("test.msg");
-
-    // Verify no default singleton leaks
-    expect(typeof createAuditLogger).toBe("function");
   });
 
   it("redacts sensitive fields in audit.metadata", async () => {
-    const pino = (await import("pino")).default;
-    const chunks: string[] = [];
-    const destination = new Writable({
-      write(chunk, _encoding, cb) {
-        chunks.push(chunk.toString());
-        cb();
-      },
-    });
-
     const { createAuditLogger } = await import("@/lib/audit-logger");
-    // We need to test redaction, so we create a logger with the same redact config
-    // but writing to our destination
-    const logger = pino(
-      {
-        name: "test",
-        level: "info",
-        enabled: true,
-        redact: {
-          paths: [
-            "audit.metadata.password",
-            "audit.metadata.token",
-            "audit.metadata.secretKey",
-          ],
-          censor: "[REDACTED]",
-        },
-        formatters: {
-          level(label: string) {
-            return { level: label };
-          },
-        },
-      },
-      destination,
-    );
+    const { chunks, stream } = createSink();
+
+    const logger = createAuditLogger({ enabled: true, destination: stream });
 
     logger.info(
       {
         audit: {
           metadata: {
             password: "super-secret",
+            passphrase: "my-passphrase",
             token: "bearer-xyz",
             secretKey: "key-material",
+            encryptedBlob: "blob-data",
+            accessToken: "access-123",
             filename: "export.csv",
             count: 42,
           },
@@ -147,25 +115,34 @@ describe("createAuditLogger", () => {
     expect(chunks.length).toBeGreaterThan(0);
     const record = JSON.parse(chunks[0]);
     expect(record.audit.metadata.password).toBe("[REDACTED]");
+    expect(record.audit.metadata.passphrase).toBe("[REDACTED]");
     expect(record.audit.metadata.token).toBe("[REDACTED]");
     expect(record.audit.metadata.secretKey).toBe("[REDACTED]");
+    expect(record.audit.metadata.encryptedBlob).toBe("[REDACTED]");
+    expect(record.audit.metadata.accessToken).toBe("[REDACTED]");
     // Non-sensitive fields pass through
     expect(record.audit.metadata.filename).toBe("export.csv");
     expect(record.audit.metadata.count).toBe(42);
-
-    // Verify createAuditLogger is importable
-    expect(typeof createAuditLogger).toBe("function");
   });
 
   it("uses custom appName when provided", async () => {
     const { createAuditLogger } = await import("@/lib/audit-logger");
+    const { chunks, stream } = createSink();
+
     const logger = createAuditLogger({
       enabled: true,
       appName: "my-custom-app",
+      destination: stream,
     });
-    // The pino logger bindings should include the custom name
-    expect(logger.isLevelEnabled("info")).toBe(true);
-    // We can't easily read bindings without writing, but at least verify it doesn't throw
+
+    logger.info({ audit: { action: "TEST" } }, "test");
+    logger.flush();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(chunks.length).toBeGreaterThan(0);
+    const record = JSON.parse(chunks[0]);
+    expect(record.name).toBe("my-custom-app");
+    expect(record._app).toBe("my-custom-app");
   });
 });
 
