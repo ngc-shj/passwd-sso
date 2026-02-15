@@ -76,7 +76,7 @@ export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
       <button
         type="submit"
         disabled={loading || !passphrase.trim()}
-        className="cursor-pointer px-4 py-2 bg-black text-white text-sm font-medium rounded-md hover:bg-gray-900 active:bg-gray-950 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        className="cursor-pointer px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 active:bg-gray-950 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {loading ? t("popup.unlocking") : t("popup.unlock")}
       </button>
