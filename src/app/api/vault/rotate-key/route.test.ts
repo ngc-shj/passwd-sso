@@ -28,6 +28,11 @@ vi.mock("@/lib/emergency-access-server", () => ({
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: () => Promise.resolve(true), clear: vi.fn() }),
 }));
+vi.mock("@/lib/logger", () => ({
+  default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
+  requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
+  getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+}));
 
 import { createHash } from "crypto";
 import { POST } from "./route";

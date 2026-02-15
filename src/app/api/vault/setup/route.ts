@@ -6,6 +6,8 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { hmacVerifier } from "@/lib/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
+import { withRequestLog } from "@/lib/with-request-log";
+import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -31,7 +33,7 @@ const setupSchema = z.object({
  * Initial vault setup: store encrypted secret key and auth hash.
  * Called once when the user first sets a passphrase.
  */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -107,5 +109,9 @@ export async function POST(request: Request) {
     }),
   ]);
 
+  getLogger().info({ userId: session.user.id }, "vault.setup.success");
+
   return NextResponse.json({ success: true }, { status: 201 });
 }
+
+export const POST = withRequestLog(handlePOST);

@@ -10,6 +10,7 @@ import {
 } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
+import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -19,7 +20,7 @@ function getExtension(filename: string): string {
 }
 
 // GET /api/passwords/[id]/attachments - List attachment metadata
-export async function GET(
+async function handleGET(
   _req: NextRequest,
   { params }: RouteContext
 ) {
@@ -58,7 +59,7 @@ export async function GET(
 }
 
 // POST /api/passwords/[id]/attachments - Upload encrypted attachment
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: RouteContext
 ) {
@@ -221,3 +222,6 @@ export async function POST(
 
   return NextResponse.json(attachment, { status: 201 });
 }
+
+export const GET = withRequestLog(handleGET);
+export const POST = withRequestLog(handlePOST);

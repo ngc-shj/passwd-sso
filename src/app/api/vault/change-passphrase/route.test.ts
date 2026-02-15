@@ -21,6 +21,11 @@ vi.mock("@/lib/crypto-server", () => ({
 vi.mock("@/lib/crypto-client", () => ({
   VERIFIER_VERSION: 1,
 }));
+vi.mock("@/lib/logger", () => ({
+  default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
+  requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
+  getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+}));
 
 import { POST } from "./route";
 

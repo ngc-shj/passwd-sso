@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { authOrToken } from "@/lib/auth-or-token";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
+import { withRequestLog } from "@/lib/with-request-log";
 
 export const runtime = "nodejs";
 
@@ -12,7 +13,7 @@ export const runtime = "nodejs";
  * Accepts Auth.js session or extension token (scope: vault:unlock-data).
  * The client cannot decrypt the secret key without the correct passphrase.
  */
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const authResult = await authOrToken(
     req,
     EXTENSION_TOKEN_SCOPE.VAULT_UNLOCK_DATA,
@@ -82,3 +83,5 @@ export async function GET(req: NextRequest) {
       : null,
   });
 }
+
+export const GET = withRequestLog(handleGET);

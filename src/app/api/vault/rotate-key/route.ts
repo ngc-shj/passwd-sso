@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { markGrantsStaleForOwner } from "@/lib/emergency-access-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { withRequestLog } from "@/lib/with-request-log";
+import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -33,7 +35,7 @@ const rotateKeySchema = z.object({
  * The client re-encrypts the secret key with a new passphrase and bumps keyVersion.
  * All EA grants with older keyVersion are marked STALE.
  */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -124,8 +126,12 @@ export async function POST(request: Request) {
   // Mark EA grants as STALE (best-effort, outside transaction)
   await markGrantsStaleForOwner(session.user.id, newKeyVersion).catch(() => {});
 
+  getLogger().info({ userId: session.user.id }, "vault.rotateKey.success");
+
   return NextResponse.json({
     success: true,
     keyVersion: newKeyVersion,
   });
 }
+
+export const POST = withRequestLog(handlePOST);

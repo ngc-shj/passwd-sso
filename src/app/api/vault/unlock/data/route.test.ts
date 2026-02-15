@@ -19,6 +19,11 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/crypto-server", () => ({
   hashToken: (t: string) => `hashed_${t}`,
 }));
+vi.mock("@/lib/logger", () => ({
+  default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
+  requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
+  getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+}));
 
 import { GET } from "./route";
 
