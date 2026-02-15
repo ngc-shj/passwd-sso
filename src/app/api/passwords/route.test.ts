@@ -24,6 +24,15 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/crypto-server", () => ({
   hashToken: (t: string) => `hashed_${t}`,
 }));
+vi.mock("@/lib/logger", () => {
+  const noop = vi.fn();
+  const child = { info: noop, warn: noop, error: noop };
+  return {
+    default: { info: noop, warn: noop, error: noop, child: vi.fn().mockReturnValue(child) },
+    requestContext: { run: (_s: unknown, fn: () => unknown) => fn(), getStore: () => undefined },
+    getLogger: () => child,
+  };
+});
 
 import { GET, POST } from "./route";
 
@@ -530,6 +539,8 @@ describe("POST /api/passwords", () => {
     });
 
     const res = await POST({
+      url: "http://localhost/api/passwords",
+      method: "POST",
       headers: {
         get: (key: string) => {
           if (key.toLowerCase() === "x-passwd-sso-source") return "import";
@@ -566,6 +577,8 @@ describe("POST /api/passwords", () => {
     });
 
     const res = await POST({
+      url: "http://localhost/api/passwords",
+      method: "POST",
       headers: {
         get: (key: string) => {
           if (key.toLowerCase() === "x-passwd-sso-source") return "import";

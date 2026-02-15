@@ -5,6 +5,8 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { hmacVerifier, verifyPassphraseVerifier } from "@/lib/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
+import { withRequestLog } from "@/lib/with-request-log";
+import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -32,7 +34,7 @@ const changeLimiter = createRateLimiter({
  * Server does not perform decryption verification — the rewrapped data
  * is stored as-is. Correctness is verified at next unlock.
  */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json(
@@ -126,5 +128,9 @@ export async function POST(request: Request) {
     },
   });
 
+  getLogger().info({ userId: session.user.id }, "vault.changePassphrase.success");
+
   return NextResponse.json({ success: true });
 }
+
+export const POST = withRequestLog(handlePOST);
