@@ -874,6 +874,8 @@
     "upstreamError": "外部サービスでエラーが発生しました。",
     "verifierNotSet": "一度保管庫をロックしてアンロックしてください。",
     "verifierVersionUnsupported": "アプリを更新してください。",
+    "accountLocked": "ログイン試行回数の上限を超えたため、アカウントが一時的にロックされています。しばらくしてからお試しください。",
+    "serviceUnavailable": "一時的なサーバーエラーです。再度お試しください。",
     "unknownError": "エラーが発生しました。もう一度お試しください。",
     "extensionTokenExpired": "拡張機能トークンの有効期限が切れています。",
     "extensionTokenRevoked": "拡張機能トークンは無効化されています。",

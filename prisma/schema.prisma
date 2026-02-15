@@ -73,6 +73,11 @@ model User {
   passphraseVerifierHmac    String?   @map("passphrase_verifier_hmac") @db.VarChar(64)
   passphraseVerifierVersion Int       @default(1) @map("passphrase_verifier_version")
 
+  // Account lockout
+  failedUnlockAttempts Int       @default(0) @map("failed_unlock_attempts")
+  lastFailedUnlockAt   DateTime? @map("last_failed_unlock_at")
+  accountLockedUntil   DateTime? @map("account_locked_until")
+
   accounts   Account[]
   sessions   Session[]
   passwords  PasswordEntry[]
@@ -405,6 +410,8 @@ enum AuditAction {
   EMERGENCY_ACCESS_ACTIVATE
   EMERGENCY_ACCESS_REVOKE
   EMERGENCY_VAULT_ACCESS
+  VAULT_UNLOCK_FAILED
+  VAULT_LOCKOUT_TRIGGERED
 }
 
 enum AuditScope {
