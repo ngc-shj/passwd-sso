@@ -16,7 +16,8 @@ import {
 } from "@/components/ui/card";
 import { Loader2, Lock, Eye, EyeOff } from "lucide-react";
 
-function formatLockedUntil(lockedUntil: string | null | undefined, t: (key: string, values?: Record<string, string>) => string): string {
+/** @internal Exported for testing */
+export function formatLockedUntil(lockedUntil: string | null | undefined, t: (key: string, values?: Record<string, string>) => string): string {
   if (!lockedUntil) return t("accountLocked");
   const diff = new Date(lockedUntil).getTime() - Date.now();
   if (diff <= 0) return t("accountLocked");
