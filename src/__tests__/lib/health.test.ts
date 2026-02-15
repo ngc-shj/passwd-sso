@@ -153,3 +153,41 @@ describe("health checks", () => {
     });
   });
 });
+
+describe("health checks (HEALTH_REDIS_REQUIRED=true)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns fail when redis is not configured but required", async () => {
+    vi.stubEnv("HEALTH_REDIS_REQUIRED", "true");
+    vi.resetModules();
+
+    const { runHealthChecks: run } = await import("@/lib/health");
+
+    mockQueryRaw.mockResolvedValue([{ "?column?": 1 }]);
+    mockGetRedis.mockReturnValue(null);
+    const result = await run();
+    expect(result.checks.redis.status).toBe("fail");
+    expect(result.status).toBe("unhealthy");
+    expect(mockWarn).toHaveBeenCalled();
+
+    vi.unstubAllEnvs();
+  });
+
+  it("returns fail when redis ping fails and required", async () => {
+    vi.stubEnv("HEALTH_REDIS_REQUIRED", "true");
+    vi.resetModules();
+
+    const { runHealthChecks: run } = await import("@/lib/health");
+
+    mockQueryRaw.mockResolvedValue([{ "?column?": 1 }]);
+    mockPing.mockRejectedValue(new Error("redis down"));
+    mockGetRedis.mockReturnValue({ ping: mockPing });
+    const result = await run();
+    expect(result.checks.redis.status).toBe("fail");
+    expect(result.status).toBe("unhealthy");
+
+    vi.unstubAllEnvs();
+  });
+});
