@@ -27,6 +27,38 @@ import { createKeyEscrow } from "./crypto-emergency";
 import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 
+/** Error thrown by `unlock()` when the server rejects the request with a specific error code. */
+export class VaultUnlockError extends Error {
+  constructor(
+    public readonly code: string,
+    public readonly lockedUntil?: string | null,
+  ) {
+    super(code);
+    this.name = "VaultUnlockError";
+  }
+}
+
+/**
+ * Notify the server of a failed unlock attempt (for lockout tracking).
+ * Sends a dummy authHash so the server records the failure and
+ * returns lockout status (403) or rate-limit (429) if applicable.
+ * @throws {VaultUnlockError} when server returns a structured error (e.g. ACCOUNT_LOCKED)
+ * @internal Exported for testing
+ */
+export async function notifyUnlockFailure(): Promise<void> {
+  const res = await fetch(API_PATH.VAULT_UNLOCK, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ authHash: "0".repeat(64) }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    if (body.error) {
+      throw new VaultUnlockError(body.error, body.lockedUntil);
+    }
+  }
+}
+
 // Re-export so existing consumers can keep importing from vault-context
 export type { VaultStatus };
 
@@ -105,7 +137,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const secretKeyRef = useRef<Uint8Array | null>(null);
   const keyVersionRef = useRef<number>(0);
   const accountSaltRef = useRef<Uint8Array | null>(null);
-  // eslint-disable-next-line react-hooks/purity
   const lastActivityRef = useRef(Date.now());
   const hiddenAtRef = useRef<number | null>(null);
 
@@ -377,7 +408,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           wrappingKey
         );
       } catch {
-        return false; // wrong passphrase
+        // Passphrase is wrong — notify server for lockout tracking.
+        // Network failures are swallowed (VaultUnlockError propagates for lockout UI).
+        try { await notifyUnlockFailure(); } catch (e) { if (e instanceof VaultUnlockError) throw e; }
+        return false;
       }
 
       // 4. Derive encryption key and verify with artifact
@@ -386,6 +420,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         const valid = await verifyKey(encKey, vaultData.verificationArtifact);
         if (!valid) {
           secretKey.fill(0);
+          try { await notifyUnlockFailure(); } catch (e) { if (e instanceof VaultUnlockError) throw e; }
           return false;
         }
       }
@@ -403,11 +438,19 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         );
       }
 
-      await fetch(API_PATH.VAULT_UNLOCK, {
+      const unlockRes = await fetch(API_PATH.VAULT_UNLOCK, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(unlockBody),
       });
+
+      if (!unlockRes.ok) {
+        const body = await unlockRes.json().catch(() => ({}));
+        if (body.error) {
+          throw new VaultUnlockError(body.error, body.lockedUntil);
+        }
+        return false;
+      }
 
       // 6. Store secretKey, keyVersion, accountSalt for EA auto-confirm and changePassphrase
       secretKeyRef.current = new Uint8Array(secretKey);
@@ -429,7 +472,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       lastActivityRef.current = Date.now();
 
       return true;
-    } catch {
+    } catch (err) {
+      if (err instanceof VaultUnlockError) throw err;
       return false;
     }
   }, [session?.user?.id]);

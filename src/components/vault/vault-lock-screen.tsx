@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { useVault } from "@/lib/vault-context";
+import { useVault, VaultUnlockError } from "@/lib/vault-context";
+import { API_ERROR } from "@/lib/api-error-codes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +15,19 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Loader2, Lock, Eye, EyeOff } from "lucide-react";
+
+/** @internal Exported for testing */
+export function formatLockedUntil(lockedUntil: string | null | undefined, t: (key: string, values?: Record<string, string>) => string): string {
+  if (!lockedUntil) return t("accountLocked");
+  const diff = new Date(lockedUntil).getTime() - Date.now();
+  if (diff <= 0) return t("accountLocked");
+  const minutes = Math.ceil(diff / 60_000);
+  if (minutes >= 60) {
+    const hours = Math.ceil(minutes / 60);
+    return t("accountLockedWithTime", { time: t("hours", { count: String(hours) }) });
+  }
+  return t("accountLockedWithTime", { time: t("minutes", { count: String(minutes) }) });
+}
 
 export function VaultLockScreen() {
   const t = useTranslations("Vault");
@@ -36,8 +50,25 @@ export function VaultLockScreen() {
         setError(t("wrongPassphrase"));
         setPassphrase("");
       }
-    } catch {
-      setError(t("unlockError"));
+    } catch (err) {
+      if (err instanceof VaultUnlockError) {
+        switch (err.code) {
+          case API_ERROR.ACCOUNT_LOCKED:
+            setError(formatLockedUntil(err.lockedUntil, t));
+            break;
+          case API_ERROR.RATE_LIMIT_EXCEEDED:
+            setError(t("rateLimited"));
+            break;
+          case API_ERROR.SERVICE_UNAVAILABLE:
+            setError(t("retryLater"));
+            break;
+          default:
+            setError(t("unlockError"));
+        }
+      } else {
+        setError(t("unlockError"));
+      }
+      setPassphrase("");
     } finally {
       setLoading(false);
     }
