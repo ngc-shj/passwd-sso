@@ -5,13 +5,14 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { authOrToken } from "@/lib/auth-or-token";
+import { withRequestLog } from "@/lib/with-request-log";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
 // GET /api/passwords - List passwords (returns encrypted overviews)
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
   if (authResult?.type === "scope_insufficient") {
     return NextResponse.json({ error: API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT }, { status: 403 });
@@ -90,7 +91,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/passwords - Create new password entry (E2E encrypted)
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -181,3 +182,6 @@ export async function POST(req: NextRequest) {
     { status: 201 }
   );
 }
+
+export const GET = withRequestLog(handleGET);
+export const POST = withRequestLog(handlePOST);

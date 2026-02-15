@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { withRequestLog } from "@/lib/with-request-log";
+import { getLogger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -8,7 +10,7 @@ const rate = new Map<string, { resetAt: number; count: number }>();
 
 // POST /api/csp-report
 // Receives CSP violation reports.
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const now = Date.now();
   const ip =
     request.headers.get("x-forwarded-for") ??
@@ -31,9 +33,11 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null);
     // Log for observability; avoid throwing
     if (body) {
-      console.warn("CSP report:", body);
+      getLogger().warn({ cspReport: body }, "csp.violation");
     }
   }
 
   return new NextResponse(null, { status: 204 });
 }
+
+export const POST = withRequestLog(handlePOST);

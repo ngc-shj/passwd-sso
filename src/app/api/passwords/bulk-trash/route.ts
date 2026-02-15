@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 interface BulkTrashBody {
@@ -10,7 +11,7 @@ interface BulkTrashBody {
 }
 
 // POST /api/passwords/bulk-trash - Soft delete multiple entries (move to trash)
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -95,3 +96,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ success: true, movedCount: result.count });
 }
+
+export const POST = withRequestLog(handlePOST);

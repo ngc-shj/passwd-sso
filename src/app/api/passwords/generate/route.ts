@@ -4,6 +4,7 @@ import { generatePassword, generatePassphrase } from "@/lib/password-generator";
 import { generatePasswordSchema, generatePassphraseSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { withRequestLog } from "@/lib/with-request-log";
 import { z } from "zod";
 
 const generateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
@@ -14,7 +15,7 @@ const requestSchema = z.discriminatedUnion("mode", [
 ]);
 
 // POST /api/passwords/generate - Generate a random password or passphrase
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -58,3 +59,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ password });
 }
+
+export const POST = withRequestLog(handlePOST);

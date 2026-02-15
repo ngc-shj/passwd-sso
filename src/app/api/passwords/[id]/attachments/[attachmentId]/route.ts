@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
+import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type RouteContext = {
@@ -11,7 +12,7 @@ type RouteContext = {
 };
 
 // GET /api/passwords/[id]/attachments/[attachmentId] - Download encrypted attachment
-export async function GET(
+async function handleGET(
   _req: NextRequest,
   { params }: RouteContext
 ) {
@@ -62,7 +63,7 @@ export async function GET(
 }
 
 // DELETE /api/passwords/[id]/attachments/[attachmentId] - Delete attachment
-export async function DELETE(
+async function handleDELETE(
   req: NextRequest,
   { params }: RouteContext
 ) {
@@ -116,3 +117,6 @@ export async function DELETE(
 
   return NextResponse.json({ success: true });
 }
+
+export const GET = withRequestLog(handleGET);
+export const DELETE = withRequestLog(handleDELETE);

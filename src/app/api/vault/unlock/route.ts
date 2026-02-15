@@ -6,6 +6,8 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { hmacVerifier } from "@/lib/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
+import { withRequestLog } from "@/lib/with-request-log";
+import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -26,7 +28,7 @@ const unlockLimiter = createRateLimiter({
  * On success, return the encrypted secret key + verification artifact
  * so the client can decrypt the secret key and verify locally.
  */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -34,6 +36,7 @@ export async function POST(request: Request) {
 
   const rateKey = `rl:vault_unlock:${session.user.id}`;
   if (!(await unlockLimiter.check(rateKey))) {
+    getLogger().warn({ userId: session.user.id }, "vault.unlock.rateLimited");
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 }
@@ -82,6 +85,7 @@ export async function POST(request: Request) {
     .digest("hex");
 
   if (computedHash !== user.masterPasswordServerHash) {
+    getLogger().warn({ userId: session.user.id }, "vault.unlock.failure");
     return NextResponse.json({ valid: false }, { status: 401 });
   }
 
@@ -117,6 +121,8 @@ export async function POST(request: Request) {
     },
   });
 
+  getLogger().info({ userId: session.user.id }, "vault.unlock.success");
+
   return NextResponse.json({
     valid: true,
     encryptedSecretKey: user.encryptedSecretKey,
@@ -133,3 +139,5 @@ export async function POST(request: Request) {
     keyVersion: user.keyVersion,
   });
 }
+
+export const POST = withRequestLog(handlePOST);
