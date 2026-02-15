@@ -155,7 +155,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
             placeholder={t("popup.searchPlaceholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="h-9 px-3 rounded-md border border-gray-300 text-sm"
+            className="h-9 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-900 transition-shadow"
           />
 
           {query && filteredMatched.length === 0 && filteredUnmatched.length === 0 && (
@@ -177,7 +177,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
               {filteredMatched.map((e) => (
                 <li
                   key={e.id}
-                  className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2"
+                  className="rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors px-3 py-2"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-sm font-medium text-gray-900">
