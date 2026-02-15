@@ -12,7 +12,11 @@ import { z } from "zod";
 
 // ─── Reusable validators ────────────────────────────────────
 
-const nonEmpty = z.string().min(1);
+/** Non-empty string. Trims whitespace before checking length. */
+const nonEmpty = z
+  .string()
+  .transform((s) => s.trim())
+  .pipe(z.string().min(1));
 
 /** 64-char hex string (256-bit key). Trims whitespace before validation. */
 const hex64 = z
@@ -46,7 +50,20 @@ const envSchema = z
 
     // --- Auth.js core ---
     AUTH_SECRET: z.string().optional(),
-    AUTH_URL: nonEmpty.optional(),
+    AUTH_URL: z
+      .string()
+      .refine(
+        (s) => {
+          try {
+            new URL(s);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        { message: "Must be a valid URL" },
+      )
+      .optional(),
 
     // --- Auth providers (superRefine: at least one provider set in prod) ---
     AUTH_GOOGLE_ID: nonEmpty.optional(),
