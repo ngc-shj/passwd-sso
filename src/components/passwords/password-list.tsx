@@ -425,7 +425,7 @@ export function PasswordList({
             onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
             aria-label={t("selectEntry", { title: entry.title })}
           />
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <PasswordCard
               id={entry.id}
               entryType={entry.entryType}
