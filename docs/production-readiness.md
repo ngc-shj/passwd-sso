@@ -20,8 +20,8 @@
 | 1.1 | 必須 | CI/CD パイプライン構築 | 対応済み | GitHub Actions 4 並列ジョブ (app-ci / extension-ci / audit-app / audit-ext)。ESLint native flat config 移行済み。PR #18 |
 | 1.2 | 必須 | 監査ログ外部転送 (pino + Fluent Bit) | 対応済み | 監査イベントを構造化 JSON で stdout → Fluent Bit → 任意の転送先。多層防御 (sanitizeMetadata + pino redact) |
 | 1.3 | 必須 | アプリケーション構造化ログ | 対応済み | pino 汎用ロガー (`_logType: "app"`) + `withRequestLog()` ラッパーで requestId・レイテンシ自動記録。Phase 1: vault/passwords/auth/csp-report。CSP report body サニタイズ済み。PR #20 |
-| 1.4 | 必須 | ヘルスチェックエンドポイント | 未着手 | `/api/health` — DB 接続、Redis 接続、基本応答を確認。ALB / ECS ヘルスチェック連携 |
-| 1.5 | 必須 | 監視・アラート基盤 | 未着手 | Prometheus / CloudWatch / Datadog 等。API レイテンシ、エラーレート、DB プール使用率、レートリミット発動回数の可視化 |
+| 1.4 | 必須 | ヘルスチェックエンドポイント | 対応済み | `/api/health/live` (liveness, 200 固定) + `/api/health/ready` (readiness, DB + Redis チェック, unhealthy → 503)。`HEALTH_REDIS_REQUIRED=true` で Redis 障害時 fail 切替。PR #22 |
+| 1.5 | 必須 | 監視・アラート基盤 | 対応済み | Terraform: CloudWatch メトリクスフィルタ (5xx, ヘルスチェック失敗, 高レイテンシ) + アラーム 4 種 + EventBridge ECS 停止検知 + SNS 通知。アプリコードは vendor-neutral。PR #22 |
 | 1.6 | 強く推奨 | エラートラッキング (Sentry 等) | 未着手 | クライアントサイド + サーバーサイドのエラー収集・通知 |
 
 ---
@@ -93,6 +93,8 @@
 - 環境変数バリデーション (Zod スキーマ 26 変数、起動時一括検証)
 - CI/CD パイプライン (GitHub Actions 4 並列ジョブ、ESLint + Vitest + Next.js build)
 - アプリケーション構造化ログ (pino + withRequestLog + CSP report サニタイズ)
+- ヘルスチェック (`/api/health/live` liveness + `/api/health/ready` readiness, DB/Redis チェック, タイムアウト保護)
+- 監視・アラート基盤 (CloudWatch メトリクスフィルタ + アラーム + EventBridge ECS 停止検知 + SNS 通知)
 - 本番コード `console.log` 0 件、`TODO/FIXME` 1 件
 
 ---
