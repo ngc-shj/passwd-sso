@@ -62,3 +62,8 @@ attachments_bucket_name    = ""
 enable_cloudfront          = false
 cloudfront_aliases         = []
 cloudfront_certificate_arn = ""
+
+# Backup — dev (vault lock off, minimal retention)
+enable_backup         = true
+backup_vault_lock     = false
+backup_retention_days = 7
