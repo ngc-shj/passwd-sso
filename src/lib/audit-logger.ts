@@ -8,23 +8,24 @@
  * This module NEVER replaces the existing DB-based audit logging.
  */
 
-import pino from "pino";
+import pino, { type DestinationStream } from "pino";
 
 /**
  * Factory to create a pino logger instance for audit events.
  *
  * In production, use the `auditLogger` singleton exported below.
- * In tests, call `createAuditLogger()` directly to control `enabled`.
+ * In tests, call `createAuditLogger({ destination })` to capture output.
  */
 export function createAuditLogger(opts?: {
   enabled?: boolean;
   appName?: string;
+  destination?: DestinationStream;
 }): pino.Logger {
   const enabled = opts?.enabled ?? process.env.AUDIT_LOG_FORWARD === "true";
   const appName =
     opts?.appName ?? process.env.AUDIT_LOG_APP_NAME ?? "passwd-sso";
 
-  return pino({
+  const pinoOpts: pino.LoggerOptions = {
     name: appName,
     level: "info",
     enabled,
@@ -59,7 +60,11 @@ export function createAuditLogger(opts?: {
         return { level: label };
       },
     },
-  });
+  };
+
+  return opts?.destination
+    ? pino(pinoOpts, opts.destination)
+    : pino(pinoOpts);
 }
 
 /** Production singleton */
