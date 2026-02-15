@@ -116,7 +116,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const secretKeyRef = useRef<Uint8Array | null>(null);
   const keyVersionRef = useRef<number>(0);
   const accountSaltRef = useRef<Uint8Array | null>(null);
-  // eslint-disable-next-line react-hooks/purity
   const lastActivityRef = useRef(Date.now());
   const hiddenAtRef = useRef<number | null>(null);
 
