@@ -352,6 +352,7 @@
     "somethingWentWrong": "エラーが発生しました。"
   },
   "LanguageSwitcher": {
+    "label": "言語を切り替え",
     "ja": "日本語",
     "en": "English"
   },

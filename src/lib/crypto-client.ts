@@ -23,6 +23,20 @@ const VERIFIER_PBKDF2_ITERATIONS = 600_000;
 const VERIFIER_PBKDF2_BITS = 256; // 32 bytes output
 const VERIFIER_DOMAIN_PREFIX = "verifier";
 
+// ─── Shared constants for E2E test crypto helpers ────────────────
+export const CRYPTO_CONSTANTS = {
+  PBKDF2_ITERATIONS,
+  AES_KEY_LENGTH,
+  IV_LENGTH,
+  HKDF_ENC_INFO,
+  HKDF_AUTH_INFO,
+  VERIFICATION_PLAINTEXT,
+  VERIFIER_PBKDF2_HASH,
+  VERIFIER_PBKDF2_ITERATIONS,
+  VERIFIER_PBKDF2_BITS,
+  VERIFIER_DOMAIN_PREFIX,
+} as const;
+
 export interface EncryptedData {
   ciphertext: string; // hex
   iv: string; // hex
