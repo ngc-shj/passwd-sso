@@ -16,7 +16,7 @@ import { UserAvatar } from "@/components/auth/user-avatar";
 import { SignOutButton } from "@/components/auth/signout-button";
 import { LanguageSwitcher } from "./language-switcher";
 import { useVault } from "@/lib/vault-context";
-import { VAULT_STATUS } from "@/lib/constants";
+import { APP_NAME, VAULT_STATUS } from "@/lib/constants";
 import { ChangePassphraseDialog } from "@/components/vault/change-passphrase-dialog";
 import { RecoveryKeyDialog } from "@/components/vault/recovery-key-dialog";
 
@@ -51,7 +51,7 @@ export function Header({ onMenuToggle }: HeaderProps) {
 
         <div className="flex items-center gap-2 font-semibold">
           <KeyRound className="h-5 w-5" />
-          <span className="hidden sm:inline">passwd-sso</span>
+          <span className="hidden sm:inline">{APP_NAME}</span>
         </div>
 
         <div className="flex-1" />
