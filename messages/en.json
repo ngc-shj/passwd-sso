@@ -59,7 +59,8 @@
     "catPasskey": "Passkeys",
     "newPasskey": "Passkey",
     "shareLinks": "Share Links",
-    "emergencyAccess": "Emergency Access"
+    "emergencyAccess": "Emergency Access",
+    "sidebar": "Navigation"
   },
   "ShareLinks": {
     "title": "Share Links",

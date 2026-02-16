@@ -9,11 +9,13 @@ import { proxy } from "../proxy";
 
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "test-nonce" };
 
+const APP_ORIGIN = "http://localhost:3000";
+
 function createApiRequest(
   path: string,
   headers?: Record<string, string>,
 ): NextRequest {
-  return new NextRequest(`http://localhost:3000${path}`, { headers });
+  return new NextRequest(`${APP_ORIGIN}${path}`, { headers });
 }
 
 describe("proxy — handleApiAuth Bearer bypass", () => {
@@ -137,5 +139,89 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     );
     expect(res.status).toBe(200);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("proxy — CORS preflight and headers", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.stubEnv("APP_URL", APP_ORIGIN);
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ user: { id: "u1" } }), { status: 200 }),
+    );
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("OPTIONS /api/passwords (same-origin) returns 204 with CORS headers", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+      method: "OPTIONS",
+      headers: { origin: APP_ORIGIN },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(APP_ORIGIN);
+    expect(res.headers.get("Access-Control-Allow-Methods")).toContain("PATCH");
+    expect(res.headers.get("Vary")).toBe("Origin");
+  });
+
+  it("OPTIONS /api/passwords (cross-origin) returns 204 without CORS headers", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+      method: "OPTIONS",
+      headers: { origin: "http://evil.com" },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("same-origin POST /api/passwords includes CORS headers", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+      method: "POST",
+      headers: {
+        origin: APP_ORIGIN,
+        Cookie: "authjs.session-token=sess-1",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(APP_ORIGIN);
+    expect(res.headers.get("Vary")).toContain("Origin");
+  });
+
+  it("cross-origin POST /api/passwords does not include CORS headers", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+      method: "POST",
+      headers: {
+        origin: "http://evil.com",
+        Cookie: "authjs.session-token=sess-1",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("401 response includes CORS headers for same-origin", async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify({ user: null }), { status: 200 }),
+    );
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+      method: "GET",
+      headers: {
+        origin: APP_ORIGIN,
+        Cookie: "authjs.session-token=sess-fail",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(401);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(APP_ORIGIN);
   });
 });

@@ -4,6 +4,7 @@ import type { NextRequest } from "next/server";
 import { routing } from "./i18n/routing";
 import { getLocaleFromPathname, stripLocalePrefix } from "./i18n/locale-utils";
 import { API_PATH } from "./lib/constants";
+import { handlePreflight, applyCorsHeaders } from "./lib/cors";
 
 const intlMiddleware = createIntlMiddleware(routing);
 
@@ -59,6 +60,13 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
 async function handleApiAuth(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Handle CORS preflight for API routes only.
+  // handleApiAuth() is already scoped to /api/* by the caller (proxy()).
+  // If a future route needs OPTIONS for business logic, add an exclusion here.
+  if (request.method === "OPTIONS") {
+    return handlePreflight(request);
+  }
+
   // Routes that accept extension token (Bearer) as alternative auth.
   // Let the route handler validate the token instead of checking session.
   // IMPROVE(#39): harden allowlist matching — add edge-case tests for child paths
@@ -84,7 +92,7 @@ async function handleApiAuth(request: NextRequest) {
   };
 
   if (hasBearer && extensionTokenRoutes.some(isBearerBypassRoute)) {
-    return NextResponse.next();
+    return applyCorsHeaders(request, NextResponse.next());
   }
 
   if (
@@ -99,11 +107,14 @@ async function handleApiAuth(request: NextRequest) {
   ) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {
-      return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+      return applyCorsHeaders(
+        request,
+        NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 }),
+      );
     }
   }
 
-  return NextResponse.next();
+  return applyCorsHeaders(request, NextResponse.next());
 }
 
 async function hasValidSession(request: NextRequest): Promise<boolean> {

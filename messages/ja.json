@@ -59,7 +59,8 @@
     "catPasskey": "パスキー",
     "newPasskey": "パスキー",
     "shareLinks": "共有リンク",
-    "emergencyAccess": "緊急アクセス"
+    "emergencyAccess": "緊急アクセス",
+    "sidebar": "ナビゲーション"
   },
   "ShareLinks": {
     "title": "共有リンク",
