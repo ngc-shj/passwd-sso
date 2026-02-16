@@ -411,7 +411,8 @@
     "recoveryKeyWarning": "Store this Recovery Key in a safe place. You will need it to recover your vault if you forget your passphrase. This key will not be shown again.",
     "recoveryKeyClose": "Close",
     "recoveryKeyGenerating": "Generating Recovery Key...",
-    "recoveryKeyRegenerateWarning": "You already have a Recovery Key. Generating a new one will invalidate the previous key."
+    "recoveryKeyRegenerateWarning": "You already have a Recovery Key. Generating a new one will invalidate the previous key.",
+    "vaultMustBeUnlocked": "Vault must be unlocked."
   },
   "Recovery": {
     "title": "Recover Your Vault",

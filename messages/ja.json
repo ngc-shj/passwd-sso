@@ -411,7 +411,8 @@
     "recoveryKeyWarning": "この回復キーを安全な場所に保管してください。パスフレーズを忘れた場合に保管庫を復旧するために必要です。この鍵は再表示されません。",
     "recoveryKeyClose": "閉じる",
     "recoveryKeyGenerating": "回復キーを生成中...",
-    "recoveryKeyRegenerateWarning": "既に回復キーが設定されています。新しい鍵を生成すると、以前の鍵は無効になります。"
+    "recoveryKeyRegenerateWarning": "既に回復キーが設定されています。新しい鍵を生成すると、以前の鍵は無効になります。",
+    "vaultMustBeUnlocked": "保管庫のロックを解除してください。"
   },
   "Recovery": {
     "title": "保管庫の復旧",

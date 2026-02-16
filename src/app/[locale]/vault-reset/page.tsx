@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { useRouter } from "@/i18n/navigation";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
@@ -17,7 +16,6 @@ export default function VaultResetPage() {
   const tCommon = useTranslations("Common");
   const t = useTranslations("VaultReset");
   const tApi = useTranslations("ApiErrors");
-  const router = useRouter();
 
   const [confirmation, setConfirmation] = useState("");
   const [loading, setLoading] = useState(false);
@@ -49,8 +47,8 @@ export default function VaultResetPage() {
         return;
       }
 
-      // Redirect to dashboard (will show SETUP_REQUIRED)
-      router.push("/dashboard");
+      // Full reload to re-initialize VaultProvider (client-side nav keeps stale state)
+      window.location.href = "/dashboard";
     } catch {
       setError(tApi("unknownError"));
     } finally {
