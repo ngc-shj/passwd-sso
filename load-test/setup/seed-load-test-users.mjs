@@ -153,7 +153,10 @@ function aesGcmEncrypt(key, plaintext) {
 }
 
 function computeAuthHash(authKey) {
-  return createHash("sha256").update(authKey).digest("hex");
+  // Not a raw password — authKey is already derived via PBKDF2 (600k iter) + HKDF.
+  // SHA-256 here computes a verification hash, matching the client-side Web Crypto
+  // implementation in src/lib/crypto-client.ts:computeAuthHash().
+  return createHash("sha256").update(authKey).digest("hex"); // lgtm[js/insufficient-password-hash]
 }
 
 function deriveVerifierSalt(accountSalt) {
