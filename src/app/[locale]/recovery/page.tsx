@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
 import {
   parseRecoveryKey,
@@ -42,7 +41,6 @@ export default function RecoveryPage() {
   const t = useTranslations("Recovery");
   const tVault = useTranslations("Vault");
   const tApi = useTranslations("ApiErrors");
-  const router = useRouter();
   const { setHasRecoveryKey } = useVault();
 
   const [step, setStep] = useState<Step>("input");
@@ -196,8 +194,8 @@ export default function RecoveryPage() {
 
       setHasRecoveryKey(true);
 
-      // Redirect to dashboard (will trigger vault lock screen for re-login)
-      router.push("/dashboard");
+      // Full reload to re-initialize VaultProvider (client-side nav keeps stale state)
+      window.location.href = "/dashboard";
     } catch {
       setError(tApi("unknownError"));
     } finally {

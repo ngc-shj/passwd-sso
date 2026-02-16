@@ -127,7 +127,7 @@ export function RecoveryKeyDialog({
     const secretKey = getSecretKey();
     const accountSalt = getAccountSalt();
     if (!secretKey || !accountSalt) {
-      setError("Vault must be unlocked.");
+      setError(t("vaultMustBeUnlocked"));
       return;
     }
 

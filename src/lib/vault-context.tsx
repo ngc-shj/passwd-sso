@@ -382,8 +382,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       throw new Error(err.error || "Setup failed");
     }
 
-    // 9. Store encryption key and accountSalt in memory
+    // 9. Store secretKey, keyVersion, accountSalt, and encryption key in memory
+    secretKeyRef.current = new Uint8Array(secretKey);
+    keyVersionRef.current = 1;
     accountSaltRef.current = accountSalt;
+    secretKey.fill(0);
     setEncryptionKey(encKey);
     setVaultStatus(VAULT_STATUS.UNLOCKED);
     lastActivityRef.current = Date.now();
