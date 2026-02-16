@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { MockPrisma } from "@/__tests__/helpers/mock-prisma";
 
 // vi.mock is hoisted — factory must not reference outer variables
 vi.mock("@/lib/prisma", () => {
@@ -34,8 +35,7 @@ import {
   OrgAuthError,
 } from "./org-auth";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockPrisma = prisma as any;
+const mockPrisma = prisma as unknown as MockPrisma;
 
 describe("hasOrgPermission", () => {
   it("OWNER has all permissions", () => {

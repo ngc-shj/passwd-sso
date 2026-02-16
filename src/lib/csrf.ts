@@ -23,7 +23,7 @@ import { API_ERROR } from "./api-error-codes";
  */
 export function assertOrigin(request: Request): NextResponse | null {
   const origin = request.headers.get("origin");
-  const appUrl = process.env.APP_URL || process.env.NEXTAUTH_URL;
+  const appUrl = process.env.APP_URL || process.env.AUTH_URL;
 
   if (!appUrl) {
     // If APP_URL is not configured, skip check (dev convenience)

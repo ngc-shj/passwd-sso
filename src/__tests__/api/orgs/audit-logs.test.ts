@@ -44,8 +44,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    const res = await GET(req, createParams({ orgId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(401);
@@ -62,8 +62,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    const res = await GET(req, createParams({ orgId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(403);
@@ -95,8 +95,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    const res = await GET(req, createParams({ orgId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -131,8 +131,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs?action=${AUDIT_ACTION.ORG_MEMBER_INVITE}`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    await GET(req, createParams({ orgId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -152,8 +152,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},${AUDIT_ACTION.ENTRY_UPDATE}`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    await GET(req, createParams({ orgId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -173,8 +173,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_TRASH}`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    await GET(req, createParams({ orgId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -194,8 +194,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_ARCHIVE}`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    await GET(req, createParams({ orgId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -215,8 +215,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_UNARCHIVE}`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    await GET(req, createParams({ orgId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -236,8 +236,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_RESTORE}`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    await GET(req, createParams({ orgId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -256,8 +256,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},NOPE`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    const res = await GET(req, createParams({ orgId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
@@ -275,8 +275,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs?from=2025-01-01T00:00:00Z&to=2025-06-30T23:59:59Z`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    await GET(req, createParams({ orgId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -313,8 +313,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs?limit=5`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    const res = await GET(req, createParams({ orgId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -331,8 +331,8 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs?cursor=bad-cursor`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await GET(req as any, createParams({ orgId: ORG_ID }));
+
+    const res = await GET(req, createParams({ orgId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
@@ -349,8 +349,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     );
 
     await expect(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      GET(req as any, createParams({ orgId: ORG_ID }))
+      GET(req, createParams({ orgId: ORG_ID }))
     ).rejects.toThrow("Unexpected");
   });
 });
