@@ -288,6 +288,12 @@ variable "alarm_latency_threshold_ms" {
   description = "API latency threshold in milliseconds"
 }
 
+variable "alarm_rds_connections_threshold" {
+  type        = number
+  default     = 80
+  description = "RDS connection count alarm threshold. Default 80 assumes db.t4g.micro (max_connections ≈ 100). Review when changing instance type."
+}
+
 # ── Backup ─────────────────────────────────────────────
 
 variable "enable_backup" {

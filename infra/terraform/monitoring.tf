@@ -151,6 +151,29 @@ resource "aws_cloudwatch_metric_alarm" "high_latency" {
   tags          = local.tags
 }
 
+# RDS connection count approaching max_connections limit
+resource "aws_cloudwatch_metric_alarm" "rds_connections" {
+  count               = var.enable_monitoring ? 1 : 0
+  alarm_name          = "${local.name_prefix}-rds-connections-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "DatabaseConnections"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Maximum"
+  threshold           = var.alarm_rds_connections_threshold
+  alarm_description   = "RDS connection count approaching max_connections limit"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    DBInstanceIdentifier = aws_db_instance.main.identifier
+  }
+
+  alarm_actions = [aws_sns_topic.alarms[0].arn]
+  ok_actions    = [aws_sns_topic.alarms[0].arn]
+  tags          = local.tags
+}
+
 ################################################################################
 # EventBridge: ECS Task Stop Detection
 ################################################################################

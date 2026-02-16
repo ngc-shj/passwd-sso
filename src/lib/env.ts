@@ -95,6 +95,33 @@ const envSchema = z
     AZURE_STORAGE_CONNECTION_STRING: nonEmpty.optional(),
     AZURE_STORAGE_SAS_TOKEN: nonEmpty.optional(),
     GCS_ATTACHMENTS_BUCKET: nonEmpty.optional(),
+
+    // --- DB connection pool tuning (optional) ---
+    DB_POOL_MAX: z.coerce.number().int().min(1).max(200).default(20),
+    DB_POOL_CONNECTION_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(60000)
+      .default(5000),
+    DB_POOL_IDLE_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(600000)
+      .default(30000),
+    DB_POOL_MAX_LIFETIME_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(86400)
+      .default(1800),
+    DB_POOL_STATEMENT_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(300000)
+      .default(30000),
   })
   .superRefine((data, ctx) => {
     const isProd = data.NODE_ENV === "production";
