@@ -34,7 +34,7 @@ export default function () {
     "db healthy": (r) => {
       try {
         const body = JSON.parse(r.body);
-        return body.checks?.db?.status === "healthy";
+        return body.checks?.database?.status === "pass";
       } catch {
         return false;
       }

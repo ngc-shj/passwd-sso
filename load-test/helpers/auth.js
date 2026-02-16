@@ -13,7 +13,7 @@ import { BASE_URL, COOKIE_NAME } from "./config.js";
  * SharedArray ensures the data is parsed once and shared across VUs.
  */
 const users = new SharedArray("load-test-users", function () {
-  const path = __ENV.AUTH_FILE || "load-test/setup/.load-test-auth.json";
+  const path = __ENV.AUTH_FILE || "../setup/.load-test-auth.json";
   const data = JSON.parse(open(path));
   if (!Array.isArray(data) || data.length === 0) {
     throw new Error(

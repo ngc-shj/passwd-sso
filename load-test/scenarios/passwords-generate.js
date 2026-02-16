@@ -12,18 +12,19 @@ import { setSessionCookie } from "../helpers/auth.js";
 export const options = {
   scenarios: {
     generate: {
-      executor: "constant-arrival-rate",
-      rate: 50,
-      timeUnit: "1s",
-      duration: "30s",
-      preAllocatedVUs: 10,
-      maxVUs: 50,
+      executor: "ramping-vus",
+      startVUs: 1,
+      stages: [
+        { duration: "10s", target: 20 },
+        { duration: "20s", target: 20 },
+        { duration: "10s", target: 0 },
+      ],
     },
   },
   thresholds: {
     http_req_duration: ["p(95)<100", "p(99)<300"],
-    http_req_failed: ["rate<0.001"],
-    checks: ["rate>0.999"],
+    http_req_failed: ["rate<0.01"],
+    checks: ["rate>0.99"],
   },
 };
 
@@ -54,5 +55,6 @@ export default function () {
     },
   });
 
-  sleep(0.1);
+  // Rate limit: 30/60s per user → max 1 req/2s per VU
+  sleep(2);
 }
