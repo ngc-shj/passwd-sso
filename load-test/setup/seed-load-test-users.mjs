@@ -152,11 +152,12 @@ function aesGcmEncrypt(key, plaintext) {
   };
 }
 
+// authKey is already derived via PBKDF2 (600k iter) + HKDF — not a raw password.
+// SHA-256 here computes a verification hash, matching the client-side Web Crypto
+// implementation in src/lib/crypto-client.ts:computeAuthHash().
+// CodeQL js/insufficient-password-hash: false positive — dismissed via GitHub UI.
 function computeAuthHash(authKey) {
-  // Not a raw password — authKey is already derived via PBKDF2 (600k iter) + HKDF.
-  // SHA-256 here computes a verification hash, matching the client-side Web Crypto
-  // implementation in src/lib/crypto-client.ts:computeAuthHash().
-  return createHash("sha256").update(authKey).digest("hex"); // lgtm[js/insufficient-password-hash]
+  return createHash("sha256").update(authKey).digest("hex");
 }
 
 function deriveVerifierSalt(accountSalt) {
