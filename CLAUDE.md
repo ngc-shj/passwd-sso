@@ -52,6 +52,9 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/vault/unlock` | POST | Verify passphrase, return encrypted key |
 | `/api/vault/unlock/data` | POST | Return encrypted key data |
 | `/api/vault/status` | GET | Check vault initialization status |
+| `/api/vault/recovery-key/generate` | POST | Save recovery key encrypted data |
+| `/api/vault/recovery-key/recover` | POST | Recover vault with recovery key (2-step: verify/reset) |
+| `/api/vault/reset` | POST | Full vault deletion (last resort) |
 | `/api/passwords` | GET, POST | List/create password entries |
 | `/api/passwords/[id]` | GET, PUT, DELETE | CRUD single entry |
 | `/api/passwords/generate` | POST | Server-side secure password generation |

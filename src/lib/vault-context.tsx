@@ -66,10 +66,14 @@ interface VaultContextValue {
   status: VaultStatus;
   encryptionKey: CryptoKey | null;
   userId: string | null;
+  hasRecoveryKey: boolean;
   unlock: (passphrase: string) => Promise<boolean>;
   lock: () => void;
   setup: (passphrase: string) => Promise<void>;
   changePassphrase: (currentPassphrase: string, newPassphrase: string) => Promise<void>;
+  getSecretKey: () => Uint8Array | null;
+  getAccountSalt: () => Uint8Array | null;
+  setHasRecoveryKey: (value: boolean) => void;
 }
 
 const VaultContext = createContext<VaultContextValue | null>(null);
@@ -134,6 +138,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const { data: session, status: sessionStatus } = useSession();
   const [vaultStatus, setVaultStatus] = useState<VaultStatus>(VAULT_STATUS.LOADING);
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
+  const [hasRecoveryKey, setHasRecoveryKey] = useState(false);
   const secretKeyRef = useRef<Uint8Array | null>(null);
   const keyVersionRef = useRef<number>(0);
   const accountSaltRef = useRef<Uint8Array | null>(null);
@@ -158,10 +163,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           return;
         }
         const data = await res.json();
+        setHasRecoveryKey(!!data.hasRecoveryKey);
         setVaultStatus((prev) => {
+          // SETUP_REQUIRED always wins (vault was reset while unlocked)
+          if (data.setupRequired) return VAULT_STATUS.SETUP_REQUIRED;
           // Never overwrite "unlocked" — only the lock timer should do that
           if (prev === VAULT_STATUS.UNLOCKED) return prev;
-          return data.setupRequired ? VAULT_STATUS.SETUP_REQUIRED : VAULT_STATUS.LOCKED;
+          return VAULT_STATUS.LOCKED;
         });
       } catch {
         setVaultStatus((prev) => prev === VAULT_STATUS.UNLOCKED ? prev : VAULT_STATUS.LOCKED);
@@ -374,8 +382,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       throw new Error(err.error || "Setup failed");
     }
 
-    // 9. Store encryption key and accountSalt in memory
+    // 9. Store secretKey, keyVersion, accountSalt, and encryption key in memory
+    secretKeyRef.current = new Uint8Array(secretKey);
+    keyVersionRef.current = 1;
     accountSaltRef.current = accountSalt;
+    secretKey.fill(0);
     setEncryptionKey(encKey);
     setVaultStatus(VAULT_STATUS.UNLOCKED);
     lastActivityRef.current = Date.now();
@@ -530,16 +541,28 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const getSecretKey = useCallback(() => {
+    return secretKeyRef.current ? new Uint8Array(secretKeyRef.current) : null;
+  }, []);
+
+  const getAccountSalt = useCallback(() => {
+    return accountSaltRef.current ? new Uint8Array(accountSaltRef.current) : null;
+  }, []);
+
   return (
     <VaultContext.Provider
       value={{
         status: vaultStatus,
         encryptionKey,
         userId: session?.user?.id ?? null,
+        hasRecoveryKey,
         unlock,
         lock,
         setup,
         changePassphrase,
+        getSecretKey,
+        getAccountSalt,
+        setHasRecoveryKey,
       }}
     >
       {children}

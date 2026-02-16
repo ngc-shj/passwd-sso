@@ -29,10 +29,11 @@ vi.mock("@/lib/logger", () => {
   };
 });
 
+import { NextRequest } from "next/server";
 import { GET } from "./route";
 
 function createRequest() {
-  return new Request("http://localhost/api/health/ready", {
+  return new NextRequest("http://localhost/api/health/ready", {
     method: "GET",
     headers: { "x-forwarded-for": "127.0.0.1" },
   });

@@ -25,6 +25,9 @@ SSO 認証とエンドツーエンド暗号化を備えたセルフホスト型�
 - **多言語対応** - 日本語・英語（next-intl）
 - **ダークモード** - ライト / ダーク / システム（next-themes）
 - **組織 Vault** - チームでのパスワード共有（サーバーサイド AES-256-GCM 暗号化、RBAC: Owner/Admin/Member/Viewer）
+- **回復キー** - 256 ビット回復キー（HKDF + AES-256-GCM）、Base32 エンコード + チェックサム; パスフレーズなしで Vault を復旧
+- **Vault リセット** - 最終手段としての全データ削除（確認トークン "DELETE MY VAULT"）
+- **アカウントロックアウト** - 段階的ロックアウト（5 回→15 分、10 回→1 時間、15 回→24 時間）+ 監査ログ
 - **レート制限** - Redis による Vault アンロック試行制限
 - **CSP & セキュリティヘッダー** - nonce ベースの Content Security Policy、CSP 違反レポート
 - **セルフホスト** - Docker Compose（PostgreSQL + SAML Jackson + Redis）
@@ -223,7 +226,7 @@ src/
 │   ├── auth/                 # Auth.js ハンドラー
 │   ├── passwords/            # パスワード CRUD + 生成
 │   ├── tags/                 # タグ CRUD
-│   ├── vault/                # セットアップ、アンロック、ステータス、鍵ローテーション
+│   ├── vault/                # セットアップ、アンロック、ステータス、鍵ローテーション、回復キー、リセット
 │   ├── orgs/                 # 組織管理
 │   ├── share-links/          # 共有リンク CRUD + アクセス
 │   ├── audit-logs/           # 監査ログクエリ
@@ -238,13 +241,14 @@ src/
 │   ├── emergency-access/     # 緊急アクセス UI
 │   ├── share/                # 共有リンク UI
 │   ├── watchtower/           # セキュリティ監査ダッシュボード
-│   ├── vault/                # Vault ロック/アンロック UI
+│   ├── vault/                # Vault ロック/アンロック UI、回復キーダイアログ/バナー
 │   ├── tags/                 # TagInput, TagBadge
 │   ├── providers/            # クライアントプロバイダー（テーマ、セッション等）
 │   ├── auth/                 # SignOutButton
 │   └── ui/                   # shadcn/ui コンポーネント
 ├── lib/
 │   ├── crypto-client.ts      # クライアントサイド E2E 暗号化（個人 Vault）
+│   ├── crypto-recovery.ts    # 回復キー暗号モジュール（HKDF + AES-256-GCM ラップ）
 │   ├── crypto-server.ts      # サーバーサイド暗号化（組織 Vault）
 │   ├── crypto-aad.ts         # 暗号化の追加認証データ（AAD）
 │   ├── crypto-emergency.ts   # 緊急アクセス鍵交換
@@ -282,7 +286,11 @@ extension/
 - **クリップボードクリア** - コピーしたパスワードは 30 秒後に自動消去
 - **組織 Vault** - サーバーサイド AES-256-GCM（組織ごとの鍵を `ORG_MASTER_KEY` でラップ）
 - **RBAC** - Owner / Admin / Member / Viewer のロールベースアクセス制御
+- **回復キー** - 256 ビットランダム → HKDF → AES-256-GCM で秘密鍵をラップ; サーバーは HMAC(pepper, verifierHash) のみ保存
+- **Vault リセット** - 最終手段としての全データ削除（固定確認トークン）
+- **アカウントロックアウト** - 段階的ロックアウト（5 回→15 分、10 回→1 時間、15 回→24 時間）、DB 永続 + 監査ログ
 - **レート制限** - Redis による Vault アンロック試行制限（15 分間に 5 回まで）
+- **CSRF 防御** - JSON body + SameSite Cookie + CSP + Origin ヘッダー検証（破壊的エンドポイント）
 - **CSP** - nonce ベースの Content Security Policy と違反レポート
 
 ## デプロイガイド

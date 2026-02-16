@@ -14,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Link } from "@/i18n/navigation";
 import { Loader2, Lock, Eye, EyeOff } from "lucide-react";
 
 /** @internal Exported for testing */
@@ -130,6 +131,16 @@ export function VaultLockScreen() {
               {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {t("unlock")}
             </Button>
+
+            <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+              <Link href="/recovery" className="hover:underline">
+                {t("forgotPassphrase")}
+              </Link>
+              <span>|</span>
+              <Link href="/vault-reset" className="hover:underline">
+                {t("resetVault")}
+              </Link>
+            </div>
           </form>
         </CardContent>
       </Card>
