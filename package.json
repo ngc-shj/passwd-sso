@@ -15,7 +15,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test --config e2e/playwright.config.ts"
+    "test:e2e": "playwright test --config e2e/playwright.config.ts",
+    "licenses:check": "node scripts/check-licenses.mjs --name app --lockfile package-lock.json",
+    "licenses:check:ext": "node scripts/check-licenses.mjs --name extension --lockfile extension/package-lock.json"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
