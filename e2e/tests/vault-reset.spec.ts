@@ -4,8 +4,8 @@ import { getAuthState } from "../helpers/fixtures";
 
 test.describe("Vault Reset", () => {
   test("reset vault with correct confirmation", async ({ context, page }) => {
-    const { vaultReady } = getAuthState();
-    await injectSession(context, vaultReady.sessionToken);
+    const { reset } = getAuthState();
+    await injectSession(context, reset.sessionToken);
     await page.goto("/ja/vault-reset");
 
     const confirmInput = page.locator("#confirm-reset");
@@ -30,8 +30,8 @@ test.describe("Vault Reset", () => {
     context,
     page,
   }) => {
-    const { vaultReady } = getAuthState();
-    await injectSession(context, vaultReady.sessionToken);
+    const { reset } = getAuthState();
+    await injectSession(context, reset.sessionToken);
     await page.goto("/ja/vault-reset");
 
     const confirmInput = page.locator("#confirm-reset");

@@ -15,6 +15,10 @@ interface AuthUser {
 interface AuthState {
   vaultReady: AuthUser;
   fresh: AuthUser;
+  /** Dedicated user for lockout tests (destructive: triggers account lock) */
+  lockout: AuthUser;
+  /** Dedicated user for vault-reset tests (destructive: deletes vault) */
+  reset: AuthUser;
 }
 
 let _authState: AuthState | null = null;

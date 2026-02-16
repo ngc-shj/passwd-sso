@@ -49,8 +49,17 @@ test.describe("Vault Unlock", () => {
 
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
   });
+});
 
-  test("lockout after 5 failed attempts", async ({ page }) => {
+/**
+ * Lockout test uses a dedicated user to avoid contaminating other specs.
+ * After 5 failed attempts, the account should be locked.
+ */
+test.describe("Vault Lockout", () => {
+  test("lockout after 5 failed attempts", async ({ context, page }) => {
+    const { lockout } = getAuthState();
+    await injectSession(context, lockout.sessionToken);
+
     await page.goto("/ja/dashboard");
 
     const lockPage = new VaultLockPage(page);

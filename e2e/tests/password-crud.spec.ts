@@ -13,6 +13,10 @@ const TEST_ENTRY = {
   notes: "Created by E2E test",
 };
 
+/**
+ * Tests run sequentially within the describe block (workers: 1).
+ * create → view → edit → delete form a chain — each depends on the prior.
+ */
 test.describe("Password CRUD", () => {
   test.beforeEach(async ({ context, page }) => {
     const { vaultReady } = getAuthState();
@@ -43,16 +47,15 @@ test.describe("Password CRUD", () => {
   test("view password entry details", async ({ page }) => {
     const dashboard = new DashboardPage(page);
 
-    // Click on an entry (created in previous test or pre-seeded)
+    // Entry must exist (created by previous test)
     const entry = dashboard.entryByTitle(TEST_ENTRY.title);
-    if (await entry.isVisible()) {
-      await entry.click();
+    await expect(entry).toBeVisible({ timeout: 10_000 });
+    await entry.click();
 
-      // Should show decrypted details
-      await expect(page.getByText(TEST_ENTRY.username)).toBeVisible({
-        timeout: 10_000,
-      });
-    }
+    // Should show decrypted details
+    await expect(page.getByText(TEST_ENTRY.username)).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test("edit a password entry", async ({ page }) => {
@@ -60,46 +63,44 @@ test.describe("Password CRUD", () => {
     const entryPage = new PasswordEntryPage(page);
 
     const entry = dashboard.entryByTitle(TEST_ENTRY.title);
-    if (await entry.isVisible()) {
-      await entry.click();
+    await expect(entry).toBeVisible({ timeout: 10_000 });
+    await entry.click();
 
-      // Navigate to edit
-      await entryPage.editButton.click();
-      await page.waitForURL(/\/edit/);
+    // Navigate to edit
+    await entryPage.editButton.click();
+    await page.waitForURL(/\/edit/);
 
-      // Change title
-      const updatedTitle = `${TEST_ENTRY.title} (edited)`;
-      await entryPage.titleInput.clear();
-      await entryPage.titleInput.fill(updatedTitle);
-      await entryPage.updateButton.click();
+    // Change title
+    const updatedTitle = `${TEST_ENTRY.title} (edited)`;
+    await entryPage.titleInput.clear();
+    await entryPage.titleInput.fill(updatedTitle);
+    await entryPage.updateButton.click();
 
-      // Wait for save
-      await page.waitForURL(/\/dashboard/, { timeout: 10_000 });
+    // Wait for save
+    await page.waitForURL(/\/dashboard/, { timeout: 10_000 });
 
-      // Verify updated entry
-      await expect(dashboard.entryByTitle(updatedTitle)).toBeVisible({
-        timeout: 10_000,
-      });
-    }
+    // Verify updated entry
+    await expect(dashboard.entryByTitle(updatedTitle)).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test("delete a password entry", async ({ page }) => {
     const entryPage = new PasswordEntryPage(page);
 
-    // Find any entry with our test title
+    // Find entry with our test title (may be original or edited)
     const entry = page.getByText(/E2E Test Entry/).first();
-    if (await entry.isVisible()) {
-      await entry.click();
+    await expect(entry).toBeVisible({ timeout: 10_000 });
+    await entry.click();
 
-      // Delete via confirmation dialog
-      await entryPage.deleteButton.click();
-      await entryPage.deleteConfirmButton.click();
+    // Delete via confirmation dialog
+    await entryPage.deleteButton.click();
+    await entryPage.deleteConfirmButton.click();
 
-      // Wait for return to dashboard
-      await page.waitForURL(/\/dashboard/, { timeout: 10_000 });
+    // Wait for return to dashboard
+    await page.waitForURL(/\/dashboard/, { timeout: 10_000 });
 
-      // Entry should no longer be in the active list
-      // (it's in trash, not permanently deleted)
-    }
+    // Entry should no longer be in the active list
+    // (it's in trash, not permanently deleted)
   });
 });
