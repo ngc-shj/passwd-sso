@@ -6,7 +6,8 @@ import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { VisuallyHidden } from "radix-ui";
 import { Separator } from "@/components/ui/separator";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, Fingerprint, ScrollText, Link as LinkIcon, HeartPulse, ChevronDown, ChevronRight } from "lucide-react";
@@ -657,6 +658,9 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       {/* Mobile sidebar (sheet) */}
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent side="left" className="w-56 p-0">
+          <VisuallyHidden.Root>
+            <SheetTitle>{t("sidebar")}</SheetTitle>
+          </VisuallyHidden.Root>
           {content}
         </SheetContent>
       </Sheet>
