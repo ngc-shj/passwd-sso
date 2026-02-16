@@ -123,7 +123,9 @@ describe("crypto-server", () => {
       const orgKey = generateOrgKey();
       const encrypted = encryptServerData("secret", orgKey);
 
-      encrypted.ciphertext = "ff" + encrypted.ciphertext.slice(2);
+      const b = parseInt(encrypted.ciphertext.slice(0, 2), 16);
+      const f = ((b ^ 0x01) & 0xff).toString(16).padStart(2, "0");
+      encrypted.ciphertext = f + encrypted.ciphertext.slice(2);
       expect(() => decryptServerData(encrypted, orgKey)).toThrow();
     });
 
