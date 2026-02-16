@@ -14,6 +14,12 @@
 import { type NextRequest } from "next/server";
 import logger, { requestContext } from "@/lib/logger";
 
+// Route handlers have varying signatures:
+//   (request: NextRequest) => Promise<Response>                    — static routes
+//   (request: NextRequest, context: { params: Promise<P> }) => …  — dynamic routes
+// TypeScript's contravariant function params prevent a single non-any
+// constraint from accepting both shapes while preserving H's concrete type.
+// The `as unknown as H` cast (L53) is the actual type boundary.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type RouteHandler = (...args: any[]) => Promise<Response>;
 

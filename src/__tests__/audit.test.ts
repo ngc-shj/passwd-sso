@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { NextRequest } from "next/server";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 const { mockCreate, mockAuditInfo } = vi.hoisted(() => ({
@@ -291,54 +292,50 @@ describe("sanitizeMetadata", () => {
 
 describe("extractRequestMeta", () => {
   it("extracts IP from x-forwarded-for header", () => {
-    const req = new Request("http://localhost/api/test", {
+    const req = new NextRequest("http://localhost/api/test", {
       headers: {
         "x-forwarded-for": "203.0.113.1, 10.0.0.1",
         "user-agent": "Mozilla/5.0",
       },
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = extractRequestMeta(req as any);
+    const result = extractRequestMeta(req);
 
     expect(result.ip).toBe("203.0.113.1");
     expect(result.userAgent).toBe("Mozilla/5.0");
   });
 
   it("falls back to x-real-ip when no x-forwarded-for", () => {
-    const req = new Request("http://localhost/api/test", {
+    const req = new NextRequest("http://localhost/api/test", {
       headers: {
         "x-real-ip": "198.51.100.10",
         "user-agent": "TestAgent",
       },
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = extractRequestMeta(req as any);
+    const result = extractRequestMeta(req);
 
     expect(result.ip).toBe("198.51.100.10");
     expect(result.userAgent).toBe("TestAgent");
   });
 
   it("returns null IP when no proxy headers", () => {
-    const req = new Request("http://localhost/api/test", {
+    const req = new NextRequest("http://localhost/api/test", {
       headers: {
         "user-agent": "TestAgent",
       },
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = extractRequestMeta(req as any);
+    const result = extractRequestMeta(req);
 
     expect(result.ip).toBeNull();
     expect(result.userAgent).toBe("TestAgent");
   });
 
   it("returns null userAgent when no user-agent header", () => {
-    const req = new Request("http://localhost/api/test");
+    const req = new NextRequest("http://localhost/api/test");
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = extractRequestMeta(req as any);
+    const result = extractRequestMeta(req);
 
     expect(result.ip).toBeNull();
     expect(result.userAgent).toBeNull();

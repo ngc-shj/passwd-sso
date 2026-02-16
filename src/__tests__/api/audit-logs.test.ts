@@ -26,8 +26,7 @@ describe("GET /api/audit-logs", () => {
     mockAuth.mockResolvedValue(null);
 
     const req = createRequest("GET", "http://localhost/api/audit-logs");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await GET(req as any);
+    const res = await GET(req);
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(401);
@@ -52,8 +51,8 @@ describe("GET /api/audit-logs", () => {
     mockFindMany.mockResolvedValue(logs);
 
     const req = createRequest("GET", "http://localhost/api/audit-logs");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await GET(req as any);
+
+    const res = await GET(req);
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -93,8 +92,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       "http://localhost/api/audit-logs?limit=3"
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await GET(req as any);
+
+    const res = await GET(req);
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -110,8 +109,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       `http://localhost/api/audit-logs?action=${AUDIT_ACTION.AUTH_LOGIN}`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any);
+
+    await GET(req);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -130,8 +129,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.AUTH_LOGIN},${AUDIT_ACTION.ENTRY_CREATE}`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any);
+
+    await GET(req);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -150,8 +149,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       "http://localhost/api/audit-logs?from=2025-01-01T00:00:00Z&to=2025-12-31T23:59:59Z"
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any);
+
+    await GET(req);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -173,8 +172,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.ENTRY_IMPORT}`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any);
+
+    await GET(req);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -193,8 +192,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_TRASH}`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any);
+
+    await GET(req);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -213,8 +212,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_ARCHIVE}`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any);
+
+    await GET(req);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -233,8 +232,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_UNARCHIVE}`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any);
+
+    await GET(req);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -253,8 +252,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_RESTORE}`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any);
+
+    await GET(req);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -273,8 +272,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       "http://localhost/api/audit-logs?action=INVALID_ACTION"
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any);
+
+    await GET(req);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -292,8 +291,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       `http://localhost/api/audit-logs?actions=${AUDIT_ACTION.AUTH_LOGIN},INVALID_ACTION`
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await GET(req as any);
+
+    const res = await GET(req);
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
@@ -309,8 +308,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       "http://localhost/api/audit-logs?limit=999"
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any);
+
+    await GET(req);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -327,8 +326,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       "http://localhost/api/audit-logs?cursor=abc123"
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await GET(req as any);
+
+    await GET(req);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -346,8 +345,8 @@ describe("GET /api/audit-logs", () => {
       "GET",
       "http://localhost/api/audit-logs?cursor=invalid-cursor-id"
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await GET(req as any);
+
+    const res = await GET(req);
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
@@ -377,8 +376,8 @@ describe("GET /api/audit-logs", () => {
     ]);
 
     const req = createRequest("GET", "http://localhost/api/audit-logs");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await GET(req as any);
+
+    const res = await GET(req);
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
