@@ -12,10 +12,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ─── Change Detection (path-based job gating) ───────────────
+  changes:
+    name: "Detect changed areas"
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      extension: ${{ steps.filter.outputs.extension }}
+      e2e: ${{ steps.filter.outputs.e2e }}
+      ci: ${{ steps.filter.outputs.ci }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            app:
+              - "src/**"
+              - "prisma/**"
+              - "proxy.ts"
+              - "instrumentation.ts"
+              - "messages/**"
+              - "package.json"
+              - "package-lock.json"
+              - "tsconfig*.json"
+              - "vitest.config.*"
+              - "eslint.config.*"
+              - "next.config.*"
+              - "scripts/**"
+            extension:
+              - "extension/**"
+            e2e:
+              - "e2e/**"
+            ci:
+              - ".github/workflows/ci.yml"
+              - "scripts/check-licenses.mjs"
+
   # ─── Main App: Lint → Test → Build ────────────────────────
   app-ci:
     name: "App: Lint → Test → Build"
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
     timeout-minutes: 15
     services:
       redis:
@@ -54,6 +93,8 @@ jobs:
   extension-ci:
     name: "Extension: Test → Build"
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.extension == 'true' || needs.changes.outputs.ci == 'true'
     timeout-minutes: 10
     defaults:
       run:
@@ -76,7 +117,12 @@ jobs:
     name: "E2E: Playwright"
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: app-ci
+    needs: [changes, app-ci]
+    if: |
+      (needs.changes.outputs.app == 'true' ||
+       needs.changes.outputs.e2e == 'true' ||
+       needs.changes.outputs.ci == 'true') &&
+      needs.app-ci.result != 'failure'
     services:
       postgres:
         image: postgres:16-alpine
@@ -144,6 +190,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -161,6 +209,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
+    needs: changes
+    if: needs.changes.outputs.extension == 'true' || needs.changes.outputs.ci == 'true'
     defaults:
       run:
         working-directory: extension
@@ -181,6 +231,11 @@ jobs:
     name: "Audit: Dependency licenses"
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    needs: changes
+    if: |
+      needs.changes.outputs.app == 'true' ||
+      needs.changes.outputs.extension == 'true' ||
+      needs.changes.outputs.ci == 'true'
     steps:
       - uses: actions/checkout@v4
 
