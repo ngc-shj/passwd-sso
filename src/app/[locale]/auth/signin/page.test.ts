@@ -7,7 +7,7 @@
  *   - Unauthenticated → renders sign-in page (no redirect)
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────
 const { mockAuth, mockRedirect, mockGetTranslations, mockSetRequestLocale } =
@@ -133,16 +133,48 @@ describe("SignInPage", () => {
   });
 
   describe("provider button visibility", () => {
-    const origGoogleId = process.env.AUTH_GOOGLE_ID;
-    const origJacksonUrl = process.env.JACKSON_URL;
+    // Keys checked by the page: ID + SECRET for Google, URL + ID + SECRET for SAML
+    const envKeys = [
+      "AUTH_GOOGLE_ID",
+      "AUTH_GOOGLE_SECRET",
+      "JACKSON_URL",
+      "AUTH_JACKSON_ID",
+      "AUTH_JACKSON_SECRET",
+    ] as const;
+    const saved: Record<string, string | undefined> = {};
+
+    beforeEach(() => {
+      for (const k of envKeys) saved[k] = process.env[k];
+    });
 
     afterEach(() => {
-      // Restore original env
-      if (origGoogleId !== undefined) process.env.AUTH_GOOGLE_ID = origGoogleId;
-      else delete process.env.AUTH_GOOGLE_ID;
-      if (origJacksonUrl !== undefined) process.env.JACKSON_URL = origJacksonUrl;
-      else delete process.env.JACKSON_URL;
+      for (const k of envKeys) {
+        if (saved[k] !== undefined) process.env[k] = saved[k];
+        else delete process.env[k];
+      }
     });
+
+    function setGoogle(enabled: boolean) {
+      if (enabled) {
+        process.env.AUTH_GOOGLE_ID = "test-id";
+        process.env.AUTH_GOOGLE_SECRET = "test-secret";
+      } else {
+        delete process.env.AUTH_GOOGLE_ID;
+        delete process.env.AUTH_GOOGLE_SECRET;
+      }
+    }
+
+    function setSaml(enabled: boolean) {
+      if (enabled) {
+        process.env.JACKSON_URL = "http://localhost:5225";
+        process.env.AUTH_JACKSON_ID = "test-jackson-id";
+        process.env.AUTH_JACKSON_SECRET = "test-jackson-secret";
+      } else {
+        delete process.env.JACKSON_URL;
+        delete process.env.AUTH_JACKSON_ID;
+        delete process.env.AUTH_JACKSON_SECRET;
+      }
+    }
 
     function hasProvider(tree: unknown, provider: string) {
       return hasElement(
@@ -151,9 +183,9 @@ describe("SignInPage", () => {
       );
     }
 
-    it("shows only Google button when JACKSON_URL is not set", async () => {
-      process.env.AUTH_GOOGLE_ID = "test-id";
-      delete process.env.JACKSON_URL;
+    it("shows only Google button when SAML is not configured", async () => {
+      setGoogle(true);
+      setSaml(false);
       mockAuth.mockResolvedValue(null);
 
       const result = await SignInPage({ params: makeParams() });
@@ -162,9 +194,9 @@ describe("SignInPage", () => {
       expect(hasProvider(result, "saml-jackson")).toBe(false);
     });
 
-    it("shows only SSO button when AUTH_GOOGLE_ID is not set", async () => {
-      delete process.env.AUTH_GOOGLE_ID;
-      process.env.JACKSON_URL = "http://localhost:5225";
+    it("shows only SSO button when Google is not configured", async () => {
+      setGoogle(false);
+      setSaml(true);
       mockAuth.mockResolvedValue(null);
 
       const result = await SignInPage({ params: makeParams() });
@@ -173,9 +205,9 @@ describe("SignInPage", () => {
       expect(hasProvider(result, "saml-jackson")).toBe(true);
     });
 
-    it("shows both buttons when both are configured", async () => {
-      process.env.AUTH_GOOGLE_ID = "test-id";
-      process.env.JACKSON_URL = "http://localhost:5225";
+    it("shows both buttons when both are fully configured", async () => {
+      setGoogle(true);
+      setSaml(true);
       mockAuth.mockResolvedValue(null);
 
       const result = await SignInPage({ params: makeParams() });
@@ -185,13 +217,36 @@ describe("SignInPage", () => {
     });
 
     it("shows no buttons when neither is configured", async () => {
-      delete process.env.AUTH_GOOGLE_ID;
-      delete process.env.JACKSON_URL;
+      setGoogle(false);
+      setSaml(false);
       mockAuth.mockResolvedValue(null);
 
       const result = await SignInPage({ params: makeParams() });
 
       expect(hasProvider(result, "google")).toBe(false);
+      expect(hasProvider(result, "saml-jackson")).toBe(false);
+    });
+
+    it("hides Google button when AUTH_GOOGLE_SECRET is missing", async () => {
+      process.env.AUTH_GOOGLE_ID = "test-id";
+      delete process.env.AUTH_GOOGLE_SECRET;
+      setSaml(false);
+      mockAuth.mockResolvedValue(null);
+
+      const result = await SignInPage({ params: makeParams() });
+
+      expect(hasProvider(result, "google")).toBe(false);
+    });
+
+    it("hides SSO button when AUTH_JACKSON_SECRET is missing", async () => {
+      setGoogle(false);
+      process.env.JACKSON_URL = "http://localhost:5225";
+      process.env.AUTH_JACKSON_ID = "test-jackson-id";
+      delete process.env.AUTH_JACKSON_SECRET;
+      mockAuth.mockResolvedValue(null);
+
+      const result = await SignInPage({ params: makeParams() });
+
       expect(hasProvider(result, "saml-jackson")).toBe(false);
     });
   });

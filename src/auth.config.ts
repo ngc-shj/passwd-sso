@@ -4,10 +4,11 @@ import { API_PATH } from "@/lib/constants";
 
 export default {
   providers: [
-    // Only register providers whose credentials are configured.
-    // Missing credentials → broken OAuth flow at runtime; missing issuer
-    // (JACKSON_URL) → Auth.js throws InvalidEndpoints at startup.
-    ...(process.env.AUTH_GOOGLE_ID
+    // Only register providers whose credentials are fully configured.
+    // Partial config (e.g. ID without SECRET) → broken OAuth at runtime;
+    // missing issuer (JACKSON_URL) → Auth.js throws InvalidEndpoints.
+    // Conditions mirror env.ts superRefine checks (L139-144).
+    ...(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
       ? [
           Google({
             clientId: process.env.AUTH_GOOGLE_ID,
@@ -24,7 +25,9 @@ export default {
           }),
         ]
       : []),
-    ...(process.env.JACKSON_URL
+    ...(process.env.JACKSON_URL &&
+    process.env.AUTH_JACKSON_ID &&
+    process.env.AUTH_JACKSON_SECRET
       ? [
           {
             id: "saml-jackson" as const,

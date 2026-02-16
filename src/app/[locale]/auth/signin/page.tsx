@@ -29,8 +29,14 @@ export default async function SignInPage({
     redirect({ href: "/dashboard", locale });
   }
 
-  const hasGoogle = !!process.env.AUTH_GOOGLE_ID;
-  const hasSaml = !!process.env.JACKSON_URL;
+  const hasGoogle = !!(
+    process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
+  );
+  const hasSaml = !!(
+    process.env.JACKSON_URL &&
+    process.env.AUTH_JACKSON_ID &&
+    process.env.AUTH_JACKSON_SECRET
+  );
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
