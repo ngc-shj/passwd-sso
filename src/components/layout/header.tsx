@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
-import { KeyRound, Lock, Menu, RefreshCw } from "lucide-react";
+import { KeyRound, Lock, Menu, RefreshCw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,6 +18,7 @@ import { LanguageSwitcher } from "./language-switcher";
 import { useVault } from "@/lib/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
 import { ChangePassphraseDialog } from "@/components/vault/change-passphrase-dialog";
+import { RecoveryKeyDialog } from "@/components/vault/recovery-key-dialog";
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -29,6 +30,7 @@ export function Header({ onMenuToggle }: HeaderProps) {
   const t = useTranslations("Vault");
   const [mounted, setMounted] = useState(false);
   const [changePassOpen, setChangePassOpen] = useState(false);
+  const [recoveryKeyOpen, setRecoveryKeyOpen] = useState(false);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -77,6 +79,10 @@ export function Header({ onMenuToggle }: HeaderProps) {
                     <RefreshCw className="h-4 w-4" />
                     {t("changePassphrase")}
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setRecoveryKeyOpen(true)}>
+                    <ShieldCheck className="h-4 w-4" />
+                    {t("recoveryKey")}
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={lock}>
                     <Lock className="h-4 w-4" />
                     {t("lockVault")}
@@ -98,6 +104,10 @@ export function Header({ onMenuToggle }: HeaderProps) {
       <ChangePassphraseDialog
         open={changePassOpen}
         onOpenChange={setChangePassOpen}
+      />
+      <RecoveryKeyDialog
+        open={recoveryKeyOpen}
+        onOpenChange={setRecoveryKeyOpen}
       />
     </header>
   );

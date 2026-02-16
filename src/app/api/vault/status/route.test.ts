@@ -39,6 +39,7 @@ describe("GET /api/vault/status", () => {
       vaultSetupAt: null,
       accountSalt: null,
       keyVersion: 0,
+      recoveryKeySetAt: null,
     });
     const res = await GET(new Request("http://localhost/api/vault/status"));
     const json = await res.json();
@@ -47,6 +48,7 @@ describe("GET /api/vault/status", () => {
       setupRequired: true,
       accountSalt: null,
       keyVersion: 0,
+      hasRecoveryKey: false,
     });
   });
 
@@ -55,6 +57,7 @@ describe("GET /api/vault/status", () => {
       vaultSetupAt: new Date(),
       accountSalt: "a".repeat(64),
       keyVersion: 1,
+      recoveryKeySetAt: null,
     });
     const res = await GET(new Request("http://localhost/api/vault/status"));
     const json = await res.json();
@@ -62,5 +65,18 @@ describe("GET /api/vault/status", () => {
     expect(json.setupRequired).toBe(false);
     expect(json.accountSalt).toBe("a".repeat(64));
     expect(json.keyVersion).toBe(1);
+    expect(json.hasRecoveryKey).toBe(false);
+  });
+
+  it("returns hasRecoveryKey: true when recovery key is set", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({
+      vaultSetupAt: new Date(),
+      accountSalt: "a".repeat(64),
+      keyVersion: 1,
+      recoveryKeySetAt: new Date(),
+    });
+    const res = await GET(new Request("http://localhost/api/vault/status"));
+    const json = await res.json();
+    expect(json.hasRecoveryKey).toBe(true);
   });
 });

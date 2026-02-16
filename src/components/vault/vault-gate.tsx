@@ -5,6 +5,7 @@ import { VAULT_STATUS } from "@/lib/constants";
 import { VaultSetupWizard } from "./vault-setup-wizard";
 import { VaultLockScreen } from "./vault-lock-screen";
 import { AutoExtensionConnect } from "@/components/extension/auto-extension-connect";
+import { RecoveryKeyBanner } from "./recovery-key-banner";
 import { Loader2 } from "lucide-react";
 
 interface VaultGateProps {
@@ -40,6 +41,7 @@ export function VaultGate({ children }: VaultGateProps) {
   return (
     <>
       <AutoExtensionConnect />
+      <RecoveryKeyBanner />
       {children}
     </>
   );

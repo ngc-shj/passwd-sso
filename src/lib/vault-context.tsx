@@ -66,10 +66,14 @@ interface VaultContextValue {
   status: VaultStatus;
   encryptionKey: CryptoKey | null;
   userId: string | null;
+  hasRecoveryKey: boolean;
   unlock: (passphrase: string) => Promise<boolean>;
   lock: () => void;
   setup: (passphrase: string) => Promise<void>;
   changePassphrase: (currentPassphrase: string, newPassphrase: string) => Promise<void>;
+  getSecretKey: () => Uint8Array | null;
+  getAccountSalt: () => Uint8Array | null;
+  setHasRecoveryKey: (value: boolean) => void;
 }
 
 const VaultContext = createContext<VaultContextValue | null>(null);
@@ -134,6 +138,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const { data: session, status: sessionStatus } = useSession();
   const [vaultStatus, setVaultStatus] = useState<VaultStatus>(VAULT_STATUS.LOADING);
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
+  const [hasRecoveryKey, setHasRecoveryKey] = useState(false);
   const secretKeyRef = useRef<Uint8Array | null>(null);
   const keyVersionRef = useRef<number>(0);
   const accountSaltRef = useRef<Uint8Array | null>(null);
@@ -158,6 +163,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           return;
         }
         const data = await res.json();
+        setHasRecoveryKey(!!data.hasRecoveryKey);
         setVaultStatus((prev) => {
           // Never overwrite "unlocked" — only the lock timer should do that
           if (prev === VAULT_STATUS.UNLOCKED) return prev;
@@ -530,16 +536,28 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const getSecretKey = useCallback(() => {
+    return secretKeyRef.current ? new Uint8Array(secretKeyRef.current) : null;
+  }, []);
+
+  const getAccountSalt = useCallback(() => {
+    return accountSaltRef.current ? new Uint8Array(accountSaltRef.current) : null;
+  }, []);
+
   return (
     <VaultContext.Provider
       value={{
         status: vaultStatus,
         encryptionKey,
         userId: session?.user?.id ?? null,
+        hasRecoveryKey,
         unlock,
         lock,
         setup,
         changePassphrase,
+        getSecretKey,
+        getAccountSalt,
+        setHasRecoveryKey,
       }}
     >
       {children}
