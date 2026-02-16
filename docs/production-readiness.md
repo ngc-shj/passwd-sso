@@ -45,7 +45,7 @@
 | # | 優先度 | 項目 | 状態 | 備考 |
 |---|--------|------|------|------|
 | 3.1 | 必須 | バックアップ・リカバリ戦略 | 対応済み | AWS Backup Vault Lock (WORM/Compliance) + S3 Object Lock + クロスリージョンコピー + EventBridge 失敗通知。RPO 1h / RTO 2h。PR #23 |
-| 3.2 | 強く推奨 | DB コネクションプール設定 | 未着手 | pg.Pool の max / idleTimeoutMillis / connectionTimeoutMillis をチューニング + 接続数監視 |
+| 3.2 | 強く推奨 | DB コネクションプール設定 | 対応済み | pg.Pool を環境変数で設定可能化 (max / connectionTimeoutMillis / idleTimeoutMillis / maxLifetimeSeconds / statement_timeout)。envInt() で厳密パース + 範囲ガード (production fail-fast)。pool.on("error") + SIGTERM graceful shutdown。CloudWatch RDS DatabaseConnections アラーム追加。#48 |
 | 3.3 | 強く推奨 | マイグレーション戦略の分離 | 対応済み | ECS one-off タスク定義 (Fargate RunTask) でマイグレーションをアプリ起動から完全分離。deploy.sh で migrate → 成功確認 → app 更新の順序を保証。docker-compose は profiles 分離。docs/deployment.md。#47 |
 | 3.4 | 推奨 | Redis 高可用性 | 未着手 | 現行は単一 Redis。Redis Sentinel / ElastiCache 等によるフェイルオーバー |
 
@@ -100,6 +100,7 @@
 - コンポーネントテスト基盤 (`@testing-library/react` + `jsdom`、signin / header / auto-extension-connect)
 - E2E テスト (Playwright 7 spec / 22 ケース、暗号互換性テスト 16 件、DB 二重ガード + スコープ限定クリーンアップ)
 - マイグレーション戦略の分離 (ECS one-off RunTask + deploy.sh 順序保証 + docker-compose profiles 分離)
+- DB コネクションプール設定 (環境変数チューニング + maxLifetimeSeconds + graceful shutdown + RDS 接続数アラーム)
 - 本番コード `console.log` 0 件、`TODO/FIXME` 0 件
 
 ---
