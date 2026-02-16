@@ -1,25 +1,19 @@
 /**
- * Tests for recovery-key-dialog logic.
+ * Tests for generateRecoveryKeyFlow — the actual function the component calls.
  *
- * Since the project uses node environment (no jsdom/React Testing Library),
- * we test the key security invariant: secretKey memory zeroing.
- * The crypto logic and API interactions are fully covered by
- * crypto-recovery.test.ts and generate/route.test.ts respectively.
+ * Verifies three execution paths (success / API error / exception) and
+ * confirms that secretKey AND recoveryKey are always zeroed in finally.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────────
 const {
-  mockGetSecretKey,
-  mockGetAccountSalt,
   mockComputePassphraseVerifier,
   mockGenerateRecoveryKey,
   mockWrapSecretKeyWithRecovery,
   mockFormatRecoveryKey,
   mockFetch,
 } = vi.hoisted(() => ({
-  mockGetSecretKey: vi.fn(),
-  mockGetAccountSalt: vi.fn(),
   mockComputePassphraseVerifier: vi.fn(),
   mockGenerateRecoveryKey: vi.fn(),
   mockWrapSecretKeyWithRecovery: vi.fn(),
@@ -27,14 +21,6 @@ const {
   mockFetch: vi.fn(),
 }));
 
-vi.mock("@/lib/vault-context", () => ({
-  useVault: () => ({
-    getSecretKey: mockGetSecretKey,
-    getAccountSalt: mockGetAccountSalt,
-    hasRecoveryKey: false,
-    setHasRecoveryKey: vi.fn(),
-  }),
-}));
 vi.mock("@/lib/crypto-client", () => ({
   computePassphraseVerifier: mockComputePassphraseVerifier,
 }));
@@ -49,6 +35,10 @@ vi.mock("@/lib/api-error-codes", () => ({
 vi.mock("@/lib/constants", () => ({
   API_PATH: { VAULT_RECOVERY_KEY_GENERATE: "/api/vault/recovery-key/generate" },
 }));
+// Unused by generateRecoveryKeyFlow but required for module import
+vi.mock("@/lib/vault-context", () => ({
+  useVault: () => ({}),
+}));
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
@@ -56,21 +46,30 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn() },
 }));
 
+import { generateRecoveryKeyFlow } from "./recovery-key-dialog";
+
+// ── Helpers ────────────────────────────────────────────────────
+
+function allZero(arr: Uint8Array): boolean {
+  return arr.every((b) => b === 0);
+}
+
 // ── Tests ──────────────────────────────────────────────────────
 
-describe("recovery-key-dialog: secretKey memory zeroing", () => {
-  let capturedSecretKey: Uint8Array;
+describe("generateRecoveryKeyFlow", () => {
+  let secretKey: Uint8Array;
+  let recoveryKey: Uint8Array;
+  const accountSalt = new Uint8Array(32);
 
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Simulate getSecretKey() returning a copy (as vault-context does)
-    capturedSecretKey = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
-    mockGetSecretKey.mockReturnValue(capturedSecretKey);
-    mockGetAccountSalt.mockReturnValue(new Uint8Array(32));
+    // Non-zero bytes so we can verify zeroing
+    secretKey = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    recoveryKey = new Uint8Array([9, 10, 11, 12, 13, 14, 15, 16]);
 
     mockComputePassphraseVerifier.mockResolvedValue("verifier-hash");
-    mockGenerateRecoveryKey.mockReturnValue(new Uint8Array(32));
+    mockGenerateRecoveryKey.mockReturnValue(recoveryKey);
     mockWrapSecretKeyWithRecovery.mockResolvedValue({
       encryptedSecretKey: "enc",
       iv: "iv",
@@ -78,94 +77,123 @@ describe("recovery-key-dialog: secretKey memory zeroing", () => {
       hkdfSalt: "salt",
       verifierHash: "vhash",
     });
-    mockFormatRecoveryKey.mockResolvedValue("ABCD-EFGH");
+    mockFormatRecoveryKey.mockResolvedValue("ABCD-EFGH-IJKL");
 
-    // Stub global fetch
     vi.stubGlobal("fetch", mockFetch);
   });
 
-  it("zeros secretKey after successful generation", async () => {
+  // ── Success path ──────────────────────────────────────────
+
+  it("returns formattedKey on success", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ success: true }),
     });
 
-    // Manually run the handleGenerate logic extracted from the component
-    // This tests the invariant: secretKey.fill(0) runs in finally
-    const secretKey = mockGetSecretKey();
-    const accountSalt = mockGetAccountSalt();
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
 
-    try {
-      await mockComputePassphraseVerifier("passphrase", accountSalt);
-      const recoveryKey = mockGenerateRecoveryKey();
-      await mockWrapSecretKeyWithRecovery(secretKey, recoveryKey);
-
-      const res = await fetch("/api/vault/recovery-key/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-
-      expect(res.ok).toBe(true);
-      recoveryKey.fill(0);
-    } finally {
-      // This is what the component does in finally
-      secretKey.fill(0);
-    }
-
-    // Verify the secretKey copy was zeroed
-    expect(capturedSecretKey.every((b) => b === 0)).toBe(true);
+    expect(result).toEqual({ ok: true, formattedKey: "ABCD-EFGH-IJKL" });
   });
 
-  it("zeros secretKey even when API call fails", async () => {
+  it("zeros secretKey and recoveryKey after success", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ success: true }),
+    });
+
+    await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+
+    expect(allZero(secretKey)).toBe(true);
+    expect(allZero(recoveryKey)).toBe(true);
+  });
+
+  it("calls fetch with correct payload", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ success: true }),
+    });
+
+    await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/vault/recovery-key/generate",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          currentVerifierHash: "verifier-hash",
+          encryptedSecretKey: "enc",
+          secretKeyIv: "iv",
+          secretKeyAuthTag: "tag",
+          hkdfSalt: "salt",
+          verifierHash: "vhash",
+        }),
+      }),
+    );
+  });
+
+  // ── API error path ────────────────────────────────────────
+
+  it("returns errorCode on API error", async () => {
     mockFetch.mockResolvedValue({
       ok: false,
       json: () => Promise.resolve({ error: "INVALID_PASSPHRASE" }),
     });
 
-    const secretKey = mockGetSecretKey();
-    const accountSalt = mockGetAccountSalt();
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
 
-    try {
-      await mockComputePassphraseVerifier("passphrase", accountSalt);
-      const recoveryKey = mockGenerateRecoveryKey();
-      await mockWrapSecretKeyWithRecovery(secretKey, recoveryKey);
-
-      const res = await fetch("/api/vault/recovery-key/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-
-      if (!res.ok) {
-        // Error path — component returns early from try
-        return;
-      }
-    } finally {
-      // Component always runs secretKey.fill(0) in finally
-      secretKey.fill(0);
-    }
-
-    // Should not reach here in error path, but the finally ensures zeroing
-    expect(capturedSecretKey.every((b) => b === 0)).toBe(true);
+    expect(result).toEqual({ ok: false, errorCode: "INVALID_PASSPHRASE" });
   });
 
-  it("zeros secretKey even when crypto throws", async () => {
+  it("zeros secretKey and recoveryKey on API error", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      json: () => Promise.resolve({ error: "INVALID_PASSPHRASE" }),
+    });
+
+    await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+
+    expect(allZero(secretKey)).toBe(true);
+    expect(allZero(recoveryKey)).toBe(true);
+  });
+
+  it("returns null errorCode when API error body is unparseable", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      json: () => Promise.reject(new Error("invalid json")),
+    });
+
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+
+    expect(result).toEqual({ ok: false, errorCode: null });
+  });
+
+  // ── Exception path ────────────────────────────────────────
+
+  it("returns null errorCode on crypto exception", async () => {
     mockWrapSecretKeyWithRecovery.mockRejectedValue(new Error("crypto failure"));
 
-    const secretKey = mockGetSecretKey();
-    const accountSalt = mockGetAccountSalt();
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
 
-    try {
-      await mockComputePassphraseVerifier("passphrase", accountSalt);
-      const recoveryKey = mockGenerateRecoveryKey();
-      await mockWrapSecretKeyWithRecovery(secretKey, recoveryKey);
-    } catch {
-      // Component catches and sets error state
-    } finally {
-      secretKey.fill(0);
-    }
+    expect(result).toEqual({ ok: false, errorCode: null });
+  });
 
-    expect(capturedSecretKey.every((b) => b === 0)).toBe(true);
+  it("zeros secretKey and recoveryKey on crypto exception", async () => {
+    mockWrapSecretKeyWithRecovery.mockRejectedValue(new Error("crypto failure"));
+
+    await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+
+    expect(allZero(secretKey)).toBe(true);
+    expect(allZero(recoveryKey)).toBe(true);
+  });
+
+  it("zeros secretKey even when exception occurs before recoveryKey generation", async () => {
+    mockComputePassphraseVerifier.mockRejectedValue(new Error("verifier failure"));
+
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+
+    expect(result).toEqual({ ok: false, errorCode: null });
+    expect(allZero(secretKey)).toBe(true);
+    // recoveryKey was never generated, so mockGenerateRecoveryKey was not called
+    expect(mockGenerateRecoveryKey).not.toHaveBeenCalled();
   });
 });

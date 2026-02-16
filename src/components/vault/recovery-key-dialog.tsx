@@ -26,6 +26,65 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2, Copy, AlertTriangle } from "lucide-react";
 
+// ── Core logic (exported for testing) ───────────────────────────
+
+type FlowSuccess = { ok: true; formattedKey: string };
+type FlowError = { ok: false; errorCode: string | null };
+
+/** @internal Exported for testing */
+export type GenerateFlowResult = FlowSuccess | FlowError;
+
+/**
+ * Pure async flow: generate Recovery Key, wrap secretKey, send to server.
+ * Guarantees both `secretKey` and `recoveryKey` are zeroed in `finally`.
+ *
+ * @internal Exported for testing — the component delegates to this function.
+ */
+export async function generateRecoveryKeyFlow(
+  passphrase: string,
+  secretKey: Uint8Array,
+  accountSalt: Uint8Array,
+): Promise<GenerateFlowResult> {
+  let recoveryKey: Uint8Array | null = null;
+  try {
+    const currentVerifierHash = await computePassphraseVerifier(
+      passphrase,
+      accountSalt,
+    );
+
+    recoveryKey = generateRecoveryKey();
+    const wrapped = await wrapSecretKeyWithRecovery(secretKey, recoveryKey);
+
+    const res = await fetch(API_PATH.VAULT_RECOVERY_KEY_GENERATE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        currentVerifierHash,
+        encryptedSecretKey: wrapped.encryptedSecretKey,
+        secretKeyIv: wrapped.iv,
+        secretKeyAuthTag: wrapped.authTag,
+        hkdfSalt: wrapped.hkdfSalt,
+        verifierHash: wrapped.verifierHash,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return { ok: false, errorCode: err.error ?? null };
+    }
+
+    const formattedKey = await formatRecoveryKey(recoveryKey);
+    return { ok: true, formattedKey };
+  } catch {
+    return { ok: false, errorCode: null };
+  } finally {
+    recoveryKey?.fill(0);
+    secretKey.fill(0);
+  }
+}
+
+// ── Component ───────────────────────────────────────────────────
+
 interface RecoveryKeyDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -75,59 +134,20 @@ export function RecoveryKeyDialog({
     setLoading(true);
     setError("");
 
-    try {
-      // 1. Compute passphrase verifier for server-side confirmation
-      const currentVerifierHash = await computePassphraseVerifier(
-        passphrase,
-        accountSalt,
-      );
+    const result = await generateRecoveryKeyFlow(passphrase, secretKey, accountSalt);
 
-      // 2. Generate recovery key
-      const recoveryKey = generateRecoveryKey();
-
-      // 3. Wrap secretKey with recovery key
-      const wrapped = await wrapSecretKeyWithRecovery(secretKey, recoveryKey);
-
-      // 4. Send to server
-      const res = await fetch(API_PATH.VAULT_RECOVERY_KEY_GENERATE, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          currentVerifierHash,
-          encryptedSecretKey: wrapped.encryptedSecretKey,
-          secretKeyIv: wrapped.iv,
-          secretKeyAuthTag: wrapped.authTag,
-          hkdfSalt: wrapped.hkdfSalt,
-          verifierHash: wrapped.verifierHash,
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        if (err.error === "INVALID_PASSPHRASE") {
-          setError(tApi("invalidPassphrase"));
-        } else if (err.error) {
-          setError(tApi(apiErrorToI18nKey(err.error)));
-        } else {
-          setError(tApi("unknownError"));
-        }
-        return;
-      }
-
-      // 5. Format and display the recovery key
-      const formatted = await formatRecoveryKey(recoveryKey);
-      setFormattedKey(formatted);
+    if (result.ok) {
+      setFormattedKey(result.formattedKey);
       setStep("display");
-
-      // Zero the recovery key from memory
-      recoveryKey.fill(0);
-    } catch {
+    } else if (result.errorCode === "INVALID_PASSPHRASE") {
+      setError(tApi("invalidPassphrase"));
+    } else if (result.errorCode) {
+      setError(tApi(apiErrorToI18nKey(result.errorCode)));
+    } else {
       setError(tApi("unknownError"));
-    } finally {
-      // Zero the secretKey copy from memory
-      secretKey.fill(0);
-      setLoading(false);
     }
+
+    setLoading(false);
   }
 
   async function handleCopy() {
