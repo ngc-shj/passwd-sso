@@ -23,7 +23,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getStrength, STRENGTH_COLORS } from "@/components/vault/passphrase-strength";
-import { Loader2, ShieldCheck } from "lucide-react";
+import { Link } from "@/i18n/navigation";
+import { ArrowLeft, Loader2, ShieldCheck } from "lucide-react";
 
 type Step = "input" | "new-passphrase";
 
@@ -37,6 +38,7 @@ interface VerifiedData {
 }
 
 export default function RecoveryPage() {
+  const tCommon = useTranslations("Common");
   const t = useTranslations("Recovery");
   const tVault = useTranslations("Vault");
   const tApi = useTranslations("ApiErrors");
@@ -206,6 +208,14 @@ export default function RecoveryPage() {
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
       <div className="w-full max-w-md space-y-6">
+        <Link
+          href="/dashboard"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          {tCommon("back")}
+        </Link>
+
         <div className="flex flex-col items-center gap-2 text-center">
           <ShieldCheck className="h-10 w-10 text-muted-foreground" />
           <h1 className="text-2xl font-bold">{t("title")}</h1>

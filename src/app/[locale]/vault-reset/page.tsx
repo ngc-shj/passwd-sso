@@ -8,11 +8,13 @@ import { API_PATH } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, AlertTriangle } from "lucide-react";
+import { Link } from "@/i18n/navigation";
+import { ArrowLeft, Loader2, AlertTriangle } from "lucide-react";
 
 const CONFIRMATION_TOKEN = "DELETE MY VAULT";
 
 export default function VaultResetPage() {
+  const tCommon = useTranslations("Common");
   const t = useTranslations("VaultReset");
   const tApi = useTranslations("ApiErrors");
   const router = useRouter();
@@ -59,6 +61,14 @@ export default function VaultResetPage() {
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
       <div className="w-full max-w-md space-y-6">
+        <Link
+          href="/dashboard"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          {tCommon("back")}
+        </Link>
+
         <div className="flex flex-col items-center gap-2 text-center">
           <AlertTriangle className="h-10 w-10 text-destructive" />
           <h1 className="text-2xl font-bold">{t("title")}</h1>
