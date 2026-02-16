@@ -57,7 +57,7 @@
 |---|--------|------|------|------|
 | 4.1 | 必須 | E2E テスト導入 | 対応済み | Playwright (Chromium)。7 spec / 22 ケース: セットアップ → アンロック → CRUD → ロック/再アンロック → Recovery Key → Vault Reset → ロケール切替。Node.js 版暗号ヘルパー (CRYPTO_CONSTANTS 共有)、DB 二重ガード (URL パターン + E2E_ALLOW_DB_MUTATION)、暗号互換性テスト 16 件。CI ジョブ追加 (PostgreSQL + Redis サービス) |
 | 4.2 | 強く推奨 | カバレッジ対象の拡大 | 一部対応 | コンポーネントテスト基盤導入済み (`@testing-library/react` + `jsdom`, `.test.tsx` 対応)。coverage 対象は 4 パスに限定 → crypto-client.ts や components 層を追加 |
-| 4.3 | 強く推奨 | 負荷テスト | 未着手 | k6 / Artillery 等。同時接続数、レートリミット動作、暗号処理のスループット検証 |
+| 4.3 | 強く推奨 | 負荷テスト | 対応済み | k6 6 シナリオ (health / vault-unlock / passwords-list / passwords-create / passwords-generate / mixed-workload)。DB シードスクリプト (三重安全ガード + スモークテスト)。SLO 初期目標 + thresholds による自動合否判定。#49 |
 | 4.4 | 推奨 | セキュリティスキャン自動化 | 未着手 | Dependabot / Snyk / Trivy (コンテナ) を CI に統合 |
 
 ---
@@ -101,6 +101,7 @@
 - E2E テスト (Playwright 7 spec / 22 ケース、暗号互換性テスト 16 件、DB 二重ガード + スコープ限定クリーンアップ)
 - マイグレーション戦略の分離 (ECS one-off RunTask + deploy.sh 順序保証 + docker-compose profiles 分離)
 - DB コネクションプール設定 (環境変数チューニング + maxLifetimeSeconds + graceful shutdown + RDS 接続数アラーム)
+- 負荷テスト (k6 6 シナリオ、DB シード三重ガード、SLO 初期目標、thresholds 自動合否判定)
 - 本番コード `console.log` 0 件、`TODO/FIXME` 0 件
 
 ---

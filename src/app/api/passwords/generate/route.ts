@@ -7,7 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { z } from "zod";
 
-const generateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+const generateLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
 
 const requestSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("password") }).merge(generatePasswordSchema),

@@ -57,6 +57,7 @@ e2e/.auth-state.json
 e2e/playwright-report/
 e2e/test-results/
 test-results/
+load-test/setup/.load-test-auth.json
 
 # Secrets & Keys - NEVER commit
 *.pem
