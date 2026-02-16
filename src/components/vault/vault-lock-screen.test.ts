@@ -1,4 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
+
+vi.mock("@/i18n/navigation", () => ({
+  Link: "a",
+}));
+
 import { formatLockedUntil } from "./vault-lock-screen";
 
 /**

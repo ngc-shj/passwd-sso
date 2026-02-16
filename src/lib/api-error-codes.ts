@@ -34,6 +34,10 @@ export const API_ERROR = {
   USER_NOT_FOUND: "USER_NOT_FOUND",
   ACCOUNT_LOCKED: "ACCOUNT_LOCKED",
   SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE",
+  INVALID_RECOVERY_KEY: "INVALID_RECOVERY_KEY",
+  RECOVERY_KEY_NOT_SET: "RECOVERY_KEY_NOT_SET",
+  VAULT_RESET_CONFIRMATION_MISMATCH: "VAULT_RESET_CONFIRMATION_MISMATCH",
+  INVALID_ORIGIN: "INVALID_ORIGIN",
 
   // ── Tags ──────────────────────────────────────────────────
   TAG_ALREADY_EXISTS: "TAG_ALREADY_EXISTS",
@@ -175,6 +179,10 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   EXTENSION_TOKEN_REVOKED: "extensionTokenRevoked",
   EXTENSION_TOKEN_INVALID: "extensionTokenInvalid",
   EXTENSION_TOKEN_SCOPE_INSUFFICIENT: "extensionTokenScopeInsufficient",
+  INVALID_RECOVERY_KEY: "invalidRecoveryKey",
+  RECOVERY_KEY_NOT_SET: "recoveryKeyNotSet",
+  VAULT_RESET_CONFIRMATION_MISMATCH: "vaultResetConfirmationMismatch",
+  INVALID_ORIGIN: "invalidOrigin",
 } satisfies Record<ApiErrorCode, string>;
 
 /**

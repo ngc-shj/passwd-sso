@@ -22,6 +22,7 @@ async function handleGET() {
       vaultSetupAt: true,
       accountSalt: true,
       keyVersion: true,
+      recoveryKeySetAt: true,
     },
   });
 
@@ -33,6 +34,7 @@ async function handleGET() {
     setupRequired: !user.vaultSetupAt,
     accountSalt: user.accountSalt,
     keyVersion: user.keyVersion,
+    hasRecoveryKey: !!user.recoveryKeySetAt,
   });
 }
 
