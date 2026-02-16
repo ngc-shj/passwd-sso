@@ -3,17 +3,21 @@ import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
 
 /**
- * Vault Reset tests use a dedicated "reset" user.
- * Non-destructive test runs first; destructive reset runs last
- * to avoid state contamination between tests.
+ * Vault Reset tests.
+ *
+ * Each test uses its own user so they are fully independent
+ * and safe for parallel execution or retry:
+ * - "wrong confirmation" → vaultReady (non-destructive, read-only page visit)
+ * - "correct reset"      → reset (destructive, dedicated user)
  */
 test.describe("Vault Reset", () => {
   test("wrong confirmation text keeps button disabled", async ({
     context,
     page,
   }) => {
-    const { reset } = getAuthState();
-    await injectSession(context, reset.sessionToken);
+    // Non-destructive — safe to use shared vaultReady user
+    const { vaultReady } = getAuthState();
+    await injectSession(context, vaultReady.sessionToken);
     await page.goto("/ja/vault-reset");
 
     const confirmInput = page.locator("#confirm-reset");
@@ -30,6 +34,7 @@ test.describe("Vault Reset", () => {
   });
 
   test("reset vault with correct confirmation", async ({ context, page }) => {
+    // Destructive — uses dedicated reset user
     const { reset } = getAuthState();
     await injectSession(context, reset.sessionToken);
     await page.goto("/ja/vault-reset");
