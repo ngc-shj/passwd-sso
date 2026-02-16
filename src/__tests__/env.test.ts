@@ -230,6 +230,83 @@ describe("env validation", () => {
     expect(env.AUTH_URL).toBe("https://app.example.com");
   });
 
+  // ─── DB pool variable defaults ─────────────────────────
+
+  it("applies pool variable defaults in dev config", async () => {
+    setMinimalDevEnv();
+    const { env } = await import("@/lib/env");
+    expect(env.DB_POOL_MAX).toBe(20);
+    expect(env.DB_POOL_CONNECTION_TIMEOUT_MS).toBe(5000);
+    expect(env.DB_POOL_IDLE_TIMEOUT_MS).toBe(30000);
+    expect(env.DB_POOL_MAX_LIFETIME_SECONDS).toBe(1800);
+    expect(env.DB_POOL_STATEMENT_TIMEOUT_MS).toBe(30000);
+  });
+
+  it("accepts custom pool variable values", async () => {
+    setMinimalDevEnv();
+    process.env.DB_POOL_MAX = "50";
+    process.env.DB_POOL_CONNECTION_TIMEOUT_MS = "10000";
+    process.env.DB_POOL_IDLE_TIMEOUT_MS = "60000";
+    process.env.DB_POOL_MAX_LIFETIME_SECONDS = "3600";
+    process.env.DB_POOL_STATEMENT_TIMEOUT_MS = "15000";
+    const { env } = await import("@/lib/env");
+    expect(env.DB_POOL_MAX).toBe(50);
+    expect(env.DB_POOL_CONNECTION_TIMEOUT_MS).toBe(10000);
+    expect(env.DB_POOL_IDLE_TIMEOUT_MS).toBe(60000);
+    expect(env.DB_POOL_MAX_LIFETIME_SECONDS).toBe(3600);
+    expect(env.DB_POOL_STATEMENT_TIMEOUT_MS).toBe(15000);
+  });
+
+  it("rejects non-numeric DB_POOL_MAX", async () => {
+    setMinimalDevEnv();
+    process.env.DB_POOL_MAX = "abc";
+    await expect(import("@/lib/env")).rejects.toThrow("DB_POOL_MAX");
+  });
+
+  it("rejects DB_POOL_MAX below minimum (0)", async () => {
+    setMinimalDevEnv();
+    process.env.DB_POOL_MAX = "0";
+    await expect(import("@/lib/env")).rejects.toThrow("DB_POOL_MAX");
+  });
+
+  it("rejects DB_POOL_MAX above maximum (201)", async () => {
+    setMinimalDevEnv();
+    process.env.DB_POOL_MAX = "201";
+    await expect(import("@/lib/env")).rejects.toThrow("DB_POOL_MAX");
+  });
+
+  it("rejects DB_POOL_CONNECTION_TIMEOUT_MS above maximum", async () => {
+    setMinimalDevEnv();
+    process.env.DB_POOL_CONNECTION_TIMEOUT_MS = "60001";
+    await expect(import("@/lib/env")).rejects.toThrow(
+      "DB_POOL_CONNECTION_TIMEOUT_MS",
+    );
+  });
+
+  it("rejects DB_POOL_IDLE_TIMEOUT_MS above maximum", async () => {
+    setMinimalDevEnv();
+    process.env.DB_POOL_IDLE_TIMEOUT_MS = "600001";
+    await expect(import("@/lib/env")).rejects.toThrow(
+      "DB_POOL_IDLE_TIMEOUT_MS",
+    );
+  });
+
+  it("rejects DB_POOL_MAX_LIFETIME_SECONDS above maximum", async () => {
+    setMinimalDevEnv();
+    process.env.DB_POOL_MAX_LIFETIME_SECONDS = "86401";
+    await expect(import("@/lib/env")).rejects.toThrow(
+      "DB_POOL_MAX_LIFETIME_SECONDS",
+    );
+  });
+
+  it("rejects DB_POOL_STATEMENT_TIMEOUT_MS above maximum", async () => {
+    setMinimalDevEnv();
+    process.env.DB_POOL_STATEMENT_TIMEOUT_MS = "300001";
+    await expect(import("@/lib/env")).rejects.toThrow(
+      "DB_POOL_STATEMENT_TIMEOUT_MS",
+    );
+  });
+
   // ─── Error aggregation ─────────────────────────────────
 
   it("reports all errors at once", async () => {
