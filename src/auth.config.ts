@@ -4,41 +4,59 @@ import { API_PATH } from "@/lib/constants";
 
 export default {
   providers: [
-    Google({
-      clientId: process.env.AUTH_GOOGLE_ID,
-      clientSecret: process.env.AUTH_GOOGLE_SECRET,
-      authorization: {
-        params: {
-          // Restrict to specific domain (optional, omit for personal accounts)
-          hd: process.env.GOOGLE_WORKSPACE_DOMAIN,
-          prompt: "consent",
-          access_type: "offline",
-          response_type: "code",
-        },
-      },
-    }),
-    // SAML Jackson acts as an OIDC provider bridging any SAML 2.0 IdP
-    {
-      id: "saml-jackson",
-      name: process.env.SAML_PROVIDER_NAME ?? "SSO",
-      type: "oidc",
-      issuer: process.env.JACKSON_URL,
-      clientId: process.env.AUTH_JACKSON_ID ?? "dummy",
-      clientSecret: process.env.AUTH_JACKSON_SECRET ?? "dummy",
-      authorization: {
-        params: {
-          scope: "openid email profile",
-        },
-      },
-      profile(profile) {
-        return {
-          id: profile.sub,
-          name: profile.name ?? profile.email,
-          email: profile.email,
-          image: profile.picture ?? null,
-        };
-      },
-    },
+    // Only register providers whose credentials are fully configured.
+    // Partial config (e.g. ID without SECRET) → broken OAuth at runtime;
+    // missing issuer (JACKSON_URL) → Auth.js throws InvalidEndpoints.
+    // Conditions mirror env.ts superRefine checks (L139-144).
+    ...(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
+      ? [
+          Google({
+            clientId: process.env.AUTH_GOOGLE_ID,
+            clientSecret: process.env.AUTH_GOOGLE_SECRET,
+            authorization: {
+              params: {
+                // Restrict to specific domain (optional, omit for personal accounts)
+                hd: process.env.GOOGLE_WORKSPACE_DOMAIN,
+                prompt: "consent",
+                access_type: "offline",
+                response_type: "code",
+              },
+            },
+          }),
+        ]
+      : []),
+    ...(process.env.JACKSON_URL &&
+    process.env.AUTH_JACKSON_ID &&
+    process.env.AUTH_JACKSON_SECRET
+      ? [
+          {
+            id: "saml-jackson" as const,
+            name: process.env.SAML_PROVIDER_NAME ?? "SSO",
+            type: "oidc" as const,
+            issuer: process.env.JACKSON_URL,
+            clientId: process.env.AUTH_JACKSON_ID ?? "dummy",
+            clientSecret: process.env.AUTH_JACKSON_SECRET ?? "dummy",
+            authorization: {
+              params: {
+                scope: "openid email profile",
+              },
+            },
+            profile(profile: {
+              sub: string;
+              name?: string;
+              email: string;
+              picture?: string;
+            }) {
+              return {
+                id: profile.sub,
+                name: profile.name ?? profile.email,
+                email: profile.email,
+                image: profile.picture ?? null,
+              };
+            },
+          },
+        ]
+      : []),
   ],
 
   pages: {
