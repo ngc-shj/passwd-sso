@@ -1,59 +1,59 @@
 # Load Testing (k6)
 
-k6 を使用した負荷テストスイート。6 シナリオで API のスループット、レイテンシ、エラー率を計測する。
+A load testing suite using k6. Measures API throughput, latency, and error rates across 6 scenarios.
 
-## 前提
+## Prerequisites
 
-- [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) がインストール済み
-- PostgreSQL + Redis が起動中
-- アプリが `http://localhost:3000` で起動中
-- `ORG_MASTER_KEY` (または `VERIFIER_PEPPER_KEY`) が設定済み
+- [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) installed
+- PostgreSQL + Redis running
+- App running at `http://localhost:3000`
+- `ORG_MASTER_KEY` (or `VERIFIER_PEPPER_KEY`) configured
 
-## クイックスタート
+## Quick Start
 
 ```bash
-# 1. DB にテストユーザーをシード (50ユーザー、PBKDF2のため数分かかる)
-#    dev DB名が test/loadtest/ci を含まない場合は ALLOW_NON_TEST_DBNAME=true を追加
+# 1. Seed test users into DB (50 users, takes a few minutes due to PBKDF2)
+#    Add ALLOW_NON_TEST_DBNAME=true if dev DB name doesn't contain test/loadtest/ci
 ALLOW_LOAD_TEST_SEED=true \
 ALLOW_NON_TEST_DBNAME=true \
 DATABASE_URL=postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso \
 npm run test:load:seed
 
-# 2. 負荷テスト実行
+# 2. Run load test
 k6 run load-test/scenarios/mixed-workload.js
 
-# 3. テストデータ削除
+# 3. Clean up test data
 ALLOW_LOAD_TEST_SEED=true \
 ALLOW_NON_TEST_DBNAME=true \
 DATABASE_URL=postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso \
 npm run test:load:cleanup
 ```
 
-## npm スクリプト
+## npm Scripts
 
-| コマンド | 説明 |
-|---------|------|
-| `npm run test:load:seed` | テストユーザーをシード |
-| `npm run test:load:cleanup` | テストデータを削除 |
-| `npm run test:load:smoke` | スモークテスト (ガード検証 + 1ユーザーシード + API確認 + クリーンアップ) |
-| `npm run test:load` | mixed workload シナリオ実行 |
-| `npm run test:load:health` | health シナリオ実行 |
+| Command | Description |
+|---------|-------------|
+| `npm run test:load:seed` | Seed test users |
+| `npm run test:load:cleanup` | Remove test data |
+| `npm run test:load:smoke` | Smoke test (guard validation + 1-user seed + API check + cleanup) |
+| `npm run test:load` | Run mixed workload scenario |
+| `npm run test:load:health` | Run health scenario |
 
-## シナリオ一覧
+## Scenarios
 
-| シナリオ | エンドポイント | executor | 負荷 |
-|---------|-------------|----------|-----|
+| Scenario | Endpoint | Executor | Load |
+|----------|----------|----------|------|
 | `health.js` | GET /api/health/ready | constant-arrival-rate | 50 rps, 30s |
-| `vault-unlock.js` | POST /api/vault/unlock | ramping-vus | 1→20→0, 50s |
+| `vault-unlock.js` | POST /api/vault/unlock | ramping-vus | 1->20->0, 50s |
 | `passwords-list.js` | GET /api/passwords | constant-arrival-rate | 30 rps, 30s |
-| `passwords-create.js` | POST /api/passwords | ramping-vus | 1→10→0, 40s |
+| `passwords-create.js` | POST /api/passwords | ramping-vus | 1->10->0, 40s |
 | `passwords-generate.js` | POST /api/passwords/generate | constant-arrival-rate | 50 rps, 30s |
-| `mixed-workload.js` | 上記複合 | ramping-vus | 1→20→0, 90s |
+| `mixed-workload.js` | All of the above | ramping-vus | 1->20->0, 90s |
 
-## SLO 初期目標
+## Initial SLO Targets
 
-| エンドポイント | p95 | p99 | エラー率 |
-|-------------|-----|-----|---------|
+| Endpoint | p95 | p99 | Error Rate |
+|----------|-----|-----|------------|
 | GET /api/health/ready | < 200ms | < 500ms | < 0.1% |
 | POST /api/vault/unlock | < 500ms | < 1000ms | < 1% |
 | GET /api/passwords | < 300ms | < 800ms | < 0.1% |
@@ -61,69 +61,99 @@ npm run test:load:cleanup
 | POST /api/passwords/generate | < 100ms | < 300ms | < 0.1% |
 | Mixed workload | < 500ms | < 1500ms | < 0.5% |
 
-k6 の `thresholds` が breach されると **exit code 99** で終了する。スクリプトやCIでの合否判定に使用可能。
+When k6 `thresholds` are breached, the process exits with **exit code 99**. This can be used for pass/fail determination in scripts and CI.
 
-## 安全ガード
+## Baseline Benchmark (2026-02-17)
 
-シードスクリプトは三重ガードで本番 DB への誤接続を防止:
+### Environment
 
-1. **URL パース**: hostname が `localhost`, `127.0.0.1`, `::1`, `db` のいずれか + dbname に `test`/`loadtest`/`ci` を含む
-   - SSH tunnel / SSM port-forward で本番 DB が localhost に見えるケースを防止
-   - dev DB名が `passwd_sso` 等の場合は `ALLOW_NON_TEST_DBNAME=true` で明示的にオプトイン
-2. **NODE_ENV**: `production` の場合は拒否
-3. **明示フラグ**: `ALLOW_LOAD_TEST_SEED=true` が必須
+| Item | Value |
+|------|-------|
+| CPU | Apple M3 Pro |
+| RAM | 18 GB |
+| OS | macOS 26.2 (Darwin 25.2.0) |
+| Node.js | v25.2.1 |
+| PostgreSQL | 16.11 (Docker) |
+| k6 | v1.6.1 (go1.26.0, darwin/arm64) |
+| App | Next.js 16 dev server (Turbopack, build cache warm) |
+| Seeded Users | 50 |
 
-> **注**: hostname `db` は docker-compose 内部ネットワーク専用。外部環境では使用しないこと。
+### Results by Scenario
 
-## 認証方式
+| Scenario | Load | p95 | p99 | Error Rate | SLO |
+|----------|------|-----|-----|------------|-----|
+| health | 50 rps x 30s | 13.86 ms | 40.19 ms | 0.00% | PASS |
+| vault-unlock | 1->20->0 VU, 50s | 129 ms | 142 ms | 0.00% | PASS |
+| passwords-list | 30 rps x 30s | 31.84 ms | 115 ms | 0.00% | PASS |
+| passwords-create | 1->10->0 VU, 40s | 102 ms | 123 ms | 0.00% | PASS |
+| passwords-generate | 50 rps x 30s | 30 ms | 255 ms | 0.00% | PASS |
+| mixed-workload | 1->20->0 VU, 90s | 52 ms | -- | 0.00% | PASS |
 
-- Auth.js v5 の database session 戦略 (raw token)
-- セッショントークンを DB に直接 INSERT (E2E テストと同一パターン)
-- k6 は `authjs.session-token` cookie でリクエスト
-- HTTPS 環境では `COOKIE_NAME=__Secure-authjs.session-token` を指定
+All scenarios cleared SLO thresholds with comfortable margins.
 
-## ベースライン管理
+> **Note**: These are measurements from a local dev server and do not guarantee production performance. Use as a baseline for regression detection within the same environment.
+
+## Safety Guards
+
+The seed script uses a triple guard to prevent accidental connections to production databases:
+
+1. **URL parsing**: hostname must be one of `localhost`, `127.0.0.1`, `::1`, or `db`, and the dbname must contain `test`, `loadtest`, or `ci`
+   - Prevents cases where a production DB appears as localhost via SSH tunnel / SSM port-forward
+   - For dev DB names like `passwd_sso`, explicitly opt in with `ALLOW_NON_TEST_DBNAME=true`
+2. **NODE_ENV**: Rejected if set to `production`
+3. **Explicit flag**: `ALLOW_LOAD_TEST_SEED=true` is required
+
+> **Note**: The hostname `db` is for docker-compose internal networks only. Do not use in external environments.
+
+## Authentication
+
+- Auth.js v5 database session strategy (raw token)
+- Session tokens are directly INSERTed into the DB (same pattern as E2E tests)
+- k6 sends requests with the `authjs.session-token` cookie
+- For HTTPS environments, set `COOKIE_NAME=__Secure-authjs.session-token`
+
+## Baseline Management
 
 ```bash
-# ベースライン保存 (環境別プレフィックス)
+# Save baseline (environment-prefixed)
 k6 run load-test/scenarios/mixed-workload.js \
   --out json=load-test/baselines/local-$(date +%F).json
 
-# staging 環境
+# Staging environment
 BASE_URL=https://staging.example.com k6 run load-test/scenarios/mixed-workload.js \
   --out json=load-test/baselines/staging-$(date +%F).json
 ```
 
-**重要**: ローカル計測値は本番 SLO の参考値であり、直接比較しないこと。比較は同一環境内の経時変化 (リグレッション検出) に使用する。
+**Important**: Local measurements are reference values for production SLOs and should not be directly compared. Use comparisons for detecting regressions over time within the same environment.
 
-## 認証アーティファクトの取り扱い
+## Auth Artifact Handling
 
-- `.load-test-auth.json` はローカル専用、共有禁止
-- `chmod 600` が自動適用される
-- 使用後は `npm run test:load:cleanup` で削除
-- `.gitignore` に登録済み
+- `.load-test-auth.json` is local-only and must not be shared
+- `chmod 600` is applied automatically
+- Delete after use with `npm run test:load:cleanup`
+- Listed in `.gitignore`
 
-## トラブルシューティング
+## Troubleshooting
 
-### セッション認証エラー (401)
+### Session Auth Errors (401)
 
 ```bash
-# cookie名を確認
+# Check cookie name
 COOKIE_NAME=__Secure-authjs.session-token npm run test:load:seed
 ```
 
-### レートリミット (429)
+### Rate Limiting (429)
 
-vault-unlock は 5回/5分のレートリミットあり。50ユーザーに分散 + `sleep(1)` で回避。ユーザー数を増やす:
+vault-unlock has a rate limit of 5 requests per 5 minutes. Distributed across 50 users + `sleep(1)` to avoid hitting limits. To increase users:
 
 ```bash
 ALLOW_LOAD_TEST_SEED=true DATABASE_URL=... \
   node load-test/setup/seed-load-test-users.mjs --users 100
 ```
 
-### 手動クリーンアップ
+### Manual Cleanup
 
-cleanup コマンドが失敗した場合:
+If the cleanup command fails:
 
 ```sql
 DELETE FROM password_entries WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local');
@@ -132,7 +162,7 @@ DELETE FROM vault_keys WHERE user_id IN (SELECT id FROM users WHERE email LIKE '
 DELETE FROM users WHERE email LIKE 'lt-user-%@loadtest.local';
 ```
 
-### k6 がインストールされていない
+### k6 Not Installed
 
 ```bash
 # macOS
