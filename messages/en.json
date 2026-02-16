@@ -11,7 +11,8 @@
     "delete": "Delete",
     "edit": "Edit",
     "tryAgain": "Try again",
-    "or": "or"
+    "or": "or",
+    "close": "Close"
   },
   "Auth": {
     "signOut": "Sign out",

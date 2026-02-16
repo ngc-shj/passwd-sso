@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { injectExtensionToken } from "@/lib/inject-extension-token";
 import {
+  APP_NAME,
   API_PATH,
   EXT_CONNECT_PARAM,
   CONNECT_STATUS,
@@ -115,7 +116,7 @@ export function AutoExtensionConnect() {
           {/* App branding */}
           <div className="flex items-center gap-2 text-muted-foreground">
             <KeyRound className="h-4 w-4" />
-            <span className="text-sm font-medium">passwd-sso</span>
+            <span className="text-sm font-medium">{APP_NAME}</span>
           </div>
 
           {/* Title & Description */}

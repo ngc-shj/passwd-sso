@@ -1,6 +1,7 @@
 import { redirect } from "@/i18n/navigation";
 import { auth } from "@/auth";
 import { getTranslations, setRequestLocale } from "next-intl/server";
+import { APP_NAME } from "@/lib/constants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { SignInButton } from "@/components/auth/signin-button";
@@ -36,7 +37,7 @@ export default async function SignInPage({
             <KeyRound className="h-7 w-7 text-primary" />
           </div>
           <div>
-            <CardTitle className="text-2xl">passwd-sso</CardTitle>
+            <CardTitle className="text-2xl">{APP_NAME}</CardTitle>
             <p className="mt-2 text-sm text-muted-foreground">
               {t("signInDescription")}
             </p>
