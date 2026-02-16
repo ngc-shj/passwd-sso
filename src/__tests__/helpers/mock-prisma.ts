@@ -12,6 +12,15 @@ const MODEL_METHODS = [
   "upsert",
 ] as const;
 
+type MockModel = Record<
+  (typeof MODEL_METHODS)[number],
+  ReturnType<typeof vi.fn>
+>;
+
+export type MockPrisma = Record<string, MockModel> & {
+  $transaction: ReturnType<typeof vi.fn>;
+};
+
 /**
  * Creates a deeply proxied mock where any model property access returns
  * an object whose methods are all vi.fn().
@@ -55,6 +64,5 @@ export function createMockPrisma() {
   };
 
   const proxy = new Proxy({}, handler);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return proxy as any;
+  return proxy as MockPrisma;
 }

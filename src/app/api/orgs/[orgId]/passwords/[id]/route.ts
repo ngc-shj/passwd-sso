@@ -79,8 +79,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     ? Buffer.from(buildOrgEntryAAD(orgId, entry.id, "blob"))
     : undefined;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let blob: Record<string, any>;
+  let blob: Record<string, unknown>;
   try {
     blob = JSON.parse(
       decryptServerData(
@@ -224,8 +223,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     ? Buffer.from(buildOrgEntryAAD(orgId, id, "blob"))
     : undefined;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let currentBlob: Record<string, any>;
+  let currentBlob: Record<string, unknown>;
   try {
     currentBlob = JSON.parse(
       decryptServerData(
@@ -264,8 +262,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
     isArchived = parsed.data.isArchived;
 
     const updatedBlob = {
-      title: parsed.data.title ?? currentBlob.title,
-      content: parsed.data.content ?? currentBlob.content,
+      title: (parsed.data.title ?? currentBlob.title) as string,
+      content: (parsed.data.content ?? currentBlob.content) as string,
     };
     responseTitle = updatedBlob.title;
 
@@ -285,7 +283,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     isArchived = parsed.data.isArchived;
 
     const updatedBlob = {
-      title: parsed.data.title ?? currentBlob.title,
+      title: (parsed.data.title ?? currentBlob.title) as string,
       cardholderName:
         parsed.data.cardholderName !== undefined
           ? parsed.data.cardholderName || null
@@ -318,7 +316,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     responseTitle = updatedBlob.title;
 
     const lastFour = updatedBlob.cardNumber
-      ? updatedBlob.cardNumber.slice(-4)
+      ? (updatedBlob.cardNumber as string).slice(-4)
       : null;
     updatedBlobStr = JSON.stringify(updatedBlob);
     overviewBlobStr = JSON.stringify({
@@ -345,7 +343,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
         : currentBlob[field];
 
     const updatedBlob = {
-      title: parsed.data.title ?? currentBlob.title,
+      title: (parsed.data.title ?? currentBlob.title) as string,
       fullName: mergeField("fullName"),
       address: mergeField("address"),
       phone: mergeField("phone"),

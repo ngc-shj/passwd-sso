@@ -125,8 +125,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   const entries: OrgPasswordListEntry[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const entry of passwords as any[]) {
+  for (const entry of passwords) {
     try {
       const aad = entry.aadVersion >= 1
         ? Buffer.from(buildOrgEntryAAD(orgId, entry.id, "overview"))
