@@ -26,6 +26,10 @@ done
 SKIP_MIGRATE=false
 if [[ "${1:-}" == "--skip-migrate" ]]; then
   SKIP_MIGRATE=true
+elif [[ -n "${1:-}" ]]; then
+  echo "ERROR: Unknown option: $1" >&2
+  echo "Usage: $0 [--skip-migrate]" >&2
+  exit 1
 fi
 
 # Step 1: Run migration (unless skipped)
