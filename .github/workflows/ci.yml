@@ -17,6 +17,15 @@ jobs:
     name: "App: Lint → Test → Build"
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
     env:
       DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
       ORG_MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -97,6 +106,9 @@ jobs:
       VERIFIER_PEPPER_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       REDIS_URL: "redis://localhost:6379"
       E2E_ALLOW_DB_MUTATION: "true"
+      # Dummy auth provider — production env validation requires at least one
+      AUTH_GOOGLE_ID: "ci-google-id.apps.googleusercontent.com"
+      AUTH_GOOGLE_SECRET: "ci-google-secret"
     steps:
       - uses: actions/checkout@v4
 
