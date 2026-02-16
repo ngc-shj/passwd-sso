@@ -4,22 +4,26 @@ import { API_PATH } from "@/lib/constants";
 
 export default {
   providers: [
-    Google({
-      clientId: process.env.AUTH_GOOGLE_ID,
-      clientSecret: process.env.AUTH_GOOGLE_SECRET,
-      authorization: {
-        params: {
-          // Restrict to specific domain (optional, omit for personal accounts)
-          hd: process.env.GOOGLE_WORKSPACE_DOMAIN,
-          prompt: "consent",
-          access_type: "offline",
-          response_type: "code",
-        },
-      },
-    }),
-    // SAML Jackson acts as an OIDC provider bridging any SAML 2.0 IdP.
-    // Only register when JACKSON_URL is configured — otherwise Auth.js
-    // throws InvalidEndpoints trying to discover the OIDC endpoints.
+    // Only register providers whose credentials are configured.
+    // Missing credentials → broken OAuth flow at runtime; missing issuer
+    // (JACKSON_URL) → Auth.js throws InvalidEndpoints at startup.
+    ...(process.env.AUTH_GOOGLE_ID
+      ? [
+          Google({
+            clientId: process.env.AUTH_GOOGLE_ID,
+            clientSecret: process.env.AUTH_GOOGLE_SECRET,
+            authorization: {
+              params: {
+                // Restrict to specific domain (optional, omit for personal accounts)
+                hd: process.env.GOOGLE_WORKSPACE_DOMAIN,
+                prompt: "consent",
+                access_type: "offline",
+                response_type: "code",
+              },
+            },
+          }),
+        ]
+      : []),
     ...(process.env.JACKSON_URL
       ? [
           {

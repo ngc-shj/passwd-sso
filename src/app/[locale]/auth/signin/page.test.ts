@@ -35,8 +35,11 @@ vi.mock("@/components/ui/card", () => ({
 vi.mock("@/components/ui/separator", () => ({
   Separator: () => null,
 }));
+const { mockSignInButton } = vi.hoisted(() => ({
+  mockSignInButton: vi.fn(() => null),
+}));
 vi.mock("@/components/auth/signin-button", () => ({
-  SignInButton: () => null,
+  SignInButton: mockSignInButton,
 }));
 vi.mock("lucide-react", () => ({
   Shield: () => null,
@@ -49,6 +52,21 @@ import SignInPage from "./page";
 // ── Helpers ────────────────────────────────────────────────
 const makeParams = (locale = "en") => Promise.resolve({ locale });
 const fakeT = (key: string) => key;
+
+/** Walk a React element tree and return true if any node matches */
+function hasElement(
+  node: unknown,
+  predicate: (el: { type: unknown; props: Record<string, unknown> }) => boolean,
+): boolean {
+  if (node == null || typeof node !== "object") return false;
+  const el = node as { type?: unknown; props?: Record<string, unknown> };
+  if (el.type && el.props && predicate(el as { type: unknown; props: Record<string, unknown> }))
+    return true;
+  const children = el.props?.children;
+  if (children == null) return false;
+  const arr = Array.isArray(children) ? children : [children];
+  return arr.some((child: unknown) => hasElement(child, predicate));
+}
 
 describe("SignInPage", () => {
   beforeEach(() => {
@@ -112,5 +130,69 @@ describe("SignInPage", () => {
     await SignInPage({ params: makeParams("ja") });
 
     expect(mockSetRequestLocale).toHaveBeenCalledWith("ja");
+  });
+
+  describe("provider button visibility", () => {
+    const origGoogleId = process.env.AUTH_GOOGLE_ID;
+    const origJacksonUrl = process.env.JACKSON_URL;
+
+    afterEach(() => {
+      // Restore original env
+      if (origGoogleId !== undefined) process.env.AUTH_GOOGLE_ID = origGoogleId;
+      else delete process.env.AUTH_GOOGLE_ID;
+      if (origJacksonUrl !== undefined) process.env.JACKSON_URL = origJacksonUrl;
+      else delete process.env.JACKSON_URL;
+    });
+
+    function hasProvider(tree: unknown, provider: string) {
+      return hasElement(
+        tree,
+        (el) => el.type === mockSignInButton && el.props.provider === provider,
+      );
+    }
+
+    it("shows only Google button when JACKSON_URL is not set", async () => {
+      process.env.AUTH_GOOGLE_ID = "test-id";
+      delete process.env.JACKSON_URL;
+      mockAuth.mockResolvedValue(null);
+
+      const result = await SignInPage({ params: makeParams() });
+
+      expect(hasProvider(result, "google")).toBe(true);
+      expect(hasProvider(result, "saml-jackson")).toBe(false);
+    });
+
+    it("shows only SSO button when AUTH_GOOGLE_ID is not set", async () => {
+      delete process.env.AUTH_GOOGLE_ID;
+      process.env.JACKSON_URL = "http://localhost:5225";
+      mockAuth.mockResolvedValue(null);
+
+      const result = await SignInPage({ params: makeParams() });
+
+      expect(hasProvider(result, "google")).toBe(false);
+      expect(hasProvider(result, "saml-jackson")).toBe(true);
+    });
+
+    it("shows both buttons when both are configured", async () => {
+      process.env.AUTH_GOOGLE_ID = "test-id";
+      process.env.JACKSON_URL = "http://localhost:5225";
+      mockAuth.mockResolvedValue(null);
+
+      const result = await SignInPage({ params: makeParams() });
+
+      expect(hasProvider(result, "google")).toBe(true);
+      expect(hasProvider(result, "saml-jackson")).toBe(true);
+    });
+
+    it("shows no buttons when neither is configured", async () => {
+      delete process.env.AUTH_GOOGLE_ID;
+      delete process.env.JACKSON_URL;
+      mockAuth.mockResolvedValue(null);
+
+      const result = await SignInPage({ params: makeParams() });
+
+      expect(hasProvider(result, "google")).toBe(false);
+      expect(hasProvider(result, "saml-jackson")).toBe(false);
+    });
   });
 });
