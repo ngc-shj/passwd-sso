@@ -14,7 +14,13 @@ import { BASE_URL, COOKIE_NAME } from "./config.js";
  */
 const users = new SharedArray("load-test-users", function () {
   const path = __ENV.AUTH_FILE || "load-test/setup/.load-test-auth.json";
-  return JSON.parse(open(path));
+  const data = JSON.parse(open(path));
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error(
+      "No users in auth file. Run 'npm run test:load:seed' first.",
+    );
+  }
+  return data;
 });
 
 /**

@@ -255,11 +255,12 @@ async function seedUsers(pool, userCount) {
     );
 
     // Insert session (raw token, same as Auth.js database strategy)
+    // ON CONFLICT (id) handles re-seed: update token + expiry
     const expires = new Date(Date.now() + SESSION_HOURS * 60 * 60 * 1000);
     await pool.query(
       `INSERT INTO sessions (id, session_token, user_id, expires)
        VALUES ($1, $2, $3, $4)
-       ON CONFLICT (session_token) DO NOTHING`,
+       ON CONFLICT (id) DO UPDATE SET session_token = $2, expires = $4`,
       [`lt-session-${userId}`, sessionToken, userId, expires.toISOString()],
     );
 
