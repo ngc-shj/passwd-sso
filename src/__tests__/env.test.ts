@@ -11,14 +11,14 @@ const originalEnv = { ...process.env };
 function setMinimalDevEnv() {
   process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
   process.env.ORG_MASTER_KEY = "a".repeat(64);
-  process.env.NODE_ENV = "development";
+  (process.env as Record<string, string | undefined>).NODE_ENV = "development";
 }
 
 /** Full production env that passes all checks. */
 function setFullProdEnv() {
   process.env.DATABASE_URL = "postgresql://prod:prod@db:5432/passwd";
   process.env.ORG_MASTER_KEY = "a".repeat(64);
-  process.env.NODE_ENV = "production";
+  (process.env as Record<string, string | undefined>).NODE_ENV = "production";
   process.env.VERIFIER_PEPPER_KEY = "b".repeat(64);
   process.env.REDIS_URL = "redis://redis:6379";
   process.env.AUTH_SECRET = "x".repeat(32);

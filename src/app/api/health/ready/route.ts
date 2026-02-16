@@ -1,10 +1,11 @@
-import { NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { withRequestLog } from "@/lib/with-request-log";
 import { runHealthChecks } from "@/lib/health";
 
 export const runtime = "nodejs";
 
-async function handleGET() {
+async function handleGET(_request: NextRequest) {
+  void _request;
   const result = await runHealthChecks();
   const httpStatus = result.status === "unhealthy" ? 503 : 200;
   return NextResponse.json(result, {
