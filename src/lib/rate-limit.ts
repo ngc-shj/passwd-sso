@@ -26,10 +26,9 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     const redis = getRedis();
     if (!redis) return null;
     try {
-      const windowSec = Math.ceil(windowMs / 1000);
       const count = await redis.incr(key);
       if (count === 1) {
-        await redis.expire(key, windowSec);
+        await redis.pExpire(key, windowMs);
       }
       return count <= max;
     } catch {
