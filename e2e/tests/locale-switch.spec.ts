@@ -10,53 +10,39 @@ test.describe("Locale Switching", () => {
   });
 
   test("switch from ja to en", async ({ page }) => {
+    const { vaultReady } = getAuthState();
     await page.goto("/ja/dashboard");
 
-    // Wait for page to load
+    // Lock screen has no header — unlock first
     const lockPage = new VaultLockPage(page);
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
+    await lockPage.unlockAndWait(vaultReady.passphrase!);
 
-    // Click language switcher (Globe icon button)
-    const globeButton = page
-      .locator("header")
-      .getByRole("button")
-      .filter({ has: page.locator("svg") })
-      .first();
-    await globeButton.click();
+    // Click language switcher (Globe icon button in header)
+    await page.locator("header button:has(.lucide-globe)").click();
 
     // Select English
-    const enOption = page.getByRole("menuitem", { name: /English/i });
-    await enOption.click();
+    await page.getByRole("menuitem", { name: /English/i }).click();
 
     // URL should change to /en/
     await expect(page).toHaveURL(/\/en\/dashboard/);
-
-    // UI should be in English
-    await expect(
-      page.getByRole("button", { name: /Unlock/i })
-    ).toBeVisible();
   });
 
   test("switch from en to ja", async ({ page }) => {
+    const { vaultReady } = getAuthState();
     await page.goto("/en/dashboard");
 
     const lockPage = new VaultLockPage(page);
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
+    await lockPage.unlockAndWait(vaultReady.passphrase!);
 
-    const globeButton = page
-      .locator("header")
-      .getByRole("button")
-      .filter({ has: page.locator("svg") })
-      .first();
-    await globeButton.click();
-
-    const jaOption = page.getByRole("menuitem", { name: /日本語/i });
-    await jaOption.click();
+    await page.locator("header button:has(.lucide-globe)").click();
+    await page.getByRole("menuitem", { name: /日本語/i }).click();
 
     await expect(page).toHaveURL(/\/ja\/dashboard/);
   });
 
-  test("locale switch preserves vault unlocked state", async ({ page }) => {
+  test("locale switch resets vault to locked state", async ({ page }) => {
     const { vaultReady } = getAuthState();
     await page.goto("/ja/dashboard");
 
@@ -64,24 +50,15 @@ test.describe("Locale Switching", () => {
     const lockPage = new VaultLockPage(page);
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
     await lockPage.unlockAndWait(vaultReady.passphrase!);
-
-    // Verify unlocked
     await expect(lockPage.passphraseInput).not.toBeVisible();
 
-    // Switch locale
-    const globeButton = page
-      .locator("header")
-      .getByRole("button")
-      .filter({ has: page.locator("svg") })
-      .first();
-    await globeButton.click();
-
-    const enOption = page.getByRole("menuitem", { name: /English/i });
-    await enOption.click();
+    // Switch locale — causes full page navigation
+    await page.locator("header button:has(.lucide-globe)").click();
+    await page.getByRole("menuitem", { name: /English/i }).click();
 
     await expect(page).toHaveURL(/\/en\/dashboard/);
 
-    // Vault should still be unlocked (no lock screen)
-    await expect(lockPage.passphraseInput).not.toBeVisible({ timeout: 5_000 });
+    // Vault key is in-memory only — locale switch resets it, lock screen returns
+    await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
   });
 });

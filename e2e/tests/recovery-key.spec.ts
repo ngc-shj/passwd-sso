@@ -19,7 +19,7 @@ test.describe("Recovery Key", () => {
     await userMenuButton.click();
 
     const recoveryKeyItem = page.getByRole("menuitem", {
-      name: /Recovery Key|リカバリーキー/i,
+      name: /Recovery Key|回復キー/i,
     });
     await recoveryKeyItem.click();
 
@@ -28,9 +28,9 @@ test.describe("Recovery Key", () => {
     await expect(passphraseInput).toBeVisible({ timeout: 5_000 });
     await passphraseInput.fill(vaultReady.passphrase!);
 
-    // Click generate
+    // Click generate (button text = t("recoveryKey"))
     const generateButton = page.getByRole("button", {
-      name: /Recovery Key|リカバリーキー|Generate|生成/i,
+      name: /Recovery Key|回復キー/i,
     });
     await generateButton.click();
 
@@ -55,11 +55,8 @@ test.describe("Recovery Key", () => {
     await expect(keyInput).toBeVisible({ timeout: 10_000 });
     await keyInput.fill("AAAA-BBBB-CCCC-DDDD-EEEE-FFFF-GGGG-HHHH");
 
-    // Submit — should show checksum error before server communication
-    const verifyButton = page.getByRole("button", {
-      name: /Verify|検証/i,
-    });
-    await verifyButton.click();
+    // Submit via form submit button
+    await page.locator("button[type='submit']").click();
 
     // Should show error
     await expect(page.locator(".text-destructive")).toBeVisible({
@@ -77,13 +74,9 @@ test.describe("Recovery Key", () => {
     await expect(keyInput).toBeVisible({ timeout: 10_000 });
 
     // Enter a syntactically valid but unregistered recovery key
-    // (will pass checksum but fail server verification)
     await keyInput.fill("ABCD-EFGH-IJKL-MNOP-QRST-UVWX-YZAB-CDEF");
 
-    const verifyButton = page.getByRole("button", {
-      name: /Verify|検証/i,
-    });
-    await verifyButton.click();
+    await page.locator("button[type='submit']").click();
 
     // Should show error (recovery key not set or invalid)
     await expect(page.locator(".text-destructive")).toBeVisible({

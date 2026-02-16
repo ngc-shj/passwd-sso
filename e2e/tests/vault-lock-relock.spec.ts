@@ -23,7 +23,7 @@ test.describe("Vault Lock and Relock", () => {
     await userMenuButton.click();
 
     const lockMenuItem = page.getByRole("menuitem", {
-      name: /Lock Vault|Vaultをロック/i,
+      name: /Lock Vault|保管庫をロック/i,
     });
     await lockMenuItem.click();
 
@@ -44,7 +44,7 @@ test.describe("Vault Lock and Relock", () => {
     const userMenuButton = page.locator("header").getByRole("button").last();
     await userMenuButton.click();
     await page
-      .getByRole("menuitem", { name: /Lock Vault|Vaultをロック/i })
+      .getByRole("menuitem", { name: /Lock Vault|保管庫をロック/i })
       .click();
 
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });

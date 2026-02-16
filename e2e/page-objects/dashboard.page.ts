@@ -24,10 +24,13 @@ export class DashboardPage {
 
   /**
    * Navigate to create a new password entry.
+   * Opens the "New Item" dropdown, selects "New Password",
+   * then waits for the dialog to appear.
    */
   async createNewPassword(): Promise<void> {
     await this.newItemButton.click();
     await this.newPasswordOption.click();
-    await this.page.waitForURL(/\/dashboard\/new/);
+    // The form opens in a Dialog (no URL change)
+    await this.page.locator("[role='dialog']").waitFor({ timeout: 5_000 });
   }
 }

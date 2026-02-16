@@ -1,9 +1,12 @@
 /**
  * Playwright global teardown — clean up test data and generated files.
  */
+import { config } from "dotenv";
 import { unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { assertTestDatabase, cleanup, closePool } from "./helpers/db";
+
+config({ path: join(__dirname, "..", ".env.local") });
 
 const AUTH_STATE_PATH = join(__dirname, ".auth-state.json");
 

@@ -12,7 +12,7 @@ export class VaultSetupPage {
   }
 
   get submitButton() {
-    return this.page.getByRole("button", { name: /Set Up Vault|Vaultをセットアップ/i });
+    return this.page.getByRole("button", { name: /Set Up Vault|保管庫をセットアップ/i });
   }
 
   async setup(passphrase: string): Promise<void> {

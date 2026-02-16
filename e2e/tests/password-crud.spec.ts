@@ -53,7 +53,7 @@ test.describe("Password CRUD", () => {
     await expect(entry).toBeVisible({ timeout: 10_000 });
     await entry.click();
 
-    // Should show decrypted details
+    // Inline detail expands — should show decrypted details
     await expect(page.getByText(TEST_ENTRY.username)).toBeVisible({
       timeout: 10_000,
     });
@@ -67,18 +67,25 @@ test.describe("Password CRUD", () => {
     await expect(entry).toBeVisible({ timeout: 10_000 });
     await entry.click();
 
-    // Navigate to edit
-    await entryPage.editButton.click();
-    await page.waitForURL(/\/edit/);
+    // Wait for inline detail to expand (username visible)
+    await expect(page.getByText(TEST_ENTRY.username)).toBeVisible({
+      timeout: 10_000,
+    });
 
-    // Change title
+    // Open edit dialog via ⋮ menu
+    await entryPage.openEditDialog();
+
+    // Change title in the edit dialog
     const updatedTitle = `${TEST_ENTRY.title} (edited)`;
     await entryPage.titleInput.clear();
     await entryPage.titleInput.fill(updatedTitle);
     await entryPage.updateButton.click();
 
-    // Wait for save
-    await page.waitForURL(/\/dashboard/, { timeout: 10_000 });
+    // Wait for edit dialog to close
+    await page.locator("[role='dialog']").waitFor({
+      state: "hidden",
+      timeout: 15_000,
+    });
 
     // Verify updated entry
     await expect(dashboard.entryByTitle(updatedTitle)).toBeVisible({
@@ -94,12 +101,13 @@ test.describe("Password CRUD", () => {
     await expect(entry).toBeVisible({ timeout: 10_000 });
     await entry.click();
 
-    // Delete via confirmation dialog
-    await entryPage.deleteButton.click();
-    await entryPage.deleteConfirmButton.click();
+    // Wait for inline detail to expand
+    await expect(page.getByText(TEST_ENTRY.username)).toBeVisible({
+      timeout: 10_000,
+    });
 
-    // Wait for return to dashboard
-    await page.waitForURL(/\/dashboard/, { timeout: 10_000 });
+    // Delete via ⋮ menu → confirmation dialog
+    await entryPage.deleteEntry();
 
     // Entry should no longer be in the active list (moved to trash)
     await expect(page.getByText(/E2E Test Entry/)).not.toBeVisible({

@@ -9,9 +9,13 @@
  *
  * Session tokens are written to .auth-state.json for test consumption.
  */
+import { config } from "dotenv";
 import { createHash, randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+// Load .env.local so DATABASE_URL / VERIFIER_PEPPER_KEY are available
+config({ path: join(__dirname, "..", ".env.local") });
 import { setupVaultCrypto } from "./helpers/crypto";
 import {
   assertTestDatabase,
