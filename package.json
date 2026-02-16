@@ -17,7 +17,12 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
     "licenses:check": "node scripts/check-licenses.mjs --name app --lockfile package-lock.json",
-    "licenses:check:ext": "node scripts/check-licenses.mjs --name extension --lockfile extension/package-lock.json"
+    "licenses:check:ext": "node scripts/check-licenses.mjs --name extension --lockfile extension/package-lock.json",
+    "test:load:seed": "node load-test/setup/seed-load-test-users.mjs",
+    "test:load:cleanup": "node load-test/setup/seed-load-test-users.mjs --cleanup",
+    "test:load:smoke": "node load-test/setup/seed-load-test-users.mjs --smoke",
+    "test:load": "k6 run load-test/scenarios/mixed-workload.js",
+    "test:load:health": "k6 run load-test/scenarios/health.js"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
