@@ -58,7 +58,9 @@ describe("crypto-server", () => {
       const orgKey = generateOrgKey();
       const wrapped = wrapOrgKey(orgKey);
 
-      wrapped.ciphertext = "ff" + wrapped.ciphertext.slice(2);
+      const byte = parseInt(wrapped.ciphertext.slice(0, 2), 16);
+      const flipped = ((byte ^ 0x01) & 0xff).toString(16).padStart(2, "0");
+      wrapped.ciphertext = flipped + wrapped.ciphertext.slice(2);
       expect(() => unwrapOrgKey(wrapped)).toThrow();
     });
 
