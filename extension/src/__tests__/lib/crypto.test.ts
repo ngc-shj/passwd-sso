@@ -151,7 +151,9 @@ describe("decryptData", () => {
   it("fails with tampered ciphertext", async () => {
     const key = await makeTestKey();
     const encrypted = await encrypt("data", key);
-    encrypted.ciphertext = "ff" + encrypted.ciphertext.slice(2);
+    const b = parseInt(encrypted.ciphertext.slice(0, 2), 16);
+    const f = ((b ^ 0x01) & 0xff).toString(16).padStart(2, "0");
+    encrypted.ciphertext = f + encrypted.ciphertext.slice(2);
     await expect(decryptData(encrypted, key)).rejects.toThrow();
   });
 });
