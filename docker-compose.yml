@@ -72,6 +72,23 @@ services:
       - internal
     # Do NOT expose port 5225 to host in production
 
+  migrate:
+    profiles: ["migrate"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DATABASE_URL: postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
+    environment:
+      - DATABASE_URL=postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["npx", "prisma", "migrate", "deploy"]
+    restart: "no"
+    networks:
+      - internal
+
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
