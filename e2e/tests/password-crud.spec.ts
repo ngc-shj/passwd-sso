@@ -100,7 +100,9 @@ test.describe("Password CRUD", () => {
     // Wait for return to dashboard
     await page.waitForURL(/\/dashboard/, { timeout: 10_000 });
 
-    // Entry should no longer be in the active list
-    // (it's in trash, not permanently deleted)
+    // Entry should no longer be in the active list (moved to trash)
+    await expect(page.getByText(/E2E Test Entry/)).not.toBeVisible({
+      timeout: 10_000,
+    });
   });
 });
