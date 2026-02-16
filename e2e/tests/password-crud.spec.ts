@@ -72,8 +72,8 @@ test.describe("Password CRUD", () => {
       timeout: 10_000,
     });
 
-    // Open edit dialog via ⋮ menu
-    await entryPage.openEditDialog();
+    // Open edit dialog via ⋮ menu (scoped to this card)
+    await entryPage.openEditDialog(TEST_ENTRY.title);
 
     // Change title in the edit dialog
     const updatedTitle = `${TEST_ENTRY.title} (edited)`;
@@ -106,8 +106,8 @@ test.describe("Password CRUD", () => {
       timeout: 10_000,
     });
 
-    // Delete via ⋮ menu → confirmation dialog
-    await entryPage.deleteEntry();
+    // Delete via ⋮ menu → confirmation dialog (scoped to this card)
+    await entryPage.deleteEntry(/E2E Test Entry/);
 
     // Entry should no longer be in the active list (moved to trash)
     await expect(page.getByText(/E2E Test Entry/)).not.toBeVisible({

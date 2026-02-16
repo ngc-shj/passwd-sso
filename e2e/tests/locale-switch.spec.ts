@@ -19,7 +19,7 @@ test.describe("Locale Switching", () => {
     await lockPage.unlockAndWait(vaultReady.passphrase!);
 
     // Click language switcher (Globe icon button in header)
-    await page.locator("header button:has(.lucide-globe)").click();
+    await page.getByRole("button", { name: /Switch language|言語を切り替え/i }).click();
 
     // Select English
     await page.getByRole("menuitem", { name: /English/i }).click();
@@ -36,7 +36,7 @@ test.describe("Locale Switching", () => {
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
     await lockPage.unlockAndWait(vaultReady.passphrase!);
 
-    await page.locator("header button:has(.lucide-globe)").click();
+    await page.getByRole("button", { name: /Switch language|言語を切り替え/i }).click();
     await page.getByRole("menuitem", { name: /日本語/i }).click();
 
     await expect(page).toHaveURL(/\/ja\/dashboard/);
@@ -53,7 +53,7 @@ test.describe("Locale Switching", () => {
     await expect(lockPage.passphraseInput).not.toBeVisible();
 
     // Switch locale — causes full page navigation
-    await page.locator("header button:has(.lucide-globe)").click();
+    await page.getByRole("button", { name: /Switch language|言語を切り替え/i }).click();
     await page.getByRole("menuitem", { name: /English/i }).click();
 
     await expect(page).toHaveURL(/\/en\/dashboard/);

@@ -27,10 +27,11 @@ export default defineConfig({
   ],
 
   webServer: {
-    // "output: standalone" makes `next start` unusable; dev server is
-    // the most reliable option and crypto behaviour is identical.
+    // CI: production build for parity; local: dev server for speed.
     // Skip --experimental-https so Playwright can connect over plain HTTP.
-    command: "npx next dev --turbopack",
+    command: process.env.CI
+      ? "npm run build && npm start"
+      : "npx next dev --turbopack",
     cwd: "..",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,

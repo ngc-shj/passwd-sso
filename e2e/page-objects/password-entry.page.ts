@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 export class PasswordEntryPage {
   constructor(private page: Page) {}
@@ -31,24 +31,38 @@ export class PasswordEntryPage {
     return this.page.getByRole("button", { name: /Update|更新/i });
   }
 
-  /** Three-dot (⋮) menu on the expanded password card. */
-  get moreMenuButton() {
-    return this.page.getByRole("button", {
+  /**
+   * Return a locator scoped to the card containing the given title.
+   * Useful when multiple entries are visible — avoids ambiguous matches.
+   */
+  card(title: string | RegExp): Locator {
+    return this.page.locator("[data-slot='card']").filter({ hasText: title });
+  }
+
+  /**
+   * Three-dot (⋮) menu button scoped to a specific card.
+   * Falls back to first match when no title is given (single-entry scenarios).
+   */
+  moreMenuButton(title?: string | RegExp): Locator {
+    const scope = title ? this.card(title) : this.page;
+    return scope.getByRole("button", {
       name: /More actions|その他のアクション/i,
     });
   }
 
-  /** "Edit" / "編集" in the card's more-actions dropdown. */
+  /** "Edit" / "編集" — portal-rendered, page-scoped is correct. */
   get editMenuItem() {
     return this.page.getByRole("menuitem", { name: /Edit|編集/i });
   }
 
-  /** "Move to Trash" / "ゴミ箱に移動" in the card's more-actions dropdown. */
+  /** "Move to Trash" / "ゴミ箱に移動" — portal-rendered, page-scoped is correct. */
   get deleteMenuItem() {
-    return this.page.getByRole("menuitem", { name: /Move to Trash|ゴミ箱に移動/i });
+    return this.page.getByRole("menuitem", {
+      name: /Move to Trash|ゴミ箱に移動/i,
+    });
   }
 
-  /** Confirm button inside the delete confirmation dialog (common namespace: "削除" / "Delete"). */
+  /** Confirm button inside the delete confirmation dialog. */
   get deleteConfirmButton() {
     return this.page
       .locator("[role='dialog']")
@@ -78,16 +92,16 @@ export class PasswordEntryPage {
     });
   }
 
-  /** Open ⋮ menu → Edit → wait for edit dialog. */
-  async openEditDialog(): Promise<void> {
-    await this.moreMenuButton.click();
+  /** Open ⋮ menu → Edit → wait for edit dialog. Card-scoped when title given. */
+  async openEditDialog(title?: string | RegExp): Promise<void> {
+    await this.moreMenuButton(title).click();
     await this.editMenuItem.click();
     await this.page.locator("[role='dialog']").waitFor({ timeout: 5_000 });
   }
 
-  /** Open ⋮ menu → Delete → confirm in dialog. */
-  async deleteEntry(): Promise<void> {
-    await this.moreMenuButton.click();
+  /** Open ⋮ menu → Delete → confirm in dialog. Card-scoped when title given. */
+  async deleteEntry(title?: string | RegExp): Promise<void> {
+    await this.moreMenuButton(title).click();
     await this.deleteMenuItem.click();
     await this.deleteConfirmButton.click();
   }
