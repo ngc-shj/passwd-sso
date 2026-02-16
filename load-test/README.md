@@ -13,7 +13,9 @@ k6 を使用した負荷テストスイート。6 シナリオで API のスル�
 
 ```bash
 # 1. DB にテストユーザーをシード (50ユーザー、PBKDF2のため数分かかる)
+#    dev DB名が test/loadtest/ci を含まない場合は ALLOW_NON_TEST_DBNAME=true を追加
 ALLOW_LOAD_TEST_SEED=true \
+ALLOW_NON_TEST_DBNAME=true \
 DATABASE_URL=postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso \
 npm run test:load:seed
 
@@ -22,6 +24,7 @@ k6 run load-test/scenarios/mixed-workload.js
 
 # 3. テストデータ削除
 ALLOW_LOAD_TEST_SEED=true \
+ALLOW_NON_TEST_DBNAME=true \
 DATABASE_URL=postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso \
 npm run test:load:cleanup
 ```
@@ -65,6 +68,8 @@ k6 の `thresholds` が breach されると **exit code 99** で終了する。�
 シードスクリプトは三重ガードで本番 DB への誤接続を防止:
 
 1. **URL パース**: hostname が `localhost`, `127.0.0.1`, `::1`, `db` のいずれか + dbname に `test`/`loadtest`/`ci` を含む
+   - SSH tunnel / SSM port-forward で本番 DB が localhost に見えるケースを防止
+   - dev DB名が `passwd_sso` 等の場合は `ALLOW_NON_TEST_DBNAME=true` で明示的にオプトイン
 2. **NODE_ENV**: `production` の場合は拒否
 3. **明示フラグ**: `ALLOW_LOAD_TEST_SEED=true` が必須
 

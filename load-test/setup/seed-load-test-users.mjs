@@ -10,13 +10,15 @@
  *
  * Environment:
  *   DATABASE_URL             - PostgreSQL connection string
- *   ALLOW_LOAD_TEST_SEED=true - Explicit opt-in required
- *   VERIFIER_PEPPER_KEY      - 64-char hex for HMAC verifier (or ORG_MASTER_KEY for dev fallback)
- *   ORG_MASTER_KEY           - 64-char hex master key (for dev verifier pepper derivation)
- *   BASE_URL                 - App base URL for smoke check (default: http://localhost:3000)
+ *   ALLOW_LOAD_TEST_SEED=true     - Explicit opt-in required
+ *   ALLOW_NON_TEST_DBNAME=true    - Override dbname pattern check (e.g. dev DB named "passwd_sso")
+ *   VERIFIER_PEPPER_KEY           - 64-char hex for HMAC verifier (or ORG_MASTER_KEY for dev fallback)
+ *   ORG_MASTER_KEY                - 64-char hex master key (for dev verifier pepper derivation)
+ *   BASE_URL                      - App base URL for smoke check (default: http://localhost:3000)
  *
  * Safety guards (all three must pass):
  *   1. DATABASE_URL hostname in allowlist + dbname contains test/loadtest/ci
+ *      (dbname check can be bypassed with ALLOW_NON_TEST_DBNAME=true)
  *   2. NODE_ENV !== "production"
  *   3. ALLOW_LOAD_TEST_SEED=true
  */
@@ -48,15 +50,16 @@ const VERIFIER_PBKDF2_BITS = 256;
 
 // ─── Safety Guards (pure functions for testability) ────────────
 
-const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "::1"];
-const HOSTNAME_ALLOWLIST = [...LOOPBACK_HOSTS, "db"];
+const HOSTNAME_ALLOWLIST = ["localhost", "127.0.0.1", "::1", "db"];
 const DBNAME_PATTERNS = ["test", "loadtest", "ci"];
 
 /**
  * Validate DATABASE_URL against safety rules.
+ * @param {string} databaseUrl
+ * @param {{ allowNonTestDbname?: boolean }} opts
  * Returns { valid: true } or { valid: false, reason: string }.
  */
-export function validateDatabaseUrl(databaseUrl) {
+export function validateDatabaseUrl(databaseUrl, opts = {}) {
   if (!databaseUrl) {
     return { valid: false, reason: "DATABASE_URL is not set" };
   }
@@ -77,15 +80,20 @@ export function validateDatabaseUrl(databaseUrl) {
     };
   }
 
-  // For non-loopback compose hostnames (e.g. "db"), also require dbname pattern.
-  // Loopback addresses are guaranteed local — any dbname is acceptable.
-  if (!LOOPBACK_HOSTS.includes(hostname)) {
-    const dbname = parsed.pathname.replace(/^\//, "").toLowerCase();
-    if (!DBNAME_PATTERNS.some((p) => dbname.includes(p))) {
+  const dbname = parsed.pathname.replace(/^\//, "").toLowerCase();
+  if (!DBNAME_PATTERNS.some((p) => dbname.includes(p))) {
+    if (opts.allowNonTestDbname) {
+      // Explicit opt-in: accept non-test dbname with warning
+      console.warn(
+        `WARNING: dbname "${dbname}" does not match [${DBNAME_PATTERNS.join(", ")}]. ` +
+          `Proceeding because ALLOW_NON_TEST_DBNAME=true. ` +
+          `Ensure this is NOT a production database (SSH tunnel / port-forward risk).`,
+      );
+    } else {
       return {
         valid: false,
         reason: `DATABASE_URL dbname "${dbname}" must contain one of [${DBNAME_PATTERNS.join(", ")}]. ` +
-          `Loopback hosts (${LOOPBACK_HOSTS.join(", ")}) are exempt from this check.`,
+          `Set ALLOW_NON_TEST_DBNAME=true to override (e.g. local dev DB named "passwd_sso").`,
       };
     }
   }
@@ -97,8 +105,10 @@ export function validateDatabaseUrl(databaseUrl) {
  * Run all three safety guards. Returns { safe: true } or { safe: false, reason: string }.
  */
 export function checkSafetyGuards(env = process.env) {
-  // Guard 1: URL parse + allowlist
-  const urlCheck = validateDatabaseUrl(env.DATABASE_URL);
+  // Guard 1: URL parse + allowlist + dbname pattern
+  const urlCheck = validateDatabaseUrl(env.DATABASE_URL, {
+    allowNonTestDbname: env.ALLOW_NON_TEST_DBNAME === "true",
+  });
   if (!urlCheck.valid) {
     return { safe: false, reason: `[Guard 1/3] ${urlCheck.reason}` };
   }
@@ -359,17 +369,27 @@ async function runSmokeTest(pool) {
     process.exit(1);
   }
 
-  // Compose hostname "db" requires dbname pattern (test/loadtest/ci)
-  const composeNoPat = validateDatabaseUrl("postgresql://db:5432/passwd_sso");
-  if (composeNoPat.valid) {
-    console.error("FAIL: Should have rejected compose hostname without test/loadtest/ci dbname");
+  // Non-test dbname rejected by default (protects against SSH tunnel to prod)
+  const nonTestDb = validateDatabaseUrl("postgresql://localhost:5432/passwd_sso");
+  if (nonTestDb.valid) {
+    console.error("FAIL: Should have rejected non-test dbname without opt-in");
     process.exit(1);
   }
 
-  // Loopback is exempt from dbname pattern
-  const loopbackAny = validateDatabaseUrl("postgresql://localhost:5432/passwd_sso");
-  if (!loopbackAny.valid) {
-    console.error("FAIL: Should have accepted loopback hostname with any dbname");
+  // Non-test dbname accepted with explicit opt-in
+  const nonTestDbOptIn = validateDatabaseUrl(
+    "postgresql://localhost:5432/passwd_sso",
+    { allowNonTestDbname: true },
+  );
+  if (!nonTestDbOptIn.valid) {
+    console.error("FAIL: Should have accepted non-test dbname with allowNonTestDbname");
+    process.exit(1);
+  }
+
+  // Test dbname accepted without opt-in
+  const testDb = validateDatabaseUrl("postgresql://db:5432/passwd_sso_loadtest");
+  if (!testDb.valid) {
+    console.error("FAIL: Should have accepted test-pattern dbname");
     process.exit(1);
   }
 
