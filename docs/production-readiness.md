@@ -1,6 +1,6 @@
 # passwd-sso 商用運用 ToDo
 
-最終更新: 2026-02-16
+最終更新: 2026-02-17
 ベースライン: main ブランチ
 
 ---
@@ -18,7 +18,7 @@
 | # | 優先度 | 項目 | 状態 | 備考 |
 |---|--------|------|------|------|
 | 1.1 | 必須 | CI/CD パイプライン構築 | 対応済み | GitHub Actions 4 並列ジョブ (app-ci / extension-ci / audit-app / audit-ext)。ESLint native flat config 移行済み。PR #18 |
-| 1.2 | 必須 | 監査ログ外部転送 (pino + Fluent Bit) | 対応済み | 監査イベントを構造化 JSON で stdout → Fluent Bit → 任意の転送先。多層防御 (sanitizeMetadata + pino redact) |
+| 1.2 | 必須 | 監査ログ外部転送 (pino + Fluent Bit) | 対応済み | 監査イベントを構造化 JSON で stdout → Fluent Bit → 任意の転送先。多層防御 (sanitizeMetadata + pino redact)。PR #14 |
 | 1.3 | 必須 | アプリケーション構造化ログ | 対応済み | pino 汎用ロガー (`_logType: "app"`) + `withRequestLog()` ラッパーで requestId・レイテンシ自動記録。Phase 1: vault/passwords/auth/csp-report。CSP report body サニタイズ済み。PR #20 |
 | 1.4 | 必須 | ヘルスチェックエンドポイント | 対応済み | `/api/health/live` (liveness, 200 固定) + `/api/health/ready` (readiness, DB + Redis チェック, unhealthy → 503)。`HEALTH_REDIS_REQUIRED=true` で Redis 障害時 fail 切替。PR #22 |
 | 1.5 | 必須 | 監視・アラート基盤 | 対応済み | Terraform: CloudWatch メトリクスフィルタ (5xx, ヘルスチェック失敗, 高レイテンシ) + アラーム 4 種 + EventBridge ECS 停止検知 + SNS 通知。アプリコードは vendor-neutral。PR #22 |
@@ -31,9 +31,9 @@
 | # | 優先度 | 項目 | 状態 | 備考 |
 |---|--------|------|------|------|
 | 2.1 | 必須 | 環境変数バリデーション | 対応済み | Zod スキーマで起動時に 26 変数を一括検証 (`src/lib/env.ts` + `instrumentation.ts`)。PR #17 |
-| 2.2 | 必須 | アカウントロックアウト | 対応済み | DB 永続の段階的ロックアウト (5回→15分, 10回→1h, 15回→24h) + 24h 観測ウィンドウ + 監査ログ (`VAULT_UNLOCK_FAILED` / `VAULT_LOCKOUT_TRIGGERED`)。既存 rate limiter と併用。管理者通知は監査ログ/運用ログ出力まで (CloudWatch Alarm 自動化は次フェーズ) |
-| 2.3 | 必須 | パスフレーズリカバリフロー | 対応済み | 回復キー (256-bit, HKDF+AES-256-GCM) による secretKey 復元 + 新パスフレーズ設定。Vault Reset (全データ削除) を最終手段として提供。未生成時はバナーで促進 (24h 後に再表示)。監査ログ 4 種。CSRF 防御 (Origin 検証) + Rate limit 付き |
-| 2.4 | 強く推奨 | CORS 設定の明示 | 対応済み | Same-origin only ポリシーを明示実装。OPTIONS preflight 204 応答 + `applyCorsHeaders()` で全 API return 経路にヘッダー付与。`Vary: Origin` + case-insensitive 重複排除。Extension は Service Worker + Bearer Token で CORS 迂回。docs/cors-policy.md に運用方針を文書化 |
+| 2.2 | 必須 | アカウントロックアウト | 対応済み | DB 永続の段階的ロックアウト (5回→15分, 10回→1h, 15回→24h) + 24h 観測ウィンドウ + 監査ログ (`VAULT_UNLOCK_FAILED` / `VAULT_LOCKOUT_TRIGGERED`)。既存 rate limiter と併用。管理者通知は監査ログ/運用ログ出力まで (CloudWatch Alarm 自動化は次フェーズ)。PR #24 |
+| 2.3 | 必須 | パスフレーズリカバリフロー | 対応済み | 回復キー (256-bit, HKDF+AES-256-GCM) による secretKey 復元 + 新パスフレーズ設定。Vault Reset (全データ削除) を最終手段として提供。未生成時はバナーで促進 (24h 後に再表示)。監査ログ 4 種。CSRF 防御 (Origin 検証) + Rate limit 付き。PR #25 |
+| 2.4 | 強く推奨 | CORS 設定の明示 | 対応済み | Same-origin only ポリシーを明示実装。OPTIONS preflight 204 応答 + `applyCorsHeaders()` で全 API return 経路にヘッダー付与。`Vary: Origin` + case-insensitive 重複排除。Extension は Service Worker + Bearer Token で CORS 迂回。docs/cors-policy.md に運用方針を文書化。#46, PR #57 |
 | 2.5 | 強く推奨 | 並行セッション管理 | 未着手 | セッション一覧表示、リモートログアウト、新規ログイン通知 |
 | 2.6 | 強く推奨 | 鍵素材メモリ管理の文書化 | 一部対応 | security-review.md に記載あり。Web Crypto API 制約下でのリスク受容判断をユーザー向けにも公開 |
 | 2.7 | 推奨 | セキュリティ第三者監査 | 未着手 | 暗号実装の外部レビュー (NCC Group, Cure53 等) |
@@ -46,7 +46,7 @@
 |---|--------|------|------|------|
 | 3.1 | 必須 | バックアップ・リカバリ戦略 | 対応済み | AWS Backup Vault Lock (WORM/Compliance) + S3 Object Lock + クロスリージョンコピー + EventBridge 失敗通知。RPO 1h / RTO 2h。PR #23 |
 | 3.2 | 強く推奨 | DB コネクションプール設定 | 未着手 | pg.Pool の max / idleTimeoutMillis / connectionTimeoutMillis をチューニング + 接続数監視 |
-| 3.3 | 強く推奨 | マイグレーション戦略の分離 | 未着手 | Dockerfile CMD での毎回実行 → デプロイパイプラインの独立ステップに分離。複数レプリカ起動時の競合防止 |
+| 3.3 | 強く推奨 | マイグレーション戦略の分離 | 対応済み | ECS one-off タスク定義 (Fargate RunTask) でマイグレーションをアプリ起動から完全分離。deploy.sh で migrate → 成功確認 → app 更新の順序を保証。docker-compose は profiles 分離。docs/deployment.md。#47 |
 | 3.4 | 推奨 | Redis 高可用性 | 未着手 | 現行は単一 Redis。Redis Sentinel / ElastiCache 等によるフェイルオーバー |
 
 ---
@@ -99,6 +99,7 @@
 - パスフレーズリカバリフロー (回復キー: Base32 + HKDF + AES-256-GCM ラップ + Vault Reset: 全データ削除)
 - コンポーネントテスト基盤 (`@testing-library/react` + `jsdom`、signin / header / auto-extension-connect)
 - E2E テスト (Playwright 7 spec / 22 ケース、暗号互換性テスト 16 件、DB 二重ガード + スコープ限定クリーンアップ)
+- マイグレーション戦略の分離 (ECS one-off RunTask + deploy.sh 順序保証 + docker-compose profiles 分離)
 - 本番コード `console.log` 0 件、`TODO/FIXME` 0 件
 
 ---
