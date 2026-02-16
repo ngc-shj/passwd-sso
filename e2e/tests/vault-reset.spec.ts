@@ -16,6 +16,7 @@ test.describe("Vault Reset", () => {
     page,
   }) => {
     // Non-destructive — safe to use shared vaultReady user
+    // IMPROVE(#27): use dedicated user for full independence
     const { vaultReady } = getAuthState();
     await injectSession(context, vaultReady.sessionToken);
     await page.goto("/ja/vault-reset");

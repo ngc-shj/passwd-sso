@@ -16,6 +16,7 @@ const TEST_ENTRY = {
 /**
  * Tests run sequentially within the describe block (workers: 1).
  * create → view → edit → delete form a chain — each depends on the prior.
+ * IMPROVE(#27): consolidate into test.step or use independent data per test
  */
 test.describe("Password CRUD", () => {
   test.beforeEach(async ({ context, page }) => {
