@@ -55,7 +55,7 @@
 
 | # | 優先度 | 項目 | 状態 | 備考 |
 |---|--------|------|------|------|
-| 4.1 | 必須 | E2E テスト導入 | 未着手 | Playwright / Cypress。パスフレーズ入力 → Vault 解錠 → 暗号化 → 保存 → 復号 → 表示の一連フロー |
+| 4.1 | 必須 | E2E テスト導入 | 対応済み | Playwright (Chromium)。7 spec / 22 ケース: セットアップ → アンロック → CRUD → ロック/再アンロック → Recovery Key → Vault Reset → ロケール切替。Node.js 版暗号ヘルパー (CRYPTO_CONSTANTS 共有)、DB 二重ガード (URL パターン + E2E_ALLOW_DB_MUTATION)、暗号互換性テスト 16 件。CI ジョブ追加 (PostgreSQL + Redis サービス) |
 | 4.2 | 強く推奨 | カバレッジ対象の拡大 | 一部対応 | コンポーネントテスト基盤導入済み (`@testing-library/react` + `jsdom`, `.test.tsx` 対応)。coverage 対象は 4 パスに限定 → crypto-client.ts や components 層を追加 |
 | 4.3 | 強く推奨 | 負荷テスト | 未着手 | k6 / Artillery 等。同時接続数、レートリミット動作、暗号処理のスループット検証 |
 | 4.4 | 推奨 | セキュリティスキャン自動化 | 未着手 | Dependabot / Snyk / Trivy (コンテナ) を CI に統合 |
@@ -98,13 +98,13 @@
 - バックアップ・リカバリ (AWS Backup Vault Lock WORM + S3 Object Lock Compliance + クロスリージョンコピー + EventBridge 失敗通知)
 - パスフレーズリカバリフロー (回復キー: Base32 + HKDF + AES-256-GCM ラップ + Vault Reset: 全データ削除)
 - コンポーネントテスト基盤 (`@testing-library/react` + `jsdom`、signin / header / auto-extension-connect)
+- E2E テスト (Playwright 7 spec / 22 ケース、暗号互換性テスト 16 件、DB 二重ガード + スコープ限定クリーンアップ)
 - 本番コード `console.log` 0 件、`TODO/FIXME` 0 件
 
 ---
 
 ## 推奨実行順序 (残りの必須項目)
 
-必須項目 7/9 対応済み。残り:
+必須項目 8/9 対応済み。残り:
 
-1. **4.1** E2E テスト導入 — 暗号フローの結合検証
-2. **5.1** プライバシーポリシー・利用規約 — リリース前の法務要件
+1. **5.1** プライバシーポリシー・利用規約 — リリース前の法務要件

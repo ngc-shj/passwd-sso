@@ -53,6 +53,9 @@ postgres_data/
 
 # Test
 coverage/
+e2e/.auth-state.json
+e2e/playwright-report/
+e2e/test-results/
 
 # Secrets & Keys - NEVER commit
 *.pem
