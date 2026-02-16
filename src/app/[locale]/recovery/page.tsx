@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import {
   parseRecoveryKey,
@@ -37,6 +37,7 @@ interface VerifiedData {
 }
 
 export default function RecoveryPage() {
+  const locale = useLocale();
   const tCommon = useTranslations("Common");
   const t = useTranslations("Recovery");
   const tVault = useTranslations("Vault");
@@ -127,9 +128,10 @@ export default function RecoveryPage() {
     setLoading(true);
     setError("");
 
+    let secretKey: Uint8Array | null = null;
     try {
       // 1. Unwrap secretKey using recovery key
-      const secretKey = await unwrapSecretKeyWithRecovery(
+      secretKey = await unwrapSecretKeyWithRecovery(
         {
           encryptedSecretKey: verifiedData.encryptedSecretKey,
           iv: verifiedData.iv,
@@ -187,18 +189,17 @@ export default function RecoveryPage() {
         return;
       }
 
-      // Zero sensitive data
-      secretKey.fill(0);
       recoveryKeyBytes.fill(0);
       setRecoveryKeyBytes(null);
-
       setHasRecoveryKey(true);
 
       // Full reload to re-initialize VaultProvider (client-side nav keeps stale state)
-      window.location.href = "/dashboard";
+      window.location.href = `/${locale}/dashboard`;
     } catch {
       setError(tApi("unknownError"));
     } finally {
+      // Always zero secretKey regardless of success/failure
+      secretKey?.fill(0);
       setLoading(false);
     }
   }

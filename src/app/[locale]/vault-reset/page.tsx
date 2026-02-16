@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { ArrowLeft, Loader2, AlertTriangle } from "lucide-react";
 const CONFIRMATION_TOKEN = "DELETE MY VAULT";
 
 export default function VaultResetPage() {
+  const locale = useLocale();
   const tCommon = useTranslations("Common");
   const t = useTranslations("VaultReset");
   const tApi = useTranslations("ApiErrors");
@@ -48,7 +49,7 @@ export default function VaultResetPage() {
       }
 
       // Full reload to re-initialize VaultProvider (client-side nav keeps stale state)
-      window.location.href = "/dashboard";
+      window.location.href = `/${locale}/dashboard`;
     } catch {
       setError(tApi("unknownError"));
     } finally {
