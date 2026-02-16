@@ -25,6 +25,9 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **i18n** - English and Japanese (next-intl)
 - **Dark Mode** - Light / dark / system (next-themes)
 - **Organization Vault** - Team password sharing with server-side AES-256-GCM encryption and RBAC (Owner/Admin/Member/Viewer)
+- **Recovery Key** - 256-bit recovery key (HKDF + AES-256-GCM) with Base32 encoding and checksum; recover vault access without passphrase
+- **Vault Reset** - Last-resort full vault deletion with explicit confirmation ("DELETE MY VAULT")
+- **Account Lockout** - Progressive lockout (5→15min, 10→1h, 15→24h) with audit logging
 - **Rate Limiting** - Redis-backed vault unlock rate limiting
 - **CSP & Security Headers** - Content Security Policy with nonce, CSP violation reporting
 - **Self-Hosted** - Docker Compose with PostgreSQL, SAML Jackson, and Redis
@@ -223,7 +226,7 @@ src/
 │   ├── auth/                 # Auth.js handlers
 │   ├── passwords/            # Password CRUD + generation
 │   ├── tags/                 # Tag CRUD
-│   ├── vault/                # Setup, unlock, status, key rotation
+│   ├── vault/                # Setup, unlock, status, key rotation, recovery key, reset
 │   ├── orgs/                 # Organization management
 │   ├── share-links/          # Share link CRUD + access
 │   ├── audit-logs/           # Audit log queries
@@ -238,13 +241,14 @@ src/
 │   ├── emergency-access/     # Emergency access UI
 │   ├── share/                # Share link UI
 │   ├── watchtower/           # Security audit dashboard
-│   ├── vault/                # Vault lock/unlock UI
+│   ├── vault/                # Vault lock/unlock UI, recovery key dialog/banner
 │   ├── tags/                 # TagInput, TagBadge
 │   ├── providers/            # Client-side providers (theme, session, etc.)
 │   ├── auth/                 # SignOutButton
 │   └── ui/                   # shadcn/ui components
 ├── lib/
 │   ├── crypto-client.ts      # Client-side E2E encryption (personal vault)
+│   ├── crypto-recovery.ts    # Recovery Key crypto (HKDF + AES-256-GCM wrap)
 │   ├── crypto-server.ts      # Server-side encryption (org vault)
 │   ├── crypto-aad.ts         # Additional Authenticated Data for encryption
 │   ├── crypto-emergency.ts   # Emergency access key exchange
@@ -282,7 +286,11 @@ extension/
 - **Clipboard clear** - Copied passwords auto-clear after 30 seconds
 - **Organization vault** - Server-side AES-256-GCM with per-org keys wrapped by `ORG_MASTER_KEY`
 - **RBAC** - Owner / Admin / Member / Viewer role-based access control for organizations
+- **Recovery Key** - 256-bit random → HKDF → AES-256-GCM wrap of secret key; server stores only HMAC(pepper, verifierHash)
+- **Vault Reset** - Last-resort full data deletion with fixed confirmation token
+- **Account lockout** - Progressive lockout (5→15min, 10→1h, 15→24h) with DB persistence and audit logging
 - **Rate limiting** - Redis-backed rate limiting on vault unlock (5 attempts per 15 min)
+- **CSRF defense** - JSON body + SameSite cookie + CSP + Origin header validation on destructive endpoints
 - **CSP** - Content Security Policy with nonce-based script control and violation reporting
 
 ## Deployment Guides
