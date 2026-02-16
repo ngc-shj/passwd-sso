@@ -17,28 +17,39 @@ export default {
         },
       },
     }),
-    // SAML Jackson acts as an OIDC provider bridging any SAML 2.0 IdP
-    {
-      id: "saml-jackson",
-      name: process.env.SAML_PROVIDER_NAME ?? "SSO",
-      type: "oidc",
-      issuer: process.env.JACKSON_URL,
-      clientId: process.env.AUTH_JACKSON_ID ?? "dummy",
-      clientSecret: process.env.AUTH_JACKSON_SECRET ?? "dummy",
-      authorization: {
-        params: {
-          scope: "openid email profile",
-        },
-      },
-      profile(profile) {
-        return {
-          id: profile.sub,
-          name: profile.name ?? profile.email,
-          email: profile.email,
-          image: profile.picture ?? null,
-        };
-      },
-    },
+    // SAML Jackson acts as an OIDC provider bridging any SAML 2.0 IdP.
+    // Only register when JACKSON_URL is configured — otherwise Auth.js
+    // throws InvalidEndpoints trying to discover the OIDC endpoints.
+    ...(process.env.JACKSON_URL
+      ? [
+          {
+            id: "saml-jackson" as const,
+            name: process.env.SAML_PROVIDER_NAME ?? "SSO",
+            type: "oidc" as const,
+            issuer: process.env.JACKSON_URL,
+            clientId: process.env.AUTH_JACKSON_ID ?? "dummy",
+            clientSecret: process.env.AUTH_JACKSON_SECRET ?? "dummy",
+            authorization: {
+              params: {
+                scope: "openid email profile",
+              },
+            },
+            profile(profile: {
+              sub: string;
+              name?: string;
+              email: string;
+              picture?: string;
+            }) {
+              return {
+                id: profile.sub,
+                name: profile.name ?? profile.email,
+                email: profile.email,
+                image: profile.picture ?? null,
+              };
+            },
+          },
+        ]
+      : []),
   ],
 
   pages: {
