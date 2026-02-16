@@ -1,3 +1,4 @@
+export { APP_NAME } from "./app";
 export { VAULT_STATUS } from "./vault";
 export type { VaultStatus } from "./vault";
 

@@ -11,7 +11,8 @@
     "delete": "削除",
     "edit": "編集",
     "tryAgain": "再試行",
-    "or": "または"
+    "or": "または",
+    "close": "閉じる"
   },
   "Auth": {
     "signOut": "サインアウト",
