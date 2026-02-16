@@ -365,13 +365,13 @@ describe("crypto-server", () => {
       const savedPepper = process.env.VERIFIER_PEPPER_KEY;
       const savedEnv = process.env.NODE_ENV;
       delete process.env.VERIFIER_PEPPER_KEY;
-      process.env.NODE_ENV = "production";
+      (process.env as Record<string, string | undefined>).NODE_ENV = "production";
 
       expect(() => hmacVerifier("a".repeat(64))).toThrow(
         "VERIFIER_PEPPER_KEY is required in production"
       );
 
-      process.env.NODE_ENV = savedEnv;
+      (process.env as Record<string, string | undefined>).NODE_ENV = savedEnv;
       if (savedPepper) {
         process.env.VERIFIER_PEPPER_KEY = savedPepper;
       }
@@ -431,13 +431,13 @@ describe("crypto-server", () => {
       const savedPepper = process.env.VERIFIER_PEPPER_KEY;
       const savedEnv = process.env.NODE_ENV;
       delete process.env.VERIFIER_PEPPER_KEY;
-      process.env.NODE_ENV = "production";
+      (process.env as Record<string, string | undefined>).NODE_ENV = "production";
 
       // In production without pepper, hmacVerifier would throw,
       // but verifyPassphraseVerifier catches and returns false
       expect(verifyPassphraseVerifier(verifierHash, "a".repeat(64))).toBe(false);
 
-      process.env.NODE_ENV = savedEnv;
+      (process.env as Record<string, string | undefined>).NODE_ENV = savedEnv;
       if (savedPepper) {
         process.env.VERIFIER_PEPPER_KEY = savedPepper;
       }

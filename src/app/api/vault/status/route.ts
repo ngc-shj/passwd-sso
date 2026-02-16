@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -10,7 +10,8 @@ export const runtime = "nodejs";
  * GET /api/vault/status
  * Returns whether the user has set up their vault (passphrase + secret key).
  */
-async function handleGET() {
+async function handleGET(_request: NextRequest) {
+  void _request;
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -22,6 +23,7 @@ async function handleGET() {
       vaultSetupAt: true,
       accountSalt: true,
       keyVersion: true,
+      recoveryKeySetAt: true,
     },
   });
 
@@ -33,6 +35,7 @@ async function handleGET() {
     setupRequired: !user.vaultSetupAt,
     accountSalt: user.accountSalt,
     keyVersion: user.keyVersion,
+    hasRecoveryKey: !!user.recoveryKeySetAt,
   });
 }
 

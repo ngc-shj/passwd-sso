@@ -32,7 +32,7 @@
 |---|--------|------|------|------|
 | 2.1 | 必須 | 環境変数バリデーション | 対応済み | Zod スキーマで起動時に 26 変数を一括検証 (`src/lib/env.ts` + `instrumentation.ts`)。PR #17 |
 | 2.2 | 必須 | アカウントロックアウト | 対応済み | DB 永続の段階的ロックアウト (5回→15分, 10回→1h, 15回→24h) + 24h 観測ウィンドウ + 監査ログ (`VAULT_UNLOCK_FAILED` / `VAULT_LOCKOUT_TRIGGERED`)。既存 rate limiter と併用。管理者通知は監査ログ/運用ログ出力まで (CloudWatch Alarm 自動化は次フェーズ) |
-| 2.3 | 必須 | パスフレーズリカバリフロー | 未着手 | リカバリキーの事前生成・安全な保管フロー、またはリセット時のデータ消失の明示的 UX |
+| 2.3 | 必須 | パスフレーズリカバリフロー | 対応済み | 回復キー (256-bit, HKDF+AES-256-GCM) による secretKey 復元 + 新パスフレーズ設定。Vault Reset (全データ削除) を最終手段として提供。未生成時はバナーで促進 (24h 後に再表示)。監査ログ 4 種。CSRF 防御 (Origin 検証) + Rate limit 付き |
 | 2.4 | 強く推奨 | CORS 設定の明示 | 未着手 | 許可 origin 固定 + credentials 方針 + preflight テスト。ブラウザ拡張からの API アクセスを考慮 |
 | 2.5 | 強く推奨 | 並行セッション管理 | 未着手 | セッション一覧表示、リモートログアウト、新規ログイン通知 |
 | 2.6 | 強く推奨 | 鍵素材メモリ管理の文書化 | 一部対応 | security-review.md に記載あり。Web Crypto API 制約下でのリスク受容判断をユーザー向けにも公開 |
@@ -96,6 +96,7 @@
 - ヘルスチェック (`/api/health/live` liveness + `/api/health/ready` readiness, DB/Redis チェック, タイムアウト保護)
 - 監視・アラート基盤 (CloudWatch メトリクスフィルタ + アラーム + EventBridge ECS 停止検知 + SNS 通知)
 - バックアップ・リカバリ (AWS Backup Vault Lock WORM + S3 Object Lock Compliance + クロスリージョンコピー + EventBridge 失敗通知)
+- パスフレーズリカバリフロー (回復キー: Base32 + HKDF + AES-256-GCM ラップ + Vault Reset: 全データ削除)
 - 本番コード `console.log` 0 件、`TODO/FIXME` 1 件
 
 ---
