@@ -165,9 +165,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         const data = await res.json();
         setHasRecoveryKey(!!data.hasRecoveryKey);
         setVaultStatus((prev) => {
+          // SETUP_REQUIRED always wins (vault was reset while unlocked)
+          if (data.setupRequired) return VAULT_STATUS.SETUP_REQUIRED;
           // Never overwrite "unlocked" — only the lock timer should do that
           if (prev === VAULT_STATUS.UNLOCKED) return prev;
-          return data.setupRequired ? VAULT_STATUS.SETUP_REQUIRED : VAULT_STATUS.LOCKED;
+          return VAULT_STATUS.LOCKED;
         });
       } catch {
         setVaultStatus((prev) => prev === VAULT_STATUS.UNLOCKED ? prev : VAULT_STATUS.LOCKED);
