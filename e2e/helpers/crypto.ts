@@ -116,6 +116,9 @@ export function wrapSecretKey(
 
 /**
  * SHA-256(authKey) → hex
+ *
+ * Not a password hash — authKey is already derived via PBKDF2 (600k iterations)
+ * then HKDF. SHA-256 here produces a fingerprint of the derived key.
  */
 export function computeAuthHash(authKey: Buffer): string {
   return createHash("sha256").update(authKey).digest("hex");
