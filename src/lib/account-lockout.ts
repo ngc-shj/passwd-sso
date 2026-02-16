@@ -195,6 +195,7 @@ export async function recordFailure(
           ip: meta.ip,
           userAgent: meta.userAgent,
         });
+        // IMPROVE(#40): implement admin notification (CloudWatch Alarm / SNS)
         getLogger().warn(
           {
             userId,
