@@ -65,13 +65,13 @@ Or with `run`:
 docker compose --profile migrate run --rm migrate
 ```
 
-### Start app (without migration)
+### Start all services (without migration)
 
 ```bash
 docker compose up
 ```
 
-`docker compose up` does **not** run the migrate service (it uses `profiles: ["migrate"]`).
+This starts `app`, `db`, `jackson`, and `redis` — but **not** the `migrate` service (it uses `profiles: ["migrate"]`).
 
 ## Migration Failure
 
