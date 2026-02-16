@@ -48,7 +48,8 @@ const VERIFIER_PBKDF2_BITS = 256;
 
 // ─── Safety Guards (pure functions for testability) ────────────
 
-const HOSTNAME_ALLOWLIST = ["localhost", "127.0.0.1", "::1", "db"];
+const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "::1"];
+const HOSTNAME_ALLOWLIST = [...LOOPBACK_HOSTS, "db"];
 const DBNAME_PATTERNS = ["test", "loadtest", "ci"];
 
 /**
@@ -76,12 +77,17 @@ export function validateDatabaseUrl(databaseUrl) {
     };
   }
 
-  const dbname = parsed.pathname.replace(/^\//, "").toLowerCase();
-  if (!DBNAME_PATTERNS.some((p) => dbname.includes(p))) {
-    return {
-      valid: false,
-      reason: `DATABASE_URL dbname "${dbname}" must contain one of [${DBNAME_PATTERNS.join(", ")}]`,
-    };
+  // For non-loopback compose hostnames (e.g. "db"), also require dbname pattern.
+  // Loopback addresses are guaranteed local — any dbname is acceptable.
+  if (!LOOPBACK_HOSTS.includes(hostname)) {
+    const dbname = parsed.pathname.replace(/^\//, "").toLowerCase();
+    if (!DBNAME_PATTERNS.some((p) => dbname.includes(p))) {
+      return {
+        valid: false,
+        reason: `DATABASE_URL dbname "${dbname}" must contain one of [${DBNAME_PATTERNS.join(", ")}]. ` +
+          `Loopback hosts (${LOOPBACK_HOSTS.join(", ")}) are exempt from this check.`,
+      };
+    }
   }
 
   return { valid: true };
@@ -350,6 +356,20 @@ async function runSmokeTest(pool) {
   const badUrlCheck = validateDatabaseUrl("postgresql://prod-db.example.com:5432/myapp");
   if (badUrlCheck.valid) {
     console.error("FAIL: Should have rejected non-allowlist hostname");
+    process.exit(1);
+  }
+
+  // Compose hostname "db" requires dbname pattern (test/loadtest/ci)
+  const composeNoPat = validateDatabaseUrl("postgresql://db:5432/passwd_sso");
+  if (composeNoPat.valid) {
+    console.error("FAIL: Should have rejected compose hostname without test/loadtest/ci dbname");
+    process.exit(1);
+  }
+
+  // Loopback is exempt from dbname pattern
+  const loopbackAny = validateDatabaseUrl("postgresql://localhost:5432/passwd_sso");
+  if (!loopbackAny.valid) {
+    console.error("FAIL: Should have accepted loopback hostname with any dbname");
     process.exit(1);
   }
 
