@@ -109,6 +109,40 @@ resource "aws_ecs_task_definition" "jackson" {
 }
 
 ################################################################################
+# Migrate Task Definition (one-off, run via ECS RunTask before app deploy)
+################################################################################
+
+resource "aws_ecs_task_definition" "migrate" {
+  family                   = "${local.name_prefix}-migrate"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = 256
+  memory                   = 512
+  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "migrate"
+      image     = var.app_image
+      essential = true
+      command   = ["npx", "prisma", "migrate", "deploy"]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.app.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "migrate"
+        }
+      }
+      secrets = [
+        { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
+      ]
+    }
+  ])
+  tags = local.tags
+}
+
+################################################################################
 # ECS Services
 ################################################################################
 
