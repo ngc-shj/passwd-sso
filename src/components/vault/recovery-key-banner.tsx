@@ -11,7 +11,8 @@ import { RecoveryKeyDialog } from "./recovery-key-dialog";
 const DISMISS_KEY = "psso:recovery-key-banner-dismissed";
 const DISMISS_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-function isDismissedInStorage(): boolean {
+/** @internal Exported for testing */
+export function isDismissedInStorage(): boolean {
   try {
     const ts = localStorage.getItem(DISMISS_KEY);
     if (ts) {

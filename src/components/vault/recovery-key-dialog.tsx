@@ -124,6 +124,8 @@ export function RecoveryKeyDialog({
     } catch {
       setError(tApi("unknownError"));
     } finally {
+      // Zero the secretKey copy from memory
+      secretKey.fill(0);
       setLoading(false);
     }
   }
