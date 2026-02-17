@@ -60,7 +60,7 @@ Add an entry to `scripts/license-allowlist.json` with all required fields:
 | `category` | `review-required` or `missing-metadata` |
 | `reason` | Technical/legal justification for approval |
 | `scope` | Distribution form: `saas-only`, `oss-distribution`, or `internal-only` |
-| `packageVersion` | Version or semver range at time of review |
+| `packageVersion` | Exact version at time of review (e.g., `1.2.4`). CI strict mode fails on mismatch |
 | `approvedBy` | Approver's GitHub handle |
 | `reviewedAt` | Approval date (ISO 8601) |
 | `expiresAt` | Re-review deadline (typically 1 year from approval) |
@@ -81,7 +81,7 @@ The PR reviewer verifies:
 An allowlist entry must be re-reviewed when:
 
 - The `expiresAt` date is reached (CI will fail in strict mode)
-- The dependency has a major version update
+- The installed version differs from `packageVersion` (CI strict mode will fail; update the allowlist entry after re-review)
 - The project's distribution form (`scope`) changes (e.g., from `saas-only` to `oss-distribution`)
 
 ## Missing Metadata
