@@ -74,7 +74,7 @@ describe("check-licenses.mjs", () => {
   });
 
   it("fails strict when allowlist JSON is malformed", () => {
-    const { exitCode } = run(
+    const { stdout, exitCode } = run(
       [
         "--name", "test",
         "--lockfile", resolve(FIXTURES, "lockfile-clean.json"),
@@ -84,6 +84,7 @@ describe("check-licenses.mjs", () => {
       { expectFail: true },
     );
     expect(exitCode).not.toBe(0);
+    expect(stdout).toContain("Failed to parse allowlist JSON");
   });
 
   it("warns on allowlist schema issues (missing required fields)", () => {
@@ -121,5 +122,22 @@ describe("check-licenses.mjs", () => {
     ]);
     expect(stdout).toContain("Expired exceptions");
     expect(stdout).toContain("[license-audit] PASSED");
+  });
+
+  it("fails strict when installed version differs from approved version", () => {
+    const { stdout, exitCode } = run(
+      [
+        "--name", "test",
+        "--lockfile", resolve(FIXTURES, "lockfile-lgpl.json"),
+        "--allowlist", resolve(FIXTURES, "allowlist-version-mismatch.json"),
+        "--strict",
+      ],
+      { expectFail: true },
+    );
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("Version mismatches");
+    expect(stdout).toContain("lgpl-pkg: approved=2.0.0, installed=1.0.0");
+    expect(stdout).toContain("FAILED (strict)");
+    expect(stdout).toContain("version mismatches");
   });
 });
