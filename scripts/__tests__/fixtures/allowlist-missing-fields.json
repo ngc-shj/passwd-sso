@@ -1,0 +1,8 @@
+{
+  "allowlist": [
+    {
+      "package": "lgpl-pkg",
+      "license": "LGPL-3.0"
+    }
+  ]
+}
