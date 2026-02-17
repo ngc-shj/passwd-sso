@@ -1,0 +1,8 @@
+{
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "name": "test-clean" },
+    "node_modules/lodash": { "version": "4.17.21", "license": "MIT" },
+    "node_modules/express": { "version": "4.18.2", "license": "MIT" }
+  }
+}

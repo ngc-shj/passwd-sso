@@ -1,0 +1,8 @@
+{
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "name": "test-gpl" },
+    "node_modules/lodash": { "version": "4.17.21", "license": "MIT" },
+    "node_modules/gpl-pkg": { "version": "1.0.0", "license": "GPL-3.0" }
+  }
+}

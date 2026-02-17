@@ -1,0 +1,17 @@
+{
+  "allowlist": [
+    {
+      "package": "lgpl-pkg",
+      "license": "LGPL-3.0",
+      "category": "review-required",
+      "reason": "Test expired entry",
+      "scope": "saas-only",
+      "packageVersion": "1.0.0",
+      "approvedBy": "test-user",
+      "reviewedAt": "2024-01-01",
+      "expiresAt": "2025-01-01",
+      "ticket": "#test",
+      "evidenceUrl": "https://example.com"
+    }
+  ]
+}
