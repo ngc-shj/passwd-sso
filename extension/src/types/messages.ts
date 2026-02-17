@@ -11,6 +11,7 @@ export type ExtensionMessage =
   | { type: "COPY_PASSWORD"; entryId: string }
   | { type: "AUTOFILL"; entryId: string; tabId: number }
   | { type: "GET_MATCHES_FOR_URL"; url: string; topUrl?: string }
+  | { type: "COPY_TOTP"; entryId: string }
   | {
       type: "AUTOFILL_FROM_CONTENT";
       entryId: string;
@@ -41,6 +42,7 @@ export type ExtensionResponse =
       vaultLocked: boolean;
       suppressInline?: boolean;
     }
+  | { type: "COPY_TOTP"; code: string | null; error?: string }
   | { type: "AUTOFILL_FROM_CONTENT"; ok: boolean; error?: string };
 
 export interface AutofillPayload {
@@ -48,6 +50,7 @@ export interface AutofillPayload {
   username: string;
   password: string;
   targetHint?: AutofillTargetHint;
+  totpCode?: string;
   awsAccountIdOrAlias?: string;
   awsIamUsername?: string;
 }

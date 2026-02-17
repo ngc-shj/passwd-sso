@@ -29,6 +29,7 @@ import {
   CMD_TRIGGER_AUTOFILL,
   EXT_ENTRY_TYPE,
 } from "../lib/constants";
+import { generateTOTPCode } from "../lib/totp";
 
 // ── In-memory state (token/userId persisted to chrome.storage.session) ──
 
@@ -474,6 +475,7 @@ async function performAutofillForEntry(
     userId?: string | null;
     email?: string | null;
     customFields?: Array<{ label?: string; value?: string; type?: string }>;
+    totp?: { secret: string; algorithm?: string; digits?: number; period?: number };
   };
   const overview = JSON.parse(overviewPlain) as { username?: string | null };
   const password = blob.password ?? null;
@@ -522,6 +524,15 @@ async function performAutofillForEntry(
       }
     : null;
 
+  let totpCode: string | undefined;
+  if (blob.totp?.secret) {
+    try {
+      totpCode = generateTOTPCode(blob.totp);
+    } catch {
+      // TOTP generation failure must not block username/password autofill
+    }
+  }
+
   if (!password) {
     return { ok: false, error: "NO_PASSWORD" };
   }
@@ -535,6 +546,7 @@ async function performAutofillForEntry(
       type: "AUTOFILL_FILL",
       username,
       password,
+      ...(totpCode ? { totpCode } : {}),
       ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
       ...(awsAccountIdOrAlias ? { awsAccountIdOrAlias } : {}),
       ...(awsIamUsername ? { awsIamUsername } : {}),
@@ -965,6 +977,84 @@ async function handleMessage(
       return;
     }
 
+    case "COPY_TOTP": {
+      if (!encryptionKey || !currentUserId) {
+        sendResponse({
+          type: "COPY_TOTP",
+          code: null,
+          error: "VAULT_LOCKED",
+        });
+        return;
+      }
+
+      try {
+        const res = await swFetch(extApiPath.passwordById(message.entryId));
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          sendResponse({
+            type: "COPY_TOTP",
+            code: null,
+            error: json.error || "FETCH_FAILED",
+          });
+          return;
+        }
+
+        const data = (await res.json()) as {
+          encryptedBlob: { ciphertext: string; iv: string; authTag: string };
+          aadVersion?: number;
+          id: string;
+        };
+
+        const aad =
+          (data.aadVersion ?? 0) >= 1
+            ? buildPersonalEntryAAD(currentUserId, data.id)
+            : undefined;
+        const plaintext = await decryptData(
+          data.encryptedBlob,
+          encryptionKey,
+          aad,
+        );
+        let totp: { secret: string; algorithm?: string; digits?: number; period?: number } | null = null;
+        try {
+          const blob = JSON.parse(plaintext) as {
+            totp?: { secret: string; algorithm?: string; digits?: number; period?: number };
+          };
+          totp = blob.totp ?? null;
+        } catch {
+          totp = null;
+        }
+
+        if (!totp?.secret) {
+          sendResponse({
+            type: "COPY_TOTP",
+            code: null,
+            error: "NO_TOTP",
+          });
+          return;
+        }
+
+        let code: string;
+        try {
+          code = generateTOTPCode(totp);
+        } catch {
+          sendResponse({
+            type: "COPY_TOTP",
+            code: null,
+            error: "INVALID_TOTP",
+          });
+          return;
+        }
+        sendResponse({ type: "COPY_TOTP", code });
+      } catch {
+        sendResponse({
+          type: "COPY_TOTP",
+          code: null,
+          error: "FETCH_FAILED",
+        });
+      }
+      return;
+    }
+
     case "AUTOFILL": {
       try {
         const result = await performAutofillForEntry(
@@ -1110,6 +1200,9 @@ chrome.runtime.onMessage.addListener(
             break;
           case "COPY_PASSWORD":
             sendResponse({ type: "COPY_PASSWORD", password: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
+            break;
+          case "COPY_TOTP":
+            sendResponse({ type: "COPY_TOTP", code: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
             break;
           default:
             sendResponse({ type: message.type, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);

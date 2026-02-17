@@ -191,4 +191,116 @@ describe("performAutofill", () => {
     expect((document.getElementById("user") as HTMLInputElement).value).toBe("normal-user");
     expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
   });
+
+  it("fills OTP field with autocomplete='one-time-code'", () => {
+    setupForm(`
+      <input type="text" id="user" name="username" />
+      <input type="password" id="pw" />
+      <input type="text" id="otp" autocomplete="one-time-code" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "alice",
+      password: "secret",
+      totpCode: "123456",
+    });
+
+    expect((document.getElementById("user") as HTMLInputElement).value).toBe("alice");
+    expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
+    expect((document.getElementById("otp") as HTMLInputElement).value).toBe("123456");
+  });
+
+  it("fills OTP field matched by hint pattern (name='otp-code')", () => {
+    setupForm(`
+      <input type="text" id="user" name="username" />
+      <input type="password" id="pw" />
+      <input type="text" id="otp" name="otp-code" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "alice",
+      password: "secret",
+      totpCode: "654321",
+    });
+
+    expect((document.getElementById("otp") as HTMLInputElement).value).toBe("654321");
+  });
+
+  it("fills OTP field matched by Japanese hint (placeholder='認証コード')", () => {
+    setupForm(`
+      <input type="text" id="user" name="username" />
+      <input type="password" id="pw" />
+      <input type="text" id="otp" placeholder="認証コード" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "alice",
+      password: "secret",
+      totpCode: "111222",
+    });
+
+    expect((document.getElementById("otp") as HTMLInputElement).value).toBe("111222");
+  });
+
+  it("does not fill OTP field when totpCode is undefined", () => {
+    setupForm(`
+      <input type="text" id="user" name="username" />
+      <input type="password" id="pw" />
+      <input type="text" id="otp" autocomplete="one-time-code" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "alice",
+      password: "secret",
+    });
+
+    expect((document.getElementById("otp") as HTMLInputElement).value).toBe("");
+  });
+
+  it("username and password fill are unaffected by totpCode presence", () => {
+    setupForm(`
+      <input type="text" id="user" name="username" />
+      <input type="password" id="pw" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "alice",
+      password: "secret",
+      totpCode: "123456",
+    });
+
+    expect((document.getElementById("user") as HTMLInputElement).value).toBe("alice");
+    expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
+  });
+
+  it("prefers OTP field in same form over OTP field in another form", () => {
+    setupForm(`
+      <form id="login-form">
+        <input type="text" id="user" name="username" />
+        <input type="password" id="pw" />
+        <input type="text" id="otp-same" autocomplete="one-time-code" />
+      </form>
+      <form id="other-form">
+        <input type="text" id="otp-other" autocomplete="one-time-code" />
+      </form>
+    `);
+
+    const userInput = document.getElementById("user") as HTMLInputElement;
+    userInput.focus();
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "alice",
+      password: "secret",
+      totpCode: "999888",
+    });
+
+    expect((document.getElementById("otp-same") as HTMLInputElement).value).toBe("999888");
+    expect((document.getElementById("otp-other") as HTMLInputElement).value).toBe("");
+  });
 });

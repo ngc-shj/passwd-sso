@@ -23,8 +23,10 @@
     "otherEntries": "その他のエントリ",
     "fill": "入力",
     "copy": "コピー",
+    "copyTotp": "TOTP",
     "autofillSent": "自動入力を送信しました",
     "passwordCopied": "パスワードをコピーしました",
+    "totpCopied": "TOTP コードをコピーしました (30秒)",
     "enableAutofill": "このサイトで自動入力を有効にする",
     "autofillEnabled": "このサイトで自動入力が有効です",
     "httpWarning": "このページは HTTP です。安全でないページへの入力にはリスクがあります。",
@@ -59,6 +61,8 @@
     "autofillFailed": "自動入力に失敗しました。",
     "invalidUrl": "URL が正しくありません。",
     "httpsRequired": "HTTPS 必須（localhost は HTTP 可）",
-    "autoLockInvalid": "自動ロックは 0 以上にしてください"
+    "autoLockInvalid": "自動ロックは 0 以上にしてください",
+    "noTotpConfigured": "この項目に TOTP が設定されていません",
+    "invalidTotp": "この項目の TOTP 設定が不正です"
   }
 }
