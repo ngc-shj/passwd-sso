@@ -246,5 +246,5 @@ jobs:
           cache: "npm"
 
       # Lockfile-based check (no install required)
-      - run: npm run licenses:check
-      - run: npm run licenses:check:ext
+      - run: npm run licenses:check:strict
+      - run: npm run licenses:check:ext:strict

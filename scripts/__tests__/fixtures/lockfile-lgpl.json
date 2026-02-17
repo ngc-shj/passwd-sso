@@ -1,0 +1,9 @@
+{
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "name": "test-lgpl" },
+    "node_modules/lodash": { "version": "4.17.21", "license": "MIT" },
+    "node_modules/lgpl-pkg": { "version": "1.0.0", "license": "LGPL-3.0" },
+    "node_modules/missing-pkg": { "version": "1.0.0" }
+  }
+}

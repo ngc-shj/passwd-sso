@@ -1,0 +1,30 @@
+{
+  "allowlist": [
+    {
+      "package": "lgpl-pkg",
+      "license": "LGPL-3.0",
+      "category": "review-required",
+      "reason": "Test entry",
+      "scope": "saas-only",
+      "packageVersion": "2.0.0",
+      "approvedBy": "test",
+      "reviewedAt": "2026-01-01",
+      "expiresAt": "2027-01-01",
+      "ticket": "#test",
+      "evidenceUrl": "https://example.com"
+    },
+    {
+      "package": "missing-pkg",
+      "license": "MIT",
+      "category": "missing-metadata",
+      "reason": "Test entry",
+      "scope": "saas-only",
+      "packageVersion": "1.0.0",
+      "approvedBy": "test",
+      "reviewedAt": "2026-01-01",
+      "expiresAt": "2027-01-01",
+      "ticket": "#test",
+      "evidenceUrl": "https://example.com"
+    }
+  ]
+}
