@@ -521,10 +521,11 @@ describe("background message flow", () => {
       username: "alice",
       password: "secret",
     });
+    // Direct fallback should NOT run when message-based autofill succeeds.
     const directFallbackCall = chromeMock?.scripting.executeScript.mock.calls.find(
       (call) => Array.isArray((call[0] as { args?: unknown[] }).args),
-    )?.[0] as { args?: unknown[] } | undefined;
-    expect(directFallbackCall?.args?.[2]).toBeNull();
+    );
+    expect(directFallbackCall).toBeUndefined();
   });
 
   it("autofills with blob username fallback when overview username is missing", async () => {
@@ -779,6 +780,10 @@ describe("background message flow", () => {
       .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
       .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
 
+    // Message-based autofill must fail so direct fallback runs.
+    chromeMock?.tabs.sendMessage.mockRejectedValueOnce(
+      new Error("Could not establish connection"),
+    );
     // 1st call: inject file, 2nd call: direct fallback with hint -> unserializable, 3rd: retry with null hint
     chromeMock?.scripting.executeScript
       .mockResolvedValueOnce([])
