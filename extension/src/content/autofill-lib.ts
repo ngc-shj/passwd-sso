@@ -127,6 +127,40 @@ function findFocusedTextInput(): HTMLInputElement | null {
   return active;
 }
 
+function getHints(input: HTMLInputElement): string {
+  const id = input.id;
+  const label =
+    (id
+      ? document.querySelector(`label[for="${escapeSelectorValue(id)}"]`)?.textContent ?? ""
+      : "") +
+    (input.getAttribute("aria-label") ?? "") +
+    (input.placeholder ?? "") +
+    (input.name ?? "") +
+    (input.id ?? "") +
+    (input.getAttribute("formcontrolname") ?? "");
+  return label.toLowerCase();
+}
+
+function findOtpInput(inputs: HTMLInputElement[]): HTMLInputElement | null {
+  const byAutocomplete = inputs.find(
+    (i) => isUsableInput(i) && i.autocomplete === "one-time-code",
+  );
+  if (byAutocomplete) return byAutocomplete;
+
+  const otpHintRe =
+    /(otp|totp|2fa|two.?factor|mfa|verification.?code|security.?code|auth(?:entication)?.?code|one.?time)/i;
+  const otpHintJaRe = /(認証コード|確認コード|ワンタイム|二段階|セキュリティコード)/;
+
+  return (
+    inputs.find((i) => {
+      if (!isUsableInput(i)) return false;
+      if (!["text", "tel", "number"].includes(i.type)) return false;
+      const hints = getHints(i);
+      return otpHintRe.test(hints) || otpHintJaRe.test(hints);
+    }) ?? null
+  );
+}
+
 export function performAutofill(payload: AutofillPayload) {
   const inputs = Array.from(
     document.querySelectorAll("input")
@@ -173,20 +207,6 @@ export function performAutofill(payload: AutofillPayload) {
     host === "sign-in.aws.amazon.com" ||
     host.endsWith(".sign-in.aws.amazon.com");
 
-  const getHints = (input: HTMLInputElement): string => {
-    const id = input.id;
-    const label =
-      (id
-        ? document.querySelector(`label[for="${escapeSelectorValue(id)}"]`)?.textContent ?? ""
-        : "") +
-      (input.getAttribute("aria-label") ?? "") +
-      (input.placeholder ?? "") +
-      (input.name ?? "") +
-      (input.id ?? "") +
-      (input.getAttribute("formcontrolname") ?? "");
-    return label.toLowerCase();
-  };
-
   const findAwsAccountInput = (): HTMLInputElement | null => {
     return (
       inputs.find((i) => {
@@ -222,8 +242,21 @@ export function performAutofill(payload: AutofillPayload) {
   if (!hasAwsSpecificValues && usernameInput && payload.username) {
     setInputValue(usernameInput, payload.username);
   }
-  if (passwordInput) {
+  if (passwordInput && payload.password) {
     setInputValue(passwordInput, payload.password);
+  }
+
+  if (payload.totpCode) {
+    const otpForm = passwordInput?.form ?? scopeForm;
+    const otpScopedInputs = otpForm
+      ? (Array.from(otpForm.querySelectorAll("input")) as HTMLInputElement[])
+      : null;
+    const otpInput =
+      (otpScopedInputs ? findOtpInput(otpScopedInputs) : null) ??
+      findOtpInput(inputs);
+    if (otpInput) {
+      setInputValue(otpInput, payload.totpCode);
+    }
   }
 }
 

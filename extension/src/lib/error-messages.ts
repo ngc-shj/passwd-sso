@@ -13,6 +13,8 @@ const ERROR_KEY_MAP: Record<string, string> = {
   INVALID_URL: "errors.invalidUrl",
   HTTPS_REQUIRED: "errors.httpsRequired",
   AUTO_LOCK_INVALID: "errors.autoLockInvalid",
+  NO_TOTP: "errors.noTotpConfigured",
+  INVALID_TOTP: "errors.invalidTotp",
 };
 
 export function humanizeError(code: string): string {

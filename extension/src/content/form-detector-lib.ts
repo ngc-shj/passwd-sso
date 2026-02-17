@@ -167,6 +167,10 @@ const USERNAME_HINT_JA_RE =
 const NON_LOGIN_HINT_RE = /\b(search|query|keyword|coupon|promo|otp|code|verification)\b/i;
 const NON_LOGIN_HINT_JA_RE = /(検索|クーポン|認証コード|確認コード|ワンタイム)/;
 
+const OTP_HINT_RE =
+  /(otp|totp|2fa|two.?factor|mfa|verification.?code|security.?code|auth(?:entication)?.?code|one.?time)/i;
+const OTP_HINT_JA_RE = /(認証コード|確認コード|ワンタイム|二段階|セキュリティコード)/;
+
 function escapeSelectorValue(value: string): string {
   // jsdom in tests may not implement CSS.escape.
   const esc = (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS?.escape;
@@ -216,6 +220,32 @@ export function isLikelyUsernameInput(input: HTMLInputElement): boolean {
   if (!USERNAME_HINT_RE.test(hints) && !USERNAME_HINT_JA_RE.test(hints)) return false;
   if (NON_LOGIN_HINT_RE.test(hints) || NON_LOGIN_HINT_JA_RE.test(hints)) return false;
   return true;
+}
+
+export function isLikelyOtpInput(input: HTMLInputElement): boolean {
+  if (!isUsableInput(input)) return false;
+  if (!["text", "tel", "number"].includes(input.type)) return false;
+
+  const autocomplete = (input.autocomplete || "").toLowerCase().trim();
+  if (autocomplete === "one-time-code") return true;
+
+  const hints = [
+    input.name,
+    input.id,
+    input.placeholder,
+    input.getAttribute("aria-label"),
+    input.getAttribute("formcontrolname"),
+    (() => {
+      const id = input.id;
+      if (!id) return "";
+      return document.querySelector(`label[for="${escapeSelectorValue(id)}"]`)?.textContent ?? "";
+    })(),
+  ]
+    .filter((v): v is string => Boolean(v && v.trim()))
+    .join(" ");
+
+  if (!hints) return false;
+  return OTP_HINT_RE.test(hints) || OTP_HINT_JA_RE.test(hints);
 }
 
 // ── Dropdown integration ────────────────────────────────────
@@ -367,7 +397,8 @@ export function initFormDetector(): FormDetectorCleanup {
     const isPasswordInput = input.type === "password";
     const isAssociatedUsername = findAssociatedPasswordInput(input) !== null;
     const isLikelyUsername = isLikelyUsernameInput(input);
-    return isPasswordInput || isAssociatedUsername || isLikelyUsername;
+    const isOtp = isLikelyOtpInput(input);
+    return isPasswordInput || isAssociatedUsername || isLikelyUsername || isOtp;
   };
 
   const focusHandler = (e: FocusEvent) => {

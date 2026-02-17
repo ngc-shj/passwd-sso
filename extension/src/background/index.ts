@@ -29,6 +29,7 @@ import {
   CMD_TRIGGER_AUTOFILL,
   EXT_ENTRY_TYPE,
 } from "../lib/constants";
+import { generateTOTPCode } from "../lib/totp";
 
 // ── In-memory state (token/userId persisted to chrome.storage.session) ──
 
@@ -395,12 +396,17 @@ type RawEntry = {
   entryType: string;
   aadVersion?: number;
   urlHost?: string;
+  deletedAt?: string | null;
+  isArchived?: boolean;
 };
 
 async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
   if (!encryptionKey || !currentUserId) return [];
+  // Defense-in-depth: API should already filter these, but exclude
+  // trashed/archived entries client-side in case of stale cache or API bug.
+  const active = raw.filter((item) => !item.deletedAt && !item.isArchived);
   const entries: DecryptedEntry[] = [];
-  for (const item of raw) {
+  for (const item of active) {
     const aad =
       (item.aadVersion ?? 0) >= 1
         ? buildPersonalEntryAAD(currentUserId, item.id)
@@ -474,6 +480,7 @@ async function performAutofillForEntry(
     userId?: string | null;
     email?: string | null;
     customFields?: Array<{ label?: string; value?: string; type?: string }>;
+    totp?: { secret: string; algorithm?: string; digits?: number; period?: number };
   };
   const overview = JSON.parse(overviewPlain) as { username?: string | null };
   const password = blob.password ?? null;
@@ -522,10 +529,20 @@ async function performAutofillForEntry(
       }
     : null;
 
-  if (!password) {
+  let totpCode: string | undefined;
+  if (blob.totp?.secret) {
+    try {
+      totpCode = generateTOTPCode(blob.totp);
+    } catch {
+      // TOTP generation failure must not block username/password autofill
+    }
+  }
+
+  if (!password && !totpCode) {
     return { ok: false, error: "NO_PASSWORD" };
   }
 
+  let messageFillSucceeded = false;
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
@@ -534,11 +551,13 @@ async function performAutofillForEntry(
     await chrome.tabs.sendMessage(tabId, {
       type: "AUTOFILL_FILL",
       username,
-      password,
+      ...(password ? { password } : {}),
+      ...(totpCode ? { totpCode } : {}),
       ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
       ...(awsAccountIdOrAlias ? { awsAccountIdOrAlias } : {}),
       ...(awsIamUsername ? { awsIamUsername } : {}),
     });
+    messageFillSucceeded = true;
   } catch {
     // Continue to direct fallback injection below.
   }
@@ -552,7 +571,7 @@ async function performAutofillForEntry(
       target: { tabId, allFrames: true },
       args: [
         username,
-        password,
+        password ?? "",
         hintArg,
         awsAccountIdOrAlias,
         awsIamUsername,
@@ -687,16 +706,21 @@ async function performAutofillForEntry(
         if (accountInput && awsAccountIdOrAliasArg) setInputValue(accountInput, awsAccountIdOrAliasArg);
         if (iamInput && awsIamUsernameArg) setInputValue(iamInput, awsIamUsernameArg);
       }
-      if (passwordInput) setInputValue(passwordInput, passwordArg);
+      if (passwordInput && passwordArg) setInputValue(passwordInput, passwordArg);
       },
     });
 
-  try {
-    await injectDirectAutofill(serializableTargetHint);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (!/unserializable/i.test(message)) throw err;
-    await injectDirectAutofill(null);
+  // Only run direct fallback when message-based autofill failed.
+  // The direct fallback doesn't support TOTP and would overwrite OTP fields
+  // with username values, so running both approaches causes conflicts.
+  if (!messageFillSucceeded) {
+    try {
+      await injectDirectAutofill(serializableTargetHint);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!/unserializable/i.test(message)) throw err;
+      await injectDirectAutofill(null);
+    }
   }
   return { ok: true };
 }
@@ -889,6 +913,9 @@ async function handleMessage(
 
         const raw = (await res.json()) as RawEntry[];
         const entries = await decryptOverviews(raw);
+        // Update cache so inline suggestions stay in sync with popup.
+        cachedEntries = entries;
+        cacheTimestamp = Date.now();
         sendResponse({ type: "FETCH_PASSWORDS", entries });
       } catch (err) {
         sendResponse({
@@ -960,6 +987,84 @@ async function handleMessage(
           type: "COPY_PASSWORD",
           password: null,
           error: err instanceof Error ? err.message : "FETCH_FAILED",
+        });
+      }
+      return;
+    }
+
+    case "COPY_TOTP": {
+      if (!encryptionKey || !currentUserId) {
+        sendResponse({
+          type: "COPY_TOTP",
+          code: null,
+          error: "VAULT_LOCKED",
+        });
+        return;
+      }
+
+      try {
+        const res = await swFetch(extApiPath.passwordById(message.entryId));
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          sendResponse({
+            type: "COPY_TOTP",
+            code: null,
+            error: json.error || "FETCH_FAILED",
+          });
+          return;
+        }
+
+        const data = (await res.json()) as {
+          encryptedBlob: { ciphertext: string; iv: string; authTag: string };
+          aadVersion?: number;
+          id: string;
+        };
+
+        const aad =
+          (data.aadVersion ?? 0) >= 1
+            ? buildPersonalEntryAAD(currentUserId, data.id)
+            : undefined;
+        const plaintext = await decryptData(
+          data.encryptedBlob,
+          encryptionKey,
+          aad,
+        );
+        let totp: { secret: string; algorithm?: string; digits?: number; period?: number } | null = null;
+        try {
+          const blob = JSON.parse(plaintext) as {
+            totp?: { secret: string; algorithm?: string; digits?: number; period?: number };
+          };
+          totp = blob.totp ?? null;
+        } catch {
+          totp = null;
+        }
+
+        if (!totp?.secret) {
+          sendResponse({
+            type: "COPY_TOTP",
+            code: null,
+            error: "NO_TOTP",
+          });
+          return;
+        }
+
+        let code: string;
+        try {
+          code = generateTOTPCode(totp);
+        } catch {
+          sendResponse({
+            type: "COPY_TOTP",
+            code: null,
+            error: "INVALID_TOTP",
+          });
+          return;
+        }
+        sendResponse({ type: "COPY_TOTP", code });
+      } catch {
+        sendResponse({
+          type: "COPY_TOTP",
+          code: null,
+          error: "FETCH_FAILED",
         });
       }
       return;
@@ -1110,6 +1215,9 @@ chrome.runtime.onMessage.addListener(
             break;
           case "COPY_PASSWORD":
             sendResponse({ type: "COPY_PASSWORD", password: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
+            break;
+          case "COPY_TOTP":
+            sendResponse({ type: "COPY_TOTP", code: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
             break;
           default:
             sendResponse({ type: message.type, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);

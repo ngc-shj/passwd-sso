@@ -23,8 +23,10 @@
     "otherEntries": "Other entries",
     "fill": "Fill",
     "copy": "Copy",
+    "copyTotp": "TOTP",
     "autofillSent": "Autofill sent",
     "passwordCopied": "Password copied",
+    "totpCopied": "TOTP code copied (30s)",
     "enableAutofill": "Enable autofill for this site",
     "autofillEnabled": "Autofill enabled for this site",
     "httpWarning": "This page uses HTTP. Filling credentials on insecure pages is risky.",
@@ -59,6 +61,8 @@
     "autofillFailed": "Autofill failed.",
     "invalidUrl": "Invalid URL",
     "httpsRequired": "HTTPS required (HTTP allowed for localhost).",
-    "autoLockInvalid": "Auto-lock minutes must be 0 or more"
+    "autoLockInvalid": "Auto-lock minutes must be 0 or more",
+    "noTotpConfigured": "No TOTP configured for this entry",
+    "invalidTotp": "TOTP configuration is invalid for this entry"
   }
 }
