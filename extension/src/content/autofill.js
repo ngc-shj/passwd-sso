@@ -62,6 +62,44 @@ function findUsernameInput(inputs, passwordInput) {
   return null;
 }
 
+function escapeSelectorValue(value) {
+  return value.replace(/["\\]/g, "\\$&");
+}
+
+function getHints(input) {
+  var id = input.id;
+  var label =
+    (id
+      ? (document.querySelector('label[for="' + escapeSelectorValue(id) + '"]') || {}).textContent || ""
+      : "") +
+    (input.getAttribute("aria-label") || "") +
+    (input.placeholder || "") +
+    (input.name || "") +
+    (input.id || "") +
+    (input.getAttribute("formcontrolname") || "");
+  return label.toLowerCase();
+}
+
+function findOtpInput(inputs) {
+  var byAutocomplete = inputs.find(function (i) {
+    return isUsableInput(i) && i.autocomplete === "one-time-code";
+  });
+  if (byAutocomplete) return byAutocomplete;
+
+  var otpHintRe =
+    /(otp|totp|2fa|two.?factor|mfa|verification.?code|security.?code|auth(?:entication)?.?code|one.?time)/i;
+  var otpHintJaRe = /(認証コード|確認コード|ワンタイム|二段階|セキュリティコード)/;
+
+  return (
+    inputs.find(function (i) {
+      if (!isUsableInput(i)) return false;
+      if (["text", "tel", "number"].indexOf(i.type) === -1) return false;
+      var hints = getHints(i);
+      return otpHintRe.test(hints) || otpHintJaRe.test(hints);
+    }) || null
+  );
+}
+
 function performAutofill(payload) {
   var inputs = Array.from(document.querySelectorAll("input"));
   var passwordInput = findPasswordInput(inputs);
@@ -72,6 +110,19 @@ function performAutofill(payload) {
   }
   if (passwordInput) {
     setInputValue(passwordInput, payload.password);
+  }
+
+  if (payload.totpCode) {
+    var otpForm = (passwordInput && passwordInput.form) || null;
+    var otpScopedInputs = otpForm
+      ? Array.from(otpForm.querySelectorAll("input"))
+      : null;
+    var otpInput =
+      (otpScopedInputs ? findOtpInput(otpScopedInputs) : null) ||
+      findOtpInput(inputs);
+    if (otpInput) {
+      setInputValue(otpInput, payload.totpCode);
+    }
   }
 }
 

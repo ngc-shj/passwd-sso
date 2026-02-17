@@ -148,7 +148,7 @@ function findOtpInput(inputs: HTMLInputElement[]): HTMLInputElement | null {
   if (byAutocomplete) return byAutocomplete;
 
   const otpHintRe =
-    /\b(otp|totp|2fa|two.?factor|mfa|verification.?code|security.?code|auth(entication)?.?code|one.?time)\b/i;
+    /(otp|totp|2fa|two.?factor|mfa|verification.?code|security.?code|auth(?:entication)?.?code|one.?time)/i;
   const otpHintJaRe = /(認証コード|確認コード|ワンタイム|二段階|セキュリティコード)/;
 
   return (

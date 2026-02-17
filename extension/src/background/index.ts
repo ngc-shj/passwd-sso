@@ -533,10 +533,11 @@ async function performAutofillForEntry(
     }
   }
 
-  if (!password) {
+  if (!password && !totpCode) {
     return { ok: false, error: "NO_PASSWORD" };
   }
 
+  let messageFillSucceeded = false;
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
@@ -545,12 +546,13 @@ async function performAutofillForEntry(
     await chrome.tabs.sendMessage(tabId, {
       type: "AUTOFILL_FILL",
       username,
-      password,
+      password: password ?? "",
       ...(totpCode ? { totpCode } : {}),
       ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
       ...(awsAccountIdOrAlias ? { awsAccountIdOrAlias } : {}),
       ...(awsIamUsername ? { awsIamUsername } : {}),
     });
+    messageFillSucceeded = true;
   } catch {
     // Continue to direct fallback injection below.
   }
@@ -564,7 +566,7 @@ async function performAutofillForEntry(
       target: { tabId, allFrames: true },
       args: [
         username,
-        password,
+        password ?? "",
         hintArg,
         awsAccountIdOrAlias,
         awsIamUsername,
@@ -703,12 +705,17 @@ async function performAutofillForEntry(
       },
     });
 
-  try {
-    await injectDirectAutofill(serializableTargetHint);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (!/unserializable/i.test(message)) throw err;
-    await injectDirectAutofill(null);
+  // Only run direct fallback when message-based autofill failed.
+  // The direct fallback doesn't support TOTP and would overwrite OTP fields
+  // with username values, so running both approaches causes conflicts.
+  if (!messageFillSucceeded) {
+    try {
+      await injectDirectAutofill(serializableTargetHint);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!/unserializable/i.test(message)) throw err;
+      await injectDirectAutofill(null);
+    }
   }
   return { ok: true };
 }
