@@ -546,7 +546,7 @@ async function performAutofillForEntry(
     await chrome.tabs.sendMessage(tabId, {
       type: "AUTOFILL_FILL",
       username,
-      password: password ?? "",
+      ...(password ? { password } : {}),
       ...(totpCode ? { totpCode } : {}),
       ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
       ...(awsAccountIdOrAlias ? { awsAccountIdOrAlias } : {}),
@@ -701,7 +701,7 @@ async function performAutofillForEntry(
         if (accountInput && awsAccountIdOrAliasArg) setInputValue(accountInput, awsAccountIdOrAliasArg);
         if (iamInput && awsIamUsernameArg) setInputValue(iamInput, awsIamUsernameArg);
       }
-      if (passwordInput) setInputValue(passwordInput, passwordArg);
+      if (passwordInput && passwordArg) setInputValue(passwordInput, passwordArg);
       },
     });
 

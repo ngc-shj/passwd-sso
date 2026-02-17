@@ -242,7 +242,7 @@ export function performAutofill(payload: AutofillPayload) {
   if (!hasAwsSpecificValues && usernameInput && payload.username) {
     setInputValue(usernameInput, payload.username);
   }
-  if (passwordInput) {
+  if (passwordInput && payload.password) {
     setInputValue(passwordInput, payload.password);
   }
 

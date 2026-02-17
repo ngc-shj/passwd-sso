@@ -108,7 +108,7 @@ function performAutofill(payload) {
   if (usernameInput && payload.username) {
     setInputValue(usernameInput, payload.username);
   }
-  if (passwordInput) {
+  if (passwordInput && payload.password) {
     setInputValue(passwordInput, payload.password);
   }
 

@@ -278,6 +278,42 @@ describe("performAutofill", () => {
     expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
   });
 
+  it("does not overwrite password field when TOTP-only (no password)", () => {
+    setupForm(`
+      <input type="text" id="user" name="username" />
+      <input type="password" id="pw" value="existing-password" />
+      <input type="text" id="otp" autocomplete="one-time-code" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "alice",
+      password: "",
+      totpCode: "123456",
+    });
+
+    expect((document.getElementById("pw") as HTMLInputElement).value).toBe("existing-password");
+    expect((document.getElementById("otp") as HTMLInputElement).value).toBe("123456");
+  });
+
+  it("does not overwrite password field when password is undefined", () => {
+    setupForm(`
+      <input type="text" id="user" name="username" />
+      <input type="password" id="pw" value="existing-password" />
+      <input type="text" id="otp" autocomplete="one-time-code" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "",
+      password: "",
+      totpCode: "654321",
+    });
+
+    expect((document.getElementById("pw") as HTMLInputElement).value).toBe("existing-password");
+    expect((document.getElementById("otp") as HTMLInputElement).value).toBe("654321");
+  });
+
   it("prefers OTP field in same form over OTP field in another form", () => {
     setupForm(`
       <form id="login-form">
