@@ -5,7 +5,11 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["src/**/*.test.{ts,tsx}", "e2e/helpers/*.test.ts"],
+    include: [
+      "src/**/*.test.{ts,tsx}",
+      "e2e/helpers/*.test.ts",
+      "scripts/__tests__/**/*.test.mjs",
+    ],
     setupFiles: ["src/__tests__/setup.ts"],
     coverage: {
       provider: "v8",

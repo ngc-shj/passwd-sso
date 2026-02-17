@@ -1,20 +1,43 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const FORBIDDEN_PATTERNS = [/AGPL/i, /\bGPL\b/i];
-const REVIEW_PATTERNS = [/LGPL/i, /MPL/i, /EPL/i, /CDDL/i, /EUPL/i, /BlueOak/i, /CC-BY/i];
+const REVIEW_PATTERNS = [/LGPL/i, /MPL/i, /EPL/i, /CDDL/i, /EUPL/i, /CC-BY/i];
+
+const REQUIRED_ALLOWLIST_FIELDS = [
+  "package",
+  "license",
+  "category",
+  "reason",
+  "scope",
+  "packageVersion",
+  "approvedBy",
+  "reviewedAt",
+  "expiresAt",
+  "ticket",
+  "evidenceUrl",
+];
 
 function parseArgs(argv) {
   const args = {
     lockfile: "package-lock.json",
     name: "root",
     includeDev: false,
+    strict: false,
+    allowlistPath: null,
   };
   for (let i = 2; i < argv.length; i += 1) {
     const v = argv[i];
     if (v === "--include-dev") {
       args.includeDev = true;
+      continue;
+    }
+    if (v === "--strict") {
+      args.strict = true;
       continue;
     }
     if (v === "--lockfile") {
@@ -27,23 +50,73 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
+    if (v === "--allowlist") {
+      args.allowlistPath = argv[i + 1];
+      i += 1;
+      continue;
+    }
     throw new Error(`Unknown argument: ${v}`);
   }
   return args;
+}
+
+function loadAllowlist(allowlistPath) {
+  const filePath =
+    allowlistPath || resolve(__dirname, "license-allowlist.json");
+  let raw;
+  try {
+    raw = readFileSync(filePath, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return { entries: [], schemaWarnings: [] };
+    throw err;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (parseErr) {
+    console.error(`[license-audit] ERROR: Failed to parse allowlist JSON: ${filePath}`);
+    console.error(`  ${parseErr.message}`);
+    process.exit(1);
+  }
+  const entries = data.allowlist ?? [];
+  const schemaWarnings = [];
+
+  for (const entry of entries) {
+    const missing = REQUIRED_ALLOWLIST_FIELDS.filter((f) => !entry[f]);
+    if (missing.length > 0) {
+      schemaWarnings.push(
+        `${entry.package || "unknown"}: missing fields: ${missing.join(", ")}`,
+      );
+    }
+  }
+
+  return { entries, schemaWarnings };
 }
 
 function normalizePkgName(k) {
   return k.startsWith("node_modules/") ? k.slice("node_modules/".length) : k;
 }
 
-function auditLockfile(lockfilePath, { includeDev }) {
+function auditLockfile(lockfilePath, { includeDev }, allowlist) {
   const raw = readFileSync(lockfilePath, "utf8");
   const lock = JSON.parse(raw);
   const packages = lock.packages ?? {};
 
+  const today = new Date().toISOString().slice(0, 10);
+  const allowlistMap = new Map();
+  for (const entry of allowlist.entries) {
+    allowlistMap.set(entry.package, entry);
+  }
+
   const forbidden = [];
-  const review = [];
-  const missing = [];
+  const allowlisted = [];
+  const expired = [];
+  const unreviewed = [];
+  const missingAllowlisted = [];
+  const missingExpired = [];
+  const missingUnreviewed = [];
+  const versionMismatches = [];
   let scanned = 0;
 
   for (const [pkgPath, meta] of Object.entries(packages)) {
@@ -53,8 +126,23 @@ function auditLockfile(lockfilePath, { includeDev }) {
 
     const license = (meta.license ?? "").toString().trim();
     const name = normalizePkgName(pkgPath);
+
+    const version = (meta.version ?? "").toString().trim();
+
     if (!license) {
-      missing.push(name);
+      const entry = allowlistMap.get(name);
+      if (entry) {
+        if (entry.packageVersion && version && entry.packageVersion !== version) {
+          versionMismatches.push(`${name}: approved=${entry.packageVersion}, installed=${version}`);
+        }
+        if (entry.expiresAt && entry.expiresAt < today) {
+          missingExpired.push(name);
+        } else {
+          missingAllowlisted.push(name);
+        }
+      } else {
+        missingUnreviewed.push(name);
+      }
       continue;
     }
     if (FORBIDDEN_PATTERNS.some((re) => re.test(license))) {
@@ -62,43 +150,115 @@ function auditLockfile(lockfilePath, { includeDev }) {
       continue;
     }
     if (REVIEW_PATTERNS.some((re) => re.test(license))) {
-      review.push({ name, license });
+      const entry = allowlistMap.get(name);
+      if (entry) {
+        if (entry.packageVersion && version && entry.packageVersion !== version) {
+          versionMismatches.push(`${name}: approved=${entry.packageVersion}, installed=${version}`);
+        }
+        if (entry.expiresAt && entry.expiresAt < today) {
+          expired.push({ name, license });
+        } else {
+          allowlisted.push({ name, license });
+        }
+      } else {
+        unreviewed.push({ name, license });
+      }
     }
   }
 
-  return { scanned, forbidden, review, missing };
+  return {
+    scanned,
+    forbidden,
+    allowlisted,
+    expired,
+    unreviewed,
+    missingAllowlisted,
+    missingExpired,
+    missingUnreviewed,
+    versionMismatches,
+  };
 }
 
 function printList(title, rows) {
   if (rows.length === 0) return;
   console.log(`\n${title} (${rows.length})`);
   for (const row of rows.slice(0, 30)) {
-    if (typeof row === "string") console.log(`- ${row}`);
-    else console.log(`- ${row.name} (${row.license})`);
+    if (typeof row === "string") console.log(`  - ${row}`);
+    else console.log(`  - ${row.name} (${row.license})`);
   }
   if (rows.length > 30) {
-    console.log(`... and ${rows.length - 30} more`);
+    console.log(`  ... and ${rows.length - 30} more`);
   }
 }
 
 function main() {
   const args = parseArgs(process.argv);
   const lockfilePath = resolve(process.cwd(), args.lockfile);
-  const result = auditLockfile(lockfilePath, { includeDev: args.includeDev });
+  const allowlist = loadAllowlist(args.allowlistPath);
+  const result = auditLockfile(
+    lockfilePath,
+    { includeDev: args.includeDev },
+    allowlist,
+  );
 
   console.log(`[license-audit] target=${args.name}`);
   console.log(`[license-audit] lockfile=${args.lockfile}`);
   console.log(`[license-audit] scanned_packages=${result.scanned}`);
+  if (args.strict) console.log(`[license-audit] mode=strict`);
 
   printList("Forbidden licenses (fail)", result.forbidden);
-  printList("Review required licenses (warning)", result.review);
-  printList("Missing license metadata (warning)", result.missing);
+  printList("Allowlisted exceptions (ok)", result.allowlisted);
+  printList("Allowlisted missing-metadata (ok)", result.missingAllowlisted);
+  printList("Expired exceptions (review needed)", result.expired);
+  printList("Expired missing-metadata (review needed)", result.missingExpired);
+  printList("Unreviewed review-required licenses", result.unreviewed);
+  printList("Unreviewed missing license metadata", result.missingUnreviewed);
+
+  if (result.versionMismatches.length > 0) {
+    console.log(`\nVersion mismatches (${result.versionMismatches.length})`);
+    for (const w of result.versionMismatches) {
+      console.log(`  - ${w}`);
+    }
+  }
+
+  if (allowlist.schemaWarnings.length > 0) {
+    console.log(`\nAllowlist schema warnings (${allowlist.schemaWarnings.length})`);
+    for (const w of allowlist.schemaWarnings) {
+      console.log(`  - ${w}`);
+    }
+  }
+
+  const hasExpired = result.expired.length + result.missingExpired.length > 0;
+  const hasUnreviewed =
+    result.unreviewed.length + result.missingUnreviewed.length > 0;
+  const hasSchemaIssues = allowlist.schemaWarnings.length > 0;
+  const hasVersionMismatches = result.versionMismatches.length > 0;
 
   if (result.forbidden.length > 0) {
     console.error("\n[license-audit] FAILED: forbidden licenses detected.");
     process.exit(1);
   }
-  console.log("\n[license-audit] PASSED");
+
+  if (args.strict) {
+    const failures = [];
+    if (hasUnreviewed) failures.push("unreviewed exceptions");
+    if (hasExpired) failures.push("expired exceptions");
+    if (hasSchemaIssues) failures.push("allowlist schema issues");
+    if (hasVersionMismatches) failures.push("version mismatches");
+    if (failures.length > 0) {
+      console.error(
+        `\n[license-audit] FAILED (strict): ${failures.join(", ")}.`,
+      );
+      process.exit(1);
+    }
+    const totalAllowlisted =
+      result.allowlisted.length + result.missingAllowlisted.length;
+    console.log(
+      `\n[license-audit] PASSED (strict) — allowlisted=${totalAllowlisted}, unreviewed=0, expired=0`,
+    );
+  } else {
+    console.log("\n[license-audit] PASSED");
+  }
 }
 
 main();
