@@ -355,4 +355,138 @@ describe("MatchList", () => {
     fireEvent.change(input, { target: { value: "nope" } });
     expect(await screen.findByText(/no results for/i)).toBeInTheDocument();
   });
+
+  it("shows TOTP button for LOGIN entries", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "Example",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    expect(await screen.findByRole("button", { name: "TOTP" })).toBeInTheDocument();
+  });
+
+  it("does not show TOTP button for non-login entries", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "Note",
+          username: "",
+          urlHost: "",
+          entryType: "SECURE_NOTE",
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
+    await screen.findByText("Note");
+    expect(screen.queryByRole("button", { name: "TOTP" })).toBeNull();
+  });
+
+  it("copies TOTP code and shows success toast", async () => {
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Example",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        type: "COPY_TOTP",
+        code: "123456",
+      });
+
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+
+    const totpButton = await screen.findByRole("button", { name: "TOTP" });
+    fireEvent.click(totpButton);
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("123456");
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(/TOTP code copied/i);
+  });
+
+  it("shows error toast when TOTP is not configured", async () => {
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Example",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        type: "COPY_TOTP",
+        code: null,
+        error: "NO_TOTP",
+      });
+
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+
+    const totpButton = await screen.findByRole("button", { name: "TOTP" });
+    fireEvent.click(totpButton);
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      /no totp configured for this entry/i,
+    );
+  });
+
+  it("schedules clipboard clear 30s after TOTP copy", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Example",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        type: "COPY_TOTP",
+        code: "654321",
+      });
+
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+
+    const totpButton = await screen.findByRole("button", { name: "TOTP" });
+    fireEvent.click(totpButton);
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("654321");
+    });
+
+    const clearCall = setTimeoutSpy.mock.calls.find(
+      (call) => call[1] === 30_000,
+    );
+    expect(clearCall).toBeDefined();
+
+    setTimeoutSpy.mockRestore();
+  });
 });

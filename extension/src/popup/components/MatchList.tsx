@@ -75,6 +75,27 @@ export function MatchList({ tabUrl, onLock }: Props) {
     }
   };
 
+  const handleCopyTotp = async (entryId: string) => {
+    const res = await sendMessage({ type: "COPY_TOTP", entryId });
+    if (res.code) {
+      try {
+        await navigator.clipboard.writeText(res.code);
+        setToast({ message: t("popup.totpCopied"), type: "success" });
+        setTimeout(() => setToast(null), 2000);
+        setTimeout(() => {
+          navigator.clipboard.writeText("").catch(() => {});
+        }, 30_000);
+      } catch {
+        setToast({ message: humanizeError("CLIPBOARD_FAILED"), type: "error" });
+      }
+    } else {
+      setToast({
+        message: humanizeError(res.error || "COPY_TOTP_FAILED"),
+        type: "error",
+      });
+    }
+  };
+
   const handleFill = async (entryId: string) => {
     if (filling) return;
     setFilling(true);
@@ -193,6 +214,12 @@ export function MatchList({ tabUrl, onLock }: Props) {
                           {t("popup.fill")}
                         </button>
                         <button
+                          onClick={() => handleCopyTotp(e.id)}
+                          className="text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 px-2.5 py-1.5 rounded-md hover:bg-gray-200 active:bg-gray-300 transition-colors"
+                        >
+                          {t("popup.copyTotp")}
+                        </button>
+                        <button
                           onClick={() => handleCopy(e.id)}
                           className="text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 px-2.5 py-1.5 rounded-md hover:bg-gray-200 active:bg-gray-300 transition-colors"
                         >
@@ -235,6 +262,12 @@ export function MatchList({ tabUrl, onLock }: Props) {
                           className="text-xs font-semibold text-white bg-gray-900 px-2.5 py-1.5 rounded-md hover:bg-gray-800 active:bg-gray-950 transition-colors disabled:opacity-60"
                         >
                           {t("popup.fill")}
+                        </button>
+                        <button
+                          onClick={() => handleCopyTotp(e.id)}
+                          className="text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 px-2.5 py-1.5 rounded-md hover:bg-gray-200 active:bg-gray-300 transition-colors"
+                        >
+                          {t("popup.copyTotp")}
                         </button>
                         <button
                           onClick={() => handleCopy(e.id)}
