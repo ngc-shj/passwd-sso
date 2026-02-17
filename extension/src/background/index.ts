@@ -396,12 +396,17 @@ type RawEntry = {
   entryType: string;
   aadVersion?: number;
   urlHost?: string;
+  deletedAt?: string | null;
+  isArchived?: boolean;
 };
 
 async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
   if (!encryptionKey || !currentUserId) return [];
+  // Defense-in-depth: API should already filter these, but exclude
+  // trashed/archived entries client-side in case of stale cache or API bug.
+  const active = raw.filter((item) => !item.deletedAt && !item.isArchived);
   const entries: DecryptedEntry[] = [];
-  for (const item of raw) {
+  for (const item of active) {
     const aad =
       (item.aadVersion ?? 0) >= 1
         ? buildPersonalEntryAAD(currentUserId, item.id)
@@ -908,6 +913,9 @@ async function handleMessage(
 
         const raw = (await res.json()) as RawEntry[];
         const entries = await decryptOverviews(raw);
+        // Update cache so inline suggestions stay in sync with popup.
+        cachedEntries = entries;
+        cacheTimestamp = Date.now();
         sendResponse({ type: "FETCH_PASSWORDS", entries });
       } catch (err) {
         sendResponse({
