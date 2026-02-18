@@ -534,15 +534,15 @@ export function OrgPasswordForm({
         notes: editData?.notes ?? "",
         selectedTagIds: (editData?.tags ?? []).map((tag) => tag.id).sort(),
         orgFolderId: editData?.orgFolderId ?? null,
-        login: isNote || isCreditCard || isIdentity || isPasskey
-          ? null
-          : {
+        login: isLoginEntry
+          ? {
               username: editData?.username ?? "",
               password: editData?.password ?? "",
               url: editData?.url ?? "",
               customFields: editData?.customFields ?? [],
               totp: editData?.totp ?? null,
-            },
+            }
+          : null,
         secureNote: isNote
           ? {
               content: editData?.content ?? "",
@@ -582,7 +582,7 @@ export function OrgPasswordForm({
             }
           : null,
       }),
-    [editData, effectiveEntryType, isNote, isCreditCard, isIdentity, isPasskey]
+    [editData, effectiveEntryType, isNote, isCreditCard, isIdentity, isPasskey, isLoginEntry]
   );
 
   const currentSnapshot = useMemo(
@@ -593,9 +593,9 @@ export function OrgPasswordForm({
         notes,
         selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
         orgFolderId,
-        login: isNote || isCreditCard || isIdentity || isPasskey
-          ? null
-          : { username, password, url, customFields, totp },
+        login: isLoginEntry
+          ? { username, password, url, customFields, totp }
+          : null,
         secureNote: isNote ? { content } : null,
         creditCard: isCreditCard
           ? { cardholderName, cardNumber, brand, expiryMonth, expiryYear, cvv }
@@ -633,6 +633,7 @@ export function OrgPasswordForm({
       isCreditCard,
       isIdentity,
       isPasskey,
+      isLoginEntry,
       username,
       password,
       url,
