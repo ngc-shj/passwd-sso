@@ -403,50 +403,60 @@ export function OrgPasswordForm({
       ? `${tGen("modePassphrase")} · ${generatorSettings.passphrase.wordCount}`
       : `${tGen("modePassword")} · ${generatorSettings.length}`;
 
-  const entryCopy = isPasskey
-    ? {
-        dialogLabel: isEdit ? tpk("editPasskey") : tpk("newPasskey"),
-        titleLabel: tpk("title"),
-        titlePlaceholder: tpk("titlePlaceholder"),
-        notesLabel: tpk("notes"),
-        notesPlaceholder: tpk("notesPlaceholder"),
-        tagsTitle: tpk("tags"),
-      }
+  const entryKind = isPasskey
+    ? "passkey"
     : isIdentity
-      ? {
-          dialogLabel: isEdit ? ti("editIdentity") : ti("newIdentity"),
-          titleLabel: ti("title"),
-          titlePlaceholder: ti("titlePlaceholder"),
-          notesLabel: ti("notes"),
-          notesPlaceholder: ti("notesPlaceholder"),
-          tagsTitle: ti("tags"),
-        }
+      ? "identity"
       : isCreditCard
-        ? {
-            dialogLabel: isEdit ? tcc("editCard") : tcc("newCard"),
-            titleLabel: tcc("title"),
-            titlePlaceholder: tcc("titlePlaceholder"),
-            notesLabel: tcc("notes"),
-            notesPlaceholder: tcc("notesPlaceholder"),
-            tagsTitle: tcc("tags"),
-          }
+        ? "creditCard"
         : isNote
-          ? {
-              dialogLabel: isEdit ? tn("editNote") : tn("newNote"),
-              titleLabel: tn("title"),
-              titlePlaceholder: tn("titlePlaceholder"),
-              notesLabel: tn("notes"),
-              notesPlaceholder: tn("notesPlaceholder"),
-              tagsTitle: tn("tags"),
-            }
-          : {
-              dialogLabel: isEdit ? t("editPassword") : t("newPassword"),
-              titleLabel: t("title"),
-              titlePlaceholder: t("titlePlaceholder"),
-              notesLabel: t("notes"),
-              notesPlaceholder: t("notesPlaceholder"),
-              tagsTitle: t("tags"),
-            };
+          ? "secureNote"
+          : "password";
+
+  const entryCopies = {
+    passkey: {
+      dialogLabel: isEdit ? tpk("editPasskey") : tpk("newPasskey"),
+      titleLabel: tpk("title"),
+      titlePlaceholder: tpk("titlePlaceholder"),
+      notesLabel: tpk("notes"),
+      notesPlaceholder: tpk("notesPlaceholder"),
+      tagsTitle: tpk("tags"),
+    },
+    identity: {
+      dialogLabel: isEdit ? ti("editIdentity") : ti("newIdentity"),
+      titleLabel: ti("title"),
+      titlePlaceholder: ti("titlePlaceholder"),
+      notesLabel: ti("notes"),
+      notesPlaceholder: ti("notesPlaceholder"),
+      tagsTitle: ti("tags"),
+    },
+    creditCard: {
+      dialogLabel: isEdit ? tcc("editCard") : tcc("newCard"),
+      titleLabel: tcc("title"),
+      titlePlaceholder: tcc("titlePlaceholder"),
+      notesLabel: tcc("notes"),
+      notesPlaceholder: tcc("notesPlaceholder"),
+      tagsTitle: tcc("tags"),
+    },
+    secureNote: {
+      dialogLabel: isEdit ? tn("editNote") : tn("newNote"),
+      titleLabel: tn("title"),
+      titlePlaceholder: tn("titlePlaceholder"),
+      notesLabel: tn("notes"),
+      notesPlaceholder: tn("notesPlaceholder"),
+      tagsTitle: tn("tags"),
+    },
+    password: {
+      dialogLabel: isEdit ? t("editPassword") : t("newPassword"),
+      titleLabel: t("title"),
+      titlePlaceholder: t("titlePlaceholder"),
+      notesLabel: t("notes"),
+      notesPlaceholder: t("notesPlaceholder"),
+      tagsTitle: t("tags"),
+    },
+  } as const;
+
+  const entryCopy = entryCopies[entryKind];
 
   const baselineSnapshot = useMemo(
     () =>
