@@ -281,4 +281,41 @@ describe("DELETE /api/orgs/[orgId]/folders/[id]", () => {
       }),
     );
   });
+
+  it("renames children that would conflict at the target parent level", async () => {
+    const parentFolder = { ...ownedFolder, name: "テスト" };
+    mockPrismaOrgFolder.findUnique.mockResolvedValue(parentFolder);
+
+    const childId = "cm000000000000000child01";
+    mockPrismaOrgFolder.findMany
+      .mockResolvedValueOnce([{ id: childId, name: "テスト" }])
+      .mockResolvedValueOnce([{ id: FOLDER_ID, name: "テスト" }]);
+
+    const txUpdates: Array<{ where: unknown; data: unknown }> = [];
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
+      await fn({
+        orgFolder: {
+          update: vi.fn(({ where, data }: { where: unknown; data: unknown }) => {
+            txUpdates.push({ where, data });
+            return Promise.resolve({});
+          }),
+          delete: vi.fn().mockResolvedValue({}),
+        },
+        orgPasswordEntry: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      });
+    });
+
+    const res = await DELETE(
+      createRequest("DELETE", BASE),
+      createParams({ orgId: ORG_ID, id: FOLDER_ID }),
+    );
+    expect(res.status).toBe(200);
+
+    const childUpdate = txUpdates.find(
+      (u) => (u.where as { id: string }).id === childId,
+    );
+    expect(childUpdate).toBeDefined();
+    expect((childUpdate!.data as { name: string }).name).toBe("テスト (2)");
+    expect((childUpdate!.data as { parentId: string | null }).parentId).toBeNull();
+  });
 });
