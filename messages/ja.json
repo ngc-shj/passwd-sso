@@ -512,6 +512,7 @@
     "importButton": "{count} 件をインポート",
     "importing": "{current} / {total} をインポート中...",
     "importedCount": "{count} 件のパスワードをインポートしました",
+    "importAnother": "別のファイルをインポート",
     "back": "戻る",
     "close": "閉じる",
     "encryptedFileDetected": "このファイルはパスワードで保護されています。",

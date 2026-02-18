@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { __testablesImport } from "@/components/passwords/import-dialog";
+import { detectFormat, parseCsv, parseJson } from "@/components/passwords/import-dialog-utils";
 import {
   type ExportEntry,
   formatExportCsv,
@@ -47,7 +47,7 @@ const sampleLoginEntry = {
 
 describe("import/export format compatibility", () => {
   it("detects passwd-sso CSV when passwd_sso column exists", () => {
-    const format = __testablesImport.detectFormat([
+    const format = detectFormat([
       "type",
       "name",
       "login_username",
@@ -73,7 +73,7 @@ describe("import/export format compatibility", () => {
         },
       ],
     });
-    const parsed = __testablesImport.parseJson(json);
+    const parsed = parseJson(json);
     expect(parsed.format).toBe("passwd-sso");
     expect(parsed.entries[0].customFields).toHaveLength(1);
   });
@@ -84,7 +84,7 @@ describe("import/export format compatibility", () => {
       "passwd-sso",
       PERSONAL_EXPORT_OPTIONS.csv
     );
-    const parsed = __testablesImport.parseCsv(csv);
+    const parsed = parseCsv(csv);
     expect(parsed.format).toBe("passwd-sso");
     expect(parsed.entries[0].customFields).toHaveLength(1);
     expect(parsed.entries[0].customFields[0].label).toBe("accountId");
@@ -95,7 +95,7 @@ describe("import/export format compatibility", () => {
       "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp",
       ",,login,Test,,,1,https://example.com,user,pass,",
     ].join("\n");
-    const parsed = __testablesImport.parseCsv(csv);
+    const parsed = parseCsv(csv);
     expect(parsed.entries[0].requireReprompt).toBe(true);
   });
 
@@ -104,7 +104,7 @@ describe("import/export format compatibility", () => {
       "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp",
       ",,login,Test,,,,https://example.com,user,pass,",
     ].join("\n");
-    const parsed = __testablesImport.parseCsv(csv);
+    const parsed = parseCsv(csv);
     expect(parsed.entries[0].requireReprompt).toBe(false);
   });
 
@@ -113,7 +113,7 @@ describe("import/export format compatibility", () => {
       "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp",
       ",,login,Test,,,true,https://example.com,user,pass,",
     ].join("\n");
-    const parsed = __testablesImport.parseCsv(csv);
+    const parsed = parseCsv(csv);
     expect(parsed.entries[0].requireReprompt).toBe(false);
   });
 
@@ -127,7 +127,7 @@ describe("import/export format compatibility", () => {
         reprompt: 0,
       }],
     });
-    const parsed = __testablesImport.parseJson(json);
+    const parsed = parseJson(json);
     expect(parsed.entries[0].requireReprompt).toBe(true);
   });
 
@@ -140,7 +140,7 @@ describe("import/export format compatibility", () => {
         reprompt: 1,
       }],
     });
-    const parsed = __testablesImport.parseJson(json);
+    const parsed = parseJson(json);
     expect(parsed.entries[0].requireReprompt).toBe(true);
   });
 
@@ -153,7 +153,7 @@ describe("import/export format compatibility", () => {
         requireReprompt: 1,
       }],
     });
-    const parsed = __testablesImport.parseJson(json);
+    const parsed = parseJson(json);
     expect(parsed.entries[0].requireReprompt).toBe(false);
   });
 
@@ -163,7 +163,7 @@ describe("import/export format compatibility", () => {
       "passwd-sso",
       PERSONAL_EXPORT_OPTIONS.csv
     );
-    const parsed = __testablesImport.parseCsv(csv);
+    const parsed = parseCsv(csv);
     expect(parsed.entries[0].requireReprompt).toBe(true);
   });
 
@@ -173,7 +173,7 @@ describe("import/export format compatibility", () => {
       "passwd-sso",
       PERSONAL_EXPORT_OPTIONS.json
     );
-    const parsed = __testablesImport.parseJson(json);
+    const parsed = parseJson(json);
     expect(parsed.entries[0].requireReprompt).toBe(true);
   });
 

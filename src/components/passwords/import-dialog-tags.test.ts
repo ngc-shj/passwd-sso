@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { API_PATH } from "@/lib/constants";
-import { __testablesImport } from "@/components/passwords/import-dialog";
+import { resolveEntryTagIds, resolveTagNameToIdForImport } from "@/components/passwords/import-dialog-utils";
 
 type ImportEntry = Parameters<
-  typeof __testablesImport.resolveTagNameToIdForImport
+  typeof resolveTagNameToIdForImport
 >[0][number];
 
 function entryWithTags(tags: Array<{ name: string; color: string | null }>): ImportEntry {
@@ -32,7 +32,7 @@ describe("import tag resolution", () => {
       entryWithTags([{ name: "new", color: "#222222" }]),
     ];
 
-    const map = await __testablesImport.resolveTagNameToIdForImport(
+    const map = await resolveTagNameToIdForImport(
       entries,
       API_PATH.TAGS,
       fetcher as never
@@ -66,7 +66,7 @@ describe("import tag resolution", () => {
       ]),
     ];
 
-    const map = await __testablesImport.resolveTagNameToIdForImport(
+    const map = await resolveTagNameToIdForImport(
       entries,
       API_PATH.TAGS,
       fetcher as never
@@ -85,7 +85,7 @@ describe("import tag resolution", () => {
 
     const entries = [entryWithTags([{ name: "new", color: "#222222" }])];
 
-    const map = await __testablesImport.resolveTagNameToIdForImport(
+    const map = await resolveTagNameToIdForImport(
       entries,
       API_PATH.TAGS,
       fetcher as never
@@ -101,7 +101,7 @@ describe("import tag resolution", () => {
       ["new", "t-new"],
     ]);
 
-    const ids = __testablesImport.resolveEntryTagIds(
+    const ids = resolveEntryTagIds(
       entryWithTags([
         { name: " work ", color: null },
         { name: "new", color: null },

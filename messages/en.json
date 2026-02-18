@@ -512,6 +512,7 @@
     "importButton": "Import {count} entries",
     "importing": "Importing {current} of {total}...",
     "importedCount": "{count} passwords imported",
+    "importAnother": "Import another file",
     "back": "Back",
     "close": "Close",
     "encryptedFileDetected": "This file is password-protected.",

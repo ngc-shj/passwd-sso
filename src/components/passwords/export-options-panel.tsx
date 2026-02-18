@@ -2,7 +2,6 @@
 
 import { Lock, Download, Loader2 } from "lucide-react";
 import type { ExportFormat, ExportProfile } from "@/lib/export-format-common";
-import { DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -125,7 +124,7 @@ export function ExportOptionsPanel({
         )}
       </div>
 
-      <DialogFooter className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:justify-end sm:gap-2">
+      <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:justify-end sm:gap-2">
         <Button
           variant="outline"
           className="w-full sm:w-auto"
@@ -151,7 +150,7 @@ export function ExportOptionsPanel({
           )}
           {t("exportJson")}
         </Button>
-      </DialogFooter>
+      </div>
     </>
   );
 }
