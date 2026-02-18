@@ -9,7 +9,9 @@ export const API_PATH = {
   PASSWORDS_BULK_RESTORE: "/api/passwords/bulk-restore",
   PASSWORDS_EMPTY_TRASH: "/api/passwords/empty-trash",
   PASSWORDS_GENERATE: "/api/passwords/generate",
+  FOLDERS: "/api/folders",
   TAGS: "/api/tags",
+  MAINTENANCE_PURGE_HISTORY: "/api/maintenance/purge-history",
   ORGS: "/api/orgs",
   ORGS_ARCHIVED: "/api/orgs/archived",
   ORGS_FAVORITES: "/api/orgs/favorites",
@@ -82,4 +84,16 @@ export const apiPath = {
   shareLinkById: (shareId: string) => `${API_PATH.SHARE_LINKS}/${shareId}`,
   shareLinkAccessLogs: (shareId: string) =>
     `${API_PATH.SHARE_LINKS}/${shareId}/access-logs`,
+  folderById: (folderId: string) => `${API_PATH.FOLDERS}/${folderId}`,
+  orgFolders: (orgId: string) => `${API_PATH.ORGS}/${orgId}/folders`,
+  orgFolderById: (orgId: string, folderId: string) =>
+    `${API_PATH.ORGS}/${orgId}/folders/${folderId}`,
+  passwordHistory: (entryId: string) =>
+    `${API_PATH.PASSWORDS}/${entryId}/history`,
+  passwordHistoryRestore: (entryId: string, historyId: string) =>
+    `${API_PATH.PASSWORDS}/${entryId}/history/${historyId}/restore`,
+  orgPasswordHistory: (orgId: string, entryId: string) =>
+    `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/history`,
+  orgPasswordHistoryRestore: (orgId: string, entryId: string, historyId: string) =>
+    `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/history/${historyId}/restore`,
 } as const;

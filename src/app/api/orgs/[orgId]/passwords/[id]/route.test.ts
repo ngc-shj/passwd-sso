@@ -5,6 +5,7 @@ const {
   mockAuth, mockPrismaOrgPasswordEntry, mockRequireOrgPermission,
   mockRequireOrgMember, mockHasOrgPermission, mockUnwrapOrgKey,
   mockEncryptServerData, mockDecryptServerData, OrgAuthError,
+  mockPrismaTransaction,
 } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
@@ -28,12 +29,17 @@ const {
     mockEncryptServerData: vi.fn(),
     mockDecryptServerData: vi.fn(),
     OrgAuthError: _OrgAuthError,
+    mockPrismaTransaction: vi.fn(),
   };
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { orgPasswordEntry: mockPrismaOrgPasswordEntry, auditLog: { create: vi.fn().mockResolvedValue({}) } },
+  prisma: {
+    orgPasswordEntry: mockPrismaOrgPasswordEntry,
+    auditLog: { create: vi.fn().mockResolvedValue({}) },
+    $transaction: mockPrismaTransaction,
+  },
 }));
 vi.mock("@/lib/org-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,
@@ -357,6 +363,14 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
 });
 
 describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
+  const txMock = {
+    orgPasswordEntryHistory: {
+      create: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -367,6 +381,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
       JSON.stringify({ title: "Old", username: "old", password: "old", url: null, notes: null })
     );
     mockEncryptServerData.mockReturnValue({ ciphertext: "enc", iv: "iv", authTag: "tag" });
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: typeof txMock) => Promise<unknown>) => fn(txMock));
   });
 
   it("returns 401 when unauthenticated", async () => {

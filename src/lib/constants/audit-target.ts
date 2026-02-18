@@ -1,6 +1,8 @@
 export const AUDIT_TARGET_TYPE = {
   ATTACHMENT: "Attachment",
   EMERGENCY_ACCESS_GRANT: "EmergencyAccessGrant",
+  FOLDER: "Folder",
+  ORG_FOLDER: "OrgFolder",
   ORG_INVITATION: "OrgInvitation",
   ORG_MEMBER: "OrgMember",
   ORG_PASSWORD_ENTRY: "OrgPasswordEntry",
