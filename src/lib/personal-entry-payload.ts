@@ -1,33 +1,15 @@
-import type { CustomFieldType, TotpAlgorithm } from "@/lib/constants";
 import {
   filterNonEmptyCustomFields,
   parseUrlHost,
   toTagNameColor,
 } from "@/lib/entry-form-helpers";
+import type {
+  EntryCustomField,
+  EntryPasswordHistory,
+  EntryTagNameColor,
+  EntryTotp,
+} from "@/lib/entry-form-types";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
-
-interface TagLike {
-  name: string;
-  color: string | null;
-}
-
-interface CustomFieldLike {
-  label: string;
-  value: string;
-  type: CustomFieldType;
-}
-
-interface TotpLike {
-  secret: string;
-  algorithm?: TotpAlgorithm;
-  digits?: number;
-  period?: number;
-}
-
-interface PasswordHistoryEntry {
-  password: string;
-  changedAt: string;
-}
 
 interface BuildPersonalEntryPayloadInput {
   title: string;
@@ -35,20 +17,20 @@ interface BuildPersonalEntryPayloadInput {
   password: string;
   url: string;
   notes: string;
-  selectedTags: TagLike[];
+  selectedTags: EntryTagNameColor[];
   generatorSettings: GeneratorSettings;
-  customFields: CustomFieldLike[];
-  totp: TotpLike | null;
+  customFields: EntryCustomField[];
+  totp: EntryTotp | null;
   requireReprompt: boolean;
-  existingHistory: PasswordHistoryEntry[];
+  existingHistory: EntryPasswordHistory[];
 }
 
 export function buildPasswordHistory(
   previousPassword: string,
   nextPassword: string,
-  existingHistory: PasswordHistoryEntry[],
+  existingHistory: EntryPasswordHistory[],
   nowIso: string
-): PasswordHistoryEntry[] {
+): EntryPasswordHistory[] {
   if (!previousPassword || previousPassword === nextPassword) return existingHistory;
   return [
     { password: previousPassword, changedAt: nowIso },
@@ -86,4 +68,3 @@ export function buildPersonalEntryPayload(
 
   return { fullBlob, overviewBlob };
 }
-

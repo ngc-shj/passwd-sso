@@ -13,22 +13,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EntrySectionCard } from "@/components/passwords/entry-form-ui";
-import { TOTPField, type TOTPEntry } from "@/components/passwords/totp-field";
+import { TOTPField } from "@/components/passwords/totp-field";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
+import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { Plus, Rows3, ShieldCheck, X } from "lucide-react";
 
-interface CustomFieldLike {
-  label: string;
-  value: string;
-  type: CustomFieldType;
-}
-
 interface EntryCustomFieldsTotpSectionProps {
-  customFields: CustomFieldLike[];
-  setCustomFields: Dispatch<SetStateAction<CustomFieldLike[]>>;
-  totp: TOTPEntry | null;
-  onTotpChange: (value: TOTPEntry | null) => void;
+  customFields: EntryCustomField[];
+  setCustomFields: Dispatch<SetStateAction<EntryCustomField[]>>;
+  totp: EntryTotp | null;
+  onTotpChange: (value: EntryTotp | null) => void;
   showTotpInput: boolean;
   setShowTotpInput: (show: boolean) => void;
 }
@@ -90,7 +85,9 @@ export function EntryCustomFieldsTotpSection({
                   value={field.type}
                   onValueChange={(v: CustomFieldType) =>
                     setCustomFields((prev) =>
-                      prev.map((f, i) => (i === idx ? { ...f, type: v } : f))
+                      prev.map((f, i) =>
+                        i === idx ? { ...f, type: v } : f
+                      )
                     )
                   }
                 >

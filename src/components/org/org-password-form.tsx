@@ -21,7 +21,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PasswordGenerator } from "@/components/passwords/password-generator";
-import type { TOTPEntry } from "@/components/passwords/totp-field";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import { OrgTagInput, type OrgTagData } from "./org-tag-input";
@@ -54,13 +53,10 @@ import {
 } from "@/lib/entry-form-helpers";
 import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
-import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
+import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 
-export interface CustomField {
-  label: string;
-  value: string;
-  type: CustomFieldType;
-}
+export type CustomField = EntryCustomField;
 
 interface OrgPasswordFormProps {
   orgId: string;
@@ -78,8 +74,8 @@ interface OrgPasswordFormProps {
     url: string | null;
     notes: string | null;
     tags?: OrgTagData[];
-    customFields?: CustomField[];
-    totp?: TOTPEntry | null;
+    customFields?: EntryCustomField[];
+    totp?: EntryTotp | null;
     cardholderName?: string | null;
     cardNumber?: string | null;
     brand?: string | null;
@@ -143,10 +139,10 @@ export function OrgPasswordForm({
   const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(
     { ...DEFAULT_GENERATOR_SETTINGS }
   );
-  const [customFields, setCustomFields] = useState<CustomField[]>(
+  const [customFields, setCustomFields] = useState<EntryCustomField[]>(
     editData?.customFields ?? []
   );
-  const [totp, setTotp] = useState<TOTPEntry | null>(
+  const [totp, setTotp] = useState<EntryTotp | null>(
     editData?.totp ?? null
   );
   const [showTotpInput, setShowTotpInput] = useState(!!editData?.totp);

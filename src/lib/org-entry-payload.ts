@@ -1,19 +1,7 @@
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { EntryTypeValue, TotpAlgorithm, CustomFieldType } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
 import { filterNonEmptyCustomFields } from "@/lib/entry-form-helpers";
-
-interface CustomFieldLike {
-  label: string;
-  value: string;
-  type: CustomFieldType;
-}
-
-interface TotpLike {
-  secret: string;
-  algorithm?: TotpAlgorithm;
-  digits?: number;
-  period?: number;
-}
+import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 
 export interface BuildOrgEntryPayloadInput {
   entryType: EntryTypeValue;
@@ -25,8 +13,8 @@ export interface BuildOrgEntryPayloadInput {
   username?: string;
   password?: string;
   url?: string;
-  customFields?: CustomFieldLike[];
-  totp?: TotpLike | null;
+  customFields?: EntryCustomField[];
+  totp?: EntryTotp | null;
 
   content?: string;
 
@@ -122,4 +110,3 @@ export function buildOrgEntryPayload(
     }
   }
 }
-

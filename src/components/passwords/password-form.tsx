@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PasswordGenerator } from "./password-generator";
-import type { TOTPEntry } from "./totp-field";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
@@ -24,7 +23,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Eye, EyeOff, ArrowLeft, Dices, ShieldCheck, Tags } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, apiPath } from "@/lib/constants";
-import type { CustomFieldType } from "@/lib/constants";
+import type { EntryCustomField, EntryPasswordHistory, EntryTotp } from "@/lib/entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   extractTagIds,
@@ -33,19 +32,12 @@ import {
   buildPasswordHistory,
   buildPersonalEntryPayload,
 } from "@/lib/personal-entry-payload";
+import type { FolderItem } from "@/components/folders/folder-tree";
 
-export interface CustomField {
-  label: string;
-  value: string;
-  type: CustomFieldType;
-}
+export type CustomField = EntryCustomField;
+export type PasswordHistoryEntry = EntryPasswordHistory;
 
-export interface PasswordHistoryEntry {
-  password: string;
-  changedAt: string;
-}
-
-export type { TOTPEntry };
+export type TOTPEntry = EntryTotp;
 
 interface PasswordFormProps {
   mode: "create" | "edit";
@@ -59,8 +51,8 @@ interface PasswordFormProps {
     tags: TagData[];
     generatorSettings?: GeneratorSettings;
     passwordHistory?: PasswordHistoryEntry[];
-    customFields?: CustomField[];
-    totp?: TOTPEntry;
+    customFields?: EntryCustomField[];
+    totp?: EntryTotp;
     requireReprompt?: boolean;
     folderId?: string | null;
   };
@@ -89,10 +81,10 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(
     initialData?.generatorSettings ?? { ...DEFAULT_GENERATOR_SETTINGS }
   );
-  const [customFields, setCustomFields] = useState<CustomField[]>(
+  const [customFields, setCustomFields] = useState<EntryCustomField[]>(
     initialData?.customFields ?? []
   );
-  const [totp, setTotp] = useState<TOTPEntry | null>(
+  const [totp, setTotp] = useState<EntryTotp | null>(
     initialData?.totp ?? null
   );
   const [showTotpInput, setShowTotpInput] = useState(!!initialData?.totp);
