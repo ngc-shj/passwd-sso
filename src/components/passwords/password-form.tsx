@@ -19,25 +19,16 @@ import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
 } from "@/lib/generator-prefs";
-import { toast } from "sonner";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
-import {
-  extractTagIds,
-} from "@/lib/entry-form-helpers";
-import {
-  buildPasswordHistory,
-  buildPersonalEntryPayload,
-} from "@/lib/personal-entry-payload";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
-import { savePersonalEntry } from "@/lib/personal-entry-save";
-import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
 import {
   buildPersonalCurrentSnapshot,
   buildPersonalInitialSnapshot,
 } from "@/components/passwords/personal-password-form-snapshot";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
+import { submitPersonalPasswordForm } from "@/components/passwords/personal-password-submit";
 
 export function PasswordForm({ mode, initialData, variant = "page", onSaved }: PasswordFormProps) {
   const t = useTranslations("PasswordForm");
@@ -92,48 +83,27 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!encryptionKey) return;
-    setSubmitting(true);
-
-    try {
-      const existingHistory = buildPasswordHistory(
-        mode === "edit" && initialData ? initialData.password : "",
-        password,
-        initialData?.passwordHistory ?? [],
-        new Date().toISOString()
-      );
-      const { fullBlob, overviewBlob } = buildPersonalEntryPayload({
-        title,
-        username,
-        password,
-        url,
-        notes,
-        selectedTags,
-        generatorSettings,
-        customFields,
-        totp,
-        requireReprompt,
-        existingHistory,
-      });
-
-      const res = await savePersonalEntry({
-        mode,
-        initialId: initialData?.id,
-        encryptionKey,
-        userId: userId ?? undefined,
-        fullBlob,
-        overviewBlob,
-        tagIds: extractTagIds(selectedTags),
-        requireReprompt,
-        folderId: folderId ?? null,
-      });
-
-      handlePersonalSaveFeedback({ res, mode, t, router, onSaved });
-    } catch {
-      toast.error(t("networkError"));
-    } finally {
-      setSubmitting(false);
-    }
+    await submitPersonalPasswordForm({
+      mode,
+      initialData,
+      encryptionKey,
+      userId: userId ?? undefined,
+      title,
+      username,
+      password,
+      url,
+      notes,
+      selectedTags,
+      generatorSettings,
+      customFields,
+      totp,
+      requireReprompt,
+      folderId,
+      setSubmitting,
+      t,
+      router,
+      onSaved,
+    });
   };
 
   const handleCancel = () => {
