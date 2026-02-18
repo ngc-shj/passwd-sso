@@ -27,6 +27,7 @@ import { Upload, Loader2, FileUp, CheckCircle2, AlertCircle, Lock } from "lucide
 import { toast } from "sonner";
 import { API_PATH, ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
+import type { EntryPasswordHistory, EntryTagNameColor } from "@/lib/entry-form-types";
 
 // ─── CSV Parsing ────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ interface ParsedEntry {
   credentialId: string;
   creationDate: string;
   deviceInfo: string;
-  tags: Array<{ name: string; color: string | null }>;
+  tags: EntryTagNameColor[];
   customFields: Array<{ label: string; value: string; type: string }>;
   totp: {
     secret: string;
@@ -69,7 +70,7 @@ interface ParsedEntry {
     algorithm?: string;
   } | null;
   generatorSettings: Record<string, unknown> | null;
-  passwordHistory: Array<{ password: string; changedAt: string }>;
+  passwordHistory: EntryPasswordHistory[];
   requireReprompt: boolean;
 }
 

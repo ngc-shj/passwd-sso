@@ -20,6 +20,7 @@ import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react"
 import { API_PATH, apiPath } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
+import type { EntryPasswordHistory, EntryTagNameColor } from "@/lib/entry-form-types";
 
 type ExportFormat = "csv" | "json";
 type ExportProfile = "compatible" | "passwd-sso";
@@ -48,7 +49,7 @@ interface OrgExportEntry {
   idNumber: string | null;
   issueDate: string | null;
   expiryDate: string | null;
-  tags: Array<{ name: string; color: string | null }>;
+  tags: EntryTagNameColor[];
   customFields: Array<{ label: string; value: string; type: string }>;
   totpConfig: {
     secret: string;
@@ -59,7 +60,7 @@ interface OrgExportEntry {
     algorithm?: string;
   } | null;
   generatorSettings: Record<string, unknown> | null;
-  passwordHistory: Array<{ password: string; changedAt: string }>;
+  passwordHistory: EntryPasswordHistory[];
 }
 
 interface OrgExportDialogProps {
