@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
@@ -21,6 +20,7 @@ import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-s
 import { OrgCreditCardFields } from "@/components/org/org-credit-card-fields";
 import { OrgIdentityFields } from "@/components/org/org-identity-fields";
 import { OrgPasskeyFields } from "@/components/org/org-passkey-fields";
+import { OrgSecureNoteFields } from "@/components/org/org-secure-note-fields";
 import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
@@ -761,20 +761,12 @@ export function OrgPasswordForm({
       }}
     />
   ) : isNote ? (
-    <>
-      {/* Content (Secure Note) */}
-      <div className="space-y-2">
-        <Label>{tn("content")}</Label>
-        <Textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder={tn("contentPlaceholder")}
-          rows={10}
-          maxLength={50000}
-          className="font-mono"
-        />
-      </div>
-    </>
+    <OrgSecureNoteFields
+      content={content}
+      onContentChange={setContent}
+      contentLabel={tn("content")}
+      contentPlaceholder={tn("contentPlaceholder")}
+    />
   ) : (
     <>
       <EntryLoginMainFields
