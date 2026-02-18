@@ -19,6 +19,10 @@ import { getOrgCardValidationState } from "@/components/org/org-credit-card-vali
 import { OrgIdentityFields } from "@/components/org/org-identity-fields";
 import { OrgLoginFields } from "@/components/org/org-login-fields";
 import { OrgPasskeyFields } from "@/components/org/org-passkey-fields";
+import {
+  applyOrgEditDataToForm,
+  resetOrgFormForClose,
+} from "@/components/org/org-password-form-state";
 import { OrgSecureNoteFields } from "@/components/org/org-secure-note-fields";
 import {
   buildBaselineSnapshot,
@@ -137,83 +141,93 @@ export function OrgPasswordForm({
 
   const isEdit = !!editData;
 
-  const applyEditDataToForm = (data: OrgPasswordFormEditData) => {
-    setTitle(data.title);
-    setUsername(data.username ?? "");
-    setPassword(data.password ?? "");
-    setContent(data.content ?? "");
-    setUrl(data.url ?? "");
-    setNotes(data.notes ?? "");
-    setSelectedTags(data.tags ?? []);
-    setCustomFields(data.customFields ?? []);
-    setTotp(data.totp ?? null);
-    setShowTotpInput(!!data.totp);
-    setCardholderName(data.cardholderName ?? "");
-    setCardNumber(formatCardNumber(data.cardNumber ?? "", data.brand ?? ""));
-    setBrand(data.brand ?? "");
-    setBrandSource(data.brand ? "manual" : "auto");
-    setExpiryMonth(data.expiryMonth ?? "");
-    setExpiryYear(data.expiryYear ?? "");
-    setCvv(data.cvv ?? "");
-    setFullName(data.fullName ?? "");
-    setAddress(data.address ?? "");
-    setPhone(data.phone ?? "");
-    setEmail(data.email ?? "");
-    setDateOfBirth(data.dateOfBirth ?? "");
-    setNationality(data.nationality ?? "");
-    setIdNumber(data.idNumber ?? "");
-    setIssueDate(data.issueDate ?? "");
-    setExpiryDate(data.expiryDate ?? "");
-    setRelyingPartyId(data.relyingPartyId ?? "");
-    setRelyingPartyName(data.relyingPartyName ?? "");
-    setCredentialId(data.credentialId ?? "");
-    setCreationDate(data.creationDate ?? "");
-    setDeviceInfo(data.deviceInfo ?? "");
-    setOrgFolderId(data.orgFolderId ?? null);
-  };
+  const applyEditDataToForm = (data: OrgPasswordFormEditData) =>
+    applyOrgEditDataToForm(data, {
+      setTitle,
+      setUsername,
+      setPassword,
+      setContent,
+      setUrl,
+      setNotes,
+      setSelectedTags,
+      setCustomFields,
+      setTotp,
+      setShowTotpInput,
+      setCardholderName,
+      setCardNumber,
+      setBrand,
+      setBrandSource,
+      setExpiryMonth,
+      setExpiryYear,
+      setCvv,
+      setFullName,
+      setAddress,
+      setPhone,
+      setEmail,
+      setDateOfBirth,
+      setNationality,
+      setIdNumber,
+      setIssueDate,
+      setExpiryDate,
+      setRelyingPartyId,
+      setRelyingPartyName,
+      setCredentialId,
+      setCreationDate,
+      setDeviceInfo,
+      setOrgFolderId,
+      setShowPassword,
+      setShowGenerator,
+      setShowCardNumber,
+      setShowCvv,
+      setShowIdNumber,
+      setShowCredentialId,
+      setAttachments,
+      setSaving,
+    });
 
-  const resetFormForClose = () => {
-    setTitle("");
-    setUsername("");
-    setPassword("");
-    setContent("");
-    setUrl("");
-    setNotes("");
-    setSelectedTags([]);
-    setCustomFields([]);
-    setTotp(null);
-    setShowTotpInput(false);
-    setShowPassword(false);
-    setShowGenerator(false);
-    setCardholderName("");
-    setCardNumber("");
-    setBrand("");
-    setBrandSource("auto");
-    setExpiryMonth("");
-    setExpiryYear("");
-    setCvv("");
-    setShowCardNumber(false);
-    setShowCvv(false);
-    setFullName("");
-    setAddress("");
-    setPhone("");
-    setEmail("");
-    setDateOfBirth("");
-    setNationality("");
-    setIdNumber("");
-    setIssueDate("");
-    setExpiryDate("");
-    setShowIdNumber(false);
-    setRelyingPartyId("");
-    setRelyingPartyName("");
-    setCredentialId("");
-    setCreationDate("");
-    setDeviceInfo("");
-    setShowCredentialId(false);
-    setAttachments([]);
-    setOrgFolderId(null);
-    setSaving(false);
-  };
+  const resetFormForClose = () =>
+    resetOrgFormForClose({
+      setTitle,
+      setUsername,
+      setPassword,
+      setContent,
+      setUrl,
+      setNotes,
+      setSelectedTags,
+      setCustomFields,
+      setTotp,
+      setShowTotpInput,
+      setCardholderName,
+      setCardNumber,
+      setBrand,
+      setBrandSource,
+      setExpiryMonth,
+      setExpiryYear,
+      setCvv,
+      setFullName,
+      setAddress,
+      setPhone,
+      setEmail,
+      setDateOfBirth,
+      setNationality,
+      setIdNumber,
+      setIssueDate,
+      setExpiryDate,
+      setRelyingPartyId,
+      setRelyingPartyName,
+      setCredentialId,
+      setCreationDate,
+      setDeviceInfo,
+      setOrgFolderId,
+      setShowPassword,
+      setShowGenerator,
+      setShowCardNumber,
+      setShowCvv,
+      setShowIdNumber,
+      setShowCredentialId,
+      setAttachments,
+      setSaving,
+    });
 
   // Fetch org folders for the folder selector
   useEffect(() => {
