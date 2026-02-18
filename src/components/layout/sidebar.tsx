@@ -10,14 +10,13 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { VisuallyHidden } from "radix-ui";
 import { Separator } from "@/components/ui/separator";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, Fingerprint, ScrollText, Link as LinkIcon, HeartPulse, ChevronDown, ChevronRight, Plus, Pencil, MoreHorizontal } from "lucide-react";
+import { FolderOpen, Tag, Star, Archive, Trash2, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, Fingerprint, ChevronDown, ChevronRight, Plus, Pencil, MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { useLocalStorage } from "@/hooks/use-local-storage";
-import { ExportDialog } from "@/components/passwords/export-dialog";
-import { ImportDialog } from "@/components/passwords/import-dialog";
 import { FolderDialog } from "@/components/folders/folder-dialog";
 import { VaultSelector } from "@/components/layout/vault-selector";
+import { SecuritySection, UtilitiesSection } from "@/components/layout/sidebar-section-security";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1019,162 +1018,6 @@ function OrganizeSection({
   );
 }
 
-interface SecuritySectionProps {
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
-  t: (key: string) => string;
-  isWatchtower: boolean;
-  isShareLinks: boolean;
-  isEmergencyAccess: boolean;
-  isPersonalAuditLog: boolean;
-  activeAuditOrgId: string | null;
-  orgs: OrgItem[];
-  onNavigate: () => void;
-}
-
-function SecuritySection({
-  isOpen,
-  onOpenChange,
-  t,
-  isWatchtower,
-  isShareLinks,
-  isEmergencyAccess,
-  isPersonalAuditLog,
-  activeAuditOrgId,
-  orgs,
-  onNavigate,
-}: SecuritySectionProps) {
-  return (
-    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
-      <CollapsibleSectionHeader isOpen={isOpen}>
-        {t("security")}
-      </CollapsibleSectionHeader>
-      <CollapsibleContent>
-        <div className="space-y-1">
-          <Button
-            variant={isWatchtower ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard/watchtower" onClick={onNavigate}>
-              <Shield className="h-4 w-4" />
-              {t("watchtower")}
-            </Link>
-          </Button>
-          <Button
-            variant={isShareLinks ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard/share-links" onClick={onNavigate}>
-              <LinkIcon className="h-4 w-4" />
-              {t("shareLinks")}
-            </Link>
-          </Button>
-          <Button
-            variant={isEmergencyAccess ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard/emergency-access" onClick={onNavigate}>
-              <HeartPulse className="h-4 w-4" />
-              {t("emergencyAccess")}
-            </Link>
-          </Button>
-          <SectionLabel icon={<ScrollText className="h-3 w-3" />}>
-            {t("auditLog")}
-          </SectionLabel>
-          <div className="ml-4 space-y-1">
-            <Button
-              variant={isPersonalAuditLog ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link href="/dashboard/audit-logs" onClick={onNavigate}>
-                <FolderOpen className="h-4 w-4" />
-                {t("auditLogPersonal")}
-              </Link>
-            </Button>
-            {orgs
-              .filter((org) => org.role === ORG_ROLE.OWNER || org.role === ORG_ROLE.ADMIN)
-              .map((org) => (
-                <Button
-                  key={org.id}
-                  variant={activeAuditOrgId === org.id ? "secondary" : "ghost"}
-                  className="w-full justify-start gap-2"
-                  asChild
-                >
-                  <Link href={`/dashboard/orgs/${org.id}/audit-logs`} onClick={onNavigate}>
-                    <Building2 className="h-4 w-4" />
-                    <span className="truncate">{org.name}</span>
-                  </Link>
-                </Button>
-              ))}
-          </div>
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-interface UtilitiesSectionProps {
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
-  t: (key: string) => string;
-  tOrg: (key: string) => string;
-  selectedOrg: OrgItem | null;
-  onImportComplete: () => void;
-  onNavigate: () => void;
-}
-
-function UtilitiesSection({
-  isOpen,
-  onOpenChange,
-  t,
-  tOrg,
-  selectedOrg,
-  onImportComplete,
-  onNavigate,
-}: UtilitiesSectionProps) {
-  return (
-    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
-      <CollapsibleSectionHeader isOpen={isOpen}>
-        {t("utilities")}
-      </CollapsibleSectionHeader>
-      <CollapsibleContent>
-        <div className="space-y-1">
-          {selectedOrg &&
-            (selectedOrg.role === ORG_ROLE.OWNER || selectedOrg.role === ORG_ROLE.ADMIN) && (
-            <Button variant="ghost" className="w-full justify-start gap-2" asChild>
-              <Link href={`/dashboard/orgs/${selectedOrg.id}/settings`} onClick={onNavigate}>
-                <Settings className="h-4 w-4" />
-                {tOrg("orgSettings")}
-              </Link>
-            </Button>
-          )}
-          <ExportDialog
-            trigger={
-              <Button variant="ghost" className="w-full justify-start gap-2">
-                <Download className="h-4 w-4" />
-                {t("export")}
-              </Button>
-            }
-          />
-          <ImportDialog
-            trigger={
-              <Button variant="ghost" className="w-full justify-start gap-2">
-                <Upload className="h-4 w-4" />
-                {t("import")}
-              </Button>
-            }
-            onComplete={onImportComplete}
-          />
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
 // ─── Sub-components ──────────────────────────────────────────────
 
 /** Interactive collapsible section header with chevron indicator. */
@@ -1197,21 +1040,5 @@ function CollapsibleSectionHeader({
         {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
       </button>
     </CollapsibleTrigger>
-  );
-}
-
-/** Non-interactive label for sub-sections (e.g. Audit Log within Security). */
-function SectionLabel({
-  children,
-  icon,
-}: {
-  children: React.ReactNode;
-  icon?: React.ReactNode;
-}) {
-  return (
-    <p className="px-3 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-      {icon}
-      {children}
-    </p>
   );
 }
