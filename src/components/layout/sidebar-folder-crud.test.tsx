@@ -186,26 +186,51 @@ const FOLDERS_DATA = [
   { id: "f1", name: "Work", parentId: null, sortOrder: 0, entryCount: 2 },
 ];
 
+const ORG_FOLDERS_DATA = [
+  { id: "of1", name: "OrgWork", parentId: null, sortOrder: 0, entryCount: 3 },
+];
+
 /** Mock fetch for initial data loads returning folders and empty tags/orgs. */
-function mockFetchSuccess(overrides?: { foldersData?: unknown[] }) {
+function mockFetchSuccess(overrides?: {
+  foldersData?: unknown[];
+  orgsData?: unknown[];
+  orgFoldersData?: unknown[];
+  orgTagsData?: unknown[];
+}) {
   const folders = overrides?.foldersData ?? FOLDERS_DATA;
+  const orgsData = overrides?.orgsData ?? [];
+  const orgFolders = overrides?.orgFoldersData ?? [];
+  const orgTags = overrides?.orgTagsData ?? [];
   return vi.fn((url: string) => {
-    if (url.includes("/api/tags")) {
+    if (url.includes("/api/tags") && !url.includes("/api/orgs/")) {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve([]),
       });
     }
-    if (url.includes("/api/folders")) {
+    if (url.includes("/api/folders") && !url.includes("/api/orgs/")) {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve(folders),
       });
     }
+    // Org-specific sub-resource fetches (tags, folders)
+    if (url.match(/\/api\/orgs\/[^/]+\/tags/)) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(orgTags),
+      });
+    }
+    if (url.match(/\/api\/orgs\/[^/]+\/folders/)) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(orgFolders),
+      });
+    }
     if (url.includes("/api/orgs")) {
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve([]),
+        json: () => Promise.resolve(orgsData),
       });
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
@@ -441,5 +466,173 @@ describe("Sidebar folder CRUD integration", () => {
     ).rejects.toThrow();
 
     expect(mockToast.error).toHaveBeenCalledWith("unknownError");
+  });
+});
+
+// ── Org folder CRUD / permission tests ──────────────────────────
+
+describe("Sidebar org folder CRUD integration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    capturedFolderDialogProps = null;
+  });
+
+  it("shows org folder create button for OWNER role", async () => {
+    const fetchMock = mockFetchSuccess({
+      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
+      orgFoldersData: ORG_FOLDERS_DATA,
+    });
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(<Sidebar open={false} onOpenChange={vi.fn()} />);
+    });
+
+    const sidebar = within(getDesktopSidebar());
+
+    // Wait for org folder to render
+    await waitFor(() => {
+      expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
+    });
+
+    // The "createFolder" buttons: one for personal, one for org (OWNER)
+    const createButtons = sidebar.getAllByRole("button", { name: "createFolder" });
+    expect(createButtons.length).toBe(2);
+  });
+
+  it("shows org folder create button for ADMIN role", async () => {
+    const fetchMock = mockFetchSuccess({
+      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "ADMIN" }],
+      orgFoldersData: ORG_FOLDERS_DATA,
+    });
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(<Sidebar open={false} onOpenChange={vi.fn()} />);
+    });
+
+    const sidebar = within(getDesktopSidebar());
+
+    await waitFor(() => {
+      expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
+    });
+
+    // Personal + Org create buttons
+    const createButtons = sidebar.getAllByRole("button", { name: "createFolder" });
+    expect(createButtons.length).toBe(2);
+  });
+
+  it("hides org folder create button for MEMBER role", async () => {
+    const fetchMock = mockFetchSuccess({
+      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
+      orgFoldersData: ORG_FOLDERS_DATA,
+    });
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(<Sidebar open={false} onOpenChange={vi.fn()} />);
+    });
+
+    const sidebar = within(getDesktopSidebar());
+
+    await waitFor(() => {
+      expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
+    });
+
+    // Only personal create button should be present (no org create button for MEMBER)
+    const createButtons = sidebar.getAllByRole("button", { name: "createFolder" });
+    expect(createButtons.length).toBe(1);
+  });
+
+  it("hides edit/delete menu for org folders when role is MEMBER", async () => {
+    const fetchMock = mockFetchSuccess({
+      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
+      orgFoldersData: ORG_FOLDERS_DATA,
+    });
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(<Sidebar open={false} onOpenChange={vi.fn()} />);
+    });
+
+    const sidebar = within(getDesktopSidebar());
+
+    await waitFor(() => {
+      expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
+    });
+
+    // Org folder "OrgWork" should NOT have a context menu button
+    const menuButtons = sidebar.queryAllByRole("button", { name: "OrgWork menu" });
+    expect(menuButtons.length).toBe(0);
+  });
+
+  it("shows edit/delete menu for org folders when role is OWNER", async () => {
+    const fetchMock = mockFetchSuccess({
+      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
+      orgFoldersData: ORG_FOLDERS_DATA,
+    });
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(<Sidebar open={false} onOpenChange={vi.fn()} />);
+    });
+
+    const sidebar = within(getDesktopSidebar());
+
+    await waitFor(() => {
+      expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
+    });
+
+    // Org folder "OrgWork" should have a context menu button (plus personal "Work" menu)
+    const orgMenuButton = sidebar.getByRole("button", { name: "OrgWork menu" });
+    expect(orgMenuButton).toBeInTheDocument();
+  });
+
+  it("calls org API endpoint when creating org folder", async () => {
+    const fetchMock = mockFetchSuccess({
+      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
+      orgFoldersData: ORG_FOLDERS_DATA,
+    });
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(<Sidebar open={false} onOpenChange={vi.fn()} />);
+    });
+
+    const sidebar = within(getDesktopSidebar());
+
+    await waitFor(() => {
+      expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
+    });
+
+    // Click the org folder create button (the second "createFolder" button)
+    const createButtons = sidebar.getAllByRole("button", { name: "createFolder" });
+    expect(createButtons.length).toBe(2);
+    fireEvent.click(createButtons[1]); // Second one is the org folder create
+
+    expect(capturedFolderDialogProps).not.toBeNull();
+    expect(capturedFolderDialogProps!.open).toBe(true);
+
+    // Configure fetch to succeed for the POST
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ id: "of2", name: "New Org Folder" }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+    });
+
+    await act(async () => {
+      await capturedFolderDialogProps!.onSubmit({ name: "New Org Folder", parentId: null });
+    });
+
+    // Verify the POST was sent to the org folders endpoint
+    const postCalls = fetchMock.mock.calls.filter(
+      (c: [string, RequestInit?]) => c[1]?.method === "POST",
+    );
+    expect(postCalls.length).toBe(1);
+    expect(postCalls[0][0]).toContain("/api/orgs/org-1/folders");
   });
 });
