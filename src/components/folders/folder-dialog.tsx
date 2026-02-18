@@ -70,6 +70,9 @@ export function FolderDialog({
       onOpenChange(false);
       setName("");
       setParentId(null);
+    } catch {
+      // Error already handled by caller (e.g. toast in sidebar).
+      // Dialog stays open so the user can correct input.
     } finally {
       setLoading(false);
     }
