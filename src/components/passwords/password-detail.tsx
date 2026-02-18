@@ -286,7 +286,13 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
           </div>
 
           {/* TOTP */}
-          {data.totp && <TOTPField mode="display" totp={data.totp} />}
+          {data.totp && (
+            <TOTPField
+              mode="display"
+              totp={data.totp}
+              wrapCopyGetter={(getter) => createGuardedGetter(data.id, data.requireReprompt, getter)}
+            />
+          )}
 
           {data.url && (
             <div className="space-y-1">
@@ -416,12 +422,21 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
                         size="icon"
                         className="h-7 w-7 shrink-0"
                         onClick={() => {
-                          setRevealedHistory((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(idx)) next.delete(idx);
-                            else next.add(idx);
-                            return next;
-                          });
+                          if (revealedHistory.has(idx)) {
+                            setRevealedHistory((prev) => {
+                              const next = new Set(prev);
+                              next.delete(idx);
+                              return next;
+                            });
+                          } else {
+                            requireVerification(data.id, data.requireReprompt, () => {
+                              setRevealedHistory((prev) => {
+                                const next = new Set(prev);
+                                next.add(idx);
+                                return next;
+                              });
+                            });
+                          }
                         }}
                       >
                         {revealedHistory.has(idx) ? (
@@ -430,7 +445,7 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
                           <Eye className="h-3.5 w-3.5" />
                         )}
                       </Button>
-                      <CopyButton getValue={() => entry.password} />
+                      <CopyButton getValue={createGuardedGetter(data.id, data.requireReprompt, () => entry.password)} />
                     </div>
                   ))}
                 </div>
