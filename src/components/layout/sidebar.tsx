@@ -611,99 +611,43 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 
       {/* ── Organize (folders + tags) ──────────────────────── */}
       <Separator />
-      <Collapsible open={isOpen("organize")} onOpenChange={toggleSection("organize")}>
-        <div className="flex items-center">
-          <div className="flex-1">
-            <CollapsibleSectionHeader
-              icon={<Tag className="h-3 w-3" />}
-              isOpen={isOpen("organize")}
-            >
-              {t("organize")}
-            </CollapsibleSectionHeader>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 shrink-0 mr-1"
-            onClick={() =>
-              vaultContext.type === "org"
-                ? handleFolderCreate(vaultContext.orgId)
-                : handleFolderCreate()
-            }
-            disabled={vaultContext.type === "org" && !selectedOrgCanManageFolders}
-            aria-label={t("createFolder")}
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-        <CollapsibleContent>
-          <div className="space-y-1 mb-2">
-            {selectedFolders
-              .filter((f) => !f.parentId)
-              .map((folder) => (
-                <FolderTreeNode
-                  key={folder.id}
-                  folder={folder}
-                  folders={selectedFolders}
-                  activeFolderId={selectedFolderId}
-                  depth={0}
-                  linkHref={(id) =>
-                    vaultContext.type === "org"
-                      ? `/dashboard/orgs/${vaultContext.orgId}?folder=${id}`
-                      : `/dashboard/folders/${id}`
-                  }
-                  showMenu={vaultContext.type === "org" ? selectedOrgCanManageFolders : true}
-                  onNavigate={() => onOpenChange(false)}
-                  onEdit={(f) =>
-                    vaultContext.type === "org"
-                      ? handleFolderEdit(f, vaultContext.orgId)
-                      : handleFolderEdit(f)
-                  }
-                  onDelete={(f) =>
-                    vaultContext.type === "org"
-                      ? handleFolderDeleteClick(f, vaultContext.orgId)
-                      : handleFolderDeleteClick(f)
-                  }
-                />
-              ))}
-          </div>
-          <div className="space-y-1">
-            {selectedTags.map((tag) => {
-              const colorClass = getTagColorClass(tag.color);
-              return (
-                <Button
-                  key={tag.id}
-                  variant={selectedTagId === tag.id ? "secondary" : "ghost"}
-                  className="w-full justify-start gap-2"
-                  asChild
-                >
-                  <Link
-                    href={
-                      vaultContext.type === "org"
-                        ? `/dashboard/orgs/${vaultContext.orgId}?tag=${tag.id}`
-                        : `/dashboard/tags/${tag.id}`
-                    }
-                    onClick={() => onOpenChange(false)}
-                  >
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "h-3 w-3 rounded-full p-0",
-                        colorClass && "tag-color-bg",
-                        colorClass
-                      )}
-                    />
-                    {tag.name}
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      {tag.count}
-                    </span>
-                  </Link>
-                </Button>
-              );
-            })}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+      <OrganizeSection
+        isOpen={isOpen("organize")}
+        onOpenChange={toggleSection("organize")}
+        t={t}
+        canCreateFolder={vaultContext.type !== "org" || selectedOrgCanManageFolders}
+        folders={selectedFolders}
+        activeFolderId={selectedFolderId}
+        linkHref={(id) =>
+          vaultContext.type === "org"
+            ? `/dashboard/orgs/${vaultContext.orgId}?folder=${id}`
+            : `/dashboard/folders/${id}`
+        }
+        showFolderMenu={vaultContext.type === "org" ? selectedOrgCanManageFolders : true}
+        tags={selectedTags}
+        activeTagId={selectedTagId}
+        tagHref={(id) =>
+          vaultContext.type === "org"
+            ? `/dashboard/orgs/${vaultContext.orgId}?tag=${id}`
+            : `/dashboard/tags/${id}`
+        }
+        onCreateFolder={() =>
+          vaultContext.type === "org"
+            ? handleFolderCreate(vaultContext.orgId)
+            : handleFolderCreate()
+        }
+        onEditFolder={(f) =>
+          vaultContext.type === "org"
+            ? handleFolderEdit(f, vaultContext.orgId)
+            : handleFolderEdit(f)
+        }
+        onDeleteFolder={(f) =>
+          vaultContext.type === "org"
+            ? handleFolderDeleteClick(f, vaultContext.orgId)
+            : handleFolderDeleteClick(f)
+        }
+        onNavigate={() => onOpenChange(false)}
+      />
 
       <Separator />
 
@@ -1006,6 +950,122 @@ function CategoriesSection({
                 <Link href={href} onClick={onNavigate}>
                   <Icon className="h-4 w-4" />
                   {t(category.labelKey)}
+                </Link>
+              </Button>
+            );
+          })}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+interface OrganizeTagItem {
+  id: string;
+  name: string;
+  color: string | null;
+  count: number;
+}
+
+interface OrganizeSectionProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  t: (key: string) => string;
+  canCreateFolder: boolean;
+  folders: FolderItem[];
+  activeFolderId: string | null;
+  linkHref: (folderId: string) => string;
+  showFolderMenu: boolean;
+  tags: OrganizeTagItem[];
+  activeTagId: string | null;
+  tagHref: (tagId: string) => string;
+  onCreateFolder: () => void;
+  onEditFolder: (folder: FolderItem) => void;
+  onDeleteFolder: (folder: FolderItem) => void;
+  onNavigate: () => void;
+}
+
+function OrganizeSection({
+  isOpen,
+  onOpenChange,
+  t,
+  canCreateFolder,
+  folders,
+  activeFolderId,
+  linkHref,
+  showFolderMenu,
+  tags,
+  activeTagId,
+  tagHref,
+  onCreateFolder,
+  onEditFolder,
+  onDeleteFolder,
+  onNavigate,
+}: OrganizeSectionProps) {
+  return (
+    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
+      <div className="flex items-center">
+        <div className="flex-1">
+          <CollapsibleSectionHeader
+            icon={<Tag className="h-3 w-3" />}
+            isOpen={isOpen}
+          >
+            {t("organize")}
+          </CollapsibleSectionHeader>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 shrink-0 mr-1"
+          onClick={onCreateFolder}
+          disabled={!canCreateFolder}
+          aria-label={t("createFolder")}
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      <CollapsibleContent>
+        <div className="space-y-1 mb-2">
+          {folders
+            .filter((folder) => !folder.parentId)
+            .map((folder) => (
+              <FolderTreeNode
+                key={folder.id}
+                folder={folder}
+                folders={folders}
+                activeFolderId={activeFolderId}
+                depth={0}
+                linkHref={linkHref}
+                showMenu={showFolderMenu}
+                onNavigate={onNavigate}
+                onEdit={onEditFolder}
+                onDelete={onDeleteFolder}
+              />
+            ))}
+        </div>
+        <div className="space-y-1">
+          {tags.map((tag) => {
+            const colorClass = getTagColorClass(tag.color);
+            return (
+              <Button
+                key={tag.id}
+                variant={activeTagId === tag.id ? "secondary" : "ghost"}
+                className="w-full justify-start gap-2"
+                asChild
+              >
+                <Link href={tagHref(tag.id)} onClick={onNavigate}>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "h-3 w-3 rounded-full p-0",
+                      colorClass && "tag-color-bg",
+                      colorClass
+                    )}
+                  />
+                  {tag.name}
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {tag.count}
+                  </span>
                 </Link>
               </Button>
             );
