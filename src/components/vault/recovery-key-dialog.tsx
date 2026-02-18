@@ -11,6 +11,7 @@ import {
   wrapSecretKeyWithRecovery,
 } from "@/lib/crypto-recovery";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { preventIMESubmit } from "@/lib/ime-guard";
 import { API_PATH } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -181,7 +182,7 @@ export function RecoveryKeyDialog({
         </DialogHeader>
 
         {step === "passphrase" && (
-          <form onSubmit={handleGenerate} className="space-y-4 rounded-lg border bg-muted/20 p-4">
+          <form onSubmit={handleGenerate} onKeyDown={preventIMESubmit} className="space-y-4 rounded-lg border bg-muted/20 p-4">
             {hasRecoveryKey && (
               <div className="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm text-yellow-700 dark:text-yellow-400">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />

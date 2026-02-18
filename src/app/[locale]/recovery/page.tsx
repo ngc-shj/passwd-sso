@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
+import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   parseRecoveryKey,
   computeRecoveryVerifierHash,
@@ -222,7 +223,7 @@ export default function RecoveryPage() {
         </div>
 
         {step === "input" && (
-          <form onSubmit={handleVerify} className="space-y-4 rounded-lg border bg-card p-6 shadow-sm">
+          <form onSubmit={handleVerify} onKeyDown={preventIMESubmit} className="space-y-4 rounded-lg border bg-card p-6 shadow-sm">
             <div className="space-y-2">
               <Label htmlFor="recovery-key">{t("recoveryKeyLabel")}</Label>
               <Input
@@ -247,7 +248,7 @@ export default function RecoveryPage() {
         )}
 
         {step === "new-passphrase" && (
-          <form onSubmit={handleReset} className="space-y-4 rounded-lg border bg-card p-6 shadow-sm">
+          <form onSubmit={handleReset} onKeyDown={preventIMESubmit} className="space-y-4 rounded-lg border bg-card p-6 shadow-sm">
             <p className="text-sm text-green-600 dark:text-green-400 font-medium">
               {t("verified")}
             </p>

@@ -28,6 +28,7 @@ import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
 } from "@/lib/generator-prefs";
+import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   Eye,
   EyeOff,
@@ -632,7 +633,7 @@ export function OrgPasswordForm({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleFormSubmit} className="space-y-5">
+        <form onSubmit={handleFormSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
           <EntryPrimaryCard>
           {/* Title */}
           <div className="space-y-2">
