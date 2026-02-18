@@ -4,10 +4,10 @@ import { CARD_BRANDS } from "@/lib/credit-card";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import { OrgCreditCardFields } from "@/components/org/org-credit-card-fields";
 import { OrgIdentityFields } from "@/components/org/org-identity-fields";
-import { OrgLoginFields } from "@/components/org/org-login-fields";
 import { OrgPasskeyFields } from "@/components/org/org-passkey-fields";
 import { OrgSecureNoteFields } from "@/components/org/org-secure-note-fields";
 import type { OrgEntryKind } from "@/components/org/org-password-form-types";
+import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 
 interface OrgEntrySpecificFieldsProps {
   entryKind: OrgEntryKind;
@@ -386,7 +386,9 @@ export function OrgEntrySpecificFields({
     case "password":
     default:
       return (
-        <OrgLoginFields
+        <EntryLoginMainFields
+          idPrefix="org-"
+          hideTitle
           title={title}
           onTitleChange={onTitleChange}
           titleLabel={titleLabel}

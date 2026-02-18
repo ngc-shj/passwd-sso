@@ -6,8 +6,8 @@ import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import { describe, expect, it, vi } from "vitest";
 import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
 
-vi.mock("@/components/org/org-login-fields", () => ({
-  OrgLoginFields: () => <div data-testid="org-login-fields" />,
+vi.mock("@/components/passwords/entry-login-main-fields", () => ({
+  EntryLoginMainFields: () => <div data-testid="org-login-fields" />,
 }));
 vi.mock("@/components/org/org-secure-note-fields", () => ({
   OrgSecureNoteFields: () => <div data-testid="org-secure-note-fields" />,
