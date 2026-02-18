@@ -1,11 +1,9 @@
-import { toast } from "sonner";
 import { extractTagIds } from "@/lib/entry-form-helpers";
 import {
   buildPasswordHistory,
   buildPersonalEntryPayload,
 } from "@/lib/personal-entry-payload";
-import { savePersonalEntry } from "@/lib/personal-entry-save";
-import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
+import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
@@ -29,7 +27,7 @@ interface SubmitPersonalPasswordFormArgs {
   folderId: string | null;
   setSubmitting: (value: boolean) => void;
   t: (key: string) => string;
-  router: unknown;
+  router: { push: (href: string) => void; refresh: () => void };
   onSaved?: () => void;
 }
 
@@ -55,45 +53,40 @@ export async function submitPersonalPasswordForm({
   onSaved,
 }: SubmitPersonalPasswordFormArgs): Promise<void> {
   if (!encryptionKey) return;
-  setSubmitting(true);
 
-  try {
-    const existingHistory = buildPasswordHistory(
-      mode === "edit" && initialData ? initialData.password : "",
-      password,
-      initialData?.passwordHistory ?? [],
-      new Date().toISOString(),
-    );
-    const { fullBlob, overviewBlob } = buildPersonalEntryPayload({
-      title,
-      username,
-      password,
-      url,
-      notes,
-      selectedTags,
-      generatorSettings,
-      customFields,
-      totp,
-      requireReprompt,
-      existingHistory,
-    });
+  const existingHistory = buildPasswordHistory(
+    mode === "edit" && initialData ? initialData.password : "",
+    password,
+    initialData?.passwordHistory ?? [],
+    new Date().toISOString(),
+  );
+  const { fullBlob, overviewBlob } = buildPersonalEntryPayload({
+    title,
+    username,
+    password,
+    url,
+    notes,
+    selectedTags,
+    generatorSettings,
+    customFields,
+    totp,
+    requireReprompt,
+    existingHistory,
+  });
 
-    const res = await savePersonalEntry({
-      mode,
-      initialId: initialData?.id,
-      encryptionKey,
-      userId: userId ?? undefined,
-      fullBlob,
-      overviewBlob,
-      tagIds: extractTagIds(selectedTags),
-      requireReprompt,
-      folderId: folderId ?? null,
-    });
-
-    handlePersonalSaveFeedback({ res, mode, t, router, onSaved });
-  } catch {
-    toast.error(t("networkError"));
-  } finally {
-    setSubmitting(false);
-  }
+  await executePersonalEntrySubmit({
+    mode,
+    initialId: initialData?.id,
+    encryptionKey,
+    userId: userId ?? undefined,
+    fullBlob,
+    overviewBlob,
+    tagIds: extractTagIds(selectedTags),
+    requireReprompt,
+    folderId: folderId ?? null,
+    setSubmitting,
+    t,
+    router,
+    onSaved,
+  });
 }

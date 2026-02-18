@@ -18,13 +18,11 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
-import { toast } from "sonner";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
-import { savePersonalEntry } from "@/lib/personal-entry-save";
+import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
 import { toTagIds, toTagPayload } from "@/components/passwords/entry-form-tags";
-import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
 
 interface PasskeyFormProps {
   mode: "create" | "edit";
@@ -121,48 +119,40 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!encryptionKey) return;
-    setSubmitting(true);
+    const tags = toTagPayload(selectedTags);
+    const fullBlob = JSON.stringify({
+      title,
+      relyingPartyId: relyingPartyId || null,
+      relyingPartyName: relyingPartyName || null,
+      username: username || null,
+      credentialId: credentialId || null,
+      creationDate: creationDate || null,
+      deviceInfo: deviceInfo || null,
+      notes: notes || null,
+      tags,
+    });
+    const overviewBlob = JSON.stringify({
+      title,
+      relyingPartyId: relyingPartyId || null,
+      username: username || null,
+      tags,
+    });
 
-    try {
-      const tags = toTagPayload(selectedTags);
-
-      const fullBlob = JSON.stringify({
-        title,
-        relyingPartyId: relyingPartyId || null,
-        relyingPartyName: relyingPartyName || null,
-        username: username || null,
-        credentialId: credentialId || null,
-        creationDate: creationDate || null,
-        deviceInfo: deviceInfo || null,
-        notes: notes || null,
-        tags,
-      });
-
-      const overviewBlob = JSON.stringify({
-        title,
-        relyingPartyId: relyingPartyId || null,
-        username: username || null,
-        tags,
-      });
-
-      const res = await savePersonalEntry({
-        mode,
-        initialId: initialData?.id,
-        encryptionKey,
-        userId: userId ?? undefined,
-        fullBlob,
-        overviewBlob,
-        tagIds: toTagIds(selectedTags),
-        folderId: folderId ?? null,
-        entryType: ENTRY_TYPE.PASSKEY,
-      });
-
-      handlePersonalSaveFeedback({ res, mode, t, router, onSaved });
-    } catch {
-      toast.error(t("networkError"));
-    } finally {
-      setSubmitting(false);
-    }
+    await executePersonalEntrySubmit({
+      mode,
+      initialId: initialData?.id,
+      encryptionKey,
+      userId: userId ?? undefined,
+      fullBlob,
+      overviewBlob,
+      tagIds: toTagIds(selectedTags),
+      folderId: folderId ?? null,
+      entryType: ENTRY_TYPE.PASSKEY,
+      setSubmitting,
+      t,
+      router,
+      onSaved,
+    });
   };
 
   const handleCancel = () => {

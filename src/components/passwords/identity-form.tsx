@@ -18,13 +18,11 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
-import { toast } from "sonner";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
-import { savePersonalEntry } from "@/lib/personal-entry-save";
+import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
 import { toTagIds, toTagPayload } from "@/components/passwords/entry-form-tags";
-import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
 
 interface IdentityFormProps {
   mode: "create" | "edit";
@@ -153,53 +151,44 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
       setExpiryError(null);
     }
     if (hasError) return;
-    setSubmitting(true);
+    const tags = toTagPayload(selectedTags);
+    const idNumberLast4 = idNumber ? idNumber.slice(-4) : null;
+    const fullBlob = JSON.stringify({
+      title,
+      fullName: fullName || null,
+      address: address || null,
+      phone: phone || null,
+      email: email || null,
+      dateOfBirth: dateOfBirth || null,
+      nationality: nationality || null,
+      idNumber: idNumber || null,
+      issueDate: issueDate || null,
+      expiryDate: expiryDate || null,
+      notes: notes || null,
+      tags,
+    });
+    const overviewBlob = JSON.stringify({
+      title,
+      fullName: fullName || null,
+      idNumberLast4,
+      tags,
+    });
 
-    try {
-      const tags = toTagPayload(selectedTags);
-
-      const idNumberLast4 = idNumber ? idNumber.slice(-4) : null;
-
-      const fullBlob = JSON.stringify({
-        title,
-        fullName: fullName || null,
-        address: address || null,
-        phone: phone || null,
-        email: email || null,
-        dateOfBirth: dateOfBirth || null,
-        nationality: nationality || null,
-        idNumber: idNumber || null,
-        issueDate: issueDate || null,
-        expiryDate: expiryDate || null,
-        notes: notes || null,
-        tags,
-      });
-
-      const overviewBlob = JSON.stringify({
-        title,
-        fullName: fullName || null,
-        idNumberLast4,
-        tags,
-      });
-
-      const res = await savePersonalEntry({
-        mode,
-        initialId: initialData?.id,
-        encryptionKey,
-        userId: userId ?? undefined,
-        fullBlob,
-        overviewBlob,
-        tagIds: toTagIds(selectedTags),
-        folderId: folderId ?? null,
-        entryType: ENTRY_TYPE.IDENTITY,
-      });
-
-      handlePersonalSaveFeedback({ res, mode, t, router, onSaved });
-    } catch {
-      toast.error(t("networkError"));
-    } finally {
-      setSubmitting(false);
-    }
+    await executePersonalEntrySubmit({
+      mode,
+      initialId: initialData?.id,
+      encryptionKey,
+      userId: userId ?? undefined,
+      fullBlob,
+      overviewBlob,
+      tagIds: toTagIds(selectedTags),
+      folderId: folderId ?? null,
+      entryType: ENTRY_TYPE.IDENTITY,
+      setSubmitting,
+      t,
+      router,
+      onSaved,
+    });
   };
 
   const handleCancel = () => {

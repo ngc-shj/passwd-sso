@@ -35,13 +35,11 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
-import { toast } from "sonner";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
-import { savePersonalEntry } from "@/lib/personal-entry-save";
+import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
 import { toTagIds, toTagPayload } from "@/components/passwords/entry-form-tags";
-import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
 
 interface CreditCardFormProps {
   mode: "create" | "edit";
@@ -162,52 +160,45 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
     e.preventDefault();
     if (!encryptionKey) return;
     if (!cardNumberValid) return;
-    setSubmitting(true);
+    const tags = toTagPayload(selectedTags);
+    const normalizedCardNumber = normalizeCardNumber(cardNumber);
+    const lastFour = normalizedCardNumber ? normalizedCardNumber.slice(-4) : null;
 
-    try {
-      const tags = toTagPayload(selectedTags);
+    const fullBlob = JSON.stringify({
+      title,
+      cardholderName: cardholderName || null,
+      cardNumber: normalizedCardNumber || null,
+      brand: normalizeCardBrand(brand) || null,
+      expiryMonth: expiryMonth || null,
+      expiryYear: expiryYear || null,
+      cvv: cvv || null,
+      notes: notes || null,
+      tags,
+    });
 
-      const normalizedCardNumber = normalizeCardNumber(cardNumber);
-      const lastFour = normalizedCardNumber ? normalizedCardNumber.slice(-4) : null;
+    const overviewBlob = JSON.stringify({
+      title,
+      cardholderName: cardholderName || null,
+      brand: normalizeCardBrand(brand) || null,
+      lastFour,
+      tags,
+    });
 
-      const fullBlob = JSON.stringify({
-        title,
-        cardholderName: cardholderName || null,
-        cardNumber: normalizedCardNumber || null,
-        brand: normalizeCardBrand(brand) || null,
-        expiryMonth: expiryMonth || null,
-        expiryYear: expiryYear || null,
-        cvv: cvv || null,
-        notes: notes || null,
-        tags,
-      });
-
-      const overviewBlob = JSON.stringify({
-        title,
-        cardholderName: cardholderName || null,
-        brand: normalizeCardBrand(brand) || null,
-        lastFour,
-        tags,
-      });
-
-      const res = await savePersonalEntry({
-        mode,
-        initialId: initialData?.id,
-        encryptionKey,
-        userId: userId ?? undefined,
-        fullBlob,
-        overviewBlob,
-        tagIds: toTagIds(selectedTags),
-        folderId: folderId ?? null,
-        entryType: ENTRY_TYPE.CREDIT_CARD,
-      });
-
-      handlePersonalSaveFeedback({ res, mode, t, router, onSaved });
-    } catch {
-      toast.error(t("networkError"));
-    } finally {
-      setSubmitting(false);
-    }
+    await executePersonalEntrySubmit({
+      mode,
+      initialId: initialData?.id,
+      encryptionKey,
+      userId: userId ?? undefined,
+      fullBlob,
+      overviewBlob,
+      tagIds: toTagIds(selectedTags),
+      folderId: folderId ?? null,
+      entryType: ENTRY_TYPE.CREDIT_CARD,
+      setSubmitting,
+      t,
+      router,
+      onSaved,
+    });
   };
 
   const handleCancel = () => {

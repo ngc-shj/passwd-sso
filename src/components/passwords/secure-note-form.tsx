@@ -17,13 +17,11 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
-import { toast } from "sonner";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
-import { savePersonalEntry } from "@/lib/personal-entry-save";
+import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
 import { toTagIds, toTagPayload } from "@/components/passwords/entry-form-tags";
-import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
 
 interface SecureNoteFormProps {
   mode: "create" | "edit";
@@ -84,43 +82,26 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!encryptionKey) return;
-    setSubmitting(true);
+    const tags = toTagPayload(selectedTags);
+    const snippet = content.slice(0, 100);
+    const fullBlob = JSON.stringify({ title, content, tags });
+    const overviewBlob = JSON.stringify({ title, snippet, tags });
 
-    try {
-      const tags = toTagPayload(selectedTags);
-
-      const snippet = content.slice(0, 100);
-
-      const fullBlob = JSON.stringify({
-        title,
-        content,
-        tags,
-      });
-
-      const overviewBlob = JSON.stringify({
-        title,
-        snippet,
-        tags,
-      });
-
-      const res = await savePersonalEntry({
-        mode,
-        initialId: initialData?.id,
-        encryptionKey,
-        userId: userId ?? undefined,
-        fullBlob,
-        overviewBlob,
-        tagIds: toTagIds(selectedTags),
-        folderId: folderId ?? null,
-        entryType: ENTRY_TYPE.SECURE_NOTE,
-      });
-
-      handlePersonalSaveFeedback({ res, mode, t, router, onSaved });
-    } catch {
-      toast.error(t("networkError"));
-    } finally {
-      setSubmitting(false);
-    }
+    await executePersonalEntrySubmit({
+      mode,
+      initialId: initialData?.id,
+      encryptionKey,
+      userId: userId ?? undefined,
+      fullBlob,
+      overviewBlob,
+      tagIds: toTagIds(selectedTags),
+      folderId: folderId ?? null,
+      entryType: ENTRY_TYPE.SECURE_NOTE,
+      setSubmitting,
+      t,
+      router,
+      onSaved,
+    });
   };
 
   const handleCancel = () => {
