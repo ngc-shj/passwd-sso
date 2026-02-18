@@ -270,6 +270,45 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     expect(json.notes).toBe("Keep safe");
   });
 
+  it("returns PASSKEY with passkey fields", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: ENTRY_TYPE.PASSKEY,
+      encryptedBlob: "blob-cipher",
+      blobIv: "blob-iv",
+      blobAuthTag: "blob-tag",
+      isArchived: false,
+      org: orgKeyData,
+      tags: [],
+      createdBy: { id: "u1", name: "User", image: null },
+      updatedBy: { id: "u1", name: "User" },
+      favorites: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({
+        title: "FIDO Key",
+        relyingPartyId: "example.com",
+        relyingPartyName: "Example",
+        username: "alice@example.com",
+        credentialId: "cred-123",
+      })
+    );
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.entryType).toBe(ENTRY_TYPE.PASSKEY);
+    expect(json.relyingPartyId).toBe("example.com");
+    expect(json.username).toBe("alice@example.com");
+    expect(json.credentialId).toBe("cred-123");
+  });
+
   it("passes AAD to decryptServerData for aadVersion >= 1 entries", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
@@ -744,6 +783,43 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.title).toBe("Updated ID");
+    expect(mockEncryptServerData).toHaveBeenCalledTimes(2);
+  });
+
+  it("updates PASSKEY entry with re-encryption", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: ENTRY_TYPE.PASSKEY,
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({
+        title: "Old Key",
+        relyingPartyId: "old.example.com",
+        username: "old@example.com",
+      })
+    );
+    mockPrismaOrgPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      entryType: ENTRY_TYPE.PASSKEY,
+      tags: [],
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { title: "Updated Key", relyingPartyId: "example.com" },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.title).toBe("Updated Key");
     expect(mockEncryptServerData).toHaveBeenCalledTimes(2);
   });
 

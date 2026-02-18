@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { updateOrgPasswordSchema, updateOrgSecureNoteSchema, updateOrgCreditCardSchema, updateOrgIdentitySchema } from "@/lib/validations";
+import {
+  updateOrgPasswordSchema,
+  updateOrgSecureNoteSchema,
+  updateOrgCreditCardSchema,
+  updateOrgIdentitySchema,
+  updateOrgPasskeySchema,
+} from "@/lib/validations";
 import {
   requireOrgPermission,
   requireOrgMember,
@@ -145,6 +151,19 @@ export async function GET(_req: NextRequest, { params }: Params) {
       idNumber: blob.idNumber ?? null,
       issueDate: blob.issueDate ?? null,
       expiryDate: blob.expiryDate ?? null,
+      notes: blob.notes ?? null,
+    });
+  }
+
+  if (entry.entryType === ENTRY_TYPE.PASSKEY) {
+    return NextResponse.json({
+      ...common,
+      relyingPartyId: blob.relyingPartyId ?? null,
+      relyingPartyName: blob.relyingPartyName ?? null,
+      username: blob.username ?? null,
+      credentialId: blob.credentialId ?? null,
+      creationDate: blob.creationDate ?? null,
+      deviceInfo: blob.deviceInfo ?? null,
       notes: blob.notes ?? null,
     });
   }
@@ -381,6 +400,58 @@ export async function PUT(req: NextRequest, { params }: Params) {
       title: updatedBlob.title,
       fullName: updatedBlob.fullName,
       idNumberLast4,
+    });
+  } else if (entry.entryType === ENTRY_TYPE.PASSKEY) {
+    const parsed = updateOrgPasskeySchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    tagIds = parsed.data.tagIds;
+    orgFolderId = parsed.data.orgFolderId;
+    isArchived = parsed.data.isArchived;
+
+    const updatedBlob = {
+      title: (parsed.data.title ?? currentBlob.title) as string,
+      relyingPartyId:
+        parsed.data.relyingPartyId !== undefined
+          ? parsed.data.relyingPartyId || null
+          : currentBlob.relyingPartyId,
+      relyingPartyName:
+        parsed.data.relyingPartyName !== undefined
+          ? parsed.data.relyingPartyName || null
+          : currentBlob.relyingPartyName,
+      username:
+        parsed.data.username !== undefined
+          ? parsed.data.username || null
+          : currentBlob.username,
+      credentialId:
+        parsed.data.credentialId !== undefined
+          ? parsed.data.credentialId || null
+          : currentBlob.credentialId,
+      creationDate:
+        parsed.data.creationDate !== undefined
+          ? parsed.data.creationDate || null
+          : currentBlob.creationDate,
+      deviceInfo:
+        parsed.data.deviceInfo !== undefined
+          ? parsed.data.deviceInfo || null
+          : currentBlob.deviceInfo,
+      notes:
+        parsed.data.notes !== undefined
+          ? parsed.data.notes || null
+          : currentBlob.notes,
+    };
+    responseTitle = updatedBlob.title;
+
+    updatedBlobStr = JSON.stringify(updatedBlob);
+    overviewBlobStr = JSON.stringify({
+      title: updatedBlob.title,
+      relyingPartyId: updatedBlob.relyingPartyId,
+      username: updatedBlob.username,
     });
   } else {
     const parsed = updateOrgPasswordSchema.safeParse(body);
