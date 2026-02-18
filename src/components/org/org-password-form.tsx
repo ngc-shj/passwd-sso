@@ -101,6 +101,28 @@ interface OrgPasswordFormProps {
   } | null;
 }
 
+interface OrgTagSectionProps {
+  title: string;
+  hint: string;
+  orgId: string;
+  selectedTags: OrgTagData[];
+  onChange: (tags: OrgTagData[]) => void;
+}
+
+function OrgTagSection({
+  title,
+  hint,
+  orgId,
+  selectedTags,
+  onChange,
+}: OrgTagSectionProps) {
+  return (
+    <EntryTagsSection title={title} hint={hint}>
+      <OrgTagInput orgId={orgId} selectedTags={selectedTags} onChange={onChange} />
+    </EntryTagsSection>
+  );
+}
+
 export function OrgPasswordForm({
   orgId,
   open,
@@ -405,6 +427,36 @@ export function OrgPasswordForm({
       ? `${tGen("modePassphrase")} · ${generatorSettings.passphrase.wordCount}`
       : `${tGen("modePassword")} · ${generatorSettings.length}`;
 
+  const dialogLabel = isPasskey
+    ? (isEdit ? tpk("editPasskey") : tpk("newPasskey"))
+    : isIdentity
+      ? (isEdit ? ti("editIdentity") : ti("newIdentity"))
+      : isCreditCard
+        ? (isEdit ? tcc("editCard") : tcc("newCard"))
+        : isNote
+          ? (isEdit ? tn("editNote") : tn("newNote"))
+          : (isEdit ? t("editPassword") : t("newPassword"));
+
+  const titleLabel = isPasskey
+    ? tpk("title")
+    : isIdentity
+      ? ti("title")
+      : isCreditCard
+        ? tcc("title")
+        : isNote
+          ? tn("title")
+          : t("title");
+
+  const titlePlaceholder = isPasskey
+    ? tpk("titlePlaceholder")
+    : isIdentity
+      ? ti("titlePlaceholder")
+      : isCreditCard
+        ? tcc("titlePlaceholder")
+        : isNote
+          ? tn("titlePlaceholder")
+          : t("titlePlaceholder");
+
   const baselineSnapshot = useMemo(
     () =>
       JSON.stringify({
@@ -543,6 +595,11 @@ export function OrgPasswordForm({
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
+  const submitDisabled =
+    !title.trim() ||
+    (isPasskey && !relyingPartyId.trim()) ||
+    (!isNote && !isCreditCard && !isIdentity && !isPasskey && !password) ||
+    (isCreditCard && !cardNumberValid);
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -553,39 +610,19 @@ export function OrgPasswordForm({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>
-            {isPasskey
-              ? (isEdit ? tpk("editPasskey") : tpk("newPasskey"))
-              : isIdentity
-                ? (isEdit ? ti("editIdentity") : ti("newIdentity"))
-                : isCreditCard
-                  ? (isEdit ? tcc("editCard") : tcc("newCard"))
-                  : isNote
-                    ? (isEdit ? tn("editNote") : tn("newNote"))
-                    : (isEdit ? t("editPassword") : t("newPassword"))}
-          </DialogTitle>
-          <DialogDescription className="sr-only">
-            {isPasskey
-              ? (isEdit ? tpk("editPasskey") : tpk("newPasskey"))
-              : isIdentity
-                ? (isEdit ? ti("editIdentity") : ti("newIdentity"))
-                : isCreditCard
-                  ? (isEdit ? tcc("editCard") : tcc("newCard"))
-                  : isNote
-                    ? (isEdit ? tn("editNote") : tn("newNote"))
-                    : (isEdit ? t("editPassword") : t("newPassword"))}
-          </DialogDescription>
+          <DialogTitle>{dialogLabel}</DialogTitle>
+          <DialogDescription className="sr-only">{dialogLabel}</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleFormSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
           <div className="space-y-5">
           {/* Title */}
           <div className="space-y-2">
-            <Label>{isPasskey ? tpk("title") : isIdentity ? ti("title") : isCreditCard ? tcc("title") : isNote ? tn("title") : t("title")}</Label>
+            <Label>{titleLabel}</Label>
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder={isPasskey ? tpk("titlePlaceholder") : isIdentity ? ti("titlePlaceholder") : isCreditCard ? tcc("titlePlaceholder") : isNote ? tn("titlePlaceholder") : t("titlePlaceholder")}
+              placeholder={titlePlaceholder}
             />
           </div>
 
@@ -683,13 +720,13 @@ export function OrgPasswordForm({
                 />
               </div>
 
-              <EntryTagsSection title={tpk("tags")} hint={t("tagsHint")}>
-                <OrgTagInput
-                  orgId={orgId}
-                  selectedTags={selectedTags}
-                  onChange={setSelectedTags}
-                />
-              </EntryTagsSection>
+              <OrgTagSection
+                title={tpk("tags")}
+                hint={t("tagsHint")}
+                orgId={orgId}
+                selectedTags={selectedTags}
+                onChange={setSelectedTags}
+              />
             </>
           ) : isIdentity ? (
             <>
@@ -834,13 +871,13 @@ export function OrgPasswordForm({
                 />
               </div>
 
-              <EntryTagsSection title={ti("tags")} hint={t("tagsHint")}>
-                <OrgTagInput
-                  orgId={orgId}
-                  selectedTags={selectedTags}
-                  onChange={setSelectedTags}
-                />
-              </EntryTagsSection>
+              <OrgTagSection
+                title={ti("tags")}
+                hint={t("tagsHint")}
+                orgId={orgId}
+                selectedTags={selectedTags}
+                onChange={setSelectedTags}
+              />
             </>
           ) : isCreditCard ? (
             <>
@@ -1009,13 +1046,13 @@ export function OrgPasswordForm({
                 />
               </div>
 
-              <EntryTagsSection title={tcc("tags")} hint={t("tagsHint")}>
-                <OrgTagInput
-                  orgId={orgId}
-                  selectedTags={selectedTags}
-                  onChange={setSelectedTags}
-                />
-              </EntryTagsSection>
+              <OrgTagSection
+                title={tcc("tags")}
+                hint={t("tagsHint")}
+                orgId={orgId}
+                selectedTags={selectedTags}
+                onChange={setSelectedTags}
+              />
             </>
           ) : isNote ? (
             <>
@@ -1032,13 +1069,13 @@ export function OrgPasswordForm({
                 />
               </div>
 
-              <EntryTagsSection title={tn("tags")} hint={t("tagsHint")}>
-                <OrgTagInput
-                  orgId={orgId}
-                  selectedTags={selectedTags}
-                  onChange={setSelectedTags}
-                />
-              </EntryTagsSection>
+              <OrgTagSection
+                title={tn("tags")}
+                hint={t("tagsHint")}
+                orgId={orgId}
+                selectedTags={selectedTags}
+                onChange={setSelectedTags}
+              />
             </>
           ) : (
             <>
@@ -1079,13 +1116,13 @@ export function OrgPasswordForm({
                 notesPlaceholder={t("notesPlaceholder")}
               />
 
-              <EntryTagsSection title={t("tags")} hint={t("tagsHint")}>
-                <OrgTagInput
-                  orgId={orgId}
-                  selectedTags={selectedTags}
-                  onChange={setSelectedTags}
-                />
-              </EntryTagsSection>
+              <OrgTagSection
+                title={t("tags")}
+                hint={t("tagsHint")}
+                orgId={orgId}
+                selectedTags={selectedTags}
+                onChange={setSelectedTags}
+              />
 
               <EntryCustomFieldsTotpSection
                 customFields={customFields}
@@ -1109,12 +1146,7 @@ export function OrgPasswordForm({
         <EntryActionBar
           hasChanges={hasChanges}
           submitting={saving}
-          submitDisabled={
-            !title.trim() ||
-            (isPasskey && !relyingPartyId.trim()) ||
-            (!isNote && !isCreditCard && !isIdentity && !isPasskey && !password) ||
-            (isCreditCard && !cardNumberValid)
-          }
+          submitDisabled={submitDisabled}
           saveLabel={isEdit ? tc("update") : tc("save")}
           cancelLabel={tc("cancel")}
           statusUnsavedLabel={t("statusUnsaved")}
