@@ -14,7 +14,7 @@ import {
   EntrySectionCard,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
+import { PersonalLoginFields } from "@/components/passwords/personal-login-fields";
 import type { TagData } from "@/components/tags/tag-input";
 import {
   type GeneratorSettings,
@@ -152,12 +152,11 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   });
 
   const loginMainFields = (
-    <EntryLoginMainFields
+    <PersonalLoginFields
       title={title}
       onTitleChange={setTitle}
       titleLabel={t("title")}
       titlePlaceholder={t("titlePlaceholder")}
-      titleRequired
       username={username}
       onUsernameChange={setUsername}
       usernameLabel={t("usernameEmail")}
@@ -166,7 +165,6 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
       onPasswordChange={setPassword}
       passwordLabel={t("password")}
       passwordPlaceholder={t("passwordPlaceholder")}
-      passwordRequired
       showPassword={showPassword}
       onToggleShowPassword={() => setShowPassword((v) => !v)}
       generatorSummary={generatorSummary}
