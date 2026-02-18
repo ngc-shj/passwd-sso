@@ -21,14 +21,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
-import type { EntryTypeValue } from "@/lib/constants";
-import type {
-  EntryCustomFieldPortable,
-  EntryPasswordHistory,
-  EntryTagNameColor,
-  EntryTotpPortable,
-} from "@/lib/entry-form-types";
 import {
+  type ExportEntry,
   csvEntryType,
   csvExportHeader,
   escapeCsvValue,
@@ -37,43 +31,6 @@ import {
 
 type ExportFormat = "csv" | "json";
 type ExportProfile = "compatible" | "passwd-sso";
-
-interface DecryptedExport {
-  entryType: EntryTypeValue;
-  title: string;
-  username: string | null;
-  password: string;
-  content: string | null;
-  url: string | null;
-  notes: string | null;
-  totp: string | null;
-  cardholderName: string | null;
-  cardNumber: string | null;
-  brand: string | null;
-  expiryMonth: string | null;
-  expiryYear: string | null;
-  cvv: string | null;
-  fullName: string | null;
-  address: string | null;
-  phone: string | null;
-  email: string | null;
-  dateOfBirth: string | null;
-  nationality: string | null;
-  idNumber: string | null;
-  issueDate: string | null;
-  expiryDate: string | null;
-  relyingPartyId: string | null;
-  relyingPartyName: string | null;
-  credentialId: string | null;
-  creationDate: string | null;
-  deviceInfo: string | null;
-  tags: EntryTagNameColor[];
-  customFields: EntryCustomFieldPortable[];
-  totpConfig: EntryTotpPortable | null;
-  generatorSettings: Record<string, unknown> | null;
-  passwordHistory: EntryPasswordHistory[];
-  requireReprompt: boolean;
-}
 
 interface ExportDialogProps {
   trigger: React.ReactNode;
@@ -125,7 +82,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
       if (!res.ok) throw new Error("Failed to fetch");
       const rawEntries = await res.json();
 
-      const entries: DecryptedExport[] = [];
+      const entries: ExportEntry[] = [];
       for (const raw of rawEntries) {
         if (!raw.encryptedBlob) continue;
         try {
@@ -456,7 +413,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
 // ─── Formatting helpers ─────────────────────────────────────
 
 function formatExportContent(
-  entries: DecryptedExport[],
+  entries: ExportEntry[],
   format: ExportFormat,
   profile: ExportProfile
 ): string {
@@ -466,7 +423,7 @@ function formatExportContent(
   return formatJson(entries, profile);
 }
 
-function formatCsv(entries: DecryptedExport[], profile: ExportProfile): string {
+function formatCsv(entries: ExportEntry[], profile: ExportProfile): string {
   const header = csvExportHeader(profile === "passwd-sso");
   const rows = entries.map((e) => {
     const isNote = e.entryType === ENTRY_TYPE.SECURE_NOTE;
@@ -521,7 +478,7 @@ function formatCsv(entries: DecryptedExport[], profile: ExportProfile): string {
   return [header, ...rows].join("\n");
 }
 
-function formatJson(entries: DecryptedExport[], profile: ExportProfile): string {
+function formatJson(entries: ExportEntry[], profile: ExportProfile): string {
   return JSON.stringify(
     {
       ...(profile === "passwd-sso" ? { format: "passwd-sso", version: 1 } : {}),

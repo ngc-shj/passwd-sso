@@ -19,14 +19,8 @@ import { Switch } from "@/components/ui/switch";
 import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { EntryTypeValue } from "@/lib/constants";
-import type {
-  EntryCustomFieldPortable,
-  EntryPasswordHistory,
-  EntryTagNameColor,
-  EntryTotpPortable,
-} from "@/lib/entry-form-types";
 import {
+  type ExportEntry,
   csvEntryType,
   csvExportHeader,
   escapeCsvValue,
@@ -35,37 +29,6 @@ import {
 
 type ExportFormat = "csv" | "json";
 type ExportProfile = "compatible" | "passwd-sso";
-
-interface OrgExportEntry {
-  entryType: EntryTypeValue;
-  title: string;
-  username: string | null;
-  password: string;
-  content: string | null;
-  url: string | null;
-  notes: string | null;
-  totp: string | null;
-  cardholderName: string | null;
-  cardNumber: string | null;
-  brand: string | null;
-  expiryMonth: string | null;
-  expiryYear: string | null;
-  cvv: string | null;
-  fullName: string | null;
-  address: string | null;
-  phone: string | null;
-  email: string | null;
-  dateOfBirth: string | null;
-  nationality: string | null;
-  idNumber: string | null;
-  issueDate: string | null;
-  expiryDate: string | null;
-  tags: EntryTagNameColor[];
-  customFields: EntryCustomFieldPortable[];
-  totpConfig: EntryTotpPortable | null;
-  generatorSettings: Record<string, unknown> | null;
-  passwordHistory: EntryPasswordHistory[];
-}
 
 interface OrgExportDialogProps {
   orgId: string;
@@ -115,7 +78,7 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
       const list: { id: string; entryType: string }[] = await listRes.json();
 
       // Fetch full details for each entry
-      const entries: OrgExportEntry[] = [];
+      const entries: ExportEntry[] = [];
       for (const item of list) {
         try {
           const res = await fetch(apiPath.orgPasswordById(orgId, item.id));
@@ -351,7 +314,7 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
 // ─── Formatting helpers ─────────────────────────────────────
 
 function formatExportContent(
-  entries: OrgExportEntry[],
+  entries: ExportEntry[],
   format: ExportFormat,
   profile: ExportProfile
 ): string {
@@ -361,7 +324,7 @@ function formatExportContent(
   return formatJson(entries, profile);
 }
 
-function formatCsv(entries: OrgExportEntry[], profile: ExportProfile): string {
+function formatCsv(entries: ExportEntry[], profile: ExportProfile): string {
   const header = csvExportHeader(profile === "passwd-sso");
   const rows = entries.map((e) => {
     const isNote = e.entryType === ENTRY_TYPE.SECURE_NOTE;
@@ -410,7 +373,7 @@ function formatCsv(entries: OrgExportEntry[], profile: ExportProfile): string {
   return [header, ...rows].join("\n");
 }
 
-function formatJson(entries: OrgExportEntry[], profile: ExportProfile): string {
+function formatJson(entries: ExportEntry[], profile: ExportProfile): string {
   return JSON.stringify(
     {
       ...(profile === "passwd-sso" ? { format: "passwd-sso", version: 1 } : {}),

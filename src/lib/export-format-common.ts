@@ -1,5 +1,48 @@
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
+import type {
+  EntryCustomFieldPortable,
+  EntryPasswordHistory,
+  EntryTagNameColor,
+  EntryTotpPortable,
+} from "@/lib/entry-form-types";
+
+export interface ExportEntry {
+  entryType: EntryTypeValue;
+  title: string;
+  username: string | null;
+  password: string;
+  content: string | null;
+  url: string | null;
+  notes: string | null;
+  totp: string | null;
+  cardholderName: string | null;
+  cardNumber: string | null;
+  brand: string | null;
+  expiryMonth: string | null;
+  expiryYear: string | null;
+  cvv: string | null;
+  fullName: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  dateOfBirth: string | null;
+  nationality: string | null;
+  idNumber: string | null;
+  issueDate: string | null;
+  expiryDate: string | null;
+  relyingPartyId?: string | null;
+  relyingPartyName?: string | null;
+  credentialId?: string | null;
+  creationDate?: string | null;
+  deviceInfo?: string | null;
+  tags: EntryTagNameColor[];
+  customFields: EntryCustomFieldPortable[];
+  totpConfig: EntryTotpPortable | null;
+  generatorSettings: Record<string, unknown> | null;
+  passwordHistory: EntryPasswordHistory[];
+  requireReprompt?: boolean;
+}
 
 export function escapeCsvValue(val: string | null): string {
   if (!val) return "";
@@ -34,4 +77,3 @@ export function csvEntryType(
   if (entryType === ENTRY_TYPE.SECURE_NOTE) return "securenote";
   return "login";
 }
-
