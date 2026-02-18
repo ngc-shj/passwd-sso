@@ -35,6 +35,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ORG_ROLE, ENTRY_TYPE, API_PATH, apiPath } from "@/lib/constants";
 import { stripLocalePrefix } from "@/i18n/locale-utils";
+import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { toast } from "sonner";
 
 // ─── Section keys ────────────────────────────────────────────────
 
@@ -173,6 +175,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const t = useTranslations("Dashboard");
   const tCommon = useTranslations("Common");
   const tOrg = useTranslations("Org");
+  const tErrors = useTranslations("ApiErrors");
   const [tags, setTags] = useState<TagItem[]>([]);
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [orgs, setOrgs] = useState<OrgItem[]>([]);
@@ -332,21 +335,30 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     setFolderDialogOpen(true);
   };
 
+  const showApiError = async (res: Response) => {
+    try {
+      const json = await res.json();
+      const i18nKey = apiErrorToI18nKey(json.error);
+      toast.error(tErrors(i18nKey));
+    } catch {
+      toast.error(tErrors("unknownError"));
+    }
+  };
+
   const handleFolderSubmit = async (data: { name: string; parentId: string | null }) => {
-    if (editingFolder) {
-      const res = await fetch(apiPath.folderById(editingFolder.id), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error("Failed to update folder");
-    } else {
-      const res = await fetch(API_PATH.FOLDERS, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error("Failed to create folder");
+    const url = editingFolder
+      ? apiPath.folderById(editingFolder.id)
+      : API_PATH.FOLDERS;
+    const method = editingFolder ? "PUT" : "POST";
+
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      await showApiError(res);
+      throw new Error("API error"); // propagate to keep dialog open
     }
     fetchData();
   };
@@ -356,7 +368,11 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     const res = await fetch(apiPath.folderById(deletingFolder.id), {
       method: "DELETE",
     });
-    if (!res.ok) throw new Error("Failed to delete folder");
+    if (!res.ok) {
+      await showApiError(res);
+      setDeletingFolder(null);
+      return;
+    }
     setDeletingFolder(null);
     fetchData();
   };
