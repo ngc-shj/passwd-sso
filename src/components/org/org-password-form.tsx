@@ -21,6 +21,11 @@ import { OrgLoginFields } from "@/components/org/org-login-fields";
 import { OrgPasskeyFields } from "@/components/org/org-passkey-fields";
 import { OrgSecureNoteFields } from "@/components/org/org-secure-note-fields";
 import { OrgTagSection } from "@/components/org/org-tag-section";
+import type {
+  OrgFolderItem,
+  OrgPasswordFormEditData,
+  OrgPasswordFormProps,
+} from "@/components/org/org-password-form-types";
 import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
@@ -47,56 +52,7 @@ import {
 import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
 import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
-import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-
-interface OrgFolderItem {
-  id: string;
-  name: string;
-  parentId: string | null;
-}
-
-interface OrgPasswordFormProps {
-  orgId: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSaved: () => void;
-  entryType?: EntryTypeValue;
-  editData?: {
-    id: string;
-    entryType?: EntryTypeValue;
-    title: string;
-    username: string | null;
-    password: string;
-    content?: string;
-    url: string | null;
-    notes: string | null;
-    tags?: OrgTagData[];
-    customFields?: EntryCustomField[];
-    totp?: EntryTotp | null;
-    cardholderName?: string | null;
-    cardNumber?: string | null;
-    brand?: string | null;
-    expiryMonth?: string | null;
-    expiryYear?: string | null;
-    cvv?: string | null;
-    fullName?: string | null;
-    address?: string | null;
-    phone?: string | null;
-    email?: string | null;
-    dateOfBirth?: string | null;
-    nationality?: string | null;
-    idNumber?: string | null;
-    issueDate?: string | null;
-    expiryDate?: string | null;
-    relyingPartyId?: string | null;
-    relyingPartyName?: string | null;
-    credentialId?: string | null;
-    creationDate?: string | null;
-    deviceInfo?: string | null;
-    orgFolderId?: string | null;
-  } | null;
-}
 
 export function OrgPasswordForm({
   orgId,
@@ -180,7 +136,7 @@ export function OrgPasswordForm({
 
   const isEdit = !!editData;
 
-  const applyEditDataToForm = (data: NonNullable<OrgPasswordFormProps["editData"]>) => {
+  const applyEditDataToForm = (data: OrgPasswordFormEditData) => {
     setTitle(data.title);
     setUsername(data.username ?? "");
     setPassword(data.password ?? "");
