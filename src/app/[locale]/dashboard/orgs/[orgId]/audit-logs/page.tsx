@@ -42,6 +42,7 @@ import {
   type AuditActionValue,
 } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format-datetime";
+import { normalizeAuditActionKey } from "@/lib/audit-action-key";
 
 interface OrgAuditLogItem {
   id: string;
@@ -101,9 +102,6 @@ const ACTION_GROUPS = [
   { label: "groupShare", value: AUDIT_ACTION_GROUP.SHARE, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.SHARE] },
 ] as const;
 
-const normalizeAuditActionKey = (action: string) =>
-  action.startsWith("AuditLog.") ? action.slice("AuditLog.".length) : action;
-
 export default function OrgAuditLogsPage({
   params,
 }: {
@@ -114,6 +112,7 @@ export default function OrgAuditLogsPage({
   const locale = useLocale();
   const [logs, setLogs] = useState<OrgAuditLogItem[]>([]);
   const [entryNames, setEntryNames] = useState<Record<string, string>>({});
+  const [orgName, setOrgName] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -144,6 +143,15 @@ export default function OrgAuditLogsPage({
     },
     [orgId, selectedActions, dateFrom, dateTo]
   );
+
+  useEffect(() => {
+    fetch(`/api/orgs/${orgId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.name) setOrgName(String(data.name));
+      })
+      .catch(() => {});
+  }, [orgId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -396,7 +404,9 @@ export default function OrgAuditLogsPage({
         <div className="flex items-center gap-3">
           <ScrollText className="h-6 w-6" />
           <div>
-            <h1 className="text-2xl font-bold">{t("title")}</h1>
+            <h1 className="text-2xl font-bold">
+              {orgName ? t("orgAuditLog", { orgName }) : t("title")}
+            </h1>
           </div>
         </div>
       </Card>

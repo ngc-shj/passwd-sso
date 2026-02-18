@@ -51,6 +51,7 @@ import {
   type AuditActionValue,
 } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format-datetime";
+import { normalizeAuditActionKey } from "@/lib/audit-action-key";
 
 interface AuditLogItem {
   id: string;
@@ -132,9 +133,6 @@ const ACTION_GROUPS = [
     actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.EMERGENCY],
   },
 ] as const;
-
-const normalizeAuditActionKey = (action: string) =>
-  action.startsWith("AuditLog.") ? action.slice("AuditLog.".length) : action;
 
 export default function AuditLogsPage() {
   const t = useTranslations("AuditLog");

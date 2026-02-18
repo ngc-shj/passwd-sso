@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
-import { ENTRY_TYPE } from "@/lib/constants";
+import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
 
 const { mockAuth, mockFindMany } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -52,7 +52,7 @@ function makeShare(overrides: Record<string, unknown> = {}) {
 describe("GET /api/share-links/mine", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1" });
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.ADMIN });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -288,5 +288,23 @@ describe("GET /api/share-links/mine", () => {
     expect(status).toBe(403);
     expect(json.error).toBe("FORBIDDEN");
     expect(mockFindMany).not.toHaveBeenCalled();
+  });
+
+  it("limits org scoped list to self-created links for VIEWER", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.VIEWER });
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    await GET(req as never);
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orgPasswordEntry: { orgId: "org-1" },
+          createdById: DEFAULT_SESSION.user.id,
+        }),
+      })
+    );
   });
 });

@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { requireOrgMember, OrgAuthError } from "@/lib/org-auth";
+import { ORG_ROLE } from "@/lib/constants";
 
 // GET /api/share-links/mine
 // - Personal context (no `org`): links created by current user, personal entries only
@@ -21,8 +22,10 @@ export async function GET(req: NextRequest) {
 
   const where: Record<string, unknown> = {};
   if (orgId) {
+    let membershipRole: string | undefined;
     try {
-      await requireOrgMember(session.user.id, orgId);
+      const membership = await requireOrgMember(session.user.id, orgId);
+      membershipRole = membership.role;
     } catch (e) {
       if (e instanceof OrgAuthError) {
         return NextResponse.json({ error: e.message }, { status: e.status });
@@ -30,6 +33,10 @@ export async function GET(req: NextRequest) {
       throw e;
     }
     where.orgPasswordEntry = { orgId };
+    // VIEWER can only see links they created. Higher roles can view org-wide links.
+    if (membershipRole === ORG_ROLE.VIEWER) {
+      where.createdById = session.user.id;
+    }
   } else {
     // Personal context: exclude organization share links.
     where.createdById = session.user.id;
