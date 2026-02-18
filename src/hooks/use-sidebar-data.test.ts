@@ -83,4 +83,89 @@ describe("useSidebarData", () => {
 
     expect(dispatchSpy).toHaveBeenCalledWith(expect.any(CustomEvent));
   });
+
+  it("re-fetches when pathname changes", async () => {
+    const { rerender } = renderHook(({ path }) => useSidebarData(path), {
+      initialProps: { path: "/dashboard" },
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+    const firstCallCount = fetchMock.mock.calls.length;
+
+    rerender({ path: "/dashboard/favorites" });
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(firstCallCount);
+    });
+  });
+
+  it("does not react to events after unmount", async () => {
+    const { unmount } = renderHook(() => useSidebarData("/dashboard"));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+    const firstCallCount = fetchMock.mock.calls.length;
+
+    unmount();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("vault-data-changed"));
+      window.dispatchEvent(new CustomEvent("org-data-changed"));
+    });
+
+    expect(fetchMock.mock.calls.length).toBe(firstCallCount);
+  });
+
+  it("keeps defaults when org fetch fails", async () => {
+    fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/tags") return { ok: true, json: async () => tags };
+      if (url === "/api/folders") return { ok: true, json: async () => folders };
+      if (url === "/api/orgs") return { ok: false, json: async () => ({}) };
+      return { ok: false, json: async () => ({}) };
+    }) as Mock;
+    globalThis.fetch = fetchMock;
+
+    const { result } = renderHook(() => useSidebarData("/dashboard"));
+
+    await waitFor(() => {
+      expect(result.current.tags).toHaveLength(1);
+      expect(result.current.folders).toHaveLength(1);
+    });
+
+    expect(result.current.orgs).toEqual([]);
+    expect(result.current.orgTagGroups).toEqual([]);
+    expect(result.current.orgFolderGroups).toEqual([]);
+  });
+
+  it("includes org folder group for admin even with zero folders", async () => {
+    fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/tags") return { ok: true, json: async () => [] };
+      if (url === "/api/folders") return { ok: true, json: async () => [] };
+      if (url === "/api/orgs") {
+        return {
+          ok: true,
+          json: async () => [{ id: "org-1", name: "Security", slug: "security", role: "ADMIN" }],
+        };
+      }
+      if (url === "/api/orgs/org-1/tags") return { ok: true, json: async () => [] };
+      if (url === "/api/orgs/org-1/folders") return { ok: true, json: async () => [] };
+      return { ok: false, json: async () => ({}) };
+    }) as Mock;
+    globalThis.fetch = fetchMock;
+
+    const { result } = renderHook(() => useSidebarData("/dashboard"));
+
+    await waitFor(() => {
+      expect(result.current.orgFolderGroups).toHaveLength(1);
+    });
+
+    expect(result.current.orgFolderGroups[0]).toMatchObject({
+      orgId: "org-1",
+      orgRole: "ADMIN",
+      folders: [],
+    });
+  });
 });
