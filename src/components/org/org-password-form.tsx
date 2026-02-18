@@ -154,6 +154,7 @@ export function OrgPasswordForm({
   const isCreditCard = effectiveEntryType === ENTRY_TYPE.CREDIT_CARD;
   const isIdentity = effectiveEntryType === ENTRY_TYPE.IDENTITY;
   const isPasskey = effectiveEntryType === ENTRY_TYPE.PASSKEY;
+  const isLoginEntry = !isNote && !isCreditCard && !isIdentity && !isPasskey;
 
   const [title, setTitle] = useState(editData?.title ?? "");
   const [username, setUsername] = useState(editData?.username ?? "");
@@ -604,8 +605,18 @@ export function OrgPasswordForm({
   const submitDisabled =
     !title.trim() ||
     (isPasskey && !relyingPartyId.trim()) ||
-    (!isNote && !isCreditCard && !isIdentity && !isPasskey && !password) ||
+    (isLoginEntry && !password) ||
     (isCreditCard && !cardNumberValid);
+
+  const orgTagsTitle = isPasskey
+    ? tpk("tags")
+    : isIdentity
+      ? ti("tags")
+      : isCreditCard
+        ? tcc("tags")
+        : isNote
+          ? tn("tags")
+          : t("tags");
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1093,7 +1104,7 @@ export function OrgPasswordForm({
           )}
 
           <OrgTagSection
-            title={isPasskey ? tpk("tags") : isIdentity ? ti("tags") : isCreditCard ? tcc("tags") : isNote ? tn("tags") : t("tags")}
+            title={orgTagsTitle}
             hint={t("tagsHint")}
             orgId={orgId}
             selectedTags={selectedTags}
@@ -1101,7 +1112,7 @@ export function OrgPasswordForm({
             sectionCardClass={dialogSectionClass}
           />
 
-          {!isPasskey && !isIdentity && !isCreditCard && !isNote && (
+          {isLoginEntry && (
             <EntryCustomFieldsTotpSection
               customFields={customFields}
               setCustomFields={setCustomFields}
