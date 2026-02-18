@@ -94,6 +94,8 @@ export const apiPath = {
     `${API_PATH.PASSWORDS}/${entryId}/history/${historyId}/restore`,
   orgPasswordHistory: (orgId: string, entryId: string) =>
     `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/history`,
+  orgPasswordHistoryById: (orgId: string, entryId: string, historyId: string) =>
+    `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/history/${historyId}`,
   orgPasswordHistoryRestore: (orgId: string, entryId: string, historyId: string) =>
     `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/history/${historyId}/restore`,
 } as const;
