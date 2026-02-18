@@ -1,7 +1,7 @@
 "use client";
 
-import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
-import { OrgTagSection } from "@/components/org/org-tag-section";
+import { EntryTagsAndFolderLayout } from "@/components/passwords/entry-tags-and-folder-layout";
+import { OrgTagInput } from "@/components/org/org-tag-input";
 import type { OrgFolderItem } from "@/components/org/org-password-form-types";
 import type { OrgTagData } from "@/components/org/org-tag-input";
 
@@ -29,22 +29,14 @@ export function OrgTagsAndFolderSection({
   sectionCardClass = "",
 }: OrgTagsAndFolderSectionProps) {
   return (
-    <>
-      <OrgTagSection
-        title={tagsTitle}
-        hint={tagsHint}
-        orgId={orgId}
-        selectedTags={selectedTags}
-        onChange={onTagsChange}
-        sectionCardClass={sectionCardClass}
-      />
-
-      <EntryFolderSelectSection
-        folders={folders}
-        value={folderId}
-        onChange={onFolderChange}
-        sectionCardClass={sectionCardClass}
-      />
-    </>
+    <EntryTagsAndFolderLayout
+      tagsTitle={tagsTitle}
+      tagsHint={tagsHint}
+      tagsInput={<OrgTagInput orgId={orgId} selectedTags={selectedTags} onChange={onTagsChange} />}
+      folders={folders}
+      folderId={folderId}
+      onFolderChange={onFolderChange}
+      sectionCardClass={sectionCardClass}
+    />
   );
 }

@@ -1,7 +1,6 @@
 "use client";
 
-import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
-import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
+import { EntryTagsAndFolderLayout } from "@/components/passwords/entry-tags-and-folder-layout";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 
 interface FolderLike {
@@ -32,21 +31,14 @@ export function EntryTagsAndFolderSection({
   sectionCardClass = "",
 }: EntryTagsAndFolderSectionProps) {
   return (
-    <>
-      <EntryTagsSection
-        title={tagsTitle}
-        hint={tagsHint}
-        sectionCardClass={sectionCardClass}
-      >
-        <TagInput selectedTags={selectedTags} onChange={onTagsChange} />
-      </EntryTagsSection>
-
-      <EntryFolderSelectSection
-        folders={folders}
-        value={folderId}
-        onChange={onFolderChange}
-        sectionCardClass={sectionCardClass}
-      />
-    </>
+    <EntryTagsAndFolderLayout
+      tagsTitle={tagsTitle}
+      tagsHint={tagsHint}
+      tagsInput={<TagInput selectedTags={selectedTags} onChange={onTagsChange} />}
+      folders={folders}
+      folderId={folderId}
+      onFolderChange={onFolderChange}
+      sectionCardClass={sectionCardClass}
+    />
   );
 }
