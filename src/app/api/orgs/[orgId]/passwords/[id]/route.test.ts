@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 const {
-  mockAuth, mockPrismaOrgPasswordEntry, mockRequireOrgPermission,
+  mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder,
+  mockRequireOrgPermission,
   mockRequireOrgMember, mockHasOrgPermission, mockUnwrapOrgKey,
   mockEncryptServerData, mockDecryptServerData, OrgAuthError,
   mockPrismaTransaction,
@@ -22,6 +23,7 @@ const {
       update: vi.fn(),
       delete: vi.fn(),
     },
+    mockPrismaOrgFolder: { findUnique: vi.fn() },
     mockRequireOrgPermission: vi.fn(),
     mockRequireOrgMember: vi.fn(),
     mockHasOrgPermission: vi.fn(),
@@ -37,6 +39,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgPasswordEntry: mockPrismaOrgPasswordEntry,
+    orgFolder: mockPrismaOrgFolder,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
     $transaction: mockPrismaTransaction,
   },
@@ -359,6 +362,38 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     expect(json.title).toBe("My Note");
     expect(json.content).toBe("Secret content here");
     expect(json.entryType).toBe("SECURE_NOTE");
+  });
+
+  it("returns orgFolderId in GET response when entry has a folder", async () => {
+    const FOLDER_CUID = "cm1234567890abcdefghijkl1";
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: ENTRY_TYPE.LOGIN,
+      orgFolderId: FOLDER_CUID,
+      encryptedBlob: "blob-cipher",
+      blobIv: "blob-iv",
+      blobAuthTag: "blob-tag",
+      isArchived: false,
+      org: orgKeyData,
+      tags: [],
+      createdBy: { id: "u1", name: "User", image: null },
+      updatedBy: { id: "u1", name: "User" },
+      favorites: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({ title: "My PW", username: "admin", password: "secret", url: null, notes: null })
+    );
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.orgFolderId).toBe(FOLDER_CUID);
   });
 });
 
@@ -871,6 +906,123 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("updates entry with orgFolderId when folder belongs to same org", async () => {
+    const FOLDER_CUID = "cm1234567890abcdefghijkl1";
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: ENTRY_TYPE.LOGIN,
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+    mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: ORG_ID });
+    mockPrismaOrgPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      entryType: ENTRY_TYPE.LOGIN,
+      tags: [],
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { title: "Updated", orgFolderId: FOLDER_CUID },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrismaOrgPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ orgFolderId: FOLDER_CUID }),
+      }),
+    );
+  });
+
+  it("returns 400 when orgFolderId belongs to a different org in PUT", async () => {
+    const FOLDER_CUID = "cm1234567890abcdefghijkl1";
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: ENTRY_TYPE.LOGIN,
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+    mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: "other-org-999" });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { title: "Updated", orgFolderId: FOLDER_CUID },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("FOLDER_NOT_FOUND");
+  });
+
+  it("returns 400 when orgFolderId does not exist in PUT", async () => {
+    const FOLDER_CUID = "cm1234567890abcdefghijkl1";
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: ENTRY_TYPE.LOGIN,
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+    mockPrismaOrgFolder.findUnique.mockResolvedValue(null);
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { title: "Updated", orgFolderId: FOLDER_CUID },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("FOLDER_NOT_FOUND");
+  });
+
+  it("clears orgFolderId when set to null in PUT", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+      id: PW_ID,
+      orgId: ORG_ID,
+      entryType: ENTRY_TYPE.LOGIN,
+      createdById: "test-user-id",
+      encryptedBlob: "old-cipher",
+      blobIv: "old-iv",
+      blobAuthTag: "old-tag",
+      org: orgKeyData,
+    });
+    mockPrismaOrgPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      entryType: ENTRY_TYPE.LOGIN,
+      tags: [],
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { title: "Updated", orgFolderId: null },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrismaOrgFolder.findUnique).not.toHaveBeenCalled();
+    expect(mockPrismaOrgPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ orgFolderId: null }),
+      }),
+    );
   });
 });
 
