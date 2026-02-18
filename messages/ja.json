@@ -162,8 +162,8 @@
     "statusSaved": "変更は保存済みです",
     "openGenerator": "生成",
     "closeGenerator": "閉じる",
-    "requireReprompt": "マスターパスワード再確認を要求",
-    "requireRepromptHelp": "機密フィールドの表示・コピー時にマスターパスフレーズの再入力を求めます。",
+    "requireReprompt": "パスフレーズ再確認を要求",
+    "requireRepromptHelp": "機密フィールドの表示・コピー時にパスフレーズの再入力を求めます。",
     "folder": "フォルダ",
     "folderHint": "このエントリをフォルダに整理します。",
     "noFolder": "（なし）"
@@ -265,6 +265,7 @@
     "dobFuture": "生年月日は過去の日付を指定してください"
   },
   "PasswordDetail": {
+    "title": "タイトル",
     "username": "ユーザー名",
     "password": "パスワード",
     "url": "URL",
@@ -290,6 +291,8 @@
     "cardNumber": "カード番号",
     "brand": "ブランド",
     "expiry": "有効期限",
+    "expiryMonth": "有効期限（月）",
+    "expiryYear": "有効期限（年）",
     "cvv": "CVV",
     "fullName": "氏名",
     "address": "住所",
@@ -314,9 +317,9 @@
     "cancel": "キャンセル"
   },
   "RepromptDialog": {
-    "title": "マスターパスフレーズの確認",
-    "description": "このアイテムにアクセスするにはマスターパスフレーズを再入力してください。",
-    "label": "マスターパスフレーズ",
+    "title": "パスフレーズの確認",
+    "description": "このアイテムにアクセスするにはパスフレーズを再入力してください。",
+    "label": "パスフレーズ",
     "verify": "確認",
     "cancel": "キャンセル",
     "incorrect": "パスフレーズが正しくありません"

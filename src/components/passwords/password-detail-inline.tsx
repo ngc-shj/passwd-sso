@@ -717,7 +717,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, orgId }: Passwor
       )}
 
       {/* Entry History (full blob snapshots) */}
-      <EntryHistorySection entryId={data.id} orgId={orgId} onRestore={onRefresh} />
+      <EntryHistorySection entryId={data.id} orgId={orgId} requireReprompt={data.requireReprompt ?? false} onRestore={onRefresh} />
 
       {/* Attachments */}
       {orgId ? (
