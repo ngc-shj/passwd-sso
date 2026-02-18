@@ -179,14 +179,6 @@ vi.mock("radix-ui", () => ({
   },
 }));
 
-vi.mock("@/components/passwords/export-dialog", () => ({
-  ExportDialog: () => null,
-}));
-
-vi.mock("@/components/passwords/import-dialog", () => ({
-  ImportDialog: () => null,
-}));
-
 vi.mock("@/components/layout/vault-selector", () => ({
   VaultSelector: () => null,
 }));

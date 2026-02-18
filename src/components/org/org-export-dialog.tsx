@@ -4,13 +4,10 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { encryptExport } from "@/lib/export-crypto";
 import {
-  Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,17 +24,11 @@ import {
   formatExportDate,
 } from "@/lib/export-format-common";
 
-interface OrgExportDialogProps {
-  orgId: string;
-  trigger?: React.ReactNode;
-}
-
 interface OrgExportPanelContentProps {
   orgId: string;
-  onDone: () => void;
 }
 
-function OrgExportPanelContent({ orgId, onDone }: OrgExportPanelContentProps) {
+function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
   const t = useTranslations("Export");
   const [exporting, setExporting] = useState(false);
   const [passwordProtect, setPasswordProtect] = useState(true);
@@ -165,7 +156,6 @@ function OrgExportPanelContent({ orgId, onDone }: OrgExportPanelContentProps) {
         }),
       }).catch(() => {});
 
-      onDone();
       resetState();
     } catch {
       // Export failed silently
@@ -310,24 +300,6 @@ function OrgExportPanelContent({ orgId, onDone }: OrgExportPanelContentProps) {
   return content;
 }
 
-export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        setOpen(v);
-      }}
-    >
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">
-        <OrgExportPanelContent orgId={orgId} onDone={() => setOpen(false)} />
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 interface OrgExportPagePanelProps {
   orgId: string;
 }
@@ -335,7 +307,7 @@ interface OrgExportPagePanelProps {
 export function OrgExportPagePanel({ orgId }: OrgExportPagePanelProps) {
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">
-      <OrgExportPanelContent orgId={orgId} onDone={() => undefined} />
+      <OrgExportPanelContent orgId={orgId} />
     </div>
   );
 }

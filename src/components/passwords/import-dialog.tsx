@@ -11,14 +11,10 @@ import {
   type EncryptedExportFile,
 } from "@/lib/export-crypto";
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -560,11 +556,6 @@ const formatLabels: Record<CsvFormat, string> = {
 
 // ─── Component ──────────────────────────────────────────────
 
-interface ImportDialogProps {
-  trigger?: React.ReactNode;
-  onComplete: () => void;
-}
-
 interface ImportPanelContentProps {
   onComplete: () => void;
 }
@@ -872,15 +863,9 @@ function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
             <p className="text-sm text-muted-foreground">
               {t("importedCount", { count: progress.total })}
             </p>
-            {isPage ? (
-              <Button type="button" onClick={reset}>
-                {t("close")}
-              </Button>
-            ) : (
-              <DialogClose asChild>
-                <Button type="button">{t("close")}</Button>
-              </DialogClose>
-            )}
+            <Button type="button" onClick={reset}>
+              {t("close")}
+            </Button>
           </div>
         ) : encryptedFile ? (
           // Decryption step
@@ -1045,24 +1030,6 @@ function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
   );
 
   return content;
-}
-
-export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        setOpen(v);
-      }}
-    >
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">
-        <ImportPanelContent onComplete={onComplete} />
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 interface ImportPagePanelProps {

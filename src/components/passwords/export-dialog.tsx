@@ -7,13 +7,10 @@ import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { encryptExport } from "@/lib/export-crypto";
 import {
-  Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,15 +26,7 @@ import {
   formatExportDate,
 } from "@/lib/export-format-common";
 
-interface ExportDialogProps {
-  trigger?: React.ReactNode;
-}
-
-interface ExportPanelContentProps {
-  onDone: () => void;
-}
-
-function ExportPanelContent({ onDone }: ExportPanelContentProps) {
+function ExportPanelContent() {
   const t = useTranslations("Export");
   const { encryptionKey, userId } = useVault();
   const [exporting, setExporting] = useState(false);
@@ -178,7 +167,6 @@ function ExportPanelContent({ onDone }: ExportPanelContentProps) {
         }),
       }).catch(() => {});
 
-      onDone();
       resetState();
     } catch {
       // Export failed silently
@@ -323,28 +311,10 @@ function ExportPanelContent({ onDone }: ExportPanelContentProps) {
   return content;
 }
 
-export function ExportDialog({ trigger }: ExportDialogProps) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        setOpen(v);
-      }}
-    >
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">
-        <ExportPanelContent onDone={() => setOpen(false)} />
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export function ExportPagePanel() {
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">
-      <ExportPanelContent onDone={() => undefined} />
+      <ExportPanelContent />
     </div>
   );
 }

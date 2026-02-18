@@ -24,14 +24,6 @@ vi.mock("@/components/layout/sidebar-shared", () => ({
   CollapsibleSectionHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock("@/components/passwords/export-dialog", () => ({
-  ExportDialog: ({ trigger }: { trigger: React.ReactNode }) => <div>{trigger}</div>,
-}));
-
-vi.mock("@/components/passwords/import-dialog", () => ({
-  ImportDialog: ({ trigger }: { trigger: React.ReactNode }) => <div>{trigger}</div>,
-}));
-
 import { SecuritySection, UtilitiesSection } from "./sidebar-section-security";
 
 describe("SecuritySection", () => {

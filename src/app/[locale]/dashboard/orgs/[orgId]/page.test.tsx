@@ -47,9 +47,6 @@ vi.mock("@/components/org/org-trash-list", () => ({
 vi.mock("@/components/org/org-role-badge", () => ({
   OrgRoleBadge: () => <span>ROLE</span>,
 }));
-vi.mock("@/components/org/org-export-dialog", () => ({
-  OrgExportDialog: () => null,
-}));
 vi.mock("@/components/ui/button", () => ({
   Button: ({ children, asChild, ...rest }: React.ComponentProps<"button"> & { asChild?: boolean }) => {
     void asChild;
