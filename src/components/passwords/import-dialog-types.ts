@@ -1,10 +1,13 @@
 import type { EntryTypeValue } from "@/lib/constants";
+import type { useTranslations } from "next-intl";
 import type {
   EntryCustomFieldPortable,
   EntryPasswordHistory,
   EntryTagNameColor,
   EntryTotpPortable,
 } from "@/lib/entry-form-types";
+
+export type ImportTranslator = ReturnType<typeof useTranslations<"Import">>;
 
 export interface ParsedEntry {
   entryType: EntryTypeValue;

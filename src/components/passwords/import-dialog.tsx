@@ -63,7 +63,7 @@ function ImportPanelContent({ onComplete, orgId }: ImportPanelContentProps) {
     passwordsPath,
     sourceFilename,
     encryptedInput,
-    userId,
+    userId: userId ?? undefined,
     encryptionKey: encryptionKey ?? undefined,
   });
 

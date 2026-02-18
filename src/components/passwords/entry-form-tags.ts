@@ -1,10 +1,10 @@
 interface TagLike {
   id: string;
   name: string;
-  color: string;
+  color: string | null;
 }
 
-export function toTagPayload(tags: TagLike[]): Array<{ name: string; color: string }> {
+export function toTagPayload(tags: TagLike[]): Array<{ name: string; color: string | null }> {
   return tags.map((tag) => ({
     name: tag.name,
     color: tag.color,

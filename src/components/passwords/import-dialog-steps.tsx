@@ -8,10 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Upload, Loader2, FileUp, CheckCircle2, AlertCircle, Lock } from "lucide-react";
 import { formatLabels, type CsvFormat, type ParsedEntry } from "@/components/passwords/import-dialog-utils";
+import type { ImportTranslator } from "@/components/passwords/import-dialog-types";
 
-type TFn = (key: string, values?: Record<string, string | number | boolean | undefined>) => string;
-
-function entryTypeLabel(t: TFn, entryType: string): string {
+function entryTypeLabel(t: ImportTranslator, entryType: string): string {
   if (entryType === ENTRY_TYPE.PASSKEY) return t("typePasskey");
   if (entryType === ENTRY_TYPE.IDENTITY) return t("typeIdentity");
   if (entryType === ENTRY_TYPE.CREDIT_CARD) return t("typeCard");
@@ -20,7 +19,7 @@ function entryTypeLabel(t: TFn, entryType: string): string {
 }
 
 interface ImportDoneStepProps {
-  t: TFn;
+  t: ImportTranslator;
   successCount: number;
   onReset: () => void;
 }
@@ -38,7 +37,7 @@ export function ImportDoneStep({ t, successCount, onReset }: ImportDoneStepProps
 }
 
 interface ImportDecryptStepProps {
-  t: TFn;
+  t: ImportTranslator;
   decryptPassword: string;
   decryptError: string;
   decrypting: boolean;
@@ -105,7 +104,7 @@ export function ImportDecryptStep({
 }
 
 interface ImportFileSelectStepProps {
-  t: TFn;
+  t: ImportTranslator;
   dragOver: boolean;
   fileRef: RefObject<HTMLInputElement | null>;
   onDragOver: (e: React.DragEvent) => void;
@@ -149,7 +148,7 @@ export function ImportFileSelectStep({
 }
 
 interface ImportPreviewStepProps {
-  t: TFn;
+  t: ImportTranslator;
   entries: ParsedEntry[];
   format: CsvFormat;
   importing: boolean;
@@ -216,7 +215,7 @@ export function ImportPreviewStep({
 }
 
 interface ImportActionsProps {
-  t: TFn;
+  t: ImportTranslator;
   importing: boolean;
   entriesCount: number;
   onReset: () => void;

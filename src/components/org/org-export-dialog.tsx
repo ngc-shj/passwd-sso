@@ -10,6 +10,7 @@ import { AlertTriangle, Building2 } from "lucide-react";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import {
+  type ExportFormat,
   type ExportEntry,
   ORG_EXPORT_OPTIONS,
   type ExportProfile,

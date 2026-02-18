@@ -3,11 +3,12 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import type { ParsedEntry } from "@/components/passwords/import-dialog-utils";
+import type { ImportTranslator } from "@/components/passwords/import-dialog-types";
 import { runImportEntries } from "@/components/passwords/import-dialog-importer";
 import { fireImportAudit } from "@/components/passwords/import-dialog-steps";
 
 interface UseImportExecutionParams {
-  t: (key: string, values?: Record<string, string | number | boolean | undefined>) => string;
+  t: ImportTranslator;
   onComplete: () => void;
   isOrgImport: boolean;
   tagsPath: string;

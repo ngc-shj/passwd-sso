@@ -12,6 +12,7 @@ import { ExportOptionsPanel } from "@/components/passwords/export-options-panel"
 import { Download, AlertTriangle } from "lucide-react";
 import { API_PATH, ENTRY_TYPE } from "@/lib/constants";
 import {
+  type ExportFormat,
   type ExportEntry,
   PERSONAL_EXPORT_OPTIONS,
   type ExportProfile,
