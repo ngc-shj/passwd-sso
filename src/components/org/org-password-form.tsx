@@ -12,26 +12,15 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
 import { OrgTagInput, type OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
+import { OrgCreditCardFields } from "@/components/org/org-credit-card-fields";
 import { OrgIdentityFields } from "@/components/org/org-identity-fields";
 import { OrgPasskeyFields } from "@/components/org/org-passkey-fields";
-import {
-  NotesField,
-  TwoColumnFields,
-  VisibilityToggleInput,
-} from "@/components/org/org-form-fields";
 import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
@@ -719,146 +708,58 @@ export function OrgPasswordForm({
       }}
     />
   ) : isCreditCard ? (
-    <>
-      {/* Cardholder Name */}
-      <div className="space-y-2">
-        <Label>{tcc("cardholderName")}</Label>
-        <Input
-          value={cardholderName}
-          onChange={(e) => setCardholderName(e.target.value)}
-          placeholder={tcc("cardholderNamePlaceholder")}
-          autoComplete="off"
-        />
-      </div>
-
-      {/* Brand */}
-      <div className="space-y-2">
-        <Label>{tcc("brand")}</Label>
-        <Select
-          value={brand}
-          onValueChange={(value) => {
-            setBrand(value);
-            setBrandSource("manual");
-          }}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder={tcc("brandPlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            {CARD_BRANDS.map((b) => (
-              <SelectItem key={b} value={b}>
-                {b}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Card Number */}
-      <div className="space-y-2">
-        <Label>{tcc("cardNumber")}</Label>
-        <VisibilityToggleInput
-          show={showCardNumber}
-          onToggle={() => setShowCardNumber(!showCardNumber)}
-          inputProps={{
-            value: cardNumber,
-            onChange: (e) => handleCardNumberChange(e.target.value),
-            placeholder: tcc("cardNumberPlaceholder"),
-            autoComplete: "off",
-            inputMode: "numeric",
-            maxLength: maxInputLength,
-            "aria-invalid": showLengthError || showLuhnError,
-          }}
-        />
-        {cardValidation.detectedBrand && (
-          <p className="text-xs text-muted-foreground">
-            {tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })}
-          </p>
-        )}
-        {!hasBrandHint && cardValidation.digits.length > 0 && (
-          <p className="text-xs text-muted-foreground">
-            {tcc("cardNumberLengthHintGeneric")}
-          </p>
-        )}
-        {hasBrandHint && (
-          <p className="text-xs text-muted-foreground">
-            {tcc("cardNumberLengthHint", { lengths: lengthHint })}
-          </p>
-        )}
-        {showLengthError && (
-          <p className="text-xs text-destructive">
-            {tcc("cardNumberInvalidLength", { lengths: lengthHint })}
-          </p>
-        )}
-        {!showLengthError && showLuhnError && (
-          <p className="text-xs text-destructive">
-            {tcc("cardNumberInvalidLuhn")}
-          </p>
-        )}
-      </div>
-
-      {/* Expiry */}
-      <TwoColumnFields
-        left={(
-          <>
-            <Label>{tcc("expiry")}</Label>
-            <div className="flex gap-2">
-              <Select value={expiryMonth} onValueChange={setExpiryMonth}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder={tcc("expiryMonth")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {Array.from({ length: 12 }, (_, i) =>
-                    String(i + 1).padStart(2, "0")
-                  ).map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {m}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={expiryYear} onValueChange={setExpiryYear}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder={tcc("expiryYear")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {Array.from({ length: 15 }, (_, i) =>
-                    String(new Date().getFullYear() + i)
-                  ).map((y) => (
-                    <SelectItem key={y} value={y}>
-                      {y}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </>
-        )}
-        right={(
-          <>
-            <Label>{tcc("cvv")}</Label>
-            <VisibilityToggleInput
-              show={showCvv}
-              onToggle={() => setShowCvv(!showCvv)}
-              inputProps={{
-                value: cvv,
-                onChange: (e) => setCvv(e.target.value),
-                placeholder: tcc("cvvPlaceholder"),
-                autoComplete: "off",
-                maxLength: 4,
-              }}
-            />
-          </>
-        )}
-      />
-
-      <NotesField
-        label={entryCopy.notesLabel}
-        value={notes}
-        onChange={setNotes}
-        placeholder={entryCopy.notesPlaceholder}
-      />
-    </>
+    <OrgCreditCardFields
+      cardholderName={cardholderName}
+      onCardholderNameChange={setCardholderName}
+      cardholderNamePlaceholder={tcc("cardholderNamePlaceholder")}
+      brand={brand}
+      onBrandChange={(value) => {
+        setBrand(value);
+        setBrandSource("manual");
+      }}
+      brandPlaceholder={tcc("brandPlaceholder")}
+      brands={CARD_BRANDS}
+      cardNumber={cardNumber}
+      onCardNumberChange={handleCardNumberChange}
+      cardNumberPlaceholder={tcc("cardNumberPlaceholder")}
+      showCardNumber={showCardNumber}
+      onToggleCardNumber={() => setShowCardNumber(!showCardNumber)}
+      maxInputLength={maxInputLength}
+      showLengthError={showLengthError}
+      showLuhnError={showLuhnError}
+      detectedBrand={
+        cardValidation.detectedBrand
+          ? tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })
+          : undefined
+      }
+      hasBrandHint={hasBrandHint && cardValidation.digits.length > 0}
+      lengthHintGenericLabel={tcc("cardNumberLengthHintGeneric")}
+      lengthHintLabel={tcc("cardNumberLengthHint", { lengths: lengthHint })}
+      invalidLengthLabel={tcc("cardNumberInvalidLength", { lengths: lengthHint })}
+      invalidLuhnLabel={tcc("cardNumberInvalidLuhn")}
+      expiryMonth={expiryMonth}
+      onExpiryMonthChange={setExpiryMonth}
+      expiryYear={expiryYear}
+      onExpiryYearChange={setExpiryYear}
+      expiryMonthPlaceholder={tcc("expiryMonth")}
+      expiryYearPlaceholder={tcc("expiryYear")}
+      cvv={cvv}
+      onCvvChange={setCvv}
+      cvvPlaceholder={tcc("cvvPlaceholder")}
+      showCvv={showCvv}
+      onToggleCvv={() => setShowCvv(!showCvv)}
+      notesLabel={entryCopy.notesLabel}
+      notes={notes}
+      onNotesChange={setNotes}
+      notesPlaceholder={entryCopy.notesPlaceholder}
+      labels={{
+        cardholderName: tcc("cardholderName"),
+        brand: tcc("brand"),
+        cardNumber: tcc("cardNumber"),
+        expiry: tcc("expiry"),
+        cvv: tcc("cvv"),
+      }}
+    />
   ) : isNote ? (
     <>
       {/* Content (Secure Note) */}
