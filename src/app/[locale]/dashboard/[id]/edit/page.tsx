@@ -10,6 +10,7 @@ import { PasswordForm } from "@/components/passwords/password-form";
 import type {
   EntryCustomField,
   EntryPasswordHistory,
+  EntryTagNameColor,
   EntryTotp,
 } from "@/lib/entry-form-types";
 import type { TagData } from "@/components/tags/tag-input";
@@ -23,7 +24,7 @@ interface VaultEntryFull {
   password: string;
   url: string | null;
   notes: string | null;
-  tags: Array<{ name: string; color: string | null }>;
+  tags: EntryTagNameColor[];
   generatorSettings?: GeneratorSettings;
   passwordHistory?: EntryPasswordHistory[];
   customFields?: EntryCustomField[];

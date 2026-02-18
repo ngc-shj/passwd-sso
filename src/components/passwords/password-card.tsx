@@ -75,7 +75,7 @@ interface PasswordCardProps {
   fullName?: string | null;
   idNumberLast4?: string | null;
   relyingPartyId?: string | null;
-  tags: Array<{ name: string; color: string | null }>;
+  tags: EntryTagNameColor[];
   isFavorite: boolean;
   isArchived: boolean;
   expanded: boolean;

@@ -10,6 +10,7 @@ import { PasswordCard } from "./password-card";
 import { Archive, KeyRound, Loader2, Star } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import type { EntryTagNameColor } from "@/lib/entry-form-types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -41,7 +42,7 @@ interface DecryptedOverview {
   idNumberLast4?: string | null;
   relyingPartyId?: string | null;
   requireReprompt?: boolean;
-  tags: Array<{ name: string; color: string | null }>;
+  tags: EntryTagNameColor[];
 }
 
 interface DisplayEntry {
@@ -57,7 +58,7 @@ interface DisplayEntry {
   fullName: string | null;
   idNumberLast4: string | null;
   relyingPartyId: string | null;
-  tags: Array<{ name: string; color: string | null }>;
+  tags: EntryTagNameColor[];
   isFavorite: boolean;
   isArchived: boolean;
   requireReprompt: boolean;
