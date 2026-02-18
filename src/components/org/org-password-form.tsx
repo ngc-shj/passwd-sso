@@ -41,7 +41,6 @@ import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import { toast } from "sonner";
 import { detectCardBrand, formatCardNumber, normalizeCardBrand, normalizeCardNumber } from "@/lib/credit-card";
 import {
   extractTagIds,
@@ -51,6 +50,7 @@ import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
+import { executeOrgEntrySubmit } from "@/components/org/org-entry-submit";
 
 export function OrgPasswordForm({
   orgId,
@@ -291,62 +291,50 @@ export function OrgPasswordForm({
       setExpiryError(validation.expiryBeforeIssue ? ti("expiryBeforeIssue") : null);
     }
     if (!validation.ok) return;
-    setSaving(true);
-
-    try {
-      const endpoint = isEdit
-        ? apiPath.orgPasswordById(orgId, editData.id)
-        : apiPath.orgPasswords(orgId);
-      const tagIds = extractTagIds(selectedTags);
-      const body = buildOrgEntryPayload({
-        entryType: effectiveEntryType,
-        title,
-        notes,
-        tagIds,
-        orgFolderId,
-        username,
-        password,
-        url,
-        customFields,
-        totp,
-        content,
-        cardholderName,
-        cardNumber: normalizeCardNumber(cardNumber),
-        brand: normalizeCardBrand(brand),
-        expiryMonth,
-        expiryYear,
-        cvv,
-        fullName,
-        address,
-        phone,
-        email,
-        dateOfBirth,
-        nationality,
-        idNumber,
-        issueDate,
-        expiryDate,
-        relyingPartyId,
-        relyingPartyName,
-        credentialId,
-        creationDate,
-        deviceInfo,
-      });
-
-      const res = await fetch(endpoint, {
-        method: isEdit ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) throw new Error("Failed");
-
-      toast.success(isEdit ? t("updated") : t("saved"));
-      handleOpenChange(false);
-      onSaved();
-    } catch {
-      toast.error(t("failedToSave"));
-      setSaving(false);
-    }
+    const tagIds = extractTagIds(selectedTags);
+    const body = buildOrgEntryPayload({
+      entryType: effectiveEntryType,
+      title,
+      notes,
+      tagIds,
+      orgFolderId,
+      username,
+      password,
+      url,
+      customFields,
+      totp,
+      content,
+      cardholderName,
+      cardNumber: normalizeCardNumber(cardNumber),
+      brand: normalizeCardBrand(brand),
+      expiryMonth,
+      expiryYear,
+      cvv,
+      fullName,
+      address,
+      phone,
+      email,
+      dateOfBirth,
+      nationality,
+      idNumber,
+      issueDate,
+      expiryDate,
+      relyingPartyId,
+      relyingPartyName,
+      credentialId,
+      creationDate,
+      deviceInfo,
+    });
+    await executeOrgEntrySubmit({
+      orgId,
+      isEdit,
+      editData,
+      body,
+      t,
+      setSaving,
+      handleOpenChange,
+      onSaved,
+    });
   };
 
   const generatorSummary = buildGeneratorSummary(generatorSettings, {
