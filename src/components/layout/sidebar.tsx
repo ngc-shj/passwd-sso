@@ -11,6 +11,7 @@ import { useSidebarData } from "@/hooks/use-sidebar-data";
 import { useSidebarFolderCrud } from "@/hooks/use-sidebar-folder-crud";
 import { useSidebarNavigationState } from "@/hooks/use-sidebar-navigation-state";
 import { useSidebarSectionsState } from "@/hooks/use-sidebar-sections-state";
+import { useSidebarViewModel } from "@/hooks/use-sidebar-view-model";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -93,16 +94,6 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     orgTagGroups,
   });
 
-  const handleVaultChange = (value: string) => {
-    if (value === "personal") {
-      router.push("/dashboard");
-      onOpenChange(false);
-      return;
-    }
-    router.push(`/dashboard/orgs/${value}`);
-    onOpenChange(false);
-  };
-
   const { isOpen, toggleSection } = useSidebarSectionsState({
     routeKey: `${pathname}?${searchParams.toString()}`,
     isSelectedVaultAll,
@@ -120,46 +111,44 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isAuditLog,
   });
 
-  const handleImportComplete = () => {
-    notifyDataChanged();
-  };
+  const sidebarContentProps = useSidebarViewModel({
+    t,
+    tOrg,
+    router,
+    onOpenChange,
+    vaultContext,
+    orgs,
+    selectedOrg,
+    selectedOrgId,
+    selectedOrgCanManageFolders,
+    selectedTypeFilter,
+    selectedFolderId,
+    selectedTagId,
+    isSelectedVaultAll,
+    isSelectedVaultFavorites,
+    isSelectedVaultArchive,
+    isSelectedVaultTrash,
+    isOrgsManage,
+    isWatchtower,
+    isShareLinks,
+    isEmergencyAccess,
+    isPersonalAuditLog,
+    activeAuditOrgId,
+    selectedFolders,
+    selectedTags,
+    isOpen,
+    toggleSection,
+    handleFolderCreate,
+    handleFolderEdit,
+    handleFolderDeleteClick,
+    notifyDataChanged,
+  });
 
   return (
     <>
       {/* Desktop sidebar */}
       <aside className="hidden md:block w-56 border-r bg-background shrink-0 overflow-auto">
-        <SidebarContent
-          t={t}
-          tOrg={tOrg}
-          vaultContext={vaultContext}
-          orgs={orgs}
-          selectedOrg={selectedOrg}
-          selectedOrgId={selectedOrgId}
-          selectedOrgCanManageFolders={selectedOrgCanManageFolders}
-          selectedTypeFilter={selectedTypeFilter}
-          selectedFolderId={selectedFolderId}
-          selectedTagId={selectedTagId}
-          isSelectedVaultAll={isSelectedVaultAll}
-          isSelectedVaultFavorites={isSelectedVaultFavorites}
-          isSelectedVaultArchive={isSelectedVaultArchive}
-          isSelectedVaultTrash={isSelectedVaultTrash}
-          isOrgsManage={isOrgsManage}
-          isWatchtower={isWatchtower}
-          isShareLinks={isShareLinks}
-          isEmergencyAccess={isEmergencyAccess}
-          isPersonalAuditLog={isPersonalAuditLog}
-          activeAuditOrgId={activeAuditOrgId}
-          selectedFolders={selectedFolders}
-          selectedTags={selectedTags}
-          isOpen={isOpen}
-          toggleSection={toggleSection}
-          onVaultChange={handleVaultChange}
-          onCreateFolder={handleFolderCreate}
-          onEditFolder={handleFolderEdit}
-          onDeleteFolder={handleFolderDeleteClick}
-          onImportComplete={handleImportComplete}
-          onNavigate={() => onOpenChange(false)}
-        />
+        <SidebarContent {...sidebarContentProps} />
       </aside>
 
       {/* Mobile sidebar (sheet) */}
@@ -168,38 +157,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
           <VisuallyHidden.Root>
             <SheetTitle>{t("sidebar")}</SheetTitle>
           </VisuallyHidden.Root>
-          <SidebarContent
-            t={t}
-            tOrg={tOrg}
-            vaultContext={vaultContext}
-            orgs={orgs}
-            selectedOrg={selectedOrg}
-            selectedOrgId={selectedOrgId}
-            selectedOrgCanManageFolders={selectedOrgCanManageFolders}
-            selectedTypeFilter={selectedTypeFilter}
-            selectedFolderId={selectedFolderId}
-            selectedTagId={selectedTagId}
-            isSelectedVaultAll={isSelectedVaultAll}
-            isSelectedVaultFavorites={isSelectedVaultFavorites}
-            isSelectedVaultArchive={isSelectedVaultArchive}
-            isSelectedVaultTrash={isSelectedVaultTrash}
-            isOrgsManage={isOrgsManage}
-            isWatchtower={isWatchtower}
-            isShareLinks={isShareLinks}
-            isEmergencyAccess={isEmergencyAccess}
-            isPersonalAuditLog={isPersonalAuditLog}
-            activeAuditOrgId={activeAuditOrgId}
-            selectedFolders={selectedFolders}
-            selectedTags={selectedTags}
-            isOpen={isOpen}
-            toggleSection={toggleSection}
-            onVaultChange={handleVaultChange}
-            onCreateFolder={handleFolderCreate}
-            onEditFolder={handleFolderEdit}
-            onDeleteFolder={handleFolderDeleteClick}
-            onImportComplete={handleImportComplete}
-            onNavigate={() => onOpenChange(false)}
-          />
+          <SidebarContent {...sidebarContentProps} />
         </SheetContent>
       </Sheet>
 

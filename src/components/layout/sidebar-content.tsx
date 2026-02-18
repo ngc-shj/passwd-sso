@@ -20,7 +20,7 @@ interface OrganizeTagItem {
   count: number;
 }
 
-interface SidebarContentProps {
+export interface SidebarContentProps {
   t: (key: string) => string;
   tOrg: (key: string) => string;
   vaultContext: VaultContext;
