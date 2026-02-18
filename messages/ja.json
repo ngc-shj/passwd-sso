@@ -67,10 +67,15 @@
     "createFolder": "新規フォルダ",
     "editFolder": "フォルダを編集",
     "deleteFolder": "フォルダを削除",
+    "editTag": "タグを編集",
+    "deleteTag": "タグを削除",
     "folderName": "フォルダ名",
+    "tagName": "タグ名",
+    "tagColor": "タグ色",
     "parentFolder": "親フォルダ",
     "noParent": "（ルート）",
     "folderDeleteConfirm": "フォルダ「{name}」を削除しますか？サブフォルダは親に昇格し、エントリは未所属になります。",
+    "tagDeleteConfirm": "タグ「{name}」を削除しますか？この操作は元に戻せません。",
     "folderMaxDepth": "フォルダの最大階層数（{max}）を超えています。"
   },
   "ShareLinks": {

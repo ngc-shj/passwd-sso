@@ -53,6 +53,10 @@ vi.mock("@/components/folders/folder-dialog", () => ({
   },
 }));
 
+vi.mock("@/components/tags/tag-dialog", () => ({
+  TagDialog: () => null,
+}));
+
 vi.mock("next/navigation", () => ({
   usePathname: () => "/ja/dashboard",
   useSearchParams: () => new URLSearchParams(),

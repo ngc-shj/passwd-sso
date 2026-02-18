@@ -22,6 +22,7 @@ interface UseSidebarViewModelParams {
   orgs: SidebarOrgItem[];
   selectedOrg: SidebarOrgItem | null;
   selectedOrgCanManageFolders: boolean;
+  selectedOrgCanManageTags: boolean;
   selectedTypeFilter: string | null;
   selectedFolderId: string | null;
   selectedTagId: string | null;
@@ -41,6 +42,8 @@ interface UseSidebarViewModelParams {
   handleFolderCreate: (orgId?: string) => void;
   handleFolderEdit: (folder: SidebarFolderItem, orgId?: string) => void;
   handleFolderDeleteClick: (folder: SidebarFolderItem, orgId?: string) => void;
+  handleTagEdit: (tag: OrganizeTagItem, orgId?: string) => void;
+  handleTagDeleteClick: (tag: OrganizeTagItem, orgId?: string) => void;
   notifyDataChanged: () => void;
 }
 
@@ -53,6 +56,7 @@ export function useSidebarViewModel({
   orgs,
   selectedOrg,
   selectedOrgCanManageFolders,
+  selectedOrgCanManageTags,
   selectedTypeFilter,
   selectedFolderId,
   selectedTagId,
@@ -72,6 +76,8 @@ export function useSidebarViewModel({
   handleFolderCreate,
   handleFolderEdit,
   handleFolderDeleteClick,
+  handleTagEdit,
+  handleTagDeleteClick,
   notifyDataChanged,
 }: UseSidebarViewModelParams): SidebarContentProps {
   const onNavigate = useCallback(() => {
@@ -102,6 +108,7 @@ export function useSidebarViewModel({
     orgs,
     selectedOrg,
     selectedOrgCanManageFolders,
+    selectedOrgCanManageTags,
     selectedTypeFilter,
     selectedFolderId,
     selectedTagId,
@@ -122,6 +129,8 @@ export function useSidebarViewModel({
     onCreateFolder: handleFolderCreate,
     onEditFolder: handleFolderEdit,
     onDeleteFolder: handleFolderDeleteClick,
+    onEditTag: handleTagEdit,
+    onDeleteTag: handleTagDeleteClick,
     onImportComplete,
     onNavigate,
   };

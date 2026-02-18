@@ -27,6 +27,7 @@ export interface SidebarContentProps {
   orgs: SidebarOrgItem[];
   selectedOrg: SidebarOrgItem | null;
   selectedOrgCanManageFolders: boolean;
+  selectedOrgCanManageTags: boolean;
   selectedTypeFilter: string | null;
   selectedFolderId: string | null;
   selectedTagId: string | null;
@@ -47,6 +48,8 @@ export interface SidebarContentProps {
   onCreateFolder: (orgId?: string) => void;
   onEditFolder: (folder: SidebarFolderItem, orgId?: string) => void;
   onDeleteFolder: (folder: SidebarFolderItem, orgId?: string) => void;
+  onEditTag: (tag: OrganizeTagItem, orgId?: string) => void;
+  onDeleteTag: (tag: OrganizeTagItem, orgId?: string) => void;
   onImportComplete: () => void;
   onNavigate: () => void;
 }
@@ -58,6 +61,7 @@ export function SidebarContent({
   orgs,
   selectedOrg,
   selectedOrgCanManageFolders,
+  selectedOrgCanManageTags,
   selectedTypeFilter,
   selectedFolderId,
   selectedTagId,
@@ -78,6 +82,8 @@ export function SidebarContent({
   onCreateFolder,
   onEditFolder,
   onDeleteFolder,
+  onEditTag,
+  onDeleteTag,
   onImportComplete,
   onNavigate,
 }: SidebarContentProps) {
@@ -143,6 +149,17 @@ export function SidebarContent({
             ? onDeleteFolder(f, vaultContext.orgId)
             : onDeleteFolder(f)
         }
+        onEditTag={(tag) =>
+          vaultContext.type === "org"
+            ? onEditTag(tag, vaultContext.orgId)
+            : onEditTag(tag)
+        }
+        onDeleteTag={(tag) =>
+          vaultContext.type === "org"
+            ? onDeleteTag(tag, vaultContext.orgId)
+            : onDeleteTag(tag)
+        }
+        showTagMenu={vaultContext.type !== "org" || selectedOrgCanManageTags}
         onNavigate={onNavigate}
       />
 

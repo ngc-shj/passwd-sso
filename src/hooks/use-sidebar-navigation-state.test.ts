@@ -64,6 +64,7 @@ describe("useSidebarNavigationState", () => {
 
     expect(result.current.selectedOrgId).toBe("org-1");
     expect(result.current.selectedOrgCanManageFolders).toBe(true);
+    expect(result.current.selectedOrgCanManageTags).toBe(true);
     expect(result.current.selectedTypeFilter).toBe("LOGIN");
     expect(result.current.selectedTagId).toBe("ot1");
     expect(result.current.selectedFolderId).toBe("of1");

@@ -4,6 +4,12 @@ import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { ENTRY_TYPE } from "@/lib/constants";
@@ -22,6 +28,9 @@ import {
   Plus,
   Link as LinkIcon,
   ScrollText,
+  MoreHorizontal,
+  Pencil,
+  Trash2 as TrashIcon,
 } from "lucide-react";
 import { CollapsibleSectionHeader, FolderTreeNode, type SidebarFolderItem } from "@/components/layout/sidebar-shared";
 
@@ -141,6 +150,9 @@ interface OrganizeSectionProps {
   onCreateFolder: () => void;
   onEditFolder: (folder: SidebarFolderItem) => void;
   onDeleteFolder: (folder: SidebarFolderItem) => void;
+  onEditTag: (tag: OrganizeTagItem) => void;
+  onDeleteTag: (tag: OrganizeTagItem) => void;
+  showTagMenu: boolean;
   onNavigate: () => void;
 }
 
@@ -159,6 +171,9 @@ export function OrganizeSection({
   onCreateFolder,
   onEditFolder,
   onDeleteFolder,
+  onEditTag,
+  onDeleteTag,
+  showTagMenu,
   onNavigate,
 }: OrganizeSectionProps) {
   return (
@@ -203,21 +218,46 @@ export function OrganizeSection({
           {tags.map((tag) => {
             const colorClass = getTagColorClass(tag.color);
             return (
-              <Button
-                key={tag.id}
-                variant={activeTagId === tag.id ? "secondary" : "ghost"}
-                className="w-full justify-start gap-2"
-                asChild
-              >
-                <Link href={tagHref(tag.id)} onClick={onNavigate}>
-                  <Badge
-                    variant="outline"
-                    className={cn("h-3 w-3 rounded-full p-0", colorClass && "tag-color-bg", colorClass)}
-                  />
-                  {tag.name}
-                  <span className="ml-auto text-xs text-muted-foreground">{tag.count}</span>
-                </Link>
-              </Button>
+              <div key={tag.id} className="group/tag flex items-center">
+                <Button
+                  variant={activeTagId === tag.id ? "secondary" : "ghost"}
+                  className="flex-1 justify-start gap-2"
+                  asChild
+                >
+                  <Link href={tagHref(tag.id)} onClick={onNavigate}>
+                    <Badge
+                      variant="outline"
+                      className={cn("h-3 w-3 rounded-full p-0", colorClass && "tag-color-bg", colorClass)}
+                    />
+                    <span className="truncate">{tag.name}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">{tag.count}</span>
+                  </Link>
+                </Button>
+                {showTagMenu && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0 opacity-0 group-hover/tag:opacity-100 focus:opacity-100"
+                        aria-label={`${tag.name} menu`}
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => onEditTag(tag)}>
+                        <Pencil className="h-3.5 w-3.5 mr-2" />
+                        {t("editTag")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem className="text-destructive" onClick={() => onDeleteTag(tag)}>
+                        <TrashIcon className="h-3.5 w-3.5 mr-2" />
+                        {t("deleteTag")}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </div>
             );
           })}
         </div>

@@ -74,6 +74,9 @@ export function useSidebarNavigationState({
     const selectedOrgCanManageFolders = selectedOrg
       ? selectedOrg.role === ORG_ROLE.OWNER || selectedOrg.role === ORG_ROLE.ADMIN
       : false;
+    const selectedOrgCanManageTags = selectedOrg
+      ? selectedOrg.role !== ORG_ROLE.VIEWER
+      : false;
 
     const selectedOrgTypeFilter =
       selectedOrgId && activeOrgId === selectedOrgId ? activeOrgTypeFilter : null;
@@ -144,6 +147,7 @@ export function useSidebarNavigationState({
       selectedOrgId,
       selectedOrg,
       selectedOrgCanManageFolders,
+      selectedOrgCanManageTags,
       selectedTypeFilter,
       selectedFolderId,
       selectedTagId,

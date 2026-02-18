@@ -20,6 +20,15 @@ vi.mock("@/components/ui/collapsible", () => ({
   CollapsibleContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock("@/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuItem: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
+    <button onClick={onClick}>{children}</button>
+  ),
+}));
+
 vi.mock("@/components/layout/sidebar-shared", () => ({
   CollapsibleSectionHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FolderTreeNode: ({ folder }: { folder: { name: string } }) => <div>{folder.name}</div>,
@@ -100,6 +109,9 @@ describe("OrganizeSection", () => {
         onCreateFolder={onCreateFolder}
         onEditFolder={() => {}}
         onDeleteFolder={() => {}}
+        onEditTag={() => {}}
+        onDeleteTag={() => {}}
+        showTagMenu
         onNavigate={() => {}}
       />
     );

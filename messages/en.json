@@ -67,10 +67,15 @@
     "createFolder": "New Folder",
     "editFolder": "Edit Folder",
     "deleteFolder": "Delete Folder",
+    "editTag": "Edit Tag",
+    "deleteTag": "Delete Tag",
     "folderName": "Folder Name",
+    "tagName": "Tag Name",
+    "tagColor": "Tag Color",
     "parentFolder": "Parent Folder",
     "noParent": "(Root)",
     "folderDeleteConfirm": "Delete folder \"{name}\"? Sub-folders will be promoted to the parent, and entries will be unassigned.",
+    "tagDeleteConfirm": "Delete tag \"{name}\"? This action cannot be undone.",
     "folderMaxDepth": "Maximum folder depth ({max}) exceeded."
   },
   "ShareLinks": {

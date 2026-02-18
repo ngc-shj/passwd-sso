@@ -13,6 +13,7 @@ function makeParams() {
     orgs: [{ id: "org-1", name: "Acme", slug: "acme", role: "ADMIN" }],
     selectedOrg: null,
     selectedOrgCanManageFolders: false,
+    selectedOrgCanManageTags: false,
     selectedTypeFilter: null,
     selectedFolderId: null,
     selectedTagId: null,
@@ -32,6 +33,8 @@ function makeParams() {
     handleFolderCreate: vi.fn(),
     handleFolderEdit: vi.fn(),
     handleFolderDeleteClick: vi.fn(),
+    handleTagEdit: vi.fn(),
+    handleTagDeleteClick: vi.fn(),
     notifyDataChanged: vi.fn(),
   };
 }

@@ -6,9 +6,11 @@ import { useRouter } from "@/i18n/navigation";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { VisuallyHidden } from "radix-ui";
 import { FolderDialog } from "@/components/folders/folder-dialog";
+import { TagDialog } from "@/components/tags/tag-dialog";
 import { SidebarContent } from "@/components/layout/sidebar-content";
 import { useSidebarData } from "@/hooks/use-sidebar-data";
 import { useSidebarFolderCrud } from "@/hooks/use-sidebar-folder-crud";
+import { useSidebarTagCrud } from "@/hooks/use-sidebar-tag-crud";
 import { useSidebarNavigationState } from "@/hooks/use-sidebar-navigation-state";
 import { useSidebarSectionsState } from "@/hooks/use-sidebar-sections-state";
 import { useSidebarViewModel } from "@/hooks/use-sidebar-view-model";
@@ -60,6 +62,20 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     refreshData,
     tErrors,
   });
+  const {
+    tagDialogOpen,
+    setTagDialogOpen,
+    editingTag,
+    deletingTag,
+    handleTagEdit,
+    handleTagDeleteClick,
+    handleTagSubmit,
+    handleTagDelete,
+    clearDeletingTag,
+  } = useSidebarTagCrud({
+    refreshData,
+    tErrors,
+  });
 
   const vaultContext = useVaultContext(orgs);
   const {
@@ -71,6 +87,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isPersonalAuditLog,
     selectedOrg,
     selectedOrgCanManageFolders,
+    selectedOrgCanManageTags,
     selectedTypeFilter,
     selectedFolderId,
     selectedTagId,
@@ -111,6 +128,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     orgs,
     selectedOrg,
     selectedOrgCanManageFolders,
+    selectedOrgCanManageTags,
     selectedTypeFilter,
     selectedFolderId,
     selectedTagId,
@@ -130,6 +148,8 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     handleFolderCreate,
     handleFolderEdit,
     handleFolderDeleteClick,
+    handleTagEdit,
+    handleTagDeleteClick,
     notifyDataChanged,
   });
 
@@ -158,6 +178,12 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         editFolder={editingFolder}
         onSubmit={handleFolderSubmit}
       />
+      <TagDialog
+        open={tagDialogOpen}
+        onOpenChange={setTagDialogOpen}
+        editTag={editingTag}
+        onSubmit={handleTagSubmit}
+      />
 
       {/* Folder delete confirmation */}
       <AlertDialog
@@ -174,6 +200,27 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
           <AlertDialogFooter>
             <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={handleFolderDelete}>
+              {tCommon("delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Tag delete confirmation */}
+      <AlertDialog
+        open={!!deletingTag}
+        onOpenChange={(open) => { if (!open) clearDeletingTag(); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("deleteTag")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("tagDeleteConfirm", { name: deletingTag?.name ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleTagDelete}>
               {tCommon("delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
