@@ -6,6 +6,7 @@ import { encryptExport } from "@/lib/export-crypto";
 import {
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,9 +24,10 @@ import {
 
 interface OrgExportPanelContentProps {
   orgId: string;
+  hideHeader?: boolean;
 }
 
-function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
+function OrgExportPanelContent({ orgId, hideHeader = false }: OrgExportPanelContentProps) {
   const t = useTranslations("Export");
   const [exporting, setExporting] = useState(false);
   const [passwordProtect, setPasswordProtect] = useState(true);
@@ -163,13 +165,15 @@ function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
 
   const content = (
     <>
-      <div className="space-y-1.5">
-        <h1 className="flex items-center gap-2 text-lg font-semibold leading-none tracking-tight">
-          <Building2 className="h-4 w-4" />
-          {t("title")}
-        </h1>
-        <p className="text-sm text-muted-foreground">{t("description")}</p>
-      </div>
+      {!hideHeader && (
+        <div className="space-y-1.5">
+          <h1 className="flex items-center gap-2 text-2xl font-bold leading-none tracking-tight">
+            <Building2 className="h-4 w-4" />
+            {t("title")}
+          </h1>
+          <p className="text-sm text-muted-foreground">{t("description")}</p>
+        </div>
+      )}
 
         <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
           <AlertTriangle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
@@ -302,9 +306,21 @@ interface OrgExportPagePanelProps {
 }
 
 export function OrgExportPagePanel({ orgId }: OrgExportPagePanelProps) {
+  const t = useTranslations("Export");
   return (
-    <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">
-      <OrgExportPanelContent orgId={orgId} />
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-6">
+        <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
+          <div className="space-y-1.5">
+            <h1 className="flex items-center gap-2 text-2xl font-bold leading-none tracking-tight">
+              <Building2 className="h-5 w-5" />
+              {t("title")}
+            </h1>
+            <p className="text-sm text-muted-foreground">{t("description")}</p>
+          </div>
+        </Card>
+        <OrgExportPanelContent orgId={orgId} hideHeader />
+      </div>
     </div>
   );
 }

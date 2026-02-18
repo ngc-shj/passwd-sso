@@ -13,6 +13,7 @@ import {
 import {
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -555,9 +556,10 @@ const formatLabels: Record<CsvFormat, string> = {
 
 interface ImportPanelContentProps {
   onComplete: () => void;
+  hideHeader?: boolean;
 }
 
-function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
+function ImportPanelContent({ onComplete, hideHeader = false }: ImportPanelContentProps) {
   const t = useTranslations("Import");
   const { encryptionKey, userId } = useVault();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -846,13 +848,15 @@ function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
 
   const content = (
     <>
-      <div className="space-y-1.5">
-        <h1 className="flex items-center gap-2 text-lg font-semibold leading-none tracking-tight">
-          <FileUp className="h-4 w-4" />
-          {t("title")}
-        </h1>
-        <p className="text-sm text-muted-foreground">{t("description")}</p>
-      </div>
+      {!hideHeader && (
+        <div className="space-y-1.5">
+          <h1 className="flex items-center gap-2 text-2xl font-bold leading-none tracking-tight">
+            <FileUp className="h-4 w-4" />
+            {t("title")}
+          </h1>
+          <p className="text-sm text-muted-foreground">{t("description")}</p>
+        </div>
+      )}
 
         {done ? (
           <div className="flex flex-col items-center gap-3 py-6">
@@ -1034,9 +1038,21 @@ interface ImportPagePanelProps {
 }
 
 export function ImportPagePanel({ onComplete }: ImportPagePanelProps) {
+  const t = useTranslations("Import");
   return (
-    <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">
-      <ImportPanelContent onComplete={onComplete} />
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-6">
+        <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
+          <div className="space-y-1.5">
+            <h1 className="flex items-center gap-2 text-2xl font-bold leading-none tracking-tight">
+              <FileUp className="h-5 w-5" />
+              {t("title")}
+            </h1>
+            <p className="text-sm text-muted-foreground">{t("description")}</p>
+          </div>
+        </Card>
+        <ImportPanelContent onComplete={onComplete} hideHeader />
+      </div>
     </div>
   );
 }
