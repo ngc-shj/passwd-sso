@@ -22,27 +22,13 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import {
   type ExportEntry,
   type ExportFormat,
-  type FormatExportOptions,
+  ORG_EXPORT_OPTIONS,
   type ExportProfile,
   formatExportContent as formatExportContentShared,
   formatExportCsv,
   formatExportJson,
   formatExportDate,
 } from "@/lib/export-format-common";
-
-const ORG_EXPORT_OPTIONS: FormatExportOptions = {
-  csv: {
-    includePasskeyType: true,
-    includeReprompt: false,
-    includeRequireRepromptInPasswdSso: false,
-    includePasskeyFieldsInPasswdSso: false,
-  },
-  json: {
-    includePasskey: true,
-    includeReprompt: false,
-    includeRequireRepromptInPasswdSso: false,
-  },
-};
 
 interface OrgExportDialogProps {
   orgId: string;

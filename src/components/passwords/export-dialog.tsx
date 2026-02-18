@@ -24,27 +24,13 @@ import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import {
   type ExportEntry,
   type ExportFormat,
-  type FormatExportOptions,
+  PERSONAL_EXPORT_OPTIONS,
   type ExportProfile,
   formatExportContent as formatExportContentShared,
   formatExportCsv,
   formatExportJson,
   formatExportDate,
 } from "@/lib/export-format-common";
-
-const PERSONAL_EXPORT_OPTIONS: FormatExportOptions = {
-  csv: {
-    includePasskeyType: true,
-    includeReprompt: true,
-    includeRequireRepromptInPasswdSso: true,
-    includePasskeyFieldsInPasswdSso: true,
-  },
-  json: {
-    includePasskey: true,
-    includeReprompt: true,
-    includeRequireRepromptInPasswdSso: true,
-  },
-};
 
 interface ExportDialogProps {
   trigger: React.ReactNode;

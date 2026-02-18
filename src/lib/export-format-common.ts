@@ -99,6 +99,34 @@ export interface FormatExportOptions {
   json: FormatExportJsonOptions;
 }
 
+export const PERSONAL_EXPORT_OPTIONS: FormatExportOptions = {
+  csv: {
+    includePasskeyType: true,
+    includeReprompt: true,
+    includeRequireRepromptInPasswdSso: true,
+    includePasskeyFieldsInPasswdSso: true,
+  },
+  json: {
+    includePasskey: true,
+    includeReprompt: true,
+    includeRequireRepromptInPasswdSso: true,
+  },
+};
+
+export const ORG_EXPORT_OPTIONS: FormatExportOptions = {
+  csv: {
+    includePasskeyType: true,
+    includeReprompt: false,
+    includeRequireRepromptInPasswdSso: false,
+    includePasskeyFieldsInPasswdSso: false,
+  },
+  json: {
+    includePasskey: true,
+    includeReprompt: false,
+    includeRequireRepromptInPasswdSso: false,
+  },
+};
+
 function withReprompt(
   entry: ExportEntry,
   includeReprompt: boolean

@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { __testablesImport } from "@/components/passwords/import-dialog";
-import { __testablesPersonalExport } from "@/components/passwords/export-dialog";
-import { __testablesOrgExport } from "@/components/org/org-export-dialog";
+import {
+  type ExportEntry,
+  formatExportCsv,
+  formatExportJson,
+  ORG_EXPORT_OPTIONS,
+  PERSONAL_EXPORT_OPTIONS,
+} from "@/lib/export-format-common";
 
 const sampleLoginEntry = {
   entryType: ENTRY_TYPE.LOGIN,
@@ -75,25 +80,28 @@ describe("import/export format compatibility", () => {
   });
 
   it("exports compatible profile without passwd-sso payloads", () => {
-    const personalJson = __testablesPersonalExport.formatJson(
-      [sampleLoginEntry] as never,
-      "compatible"
+    const personalJson = formatExportJson(
+      [sampleLoginEntry] as ExportEntry[],
+      "compatible",
+      PERSONAL_EXPORT_OPTIONS.json
     );
     const parsed = JSON.parse(personalJson);
     expect(parsed.format).toBeUndefined();
     expect(parsed.entries[0].passwdSso).toBeUndefined();
 
-    const personalCsv = __testablesPersonalExport.formatCsv(
-      [sampleLoginEntry] as never,
-      "compatible"
+    const personalCsv = formatExportCsv(
+      [sampleLoginEntry] as ExportEntry[],
+      "compatible",
+      PERSONAL_EXPORT_OPTIONS.csv
     );
     expect(personalCsv.split("\n")[0]).not.toContain("passwd_sso");
   });
 
   it("round-trips passwd-sso CSV custom fields", () => {
-    const csv = __testablesPersonalExport.formatCsv(
-      [sampleLoginEntry] as never,
-      "passwd-sso"
+    const csv = formatExportCsv(
+      [sampleLoginEntry] as ExportEntry[],
+      "passwd-sso",
+      PERSONAL_EXPORT_OPTIONS.csv
     );
     const parsed = __testablesImport.parseCsv(csv);
     expect(parsed.format).toBe("passwd-sso");
@@ -102,9 +110,10 @@ describe("import/export format compatibility", () => {
   });
 
   it("exports requireReprompt=true as CSV reprompt='1'", () => {
-    const csv = __testablesPersonalExport.formatCsv(
-      [{ ...sampleLoginEntry, requireReprompt: true }] as never,
-      "compatible"
+    const csv = formatExportCsv(
+      [{ ...sampleLoginEntry, requireReprompt: true }] as ExportEntry[],
+      "compatible",
+      PERSONAL_EXPORT_OPTIONS.csv
     );
     const rows = csv.split("\n");
     const headers = rows[0].split(",");
@@ -114,9 +123,10 @@ describe("import/export format compatibility", () => {
   });
 
   it("exports requireReprompt=false as CSV reprompt=''", () => {
-    const csv = __testablesPersonalExport.formatCsv(
-      [sampleLoginEntry] as never,
-      "compatible"
+    const csv = formatExportCsv(
+      [sampleLoginEntry] as ExportEntry[],
+      "compatible",
+      PERSONAL_EXPORT_OPTIONS.csv
     );
     const rows = csv.split("\n");
     const headers = rows[0].split(",");
@@ -126,9 +136,10 @@ describe("import/export format compatibility", () => {
   });
 
   it("exports JSON with reprompt field and passwdSso.requireReprompt", () => {
-    const json = __testablesPersonalExport.formatJson(
-      [{ ...sampleLoginEntry, requireReprompt: true }] as never,
-      "passwd-sso"
+    const json = formatExportJson(
+      [{ ...sampleLoginEntry, requireReprompt: true }] as ExportEntry[],
+      "passwd-sso",
+      PERSONAL_EXPORT_OPTIONS.json
     );
     const parsed = JSON.parse(json);
     expect(parsed.entries[0].reprompt).toBe(1);
@@ -136,9 +147,10 @@ describe("import/export format compatibility", () => {
   });
 
   it("exports JSON reprompt=0 for requireReprompt=false", () => {
-    const json = __testablesPersonalExport.formatJson(
-      [sampleLoginEntry] as never,
-      "compatible"
+    const json = formatExportJson(
+      [sampleLoginEntry] as ExportEntry[],
+      "compatible",
+      PERSONAL_EXPORT_OPTIONS.json
     );
     const parsed = JSON.parse(json);
     expect(parsed.entries[0].reprompt).toBe(0);
@@ -212,27 +224,30 @@ describe("import/export format compatibility", () => {
   });
 
   it("round-trips requireReprompt through CSV export/import", () => {
-    const csv = __testablesPersonalExport.formatCsv(
-      [{ ...sampleLoginEntry, requireReprompt: true }] as never,
-      "passwd-sso"
+    const csv = formatExportCsv(
+      [{ ...sampleLoginEntry, requireReprompt: true }] as ExportEntry[],
+      "passwd-sso",
+      PERSONAL_EXPORT_OPTIONS.csv
     );
     const parsed = __testablesImport.parseCsv(csv);
     expect(parsed.entries[0].requireReprompt).toBe(true);
   });
 
   it("round-trips requireReprompt through JSON export/import", () => {
-    const json = __testablesPersonalExport.formatJson(
-      [{ ...sampleLoginEntry, requireReprompt: true }] as never,
-      "passwd-sso"
+    const json = formatExportJson(
+      [{ ...sampleLoginEntry, requireReprompt: true }] as ExportEntry[],
+      "passwd-sso",
+      PERSONAL_EXPORT_OPTIONS.json
     );
     const parsed = __testablesImport.parseJson(json);
     expect(parsed.entries[0].requireReprompt).toBe(true);
   });
 
   it("org export supports passwd-sso profile envelope", () => {
-    const orgJson = __testablesOrgExport.formatJson(
-      [sampleLoginEntry] as never,
-      "passwd-sso"
+    const orgJson = formatExportJson(
+      [sampleLoginEntry] as ExportEntry[],
+      "passwd-sso",
+      ORG_EXPORT_OPTIONS.json
     );
     const parsed = JSON.parse(orgJson);
     expect(parsed.format).toBe("passwd-sso");
