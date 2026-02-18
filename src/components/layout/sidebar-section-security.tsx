@@ -3,8 +3,6 @@
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
-import { ExportDialog } from "@/components/passwords/export-dialog";
-import { ImportDialog } from "@/components/passwords/import-dialog";
 import { ORG_ROLE } from "@/lib/constants";
 import { CollapsibleSectionHeader } from "@/components/layout/sidebar-shared";
 import {
@@ -85,9 +83,14 @@ export function UtilitiesSection({
   t,
   tOrg,
   selectedOrg,
-  onImportComplete,
+  onImportComplete: _onImportComplete,
   onNavigate,
 }: UtilitiesSectionProps) {
+  void _onImportComplete;
+  const exportHref = selectedOrg
+    ? `/dashboard/orgs/${selectedOrg.id}/export`
+    : "/dashboard/export";
+
   return (
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
       <CollapsibleSectionHeader isOpen={isOpen}>{t("utilities")}</CollapsibleSectionHeader>
@@ -102,23 +105,18 @@ export function UtilitiesSection({
               </Link>
             </Button>
           )}
-          <ExportDialog
-            trigger={
-              <Button variant="ghost" className="w-full justify-start gap-2">
-                <Download className="h-4 w-4" />
-                {t("export")}
-              </Button>
-            }
-          />
-          <ImportDialog
-            trigger={
-              <Button variant="ghost" className="w-full justify-start gap-2">
-                <Upload className="h-4 w-4" />
-                {t("import")}
-              </Button>
-            }
-            onComplete={onImportComplete}
-          />
+          <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+            <Link href={exportHref} onClick={onNavigate}>
+              <Download className="h-4 w-4" />
+              {t("export")}
+            </Link>
+          </Button>
+          <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+            <Link href="/dashboard/import" onClick={onNavigate}>
+              <Upload className="h-4 w-4" />
+              {t("import")}
+            </Link>
+          </Button>
         </div>
       </CollapsibleContent>
     </Collapsible>

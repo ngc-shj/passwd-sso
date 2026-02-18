@@ -29,10 +29,16 @@ import {
 
 interface OrgExportDialogProps {
   orgId: string;
-  trigger: React.ReactNode;
+  trigger?: React.ReactNode;
+  mode?: "dialog" | "page";
 }
 
-export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
+export function OrgExportDialog({
+  orgId,
+  trigger,
+  mode = "dialog",
+}: OrgExportDialogProps) {
+  const isPage = mode === "page";
   const t = useTranslations("Export");
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -170,23 +176,15 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
     }
   };
 
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        setOpen(v);
-        if (!v) resetState();
-      }}
-    >
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Building2 className="h-4 w-4" />
-            {t("title")}
-          </DialogTitle>
-          <DialogDescription>{t("description")}</DialogDescription>
-        </DialogHeader>
+  const content = (
+    <>
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <Building2 className="h-4 w-4" />
+          {t("title")}
+        </DialogTitle>
+        <DialogDescription>{t("description")}</DialogDescription>
+      </DialogHeader>
 
         <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
           <AlertTriangle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
@@ -308,7 +306,23 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
             {t("exportJson")}
           </Button>
         </DialogFooter>
-      </DialogContent>
+    </>
+  );
+
+  if (isPage) {
+    return <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">{content}</div>;
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) resetState();
+      }}
+    >
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent className="sm:max-w-2xl">{content}</DialogContent>
     </Dialog>
   );
 }

@@ -19,8 +19,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react";
-import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { Download, Loader2, AlertTriangle, Lock } from "lucide-react";
+import { API_PATH, ENTRY_TYPE } from "@/lib/constants";
 import {
   type ExportEntry,
   PERSONAL_EXPORT_OPTIONS,
@@ -30,10 +30,12 @@ import {
 } from "@/lib/export-format-common";
 
 interface ExportDialogProps {
-  trigger: React.ReactNode;
+  trigger?: React.ReactNode;
+  mode?: "dialog" | "page";
 }
 
-export function ExportDialog({ trigger }: ExportDialogProps) {
+export function ExportDialog({ trigger, mode = "dialog" }: ExportDialogProps) {
+  const isPage = mode === "page";
   const t = useTranslations("Export");
   const { encryptionKey, userId } = useVault();
   const [open, setOpen] = useState(false);
@@ -42,7 +44,6 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
   const [exportPassword, setExportPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
-  const [includeOrgs, setIncludeOrgs] = useState(true);
   const [exportProfile, setExportProfile] = useState<ExportProfile>("compatible");
 
   const resetState = () => {
@@ -50,7 +51,6 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
     setExportPassword("");
     setConfirmPassword("");
     setPasswordError("");
-    setIncludeOrgs(true);
     setExportProfile("compatible");
   };
 
@@ -133,70 +133,6 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
         }
       }
 
-      // 2. Fetch org entries (server-side decrypted via detail API)
-      if (includeOrgs) try {
-        const orgsRes = await fetch(API_PATH.ORGS);
-        if (orgsRes.ok) {
-          const orgs: { id: string }[] = await orgsRes.json();
-          for (const org of orgs) {
-            try {
-              const listRes = await fetch(apiPath.orgPasswords(org.id));
-              if (!listRes.ok) continue;
-              const list: { id: string; entryType: string }[] = await listRes.json();
-              for (const item of list) {
-                try {
-                  const detailRes = await fetch(apiPath.orgPasswordById(org.id, item.id));
-                  if (!detailRes.ok) continue;
-                  const data = await detailRes.json();
-                  entries.push({
-                    entryType: data.entryType ?? ENTRY_TYPE.LOGIN,
-                    title: data.title ?? "",
-                    username: data.username ?? null,
-                    password: data.password ?? "",
-                    content: data.content ?? null,
-                    url: data.url ?? null,
-                    notes: data.notes ?? null,
-                    totp: data.totp?.secret ?? null,
-                    cardholderName: data.cardholderName ?? null,
-                    cardNumber: data.cardNumber ?? null,
-                    brand: data.brand ?? null,
-                    expiryMonth: data.expiryMonth ?? null,
-                    expiryYear: data.expiryYear ?? null,
-                    cvv: data.cvv ?? null,
-                    fullName: data.fullName ?? null,
-                    address: data.address ?? null,
-                    phone: data.phone ?? null,
-                    email: data.email ?? null,
-                    dateOfBirth: data.dateOfBirth ?? null,
-                    nationality: data.nationality ?? null,
-                    idNumber: data.idNumber ?? null,
-                    issueDate: data.issueDate ?? null,
-                    expiryDate: data.expiryDate ?? null,
-                    relyingPartyId: data.relyingPartyId ?? null,
-                    relyingPartyName: data.relyingPartyName ?? null,
-                    credentialId: data.credentialId ?? null,
-                    creationDate: data.creationDate ?? null,
-                    deviceInfo: data.deviceInfo ?? null,
-                    tags: Array.isArray(data.tags) ? data.tags : [],
-                    customFields: Array.isArray(data.customFields) ? data.customFields : [],
-                    totpConfig: data.totp ?? null,
-                    generatorSettings: data.generatorSettings ?? null,
-                    passwordHistory: Array.isArray(data.passwordHistory) ? data.passwordHistory : [],
-                    requireReprompt: false,
-                  });
-                } catch {
-                  // Skip entries that fail to fetch
-                }
-              }
-            } catch {
-              // Skip orgs that fail to fetch
-            }
-          }
-        }
-      } catch {
-        // Org fetch failed — continue with personal entries only
-      }
-
       const content = formatExportContentShared(
         entries,
         format,
@@ -237,7 +173,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
           format,
           filename,
           encrypted: passwordProtect,
-          includeOrgs,
+          includeOrgs: false,
         }),
       }).catch(() => {});
 
@@ -250,72 +186,45 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
     }
   };
 
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        setOpen(v);
-        if (!v) resetState();
-      }}
-    >
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Download className="h-4 w-4" />
-            {t("title")}
-          </DialogTitle>
-          <DialogDescription>{t("description")}</DialogDescription>
-        </DialogHeader>
+  const content = (
+    <>
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <Download className="h-4 w-4" />
+          {t("title")}
+        </DialogTitle>
+        <DialogDescription>{t("description")}</DialogDescription>
+      </DialogHeader>
 
-        <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
-          <AlertTriangle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
-          <p className="text-sm text-yellow-800 dark:text-yellow-200">
-            {passwordProtect ? t("encryptedWarning") : t("warning")}
+      <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
+        <AlertTriangle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
+        <p className="text-sm text-yellow-800 dark:text-yellow-200">
+          {passwordProtect ? t("encryptedWarning") : t("warning")}
+        </p>
+      </div>
+
+      <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="export-profile" className="text-sm font-medium">
+            {t("profileLabel")}
+          </Label>
+          <select
+            id="export-profile"
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            value={exportProfile}
+            onChange={(e) => setExportProfile(e.target.value as ExportProfile)}
+          >
+            <option value="compatible">{t("profileCompatible")}</option>
+            <option value="passwd-sso">{t("profilePasswdSso")}</option>
+          </select>
+          <p className="text-xs text-muted-foreground">
+            {exportProfile === "compatible"
+              ? t("profileCompatibleDesc")
+              : t("profilePasswdSsoDesc")}
           </p>
         </div>
 
-        <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="export-profile" className="text-sm font-medium">
-              {t("profileLabel")}
-            </Label>
-            <select
-              id="export-profile"
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-              value={exportProfile}
-              onChange={(e) => setExportProfile(e.target.value as ExportProfile)}
-            >
-              <option value="compatible">{t("profileCompatible")}</option>
-              <option value="passwd-sso">{t("profilePasswdSso")}</option>
-            </select>
-            <p className="text-xs text-muted-foreground">
-              {exportProfile === "compatible"
-                ? t("profileCompatibleDesc")
-                : t("profilePasswdSsoDesc")}
-            </p>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Building2 className="h-4 w-4 text-muted-foreground" />
-              <div>
-                <Label htmlFor="include-orgs" className="text-sm font-medium">
-                  {t("includeOrgs")}
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  {t("includeOrgsDesc")}
-                </p>
-              </div>
-            </div>
-            <Switch
-              id="include-orgs"
-              checked={includeOrgs}
-              onCheckedChange={setIncludeOrgs}
-            />
-          </div>
-
-          <div className="flex items-center justify-between border-t pt-3">
+        <div className="flex items-center justify-between border-t pt-3">
             <div className="flex items-center gap-2">
               <Lock className="h-4 w-4 text-muted-foreground" />
               <div>
@@ -339,10 +248,10 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
                 }
               }}
             />
-          </div>
+        </div>
 
-          {passwordProtect && (
-            <div className="space-y-3">
+        {passwordProtect && (
+          <div className="space-y-3">
               <div className="space-y-1.5">
                 <Label htmlFor="export-password" className="text-sm">
                   {t("exportPassword")}
@@ -376,38 +285,58 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
               {passwordError && (
                 <p className="text-sm text-destructive">{passwordError}</p>
               )}
-            </div>
-          )}
-        </div>
+          </div>
+        )}
+      </div>
 
-        <DialogFooter className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:justify-end sm:gap-2">
-          <Button
-            variant="outline"
-            className="w-full sm:w-auto"
-            onClick={() => handleExport("csv")}
-            disabled={exporting}
-          >
-            {exporting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4 mr-2" />
-            )}
-            {t("exportCsv")}
-          </Button>
-          <Button
-            className="w-full sm:w-auto"
-            onClick={() => handleExport("json")}
-            disabled={exporting}
-          >
-            {exporting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4 mr-2" />
-            )}
-            {t("exportJson")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+      <DialogFooter className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:justify-end sm:gap-2">
+        <Button
+          variant="outline"
+          className="w-full sm:w-auto"
+          onClick={() => handleExport("csv")}
+          disabled={exporting}
+        >
+          {exporting ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4 mr-2" />
+          )}
+          {t("exportCsv")}
+        </Button>
+        <Button
+          className="w-full sm:w-auto"
+          onClick={() => handleExport("json")}
+          disabled={exporting}
+        >
+          {exporting ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4 mr-2" />
+          )}
+          {t("exportJson")}
+        </Button>
+      </DialogFooter>
+    </>
+  );
+
+  if (isPage) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) resetState();
+      }}
+    >
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent className="sm:max-w-2xl">{content}</DialogContent>
     </Dialog>
   );
 }

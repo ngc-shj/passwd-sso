@@ -561,11 +561,13 @@ const formatLabels: Record<CsvFormat, string> = {
 // ─── Component ──────────────────────────────────────────────
 
 interface ImportDialogProps {
-  trigger: React.ReactNode;
+  trigger?: React.ReactNode;
   onComplete: () => void;
+  mode?: "dialog" | "page";
 }
 
-export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
+export function ImportDialog({ trigger, onComplete, mode = "dialog" }: ImportDialogProps) {
+  const isPage = mode === "page";
   const t = useTranslations("Import");
   const { encryptionKey, userId } = useVault();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -853,23 +855,15 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
     }
   };
 
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        setOpen(v);
-        if (!v) reset();
-      }}
-    >
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <FileUp className="h-4 w-4" />
-            {t("title")}
-          </DialogTitle>
-          <DialogDescription>{t("description")}</DialogDescription>
-        </DialogHeader>
+  const content = (
+    <>
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <FileUp className="h-4 w-4" />
+          {t("title")}
+        </DialogTitle>
+        <DialogDescription>{t("description")}</DialogDescription>
+      </DialogHeader>
 
         {done ? (
           <div className="flex flex-col items-center gap-3 py-6">
@@ -877,9 +871,15 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             <p className="text-sm text-muted-foreground">
               {t("importedCount", { count: progress.total })}
             </p>
-            <DialogClose asChild>
-              <Button type="button">{t("close")}</Button>
-            </DialogClose>
+            {isPage ? (
+              <Button type="button" onClick={reset}>
+                {t("close")}
+              </Button>
+            ) : (
+              <DialogClose asChild>
+                <Button type="button">{t("close")}</Button>
+              </DialogClose>
+            )}
           </div>
         ) : encryptedFile ? (
           // Decryption step
@@ -1040,7 +1040,23 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             </Button>
           </DialogFooter>
         )}
-      </DialogContent>
+    </>
+  );
+
+  if (isPage) {
+    return <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">{content}</div>;
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) reset();
+      }}
+    >
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent className="sm:max-w-2xl">{content}</DialogContent>
     </Dialog>
   );
 }
