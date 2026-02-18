@@ -637,7 +637,11 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                     )}
                   </Button>
                 </div>
-                {isOrgMenuOpen(org.id) && (
+                {isOrgMenuOpen(org.id) && (() => {
+                  const orgFolderGroup = orgFolderGroups.find((g) => g.orgId === org.id);
+                  const orgFolders = orgFolderGroup?.folders ?? [];
+                  const canManageFolders = org.role === ORG_ROLE.OWNER || org.role === ORG_ROLE.ADMIN;
+                  return (
                   <div className="ml-6 space-y-0.5">
                     <Button
                       variant={activeOrgTypeFilter === ENTRY_TYPE.LOGIN ? "secondary" : "ghost"}
@@ -694,6 +698,45 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                         {t("catPasskey")}
                       </Link>
                     </Button>
+                    {(orgFolders.length > 0 || canManageFolders) && (
+                      <>
+                        <Separator className="my-1" />
+                        <div className="flex items-center">
+                          <SectionLabel icon={<FolderOpen className="h-3 w-3" />}>
+                            {t("folders")}
+                          </SectionLabel>
+                          {canManageFolders && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 shrink-0 ml-auto"
+                              onClick={() => handleFolderCreate(org.id)}
+                              aria-label={`${org.name} createFolder`}
+                            >
+                              <Plus className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                        <div className="space-y-0.5">
+                          {orgFolders
+                            .filter((f) => !f.parentId)
+                            .map((folder) => (
+                              <FolderTreeNode
+                                key={folder.id}
+                                folder={folder}
+                                folders={orgFolders}
+                                activeFolderId={activeOrgFolderId}
+                                depth={0}
+                                linkHref={(id) => `/dashboard/orgs/${org.id}?folder=${id}`}
+                                showMenu={canManageFolders}
+                                onNavigate={() => onOpenChange(false)}
+                                onEdit={(f) => handleFolderEdit(f, org.id)}
+                                onDelete={(f) => handleFolderDeleteClick(f, org.id)}
+                              />
+                            ))}
+                        </div>
+                      </>
+                    )}
                     <Separator className="my-1" />
                     <Button
                       variant={activeOrgScope === "archive" ? "secondary" : "ghost"}
@@ -718,7 +761,8 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                       </Link>
                     </Button>
                   </div>
-                )}
+                  );
+                })()}
               </div>
             ))}
             <Button
@@ -806,50 +850,6 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
               );
             })}
           </div>
-
-          {orgFolderGroups.map((group) => {
-            const canManage = group.orgRole === ORG_ROLE.OWNER || group.orgRole === ORG_ROLE.ADMIN;
-            return (
-              <div key={`orgf-${group.orgId}`}>
-                <div className="flex items-center">
-                  <div className="flex-1">
-                    <SectionLabel icon={<Building2 className="h-3 w-3" />}>
-                      {group.orgName}
-                    </SectionLabel>
-                  </div>
-                  {canManage && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5 shrink-0 mr-1"
-                      onClick={() => handleFolderCreate(group.orgId)}
-                      aria-label={t("createFolder")}
-                    >
-                      <Plus className="h-3 w-3" />
-                    </Button>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  {group.folders
-                    .filter((f) => !f.parentId)
-                    .map((folder) => (
-                      <FolderTreeNode
-                        key={folder.id}
-                        folder={folder}
-                        folders={group.folders}
-                        activeFolderId={activeOrgFolderId}
-                        depth={0}
-                        linkHref={(id) => `/dashboard/orgs/${group.orgId}?folder=${id}`}
-                        showMenu={canManage}
-                        onNavigate={() => onOpenChange(false)}
-                        onEdit={(f) => handleFolderEdit(f, group.orgId)}
-                        onDelete={(f) => handleFolderDeleteClick(f, group.orgId)}
-                      />
-                    ))}
-                </div>
-              </div>
-            );
-          })}
 
           {orgTagGroups.map((group) => (
             <div key={group.orgId}>
