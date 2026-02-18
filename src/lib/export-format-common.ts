@@ -86,6 +86,13 @@ interface FormatExportJsonOptions {
   includeRequireRepromptInPasswdSso: boolean;
 }
 
+interface FormatExportCsvOptions {
+  includePasskeyType: boolean;
+  includeReprompt: boolean;
+  includeRequireRepromptInPasswdSso: boolean;
+  includePasskeyFieldsInPasswdSso: boolean;
+}
+
 function withReprompt(
   entry: ExportEntry,
   includeReprompt: boolean
@@ -228,4 +235,87 @@ export function formatExportJson(
     null,
     2
   );
+}
+
+function passwdSsoCsvPayload(
+  entry: ExportEntry,
+  options: Pick<
+    FormatExportCsvOptions,
+    "includeRequireRepromptInPasswdSso" | "includePasskeyFieldsInPasswdSso"
+  >
+): string {
+  return JSON.stringify({
+    entryType: entry.entryType,
+    tags: entry.tags,
+    customFields: entry.customFields,
+    totp: entry.totpConfig,
+    generatorSettings: entry.generatorSettings,
+    passwordHistory: entry.passwordHistory,
+    ...(options.includeRequireRepromptInPasswdSso
+      ? { requireReprompt: entry.requireReprompt }
+      : {}),
+    cardholderName: entry.cardholderName,
+    cardNumber: entry.cardNumber,
+    brand: entry.brand,
+    expiryMonth: entry.expiryMonth,
+    expiryYear: entry.expiryYear,
+    cvv: entry.cvv,
+    fullName: entry.fullName,
+    address: entry.address,
+    phone: entry.phone,
+    email: entry.email,
+    dateOfBirth: entry.dateOfBirth,
+    nationality: entry.nationality,
+    idNumber: entry.idNumber,
+    issueDate: entry.issueDate,
+    expiryDate: entry.expiryDate,
+    ...(options.includePasskeyFieldsInPasswdSso
+      ? {
+          relyingPartyId: entry.relyingPartyId,
+          relyingPartyName: entry.relyingPartyName,
+          credentialId: entry.credentialId,
+          creationDate: entry.creationDate,
+          deviceInfo: entry.deviceInfo,
+        }
+      : {}),
+  });
+}
+
+export function formatExportCsv(
+  entries: ExportEntry[],
+  profile: ExportProfile,
+  options: FormatExportCsvOptions
+): string {
+  const header = csvExportHeader(profile === "passwd-sso");
+  const rows = entries.map((entry) => {
+    const isNote = entry.entryType === ENTRY_TYPE.SECURE_NOTE;
+    const isCard = entry.entryType === ENTRY_TYPE.CREDIT_CARD;
+    const isIdentity = entry.entryType === ENTRY_TYPE.IDENTITY;
+    const isPasskey = entry.entryType === ENTRY_TYPE.PASSKEY;
+    const type = csvEntryType(entry.entryType, {
+      includePasskeyType: options.includePasskeyType,
+    });
+    const isLogin = !isNote && !isCard && !isIdentity && !isPasskey;
+    const passwdSso = passwdSsoCsvPayload(entry, {
+      includeRequireRepromptInPasswdSso:
+        options.includeRequireRepromptInPasswdSso,
+      includePasskeyFieldsInPasswdSso: options.includePasskeyFieldsInPasswdSso,
+    });
+
+    return [
+      "",
+      "",
+      type,
+      escapeCsvValue(entry.title),
+      escapeCsvValue(isNote ? entry.content : entry.notes),
+      "",
+      options.includeReprompt && entry.requireReprompt ? "1" : "",
+      isLogin ? escapeCsvValue(entry.url) : "",
+      isLogin ? escapeCsvValue(entry.username) : "",
+      isLogin ? escapeCsvValue(entry.password) : "",
+      isLogin ? escapeCsvValue(entry.totp) : "",
+      ...(profile === "passwd-sso" ? [escapeCsvValue(passwdSso)] : []),
+    ].join(",");
+  });
+  return [header, ...rows].join("\n");
 }

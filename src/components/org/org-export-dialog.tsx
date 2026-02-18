@@ -22,9 +22,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import {
   type ExportEntry,
   type ExportProfile,
-  csvEntryType,
-  csvExportHeader,
-  escapeCsvValue,
+  formatExportCsv,
   formatExportJson,
   formatExportDate,
 } from "@/lib/export-format-common";
@@ -326,52 +324,12 @@ function formatExportContent(
 }
 
 function formatCsv(entries: ExportEntry[], profile: ExportProfile): string {
-  const header = csvExportHeader(profile === "passwd-sso");
-  const rows = entries.map((e) => {
-    const isNote = e.entryType === ENTRY_TYPE.SECURE_NOTE;
-    const isCard = e.entryType === ENTRY_TYPE.CREDIT_CARD;
-    const isIdentity = e.entryType === ENTRY_TYPE.IDENTITY;
-    const type = csvEntryType(e.entryType, { includePasskeyType: true });
-    const isLogin = !isNote && !isCard && !isIdentity;
-    const passwdSso = JSON.stringify({
-      entryType: e.entryType,
-      tags: e.tags,
-      customFields: e.customFields,
-      totp: e.totpConfig,
-      generatorSettings: e.generatorSettings,
-      passwordHistory: e.passwordHistory,
-      cardholderName: e.cardholderName,
-      cardNumber: e.cardNumber,
-      brand: e.brand,
-      expiryMonth: e.expiryMonth,
-      expiryYear: e.expiryYear,
-      cvv: e.cvv,
-      fullName: e.fullName,
-      address: e.address,
-      phone: e.phone,
-      email: e.email,
-      dateOfBirth: e.dateOfBirth,
-      nationality: e.nationality,
-      idNumber: e.idNumber,
-      issueDate: e.issueDate,
-      expiryDate: e.expiryDate,
-    });
-    return [
-      "", // folder
-      "", // favorite
-      type,
-      escapeCsvValue(e.title),
-      escapeCsvValue(isNote ? e.content : e.notes),
-      "", // fields
-      "", // reprompt
-      isLogin ? escapeCsvValue(e.url) : "",
-      isLogin ? escapeCsvValue(e.username) : "",
-      isLogin ? escapeCsvValue(e.password) : "",
-      isLogin ? escapeCsvValue(e.totp) : "",
-      ...(profile === "passwd-sso" ? [escapeCsvValue(passwdSso)] : []),
-    ].join(",");
+  return formatExportCsv(entries, profile, {
+    includePasskeyType: true,
+    includeReprompt: false,
+    includeRequireRepromptInPasswdSso: false,
+    includePasskeyFieldsInPasswdSso: false,
   });
-  return [header, ...rows].join("\n");
 }
 
 function formatJson(entries: ExportEntry[], profile: ExportProfile): string {
