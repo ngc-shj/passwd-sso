@@ -145,4 +145,30 @@ describe("useImportExecution", () => {
     expect(result.current.done).toBe(false);
     expect(result.current.result).toEqual({ success: 0, failed: 0 });
   });
+
+  it("resets importing to false when import throws", async () => {
+    mockRunImportEntries.mockRejectedValue(new Error("network"));
+    const { result } = renderHook(() =>
+      useImportExecution({
+        t: (key: string) => key,
+        onComplete: vi.fn(),
+        isOrgImport: false,
+        tagsPath: "/api/tags",
+        passwordsPath: "/api/passwords",
+        sourceFilename: "x.csv",
+        encryptedInput: false,
+        encryptionKey: {} as CryptoKey,
+      })
+    );
+
+    await expect(
+      act(async () => {
+        await result.current.runImport([makeEntry()]);
+      })
+    ).rejects.toThrow("network");
+
+    expect(result.current.importing).toBe(false);
+    expect(result.current.done).toBe(false);
+    expect(mockFireImportAudit).not.toHaveBeenCalled();
+  });
 });

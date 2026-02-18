@@ -61,29 +61,31 @@ export function useImportExecution({
 
     setImporting(true);
     setProgress({ current: 0, total: entries.length });
+    try {
+      const { successCount, failedCount } = await runImportEntries({
+        entries,
+        isOrgImport,
+        tagsPath,
+        passwordsPath,
+        sourceFilename,
+        userId,
+        encryptionKey: encryptionKey ?? undefined,
+        onProgress: (current, total) => setProgress({ current, total }),
+      });
 
-    const { successCount, failedCount } = await runImportEntries({
-      entries,
-      isOrgImport,
-      tagsPath,
-      passwordsPath,
-      sourceFilename,
-      userId,
-      encryptionKey: encryptionKey ?? undefined,
-      onProgress: (current, total) => setProgress({ current, total }),
-    });
+      setDone(true);
+      setResult({ success: successCount, failed: failedCount });
 
-    setDone(true);
-    setImporting(false);
-    setResult({ success: successCount, failed: failedCount });
+      if (!isOrgImport) {
+        fireImportAudit(entries.length, successCount, failedCount, sourceFilename, encryptedInput);
+      }
 
-    if (!isOrgImport) {
-      fireImportAudit(entries.length, successCount, failedCount, sourceFilename, encryptedInput);
-    }
-
-    if (successCount > 0) {
-      toast.success(t("importedCount", { count: successCount }));
-      onComplete();
+      if (successCount > 0) {
+        toast.success(t("importedCount", { count: successCount }));
+        onComplete();
+      }
+    } finally {
+      setImporting(false);
     }
   };
 
