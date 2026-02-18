@@ -6,16 +6,15 @@ import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
-import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
+import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import {
   EntryActionBar,
   EntrySectionCard,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
-import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
+import type { TagData } from "@/components/tags/tag-input";
 import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
@@ -220,16 +219,16 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
               </EntrySectionCard>
             )}
 
-            <EntryTagsSection
-              title={t("tags")}
-              hint={t("tagsHint")}
+            <EntryTagsAndFolderSection
+              tagsTitle={t("tags")}
+              tagsHint={t("tagsHint")}
+              selectedTags={selectedTags}
+              onTagsChange={setSelectedTags}
+              folders={folders}
+              folderId={folderId}
+              onFolderChange={setFolderId}
               sectionCardClass={dialogSectionClass}
-            >
-              <TagInput
-                selectedTags={selectedTags}
-                onChange={setSelectedTags}
-              />
-            </EntryTagsSection>
+            />
 
             <EntryCustomFieldsTotpSection
               customFields={customFields}
@@ -238,13 +237,6 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
               onTotpChange={setTotp}
               showTotpInput={showTotpInput}
               setShowTotpInput={setShowTotpInput}
-              sectionCardClass={dialogSectionClass}
-            />
-
-            <EntryFolderSelectSection
-              folders={folders}
-              value={folderId}
-              onChange={setFolderId}
               sectionCardClass={dialogSectionClass}
             />
 
