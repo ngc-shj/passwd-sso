@@ -62,7 +62,7 @@ export function RepromptDialog({ open, onVerified, onCancel }: RepromptDialogPro
   );
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) handleCancel(); }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v && !verifying) handleCancel(); }}>
       <DialogContent showCloseButton={false}>
         <DialogHeader>
           <DialogTitle>{t("title")}</DialogTitle>
@@ -87,7 +87,7 @@ export function RepromptDialog({ open, onVerified, onCancel }: RepromptDialogPro
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={handleCancel}>
+          <Button variant="outline" onClick={handleCancel} disabled={verifying}>
             {t("cancel")}
           </Button>
           <Button onClick={handleVerify} disabled={!passphrase || verifying}>
