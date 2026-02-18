@@ -24,7 +24,8 @@ import {
 import { Plus, KeyRound, Search, FileText, CreditCard, IdCard, Fingerprint } from "lucide-react";
 import { toast } from "sonner";
 import { ORG_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
-import type { EntryTypeValue, TotpAlgorithm, CustomFieldType } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
+import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-sort";
 
 interface OrgInfo {
@@ -91,8 +92,8 @@ export default function OrgDashboardPage({
     url: string | null;
     notes: string | null;
     tags?: { id: string; name: string; color: string | null }[];
-    customFields?: { label: string; value: string; type: CustomFieldType }[];
-    totp?: { secret: string; algorithm?: TotpAlgorithm; digits?: number; period?: number } | null;
+    customFields?: EntryCustomField[];
+    totp?: EntryTotp | null;
     cardholderName?: string | null;
     cardNumber?: string | null;
     brand?: string | null;

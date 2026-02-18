@@ -7,7 +7,8 @@ import type { InlineDetailData } from "@/components/passwords/password-detail-in
 import { OrgPasswordForm } from "@/components/org/org-password-form";
 import { Building2 } from "lucide-react";
 import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
-import type { EntryTypeValue, TotpAlgorithm, CustomFieldType } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
+import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import {
   compareEntriesWithFavorite,
   type EntrySortOption,
@@ -64,8 +65,8 @@ export function OrgArchivedList({
     url: string | null;
     notes: string | null;
     tags?: { id: string; name: string; color: string | null }[];
-    customFields?: { label: string; value: string; type: CustomFieldType }[];
-    totp?: { secret: string; algorithm?: TotpAlgorithm; digits?: number; period?: number } | null;
+    customFields?: EntryCustomField[];
+    totp?: EntryTotp | null;
   } | null>(null);
 
   const fetchArchived = useCallback(async () => {
