@@ -13,6 +13,7 @@ import {
 import {
   DialogFooter,
 } from "@/components/ui/dialog";
+import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -556,10 +557,9 @@ const formatLabels: Record<CsvFormat, string> = {
 
 interface ImportPanelContentProps {
   onComplete: () => void;
-  hideHeader?: boolean;
 }
 
-function ImportPanelContent({ onComplete, hideHeader = false }: ImportPanelContentProps) {
+function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
   const t = useTranslations("Import");
   const { encryptionKey, userId } = useVault();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -848,16 +848,6 @@ function ImportPanelContent({ onComplete, hideHeader = false }: ImportPanelConte
 
   const content = (
     <>
-      {!hideHeader && (
-        <div className="space-y-1.5">
-          <h1 className="flex items-center gap-2 text-2xl font-bold leading-none tracking-tight">
-            <FileUp className="h-4 w-4" />
-            {t("title")}
-          </h1>
-          <p className="text-sm text-muted-foreground">{t("description")}</p>
-        </div>
-      )}
-
         {done ? (
           <div className="flex flex-col items-center gap-3 py-6">
             <CheckCircle2 className="h-10 w-10 text-green-500" />
@@ -1040,16 +1030,17 @@ interface ImportPagePanelProps {
 export function ImportPagePanel({ onComplete }: ImportPagePanelProps) {
   const t = useTranslations("Import");
   return (
-    <div className="flex-1 overflow-auto p-4 md:p-6">
-      <div className="mx-auto max-w-4xl space-y-6">
+    <PagePane
+      header={
         <PageTitleCard
           icon={<FileUp className="h-5 w-5" />}
           title={t("title")}
           description={t("description")}
         />
-        <ImportPanelContent onComplete={onComplete} hideHeader />
-      </div>
-    </div>
+      }
+    >
+      <ImportPanelContent onComplete={onComplete} />
+    </PagePane>
   );
 }
 

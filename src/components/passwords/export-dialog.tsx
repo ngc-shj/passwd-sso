@@ -9,6 +9,7 @@ import { encryptExport } from "@/lib/export-crypto";
 import {
   DialogFooter,
 } from "@/components/ui/dialog";
+import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,11 +25,7 @@ import {
   formatExportDate,
 } from "@/lib/export-format-common";
 
-interface ExportPanelContentProps {
-  hideHeader?: boolean;
-}
-
-function ExportPanelContent({ hideHeader = false }: ExportPanelContentProps) {
+function ExportPanelContent() {
   const t = useTranslations("Export");
   const { encryptionKey, userId } = useVault();
   const [exporting, setExporting] = useState(false);
@@ -179,16 +176,6 @@ function ExportPanelContent({ hideHeader = false }: ExportPanelContentProps) {
 
   const content = (
     <>
-      {!hideHeader && (
-        <div className="space-y-1.5">
-          <h1 className="flex items-center gap-2 text-2xl font-bold leading-none tracking-tight">
-            <Download className="h-4 w-4" />
-            {t("title")}
-          </h1>
-          <p className="text-sm text-muted-foreground">{t("description")}</p>
-        </div>
-      )}
-
       <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
         <AlertTriangle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
         <p className="text-sm text-yellow-800 dark:text-yellow-200">
@@ -318,15 +305,16 @@ function ExportPanelContent({ hideHeader = false }: ExportPanelContentProps) {
 export function ExportPagePanel() {
   const t = useTranslations("Export");
   return (
-    <div className="flex-1 overflow-auto p-4 md:p-6">
-      <div className="mx-auto max-w-4xl space-y-6">
+    <PagePane
+      header={
         <PageTitleCard
           icon={<Download className="h-5 w-5" />}
           title={t("title")}
           description={t("description")}
         />
-        <ExportPanelContent hideHeader />
-      </div>
-    </div>
+      }
+    >
+      <ExportPanelContent />
+    </PagePane>
   );
 }
