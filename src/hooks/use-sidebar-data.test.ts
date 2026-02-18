@@ -168,4 +168,52 @@ describe("useSidebarData", () => {
       folders: [],
     });
   });
+
+  it("ignores stale responses from previous refresh", async () => {
+    let resolveFirstTags: ((value: { ok: boolean; json: () => Promise<unknown> }) => void) | null = null;
+    let tagCallCount = 0;
+
+    fetchMock = vi.fn((url: string) => {
+      if (url === "/api/tags") {
+        tagCallCount += 1;
+        if (tagCallCount === 1) {
+          return new Promise((resolve) => {
+            resolveFirstTags = resolve as typeof resolveFirstTags;
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{ id: "tag-new", name: "New", color: null, passwordCount: 1 }],
+        });
+      }
+      if (url === "/api/folders") return Promise.resolve({ ok: true, json: async () => [] });
+      if (url === "/api/orgs") return Promise.resolve({ ok: true, json: async () => [] });
+      return Promise.resolve({ ok: false, json: async () => ({}) });
+    }) as Mock;
+    globalThis.fetch = fetchMock;
+
+    const { result } = renderHook(() => useSidebarData("/dashboard"));
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("vault-data-changed"));
+    });
+
+    await waitFor(() => {
+      expect(result.current.tags).toEqual([
+        { id: "tag-new", name: "New", color: null, passwordCount: 1 },
+      ]);
+    });
+
+    await act(async () => {
+      resolveFirstTags?.({
+        ok: true,
+        json: async () => [{ id: "tag-old", name: "Old", color: null, passwordCount: 9 }],
+      });
+      await Promise.resolve();
+    });
+
+    expect(result.current.tags).toEqual([
+      { id: "tag-new", name: "New", color: null, passwordCount: 1 },
+    ]);
+  });
 });

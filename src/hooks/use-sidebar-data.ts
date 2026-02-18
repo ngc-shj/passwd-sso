@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
 
 export interface SidebarTagItem {
@@ -45,81 +45,88 @@ export interface SidebarOrganizeTagItem {
   count: number;
 }
 
+async function fetchArray<T>(url: string): Promise<T[] | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data) ? (data as T[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function useSidebarData(pathname: string) {
   const [tags, setTags] = useState<SidebarTagItem[]>([]);
   const [folders, setFolders] = useState<SidebarFolderItem[]>([]);
   const [orgs, setOrgs] = useState<SidebarOrgItem[]>([]);
   const [orgTagGroups, setOrgTagGroups] = useState<SidebarOrgTagGroup[]>([]);
   const [orgFolderGroups, setOrgFolderGroups] = useState<SidebarOrgFolderGroup[]>([]);
+  const refreshSeqRef = useRef(0);
 
-  const refreshData = useCallback(() => {
-    fetch(API_PATH.TAGS)
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch tags");
-        return res.json();
-      })
-      .then((data) => {
-        if (Array.isArray(data)) setTags(data);
-      })
-      .catch(() => {});
+  const refreshData = useCallback(async () => {
+    const seq = ++refreshSeqRef.current;
 
-    fetch(API_PATH.FOLDERS)
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch folders");
-        return res.json();
-      })
-      .then((data) => {
-        if (Array.isArray(data)) setFolders(data);
-      })
-      .catch(() => {});
+    const [nextTags, nextFolders, nextOrgs] = await Promise.all([
+      fetchArray<SidebarTagItem>(API_PATH.TAGS),
+      fetchArray<SidebarFolderItem>(API_PATH.FOLDERS),
+      fetchArray<SidebarOrgItem>(API_PATH.ORGS),
+    ]);
 
-    fetch(API_PATH.ORGS)
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch orgs");
-        return res.json();
-      })
-      .then(async (data) => {
-        if (!Array.isArray(data)) return;
-        setOrgs(data);
+    if (seq !== refreshSeqRef.current) return;
 
-        const tagGroups: SidebarOrgTagGroup[] = [];
-        const folderGroups: SidebarOrgFolderGroup[] = [];
-        await Promise.all(
-          data.map(async (org: SidebarOrgItem) => {
-            const [tagsRes, foldersRes] = await Promise.all([
-              fetch(apiPath.orgTags(org.id)).catch(() => null),
-              fetch(apiPath.orgFolders(org.id)).catch(() => null),
-            ]);
-            if (tagsRes?.ok) {
-              const orgTags = await tagsRes.json();
-              if (Array.isArray(orgTags) && orgTags.length > 0) {
-                tagGroups.push({ orgId: org.id, orgName: org.name, tags: orgTags });
-              }
-            }
-            if (foldersRes?.ok) {
-              const orgFolders = await foldersRes.json();
-              if (Array.isArray(orgFolders)) {
-                const canManage = org.role === ORG_ROLE.OWNER || org.role === ORG_ROLE.ADMIN;
-                if (orgFolders.length > 0 || canManage) {
-                  folderGroups.push({
-                    orgId: org.id,
-                    orgName: org.name,
-                    orgRole: org.role,
-                    folders: orgFolders,
-                  });
-                }
-              }
-            }
-          })
-        );
-        setOrgTagGroups(tagGroups);
-        setOrgFolderGroups(folderGroups);
+    if (nextTags) setTags(nextTags);
+    if (nextFolders) setFolders(nextFolders);
+
+    if (!nextOrgs) {
+      setOrgs([]);
+      setOrgTagGroups([]);
+      setOrgFolderGroups([]);
+      return;
+    }
+
+    setOrgs(nextOrgs);
+
+    const orgDetails = await Promise.all(
+      nextOrgs.map(async (org) => {
+        const [orgTags, orgFolders] = await Promise.all([
+          fetchArray<{ id: string; name: string; color: string | null; count: number }>(
+            apiPath.orgTags(org.id)
+          ),
+          fetchArray<SidebarFolderItem>(apiPath.orgFolders(org.id)),
+        ]);
+        return { org, orgTags, orgFolders };
       })
-      .catch(() => {});
+    );
+
+    if (seq !== refreshSeqRef.current) return;
+
+    const tagGroups: SidebarOrgTagGroup[] = [];
+    const folderGroups: SidebarOrgFolderGroup[] = [];
+    for (const { org, orgTags, orgFolders } of orgDetails) {
+      if (orgTags && orgTags.length > 0) {
+        tagGroups.push({ orgId: org.id, orgName: org.name, tags: orgTags });
+      }
+      if (orgFolders) {
+        const canManage = org.role === ORG_ROLE.OWNER || org.role === ORG_ROLE.ADMIN;
+        if (orgFolders.length > 0 || canManage) {
+          folderGroups.push({
+            orgId: org.id,
+            orgName: org.name,
+            orgRole: org.role,
+            folders: orgFolders,
+          });
+        }
+      }
+    }
+    setOrgTagGroups(tagGroups);
+    setOrgFolderGroups(folderGroups);
   }, []);
 
   useEffect(() => {
-    refreshData();
+    queueMicrotask(() => {
+      void refreshData();
+    });
   }, [pathname, refreshData]);
 
   useEffect(() => {
