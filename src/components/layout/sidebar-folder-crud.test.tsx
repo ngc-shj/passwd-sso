@@ -635,4 +635,52 @@ describe("Sidebar org folder CRUD integration", () => {
     expect(postCalls.length).toBe(1);
     expect(postCalls[0][0]).toContain("/api/orgs/org-1/folders");
   });
+
+  it("shows org folder create button even when org has zero folders (OWNER)", async () => {
+    const fetchMock = mockFetchSuccess({
+      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
+      orgFoldersData: [], // No folders yet
+    });
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(<Sidebar open={false} onOpenChange={vi.fn()} />);
+    });
+
+    const sidebar = within(getDesktopSidebar());
+
+    // Wait for org data to load — "Acme Corp" appears in both Organizations and Organize sections
+    await waitFor(() => {
+      const matches = sidebar.getAllByText("Acme Corp");
+      // At least 2: one in Organizations section, one in Organize (org folder) section
+      expect(matches.length).toBeGreaterThanOrEqual(2);
+    });
+
+    // Personal + Org create buttons (org section rendered despite 0 folders)
+    const createButtons = sidebar.getAllByRole("button", { name: "createFolder" });
+    expect(createButtons.length).toBe(2);
+  });
+
+  it("hides org folder section when MEMBER and org has zero folders", async () => {
+    const fetchMock = mockFetchSuccess({
+      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
+      orgFoldersData: [], // No folders
+    });
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(<Sidebar open={false} onOpenChange={vi.fn()} />);
+    });
+
+    const sidebar = within(getDesktopSidebar());
+
+    // Give time for async fetch to resolve
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    // Only personal create button — org section not rendered for MEMBER with 0 folders
+    const createButtons = sidebar.getAllByRole("button", { name: "createFolder" });
+    expect(createButtons.length).toBe(1);
+  });
 });

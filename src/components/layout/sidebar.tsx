@@ -366,8 +366,11 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
             }
             if (foldersRes?.ok) {
               const folders = await foldersRes.json();
-              if (Array.isArray(folders) && folders.length > 0) {
-                folderGroups.push({ orgId: org.id, orgName: org.name, orgRole: org.role, folders });
+              if (Array.isArray(folders)) {
+                const canManage = org.role === ORG_ROLE.OWNER || org.role === ORG_ROLE.ADMIN;
+                if (folders.length > 0 || canManage) {
+                  folderGroups.push({ orgId: org.id, orgName: org.name, orgRole: org.role, folders });
+                }
               }
             }
           })
