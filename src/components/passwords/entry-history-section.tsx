@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useLocale } from "next-intl";
-import { ChevronDown, ChevronRight, Eye, History, RotateCcw } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, History, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiPath } from "@/lib/constants";
 import { useVault } from "@/lib/vault-context";
@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { useReprompt } from "@/hooks/use-reprompt";
 
 interface HistoryEntry {
   id: string;
@@ -40,6 +41,7 @@ interface HistoryEntry {
 interface EntryHistorySectionProps {
   entryId: string;
   orgId?: string;
+  requireReprompt?: boolean;
   onRestore?: () => void;
 }
 
@@ -62,17 +64,61 @@ const DISPLAY_KEYS = [
   "idNumber", "issueDate", "expiryDate",
 ];
 
+const SENSITIVE_KEYS = new Set(["password", "cvv", "cardNumber", "idNumber"]);
+
 function ViewContent({ data }: { data: Record<string, unknown> }) {
+  const t = useTranslations("PasswordDetail");
+  const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
   const entries = DISPLAY_KEYS
     .filter((key) => data[key] != null && data[key] !== "")
     .map((key) => [key, String(data[key])]);
+
+  const toggleReveal = (key: string) => {
+    setRevealedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+        setTimeout(() => {
+          setRevealedKeys((p) => {
+            const n = new Set(p);
+            n.delete(key);
+            return n;
+          });
+        }, 30_000);
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-2">
       {entries.map(([key, value]) => (
         <div key={key}>
-          <p className="text-xs font-medium text-muted-foreground">{key}</p>
-          <p className="text-sm break-all whitespace-pre-wrap">{value}</p>
+          <p className="text-xs font-medium text-muted-foreground">{t(key)}</p>
+          {SENSITIVE_KEYS.has(key) ? (
+            <div className="flex items-center gap-1">
+              <p className="text-sm break-all whitespace-pre-wrap font-mono">
+                {revealedKeys.has(key) ? value : "••••••••"}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={() => toggleReveal(key)}
+              >
+                {revealedKeys.has(key) ? (
+                  <EyeOff className="h-3.5 w-3.5" />
+                ) : (
+                  <Eye className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </div>
+          ) : (
+            <p className="text-sm break-all whitespace-pre-wrap">{value}</p>
+          )}
         </div>
       ))}
       {entries.length === 0 && (
@@ -82,10 +128,11 @@ function ViewContent({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-export function EntryHistorySection({ entryId, orgId, onRestore }: EntryHistorySectionProps) {
+export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore }: EntryHistorySectionProps) {
   const t = useTranslations("PasswordDetail");
   const locale = useLocale();
   const { encryptionKey, userId } = useVault();
+  const { requireVerification, repromptDialog } = useReprompt();
   const [expanded, setExpanded] = useState(false);
   const [histories, setHistories] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -111,10 +158,8 @@ export function EntryHistorySection({ entryId, orgId, onRestore }: EntryHistoryS
   }, [entryId, orgId]);
 
   useEffect(() => {
-    if (expanded && histories.length === 0) {
-      fetchHistory();
-    }
-  }, [expanded, fetchHistory, histories.length]);
+    fetchHistory();
+  }, [fetchHistory]);
 
   const handleRestore = async () => {
     if (!restoreTarget) return;
@@ -207,7 +252,7 @@ export function EntryHistorySection({ entryId, orgId, onRestore }: EntryHistoryS
                   size="sm"
                   className="h-7 shrink-0 text-xs"
                   disabled={viewLoading}
-                  onClick={() => handleView(h)}
+                  onClick={() => requireVerification(entryId, requireReprompt ?? false, () => handleView(h))}
                 >
                   <Eye className="h-3 w-3 mr-1" />
                   {t("viewVersion")}
@@ -217,7 +262,7 @@ export function EntryHistorySection({ entryId, orgId, onRestore }: EntryHistoryS
                   variant="ghost"
                   size="sm"
                   className="h-7 shrink-0 text-xs"
-                  onClick={() => setRestoreTarget(h)}
+                  onClick={() => requireVerification(entryId, requireReprompt ?? false, () => setRestoreTarget(h))}
                 >
                   <RotateCcw className="h-3 w-3 mr-1" />
                   {t("restoreVersion")}
@@ -258,6 +303,8 @@ export function EntryHistorySection({ entryId, orgId, onRestore }: EntryHistoryS
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {repromptDialog}
     </>
   );
 }

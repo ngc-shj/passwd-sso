@@ -265,6 +265,7 @@
     "dobFuture": "Date of birth must be in the past"
   },
   "PasswordDetail": {
+    "title": "Title",
     "username": "Username",
     "password": "Password",
     "url": "URL",
@@ -290,6 +291,8 @@
     "cardNumber": "Card Number",
     "brand": "Brand",
     "expiry": "Expiration",
+    "expiryMonth": "Expiry Month",
+    "expiryYear": "Expiry Year",
     "cvv": "CVV",
     "fullName": "Full Name",
     "address": "Address",
