@@ -651,115 +651,30 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 
       <Separator />
 
-      {/* ── Security ───────────────────────────────────────── */}
-      <Collapsible open={isOpen("security")} onOpenChange={toggleSection("security")}>
-        <CollapsibleSectionHeader isOpen={isOpen("security")}>
-          {t("security")}
-        </CollapsibleSectionHeader>
-        <CollapsibleContent>
-          <div className="space-y-1">
-            <Button
-              variant={isWatchtower ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link href="/dashboard/watchtower" onClick={() => onOpenChange(false)}>
-                <Shield className="h-4 w-4" />
-                {t("watchtower")}
-              </Link>
-            </Button>
-            <Button
-              variant={isShareLinks ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link href="/dashboard/share-links" onClick={() => onOpenChange(false)}>
-                <LinkIcon className="h-4 w-4" />
-                {t("shareLinks")}
-              </Link>
-            </Button>
-            <Button
-              variant={isEmergencyAccess ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link href="/dashboard/emergency-access" onClick={() => onOpenChange(false)}>
-                <HeartPulse className="h-4 w-4" />
-                {t("emergencyAccess")}
-              </Link>
-            </Button>
-            <SectionLabel icon={<ScrollText className="h-3 w-3" />}>
-              {t("auditLog")}
-            </SectionLabel>
-            <div className="ml-4 space-y-1">
-              <Button
-                variant={isPersonalAuditLog ? "secondary" : "ghost"}
-                className="w-full justify-start gap-2"
-                asChild
-              >
-                <Link href="/dashboard/audit-logs" onClick={() => onOpenChange(false)}>
-                  <FolderOpen className="h-4 w-4" />
-                  {t("auditLogPersonal")}
-                </Link>
-              </Button>
-              {orgs.filter((org) => org.role === ORG_ROLE.OWNER || org.role === ORG_ROLE.ADMIN).map((org) => (
-                <Button
-                  key={org.id}
-                  variant={activeAuditOrgId === org.id ? "secondary" : "ghost"}
-                  className="w-full justify-start gap-2"
-                  asChild
-                >
-                  <Link
-                    href={`/dashboard/orgs/${org.id}/audit-logs`}
-                    onClick={() => onOpenChange(false)}
-                  >
-                    <Building2 className="h-4 w-4" />
-                    <span className="truncate">{org.name}</span>
-                  </Link>
-                </Button>
-              ))}
-            </div>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+      <SecuritySection
+        isOpen={isOpen("security")}
+        onOpenChange={toggleSection("security")}
+        t={t}
+        isWatchtower={isWatchtower}
+        isShareLinks={isShareLinks}
+        isEmergencyAccess={isEmergencyAccess}
+        isPersonalAuditLog={isPersonalAuditLog}
+        activeAuditOrgId={activeAuditOrgId}
+        orgs={orgs}
+        onNavigate={() => onOpenChange(false)}
+      />
 
       <Separator />
 
-      {/* ── Utilities ──────────────────────────────────────── */}
-      <Collapsible open={isOpen("utilities")} onOpenChange={toggleSection("utilities")}>
-        <CollapsibleSectionHeader isOpen={isOpen("utilities")}>
-          {t("utilities")}
-        </CollapsibleSectionHeader>
-        <CollapsibleContent>
-          <div className="space-y-1">
-            {selectedOrg && (selectedOrg.role === ORG_ROLE.OWNER || selectedOrg.role === ORG_ROLE.ADMIN) && (
-              <Button variant="ghost" className="w-full justify-start gap-2" asChild>
-                <Link href={`/dashboard/orgs/${selectedOrg.id}/settings`} onClick={() => onOpenChange(false)}>
-                  <Settings className="h-4 w-4" />
-                  {tOrg("orgSettings")}
-                </Link>
-              </Button>
-            )}
-            <ExportDialog
-              trigger={
-                <Button variant="ghost" className="w-full justify-start gap-2">
-                  <Download className="h-4 w-4" />
-                  {t("export")}
-                </Button>
-              }
-            />
-            <ImportDialog
-              trigger={
-                <Button variant="ghost" className="w-full justify-start gap-2">
-                  <Upload className="h-4 w-4" />
-                  {t("import")}
-                </Button>
-              }
-              onComplete={handleImportComplete}
-            />
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+      <UtilitiesSection
+        isOpen={isOpen("utilities")}
+        onOpenChange={toggleSection("utilities")}
+        t={t}
+        tOrg={tOrg}
+        selectedOrg={selectedOrg}
+        onImportComplete={handleImportComplete}
+        onNavigate={() => onOpenChange(false)}
+      />
     </nav>
   );
 
@@ -1070,6 +985,162 @@ function OrganizeSection({
               </Button>
             );
           })}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+interface SecuritySectionProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  t: (key: string) => string;
+  isWatchtower: boolean;
+  isShareLinks: boolean;
+  isEmergencyAccess: boolean;
+  isPersonalAuditLog: boolean;
+  activeAuditOrgId: string | null;
+  orgs: OrgItem[];
+  onNavigate: () => void;
+}
+
+function SecuritySection({
+  isOpen,
+  onOpenChange,
+  t,
+  isWatchtower,
+  isShareLinks,
+  isEmergencyAccess,
+  isPersonalAuditLog,
+  activeAuditOrgId,
+  orgs,
+  onNavigate,
+}: SecuritySectionProps) {
+  return (
+    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
+      <CollapsibleSectionHeader isOpen={isOpen}>
+        {t("security")}
+      </CollapsibleSectionHeader>
+      <CollapsibleContent>
+        <div className="space-y-1">
+          <Button
+            variant={isWatchtower ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link href="/dashboard/watchtower" onClick={onNavigate}>
+              <Shield className="h-4 w-4" />
+              {t("watchtower")}
+            </Link>
+          </Button>
+          <Button
+            variant={isShareLinks ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link href="/dashboard/share-links" onClick={onNavigate}>
+              <LinkIcon className="h-4 w-4" />
+              {t("shareLinks")}
+            </Link>
+          </Button>
+          <Button
+            variant={isEmergencyAccess ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link href="/dashboard/emergency-access" onClick={onNavigate}>
+              <HeartPulse className="h-4 w-4" />
+              {t("emergencyAccess")}
+            </Link>
+          </Button>
+          <SectionLabel icon={<ScrollText className="h-3 w-3" />}>
+            {t("auditLog")}
+          </SectionLabel>
+          <div className="ml-4 space-y-1">
+            <Button
+              variant={isPersonalAuditLog ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard/audit-logs" onClick={onNavigate}>
+                <FolderOpen className="h-4 w-4" />
+                {t("auditLogPersonal")}
+              </Link>
+            </Button>
+            {orgs
+              .filter((org) => org.role === ORG_ROLE.OWNER || org.role === ORG_ROLE.ADMIN)
+              .map((org) => (
+                <Button
+                  key={org.id}
+                  variant={activeAuditOrgId === org.id ? "secondary" : "ghost"}
+                  className="w-full justify-start gap-2"
+                  asChild
+                >
+                  <Link href={`/dashboard/orgs/${org.id}/audit-logs`} onClick={onNavigate}>
+                    <Building2 className="h-4 w-4" />
+                    <span className="truncate">{org.name}</span>
+                  </Link>
+                </Button>
+              ))}
+          </div>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+interface UtilitiesSectionProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  t: (key: string) => string;
+  tOrg: (key: string) => string;
+  selectedOrg: OrgItem | null;
+  onImportComplete: () => void;
+  onNavigate: () => void;
+}
+
+function UtilitiesSection({
+  isOpen,
+  onOpenChange,
+  t,
+  tOrg,
+  selectedOrg,
+  onImportComplete,
+  onNavigate,
+}: UtilitiesSectionProps) {
+  return (
+    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
+      <CollapsibleSectionHeader isOpen={isOpen}>
+        {t("utilities")}
+      </CollapsibleSectionHeader>
+      <CollapsibleContent>
+        <div className="space-y-1">
+          {selectedOrg &&
+            (selectedOrg.role === ORG_ROLE.OWNER || selectedOrg.role === ORG_ROLE.ADMIN) && (
+            <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+              <Link href={`/dashboard/orgs/${selectedOrg.id}/settings`} onClick={onNavigate}>
+                <Settings className="h-4 w-4" />
+                {tOrg("orgSettings")}
+              </Link>
+            </Button>
+          )}
+          <ExportDialog
+            trigger={
+              <Button variant="ghost" className="w-full justify-start gap-2">
+                <Download className="h-4 w-4" />
+                {t("export")}
+              </Button>
+            }
+          />
+          <ImportDialog
+            trigger={
+              <Button variant="ghost" className="w-full justify-start gap-2">
+                <Upload className="h-4 w-4" />
+                {t("import")}
+              </Button>
+            }
+            onComplete={onImportComplete}
+          />
         </div>
       </CollapsibleContent>
     </Collapsible>
