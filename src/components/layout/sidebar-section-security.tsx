@@ -6,14 +6,10 @@ import { Link } from "@/i18n/navigation";
 import { ExportDialog } from "@/components/passwords/export-dialog";
 import { ImportDialog } from "@/components/passwords/import-dialog";
 import { ORG_ROLE } from "@/lib/constants";
-import { CollapsibleSectionHeader, SectionLabel } from "@/components/layout/sidebar-shared";
+import { CollapsibleSectionHeader } from "@/components/layout/sidebar-shared";
 import {
-  Building2,
   Download,
-  FolderOpen,
   HeartPulse,
-  Link as LinkIcon,
-  ScrollText,
   Settings,
   Shield,
   Upload,
@@ -30,11 +26,7 @@ interface SecuritySectionProps {
   onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
   isWatchtower: boolean;
-  isShareLinks: boolean;
   isEmergencyAccess: boolean;
-  isPersonalAuditLog: boolean;
-  activeAuditOrgId: string | null;
-  orgs: SecurityOrg[];
   onNavigate: () => void;
 }
 
@@ -43,11 +35,7 @@ export function SecuritySection({
   onOpenChange,
   t,
   isWatchtower,
-  isShareLinks,
   isEmergencyAccess,
-  isPersonalAuditLog,
-  activeAuditOrgId,
-  orgs,
   onNavigate,
 }: SecuritySectionProps) {
   return (
@@ -66,16 +54,6 @@ export function SecuritySection({
             </Link>
           </Button>
           <Button
-            variant={isShareLinks ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard/share-links" onClick={onNavigate}>
-              <LinkIcon className="h-4 w-4" />
-              {t("shareLinks")}
-            </Link>
-          </Button>
-          <Button
             variant={isEmergencyAccess ? "secondary" : "ghost"}
             className="w-full justify-start gap-2"
             asChild
@@ -85,34 +63,6 @@ export function SecuritySection({
               {t("emergencyAccess")}
             </Link>
           </Button>
-          <SectionLabel icon={<ScrollText className="h-3 w-3" />}>{t("auditLog")}</SectionLabel>
-          <div className="ml-4 space-y-1">
-            <Button
-              variant={isPersonalAuditLog ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link href="/dashboard/audit-logs" onClick={onNavigate}>
-                <FolderOpen className="h-4 w-4" />
-                {t("auditLogPersonal")}
-              </Link>
-            </Button>
-            {orgs
-              .filter((org) => org.role === ORG_ROLE.OWNER || org.role === ORG_ROLE.ADMIN)
-              .map((org) => (
-                <Button
-                  key={org.id}
-                  variant={activeAuditOrgId === org.id ? "secondary" : "ghost"}
-                  className="w-full justify-start gap-2"
-                  asChild
-                >
-                  <Link href={`/dashboard/orgs/${org.id}/audit-logs`} onClick={onNavigate}>
-                    <Building2 className="h-4 w-4" />
-                    <span className="truncate">{org.name}</span>
-                  </Link>
-                </Button>
-              ))}
-          </div>
         </div>
       </CollapsibleContent>
     </Collapsible>

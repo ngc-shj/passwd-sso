@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { stripLocalePrefix } from "@/i18n/locale-utils";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 
@@ -40,10 +40,21 @@ function isCrossVaultPath(path: string): boolean {
 
 export function useVaultContext(orgs: OrgContextItem[]): VaultContext {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const cleanPath = stripLocalePrefix(pathname);
   const [lastContext, setLastContext] = useLocalStorage<string>("vault-context", "personal");
 
   const resolved = useMemo<VaultContext>(() => {
+    if (cleanPath === "/dashboard/share-links") {
+      const shareOrgId = searchParams.get("org");
+      if (shareOrgId) {
+        const org = orgs.find((item) => item.id === shareOrgId);
+        if (org) {
+          return { type: "org", orgId: org.id, orgName: org.name, orgRole: org.role };
+        }
+      }
+    }
+
     const orgMatch = cleanPath.match(/^\/dashboard\/orgs\/([^/]+)/);
     if (orgMatch) {
       const org = orgs.find((item) => item.id === orgMatch[1]);
@@ -64,7 +75,7 @@ export function useVaultContext(orgs: OrgContextItem[]): VaultContext {
     }
 
     return { type: "personal" };
-  }, [cleanPath, lastContext, orgs]);
+  }, [cleanPath, lastContext, orgs, searchParams]);
 
   useEffect(() => {
     if (resolved.type === "org" && lastContext !== resolved.orgId) {

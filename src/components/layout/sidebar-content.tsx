@@ -6,8 +6,8 @@ import { SecuritySection, UtilitiesSection } from "@/components/layout/sidebar-s
 import {
   VaultSection,
   CategoriesSection,
-  OrganizationsSection,
   OrganizeSection,
+  VaultManagementSection,
 } from "@/components/layout/sidebar-sections";
 import type { SidebarSection } from "@/hooks/use-sidebar-sections-state";
 import type { SidebarFolderItem, SidebarOrgItem } from "@/hooks/use-sidebar-data";
@@ -26,7 +26,6 @@ export interface SidebarContentProps {
   vaultContext: VaultContext;
   orgs: SidebarOrgItem[];
   selectedOrg: SidebarOrgItem | null;
-  selectedOrgId: string | null;
   selectedOrgCanManageFolders: boolean;
   selectedTypeFilter: string | null;
   selectedFolderId: string | null;
@@ -35,7 +34,6 @@ export interface SidebarContentProps {
   isSelectedVaultFavorites: boolean;
   isSelectedVaultArchive: boolean;
   isSelectedVaultTrash: boolean;
-  isOrgsManage: boolean;
   isWatchtower: boolean;
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
@@ -59,7 +57,6 @@ export function SidebarContent({
   vaultContext,
   orgs,
   selectedOrg,
-  selectedOrgId,
   selectedOrgCanManageFolders,
   selectedTypeFilter,
   selectedFolderId,
@@ -68,7 +65,6 @@ export function SidebarContent({
   isSelectedVaultFavorites,
   isSelectedVaultArchive,
   isSelectedVaultTrash,
-  isOrgsManage,
   isWatchtower,
   isShareLinks,
   isEmergencyAccess,
@@ -94,15 +90,10 @@ export function SidebarContent({
       />
 
       <VaultSection
-        isOpen={isOpen("vault")}
-        onOpenChange={toggleSection("vault")}
         t={t}
         vaultContext={vaultContext}
-        selectedOrgName={selectedOrg?.name}
         isSelectedVaultAll={isSelectedVaultAll}
         isSelectedVaultFavorites={isSelectedVaultFavorites}
-        isSelectedVaultArchive={isSelectedVaultArchive}
-        isSelectedVaultTrash={isSelectedVaultTrash}
         onNavigate={onNavigate}
       />
 
@@ -112,16 +103,6 @@ export function SidebarContent({
         t={t}
         vaultContext={vaultContext}
         selectedTypeFilter={selectedTypeFilter}
-        onNavigate={onNavigate}
-      />
-
-      <OrganizationsSection
-        isOpen={isOpen("organizations")}
-        onOpenChange={toggleSection("organizations")}
-        tOrg={tOrg}
-        orgs={orgs}
-        selectedOrgId={selectedOrgId}
-        isOrgsManage={isOrgsManage}
         onNavigate={onNavigate}
       />
 
@@ -167,16 +148,25 @@ export function SidebarContent({
 
       <Separator />
 
+      <VaultManagementSection
+        t={t}
+        vaultContext={vaultContext}
+        isSelectedVaultArchive={isSelectedVaultArchive}
+        isSelectedVaultTrash={isSelectedVaultTrash}
+        isShareLinks={isShareLinks}
+        isPersonalAuditLog={isPersonalAuditLog}
+        activeAuditOrgId={activeAuditOrgId}
+        onNavigate={onNavigate}
+      />
+
+      <Separator />
+
       <SecuritySection
         isOpen={isOpen("security")}
         onOpenChange={toggleSection("security")}
         t={t}
         isWatchtower={isWatchtower}
-        isShareLinks={isShareLinks}
         isEmergencyAccess={isEmergencyAccess}
-        isPersonalAuditLog={isPersonalAuditLog}
-        activeAuditOrgId={activeAuditOrgId}
-        orgs={orgs}
         onNavigate={onNavigate}
       />
 

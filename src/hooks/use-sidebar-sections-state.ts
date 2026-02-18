@@ -4,17 +4,13 @@ import { useEffect } from "react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 
 export type SidebarSection =
-  | "vault"
   | "categories"
-  | "organizations"
   | "organize"
   | "security"
   | "utilities";
 
 const COLLAPSE_DEFAULTS: Record<SidebarSection, boolean> = {
-  vault: false,
   categories: true,
-  organizations: false,
   organize: true,
   security: false,
   utilities: true,
@@ -22,15 +18,9 @@ const COLLAPSE_DEFAULTS: Record<SidebarSection, boolean> = {
 
 interface UseSidebarSectionsStateParams {
   routeKey: string;
-  isSelectedVaultAll: boolean;
-  isSelectedVaultFavorites: boolean;
-  isSelectedVaultArchive: boolean;
-  isSelectedVaultTrash: boolean;
   selectedTypeFilter: string | null;
   selectedTagId: string | null;
   selectedFolderId: string | null;
-  activeOrgId: string | null;
-  isOrgsManage: boolean;
   isWatchtower: boolean;
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
@@ -39,15 +29,9 @@ interface UseSidebarSectionsStateParams {
 
 export function useSidebarSectionsState({
   routeKey,
-  isSelectedVaultAll,
-  isSelectedVaultFavorites,
-  isSelectedVaultArchive,
-  isSelectedVaultTrash,
   selectedTypeFilter,
   selectedTagId,
   selectedFolderId,
-  activeOrgId,
-  isOrgsManage,
   isWatchtower,
   isShareLinks,
   isEmergencyAccess,
@@ -68,11 +52,7 @@ export function useSidebarSectionsState({
 
   useEffect(() => {
     const toOpen: SidebarSection[] = [];
-    if (isSelectedVaultAll || isSelectedVaultFavorites || isSelectedVaultArchive || isSelectedVaultTrash) {
-      toOpen.push("vault");
-    }
     if (selectedTypeFilter !== null) toOpen.push("categories");
-    if (activeOrgId !== null || isOrgsManage) toOpen.push("organizations");
     if (selectedTagId !== null || selectedFolderId !== null) toOpen.push("organize");
     if (isWatchtower || isShareLinks || isEmergencyAccess || isAuditLog) toOpen.push("security");
 
@@ -85,15 +65,9 @@ export function useSidebarSectionsState({
     });
   }, [
     routeKey,
-    isSelectedVaultAll,
-    isSelectedVaultFavorites,
-    isSelectedVaultArchive,
-    isSelectedVaultTrash,
     selectedTypeFilter,
     selectedTagId,
     selectedFolderId,
-    activeOrgId,
-    isOrgsManage,
     isWatchtower,
     isShareLinks,
     isEmergencyAccess,

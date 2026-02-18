@@ -63,15 +63,12 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 
   const vaultContext = useVaultContext(orgs);
   const {
-    activeOrgId,
     activeAuditOrgId,
-    isOrgsManage,
     isWatchtower,
     isShareLinks,
     isEmergencyAccess,
     isAuditLog,
     isPersonalAuditLog,
-    selectedOrgId,
     selectedOrg,
     selectedOrgCanManageFolders,
     selectedTypeFilter,
@@ -96,15 +93,9 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 
   const { isOpen, toggleSection } = useSidebarSectionsState({
     routeKey: `${pathname}?${searchParams.toString()}`,
-    isSelectedVaultAll,
-    isSelectedVaultFavorites,
-    isSelectedVaultArchive,
-    isSelectedVaultTrash,
     selectedTypeFilter,
     selectedTagId,
     selectedFolderId,
-    activeOrgId,
-    isOrgsManage,
     isWatchtower,
     isShareLinks,
     isEmergencyAccess,
@@ -119,7 +110,6 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     vaultContext,
     orgs,
     selectedOrg,
-    selectedOrgId,
     selectedOrgCanManageFolders,
     selectedTypeFilter,
     selectedFolderId,
@@ -128,7 +118,6 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isSelectedVaultFavorites,
     isSelectedVaultArchive,
     isSelectedVaultTrash,
-    isOrgsManage,
     isWatchtower,
     isShareLinks,
     isEmergencyAccess,

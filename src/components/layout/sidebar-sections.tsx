@@ -8,7 +8,23 @@ import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { type VaultContext } from "@/hooks/use-vault-context";
-import { Building2, FolderOpen, Tag, Star, Archive, Trash2, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Plus, Settings } from "lucide-react";
+import {
+  Building2,
+  FolderOpen,
+  Tag,
+  Star,
+  Archive,
+  Trash2,
+  KeyRound,
+  FileText,
+  CreditCard,
+  IdCard,
+  Fingerprint,
+  Plus,
+  Settings,
+  Link as LinkIcon,
+  ScrollText,
+} from "lucide-react";
 import { CollapsibleSectionHeader, FolderTreeNode, type SidebarFolderItem } from "@/components/layout/sidebar-shared";
 
 interface SidebarOrgItem {
@@ -26,75 +42,40 @@ interface OrganizeTagItem {
 }
 
 interface VaultSectionProps {
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
   vaultContext: VaultContext;
-  selectedOrgName?: string;
   isSelectedVaultAll: boolean;
   isSelectedVaultFavorites: boolean;
-  isSelectedVaultArchive: boolean;
-  isSelectedVaultTrash: boolean;
   onNavigate: () => void;
 }
 
 export function VaultSection({
-  isOpen,
-  onOpenChange,
   t,
   vaultContext,
-  selectedOrgName,
   isSelectedVaultAll,
   isSelectedVaultFavorites,
-  isSelectedVaultArchive,
-  isSelectedVaultTrash,
   onNavigate,
 }: VaultSectionProps) {
   const isOrg = vaultContext.type === "org";
 
   return (
-    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
-      <CollapsibleSectionHeader isOpen={isOpen}>
-        {isOrg ? (selectedOrgName ?? t("personalVault")) : t("personalVault")}
-      </CollapsibleSectionHeader>
-      <CollapsibleContent>
-        <div className="space-y-1">
-          <Button variant={isSelectedVaultAll ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-            <Link href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}` : "/dashboard"} onClick={onNavigate}>
-              <FolderOpen className="h-4 w-4" />
-              {t("allPasswords")}
-            </Link>
-          </Button>
-          <Button variant={isSelectedVaultFavorites ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-            <Link
-              href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=favorites` : "/dashboard/favorites"}
-              onClick={onNavigate}
-            >
-              <Star className="h-4 w-4" />
-              {t("favorites")}
-            </Link>
-          </Button>
-          <Button variant={isSelectedVaultArchive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-            <Link
-              href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=archive` : "/dashboard/archive"}
-              onClick={onNavigate}
-            >
-              <Archive className="h-4 w-4" />
-              {t("personalArchive")}
-            </Link>
-          </Button>
-          <Button variant={isSelectedVaultTrash ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-            <Link
-              href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=trash` : "/dashboard/trash"}
-              onClick={onNavigate}
-            >
-              <Trash2 className="h-4 w-4" />
-              {t("personalTrash")}
-            </Link>
-          </Button>
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+    <div className="space-y-1">
+      <Button variant={isSelectedVaultAll ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
+        <Link href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}` : "/dashboard"} onClick={onNavigate}>
+          <FolderOpen className="h-4 w-4" />
+          {t("passwords")}
+        </Link>
+      </Button>
+      <Button variant={isSelectedVaultFavorites ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
+        <Link
+          href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=favorites` : "/dashboard/favorites"}
+          onClick={onNavigate}
+        >
+          <Star className="h-4 w-4" />
+          {t("favorites")}
+        </Link>
+      </Button>
+    </div>
   );
 }
 
@@ -302,5 +283,89 @@ export function OrganizeSection({
         </div>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+interface VaultManagementSectionProps {
+  t: (key: string) => string;
+  vaultContext: VaultContext;
+  isSelectedVaultArchive: boolean;
+  isSelectedVaultTrash: boolean;
+  isShareLinks: boolean;
+  isPersonalAuditLog: boolean;
+  activeAuditOrgId: string | null;
+  onNavigate: () => void;
+}
+
+export function VaultManagementSection({
+  t,
+  vaultContext,
+  isSelectedVaultArchive,
+  isSelectedVaultTrash,
+  isShareLinks,
+  isPersonalAuditLog,
+  activeAuditOrgId,
+  onNavigate,
+}: VaultManagementSectionProps) {
+  const isOrg = vaultContext.type === "org";
+  const shareLinksHref = isOrg
+    ? `/dashboard/share-links?org=${encodeURIComponent(vaultContext.orgId)}`
+    : "/dashboard/share-links";
+  const auditLogHref = isOrg
+    ? `/dashboard/orgs/${vaultContext.orgId}/audit-logs`
+    : "/dashboard/audit-logs";
+  const isAuditActive = isOrg
+    ? activeAuditOrgId === vaultContext.orgId
+    : isPersonalAuditLog;
+
+  return (
+    <div className="space-y-1">
+      <Button
+        variant={isSelectedVaultArchive ? "secondary" : "ghost"}
+        className="w-full justify-start gap-2"
+        asChild
+      >
+        <Link
+          href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=archive` : "/dashboard/archive"}
+          onClick={onNavigate}
+        >
+          <Archive className="h-4 w-4" />
+          {t("archive")}
+        </Link>
+      </Button>
+      <Button
+        variant={isSelectedVaultTrash ? "secondary" : "ghost"}
+        className="w-full justify-start gap-2"
+        asChild
+      >
+        <Link
+          href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=trash` : "/dashboard/trash"}
+          onClick={onNavigate}
+        >
+          <Trash2 className="h-4 w-4" />
+          {t("trash")}
+        </Link>
+      </Button>
+      <Button
+        variant={isShareLinks ? "secondary" : "ghost"}
+        className="w-full justify-start gap-2"
+        asChild
+      >
+        <Link href={shareLinksHref} onClick={onNavigate}>
+          <LinkIcon className="h-4 w-4" />
+          {t("shareLinks")}
+        </Link>
+      </Button>
+      <Button
+        variant={isAuditActive ? "secondary" : "ghost"}
+        className="w-full justify-start gap-2"
+        asChild
+      >
+        <Link href={auditLogHref} onClick={onNavigate}>
+          <ScrollText className="h-4 w-4" />
+          {t("auditLog")}
+        </Link>
+      </Button>
+    </div>
   );
 }

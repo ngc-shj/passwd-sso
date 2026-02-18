@@ -21,7 +21,6 @@ interface UseSidebarViewModelParams {
   vaultContext: VaultContext;
   orgs: SidebarOrgItem[];
   selectedOrg: SidebarOrgItem | null;
-  selectedOrgId: string | null;
   selectedOrgCanManageFolders: boolean;
   selectedTypeFilter: string | null;
   selectedFolderId: string | null;
@@ -30,7 +29,6 @@ interface UseSidebarViewModelParams {
   isSelectedVaultFavorites: boolean;
   isSelectedVaultArchive: boolean;
   isSelectedVaultTrash: boolean;
-  isOrgsManage: boolean;
   isWatchtower: boolean;
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
@@ -54,7 +52,6 @@ export function useSidebarViewModel({
   vaultContext,
   orgs,
   selectedOrg,
-  selectedOrgId,
   selectedOrgCanManageFolders,
   selectedTypeFilter,
   selectedFolderId,
@@ -63,7 +60,6 @@ export function useSidebarViewModel({
   isSelectedVaultFavorites,
   isSelectedVaultArchive,
   isSelectedVaultTrash,
-  isOrgsManage,
   isWatchtower,
   isShareLinks,
   isEmergencyAccess,
@@ -105,7 +101,6 @@ export function useSidebarViewModel({
     vaultContext,
     orgs,
     selectedOrg,
-    selectedOrgId,
     selectedOrgCanManageFolders,
     selectedTypeFilter,
     selectedFolderId,
@@ -114,7 +109,6 @@ export function useSidebarViewModel({
     isSelectedVaultFavorites,
     isSelectedVaultArchive,
     isSelectedVaultTrash,
-    isOrgsManage,
     isWatchtower,
     isShareLinks,
     isEmergencyAccess,

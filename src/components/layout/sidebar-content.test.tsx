@@ -23,7 +23,7 @@ vi.mock("@/components/layout/sidebar-section-security", () => ({
 vi.mock("@/components/layout/sidebar-sections", () => ({
   VaultSection: () => <div>vault</div>,
   CategoriesSection: () => <div>categories</div>,
-  OrganizationsSection: () => <div>orgs</div>,
+  VaultManagementSection: () => <div>vault-management</div>,
   OrganizeSection: ({ onCreateFolder }: { onCreateFolder: () => void }) => (
     <button onClick={onCreateFolder}>create-folder</button>
   ),
@@ -38,7 +38,6 @@ function baseProps(overrides: Partial<SidebarContentProps> = {}): SidebarContent
     vaultContext: { type: "personal" },
     orgs: [{ id: "org-1", name: "Acme", slug: "acme", role: "ADMIN" }],
     selectedOrg: null,
-    selectedOrgId: null,
     selectedOrgCanManageFolders: false,
     selectedTypeFilter: null,
     selectedFolderId: null,
@@ -47,7 +46,6 @@ function baseProps(overrides: Partial<SidebarContentProps> = {}): SidebarContent
     isSelectedVaultFavorites: false,
     isSelectedVaultArchive: false,
     isSelectedVaultTrash: false,
-    isOrgsManage: false,
     isWatchtower: false,
     isShareLinks: false,
     isEmergencyAccess: false,
