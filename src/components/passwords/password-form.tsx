@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Eye, EyeOff, ArrowLeft, Dices, Plus, X, ShieldCheck, Tags, Rows3 } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, CUSTOM_FIELD_TYPE, apiPath } from "@/lib/constants";
@@ -488,12 +489,11 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
 
             {/* Reprompt */}
             <EntrySectionCard>
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
+              <label className="flex items-center gap-3 cursor-pointer" htmlFor="require-reprompt">
+                <Checkbox
+                  id="require-reprompt"
                   checked={requireReprompt}
-                  onChange={(e) => setRequireReprompt(e.target.checked)}
-                  className="h-4 w-4 rounded border-input accent-primary"
+                  onCheckedChange={(v) => setRequireReprompt(!!v)}
                 />
                 <div className="space-y-0.5">
                   <span className="text-sm font-medium flex items-center gap-1.5">
