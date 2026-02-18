@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { VisuallyHidden } from "radix-ui";
 import { Separator } from "@/components/ui/separator";
-import { useLocalStorage } from "@/hooks/use-local-storage";
 import { FolderDialog } from "@/components/folders/folder-dialog";
 import { VaultSelector } from "@/components/layout/vault-selector";
 import { SecuritySection, UtilitiesSection } from "@/components/layout/sidebar-section-security";
@@ -15,6 +13,7 @@ import { VaultSection, CategoriesSection, OrganizationsSection, OrganizeSection 
 import { useSidebarData } from "@/hooks/use-sidebar-data";
 import { useSidebarFolderCrud } from "@/hooks/use-sidebar-folder-crud";
 import { useSidebarNavigationState } from "@/hooks/use-sidebar-navigation-state";
+import { useSidebarSectionsState } from "@/hooks/use-sidebar-sections-state";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,19 +25,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useVaultContext } from "@/hooks/use-vault-context";
-
-// ─── Section keys ────────────────────────────────────────────────
-
-type SidebarSection = "vault" | "categories" | "organizations" | "organize" | "security" | "utilities";
-
-const COLLAPSE_DEFAULTS: Record<SidebarSection, boolean> = {
-  vault: false,         // open
-  categories: true,     // closed
-  organizations: false, // open
-  organize: true,       // closed
-  security: false,      // open
-  utilities: true,      // closed
-};
 
 interface SidebarProps {
   open: boolean;
@@ -120,36 +106,22 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     onOpenChange(false);
   };
 
-  // ─── Collapsible state ──────────────────────────────────────────
-
-  const [collapsed, setCollapsed] = useLocalStorage<Record<SidebarSection, boolean>>(
-    "sidebar-collapsed",
-    COLLAPSE_DEFAULTS
-  );
-
-  const isOpen = (k: SidebarSection) => !collapsed[k];
-
-  const toggleSection = (k: SidebarSection) => (open: boolean) =>
-    setCollapsed((prev) => ({ ...prev, [k]: !open }));
-
-  // Auto-expand section when navigating to a route within it.
-  // One-time per navigation — user can manually close afterward.
-  useEffect(() => {
-    const toOpen: SidebarSection[] = [];
-    if (isSelectedVaultAll || isSelectedVaultFavorites || isSelectedVaultArchive || isSelectedVaultTrash) toOpen.push("vault");
-    if (selectedTypeFilter !== null) toOpen.push("categories");
-    if (activeOrgId !== null || isOrgsManage) toOpen.push("organizations");
-    if (selectedTagId !== null || selectedFolderId !== null) toOpen.push("organize");
-    if (isWatchtower || isShareLinks || isEmergencyAccess || isAuditLog) toOpen.push("security");
-
-    if (toOpen.length > 0) {
-      setCollapsed((prev) => {
-        const next = { ...prev };
-        for (const k of toOpen) next[k] = false;
-        return next;
-      });
-    }
-  }, [pathname, searchParams, isSelectedVaultAll, isSelectedVaultFavorites, isSelectedVaultArchive, isSelectedVaultTrash, selectedTypeFilter, selectedTagId, selectedFolderId, activeOrgId, isOrgsManage, isWatchtower, isShareLinks, isEmergencyAccess, isAuditLog]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { isOpen, toggleSection } = useSidebarSectionsState({
+    routeKey: `${pathname}?${searchParams.toString()}`,
+    isSelectedVaultAll,
+    isSelectedVaultFavorites,
+    isSelectedVaultArchive,
+    isSelectedVaultTrash,
+    selectedTypeFilter,
+    selectedTagId,
+    selectedFolderId,
+    activeOrgId,
+    isOrgsManage,
+    isWatchtower,
+    isShareLinks,
+    isEmergencyAccess,
+    isAuditLog,
+  });
 
   const handleImportComplete = () => {
     notifyDataChanged();
