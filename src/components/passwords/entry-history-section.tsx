@@ -3,9 +3,12 @@
 import { useState, useCallback, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useLocale } from "next-intl";
-import { ChevronDown, ChevronRight, History, RotateCcw } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, History, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiPath } from "@/lib/constants";
+import { useVault } from "@/lib/vault-context";
+import { decryptData, type EncryptedData } from "@/lib/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,23 +19,27 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 interface HistoryEntry {
   id: string;
   entryId: string;
-  encryptedBlob: {
-    ciphertext: string;
-    iv: string;
-    authTag: string;
-  };
-  keyVersion: number;
+  encryptedBlob: EncryptedData;
+  keyVersion?: number;
   aadVersion: number;
   changedAt: string;
+  changedBy?: { id: string; name: string | null; email: string | null };
 }
 
 interface EntryHistorySectionProps {
   entryId: string;
+  orgId?: string;
   onRestore?: () => void;
 }
 
@@ -46,19 +53,54 @@ function formatDateTime(dateStr: string, locale: string) {
   });
 }
 
-export function EntryHistorySection({ entryId, onRestore }: EntryHistorySectionProps) {
+// Display keys we want to show and their order
+const DISPLAY_KEYS = [
+  "title", "username", "password", "url", "notes",
+  "content",
+  "cardholderName", "cardNumber", "brand", "expiryMonth", "expiryYear", "cvv",
+  "fullName", "address", "phone", "email", "dateOfBirth", "nationality",
+  "idNumber", "issueDate", "expiryDate",
+];
+
+function ViewContent({ data }: { data: Record<string, unknown> }) {
+  const entries = DISPLAY_KEYS
+    .filter((key) => data[key] != null && data[key] !== "")
+    .map((key) => [key, String(data[key])]);
+
+  return (
+    <div className="space-y-2">
+      {entries.map(([key, value]) => (
+        <div key={key}>
+          <p className="text-xs font-medium text-muted-foreground">{key}</p>
+          <p className="text-sm break-all whitespace-pre-wrap">{value}</p>
+        </div>
+      ))}
+      {entries.length === 0 && (
+        <p className="text-xs text-muted-foreground">No data</p>
+      )}
+    </div>
+  );
+}
+
+export function EntryHistorySection({ entryId, orgId, onRestore }: EntryHistorySectionProps) {
   const t = useTranslations("PasswordDetail");
   const locale = useLocale();
+  const { encryptionKey, userId } = useVault();
   const [expanded, setExpanded] = useState(false);
   const [histories, setHistories] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<HistoryEntry | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [viewData, setViewData] = useState<Record<string, unknown> | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
 
   const fetchHistory = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(apiPath.passwordHistory(entryId));
+      const url = orgId
+        ? apiPath.orgPasswordHistory(orgId, entryId)
+        : apiPath.passwordHistory(entryId);
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setHistories(data);
@@ -66,7 +108,7 @@ export function EntryHistorySection({ entryId, onRestore }: EntryHistorySectionP
     } finally {
       setLoading(false);
     }
-  }, [entryId]);
+  }, [entryId, orgId]);
 
   useEffect(() => {
     if (expanded && histories.length === 0) {
@@ -78,10 +120,10 @@ export function EntryHistorySection({ entryId, onRestore }: EntryHistorySectionP
     if (!restoreTarget) return;
     setRestoring(true);
     try {
-      const res = await fetch(
-        apiPath.passwordHistoryRestore(entryId, restoreTarget.id),
-        { method: "POST" },
-      );
+      const url = orgId
+        ? apiPath.orgPasswordHistoryRestore(orgId, entryId, restoreTarget.id)
+        : apiPath.passwordHistoryRestore(entryId, restoreTarget.id);
+      const res = await fetch(url, { method: "POST" });
       if (res.ok) {
         toast.success(t("restoreVersion"));
         setRestoreTarget(null);
@@ -90,6 +132,31 @@ export function EntryHistorySection({ entryId, onRestore }: EntryHistorySectionP
       }
     } finally {
       setRestoring(false);
+    }
+  };
+
+  const handleView = async (h: HistoryEntry) => {
+    setViewLoading(true);
+    try {
+      if (orgId) {
+        // Org entries: server-side decryption
+        const res = await fetch(apiPath.orgPasswordHistoryById(orgId, entryId, h.id));
+        if (res.ok) {
+          setViewData(await res.json());
+        }
+      } else {
+        // Personal entries: client-side decryption
+        if (!encryptionKey || !userId) return;
+        const aad = h.aadVersion >= 1
+          ? buildPersonalEntryAAD(userId, entryId)
+          : undefined;
+        const plaintext = await decryptData(h.encryptedBlob, encryptionKey, aad);
+        setViewData(JSON.parse(plaintext));
+      }
+    } catch {
+      toast.error("Failed to decrypt history version");
+    } finally {
+      setViewLoading(false);
     }
   };
 
@@ -128,7 +195,23 @@ export function EntryHistorySection({ entryId, onRestore }: EntryHistorySectionP
                   <p className="text-xs text-muted-foreground">
                     {t("versionFrom", { date: formatDateTime(h.changedAt, locale) })}
                   </p>
+                  {h.changedBy && (
+                    <p className="text-xs text-muted-foreground">
+                      {h.changedBy.name || h.changedBy.email}
+                    </p>
+                  )}
                 </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 shrink-0 text-xs"
+                  disabled={viewLoading}
+                  onClick={() => handleView(h)}
+                >
+                  <Eye className="h-3 w-3 mr-1" />
+                  {t("viewVersion")}
+                </Button>
                 <Button
                   type="button"
                   variant="ghost"
@@ -145,6 +228,17 @@ export function EntryHistorySection({ entryId, onRestore }: EntryHistorySectionP
         )}
       </div>
 
+      {/* View Dialog */}
+      <Dialog open={!!viewData} onOpenChange={(open) => !open && setViewData(null)}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t("viewVersion")}</DialogTitle>
+          </DialogHeader>
+          {viewData && <ViewContent data={viewData} />}
+        </DialogContent>
+      </Dialog>
+
+      {/* Restore Confirmation */}
       <AlertDialog
         open={!!restoreTarget}
         onOpenChange={(open) => !open && setRestoreTarget(null)}

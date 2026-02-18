@@ -717,9 +717,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, orgId }: Passwor
       )}
 
       {/* Entry History (full blob snapshots) */}
-      {!orgId && (
-        <EntryHistorySection entryId={data.id} onRestore={onRefresh} />
-      )}
+      <EntryHistorySection entryId={data.id} orgId={orgId} onRestore={onRefresh} />
 
       {/* Attachments */}
       {orgId ? (
