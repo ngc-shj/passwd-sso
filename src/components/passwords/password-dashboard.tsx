@@ -5,7 +5,6 @@ import { useTranslations } from "next-intl";
 import { SearchBar } from "@/components/layout/search-bar";
 import { PasswordList, type SortOption } from "@/components/passwords/password-list";
 import { TrashList } from "@/components/passwords/trash-list";
-import { OrgFavoritesList } from "@/components/org/org-favorites-list";
 import { PasswordNewDialog } from "@/components/passwords/password-new-dialog";
 import { EntryListHeader } from "@/components/passwords/entry-list-header";
 import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
@@ -239,12 +238,6 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
                 sortBy={sortBy}
                 onDataChange={handleDataChange}
               />
-              {isFavorites && (
-                <OrgFavoritesList
-                  searchQuery={searchQuery}
-                  refreshKey={refreshKey}
-                />
-              )}
             </>
           )}
         </div>
