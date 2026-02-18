@@ -133,6 +133,9 @@ const ACTION_GROUPS = [
   },
 ] as const;
 
+const normalizeAuditActionKey = (action: string) =>
+  action.startsWith("AuditLog.") ? action.slice("AuditLog.".length) : action;
+
 export default function AuditLogsPage() {
   const t = useTranslations("AuditLog");
   const locale = useLocale();
@@ -383,12 +386,7 @@ export default function AuditLogsPage() {
       typeof meta?.parentAction === "string" ? meta.parentAction : null;
     let parentActionText: string | null = null;
     if (parentAction) {
-      let parentActionLabel = parentAction;
-      try {
-        parentActionLabel = t(parentAction as never);
-      } catch {
-        // fallback to action key when the translation does not exist
-      }
+      const parentActionLabel = actionLabel(parentAction);
       parentActionText = t("fromAction", { action: parentActionLabel });
     }
 
@@ -431,11 +429,8 @@ export default function AuditLogsPage() {
   };
 
   const actionLabel = (action: AuditActionValue | string) => {
-    try {
-      return t(action as never);
-    } catch {
-      return String(action);
-    }
+    const key = normalizeAuditActionKey(String(action));
+    return t.has(key as never) ? t(key as never) : String(action);
   };
   const getActionLabel = (log: AuditLogItem) =>
     log.action === AUDIT_ACTION.ENTRY_BULK_TRASH
@@ -503,7 +498,6 @@ export default function AuditLogsPage() {
           <ScrollText className="h-6 w-6" />
           <div>
             <h1 className="text-2xl font-bold">{t("title")}</h1>
-            <p className="text-sm text-muted-foreground">{t("description")}</p>
           </div>
         </div>
       </Card>
