@@ -174,17 +174,20 @@ export default function ShareLinksPage() {
   const formatDate = (iso: string) => formatDateTime(iso, locale);
 
   const getStatusBadge = (link: ShareLinkItem) => {
+    if (link.isActive) {
+      return (
+        <Badge
+          variant="outline"
+          className="text-xs border-green-500 text-green-600 dark:text-green-400"
+        >
+          {t("active")}
+        </Badge>
+      );
+    }
     if (link.revokedAt) {
       return (
         <Badge variant="destructive" className="text-xs">
           {tShare("revoked")}
-        </Badge>
-      );
-    }
-    if (new Date(link.expiresAt) <= new Date()) {
-      return (
-        <Badge variant="secondary" className="text-xs">
-          {tShare("expired")}
         </Badge>
       );
     }
@@ -196,11 +199,8 @@ export default function ShareLinksPage() {
       );
     }
     return (
-      <Badge
-        variant="outline"
-        className="text-xs border-green-500 text-green-600 dark:text-green-400"
-      >
-        {t("active")}
+      <Badge variant="secondary" className="text-xs">
+        {tShare("expired")}
       </Badge>
     );
   };

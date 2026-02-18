@@ -275,4 +275,18 @@ describe("GET /api/share-links/mine", () => {
       })
     );
   });
+
+  it("returns OrgAuthError status when org membership check fails", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    const { OrgAuthError } = await import("@/lib/org-auth");
+    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    const res = await GET(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("FORBIDDEN");
+    expect(mockFindMany).not.toHaveBeenCalled();
+  });
 });

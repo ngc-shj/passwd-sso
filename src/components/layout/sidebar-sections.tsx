@@ -9,7 +9,6 @@ import { getTagColorClass } from "@/lib/dynamic-styles";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { type VaultContext } from "@/hooks/use-vault-context";
 import {
-  Building2,
   FolderOpen,
   Tag,
   Star,
@@ -21,18 +20,10 @@ import {
   IdCard,
   Fingerprint,
   Plus,
-  Settings,
   Link as LinkIcon,
   ScrollText,
 } from "lucide-react";
 import { CollapsibleSectionHeader, FolderTreeNode, type SidebarFolderItem } from "@/components/layout/sidebar-shared";
-
-interface SidebarOrgItem {
-  id: string;
-  name: string;
-  slug: string;
-  role: string;
-}
 
 interface OrganizeTagItem {
   id: string;
@@ -129,57 +120,6 @@ export function CategoriesSection({
               </Button>
             );
           })}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-interface OrganizationsSectionProps {
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
-  tOrg: (key: string) => string;
-  orgs: SidebarOrgItem[];
-  selectedOrgId: string | null;
-  isOrgsManage: boolean;
-  onNavigate: () => void;
-}
-
-export function OrganizationsSection({
-  isOpen,
-  onOpenChange,
-  tOrg,
-  orgs,
-  selectedOrgId,
-  isOrgsManage,
-  onNavigate,
-}: OrganizationsSectionProps) {
-  return (
-    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
-      <CollapsibleSectionHeader icon={<Building2 className="h-3 w-3" />} isOpen={isOpen}>
-        {tOrg("organizations")}
-      </CollapsibleSectionHeader>
-      <CollapsibleContent>
-        <div className="space-y-1">
-          {orgs.map((org) => (
-            <Button
-              key={org.id}
-              variant={selectedOrgId === org.id ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link href={`/dashboard/orgs/${org.id}`} onClick={onNavigate}>
-                <Building2 className="h-4 w-4" />
-                <span className="truncate">{org.name}</span>
-              </Link>
-            </Button>
-          ))}
-          <Button variant={isOrgsManage ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-            <Link href="/dashboard/orgs" onClick={onNavigate}>
-              <Settings className="h-4 w-4" />
-              {tOrg("manage")}
-            </Link>
-          </Button>
         </div>
       </CollapsibleContent>
     </Collapsible>

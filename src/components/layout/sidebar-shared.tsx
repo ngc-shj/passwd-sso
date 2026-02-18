@@ -63,11 +63,7 @@ export function FolderTreeNode({
     ? isAncestorOf(folder.id, activeFolderId, folders)
     : false;
   const [open, setOpen] = useState(isAncestorOfActive);
-  const [wasAncestor, setWasAncestor] = useState(isAncestorOfActive);
-  if (isAncestorOfActive !== wasAncestor) {
-    setWasAncestor(isAncestorOfActive);
-    if (isAncestorOfActive) setOpen(true);
-  }
+  const isExpanded = open || isAncestorOfActive;
 
   return (
     <>
@@ -77,8 +73,10 @@ export function FolderTreeNode({
             type="button"
             onClick={() => setOpen((prev) => !prev)}
             className="h-6 w-6 shrink-0 flex items-center justify-center rounded hover:bg-accent"
+            aria-label={isExpanded ? `Collapse ${folder.name}` : `Expand ${folder.name}`}
+            aria-expanded={isExpanded}
           >
-            {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           </button>
         ) : (
           <span className="w-6 shrink-0" />
@@ -122,7 +120,7 @@ export function FolderTreeNode({
         )}
       </div>
       {hasChildren &&
-        open &&
+        isExpanded &&
         children.map((child) => (
           <FolderTreeNode
             key={child.id}
@@ -155,6 +153,7 @@ export function CollapsibleSectionHeader({
       <button
         type="button"
         className="w-full px-3 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center justify-between gap-1 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm"
+        aria-expanded={isOpen}
       >
         <span className="flex items-center gap-1">
           {icon}

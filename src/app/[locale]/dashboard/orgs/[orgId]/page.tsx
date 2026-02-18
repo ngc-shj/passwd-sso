@@ -334,10 +334,10 @@ export default function OrgDashboardPage({
       p.urlHost?.toLowerCase().includes(q) ||
       p.snippet?.toLowerCase().includes(q) ||
       p.brand?.toLowerCase().includes(q) ||
-      p.lastFour?.includes(q) ||
+      p.lastFour?.toLowerCase().includes(q) ||
       p.cardholderName?.toLowerCase().includes(q) ||
       p.fullName?.toLowerCase().includes(q) ||
-      p.idNumberLast4?.includes(q) ||
+      p.idNumberLast4?.toLowerCase().includes(q) ||
       p.relyingPartyId?.toLowerCase().includes(q)
     );
   });
