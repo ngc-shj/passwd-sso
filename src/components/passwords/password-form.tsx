@@ -7,6 +7,7 @@ import { useVault } from "@/lib/vault-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
+import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import {
   EntryActionBar,
@@ -19,8 +20,7 @@ import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
 } from "@/lib/generator-prefs";
-import { Checkbox } from "@/components/ui/checkbox";
-import { ArrowLeft, ShieldCheck } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
@@ -221,23 +221,13 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
               sectionCardClass={dialogSectionClass}
             />
 
-            {/* Reprompt */}
-            <EntrySectionCard className={dialogSectionClass}>
-              <label className="flex items-center gap-3 cursor-pointer" htmlFor="require-reprompt">
-                <Checkbox
-                  id="require-reprompt"
-                  checked={requireReprompt}
-                  onCheckedChange={(v) => setRequireReprompt(!!v)}
-                />
-                <div className="space-y-0.5">
-                  <span className="text-sm font-medium flex items-center gap-1.5">
-                    <ShieldCheck className="h-3.5 w-3.5" />
-                    {t("requireReprompt")}
-                  </span>
-                  <p className="text-xs text-muted-foreground">{t("requireRepromptHelp")}</p>
-                </div>
-              </label>
-            </EntrySectionCard>
+            <EntryRepromptSection
+              checked={requireReprompt}
+              onCheckedChange={setRequireReprompt}
+              title={t("requireReprompt")}
+              description={t("requireRepromptHelp")}
+              sectionCardClass={dialogSectionClass}
+            />
 
             <EntryActionBar
               hasChanges={hasChanges}
