@@ -284,6 +284,61 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const isShareLinks = cleanPath === "/dashboard/share-links";
   const isEmergencyAccess = cleanPath === "/dashboard/emergency-access" || cleanPath.startsWith("/dashboard/emergency-access/");
   const vaultContext = useVaultContext(orgs);
+  const selectedOrgId = vaultContext.type === "org" ? vaultContext.orgId : null;
+  const selectedOrg = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId) ?? null : null;
+  const selectedOrgFolderGroup = selectedOrgId
+    ? orgFolderGroups.find((group) => group.orgId === selectedOrgId)
+    : null;
+  const selectedOrgTagGroup = selectedOrgId
+    ? orgTagGroups.find((group) => group.orgId === selectedOrgId)
+    : null;
+  const selectedOrgCanManageFolders = selectedOrg
+    ? selectedOrg.role === ORG_ROLE.OWNER || selectedOrg.role === ORG_ROLE.ADMIN
+    : false;
+  const selectedOrgTypeFilter = selectedOrgId && activeOrgId === selectedOrgId ? activeOrgTypeFilter : null;
+  const selectedOrgScope = selectedOrgId && activeOrgId === selectedOrgId ? activeOrgScope : null;
+  const selectedOrgFolderId = selectedOrgId && activeOrgId === selectedOrgId ? activeOrgFolderId : null;
+  const selectedOrgTagId = selectedOrgId && activeOrgId === selectedOrgId ? activeOrgTagId : null;
+
+  const selectedTypeFilter = vaultContext.type === "org" ? selectedOrgTypeFilter : activeTypeFilter;
+  const selectedFolderId = vaultContext.type === "org" ? selectedOrgFolderId : activeFolderId;
+  const selectedTagId = vaultContext.type === "org" ? selectedOrgTagId : activeTagId;
+
+  const isSelectedVaultAll = vaultContext.type === "org"
+    ? activeOrgId === selectedOrgId &&
+      !selectedOrgTypeFilter &&
+      !selectedOrgScope &&
+      !selectedOrgTagId &&
+      !selectedOrgFolderId
+    : isVaultAll;
+  const isSelectedVaultFavorites = vaultContext.type === "org"
+    ? activeOrgId === selectedOrgId && selectedOrgScope === "favorites"
+    : isVaultFavorites;
+  const isSelectedVaultArchive = vaultContext.type === "org"
+    ? activeOrgId === selectedOrgId && selectedOrgScope === "archive"
+    : isVaultArchive;
+  const isSelectedVaultTrash = vaultContext.type === "org"
+    ? activeOrgId === selectedOrgId && selectedOrgScope === "trash"
+    : isVaultTrash;
+
+  const selectedFolders = vaultContext.type === "org"
+    ? selectedOrgFolderGroup?.folders ?? []
+    : folders;
+  const selectedTags = vaultContext.type === "org"
+    ? selectedOrgTagGroup?.tags.map((tag) => ({
+        id: tag.id,
+        name: tag.name,
+        color: tag.color,
+        count: tag.count,
+      })) ?? []
+    : tags
+        .filter((tag) => tag.passwordCount > 0)
+        .map((tag) => ({
+          id: tag.id,
+          name: tag.name,
+          color: tag.color,
+          count: tag.passwordCount,
+        }));
 
   const handleVaultChange = (value: string) => {
     if (value === "personal") {
@@ -316,10 +371,10 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   // One-time per navigation — user can manually close afterward.
   useEffect(() => {
     const toOpen: SidebarSection[] = [];
-    if (isVaultAll || isVaultFavorites || isVaultArchive || isVaultTrash) toOpen.push("vault");
-    if (activeTypeFilter !== null) toOpen.push("categories");
+    if (isSelectedVaultAll || isSelectedVaultFavorites || isSelectedVaultArchive || isSelectedVaultTrash) toOpen.push("vault");
+    if (selectedTypeFilter !== null) toOpen.push("categories");
     if (activeOrgId !== null || isOrgsManage) toOpen.push("organizations");
-    if (activeTagId !== null || activeOrgTagId !== null || activeFolderId !== null || activeOrgFolderId !== null) toOpen.push("organize");
+    if (selectedTagId !== null || selectedFolderId !== null) toOpen.push("organize");
     if (isWatchtower || isShareLinks || isEmergencyAccess || isAuditLog) toOpen.push("security");
 
     if (toOpen.length > 0) {
@@ -329,7 +384,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         return next;
       });
     }
-  }, [pathname, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pathname, searchParams, isSelectedVaultAll, isSelectedVaultFavorites, isSelectedVaultArchive, isSelectedVaultTrash, selectedTypeFilter, selectedTagId, selectedFolderId, activeOrgId, isOrgsManage, isWatchtower, isShareLinks, isEmergencyAccess, isAuditLog]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Data fetching ──────────────────────────────────────────────
 
@@ -500,46 +555,67 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       {/* ── Vault ──────────────────────────────────────────── */}
       <Collapsible open={isOpen("vault")} onOpenChange={toggleSection("vault")}>
         <CollapsibleSectionHeader isOpen={isOpen("vault")}>
-          {t("personalVault")}
+          {vaultContext.type === "org" ? (selectedOrg?.name ?? t("personalVault")) : t("personalVault")}
         </CollapsibleSectionHeader>
         <CollapsibleContent>
           <div className="space-y-1">
             <Button
-              variant={isVaultAll ? "secondary" : "ghost"}
+              variant={isSelectedVaultAll ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
-              <Link href="/dashboard" onClick={() => onOpenChange(false)}>
+              <Link href={vaultContext.type === "org" ? `/dashboard/orgs/${vaultContext.orgId}` : "/dashboard"} onClick={() => onOpenChange(false)}>
                 <FolderOpen className="h-4 w-4" />
                 {t("allPasswords")}
               </Link>
             </Button>
             <Button
-              variant={isVaultFavorites ? "secondary" : "ghost"}
+              variant={isSelectedVaultFavorites ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
-              <Link href="/dashboard/favorites" onClick={() => onOpenChange(false)}>
+              <Link
+                href={
+                  vaultContext.type === "org"
+                    ? `/dashboard/orgs/${vaultContext.orgId}?scope=favorites`
+                    : "/dashboard/favorites"
+                }
+                onClick={() => onOpenChange(false)}
+              >
                 <Star className="h-4 w-4" />
                 {t("favorites")}
               </Link>
             </Button>
             <Button
-              variant={isVaultArchive ? "secondary" : "ghost"}
+              variant={isSelectedVaultArchive ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
-              <Link href="/dashboard/archive" onClick={() => onOpenChange(false)}>
+              <Link
+                href={
+                  vaultContext.type === "org"
+                    ? `/dashboard/orgs/${vaultContext.orgId}?scope=archive`
+                    : "/dashboard/archive"
+                }
+                onClick={() => onOpenChange(false)}
+              >
                 <Archive className="h-4 w-4" />
                 {t("personalArchive")}
               </Link>
             </Button>
             <Button
-              variant={isVaultTrash ? "secondary" : "ghost"}
+              variant={isSelectedVaultTrash ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
-              <Link href="/dashboard/trash" onClick={() => onOpenChange(false)}>
+              <Link
+                href={
+                  vaultContext.type === "org"
+                    ? `/dashboard/orgs/${vaultContext.orgId}?scope=trash`
+                    : "/dashboard/trash"
+                }
+                onClick={() => onOpenChange(false)}
+              >
                 <Trash2 className="h-4 w-4" />
                 {t("personalTrash")}
               </Link>
@@ -556,51 +632,86 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         <CollapsibleContent>
           <div className="space-y-1">
             <Button
-              variant={activeTypeFilter === ENTRY_TYPE.LOGIN ? "secondary" : "ghost"}
+              variant={selectedTypeFilter === ENTRY_TYPE.LOGIN ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
-            <Link href={`/dashboard?type=${ENTRY_TYPE.LOGIN}`} onClick={() => onOpenChange(false)}>
+            <Link
+              href={
+                vaultContext.type === "org"
+                  ? `/dashboard/orgs/${vaultContext.orgId}?type=${ENTRY_TYPE.LOGIN}`
+                  : `/dashboard?type=${ENTRY_TYPE.LOGIN}`
+              }
+              onClick={() => onOpenChange(false)}
+            >
                 <KeyRound className="h-4 w-4" />
                 {t("catLogin")}
               </Link>
             </Button>
             <Button
-              variant={activeTypeFilter === ENTRY_TYPE.SECURE_NOTE ? "secondary" : "ghost"}
+              variant={selectedTypeFilter === ENTRY_TYPE.SECURE_NOTE ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
-              <Link href="/dashboard?type=SECURE_NOTE" onClick={() => onOpenChange(false)}>
+              <Link
+                href={
+                  vaultContext.type === "org"
+                    ? "/dashboard/orgs/" + vaultContext.orgId + "?type=SECURE_NOTE"
+                    : "/dashboard?type=SECURE_NOTE"
+                }
+                onClick={() => onOpenChange(false)}
+              >
                 <FileText className="h-4 w-4" />
                 {t("catSecureNote")}
               </Link>
             </Button>
             <Button
-              variant={activeTypeFilter === ENTRY_TYPE.CREDIT_CARD ? "secondary" : "ghost"}
+              variant={selectedTypeFilter === ENTRY_TYPE.CREDIT_CARD ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
-              <Link href="/dashboard?type=CREDIT_CARD" onClick={() => onOpenChange(false)}>
+              <Link
+                href={
+                  vaultContext.type === "org"
+                    ? "/dashboard/orgs/" + vaultContext.orgId + "?type=CREDIT_CARD"
+                    : "/dashboard?type=CREDIT_CARD"
+                }
+                onClick={() => onOpenChange(false)}
+              >
                 <CreditCard className="h-4 w-4" />
                 {t("catCreditCard")}
               </Link>
             </Button>
             <Button
-              variant={activeTypeFilter === ENTRY_TYPE.IDENTITY ? "secondary" : "ghost"}
+              variant={selectedTypeFilter === ENTRY_TYPE.IDENTITY ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
-              <Link href="/dashboard?type=IDENTITY" onClick={() => onOpenChange(false)}>
+              <Link
+                href={
+                  vaultContext.type === "org"
+                    ? "/dashboard/orgs/" + vaultContext.orgId + "?type=IDENTITY"
+                    : "/dashboard?type=IDENTITY"
+                }
+                onClick={() => onOpenChange(false)}
+              >
                 <IdCard className="h-4 w-4" />
                 {t("catIdentity")}
               </Link>
             </Button>
             <Button
-              variant={activeTypeFilter === ENTRY_TYPE.PASSKEY ? "secondary" : "ghost"}
+              variant={selectedTypeFilter === ENTRY_TYPE.PASSKEY ? "secondary" : "ghost"}
               className="w-full justify-start gap-2"
               asChild
             >
-              <Link href="/dashboard?type=PASSKEY" onClick={() => onOpenChange(false)}>
+              <Link
+                href={
+                  vaultContext.type === "org"
+                    ? "/dashboard/orgs/" + vaultContext.orgId + "?type=PASSKEY"
+                    : "/dashboard?type=PASSKEY"
+                }
+                onClick={() => onOpenChange(false)}
+              >
                 <Fingerprint className="h-4 w-4" />
                 {t("catPasskey")}
               </Link>
@@ -815,7 +926,12 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
             variant="ghost"
             size="icon"
             className="h-6 w-6 shrink-0 mr-1"
-            onClick={() => handleFolderCreate()}
+            onClick={() =>
+              vaultContext.type === "org"
+                ? handleFolderCreate(vaultContext.orgId)
+                : handleFolderCreate()
+            }
+            disabled={vaultContext.type === "org" && !selectedOrgCanManageFolders}
             aria-label={t("createFolder")}
           >
             <Plus className="h-3.5 w-3.5" />
@@ -823,34 +939,51 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         </div>
         <CollapsibleContent>
           <div className="space-y-1 mb-2">
-            {folders
+            {selectedFolders
               .filter((f) => !f.parentId)
               .map((folder) => (
                 <FolderTreeNode
                   key={folder.id}
                   folder={folder}
-                  folders={folders}
-                  activeFolderId={activeFolderId}
+                  folders={selectedFolders}
+                  activeFolderId={selectedFolderId}
                   depth={0}
-                  linkHref={(id) => `/dashboard/folders/${id}`}
+                  linkHref={(id) =>
+                    vaultContext.type === "org"
+                      ? `/dashboard/orgs/${vaultContext.orgId}?folder=${id}`
+                      : `/dashboard/folders/${id}`
+                  }
+                  showMenu={vaultContext.type === "org" ? selectedOrgCanManageFolders : true}
                   onNavigate={() => onOpenChange(false)}
-                  onEdit={(f) => handleFolderEdit(f)}
-                  onDelete={(f) => handleFolderDeleteClick(f)}
+                  onEdit={(f) =>
+                    vaultContext.type === "org"
+                      ? handleFolderEdit(f, vaultContext.orgId)
+                      : handleFolderEdit(f)
+                  }
+                  onDelete={(f) =>
+                    vaultContext.type === "org"
+                      ? handleFolderDeleteClick(f, vaultContext.orgId)
+                      : handleFolderDeleteClick(f)
+                  }
                 />
               ))}
           </div>
           <div className="space-y-1">
-            {tags.filter((tg) => tg.passwordCount > 0).map((tag) => {
+            {selectedTags.map((tag) => {
               const colorClass = getTagColorClass(tag.color);
               return (
                 <Button
                   key={tag.id}
-                  variant={activeTagId === tag.id ? "secondary" : "ghost"}
+                  variant={selectedTagId === tag.id ? "secondary" : "ghost"}
                   className="w-full justify-start gap-2"
                   asChild
                 >
                   <Link
-                    href={`/dashboard/tags/${tag.id}`}
+                    href={
+                      vaultContext.type === "org"
+                        ? `/dashboard/orgs/${vaultContext.orgId}?tag=${tag.id}`
+                        : `/dashboard/tags/${tag.id}`
+                    }
                     onClick={() => onOpenChange(false)}
                   >
                     <Badge
@@ -863,52 +996,13 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                     />
                     {tag.name}
                     <span className="ml-auto text-xs text-muted-foreground">
-                      {tag.passwordCount}
+                      {tag.count}
                     </span>
                   </Link>
                 </Button>
               );
             })}
           </div>
-
-          {orgTagGroups.map((group) => (
-            <div key={group.orgId}>
-              <SectionLabel icon={<Building2 className="h-3 w-3" />}>
-                {group.orgName}
-              </SectionLabel>
-              <div className="space-y-1">
-                {group.tags.map((tag) => {
-                  const colorClass = getTagColorClass(tag.color);
-                  return (
-                    <Button
-                      key={tag.id}
-                      variant={activeOrgTagId === tag.id ? "secondary" : "ghost"}
-                      className="w-full justify-start gap-2"
-                      asChild
-                    >
-                      <Link
-                        href={`/dashboard/orgs/${group.orgId}?tag=${tag.id}`}
-                        onClick={() => onOpenChange(false)}
-                      >
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "h-3 w-3 rounded-full p-0",
-                            colorClass && "tag-color-bg",
-                            colorClass
-                          )}
-                        />
-                        {tag.name}
-                        <span className="ml-auto text-xs text-muted-foreground">
-                          {tag.count}
-                        </span>
-                      </Link>
-                    </Button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
         </CollapsibleContent>
       </Collapsible>
 
