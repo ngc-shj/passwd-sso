@@ -3,16 +3,10 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { encryptExport } from "@/lib/export-crypto";
-import {
-  DialogFooter,
-} from "@/components/ui/dialog";
 import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react";
+import { ExportOptionsPanel } from "@/components/passwords/export-options-panel";
+import { AlertTriangle, Building2 } from "lucide-react";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import {
@@ -165,126 +159,42 @@ function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
 
   const content = (
     <>
-        <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
+      <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
           <AlertTriangle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
           <p className="text-sm text-yellow-800 dark:text-yellow-200">
             {passwordProtect ? t("encryptedWarning") : t("warning")}
           </p>
         </div>
 
-        <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="org-export-profile" className="text-sm font-medium">
-              {t("profileLabel")}
-            </Label>
-            <select
-              id="org-export-profile"
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-              value={exportProfile}
-              onChange={(e) => setExportProfile(e.target.value as ExportProfile)}
-            >
-              <option value="compatible">{t("profileCompatible")}</option>
-              <option value="passwd-sso">{t("profilePasswdSso")}</option>
-            </select>
-            <p className="text-xs text-muted-foreground">
-              {exportProfile === "compatible"
-                ? t("profileCompatibleDesc")
-                : t("profilePasswdSsoDesc")}
-            </p>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Lock className="h-4 w-4 text-muted-foreground" />
-              <div>
-                <Label htmlFor="org-password-protect" className="text-sm font-medium">
-                  {t("passwordProtect")}
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  {t("passwordProtectDesc")}
-                </p>
-              </div>
-            </div>
-            <Switch
-              id="org-password-protect"
-              checked={passwordProtect}
-              onCheckedChange={(checked) => {
-                setPasswordProtect(checked);
-                setPasswordError("");
-                if (!checked) {
-                  setExportPassword("");
-                  setConfirmPassword("");
-                }
-              }}
-            />
-          </div>
-
-          {passwordProtect && (
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="org-export-password" className="text-sm">
-                  {t("exportPassword")}
-                </Label>
-                <Input
-                  id="org-export-password"
-                  type="password"
-                  value={exportPassword}
-                  onChange={(e) => {
-                    setExportPassword(e.target.value);
-                    setPasswordError("");
-                  }}
-                  autoComplete="new-password"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="org-confirm-password" className="text-sm">
-                  {t("confirmPassword")}
-                </Label>
-                <Input
-                  id="org-confirm-password"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => {
-                    setConfirmPassword(e.target.value);
-                    setPasswordError("");
-                  }}
-                  autoComplete="new-password"
-                />
-              </div>
-              {passwordError && (
-                <p className="text-sm text-destructive">{passwordError}</p>
-              )}
-            </div>
-          )}
-        </div>
-
-        <DialogFooter className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:justify-end sm:gap-2">
-          <Button
-            variant="outline"
-            className="w-full sm:w-auto"
-            onClick={() => handleExport("csv")}
-            disabled={exporting}
-          >
-            {exporting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4 mr-2" />
-            )}
-            {t("exportCsv")}
-          </Button>
-          <Button
-            className="w-full sm:w-auto"
-            onClick={() => handleExport("json")}
-            disabled={exporting}
-          >
-            {exporting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4 mr-2" />
-            )}
-            {t("exportJson")}
-          </Button>
-        </DialogFooter>
+        <ExportOptionsPanel
+          t={t}
+          exportProfile={exportProfile}
+          onExportProfileChange={setExportProfile}
+          passwordProtect={passwordProtect}
+          onPasswordProtectChange={(checked) => {
+            setPasswordProtect(checked);
+            setPasswordError("");
+            if (!checked) {
+              setExportPassword("");
+              setConfirmPassword("");
+            }
+          }}
+          exportPassword={exportPassword}
+          onExportPasswordChange={(value) => {
+            setExportPassword(value);
+            setPasswordError("");
+          }}
+          confirmPassword={confirmPassword}
+          onConfirmPasswordChange={(value) => {
+            setConfirmPassword(value);
+            setPasswordError("");
+          }}
+          passwordError={passwordError}
+          exporting={exporting}
+          onExport={handleExport}
+          idPrefix="org-"
+          showProtectTopBorder={false}
+        />
     </>
   );
 
