@@ -150,7 +150,9 @@
     "statusUnsaved": "Unsaved changes",
     "statusSaved": "All changes saved",
     "openGenerator": "Generate",
-    "closeGenerator": "Hide"
+    "closeGenerator": "Hide",
+    "requireReprompt": "Require master password re-entry",
+    "requireRepromptHelp": "Prompt for master passphrase when viewing or copying sensitive fields."
   },
   "SecureNoteForm": {
     "newNote": "New Secure Note",
@@ -289,6 +291,14 @@
     "credentialId": "Credential ID",
     "creationDate": "Creation Date",
     "deviceInfo": "Device Info"
+  },
+  "RepromptDialog": {
+    "title": "Verify Master Passphrase",
+    "description": "Re-enter your master passphrase to access this item.",
+    "label": "Master Passphrase",
+    "verify": "Verify",
+    "cancel": "Cancel",
+    "incorrect": "Incorrect passphrase"
   },
   "PasswordGenerator": {
     "use": "Use",

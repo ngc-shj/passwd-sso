@@ -82,5 +82,8 @@ infra/terraform/envs/*/terraform.tfvars
 extension/dist/
 extension/node_modules/
 
+# Temporary docs (review notes, scratch)
+docs/temp/
+
 # Claude
 .claude/
