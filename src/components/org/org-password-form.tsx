@@ -725,15 +725,6 @@ export function OrgPasswordForm({
                   rows={3}
                 />
               </div>
-
-              <OrgTagSection
-                title={tpk("tags")}
-                hint={t("tagsHint")}
-                orgId={orgId}
-                selectedTags={selectedTags}
-                onChange={setSelectedTags}
-                sectionCardClass={dialogSectionClass}
-              />
             </>
           ) : isIdentity ? (
             <>
@@ -877,15 +868,6 @@ export function OrgPasswordForm({
                   rows={3}
                 />
               </div>
-
-              <OrgTagSection
-                title={ti("tags")}
-                hint={t("tagsHint")}
-                orgId={orgId}
-                selectedTags={selectedTags}
-                onChange={setSelectedTags}
-                sectionCardClass={dialogSectionClass}
-              />
             </>
           ) : isCreditCard ? (
             <>
@@ -1053,15 +1035,6 @@ export function OrgPasswordForm({
                   rows={3}
                 />
               </div>
-
-              <OrgTagSection
-                title={tcc("tags")}
-                hint={t("tagsHint")}
-                orgId={orgId}
-                selectedTags={selectedTags}
-                onChange={setSelectedTags}
-                sectionCardClass={dialogSectionClass}
-              />
             </>
           ) : isNote ? (
             <>
@@ -1077,15 +1050,6 @@ export function OrgPasswordForm({
                   className="font-mono"
                 />
               </div>
-
-              <OrgTagSection
-                title={tn("tags")}
-                hint={t("tagsHint")}
-                orgId={orgId}
-                selectedTags={selectedTags}
-                onChange={setSelectedTags}
-                sectionCardClass={dialogSectionClass}
-              />
             </>
           ) : (
             <>
@@ -1125,26 +1089,28 @@ export function OrgPasswordForm({
                 notesLabel={t("notes")}
                 notesPlaceholder={t("notesPlaceholder")}
               />
-
-              <OrgTagSection
-                title={t("tags")}
-                hint={t("tagsHint")}
-                orgId={orgId}
-                selectedTags={selectedTags}
-                onChange={setSelectedTags}
-                sectionCardClass={dialogSectionClass}
-              />
-
-              <EntryCustomFieldsTotpSection
-                customFields={customFields}
-                setCustomFields={setCustomFields}
-                totp={totp}
-                onTotpChange={setTotp}
-                showTotpInput={showTotpInput}
-                setShowTotpInput={setShowTotpInput}
-                sectionCardClass={dialogSectionClass}
-              />
             </>
+          )}
+
+          <OrgTagSection
+            title={isPasskey ? tpk("tags") : isIdentity ? ti("tags") : isCreditCard ? tcc("tags") : isNote ? tn("tags") : t("tags")}
+            hint={t("tagsHint")}
+            orgId={orgId}
+            selectedTags={selectedTags}
+            onChange={setSelectedTags}
+            sectionCardClass={dialogSectionClass}
+          />
+
+          {!isPasskey && !isIdentity && !isCreditCard && !isNote && (
+            <EntryCustomFieldsTotpSection
+              customFields={customFields}
+              setCustomFields={setCustomFields}
+              totp={totp}
+              onTotpChange={setTotp}
+              showTotpInput={showTotpInput}
+              setShowTotpInput={setShowTotpInput}
+              sectionCardClass={dialogSectionClass}
+            />
           )}
           </div>
 
