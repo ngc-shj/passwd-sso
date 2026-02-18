@@ -31,14 +31,15 @@ import {
 
 interface ExportDialogProps {
   trigger?: React.ReactNode;
-  mode?: "dialog" | "page";
 }
 
-export function ExportDialog({ trigger, mode = "dialog" }: ExportDialogProps) {
-  const isPage = mode === "page";
+interface ExportPanelContentProps {
+  onDone: () => void;
+}
+
+function ExportPanelContent({ onDone }: ExportPanelContentProps) {
   const t = useTranslations("Export");
   const { encryptionKey, userId } = useVault();
-  const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [passwordProtect, setPasswordProtect] = useState(true);
   const [exportPassword, setExportPassword] = useState("");
@@ -177,7 +178,7 @@ export function ExportDialog({ trigger, mode = "dialog" }: ExportDialogProps) {
         }),
       }).catch(() => {});
 
-      setOpen(false);
+      onDone();
       resetState();
     } catch {
       // Export failed silently
@@ -319,28 +320,31 @@ export function ExportDialog({ trigger, mode = "dialog" }: ExportDialogProps) {
     </>
   );
 
-  if (isPage) {
-    return (
-      <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">
-        {content}
-      </div>
-    );
-  }
+  return content;
+}
+
+export function ExportDialog({ trigger }: ExportDialogProps) {
+  const [open, setOpen] = useState(false);
 
   return (
     <Dialog
       open={open}
       onOpenChange={(v) => {
         setOpen(v);
-        if (!v) resetState();
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">{content}</DialogContent>
+      <DialogContent className="sm:max-w-2xl">
+        <ExportPanelContent onDone={() => setOpen(false)} />
+      </DialogContent>
     </Dialog>
   );
 }
 
 export function ExportPagePanel() {
-  return <ExportDialog mode="page" />;
+  return (
+    <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">
+      <ExportPanelContent onDone={() => undefined} />
+    </div>
+  );
 }

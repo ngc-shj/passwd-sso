@@ -563,15 +563,16 @@ const formatLabels: Record<CsvFormat, string> = {
 interface ImportDialogProps {
   trigger?: React.ReactNode;
   onComplete: () => void;
-  mode?: "dialog" | "page";
 }
 
-export function ImportDialog({ trigger, onComplete, mode = "dialog" }: ImportDialogProps) {
-  const isPage = mode === "page";
+interface ImportPanelContentProps {
+  onComplete: () => void;
+}
+
+function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
   const t = useTranslations("Import");
   const { encryptionKey, userId } = useVault();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState<ParsedEntry[]>([]);
   const [format, setFormat] = useState<CsvFormat>("unknown");
   const [importing, setImporting] = useState(false);
@@ -1043,20 +1044,23 @@ export function ImportDialog({ trigger, onComplete, mode = "dialog" }: ImportDia
     </>
   );
 
-  if (isPage) {
-    return <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">{content}</div>;
-  }
+  return content;
+}
+
+export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
+  const [open, setOpen] = useState(false);
 
   return (
     <Dialog
       open={open}
       onOpenChange={(v) => {
         setOpen(v);
-        if (!v) reset();
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">{content}</DialogContent>
+      <DialogContent className="sm:max-w-2xl">
+        <ImportPanelContent onComplete={onComplete} />
+      </DialogContent>
     </Dialog>
   );
 }
@@ -1066,7 +1070,11 @@ interface ImportPagePanelProps {
 }
 
 export function ImportPagePanel({ onComplete }: ImportPagePanelProps) {
-  return <ImportDialog onComplete={onComplete} mode="page" />;
+  return (
+    <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">
+      <ImportPanelContent onComplete={onComplete} />
+    </div>
+  );
 }
 
 export const __testablesImport = {

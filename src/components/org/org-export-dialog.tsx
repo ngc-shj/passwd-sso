@@ -30,17 +30,15 @@ import {
 interface OrgExportDialogProps {
   orgId: string;
   trigger?: React.ReactNode;
-  mode?: "dialog" | "page";
 }
 
-export function OrgExportDialog({
-  orgId,
-  trigger,
-  mode = "dialog",
-}: OrgExportDialogProps) {
-  const isPage = mode === "page";
+interface OrgExportPanelContentProps {
+  orgId: string;
+  onDone: () => void;
+}
+
+function OrgExportPanelContent({ orgId, onDone }: OrgExportPanelContentProps) {
   const t = useTranslations("Export");
-  const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [passwordProtect, setPasswordProtect] = useState(true);
   const [exportPassword, setExportPassword] = useState("");
@@ -167,7 +165,7 @@ export function OrgExportDialog({
         }),
       }).catch(() => {});
 
-      setOpen(false);
+      onDone();
       resetState();
     } catch {
       // Export failed silently
@@ -309,20 +307,23 @@ export function OrgExportDialog({
     </>
   );
 
-  if (isPage) {
-    return <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">{content}</div>;
-  }
+  return content;
+}
+
+export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
+  const [open, setOpen] = useState(false);
 
   return (
     <Dialog
       open={open}
       onOpenChange={(v) => {
         setOpen(v);
-        if (!v) resetState();
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">{content}</DialogContent>
+      <DialogContent className="sm:max-w-2xl">
+        <OrgExportPanelContent orgId={orgId} onDone={() => setOpen(false)} />
+      </DialogContent>
     </Dialog>
   );
 }
@@ -332,5 +333,9 @@ interface OrgExportPagePanelProps {
 }
 
 export function OrgExportPagePanel({ orgId }: OrgExportPagePanelProps) {
-  return <OrgExportDialog orgId={orgId} mode="page" />;
+  return (
+    <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">
+      <OrgExportPanelContent orgId={orgId} onDone={() => undefined} />
+    </div>
+  );
 }
