@@ -23,12 +23,9 @@ import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react"
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import {
   type ExportEntry,
-  type ExportFormat,
   PERSONAL_EXPORT_OPTIONS,
   type ExportProfile,
   formatExportContent as formatExportContentShared,
-  formatExportCsv,
-  formatExportJson,
   formatExportDate,
 } from "@/lib/export-format-common";
 
@@ -200,7 +197,12 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
         // Org fetch failed — continue with personal entries only
       }
 
-      const content = formatExportContent(entries, format, exportProfile);
+      const content = formatExportContentShared(
+        entries,
+        format,
+        exportProfile,
+        PERSONAL_EXPORT_OPTIONS
+      );
 
       let blob: Blob;
       let filename: string;
@@ -409,32 +411,3 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
     </Dialog>
   );
 }
-
-// ─── Formatting helpers ─────────────────────────────────────
-
-function formatExportContent(
-  entries: ExportEntry[],
-  format: ExportFormat,
-  profile: ExportProfile
-): string {
-  return formatExportContentShared(
-    entries,
-    format,
-    profile,
-    PERSONAL_EXPORT_OPTIONS
-  );
-}
-
-function formatCsv(entries: ExportEntry[], profile: ExportProfile): string {
-  return formatExportCsv(entries, profile, PERSONAL_EXPORT_OPTIONS.csv);
-}
-
-function formatJson(entries: ExportEntry[], profile: ExportProfile): string {
-  return formatExportJson(entries, profile, PERSONAL_EXPORT_OPTIONS.json);
-}
-
-export const __testablesPersonalExport = {
-  formatExportContent,
-  formatCsv,
-  formatJson,
-};

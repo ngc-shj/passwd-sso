@@ -21,12 +21,9 @@ import { API_PATH, apiPath } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import {
   type ExportEntry,
-  type ExportFormat,
   ORG_EXPORT_OPTIONS,
   type ExportProfile,
   formatExportContent as formatExportContentShared,
-  formatExportCsv,
-  formatExportJson,
   formatExportDate,
 } from "@/lib/export-format-common";
 
@@ -120,7 +117,12 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
         }
       }
 
-      const content = formatExportContent(entries, format, exportProfile);
+      const content = formatExportContentShared(
+        entries,
+        format,
+        exportProfile,
+        ORG_EXPORT_OPTIONS
+      );
 
       let blob: Blob;
       let filename: string;
@@ -310,27 +312,3 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
     </Dialog>
   );
 }
-
-// ─── Formatting helpers ─────────────────────────────────────
-
-function formatExportContent(
-  entries: ExportEntry[],
-  format: ExportFormat,
-  profile: ExportProfile
-): string {
-  return formatExportContentShared(entries, format, profile, ORG_EXPORT_OPTIONS);
-}
-
-function formatCsv(entries: ExportEntry[], profile: ExportProfile): string {
-  return formatExportCsv(entries, profile, ORG_EXPORT_OPTIONS.csv);
-}
-
-function formatJson(entries: ExportEntry[], profile: ExportProfile): string {
-  return formatExportJson(entries, profile, ORG_EXPORT_OPTIONS.json);
-}
-
-export const __testablesOrgExport = {
-  formatExportContent,
-  formatCsv,
-  formatJson,
-};
