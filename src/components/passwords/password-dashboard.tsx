@@ -29,10 +29,11 @@ type VaultView = "all" | "favorites" | "archive" | "trash";
 interface PasswordDashboardProps {
   view: VaultView;
   tagId?: string | null;
+  folderId?: string | null;
   entryType?: string | null;
 }
 
-export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardProps) {
+export function PasswordDashboard({ view, tagId, folderId, entryType }: PasswordDashboardProps) {
   const t = useTranslations("Dashboard");
   const ts = useTranslations("Shortcuts");
 
@@ -241,6 +242,7 @@ export function PasswordDashboard({ view, tagId, entryType }: PasswordDashboardP
               <PasswordList
                 searchQuery={searchQuery}
                 tagId={tagId ?? null}
+                folderId={folderId ?? null}
                 entryType={entryType}
                 refreshKey={refreshKey}
                 favoritesOnly={isFavorites}

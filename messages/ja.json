@@ -60,7 +60,17 @@
     "newPasskey": "パスキー",
     "shareLinks": "共有リンク",
     "emergencyAccess": "緊急アクセス",
-    "sidebar": "ナビゲーション"
+    "sidebar": "ナビゲーション",
+    "folders": "フォルダ",
+    "noFolders": "フォルダがありません",
+    "createFolder": "新規フォルダ",
+    "editFolder": "フォルダを編集",
+    "deleteFolder": "フォルダを削除",
+    "folderName": "フォルダ名",
+    "parentFolder": "親フォルダ",
+    "noParent": "（ルート）",
+    "folderDeleteConfirm": "フォルダ「{name}」を削除しますか？サブフォルダは親に昇格し、エントリは未所属になります。",
+    "folderMaxDepth": "フォルダの最大階層数（{max}）を超えています。"
   },
   "ShareLinks": {
     "title": "共有リンク",
@@ -290,7 +300,13 @@
     "relyingPartyName": "リライングパーティ名",
     "credentialId": "クレデンシャルID",
     "creationDate": "作成日",
-    "deviceInfo": "デバイス情報"
+    "deviceInfo": "デバイス情報",
+    "entryHistory": "変更履歴",
+    "entryHistoryEmpty": "過去のバージョンはありません",
+    "restoreVersion": "復元",
+    "restoreConfirm": "このバージョンを復元しますか？現在のバージョンは履歴に保存されます。",
+    "versionFrom": "{date} のバージョン",
+    "viewVersion": "表示"
   },
   "RepromptDialog": {
     "title": "マスターパスフレーズの確認",
@@ -909,6 +925,10 @@
     "invalidPassphrase": "パスフレーズが正しくありません。",
     "userNotFound": "ユーザーが見つかりません。",
     "tagAlreadyExists": "同じ名前のタグが既に存在します。",
+    "folderAlreadyExists": "同じ名前のフォルダが既に存在します。",
+    "folderMaxDepthExceeded": "フォルダの最大階層数を超えています。",
+    "folderCircularReference": "フォルダを自身の子孫の下に移動することはできません。",
+    "historyNotFound": "履歴バージョンが見つかりません。",
     "notInTrash": "ゴミ箱にありません。",
     "attachmentNotFound": "添付ファイルが見つかりません。",
     "attachmentLimitExceeded": "添付ファイルの上限に達しました。",

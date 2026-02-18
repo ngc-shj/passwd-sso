@@ -461,6 +461,31 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
   }
 
+  // Snapshot current blob to history before updating
+  await prisma.$transaction(async (tx) => {
+    await tx.orgPasswordEntryHistory.create({
+      data: {
+        entryId: id,
+        encryptedBlob: entry.encryptedBlob,
+        blobIv: entry.blobIv,
+        blobAuthTag: entry.blobAuthTag,
+        aadVersion: entry.aadVersion,
+        changedById: session.user.id,
+      },
+    });
+    // Trim to max 20 entries (stable sort: changedAt asc, id asc)
+    const all = await tx.orgPasswordEntryHistory.findMany({
+      where: { entryId: id },
+      orderBy: [{ changedAt: "asc" }, { id: "asc" }],
+      select: { id: true },
+    });
+    if (all.length > 20) {
+      await tx.orgPasswordEntryHistory.deleteMany({
+        where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+      });
+    }
+  });
+
   const updated = await prisma.orgPasswordEntry.update({
     where: { id },
     data: updateData,

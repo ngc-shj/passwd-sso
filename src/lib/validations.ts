@@ -47,6 +47,7 @@ export const createE2EPasswordSchema = z.object({
   keyVersion: z.number().int().min(1),
   aadVersion: z.number().int().min(0).max(1).optional().default(1),
   tagIds: z.array(z.string().cuid()).optional(),
+  folderId: z.string().cuid().optional().nullable(),
   entryType: entryTypeSchema.optional().default(ENTRY_TYPE.LOGIN),
   requireReprompt: z.boolean().optional(),
 }).refine(
@@ -60,10 +61,25 @@ export const updateE2EPasswordSchema = z.object({
   keyVersion: z.number().int().min(1).optional(),
   aadVersion: z.number().int().min(0).max(1).optional(),
   tagIds: z.array(z.string().cuid()).optional(),
+  folderId: z.string().cuid().optional().nullable(),
   isFavorite: z.boolean().optional(),
   isArchived: z.boolean().optional(),
   entryType: entryTypeSchema.optional(),
   requireReprompt: z.boolean().optional(),
+});
+
+// ─── Folder Schemas ─────────────────────────────────────────
+
+export const createFolderSchema = z.object({
+  name: z.string().min(1).max(100).trim(),
+  parentId: z.string().cuid().optional().nullable(),
+  sortOrder: z.number().int().min(0).optional(),
+});
+
+export const updateFolderSchema = z.object({
+  name: z.string().min(1).max(100).trim().optional(),
+  parentId: z.string().cuid().optional().nullable(),
+  sortOrder: z.number().int().min(0).optional(),
 });
 
 // ─── Tag Schemas ────────────────────────────────────────────
@@ -466,6 +482,8 @@ export type GeneratePasswordInput = z.infer<typeof generatePasswordSchema>;
 export type GeneratePassphraseInput = z.infer<typeof generatePassphraseSchema>;
 export type CreateE2EPasswordInput = z.infer<typeof createE2EPasswordSchema>;
 export type UpdateE2EPasswordInput = z.infer<typeof updateE2EPasswordSchema>;
+export type CreateFolderInput = z.infer<typeof createFolderSchema>;
+export type UpdateFolderInput = z.infer<typeof updateFolderSchema>;
 export type CreateTagInput = z.infer<typeof createTagSchema>;
 export type UpdateTagInput = z.infer<typeof updateTagSchema>;
 export type CreateOrgInput = z.infer<typeof createOrgSchema>;

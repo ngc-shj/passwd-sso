@@ -47,6 +47,14 @@ interface OrgTagGroup {
   tags: { id: string; name: string; color: string | null; count: number }[];
 }
 
+interface FolderItem {
+  id: string;
+  name: string;
+  parentId: string | null;
+  sortOrder: number;
+  entryCount: number;
+}
+
 interface OrgItem {
   id: string;
   name: string;
@@ -59,12 +67,61 @@ interface SidebarProps {
   onOpenChange: (open: boolean) => void;
 }
 
+// ─── Folder tree helper ─────────────────────────────────────────
+
+function FolderTreeNode({
+  folder,
+  folders,
+  activeFolderId,
+  depth,
+  onNavigate,
+}: {
+  folder: FolderItem;
+  folders: FolderItem[];
+  activeFolderId: string | null;
+  depth: number;
+  onNavigate: () => void;
+}) {
+  const children = folders.filter((f) => f.parentId === folder.id);
+  return (
+    <>
+      <Button
+        variant={activeFolderId === folder.id ? "secondary" : "ghost"}
+        className="w-full justify-start gap-2"
+        style={{ paddingLeft: `${8 + depth * 12}px` }}
+        asChild
+      >
+        <Link href={`/dashboard/folders/${folder.id}`} onClick={onNavigate}>
+          <FolderOpen className="h-4 w-4 shrink-0" />
+          <span className="truncate">{folder.name}</span>
+          {folder.entryCount > 0 && (
+            <span className="ml-auto text-xs text-muted-foreground">
+              {folder.entryCount}
+            </span>
+          )}
+        </Link>
+      </Button>
+      {children.map((child) => (
+        <FolderTreeNode
+          key={child.id}
+          folder={child}
+          folders={folders}
+          activeFolderId={activeFolderId}
+          depth={depth + 1}
+          onNavigate={onNavigate}
+        />
+      ))}
+    </>
+  );
+}
+
 // ─── Component ───────────────────────────────────────────────────
 
 export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const t = useTranslations("Dashboard");
   const tOrg = useTranslations("Org");
   const [tags, setTags] = useState<TagItem[]>([]);
+  const [folders, setFolders] = useState<FolderItem[]>([]);
   const [orgs, setOrgs] = useState<OrgItem[]>([]);
   const [orgTagGroups, setOrgTagGroups] = useState<OrgTagGroup[]>([]);
 
@@ -87,6 +144,8 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const activeAuditOrgId = auditOrgMatch ? auditOrgMatch[1] : null;
   const tagMatch = cleanPath.match(/^\/dashboard\/tags\/([^/]+)/);
   const activeTagId = tagMatch ? tagMatch[1] : null;
+  const folderMatch = cleanPath.match(/^\/dashboard\/folders\/([^/]+)/);
+  const activeFolderId = folderMatch ? folderMatch[1] : null;
   const orgMatch = cleanPath.match(/^\/dashboard\/orgs\/([^/]+)/);
   const activeOrgId = orgMatch && !isAuditLog ? orgMatch[1] : null;
   const activeOrgTagId = activeOrgId ? searchParams.get("tag") : null;
@@ -120,7 +179,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     if (isVaultAll || isVaultFavorites || isVaultArchive || isVaultTrash) toOpen.push("vault");
     if (activeTypeFilter !== null) toOpen.push("categories");
     if (activeOrgId !== null || isOrgsManage) toOpen.push("organizations");
-    if (activeTagId !== null || activeOrgTagId !== null) toOpen.push("organize");
+    if (activeTagId !== null || activeOrgTagId !== null || activeFolderId !== null) toOpen.push("organize");
     if (isWatchtower || isShareLinks || isEmergencyAccess || isAuditLog) toOpen.push("security");
 
     if (toOpen.length > 0) {
@@ -142,6 +201,16 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       })
       .then((data) => {
         if (Array.isArray(data)) setTags(data);
+      })
+      .catch(() => {});
+
+    fetch(API_PATH.FOLDERS)
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch folders");
+        return res.json();
+      })
+      .then((data) => {
+        if (Array.isArray(data)) setFolders(data);
       })
       .catch(() => {});
 
@@ -455,8 +524,8 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         </CollapsibleContent>
       </Collapsible>
 
-      {/* ── Organize (tags) ────────────────────────────────── */}
-      {(tags.filter((tg) => tg.passwordCount > 0).length > 0 || orgTagGroups.length > 0) && (
+      {/* ── Organize (folders + tags) ──────────────────────── */}
+      {(folders.length > 0 || tags.filter((tg) => tg.passwordCount > 0).length > 0 || orgTagGroups.length > 0) && (
         <>
           <Separator />
           <Collapsible open={isOpen("organize")} onOpenChange={toggleSection("organize")}>
@@ -467,6 +536,22 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
               {t("organize")}
             </CollapsibleSectionHeader>
             <CollapsibleContent>
+              {folders.length > 0 && (
+                <div className="space-y-1 mb-2">
+                  {folders
+                    .filter((f) => !f.parentId)
+                    .map((folder) => (
+                      <FolderTreeNode
+                        key={folder.id}
+                        folder={folder}
+                        folders={folders}
+                        activeFolderId={activeFolderId}
+                        depth={0}
+                        onNavigate={() => onOpenChange(false)}
+                      />
+                    ))}
+                </div>
+              )}
               <div className="space-y-1">
                 {tags.filter((tg) => tg.passwordCount > 0).map((tag) => {
                   const colorClass = getTagColorClass(tag.color);

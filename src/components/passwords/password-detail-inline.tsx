@@ -9,6 +9,7 @@ import { Favicon } from "./favicon";
 import { TOTPField, type TOTPEntry } from "./totp-field";
 import { AttachmentSection, type AttachmentMeta } from "./attachment-section";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "@/components/org/org-attachment-section";
+import { EntryHistorySection } from "./entry-history-section";
 import { formatCardNumber } from "@/lib/credit-card";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
@@ -77,12 +78,13 @@ export interface InlineDetailData {
 interface PasswordDetailInlineProps {
   data: InlineDetailData;
   onEdit?: () => void;
+  onRefresh?: () => void;
   orgId?: string;
 }
 
 const REVEAL_TIMEOUT = 30_000;
 
-export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInlineProps) {
+export function PasswordDetailInline({ data, onEdit, onRefresh, orgId }: PasswordDetailInlineProps) {
   const t = useTranslations("PasswordDetail");
   const tc = useTranslations("Common");
   const locale = useLocale();
@@ -712,6 +714,11 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
             </div>
           )}
         </>
+      )}
+
+      {/* Entry History (full blob snapshots) */}
+      {!orgId && (
+        <EntryHistorySection entryId={data.id} onRestore={onRefresh} />
       )}
 
       {/* Attachments */}
