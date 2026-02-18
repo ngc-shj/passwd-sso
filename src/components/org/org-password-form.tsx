@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, type ComponentProps } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -113,6 +113,12 @@ interface OrgTagSectionProps {
   sectionCardClass?: string;
 }
 
+interface VisibilityToggleInputProps {
+  show: boolean;
+  onToggle: () => void;
+  inputProps: ComponentProps<typeof Input>;
+}
+
 function OrgTagSection({
   title,
   hint,
@@ -125,6 +131,34 @@ function OrgTagSection({
     <EntryTagsSection title={title} hint={hint} sectionCardClass={sectionCardClass}>
       <OrgTagInput orgId={orgId} selectedTags={selectedTags} onChange={onChange} />
     </EntryTagsSection>
+  );
+}
+
+function VisibilityToggleInput({
+  show,
+  onToggle,
+  inputProps,
+}: VisibilityToggleInputProps) {
+  return (
+    <div className="relative">
+      <Input
+        {...inputProps}
+        type={show ? "text" : "password"}
+      />
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+        onClick={onToggle}
+      >
+        {show ? (
+          <EyeOff className="h-4 w-4" />
+        ) : (
+          <Eye className="h-4 w-4" />
+        )}
+      </Button>
+    </div>
   );
 }
 
@@ -681,28 +715,16 @@ export function OrgPasswordForm({
               {/* Credential ID */}
               <div className="space-y-2">
                 <Label>{tpk("credentialId")}</Label>
-                <div className="relative">
-                  <Input
-                    type={showCredentialId ? "text" : "password"}
-                    value={credentialId}
-                    onChange={(e) => setCredentialId(e.target.value)}
-                    placeholder={tpk("credentialIdPlaceholder")}
-                    autoComplete="off"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-                    onClick={() => setShowCredentialId(!showCredentialId)}
-                  >
-                    {showCredentialId ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
+                <VisibilityToggleInput
+                  show={showCredentialId}
+                  onToggle={() => setShowCredentialId(!showCredentialId)}
+                  inputProps={{
+                    value: credentialId,
+                    onChange: (e) => setCredentialId(e.target.value),
+                    placeholder: tpk("credentialIdPlaceholder"),
+                    autoComplete: "off",
+                  }}
+                />
               </div>
 
               {/* Creation Date & Device Info */}
@@ -816,28 +838,16 @@ export function OrgPasswordForm({
               {/* ID Number */}
               <div className="space-y-2">
                 <Label>{ti("idNumber")}</Label>
-                <div className="relative">
-                  <Input
-                    type={showIdNumber ? "text" : "password"}
-                    value={idNumber}
-                    onChange={(e) => setIdNumber(e.target.value)}
-                    placeholder={ti("idNumberPlaceholder")}
-                    autoComplete="off"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-                    onClick={() => setShowIdNumber(!showIdNumber)}
-                  >
-                    {showIdNumber ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
+                <VisibilityToggleInput
+                  show={showIdNumber}
+                  onToggle={() => setShowIdNumber(!showIdNumber)}
+                  inputProps={{
+                    value: idNumber,
+                    onChange: (e) => setIdNumber(e.target.value),
+                    placeholder: ti("idNumberPlaceholder"),
+                    autoComplete: "off",
+                  }}
+                />
               </div>
 
               {/* Issue Date & Expiry Date */}
@@ -919,31 +929,19 @@ export function OrgPasswordForm({
               {/* Card Number */}
               <div className="space-y-2">
                 <Label>{tcc("cardNumber")}</Label>
-                <div className="relative">
-                  <Input
-                    type={showCardNumber ? "text" : "password"}
-                    value={cardNumber}
-                    onChange={(e) => handleCardNumberChange(e.target.value)}
-                    placeholder={tcc("cardNumberPlaceholder")}
-                    autoComplete="off"
-                    inputMode="numeric"
-                    maxLength={maxInputLength}
-                    aria-invalid={showLengthError || showLuhnError}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-                    onClick={() => setShowCardNumber(!showCardNumber)}
-                  >
-                    {showCardNumber ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
+                <VisibilityToggleInput
+                  show={showCardNumber}
+                  onToggle={() => setShowCardNumber(!showCardNumber)}
+                  inputProps={{
+                    value: cardNumber,
+                    onChange: (e) => handleCardNumberChange(e.target.value),
+                    placeholder: tcc("cardNumberPlaceholder"),
+                    autoComplete: "off",
+                    inputMode: "numeric",
+                    maxLength: maxInputLength,
+                    "aria-invalid": showLengthError || showLuhnError,
+                  }}
+                />
                 {cardValidation.detectedBrand && (
                   <p className="text-xs text-muted-foreground">
                     {tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })}
@@ -1010,29 +1008,17 @@ export function OrgPasswordForm({
                 {/* CVV */}
                 <div className="space-y-2">
                   <Label>{tcc("cvv")}</Label>
-                  <div className="relative">
-                    <Input
-                      type={showCvv ? "text" : "password"}
-                      value={cvv}
-                      onChange={(e) => setCvv(e.target.value)}
-                      placeholder={tcc("cvvPlaceholder")}
-                      autoComplete="off"
-                      maxLength={4}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-                      onClick={() => setShowCvv(!showCvv)}
-                    >
-                      {showCvv ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
+                  <VisibilityToggleInput
+                    show={showCvv}
+                    onToggle={() => setShowCvv(!showCvv)}
+                    inputProps={{
+                      value: cvv,
+                      onChange: (e) => setCvv(e.target.value),
+                      placeholder: tcc("cvvPlaceholder"),
+                      autoComplete: "off",
+                      maxLength: 4,
+                    }}
+                  />
                 </div>
               </div>
 
