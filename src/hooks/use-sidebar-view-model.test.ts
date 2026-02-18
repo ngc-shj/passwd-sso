@@ -73,4 +73,19 @@ describe("useSidebarViewModel", () => {
 
     expect(params.onOpenChange).toHaveBeenCalledWith(false);
   });
+
+  it("forwards sidebar state and handlers", () => {
+    const params = makeParams();
+    const { result } = renderHook(() => useSidebarViewModel(params));
+
+    expect(result.current.selectedTags).toBe(params.selectedTags);
+    expect(result.current.selectedFolders).toBe(params.selectedFolders);
+    expect(result.current.isOpen).toBe(params.isOpen);
+    expect(result.current.toggleSection).toBe(params.toggleSection);
+    expect(result.current.onCreateFolder).toBe(params.handleFolderCreate);
+    expect(result.current.onEditFolder).toBe(params.handleFolderEdit);
+    expect(result.current.onDeleteFolder).toBe(params.handleFolderDeleteClick);
+    expect(result.current.onEditTag).toBe(params.handleTagEdit);
+    expect(result.current.onDeleteTag).toBe(params.handleTagDeleteClick);
+  });
 });

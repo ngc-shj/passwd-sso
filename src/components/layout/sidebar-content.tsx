@@ -10,15 +10,12 @@ import {
   VaultManagementSection,
 } from "@/components/layout/sidebar-sections";
 import type { SidebarSection } from "@/hooks/use-sidebar-sections-state";
-import type { SidebarFolderItem, SidebarOrgItem } from "@/hooks/use-sidebar-data";
+import type {
+  SidebarFolderItem,
+  SidebarOrgItem,
+  SidebarOrganizeTagItem,
+} from "@/hooks/use-sidebar-data";
 import type { VaultContext } from "@/hooks/use-vault-context";
-
-interface OrganizeTagItem {
-  id: string;
-  name: string;
-  color: string | null;
-  count: number;
-}
 
 export interface SidebarContentProps {
   t: (key: string) => string;
@@ -41,15 +38,15 @@ export interface SidebarContentProps {
   isPersonalAuditLog: boolean;
   activeAuditOrgId: string | null;
   selectedFolders: SidebarFolderItem[];
-  selectedTags: OrganizeTagItem[];
+  selectedTags: SidebarOrganizeTagItem[];
   isOpen: (key: SidebarSection) => boolean;
   toggleSection: (key: SidebarSection) => (open: boolean) => void;
   onVaultChange: (value: string) => void;
   onCreateFolder: (orgId?: string) => void;
   onEditFolder: (folder: SidebarFolderItem, orgId?: string) => void;
   onDeleteFolder: (folder: SidebarFolderItem, orgId?: string) => void;
-  onEditTag: (tag: OrganizeTagItem, orgId?: string) => void;
-  onDeleteTag: (tag: OrganizeTagItem, orgId?: string) => void;
+  onEditTag: (tag: SidebarOrganizeTagItem, orgId?: string) => void;
+  onDeleteTag: (tag: SidebarOrganizeTagItem, orgId?: string) => void;
   onNavigate: () => void;
 }
 

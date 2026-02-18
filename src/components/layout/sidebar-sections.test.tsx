@@ -43,9 +43,85 @@ vi.mock("@/lib/dynamic-styles", () => ({
 }));
 
 import {
+  CategoriesSection,
+  VaultSection,
   VaultManagementSection,
   OrganizeSection,
 } from "./sidebar-sections";
+
+describe("VaultSection", () => {
+  it("renders personal vault links", () => {
+    render(
+      <VaultSection
+        t={(k) => k}
+        vaultContext={{ type: "personal" }}
+        isSelectedVaultAll
+        isSelectedVaultFavorites={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "passwords" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.getByRole("link", { name: "favorites" })).toHaveAttribute("href", "/dashboard/favorites");
+  });
+
+  it("renders org vault links", () => {
+    render(
+      <VaultSection
+        t={(k) => k}
+        vaultContext={{ type: "org", orgId: "org-1" }}
+        isSelectedVaultAll={false}
+        isSelectedVaultFavorites
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "passwords" })).toHaveAttribute("href", "/dashboard/orgs/org-1");
+    expect(screen.getByRole("link", { name: "favorites" })).toHaveAttribute(
+      "href",
+      "/dashboard/orgs/org-1?scope=favorites"
+    );
+  });
+});
+
+describe("CategoriesSection", () => {
+  it("renders all category links with personal scope", () => {
+    render(
+      <CategoriesSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        vaultContext={{ type: "personal" }}
+        selectedTypeFilter={null}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "catLogin" })).toHaveAttribute("href", "/dashboard?type=LOGIN");
+    expect(screen.getByRole("link", { name: "catSecureNote" })).toHaveAttribute("href", "/dashboard?type=SECURE_NOTE");
+    expect(screen.getByRole("link", { name: "catCreditCard" })).toHaveAttribute("href", "/dashboard?type=CREDIT_CARD");
+    expect(screen.getByRole("link", { name: "catIdentity" })).toHaveAttribute("href", "/dashboard?type=IDENTITY");
+    expect(screen.getByRole("link", { name: "catPasskey" })).toHaveAttribute("href", "/dashboard?type=PASSKEY");
+  });
+
+  it("renders org scoped category links", () => {
+    render(
+      <CategoriesSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        vaultContext={{ type: "org", orgId: "org-1" }}
+        selectedTypeFilter={null}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "catLogin" })).toHaveAttribute(
+      "href",
+      "/dashboard/orgs/org-1?type=LOGIN"
+    );
+  });
+});
 
 describe("VaultManagementSection", () => {
   it("renders personal links", () => {
@@ -118,5 +194,39 @@ describe("OrganizeSection", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "createFolder" }));
     expect(onCreateFolder).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls tag menu callbacks", () => {
+    const onEditTag = vi.fn();
+    const onDeleteTag = vi.fn();
+
+    render(
+      <OrganizeSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        canCreateFolder
+        folders={[]}
+        activeFolderId={null}
+        linkHref={() => "/dashboard"}
+        showFolderMenu={false}
+        tags={[{ id: "tag-1", name: "work", color: "#111111", count: 2 }]}
+        activeTagId={null}
+        tagHref={(id) => `/dashboard/tags/${id}`}
+        onCreateFolder={() => {}}
+        onEditFolder={() => {}}
+        onDeleteFolder={() => {}}
+        onEditTag={onEditTag}
+        onDeleteTag={onDeleteTag}
+        showTagMenu
+        onNavigate={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "editTag" }));
+    fireEvent.click(screen.getByRole("button", { name: "deleteTag" }));
+
+    expect(onEditTag).toHaveBeenCalledWith({ id: "tag-1", name: "work", color: "#111111", count: 2 });
+    expect(onDeleteTag).toHaveBeenCalledWith({ id: "tag-1", name: "work", color: "#111111", count: 2 });
   });
 });

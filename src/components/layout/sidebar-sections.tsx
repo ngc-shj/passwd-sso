@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { ENTRY_TYPE } from "@/lib/constants";
+import type { SidebarOrganizeTagItem } from "@/hooks/use-sidebar-data";
 import { type VaultContext } from "@/hooks/use-vault-context";
 import {
   FolderOpen,
@@ -33,13 +34,6 @@ import {
   Trash2 as TrashIcon,
 } from "lucide-react";
 import { CollapsibleSectionHeader, FolderTreeNode, type SidebarFolderItem } from "@/components/layout/sidebar-shared";
-
-interface OrganizeTagItem {
-  id: string;
-  name: string;
-  color: string | null;
-  count: number;
-}
 
 interface VaultSectionProps {
   t: (key: string) => string;
@@ -144,14 +138,14 @@ interface OrganizeSectionProps {
   activeFolderId: string | null;
   linkHref: (folderId: string) => string;
   showFolderMenu: boolean;
-  tags: OrganizeTagItem[];
+  tags: SidebarOrganizeTagItem[];
   activeTagId: string | null;
   tagHref: (tagId: string) => string;
   onCreateFolder: () => void;
   onEditFolder: (folder: SidebarFolderItem) => void;
   onDeleteFolder: (folder: SidebarFolderItem) => void;
-  onEditTag: (tag: OrganizeTagItem) => void;
-  onDeleteTag: (tag: OrganizeTagItem) => void;
+  onEditTag: (tag: SidebarOrganizeTagItem) => void;
+  onDeleteTag: (tag: SidebarOrganizeTagItem) => void;
   showTagMenu: boolean;
   onNavigate: () => void;
 }

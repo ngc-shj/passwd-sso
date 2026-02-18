@@ -38,6 +38,13 @@ export interface SidebarOrgFolderGroup {
   folders: SidebarFolderItem[];
 }
 
+export interface SidebarOrganizeTagItem {
+  id: string;
+  name: string;
+  color: string | null;
+  count: number;
+}
+
 export function useSidebarData(pathname: string) {
   const [tags, setTags] = useState<SidebarTagItem[]>([]);
   const [folders, setFolders] = useState<SidebarFolderItem[]>([]);

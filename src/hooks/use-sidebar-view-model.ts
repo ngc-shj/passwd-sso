@@ -2,16 +2,13 @@
 
 import { useCallback } from "react";
 import type { SidebarContentProps } from "@/components/layout/sidebar-content";
-import type { SidebarFolderItem, SidebarOrgItem } from "@/hooks/use-sidebar-data";
+import type {
+  SidebarFolderItem,
+  SidebarOrgItem,
+  SidebarOrganizeTagItem,
+} from "@/hooks/use-sidebar-data";
 import type { SidebarSection } from "@/hooks/use-sidebar-sections-state";
 import type { VaultContext } from "@/hooks/use-vault-context";
-
-interface OrganizeTagItem {
-  id: string;
-  name: string;
-  color: string | null;
-  count: number;
-}
 
 interface UseSidebarViewModelParams {
   t: (key: string) => string;
@@ -36,14 +33,14 @@ interface UseSidebarViewModelParams {
   isPersonalAuditLog: boolean;
   activeAuditOrgId: string | null;
   selectedFolders: SidebarFolderItem[];
-  selectedTags: OrganizeTagItem[];
+  selectedTags: SidebarOrganizeTagItem[];
   isOpen: (key: SidebarSection) => boolean;
   toggleSection: (key: SidebarSection) => (open: boolean) => void;
   handleFolderCreate: (orgId?: string) => void;
   handleFolderEdit: (folder: SidebarFolderItem, orgId?: string) => void;
   handleFolderDeleteClick: (folder: SidebarFolderItem, orgId?: string) => void;
-  handleTagEdit: (tag: OrganizeTagItem, orgId?: string) => void;
-  handleTagDeleteClick: (tag: OrganizeTagItem, orgId?: string) => void;
+  handleTagEdit: (tag: SidebarOrganizeTagItem, orgId?: string) => void;
+  handleTagDeleteClick: (tag: SidebarOrganizeTagItem, orgId?: string) => void;
 }
 
 export function useSidebarViewModel({
