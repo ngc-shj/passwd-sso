@@ -12,7 +12,8 @@
     "edit": "編集",
     "tryAgain": "再試行",
     "or": "または",
-    "close": "閉じる"
+    "close": "閉じる",
+    "create": "作成"
   },
   "Auth": {
     "signOut": "サインアウト",
@@ -60,7 +61,17 @@
     "newPasskey": "パスキー",
     "shareLinks": "共有リンク",
     "emergencyAccess": "緊急アクセス",
-    "sidebar": "ナビゲーション"
+    "sidebar": "ナビゲーション",
+    "folders": "フォルダ",
+    "noFolders": "フォルダがありません",
+    "createFolder": "新規フォルダ",
+    "editFolder": "フォルダを編集",
+    "deleteFolder": "フォルダを削除",
+    "folderName": "フォルダ名",
+    "parentFolder": "親フォルダ",
+    "noParent": "（ルート）",
+    "folderDeleteConfirm": "フォルダ「{name}」を削除しますか？サブフォルダは親に昇格し、エントリは未所属になります。",
+    "folderMaxDepth": "フォルダの最大階層数（{max}）を超えています。"
   },
   "ShareLinks": {
     "title": "共有リンク",
@@ -151,8 +162,11 @@
     "statusSaved": "変更は保存済みです",
     "openGenerator": "生成",
     "closeGenerator": "閉じる",
-    "requireReprompt": "マスターパスワード再確認を要求",
-    "requireRepromptHelp": "機密フィールドの表示・コピー時にマスターパスフレーズの再入力を求めます。"
+    "requireReprompt": "パスフレーズ再確認を要求",
+    "requireRepromptHelp": "機密フィールドの表示・コピー時にパスフレーズの再入力を求めます。",
+    "folder": "フォルダ",
+    "folderHint": "このエントリをフォルダに整理します。",
+    "noFolder": "（なし）"
   },
   "SecureNoteForm": {
     "newNote": "新規セキュアノート",
@@ -251,6 +265,7 @@
     "dobFuture": "生年月日は過去の日付を指定してください"
   },
   "PasswordDetail": {
+    "title": "タイトル",
     "username": "ユーザー名",
     "password": "パスワード",
     "url": "URL",
@@ -276,6 +291,8 @@
     "cardNumber": "カード番号",
     "brand": "ブランド",
     "expiry": "有効期限",
+    "expiryMonth": "有効期限（月）",
+    "expiryYear": "有効期限（年）",
     "cvv": "CVV",
     "fullName": "氏名",
     "address": "住所",
@@ -290,12 +307,19 @@
     "relyingPartyName": "リライングパーティ名",
     "credentialId": "クレデンシャルID",
     "creationDate": "作成日",
-    "deviceInfo": "デバイス情報"
+    "deviceInfo": "デバイス情報",
+    "entryHistory": "変更履歴",
+    "entryHistoryEmpty": "過去のバージョンはありません",
+    "restoreVersion": "復元",
+    "restoreConfirm": "このバージョンを復元しますか？現在のバージョンは履歴に保存されます。",
+    "versionFrom": "{date} のバージョン",
+    "viewVersion": "表示",
+    "cancel": "キャンセル"
   },
   "RepromptDialog": {
-    "title": "マスターパスフレーズの確認",
-    "description": "このアイテムにアクセスするにはマスターパスフレーズを再入力してください。",
-    "label": "マスターパスフレーズ",
+    "title": "パスフレーズの確認",
+    "description": "このアイテムにアクセスするにはパスフレーズを再入力してください。",
+    "label": "パスフレーズ",
     "verify": "確認",
     "cancel": "キャンセル",
     "incorrect": "パスフレーズが正しくありません"
@@ -909,6 +933,11 @@
     "invalidPassphrase": "パスフレーズが正しくありません。",
     "userNotFound": "ユーザーが見つかりません。",
     "tagAlreadyExists": "同じ名前のタグが既に存在します。",
+    "folderAlreadyExists": "同じ名前のフォルダが既に存在します。",
+    "folderMaxDepthExceeded": "フォルダの最大階層数を超えています。",
+    "folderCircularReference": "フォルダを自身の子孫の下に移動することはできません。",
+    "folderNotFound": "指定されたフォルダが見つかりません。",
+    "historyNotFound": "履歴バージョンが見つかりません。",
     "notInTrash": "ゴミ箱にありません。",
     "attachmentNotFound": "添付ファイルが見つかりません。",
     "attachmentLimitExceeded": "添付ファイルの上限に達しました。",

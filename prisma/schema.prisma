@@ -109,6 +109,10 @@ model User {
   // Extension tokens
   extensionTokens ExtensionToken[]
 
+  // Folder relations
+  folders                Folder[]
+  orgPasswordHistories   OrgPasswordEntryHistory[]
+
   @@map("users")
 }
 
@@ -180,13 +184,16 @@ model PasswordEntry {
   deletedAt         DateTime? @map("deleted_at")
 
   userId            String   @map("user_id")
+  folderId          String?  @map("folder_id")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
   tags        Tag[]
-  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  shares      PasswordShare[]   @relation("personalShares")
+  user        User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder      Folder?                @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  shares      PasswordShare[]        @relation("personalShares")
   attachments Attachment[]
+  histories   PasswordEntryHistory[]
 
   @@index([userId])
   @@map("password_entries")
@@ -233,6 +240,7 @@ model Organization {
   members     OrgMember[]
   passwords   OrgPasswordEntry[]
   tags        OrgTag[]
+  folders     OrgFolder[]
   invitations OrgInvitation[]
   auditLogs   AuditLog[]
 
@@ -273,20 +281,23 @@ model OrgPasswordEntry {
   isArchived Boolean   @default(false) @map("is_archived")
   deletedAt  DateTime? @map("deleted_at")
 
-  orgId       String @map("org_id")
-  createdById String @map("created_by_id")
-  updatedById String @map("updated_by_id")
+  orgId       String  @map("org_id")
+  createdById String  @map("created_by_id")
+  updatedById String  @map("updated_by_id")
+  orgFolderId String? @map("org_folder_id")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  org       Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  createdBy User                   @relation("orgPasswordCreator", fields: [createdById], references: [id])
-  updatedBy User                   @relation("orgPasswordUpdater", fields: [updatedById], references: [id])
+  org       Organization                @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy User                        @relation("orgPasswordCreator", fields: [createdById], references: [id])
+  updatedBy User                        @relation("orgPasswordUpdater", fields: [updatedById], references: [id])
+  orgFolder OrgFolder?                  @relation(fields: [orgFolderId], references: [id], onDelete: SetNull)
   tags        OrgTag[]
   favorites   OrgPasswordFavorite[]
-  shares      PasswordShare[]       @relation("orgShares")
+  shares      PasswordShare[]            @relation("orgShares")
   attachments Attachment[]
+  histories   OrgPasswordEntryHistory[]
 
   @@index([orgId])
   @@map("org_password_entries")
@@ -425,6 +436,11 @@ enum AuditAction {
   RECOVERY_KEY_REGENERATED
   RECOVERY_PASSPHRASE_RESET
   VAULT_RESET_EXECUTED
+  FOLDER_CREATE
+  FOLDER_UPDATE
+  FOLDER_DELETE
+  ENTRY_HISTORY_RESTORE
+  HISTORY_PURGE
 }
 
 enum AuditScope {
@@ -537,6 +553,81 @@ model EmergencyAccessGrant {
   @@index([granteeId])
   @@index([status])
   @@map("emergency_access_grants")
+}
+
+// ─── Folder Models ──────────────────────────────────────────
+
+model Folder {
+  id        String   @id @default(cuid())
+  name      String   @db.VarChar(100)
+  parentId  String?  @map("parent_id")
+  userId    String   @map("user_id")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent   Folder?         @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children Folder[]        @relation("FolderHierarchy")
+  entries  PasswordEntry[]
+
+  @@unique([name, parentId, userId])
+  @@index([userId])
+  @@map("folders")
+}
+
+model OrgFolder {
+  id        String   @id @default(cuid())
+  name      String   @db.VarChar(100)
+  parentId  String?  @map("parent_id")
+  orgId     String   @map("org_id")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  org      Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parent   OrgFolder?         @relation("OrgFolderHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children OrgFolder[]        @relation("OrgFolderHierarchy")
+  entries  OrgPasswordEntry[]
+
+  @@unique([name, parentId, orgId])
+  @@index([orgId])
+  @@map("org_folders")
+}
+
+// ─── Entry History Models ───────────────────────────────────
+
+model PasswordEntryHistory {
+  id            String   @id @default(cuid())
+  entryId       String   @map("entry_id")
+  encryptedBlob String   @map("encrypted_blob") @db.Text
+  blobIv        String   @map("blob_iv") @db.VarChar(24)
+  blobAuthTag   String   @map("blob_auth_tag") @db.VarChar(32)
+  keyVersion    Int      @map("key_version")
+  aadVersion    Int      @default(0) @map("aad_version")
+  changedAt     DateTime @default(now()) @map("changed_at")
+
+  entry PasswordEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId, changedAt])
+  @@map("password_entry_histories")
+}
+
+model OrgPasswordEntryHistory {
+  id            String   @id @default(cuid())
+  entryId       String   @map("entry_id")
+  encryptedBlob String   @map("encrypted_blob") @db.Text
+  blobIv        String   @map("blob_iv") @db.VarChar(24)
+  blobAuthTag   String   @map("blob_auth_tag") @db.VarChar(32)
+  aadVersion    Int      @default(0) @map("aad_version")
+  changedById   String   @map("changed_by_id")
+  changedAt     DateTime @default(now()) @map("changed_at")
+
+  entry     OrgPasswordEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  changedBy User             @relation(fields: [changedById], references: [id])
+
+  @@index([entryId, changedAt])
+  @@map("org_password_entry_histories")
 }
 
 model EmergencyAccessKeyPair {

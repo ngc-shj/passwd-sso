@@ -16,6 +16,7 @@ import { ArrowLeft, Eye, EyeOff, Tags } from "lucide-react";
 import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { toast } from "sonner";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { preventIMESubmit } from "@/lib/ime-guard";
 
 interface PasskeyFormProps {
   mode: "create" | "edit";
@@ -185,7 +186,7 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
   };
 
   const formContent = (
-    <form onSubmit={handleSubmit} className="space-y-5">
+    <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
       <EntryPrimaryCard>
       <div className="space-y-2">
         <Label htmlFor="title">{t("title")}</Label>

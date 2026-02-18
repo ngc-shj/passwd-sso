@@ -12,7 +12,8 @@
     "edit": "Edit",
     "tryAgain": "Try again",
     "or": "or",
-    "close": "Close"
+    "close": "Close",
+    "create": "Create"
   },
   "Auth": {
     "signOut": "Sign out",
@@ -60,7 +61,17 @@
     "newPasskey": "Passkey",
     "shareLinks": "Share Links",
     "emergencyAccess": "Emergency Access",
-    "sidebar": "Navigation"
+    "sidebar": "Navigation",
+    "folders": "Folders",
+    "noFolders": "No folders yet",
+    "createFolder": "New Folder",
+    "editFolder": "Edit Folder",
+    "deleteFolder": "Delete Folder",
+    "folderName": "Folder Name",
+    "parentFolder": "Parent Folder",
+    "noParent": "(Root)",
+    "folderDeleteConfirm": "Delete folder \"{name}\"? Sub-folders will be promoted to the parent, and entries will be unassigned.",
+    "folderMaxDepth": "Maximum folder depth ({max}) exceeded."
   },
   "ShareLinks": {
     "title": "Share Links",
@@ -152,7 +163,10 @@
     "openGenerator": "Generate",
     "closeGenerator": "Hide",
     "requireReprompt": "Require master password re-entry",
-    "requireRepromptHelp": "Prompt for master passphrase when viewing or copying sensitive fields."
+    "requireRepromptHelp": "Prompt for master passphrase when viewing or copying sensitive fields.",
+    "folder": "Folder",
+    "folderHint": "Organize this entry into a folder.",
+    "noFolder": "(None)"
   },
   "SecureNoteForm": {
     "newNote": "New Secure Note",
@@ -251,6 +265,7 @@
     "dobFuture": "Date of birth must be in the past"
   },
   "PasswordDetail": {
+    "title": "Title",
     "username": "Username",
     "password": "Password",
     "url": "URL",
@@ -276,6 +291,8 @@
     "cardNumber": "Card Number",
     "brand": "Brand",
     "expiry": "Expiration",
+    "expiryMonth": "Expiry Month",
+    "expiryYear": "Expiry Year",
     "cvv": "CVV",
     "fullName": "Full Name",
     "address": "Address",
@@ -290,7 +307,14 @@
     "relyingPartyName": "Relying Party Name",
     "credentialId": "Credential ID",
     "creationDate": "Creation Date",
-    "deviceInfo": "Device Info"
+    "deviceInfo": "Device Info",
+    "entryHistory": "Entry History",
+    "entryHistoryEmpty": "No previous versions",
+    "restoreVersion": "Restore",
+    "restoreConfirm": "Restore this version? The current version will be saved to history.",
+    "versionFrom": "Version from {date}",
+    "viewVersion": "View",
+    "cancel": "Cancel"
   },
   "RepromptDialog": {
     "title": "Verify Master Passphrase",
@@ -909,6 +933,11 @@
     "invalidPassphrase": "The passphrase is incorrect.",
     "userNotFound": "User not found.",
     "tagAlreadyExists": "A tag with that name already exists.",
+    "folderAlreadyExists": "A folder with that name already exists.",
+    "folderMaxDepthExceeded": "Maximum folder nesting depth exceeded.",
+    "folderCircularReference": "Cannot move a folder into its own descendant.",
+    "folderNotFound": "The specified folder was not found.",
+    "historyNotFound": "History version not found.",
     "notInTrash": "Item is not in the trash.",
     "attachmentNotFound": "Attachment not found.",
     "attachmentLimitExceeded": "Attachment limit reached.",

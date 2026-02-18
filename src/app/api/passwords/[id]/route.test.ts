@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockAuditCreate } = vi.hoisted(() => ({
+const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaTransaction, mockAuditCreate } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockAuthOrToken: vi.fn(),
   mockPrismaPasswordEntry: {
@@ -10,12 +10,23 @@ const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockAuditCreate } = 
     update: vi.fn(),
     delete: vi.fn(),
   },
+  mockPrismaHistory: {
+    create: vi.fn(),
+    findMany: vi.fn(),
+    deleteMany: vi.fn(),
+  },
+  mockPrismaTransaction: vi.fn(),
   mockAuditCreate: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { passwordEntry: mockPrismaPasswordEntry, auditLog: { create: mockAuditCreate } },
+  prisma: {
+    passwordEntry: mockPrismaPasswordEntry,
+    passwordEntryHistory: mockPrismaHistory,
+    auditLog: { create: mockAuditCreate },
+    $transaction: mockPrismaTransaction,
+  },
 }));
 
 import { GET, PUT, DELETE } from "./route";
@@ -178,10 +189,19 @@ describe("GET /api/passwords/[id]", () => {
 });
 
 describe("PUT /api/passwords/[id]", () => {
+  const txMock = {
+    passwordEntryHistory: {
+      create: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockAuditCreate.mockResolvedValue({});
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: typeof txMock) => Promise<unknown>) => fn(txMock));
   });
 
   const updateBody = {
@@ -322,6 +342,66 @@ describe("PUT /api/passwords/[id]", () => {
         data: expect.objectContaining({ isFavorite: true, isArchived: false }),
       }),
     );
+  });
+
+  it("creates history snapshot when encryptedBlob is updated", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "new-over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const updateBodyWithBlob = {
+      encryptedBlob: { ciphertext: "new-blob", iv: "a".repeat(24), authTag: "b".repeat(32) },
+      encryptedOverview: { ciphertext: "new-over", iv: "c".repeat(24), authTag: "d".repeat(32) },
+      keyVersion: 1,
+    };
+
+    await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBodyWithBlob }),
+      createParams({ id: PW_ID }),
+    );
+
+    // Should have called $transaction to create history snapshot
+    expect(mockPrismaTransaction).toHaveBeenCalled();
+    expect(txMock.passwordEntryHistory.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        entryId: PW_ID,
+        encryptedBlob: ownedEntry.encryptedBlob,
+        blobIv: ownedEntry.blobIv,
+        blobAuthTag: ownedEntry.blobAuthTag,
+      }),
+    });
+  });
+
+  it("does not create history snapshot when only metadata changes", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "overview-cipher",
+      overviewIv: "overview-iv",
+      overviewAuthTag: "overview-tag",
+      keyVersion: 1,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { isFavorite: true },
+      }),
+      createParams({ id: PW_ID }),
+    );
+
+    // $transaction should NOT have been called since no blob change
+    expect(mockPrismaTransaction).not.toHaveBeenCalled();
   });
 });
 

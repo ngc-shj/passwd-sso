@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrganization, mockPrismaOrgPasswordEntry, mockRequireOrgPermission, mockUnwrapOrgKey, mockEncryptServerData, mockDecryptServerData, OrgAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrganization, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockRequireOrgPermission, mockUnwrapOrgKey, mockEncryptServerData, mockDecryptServerData, OrgAuthError } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -18,6 +18,7 @@ const { mockAuth, mockPrismaOrganization, mockPrismaOrgPasswordEntry, mockRequir
       create: vi.fn(),
       deleteMany: vi.fn(),
     },
+    mockPrismaOrgFolder: { findUnique: vi.fn() },
     mockRequireOrgPermission: vi.fn(),
     mockUnwrapOrgKey: vi.fn(),
     mockEncryptServerData: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     organization: mockPrismaOrganization,
     orgPasswordEntry: mockPrismaOrgPasswordEntry,
+    orgFolder: mockPrismaOrgFolder,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
@@ -338,6 +340,41 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
         }),
       })
     );
+  });
+
+  it("filters by folder when folder param is provided", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+        searchParams: { folder: "folder-789" },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orgFolderId: "folder-789",
+        }),
+      })
+    );
+  });
+
+  it("does not filter by folder when folder param is absent", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createParams({ orgId: ORG_ID }),
+    );
+    const call = mockPrismaOrgPasswordEntry.findMany.mock.calls[0][0];
+    expect(call.where).not.toHaveProperty("orgFolderId");
   });
 
   it("passes AAD to decryptServerData for entries with aadVersion >= 1", async () => {
@@ -964,5 +1001,85 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
     expect(json[0].title).toBe("My Visa");
     expect(json[0].brand).toBe("Visa");
     expect(json[0].lastFour).toBe("1111");
+  });
+
+  it("creates entry with orgFolderId when folder belongs to same org", async () => {
+    const FOLDER_CUID = "cm1234567890abcdefghijkl1";
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: ORG_ID });
+    mockPrismaOrgPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      tags: [],
+      createdAt: now,
+    });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+        body: { ...validBody, orgFolderId: FOLDER_CUID },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(201);
+    expect(mockPrismaOrgPasswordEntry.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ orgFolderId: FOLDER_CUID }),
+      }),
+    );
+  });
+
+  it("returns 400 when orgFolderId belongs to a different org", async () => {
+    const FOLDER_CUID = "cm1234567890abcdefghijkl1";
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: "other-org-999" });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+        body: { ...validBody, orgFolderId: FOLDER_CUID },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("FOLDER_NOT_FOUND");
+  });
+
+  it("returns 400 when orgFolderId does not exist", async () => {
+    const FOLDER_CUID = "cm1234567890abcdefghijkl1";
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgFolder.findUnique.mockResolvedValue(null);
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+        body: { ...validBody, orgFolderId: FOLDER_CUID },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("FOLDER_NOT_FOUND");
+  });
+
+  it("creates entry without folder validation when orgFolderId is not provided", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      tags: [],
+      createdAt: now,
+    });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: validBody }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(201);
+    expect(mockPrismaOrgFolder.findUnique).not.toHaveBeenCalled();
   });
 });

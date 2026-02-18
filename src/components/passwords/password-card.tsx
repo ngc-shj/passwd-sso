@@ -702,6 +702,10 @@ export function PasswordCard({
                   if (onEditClick) onEditClick();
                   else setEditDialogOpen(true);
                 } : undefined}
+                onRefresh={() => {
+                  setDetailData(null);
+                  onRefresh();
+                }}
                 orgId={orgId}
               />
             </div>

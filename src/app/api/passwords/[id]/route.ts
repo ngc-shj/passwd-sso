@@ -58,6 +58,7 @@ async function handleGET(
     isFavorite: entry.isFavorite,
     isArchived: entry.isArchived,
     requireReprompt: entry.requireReprompt,
+    folderId: entry.folderId,
     tagIds: entry.tags.map((t) => t.id),
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
@@ -103,10 +104,35 @@ async function handlePUT(
     );
   }
 
-  const { encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, isFavorite, isArchived, entryType, requireReprompt } = parsed.data;
+  const { encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, isFavorite, isArchived, entryType, requireReprompt } = parsed.data;
   const updateData: Record<string, unknown> = {};
 
+  // If encryptedBlob is changing, snapshot the current version to history
   if (encryptedBlob) {
+    await prisma.$transaction(async (tx) => {
+      await tx.passwordEntryHistory.create({
+        data: {
+          entryId: id,
+          encryptedBlob: existing.encryptedBlob,
+          blobIv: existing.blobIv,
+          blobAuthTag: existing.blobAuthTag,
+          keyVersion: existing.keyVersion,
+          aadVersion: existing.aadVersion,
+        },
+      });
+      // Trim to max 20 entries (stable sort: changedAt asc, id asc)
+      const all = await tx.passwordEntryHistory.findMany({
+        where: { entryId: id },
+        orderBy: [{ changedAt: "asc" }, { id: "asc" }],
+        select: { id: true },
+      });
+      if (all.length > 20) {
+        await tx.passwordEntryHistory.deleteMany({
+          where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+        });
+      }
+    });
+
     updateData.encryptedBlob = encryptedBlob.ciphertext;
     updateData.blobIv = encryptedBlob.iv;
     updateData.blobAuthTag = encryptedBlob.authTag;
@@ -118,6 +144,7 @@ async function handlePUT(
   }
   if (keyVersion !== undefined) updateData.keyVersion = keyVersion;
   if (aadVersion !== undefined) updateData.aadVersion = aadVersion;
+  if (folderId !== undefined) updateData.folderId = folderId;
   if (isFavorite !== undefined) updateData.isFavorite = isFavorite;
   if (isArchived !== undefined) updateData.isArchived = isArchived;
   if (entryType !== undefined) updateData.entryType = entryType;

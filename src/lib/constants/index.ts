@@ -38,6 +38,7 @@ export {
   AUDIT_ACTION_GROUPS_PERSONAL,
   AUDIT_ACTION_GROUPS_ORG,
   AUDIT_ACTION_EMERGENCY_PREFIX,
+  AUDIT_METADATA_KEY,
 } from "./audit";
 export type { AuditScopeValue, AuditActionValue } from "./audit";
 

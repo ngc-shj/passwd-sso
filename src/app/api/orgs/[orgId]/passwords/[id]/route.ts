@@ -105,6 +105,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     title: blob.title,
     isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,
+    orgFolderId: entry.orgFolderId,
     tags: entry.tags,
     createdBy: entry.createdBy,
     updatedBy: entry.updatedBy,
@@ -246,6 +247,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   let updatedBlobStr: string;
   let overviewBlobStr: string;
   let tagIds: string[] | undefined;
+  let orgFolderId: string | null | undefined;
   let isArchived: boolean | undefined;
   let responseTitle: string;
 
@@ -259,6 +261,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
 
     tagIds = parsed.data.tagIds;
+    orgFolderId = parsed.data.orgFolderId;
     isArchived = parsed.data.isArchived;
 
     const updatedBlob = {
@@ -280,6 +283,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
 
     tagIds = parsed.data.tagIds;
+    orgFolderId = parsed.data.orgFolderId;
     isArchived = parsed.data.isArchived;
 
     const updatedBlob = {
@@ -335,6 +339,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
 
     tagIds = parsed.data.tagIds;
+    orgFolderId = parsed.data.orgFolderId;
     isArchived = parsed.data.isArchived;
 
     const mergeField = (field: string) =>
@@ -388,6 +393,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
     const { customFields, totp, ...fieldUpdates } = parsed.data;
     tagIds = parsed.data.tagIds;
+    orgFolderId = parsed.data.orgFolderId;
     isArchived = parsed.data.isArchived;
 
     const updatedBlob: Record<string, unknown> = {
@@ -438,6 +444,17 @@ export async function PUT(req: NextRequest, { params }: Params) {
     });
   }
 
+  // Validate orgFolderId belongs to this org
+  if (orgFolderId) {
+    const folder = await prisma.orgFolder.findUnique({
+      where: { id: orgFolderId },
+      select: { orgId: true },
+    });
+    if (!folder || folder.orgId !== orgId) {
+      return NextResponse.json({ error: API_ERROR.FOLDER_NOT_FOUND }, { status: 400 });
+    }
+  }
+
   // Always re-encrypt with AAD (save-time migration for legacy entries)
   const blobAad = Buffer.from(buildOrgEntryAAD(orgId, id, "blob"));
   const overviewAad = Buffer.from(buildOrgEntryAAD(orgId, id, "overview"));
@@ -456,10 +473,36 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updatedById: session.user.id,
   };
 
+  if (orgFolderId !== undefined) updateData.orgFolderId = orgFolderId;
   if (isArchived !== undefined) updateData.isArchived = isArchived;
   if (tagIds !== undefined) {
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
   }
+
+  // Snapshot current blob to history before updating
+  await prisma.$transaction(async (tx) => {
+    await tx.orgPasswordEntryHistory.create({
+      data: {
+        entryId: id,
+        encryptedBlob: entry.encryptedBlob,
+        blobIv: entry.blobIv,
+        blobAuthTag: entry.blobAuthTag,
+        aadVersion: entry.aadVersion,
+        changedById: session.user.id,
+      },
+    });
+    // Trim to max 20 entries (stable sort: changedAt asc, id asc)
+    const all = await tx.orgPasswordEntryHistory.findMany({
+      where: { entryId: id },
+      orderBy: [{ changedAt: "asc" }, { id: "asc" }],
+      select: { id: true },
+    });
+    if (all.length > 20) {
+      await tx.orgPasswordEntryHistory.deleteMany({
+        where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+      });
+    }
+  });
 
   const updated = await prisma.orgPasswordEntry.update({
     where: { id },

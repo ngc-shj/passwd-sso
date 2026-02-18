@@ -42,6 +42,15 @@ export const API_ERROR = {
   // ── Tags ──────────────────────────────────────────────────
   TAG_ALREADY_EXISTS: "TAG_ALREADY_EXISTS",
 
+  // ── Folders ─────────────────────────────────────────────────
+  FOLDER_ALREADY_EXISTS: "FOLDER_ALREADY_EXISTS",
+  FOLDER_MAX_DEPTH_EXCEEDED: "FOLDER_MAX_DEPTH_EXCEEDED",
+  FOLDER_CIRCULAR_REFERENCE: "FOLDER_CIRCULAR_REFERENCE",
+  FOLDER_NOT_FOUND: "FOLDER_NOT_FOUND",
+
+  // ── History ─────────────────────────────────────────────────
+  HISTORY_NOT_FOUND: "HISTORY_NOT_FOUND",
+
   // ── Passwords / Attachments ──────────────────────────────
   NOT_IN_TRASH: "NOT_IN_TRASH",
   ATTACHMENT_NOT_FOUND: "ATTACHMENT_NOT_FOUND",
@@ -131,6 +140,11 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   ACCOUNT_LOCKED: "accountLocked",
   SERVICE_UNAVAILABLE: "serviceUnavailable",
   TAG_ALREADY_EXISTS: "tagAlreadyExists",
+  FOLDER_ALREADY_EXISTS: "folderAlreadyExists",
+  FOLDER_MAX_DEPTH_EXCEEDED: "folderMaxDepthExceeded",
+  FOLDER_CIRCULAR_REFERENCE: "folderCircularReference",
+  FOLDER_NOT_FOUND: "folderNotFound",
+  HISTORY_NOT_FOUND: "historyNotFound",
   NOT_IN_TRASH: "notInTrash",
   ATTACHMENT_NOT_FOUND: "attachmentNotFound",
   ATTACHMENT_LIMIT_EXCEEDED: "attachmentLimitExceeded",
