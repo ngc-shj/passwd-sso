@@ -22,7 +22,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { ArrowLeft, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import type { EntryCustomField, EntryPasswordHistory, EntryTotp } from "@/lib/entry-form-types";
+import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   extractTagIds,
@@ -38,27 +38,7 @@ import {
   buildPersonalCurrentSnapshot,
   buildPersonalInitialSnapshot,
 } from "@/components/passwords/personal-password-form-snapshot";
-
-interface PasswordFormProps {
-  mode: "create" | "edit";
-  initialData?: {
-    id: string;
-    title: string;
-    username: string;
-    password: string;
-    url: string;
-    notes: string;
-    tags: TagData[];
-    generatorSettings?: GeneratorSettings;
-    passwordHistory?: EntryPasswordHistory[];
-    customFields?: EntryCustomField[];
-    totp?: EntryTotp;
-    requireReprompt?: boolean;
-    folderId?: string | null;
-  };
-  variant?: "page" | "dialog";
-  onSaved?: () => void;
-}
+import type { PasswordFormProps } from "@/components/passwords/password-form-types";
 
 export function PasswordForm({ mode, initialData, variant = "page", onSaved }: PasswordFormProps) {
   const t = useTranslations("PasswordForm");
