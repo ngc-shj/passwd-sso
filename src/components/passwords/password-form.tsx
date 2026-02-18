@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
@@ -35,6 +35,10 @@ import {
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { savePersonalEntry } from "@/lib/personal-entry-save";
 import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
+import {
+  buildPersonalCurrentSnapshot,
+  buildPersonalInitialSnapshot,
+} from "@/components/passwords/personal-password-form-snapshot";
 
 interface PasswordFormProps {
   mode: "create" | "edit";
@@ -89,26 +93,9 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
   const folders = usePersonalFolders();
 
-  const initialSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: initialData?.title ?? "",
-        username: initialData?.username ?? "",
-        password: initialData?.password ?? "",
-        url: initialData?.url ?? "",
-        notes: initialData?.notes ?? "",
-        tags: initialData?.tags ?? [],
-        generatorSettings:
-          initialData?.generatorSettings ?? { ...DEFAULT_GENERATOR_SETTINGS },
-        customFields: initialData?.customFields ?? [],
-        totp: initialData?.totp ?? null,
-        requireReprompt: initialData?.requireReprompt ?? false,
-        folderId: initialData?.folderId ?? null,
-      }),
-    [initialData]
-  );
+  const initialSnapshot = buildPersonalInitialSnapshot(initialData);
 
-  const currentSnapshot = JSON.stringify({
+  const currentSnapshot = buildPersonalCurrentSnapshot({
     title,
     username,
     password,
