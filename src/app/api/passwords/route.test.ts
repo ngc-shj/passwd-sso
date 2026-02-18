@@ -51,6 +51,7 @@ const mockEntry = {
   entryType: ENTRY_TYPE.LOGIN,
   isFavorite: false,
   isArchived: false,
+  requireReprompt: false,
   tags: [{ id: "t1" }],
   createdAt: now,
   updatedAt: now,
@@ -729,6 +730,33 @@ describe("POST /api/passwords", () => {
     expect(json[0].entryType).toBe("PASSKEY");
   });
 
+  it("creates entry with requireReprompt=true (201)", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-reprompt",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      entryType: ENTRY_TYPE.LOGIN,
+      requireReprompt: true,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: { ...validBody, requireReprompt: true },
+    }));
+    const json = await res.json();
+    expect(res.status).toBe(201);
+    expect(json.requireReprompt).toBe(true);
+    expect(mockPrismaPasswordEntry.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ requireReprompt: true }),
+      }),
+    );
+  });
+
   it("ignores invalid entryType query param", async () => {
     mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
     mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
@@ -737,6 +765,15 @@ describe("POST /api/passwords", () => {
     }));
     const call = mockPrismaPasswordEntry.findMany.mock.calls[0][0];
     expect(call.where).not.toHaveProperty("entryType");
+  });
+
+  it("returns requireReprompt in response entries", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([
+      { ...mockEntry, requireReprompt: true },
+    ]);
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    const json = await res.json();
+    expect(json[0].requireReprompt).toBe(true);
   });
 
   it("filters by entryType PASSKEY", async () => {

@@ -70,6 +70,7 @@ interface ParsedEntry {
   } | null;
   generatorSettings: Record<string, unknown> | null;
   passwordHistory: Array<{ password: string; changedAt: string }>;
+  requireReprompt: boolean;
 }
 
 interface ExistingTag {
@@ -84,7 +85,7 @@ type CsvFormat = "bitwarden" | "onepassword" | "chrome" | "passwd-sso" | "unknow
 
 function extraDefaults(): Pick<
   ParsedEntry,
-  "tags" | "customFields" | "totp" | "generatorSettings" | "passwordHistory"
+  "tags" | "customFields" | "totp" | "generatorSettings" | "passwordHistory" | "requireReprompt"
 > {
   return {
     tags: [],
@@ -92,6 +93,7 @@ function extraDefaults(): Pick<
     totp: null,
     generatorSettings: null,
     passwordHistory: [],
+    requireReprompt: false,
   };
 }
 
@@ -112,6 +114,7 @@ function parsePasswdSsoPayload(raw: string | undefined): Partial<ParsedEntry> {
           ? parsed.generatorSettings
           : null,
       passwordHistory: Array.isArray(parsed.passwordHistory) ? parsed.passwordHistory : [],
+      ...("requireReprompt" in parsed ? { requireReprompt: parsed.requireReprompt === true } : {}),
       cardholderName: typeof parsed.cardholderName === "string" ? parsed.cardholderName : "",
       cardNumber: typeof parsed.cardNumber === "string" ? parsed.cardNumber : "",
       brand: typeof parsed.brand === "string" ? parsed.brand : "",
@@ -362,6 +365,11 @@ function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
     }
     entry = { ...entry, ...passwdSso };
 
+    // CSV reprompt column: "1" → true, everything else → false (Bitwarden compat)
+    if (!("requireReprompt" in passwdSso)) {
+      entry.requireReprompt = row["reprompt"] === "1";
+    }
+
     // Login entries need title+password, notes/cards/identities/passkeys need title only
     const valid = entry.entryType === ENTRY_TYPE.LOGIN
       ? !!entry.title && !!entry.password
@@ -396,6 +404,14 @@ function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFormat } 
         item.passwdSso && typeof item.passwdSso === "object"
           ? parsePasswdSsoPayload(JSON.stringify(item.passwdSso))
           : {};
+
+      // Resolve requireReprompt: passwdSso > item.requireReprompt (strict boolean) > item.reprompt (Bitwarden)
+      if (!("requireReprompt" in passwdSso)) {
+        passwdSso.requireReprompt =
+          "requireReprompt" in item
+            ? item.requireReprompt === true
+            : item.reprompt === 1;
+      }
 
       const cardDefaults = {
         cardholderName: "", cardNumber: "", brand: "",
@@ -691,6 +707,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             relyingPartyId: entry.relyingPartyId || null,
             username: entry.username || null,
             tags: entry.tags,
+            requireReprompt: entry.requireReprompt,
           });
         } else if (isIdentity) {
           const idNumberLast4 = entry.idNumber ? entry.idNumber.slice(-4) : null;
@@ -713,6 +730,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             fullName: entry.fullName || null,
             idNumberLast4,
             tags: entry.tags,
+            requireReprompt: entry.requireReprompt,
           });
         } else if (isCard) {
           const lastFour = entry.cardNumber
@@ -735,6 +753,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             brand: entry.brand || null,
             lastFour,
             tags: entry.tags,
+            requireReprompt: entry.requireReprompt,
           });
         } else if (isNote) {
           fullBlob = JSON.stringify({
@@ -746,6 +765,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             title: entry.title,
             snippet: (entry.content || "").slice(0, 100),
             tags: entry.tags,
+            requireReprompt: entry.requireReprompt,
           });
         } else {
           let urlHost: string | null = null;
@@ -773,6 +793,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             username: entry.username || null,
             urlHost,
             tags: entry.tags,
+            requireReprompt: entry.requireReprompt,
           });
         }
 
@@ -800,6 +821,7 @@ export function ImportDialog({ trigger, onComplete }: ImportDialogProps) {
             keyVersion: 1,
             aadVersion: aad ? AAD_VERSION : 0,
             tagIds,
+            ...(entry.requireReprompt ? { requireReprompt: true } : {}),
           }),
         });
 

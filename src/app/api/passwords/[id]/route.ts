@@ -57,6 +57,7 @@ async function handleGET(
     entryType: entry.entryType,
     isFavorite: entry.isFavorite,
     isArchived: entry.isArchived,
+    requireReprompt: entry.requireReprompt,
     tagIds: entry.tags.map((t) => t.id),
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
@@ -102,7 +103,7 @@ async function handlePUT(
     );
   }
 
-  const { encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, isFavorite, isArchived, entryType } = parsed.data;
+  const { encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, isFavorite, isArchived, entryType, requireReprompt } = parsed.data;
   const updateData: Record<string, unknown> = {};
 
   if (encryptedBlob) {
@@ -120,6 +121,7 @@ async function handlePUT(
   if (isFavorite !== undefined) updateData.isFavorite = isFavorite;
   if (isArchived !== undefined) updateData.isArchived = isArchived;
   if (entryType !== undefined) updateData.entryType = entryType;
+  if (requireReprompt !== undefined) updateData.requireReprompt = requireReprompt;
   if (tagIds !== undefined) {
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
   }
@@ -149,6 +151,7 @@ async function handlePUT(
     keyVersion: updated.keyVersion,
     aadVersion: updated.aadVersion,
     entryType: updated.entryType,
+    requireReprompt: updated.requireReprompt,
     tagIds: updated.tags.map((t) => t.id),
     createdAt: updated.createdAt,
     updatedAt: updated.updatedAt,

@@ -57,6 +57,7 @@ interface PasswordFormProps {
     passwordHistory?: PasswordHistoryEntry[];
     customFields?: CustomField[];
     totp?: TOTPEntry;
+    requireReprompt?: boolean;
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
@@ -90,6 +91,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     initialData?.totp ?? null
   );
   const [showTotpInput, setShowTotpInput] = useState(!!initialData?.totp);
+  const [requireReprompt, setRequireReprompt] = useState(initialData?.requireReprompt ?? false);
 
   const initialSnapshot = useMemo(
     () =>
@@ -104,6 +106,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
           initialData?.generatorSettings ?? { ...DEFAULT_GENERATOR_SETTINGS },
         customFields: initialData?.customFields ?? [],
         totp: initialData?.totp ?? null,
+        requireReprompt: initialData?.requireReprompt ?? false,
       }),
     [initialData]
   );
@@ -118,6 +121,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     generatorSettings,
     customFields,
     totp,
+    requireReprompt,
   });
   const hasChanges = currentSnapshot !== initialSnapshot;
 
@@ -173,6 +177,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
         username: username || null,
         urlHost,
         tags,
+        requireReprompt,
       });
 
       // For create: generate client-side UUID for AAD binding
@@ -190,6 +195,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
         keyVersion: 1,
         aadVersion: aad ? AAD_VERSION : 0,
         tagIds: selectedTags.map((t) => t.id),
+        requireReprompt,
       };
 
       const endpoint =
@@ -478,6 +484,25 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                   onRemove={() => setShowTotpInput(false)}
                 />
               )}
+            </EntrySectionCard>
+
+            {/* Reprompt */}
+            <EntrySectionCard>
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={requireReprompt}
+                  onChange={(e) => setRequireReprompt(e.target.checked)}
+                  className="h-4 w-4 rounded border-input accent-primary"
+                />
+                <div className="space-y-0.5">
+                  <span className="text-sm font-medium flex items-center gap-1.5">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    {t("requireReprompt")}
+                  </span>
+                  <p className="text-xs text-muted-foreground">{t("requireRepromptHelp")}</p>
+                </div>
+              </label>
             </EntrySectionCard>
 
             <EntryActionBar

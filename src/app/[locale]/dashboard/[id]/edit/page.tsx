@@ -42,6 +42,7 @@ interface FormData {
   passwordHistory?: PasswordHistoryEntry[];
   customFields?: CustomField[];
   totp?: TOTPEntry;
+  requireReprompt?: boolean;
 }
 
 export default function EditPasswordPage() {
@@ -89,6 +90,7 @@ export default function EditPasswordPage() {
           passwordHistory: entry.passwordHistory,
           customFields: entry.customFields,
           totp: entry.totp,
+          requireReprompt: raw.requireReprompt ?? false,
         });
       } catch (e) {
         setError(e instanceof Error ? e.message : t("notFound"));

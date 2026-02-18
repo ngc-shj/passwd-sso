@@ -47,6 +47,7 @@ interface DetailData {
   totp?: TOTPEntry;
   isFavorite: boolean;
   isArchived: boolean;
+  requireReprompt: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -91,6 +92,7 @@ export default function PasswordDetailPage() {
           totp: entry.totp,
           isFavorite: raw.isFavorite ?? false,
           isArchived: raw.isArchived ?? false,
+          requireReprompt: raw.requireReprompt ?? false,
           createdAt: raw.createdAt,
           updatedAt: raw.updatedAt,
         });

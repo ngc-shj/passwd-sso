@@ -47,6 +47,7 @@ import {
   IdCard,
   Fingerprint,
   Link as LinkIcon,
+  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useVault } from "@/lib/vault-context";
@@ -91,6 +92,8 @@ interface PasswordCardProps {
   createdBy?: string | null;
   // Optional: org context for share dialog
   orgId?: string;
+  // Optional: reprompt indicator
+  requireReprompt?: boolean;
 }
 
 interface VaultEntryFull {
@@ -158,6 +161,7 @@ export function PasswordCard({
   canDelete = true,
   createdBy,
   orgId,
+  requireReprompt = false,
 }: PasswordCardProps) {
   const isOrgMode = !!getPasswordProp;
   const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
@@ -470,6 +474,9 @@ export function PasswordCard({
           <div className="flex-1 min-w-0">
             <span className="font-medium truncate block text-left">
               {title}
+              {requireReprompt && (
+                <ShieldCheck className="inline-block ml-1 h-3.5 w-3.5 text-muted-foreground align-text-bottom" />
+              )}
             </span>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               {isPasskey ? (

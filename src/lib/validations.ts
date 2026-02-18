@@ -48,6 +48,7 @@ export const createE2EPasswordSchema = z.object({
   aadVersion: z.number().int().min(0).max(1).optional().default(1),
   tagIds: z.array(z.string().cuid()).optional(),
   entryType: entryTypeSchema.optional().default(ENTRY_TYPE.LOGIN),
+  requireReprompt: z.boolean().optional(),
 }).refine(
   (d) => (d.aadVersion ?? 0) < 1 || !!d.id,
   { message: "id is required when aadVersion >= 1", path: ["id"] }
@@ -62,6 +63,7 @@ export const updateE2EPasswordSchema = z.object({
   isFavorite: z.boolean().optional(),
   isArchived: z.boolean().optional(),
   entryType: entryTypeSchema.optional(),
+  requireReprompt: z.boolean().optional(),
 });
 
 // ─── Tag Schemas ────────────────────────────────────────────
