@@ -4,10 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { encryptExport } from "@/lib/export-crypto";
 import {
-  DialogDescription,
   DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -166,13 +163,13 @@ function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
 
   const content = (
     <>
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2">
+      <div className="space-y-1.5">
+        <h1 className="flex items-center gap-2 text-lg font-semibold leading-none tracking-tight">
           <Building2 className="h-4 w-4" />
           {t("title")}
-        </DialogTitle>
-        <DialogDescription>{t("description")}</DialogDescription>
-      </DialogHeader>
+        </h1>
+        <p className="text-sm text-muted-foreground">{t("description")}</p>
+      </div>
 
         <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
           <AlertTriangle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />

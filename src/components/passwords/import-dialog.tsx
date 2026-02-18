@@ -11,10 +11,7 @@ import {
   type EncryptedExportFile,
 } from "@/lib/export-crypto";
 import {
-  DialogDescription,
   DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -849,13 +846,13 @@ function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
 
   const content = (
     <>
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2">
+      <div className="space-y-1.5">
+        <h1 className="flex items-center gap-2 text-lg font-semibold leading-none tracking-tight">
           <FileUp className="h-4 w-4" />
           {t("title")}
-        </DialogTitle>
-        <DialogDescription>{t("description")}</DialogDescription>
-      </DialogHeader>
+        </h1>
+        <p className="text-sm text-muted-foreground">{t("description")}</p>
+      </div>
 
         {done ? (
           <div className="flex flex-col items-center gap-3 py-6">
