@@ -69,6 +69,7 @@ export type SortOption = "updatedAt" | "createdAt" | "title";
 interface PasswordListProps {
   searchQuery: string;
   tagId: string | null;
+  folderId?: string | null;
   entryType?: string | null;
   refreshKey: number;
   favoritesOnly?: boolean;
@@ -81,6 +82,7 @@ interface PasswordListProps {
 export function PasswordList({
   searchQuery,
   tagId,
+  folderId,
   entryType,
   refreshKey,
   favoritesOnly = false,
@@ -108,6 +110,7 @@ export function PasswordList({
     try {
       const params = new URLSearchParams();
       if (tagId) params.set("tag", tagId);
+      if (folderId) params.set("folder", folderId);
       if (entryType) params.set("type", entryType);
       if (favoritesOnly) params.set("favorites", "true");
       if (archivedOnly) params.set("archived", "true");
@@ -196,7 +199,7 @@ export function PasswordList({
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, tagId, entryType, encryptionKey, favoritesOnly, archivedOnly, sortBy, userId]);
+  }, [searchQuery, tagId, folderId, entryType, encryptionKey, favoritesOnly, archivedOnly, sortBy, userId]);
 
   useEffect(() => {
     fetchPasswords();

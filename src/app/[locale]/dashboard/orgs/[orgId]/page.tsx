@@ -64,6 +64,7 @@ export default function OrgDashboardPage({
   const { orgId } = use(params);
   const searchParams = useSearchParams();
   const activeTagId = searchParams.get("tag");
+  const activeFolderId = searchParams.get("folder");
   const activeEntryType = searchParams.get("type");
   const activeScope = searchParams.get("scope");
   const t = useTranslations("Org");
@@ -109,6 +110,7 @@ export default function OrgDashboardPage({
     credentialId?: string | null;
     creationDate?: string | null;
     deviceInfo?: string | null;
+    orgFolderId?: string | null;
   } | null>(null);
   const isOrgArchive = activeScope === "archive";
   const isOrgTrash = activeScope === "trash";
@@ -137,6 +139,7 @@ export default function OrgDashboardPage({
     setLoading(true);
     const params = new URLSearchParams();
     if (activeTagId) params.set("tag", activeTagId);
+    if (activeFolderId) params.set("folder", activeFolderId);
     if (activeEntryType) params.set("type", activeEntryType);
     const qs = params.toString();
     const url = `${apiPath.orgPasswords(orgId)}${qs ? `?${qs}` : ""}`;
@@ -147,7 +150,7 @@ export default function OrgDashboardPage({
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [orgId, activeTagId, activeEntryType]);
+  }, [orgId, activeTagId, activeFolderId, activeEntryType]);
 
   useEffect(() => {
     setLoadError(false);

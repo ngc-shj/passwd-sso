@@ -111,7 +111,7 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (filteredTags.length > 0 && !canCreate) {
         addTag(filteredTags[0]);

@@ -30,6 +30,7 @@ async function handleGET(req: NextRequest) {
   const favoritesOnly = searchParams.get("favorites") === "true";
   const trashOnly = searchParams.get("trash") === "true";
   const archivedOnly = searchParams.get("archived") === "true";
+  const folderId = searchParams.get("folder");
 
   const passwords = await prisma.passwordEntry.findMany({
     where: {
@@ -43,6 +44,7 @@ async function handleGET(req: NextRequest) {
       ...(favoritesOnly ? { isFavorite: true } : {}),
       ...(tagId ? { tags: { some: { id: tagId } } } : {}),
       ...(entryType ? { entryType } : {}),
+      ...(folderId ? { folderId } : {}),
     },
     include: { tags: { select: { id: true } } },
     orderBy: [{ isFavorite: "desc" }, { updatedAt: "desc" }],
@@ -82,6 +84,7 @@ async function handleGET(req: NextRequest) {
     isFavorite: entry.isFavorite,
     isArchived: entry.isArchived,
     requireReprompt: entry.requireReprompt,
+    folderId: entry.folderId,
     tagIds: entry.tags.map((t) => t.id),
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
@@ -113,7 +116,7 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, entryType, requireReprompt } = parsed.data;
+  const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, entryType, requireReprompt } = parsed.data;
 
   const entry = await prisma.passwordEntry.create({
     data: {
@@ -128,6 +131,7 @@ async function handlePOST(req: NextRequest) {
       aadVersion,
       entryType,
       ...(requireReprompt !== undefined ? { requireReprompt } : {}),
+      ...(folderId ? { folderId } : {}),
       userId: session.user.id,
       ...(tagIds?.length
         ? { tags: { connect: tagIds.map((id) => ({ id })) } }

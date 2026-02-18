@@ -47,6 +47,7 @@ export const createE2EPasswordSchema = z.object({
   keyVersion: z.number().int().min(1),
   aadVersion: z.number().int().min(0).max(1).optional().default(1),
   tagIds: z.array(z.string().cuid()).optional(),
+  folderId: z.string().cuid().optional().nullable(),
   entryType: entryTypeSchema.optional().default(ENTRY_TYPE.LOGIN),
   requireReprompt: z.boolean().optional(),
 }).refine(
@@ -60,10 +61,25 @@ export const updateE2EPasswordSchema = z.object({
   keyVersion: z.number().int().min(1).optional(),
   aadVersion: z.number().int().min(0).max(1).optional(),
   tagIds: z.array(z.string().cuid()).optional(),
+  folderId: z.string().cuid().optional().nullable(),
   isFavorite: z.boolean().optional(),
   isArchived: z.boolean().optional(),
   entryType: entryTypeSchema.optional(),
   requireReprompt: z.boolean().optional(),
+});
+
+// ─── Folder Schemas ─────────────────────────────────────────
+
+export const createFolderSchema = z.object({
+  name: z.string().min(1).max(100).trim(),
+  parentId: z.string().cuid().optional().nullable(),
+  sortOrder: z.number().int().min(0).optional(),
+});
+
+export const updateFolderSchema = z.object({
+  name: z.string().min(1).max(100).trim().optional(),
+  parentId: z.string().cuid().optional().nullable(),
+  sortOrder: z.number().int().min(0).optional(),
 });
 
 // ─── Tag Schemas ────────────────────────────────────────────
@@ -141,6 +157,7 @@ export const createOrgPasswordSchema = z.object({
   url: z.string().max(2000).optional().or(z.literal("")),
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
   customFields: z.array(customFieldSchema).optional(),
   totp: totpSchema.optional().nullable(),
 });
@@ -152,6 +169,7 @@ export const updateOrgPasswordSchema = z.object({
   url: z.string().max(2000).optional().or(z.literal("")),
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
   customFields: z.array(customFieldSchema).optional(),
   totp: totpSchema.optional().nullable(),
   isArchived: z.boolean().optional(),
@@ -162,12 +180,14 @@ export const createOrgSecureNoteSchema = z.object({
   title: z.string().min(1).max(200).trim(),
   content: z.string().max(50000),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
 });
 
 export const updateOrgSecureNoteSchema = z.object({
   title: z.string().min(1).max(200).trim().optional(),
   content: z.string().max(50000).optional(),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
   isArchived: z.boolean().optional(),
 });
 
@@ -182,6 +202,7 @@ export const createOrgCreditCardSchema = z.object({
   cvv: z.string().max(10).optional().or(z.literal("")),
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
 }).superRefine((data, ctx) => {
   if (!data.cardNumber) return;
 
@@ -234,6 +255,7 @@ export const updateOrgCreditCardSchema = z.object({
   cvv: z.string().max(10).optional().or(z.literal("")),
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
   isArchived: z.boolean().optional(),
 }).superRefine((data, ctx) => {
   if (!data.cardNumber) return;
@@ -294,6 +316,7 @@ export const createOrgIdentitySchema = z.object({
   expiryDate: dateSchema,
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
 }).superRefine((data, ctx) => {
   if (data.dateOfBirth) {
     const today = new Date().toISOString().slice(0, 10);
@@ -327,6 +350,7 @@ export const updateOrgIdentitySchema = z.object({
   expiryDate: dateSchema,
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
   isArchived: z.boolean().optional(),
 }).superRefine((data, ctx) => {
   if (data.dateOfBirth) {
@@ -466,6 +490,8 @@ export type GeneratePasswordInput = z.infer<typeof generatePasswordSchema>;
 export type GeneratePassphraseInput = z.infer<typeof generatePassphraseSchema>;
 export type CreateE2EPasswordInput = z.infer<typeof createE2EPasswordSchema>;
 export type UpdateE2EPasswordInput = z.infer<typeof updateE2EPasswordSchema>;
+export type CreateFolderInput = z.infer<typeof createFolderSchema>;
+export type UpdateFolderInput = z.infer<typeof updateFolderSchema>;
 export type CreateTagInput = z.infer<typeof createTagSchema>;
 export type UpdateTagInput = z.infer<typeof updateTagSchema>;
 export type CreateOrgInput = z.infer<typeof createOrgSchema>;

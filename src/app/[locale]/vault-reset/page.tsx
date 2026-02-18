@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { preventIMESubmit } from "@/lib/ime-guard";
 import { API_PATH } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,7 +74,7 @@ export default function VaultResetPage() {
           <h1 className="text-2xl font-bold">{t("title")}</h1>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border border-destructive/30 bg-card p-6 shadow-sm">
+        <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-4 rounded-lg border border-destructive/30 bg-card p-6 shadow-sm">
           <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
             {t("warning")}
           </div>
