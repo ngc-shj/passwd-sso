@@ -51,8 +51,8 @@ import {
 } from "@/lib/credit-card";
 import {
   extractTagIds,
-  filterNonEmptyCustomFields,
 } from "@/lib/entry-form-helpers";
+import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
 
@@ -386,83 +386,39 @@ export function OrgPasswordForm({
         ? apiPath.orgPasswordById(orgId, editData.id)
         : apiPath.orgPasswords(orgId);
       const tagIds = extractTagIds(selectedTags);
-
-      let body: Record<string, unknown>;
-
-      if (isPasskey) {
-        body = {
-          entryType: ENTRY_TYPE.PASSKEY,
-          title: title.trim(),
-          relyingPartyId: relyingPartyId.trim(),
-          relyingPartyName: relyingPartyName.trim() || undefined,
-          username: username.trim() || undefined,
-          credentialId: credentialId.trim() || undefined,
-          creationDate: creationDate || undefined,
-          deviceInfo: deviceInfo.trim() || undefined,
-          notes: notes.trim() || undefined,
-          tagIds,
-          orgFolderId: orgFolderId ?? null,
-        };
-      } else if (isIdentity) {
-        body = {
-          entryType: ENTRY_TYPE.IDENTITY,
-          title: title.trim(),
-          fullName: fullName.trim() || undefined,
-          address: address.trim() || undefined,
-          phone: phone.trim() || undefined,
-          email: email.trim() || undefined,
-          dateOfBirth: dateOfBirth || undefined,
-          nationality: nationality.trim() || undefined,
-          idNumber: idNumber.trim() || undefined,
-          issueDate: issueDate || undefined,
-          expiryDate: expiryDate || undefined,
-          notes: notes.trim() || undefined,
-          tagIds,
-          orgFolderId: orgFolderId ?? null,
-        };
-      } else if (isCreditCard) {
-        body = {
-          entryType: ENTRY_TYPE.CREDIT_CARD,
-          title: title.trim(),
-          cardholderName: cardholderName.trim() || undefined,
-          cardNumber: normalizeCardNumber(cardNumber) || undefined,
-          brand: normalizeCardBrand(brand) || undefined,
-          expiryMonth: expiryMonth || undefined,
-          expiryYear: expiryYear || undefined,
-          cvv: cvv || undefined,
-          notes: notes.trim() || undefined,
-          tagIds,
-          orgFolderId: orgFolderId ?? null,
-        };
-      } else if (isNote) {
-        body = {
-          entryType: ENTRY_TYPE.SECURE_NOTE,
-          title: title.trim(),
-          content,
-          tagIds,
-          orgFolderId: orgFolderId ?? null,
-        };
-      } else {
-        body = {
-          title: title.trim(),
-          username: username.trim() || undefined,
-          password,
-          url: url.trim() || undefined,
-          notes: notes.trim() || undefined,
-          tagIds,
-          orgFolderId: orgFolderId ?? null,
-        };
-
-        const validFields = filterNonEmptyCustomFields(customFields);
-        if (validFields.length > 0) {
-          body.customFields = validFields;
-        }
-        if (totp) {
-          body.totp = totp;
-        } else {
-          body.totp = null;
-        }
-      }
+      const body = buildOrgEntryPayload({
+        entryType: effectiveEntryType,
+        title,
+        notes,
+        tagIds,
+        orgFolderId,
+        username,
+        password,
+        url,
+        customFields,
+        totp,
+        content,
+        cardholderName,
+        cardNumber: normalizeCardNumber(cardNumber),
+        brand: normalizeCardBrand(brand),
+        expiryMonth,
+        expiryYear,
+        cvv,
+        fullName,
+        address,
+        phone,
+        email,
+        dateOfBirth,
+        nationality,
+        idNumber,
+        issueDate,
+        expiryDate,
+        relyingPartyId,
+        relyingPartyName,
+        credentialId,
+        creationDate,
+        deviceInfo,
+      });
 
       const res = await fetch(endpoint, {
         method: isEdit ? "PUT" : "POST",
