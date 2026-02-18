@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "sonner";
-import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH, apiPath } from "@/lib/constants";
+import { showSidebarCrudError } from "@/hooks/use-sidebar-crud-error";
 
 interface SidebarTagItem {
   id: string;
@@ -42,16 +41,6 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
     setDeletingTag(null);
   };
 
-  const showApiError = async (res: Response) => {
-    try {
-      const json = await res.json();
-      const i18nKey = apiErrorToI18nKey(json.error);
-      toast.error(tErrors(i18nKey));
-    } catch {
-      toast.error(tErrors("unknownError"));
-    }
-  };
-
   const handleTagSubmit = async (data: TagSubmitPayload) => {
     if (!editingTag) return;
 
@@ -66,7 +55,7 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
     });
 
     if (!res.ok) {
-      await showApiError(res);
+      await showSidebarCrudError(res, tErrors);
       throw new Error("API error");
     }
 
@@ -84,7 +73,7 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
 
     const res = await fetch(url, { method: "DELETE" });
     if (!res.ok) {
-      await showApiError(res);
+      await showSidebarCrudError(res, tErrors);
       setDeletingTag(null);
       return;
     }

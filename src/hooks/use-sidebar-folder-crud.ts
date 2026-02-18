@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "sonner";
-import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH, apiPath } from "@/lib/constants";
+import { showSidebarCrudError } from "@/hooks/use-sidebar-crud-error";
 import type { SidebarFolderItem, SidebarOrgFolderGroup } from "@/hooks/use-sidebar-data";
 
 interface UseSidebarFolderCrudParams {
@@ -50,16 +49,6 @@ export function useSidebarFolderCrud({
     setDeletingFolder(null);
   };
 
-  const showApiError = async (res: Response) => {
-    try {
-      const json = await res.json();
-      const i18nKey = apiErrorToI18nKey(json.error);
-      toast.error(tErrors(i18nKey));
-    } catch {
-      toast.error(tErrors("unknownError"));
-    }
-  };
-
   const handleFolderSubmit = async (data: FolderSubmitPayload) => {
     const isOrg = folderOrgId !== null;
     const url = editingFolder
@@ -77,7 +66,7 @@ export function useSidebarFolderCrud({
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      await showApiError(res);
+      await showSidebarCrudError(res, tErrors);
       throw new Error("API error");
     }
     refreshData();
@@ -90,7 +79,7 @@ export function useSidebarFolderCrud({
       : apiPath.folderById(deletingFolder.id);
     const res = await fetch(url, { method: "DELETE" });
     if (!res.ok) {
-      await showApiError(res);
+      await showSidebarCrudError(res, tErrors);
       setDeletingFolder(null);
       return;
     }
