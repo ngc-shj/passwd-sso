@@ -124,6 +124,14 @@ interface TwoColumnFieldsProps {
   right: ReactNode;
 }
 
+interface NotesFieldProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  rows?: number;
+}
+
 function OrgTagSection({
   title,
   hint,
@@ -172,6 +180,26 @@ function TwoColumnFields({ left, right }: TwoColumnFieldsProps) {
     <div className="grid grid-cols-2 gap-4">
       <div className="space-y-2">{left}</div>
       <div className="space-y-2">{right}</div>
+    </div>
+  );
+}
+
+function NotesField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  rows = 3,
+}: NotesFieldProps) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={rows}
+      />
     </div>
   );
 }
@@ -772,16 +800,12 @@ export function OrgPasswordForm({
                 )}
               />
 
-              {/* Notes */}
-              <div className="space-y-2">
-                <Label>{entryCopy.notesLabel}</Label>
-                <Textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder={entryCopy.notesPlaceholder}
-                  rows={3}
-                />
-              </div>
+              <NotesField
+                label={entryCopy.notesLabel}
+                value={notes}
+                onChange={setNotes}
+                placeholder={entryCopy.notesPlaceholder}
+              />
             </>
           ) : isIdentity ? (
             <>
@@ -915,16 +939,12 @@ export function OrgPasswordForm({
                 <p className="text-sm text-destructive">{expiryError}</p>
               )}
 
-              {/* Notes */}
-              <div className="space-y-2">
-                <Label>{entryCopy.notesLabel}</Label>
-                <Textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder={entryCopy.notesPlaceholder}
-                  rows={3}
-                />
-              </div>
+              <NotesField
+                label={entryCopy.notesLabel}
+                value={notes}
+                onChange={setNotes}
+                placeholder={entryCopy.notesPlaceholder}
+              />
             </>
           ) : isCreditCard ? (
             <>
@@ -1060,16 +1080,12 @@ export function OrgPasswordForm({
                 )}
               />
 
-              {/* Notes */}
-              <div className="space-y-2">
-                <Label>{entryCopy.notesLabel}</Label>
-                <Textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder={entryCopy.notesPlaceholder}
-                  rows={3}
-                />
-              </div>
+              <NotesField
+                label={entryCopy.notesLabel}
+                value={notes}
+                onChange={setNotes}
+                placeholder={entryCopy.notesPlaceholder}
+              />
             </>
           ) : isNote ? (
             <>
