@@ -26,6 +26,12 @@ import type {
   EntryTagNameColor,
   EntryTotpPortable,
 } from "@/lib/entry-form-types";
+import {
+  csvEntryType,
+  csvExportHeader,
+  escapeCsvValue,
+  formatExportDate,
+} from "@/lib/export-format-common";
 
 type ExportFormat = "csv" | "json";
 type ExportProfile = "compatible" | "passwd-sso";
@@ -160,11 +166,11 @@ export function OrgExportDialog({ orgId, trigger }: OrgExportDialogProps) {
         const encrypted = await encryptExport(content, exportPassword, format);
         const encryptedJson = JSON.stringify(encrypted, null, 2);
         blob = new Blob([encryptedJson], { type: "application/json" });
-        filename = `passwd-sso-org-export-${formatDate()}.encrypted.json`;
+        filename = `passwd-sso-org-export-${formatExportDate()}.encrypted.json`;
       } else {
         const mimeType = format === "csv" ? "text/csv;charset=utf-8" : "application/json";
         blob = new Blob([content], { type: mimeType });
-        filename = `passwd-sso-org-export-${formatDate()}.${format}`;
+        filename = `passwd-sso-org-export-${formatExportDate()}.${format}`;
       }
 
       const url = URL.createObjectURL(blob);
@@ -356,22 +362,12 @@ function formatExportContent(
 }
 
 function formatCsv(entries: OrgExportEntry[], profile: ExportProfile): string {
-  const header =
-    profile === "passwd-sso"
-      ? "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp,passwd_sso"
-      : "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp";
-  const escapeCsv = (val: string | null) => {
-    if (!val) return "";
-    if (val.includes(",") || val.includes('"') || val.includes("\n")) {
-      return `"${val.replace(/"/g, '""')}"`;
-    }
-    return val;
-  };
+  const header = csvExportHeader(profile === "passwd-sso");
   const rows = entries.map((e) => {
     const isNote = e.entryType === ENTRY_TYPE.SECURE_NOTE;
     const isCard = e.entryType === ENTRY_TYPE.CREDIT_CARD;
     const isIdentity = e.entryType === ENTRY_TYPE.IDENTITY;
-    const type = isIdentity ? "identity" : isCard ? "card" : isNote ? "securenote" : "login";
+    const type = csvEntryType(e.entryType, { includePasskeyType: false });
     const isLogin = !isNote && !isCard && !isIdentity;
     const passwdSso = JSON.stringify({
       entryType: e.entryType,
@@ -400,15 +396,15 @@ function formatCsv(entries: OrgExportEntry[], profile: ExportProfile): string {
       "", // folder
       "", // favorite
       type,
-      escapeCsv(e.title),
-      escapeCsv(isNote ? e.content : e.notes),
+      escapeCsvValue(e.title),
+      escapeCsvValue(isNote ? e.content : e.notes),
       "", // fields
       "", // reprompt
-      isLogin ? escapeCsv(e.url) : "",
-      isLogin ? escapeCsv(e.username) : "",
-      isLogin ? escapeCsv(e.password) : "",
-      isLogin ? escapeCsv(e.totp) : "",
-      ...(profile === "passwd-sso" ? [escapeCsv(passwdSso)] : []),
+      isLogin ? escapeCsvValue(e.url) : "",
+      isLogin ? escapeCsvValue(e.username) : "",
+      isLogin ? escapeCsvValue(e.password) : "",
+      isLogin ? escapeCsvValue(e.totp) : "",
+      ...(profile === "passwd-sso" ? [escapeCsvValue(passwdSso)] : []),
     ].join(",");
   });
   return [header, ...rows].join("\n");
@@ -497,11 +493,6 @@ function formatJson(entries: OrgExportEntry[], profile: ExportProfile): string {
     null,
     2
   );
-}
-
-function formatDate(): string {
-  const d = new Date();
-  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
 }
 
 export const __testablesOrgExport = {
