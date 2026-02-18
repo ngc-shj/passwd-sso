@@ -31,9 +31,11 @@ import {
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { ArrowLeft, Eye, EyeOff, Tags } from "lucide-react";
 import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
+import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import { toast } from "sonner";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
+import { usePersonalFolders } from "@/hooks/use-personal-folders";
 
 interface CreditCardFormProps {
   mode: "create" | "edit";
@@ -48,6 +50,7 @@ interface CreditCardFormProps {
     cvv: string | null;
     notes: string | null;
     tags: TagData[];
+    folderId?: string | null;
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
@@ -79,6 +82,8 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
   const [selectedTags, setSelectedTags] = useState<TagData[]>(
     initialData?.tags ?? []
   );
+  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
+  const folders = usePersonalFolders();
 
   const baselineSnapshot = useMemo(
     () =>
@@ -92,6 +97,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
         cvv: initialData?.cvv ?? "",
         notes: initialData?.notes ?? "",
         selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
+        folderId: initialData?.folderId ?? null,
       }),
     [initialData]
   );
@@ -108,6 +114,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
         cvv,
         notes,
         selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
+        folderId,
       }),
     [
       title,
@@ -119,6 +126,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
       cvv,
       notes,
       selectedTags,
+      folderId,
     ]
   );
 
@@ -189,6 +197,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
         keyVersion: 1,
         aadVersion: aad ? AAD_VERSION : 0,
         tagIds: selectedTags.map((t) => t.id),
+        folderId: folderId ?? null,
         entryType: ENTRY_TYPE.CREDIT_CARD,
       };
 
@@ -436,6 +445,12 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
           onChange={setSelectedTags}
         />
       </EntrySectionCard>
+
+      <EntryFolderSelectSection
+        folders={folders}
+        value={folderId}
+        onChange={setFolderId}
+      />
 
       <EntryActionBar
         hasChanges={hasChanges}

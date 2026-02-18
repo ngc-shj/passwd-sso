@@ -13,9 +13,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { ArrowLeft, Tags } from "lucide-react";
 import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
+import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import { toast } from "sonner";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
+import { usePersonalFolders } from "@/hooks/use-personal-folders";
 
 interface SecureNoteFormProps {
   mode: "create" | "edit";
@@ -24,6 +26,7 @@ interface SecureNoteFormProps {
     title: string;
     content: string;
     tags: TagData[];
+    folderId?: string | null;
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
@@ -42,6 +45,8 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
   const [selectedTags, setSelectedTags] = useState<TagData[]>(
     initialData?.tags ?? []
   );
+  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
+  const folders = usePersonalFolders();
 
   const baselineSnapshot = useMemo(
     () =>
@@ -49,6 +54,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
         title: initialData?.title ?? "",
         content: initialData?.content ?? "",
         selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
+        folderId: initialData?.folderId ?? null,
       }),
     [initialData]
   );
@@ -59,8 +65,9 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
         title,
         content,
         selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
+        folderId,
       }),
-    [title, content, selectedTags]
+    [title, content, selectedTags, folderId]
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
@@ -103,6 +110,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
         keyVersion: 1,
         aadVersion: aad ? AAD_VERSION : 0,
         tagIds: selectedTags.map((t) => t.id),
+        folderId: folderId ?? null,
         entryType: ENTRY_TYPE.SECURE_NOTE,
       };
 
@@ -186,6 +194,12 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
           onChange={setSelectedTags}
         />
       </EntrySectionCard>
+
+      <EntryFolderSelectSection
+        folders={folders}
+        value={folderId}
+        onChange={setFolderId}
+      />
 
       <EntryActionBar
         hasChanges={hasChanges}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
@@ -32,7 +32,7 @@ import {
   buildPasswordHistory,
   buildPersonalEntryPayload,
 } from "@/lib/personal-entry-payload";
-import type { FolderItem } from "@/components/folders/folder-tree";
+import { usePersonalFolders } from "@/hooks/use-personal-folders";
 
 interface PasswordFormProps {
   mode: "create" | "edit";
@@ -85,15 +85,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   const [showTotpInput, setShowTotpInput] = useState(!!initialData?.totp);
   const [requireReprompt, setRequireReprompt] = useState(initialData?.requireReprompt ?? false);
   const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
-  const [folders, setFolders] = useState<FolderItem[]>([]);
-
-  // Fetch folders for the folder selector
-  useEffect(() => {
-    fetch(API_PATH.FOLDERS)
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data) => { if (Array.isArray(data)) setFolders(data); })
-      .catch(() => {});
-  }, []);
+  const folders = usePersonalFolders();
 
   const initialSnapshot = useMemo(
     () =>

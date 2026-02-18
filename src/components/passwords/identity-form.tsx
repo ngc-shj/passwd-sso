@@ -14,9 +14,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { ArrowLeft, Eye, EyeOff, Tags } from "lucide-react";
 import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
+import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import { toast } from "sonner";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
+import { usePersonalFolders } from "@/hooks/use-personal-folders";
 
 interface IdentityFormProps {
   mode: "create" | "edit";
@@ -34,6 +36,7 @@ interface IdentityFormProps {
     expiryDate: string | null;
     notes: string | null;
     tags: TagData[];
+    folderId?: string | null;
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
@@ -64,6 +67,8 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
   const [selectedTags, setSelectedTags] = useState<TagData[]>(
     initialData?.tags ?? []
   );
+  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
+  const folders = usePersonalFolders();
 
   const baselineSnapshot = useMemo(
     () =>
@@ -80,6 +85,7 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
         expiryDate: initialData?.expiryDate ?? "",
         notes: initialData?.notes ?? "",
         selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
+        folderId: initialData?.folderId ?? null,
       }),
     [initialData]
   );
@@ -99,6 +105,7 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
         expiryDate,
         notes,
         selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
+        folderId,
       }),
     [
       title,
@@ -113,6 +120,7 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
       expiryDate,
       notes,
       selectedTags,
+      folderId,
     ]
   );
 
@@ -181,6 +189,7 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
         keyVersion: 1,
         aadVersion: aad ? AAD_VERSION : 0,
         tagIds: selectedTags.map((t) => t.id),
+        folderId: folderId ?? null,
         entryType: ENTRY_TYPE.IDENTITY,
       };
 
@@ -397,6 +406,12 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
           onChange={setSelectedTags}
         />
       </EntrySectionCard>
+
+      <EntryFolderSelectSection
+        folders={folders}
+        value={folderId}
+        onChange={setFolderId}
+      />
 
       <EntryActionBar
         hasChanges={hasChanges}

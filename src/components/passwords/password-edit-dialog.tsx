@@ -260,6 +260,7 @@ export function PasswordEditDialog({
               deviceInfo: data.deviceInfo ?? null,
               notes: data.notes || null,
               tags: data.tags,
+              folderId: data.folderId ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -281,6 +282,7 @@ export function PasswordEditDialog({
               expiryDate: data.expiryDate ?? null,
               notes: data.notes,
               tags: data.tags,
+              folderId: data.folderId ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -299,6 +301,7 @@ export function PasswordEditDialog({
               cvv: data.cvv ?? null,
               notes: data.notes,
               tags: data.tags,
+              folderId: data.folderId ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -311,6 +314,7 @@ export function PasswordEditDialog({
               title: data.title,
               content: data.content,
               tags: data.tags,
+              folderId: data.folderId ?? null,
             }}
             onSaved={handleSaved}
           />
