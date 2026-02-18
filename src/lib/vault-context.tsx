@@ -544,8 +544,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         throw err;
       }
 
-      // 6. Update local accountSalt (secretKey unchanged)
+      // 6. Update local accountSalt and wrappedKey (secretKey unchanged)
       accountSaltRef.current = newAccountSalt;
+      wrappedKeyRef.current = {
+        ciphertext: rewrapped.ciphertext,
+        iv: rewrapped.iv,
+        authTag: rewrapped.authTag,
+      };
     },
     []
   );
