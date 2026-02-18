@@ -86,7 +86,18 @@ interface SidebarProps {
   onOpenChange: (open: boolean) => void;
 }
 
-// ─── Folder tree helper ─────────────────────────────────────────
+// ─── Folder tree helpers ────────────────────────────────────────
+
+/** Check whether `folderId` is an ancestor of `targetId` in the flat list. */
+function isAncestorOf(folderId: string, targetId: string, folders: FolderItem[]): boolean {
+  const map = new Map(folders.map((f) => [f.id, f]));
+  let current = map.get(targetId);
+  while (current) {
+    if (current.parentId === folderId) return true;
+    current = current.parentId ? map.get(current.parentId) : undefined;
+  }
+  return false;
+}
 
 function FolderTreeNode({
   folder,
@@ -108,13 +119,45 @@ function FolderTreeNode({
   const tCommon = useTranslations("Common");
   const tDashboard = useTranslations("Dashboard");
   const children = folders.filter((f) => f.parentId === folder.id);
+  const hasChildren = children.length > 0;
+
+  // Auto-expand when the active folder is a descendant of this node.
+  // Uses the "adjusting state during render" pattern recommended by React
+  // to avoid useEffect + setState cascading renders.
+  const isAncestorOfActive = activeFolderId
+    ? isAncestorOf(folder.id, activeFolderId, folders)
+    : false;
+  const [open, setOpen] = useState(isAncestorOfActive);
+  const [wasAncestor, setWasAncestor] = useState(isAncestorOfActive);
+  if (isAncestorOfActive !== wasAncestor) {
+    setWasAncestor(isAncestorOfActive);
+    if (isAncestorOfActive) setOpen(true);
+  }
+
   return (
     <>
-      <div className="group/folder flex items-center">
+      <div
+        className="group/folder flex items-center"
+        style={{ paddingLeft: `${depth * 12}px` }}
+      >
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={() => setOpen((prev) => !prev)}
+            className="h-6 w-6 shrink-0 flex items-center justify-center rounded hover:bg-accent"
+          >
+            {open ? (
+              <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronRight className="h-3 w-3" />
+            )}
+          </button>
+        ) : (
+          <span className="w-6 shrink-0" />
+        )}
         <Button
           variant={activeFolderId === folder.id ? "secondary" : "ghost"}
           className="flex-1 justify-start gap-2 min-w-0"
-          style={{ paddingLeft: `${8 + depth * 12}px` }}
           asChild
         >
           <Link href={`/dashboard/folders/${folder.id}`} onClick={onNavigate}>
@@ -153,18 +196,19 @@ function FolderTreeNode({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      {children.map((child) => (
-        <FolderTreeNode
-          key={child.id}
-          folder={child}
-          folders={folders}
-          activeFolderId={activeFolderId}
-          depth={depth + 1}
-          onNavigate={onNavigate}
-          onEdit={onEdit}
-          onDelete={onDelete}
-        />
-      ))}
+      {hasChildren && open &&
+        children.map((child) => (
+          <FolderTreeNode
+            key={child.id}
+            folder={child}
+            folders={folders}
+            activeFolderId={activeFolderId}
+            depth={depth + 1}
+            onNavigate={onNavigate}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
+        ))}
     </>
   );
 }
