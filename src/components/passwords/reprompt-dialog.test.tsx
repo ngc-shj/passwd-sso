@@ -9,7 +9,7 @@
 
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────
@@ -85,16 +85,15 @@ describe("RepromptDialog IME composition", () => {
     fireEvent.change(input, { target: { value: "パスフレーズ" } });
 
     // Simulate Enter during IME composition (isComposing: true)
-    const composingEnter = new KeyboardEvent("keydown", {
-      key: "Enter",
-      bubbles: true,
-      cancelable: true,
-      isComposing: true,
+    await act(async () => {
+      const composingEnter = new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+        isComposing: true,
+      });
+      input.dispatchEvent(composingEnter);
     });
-    input.dispatchEvent(composingEnter);
-
-    // Give time for any async handlers
-    await new Promise((r) => setTimeout(r, 50));
 
     expect(mockVerifyPassphrase).not.toHaveBeenCalled();
   });
@@ -112,11 +111,12 @@ describe("RepromptDialog IME composition", () => {
     fireEvent.change(input, { target: { value: "パスフレーズ" } });
 
     // Normal Enter (isComposing defaults to false)
-    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
 
-    // Give time for async verify
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(mockVerifyPassphrase).toHaveBeenCalledWith("パスフレーズ");
+    await waitFor(() => {
+      expect(mockVerifyPassphrase).toHaveBeenCalledWith("パスフレーズ");
+    });
   });
 });
