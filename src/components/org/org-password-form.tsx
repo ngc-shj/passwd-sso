@@ -20,9 +20,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PasswordGenerator } from "@/components/passwords/password-generator";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
+import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import { OrgTagInput, type OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
 import {
@@ -30,13 +30,8 @@ import {
   DEFAULT_GENERATOR_SETTINGS,
 } from "@/lib/generator-prefs";
 import { preventIMESubmit } from "@/lib/ime-guard";
-import {
-  Eye,
-  EyeOff,
-  Dices,
-  Tags,
-} from "lucide-react";
-import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
+import { Eye, EyeOff, Tags } from "lucide-react";
+import { EntryActionBar, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { toast } from "sonner";
 import {
   CARD_BRANDS,
@@ -56,6 +51,12 @@ import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+
+interface OrgFolderItem {
+  id: string;
+  name: string;
+  parentId: string | null;
+}
 
 interface OrgPasswordFormProps {
   orgId: string;
@@ -176,7 +177,7 @@ export function OrgPasswordForm({
   const [showCredentialId, setShowCredentialId] = useState(false);
   const [attachments, setAttachments] = useState<OrgAttachmentMeta[]>([]);
   const [orgFolderId, setOrgFolderId] = useState<string | null>(editData?.orgFolderId ?? null);
-  const [orgFolders, setOrgFolders] = useState<FolderItem[]>([]);
+  const [orgFolders, setOrgFolders] = useState<OrgFolderItem[]>([]);
 
   const isEdit = !!editData;
 
@@ -576,7 +577,7 @@ export function OrgPasswordForm({
         </DialogHeader>
 
         <form onSubmit={handleFormSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
-          <EntryPrimaryCard>
+          <div className="space-y-5">
           {/* Title */}
           <div className="space-y-2">
             <Label>{isPasskey ? tpk("title") : isIdentity ? ti("title") : isCreditCard ? tcc("title") : isNote ? tn("title") : t("title")}</Label>
@@ -1072,92 +1073,42 @@ export function OrgPasswordForm({
             </>
           ) : (
             <>
-              {/* Username */}
-              <div className="space-y-2">
-                <Label>{t("usernameEmail")}</Label>
-                <Input
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder={t("usernamePlaceholder")}
-                  autoComplete="off"
-                />
-              </div>
-
-              {/* Password with show/hide and generator */}
-              <div className="space-y-2 rounded-lg border bg-background/70 p-3">
-                <Label>{t("password")}</Label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Input
-                      type={showPassword ? "text" : "password"}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder={t("passwordPlaceholder")}
-                      autoComplete="off"
-                    />
-                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => setShowPassword(!showPassword)}
-                      >
-                        {showPassword ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
-                          <Eye className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
-                  <p className="text-xs text-muted-foreground">{generatorSummary}</p>
-                  <Button
-                    type="button"
-                    variant={showGenerator ? "secondary" : "outline"}
-                    size="sm"
-                    className="h-7 gap-1.5 text-xs"
-                    onClick={() => setShowGenerator((v) => !v)}
-                  >
-                    <Dices className="h-3.5 w-3.5" />
-                    {showGenerator ? t("closeGenerator") : t("openGenerator")}
-                  </Button>
-                </div>
-                <PasswordGenerator
-                  open={showGenerator}
-                  onClose={() => setShowGenerator(false)}
-                  settings={generatorSettings}
-                  onUse={(pw, settings) => {
-                    setPassword(pw);
-                    setShowPassword(true);
-                    setGeneratorSettings(settings);
-                  }}
-                />
-              </div>
-
-              {/* URL */}
-              <div className="space-y-2">
-                <Label>{t("url")}</Label>
-                <Input
-                  type="url"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://example.com"
-                />
-              </div>
-
-              {/* Notes */}
-              <div className="space-y-2">
-                <Label>{t("notes")}</Label>
-                <Textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder={t("notesPlaceholder")}
-                  rows={3}
-                />
-              </div>
+              <EntryLoginMainFields
+                idPrefix="org-"
+                hideTitle
+                title={title}
+                onTitleChange={setTitle}
+                titleLabel={t("title")}
+                titlePlaceholder={t("titlePlaceholder")}
+                username={username}
+                onUsernameChange={setUsername}
+                usernameLabel={t("usernameEmail")}
+                usernamePlaceholder={t("usernamePlaceholder")}
+                password={password}
+                onPasswordChange={setPassword}
+                passwordLabel={t("password")}
+                passwordPlaceholder={t("passwordPlaceholder")}
+                showPassword={showPassword}
+                onToggleShowPassword={() => setShowPassword((v) => !v)}
+                generatorSummary={generatorSummary}
+                showGenerator={showGenerator}
+                onToggleGenerator={() => setShowGenerator((v) => !v)}
+                closeGeneratorLabel={t("closeGenerator")}
+                openGeneratorLabel={t("openGenerator")}
+                generatorSettings={generatorSettings}
+                onGeneratorUse={(pw, settings) => {
+                  setPassword(pw);
+                  setShowPassword(true);
+                  setGeneratorSettings(settings);
+                }}
+                url={url}
+                onUrlChange={setUrl}
+                urlLabel={t("url")}
+                notes={notes}
+                onNotesChange={setNotes}
+                notesLabel={t("notes")}
+                notesPlaceholder={t("notesPlaceholder")}
+              />
 
               {/* Tags (org tags) */}
               <EntrySectionCard>
@@ -1185,7 +1136,7 @@ export function OrgPasswordForm({
               />
             </>
           )}
-          </EntryPrimaryCard>
+          </div>
 
         <EntryFolderSelectSection
           folders={orgFolders}

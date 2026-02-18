@@ -72,6 +72,8 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
+  const isDialogVariant = variant === "dialog";
+  const primaryCardClass = isDialogVariant ? "!border-0 !bg-none" : "";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,7 +127,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
 
   const formContent = (
     <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
-      <EntryPrimaryCard>
+      <EntryPrimaryCard className={primaryCardClass}>
         <div className="space-y-2">
           <Label htmlFor="title">{t("title")}</Label>
           <Input

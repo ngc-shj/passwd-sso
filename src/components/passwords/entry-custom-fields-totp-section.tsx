@@ -26,6 +26,7 @@ interface EntryCustomFieldsTotpSectionProps {
   onTotpChange: (value: EntryTotp | null) => void;
   showTotpInput: boolean;
   setShowTotpInput: (show: boolean) => void;
+  sectionCardClass?: string;
 }
 
 export function EntryCustomFieldsTotpSection({
@@ -35,12 +36,13 @@ export function EntryCustomFieldsTotpSection({
   onTotpChange,
   showTotpInput,
   setShowTotpInput,
+  sectionCardClass = "",
 }: EntryCustomFieldsTotpSectionProps) {
   const t = useTranslations("PasswordForm");
 
   return (
     <>
-      <EntrySectionCard>
+      <EntrySectionCard className={sectionCardClass}>
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <Label className="flex items-center gap-2">
@@ -142,7 +144,7 @@ export function EntryCustomFieldsTotpSection({
         ))}
       </EntrySectionCard>
 
-      <EntrySectionCard>
+      <EntrySectionCard className={sectionCardClass}>
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <Label className="flex items-center gap-1">

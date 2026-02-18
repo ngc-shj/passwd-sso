@@ -5,20 +5,19 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { PasswordGenerator } from "./password-generator";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
+import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
 } from "@/lib/generator-prefs";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Eye, EyeOff, ArrowLeft, Dices, ShieldCheck, Tags } from "lucide-react";
+import { ArrowLeft, ShieldCheck, Tags } from "lucide-react";
 import { toast } from "sonner";
 import type { EntryCustomField, EntryPasswordHistory, EntryTotp } from "@/lib/entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
@@ -119,6 +118,8 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     folderId,
   });
   const hasChanges = currentSnapshot !== initialSnapshot;
+  const isDialogVariant = variant === "dialog";
+  const primaryCardClass = isDialogVariant ? "!border-0 !bg-none" : "";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -181,106 +182,43 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
 
   const formContent = (
           <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
-            <EntryPrimaryCard>
-            <div className="space-y-2">
-              <Label htmlFor="title">{t("title")}</Label>
-              <Input
-                id="title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder={t("titlePlaceholder")}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="username">{t("usernameEmail")}</Label>
-              <Input
-                id="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder={t("usernamePlaceholder")}
-                autoComplete="off"
-              />
-            </div>
-
-            <div className="space-y-2 rounded-lg border bg-background/70 p-3">
-              <Label htmlFor="password">{t("password")}</Label>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder={t("passwordPlaceholder")}
-                    required
-                    autoComplete="off"
-                  />
-                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
-                <p className="text-xs text-muted-foreground">{generatorSummary}</p>
-                <Button
-                  type="button"
-                  variant={showGenerator ? "secondary" : "outline"}
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs"
-                  onClick={() => setShowGenerator((v) => !v)}
-                >
-                  <Dices className="h-3.5 w-3.5" />
-                  {showGenerator ? t("closeGenerator") : t("openGenerator")}
-                </Button>
-              </div>
-              <PasswordGenerator
-                open={showGenerator}
-                onClose={() => setShowGenerator(false)}
-                settings={generatorSettings}
-                onUse={(pw, settings) => {
-                  setPassword(pw);
-                  setShowPassword(true);
-                  setGeneratorSettings(settings);
-                }}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="url">{t("url")}</Label>
-              <Input
-                id="url"
-                type="url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://example.com"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="notes">{t("notes")}</Label>
-              <textarea
-                id="notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder={t("notesPlaceholder")}
-                rows={3}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </div>
+            <EntryPrimaryCard className={primaryCardClass}>
+            <EntryLoginMainFields
+              title={title}
+              onTitleChange={setTitle}
+              titleLabel={t("title")}
+              titlePlaceholder={t("titlePlaceholder")}
+              titleRequired
+              username={username}
+              onUsernameChange={setUsername}
+              usernameLabel={t("usernameEmail")}
+              usernamePlaceholder={t("usernamePlaceholder")}
+              password={password}
+              onPasswordChange={setPassword}
+              passwordLabel={t("password")}
+              passwordPlaceholder={t("passwordPlaceholder")}
+              passwordRequired
+              showPassword={showPassword}
+              onToggleShowPassword={() => setShowPassword((v) => !v)}
+              generatorSummary={generatorSummary}
+              showGenerator={showGenerator}
+              onToggleGenerator={() => setShowGenerator((v) => !v)}
+              closeGeneratorLabel={t("closeGenerator")}
+              openGeneratorLabel={t("openGenerator")}
+              generatorSettings={generatorSettings}
+              onGeneratorUse={(pw, settings) => {
+                setPassword(pw);
+                setShowPassword(true);
+                setGeneratorSettings(settings);
+              }}
+              url={url}
+              onUrlChange={setUrl}
+              urlLabel={t("url")}
+              notes={notes}
+              onNotesChange={setNotes}
+              notesLabel={t("notes")}
+              notesPlaceholder={t("notesPlaceholder")}
+            />
             </EntryPrimaryCard>
 
             {/* Tags section - 1Password style */}
@@ -298,12 +236,6 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
               />
             </EntrySectionCard>
 
-            <EntryFolderSelectSection
-              folders={folders}
-              value={folderId}
-              onChange={setFolderId}
-            />
-
             <EntryCustomFieldsTotpSection
               customFields={customFields}
               setCustomFields={setCustomFields}
@@ -311,6 +243,12 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
               onTotpChange={setTotp}
               showTotpInput={showTotpInput}
               setShowTotpInput={setShowTotpInput}
+            />
+
+            <EntryFolderSelectSection
+              folders={folders}
+              value={folderId}
+              onChange={setFolderId}
             />
 
             {/* Reprompt */}
