@@ -408,4 +408,76 @@ describe("OrgPasswordForm — folder selection", () => {
       expect(body.orgFolderId).toBeNull();
     });
   });
+
+  it("re-applies latest editData after close and reopen", async () => {
+    setupFetch();
+    const onOpenChange = vi.fn();
+
+    const view = render(
+      <OrgPasswordForm
+        orgId="org-1"
+        open={true}
+        onOpenChange={onOpenChange}
+        onSaved={vi.fn()}
+        editData={{
+          id: "entry-1",
+          title: "First Title",
+          username: "first-user",
+          password: "first-pass",
+          url: null,
+          notes: null,
+          orgFolderId: "folder-1",
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("First Title")).toBeInTheDocument();
+    });
+
+    view.rerender(
+      <OrgPasswordForm
+        orgId="org-1"
+        open={false}
+        onOpenChange={onOpenChange}
+        onSaved={vi.fn()}
+        editData={{
+          id: "entry-1",
+          title: "First Title",
+          username: "first-user",
+          password: "first-pass",
+          url: null,
+          notes: null,
+          orgFolderId: "folder-1",
+        }}
+      />,
+    );
+
+    view.rerender(
+      <OrgPasswordForm
+        orgId="org-1"
+        open={true}
+        onOpenChange={onOpenChange}
+        onSaved={vi.fn()}
+        editData={{
+          id: "entry-2",
+          title: "Second Title",
+          username: "second-user",
+          password: "second-pass",
+          url: null,
+          notes: null,
+          orgFolderId: "folder-2",
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Second Title")).toBeInTheDocument();
+      const selects = screen.getAllByTestId("select");
+      const folderSelect = selects.find(
+        (el) => el.getAttribute("data-value") === "folder-2",
+      );
+      expect(folderSelect).toBeDefined();
+    });
+  });
 });
