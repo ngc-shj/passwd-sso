@@ -16,6 +16,7 @@ import type { OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
 import { getOrgCardValidationState } from "@/components/org/org-credit-card-validation";
 import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
+import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
 import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
 import {
   applyOrgEditDataToForm,
@@ -49,7 +50,6 @@ import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
 import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { OrgEntryKind } from "@/components/org/org-password-form-types";
 
 export function OrgPasswordForm({
   orgId,
@@ -73,11 +73,8 @@ export function OrgPasswordForm({
   const [showCvv, setShowCvv] = useState(false);
 
   const effectiveEntryType = editData?.entryType ?? entryTypeProp;
-  const isNote = effectiveEntryType === ENTRY_TYPE.SECURE_NOTE;
-  const isCreditCard = effectiveEntryType === ENTRY_TYPE.CREDIT_CARD;
-  const isIdentity = effectiveEntryType === ENTRY_TYPE.IDENTITY;
-  const isPasskey = effectiveEntryType === ENTRY_TYPE.PASSKEY;
-  const isLoginEntry = !isNote && !isCreditCard && !isIdentity && !isPasskey;
+  const { entryKind, isNote, isCreditCard, isIdentity, isPasskey, isLoginEntry } =
+    getOrgEntryKindState(effectiveEntryType);
 
   const [title, setTitle] = useState(editData?.title ?? "");
   const [username, setUsername] = useState(editData?.username ?? "");
@@ -355,16 +352,6 @@ export function OrgPasswordForm({
     generatorSettings.mode === "passphrase"
       ? `${tGen("modePassphrase")} · ${generatorSettings.passphrase.wordCount}`
       : `${tGen("modePassword")} · ${generatorSettings.length}`;
-
-  const entryKind: OrgEntryKind = isPasskey
-    ? "passkey"
-    : isIdentity
-      ? "identity"
-      : isCreditCard
-        ? "creditCard"
-        : isNote
-          ? "secureNote"
-          : "password";
 
   const entryCopy = buildOrgEntryCopy({
     isEdit,
