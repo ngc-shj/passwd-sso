@@ -233,7 +233,7 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
       <div className="mb-3 flex items-center gap-2">
         <Building2 className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-sm font-medium text-muted-foreground">
-          {t("organizationFavorites")}
+          {t("favorites")}
         </h2>
       </div>
       <div className="space-y-2 rounded-xl border bg-card/80 p-2">

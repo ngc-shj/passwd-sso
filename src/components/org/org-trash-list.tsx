@@ -122,7 +122,7 @@ export function OrgTrashList({ orgId, searchQuery = "", refreshKey }: OrgTrashLi
         <div className="mb-3 flex items-center gap-2">
           <Building2 className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-medium text-muted-foreground">
-            {tOrg("organizationTrash")}
+            {tOrg("trash")}
           </h2>
         </div>
       )}
