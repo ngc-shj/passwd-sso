@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, type ComponentProps } from "react";
+import { useState, useEffect, useMemo, type ComponentProps, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -119,6 +119,11 @@ interface VisibilityToggleInputProps {
   inputProps: ComponentProps<typeof Input>;
 }
 
+interface TwoColumnFieldsProps {
+  left: ReactNode;
+  right: ReactNode;
+}
+
 function OrgTagSection({
   title,
   hint,
@@ -158,6 +163,15 @@ function VisibilityToggleInput({
           <Eye className="h-4 w-4" />
         )}
       </Button>
+    </div>
+  );
+}
+
+function TwoColumnFields({ left, right }: TwoColumnFieldsProps) {
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      <div className="space-y-2">{left}</div>
+      <div className="space-y-2">{right}</div>
     </div>
   );
 }
@@ -748,25 +762,29 @@ export function OrgPasswordForm({
               </div>
 
               {/* Creation Date & Device Info */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>{tpk("creationDate")}</Label>
-                  <Input
-                    type="date"
-                    value={creationDate}
-                    onChange={(e) => setCreationDate(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>{tpk("deviceInfo")}</Label>
-                  <Input
-                    value={deviceInfo}
-                    onChange={(e) => setDeviceInfo(e.target.value)}
-                    placeholder={tpk("deviceInfoPlaceholder")}
-                    autoComplete="off"
-                  />
-                </div>
-              </div>
+              <TwoColumnFields
+                left={(
+                  <>
+                    <Label>{tpk("creationDate")}</Label>
+                    <Input
+                      type="date"
+                      value={creationDate}
+                      onChange={(e) => setCreationDate(e.target.value)}
+                    />
+                  </>
+                )}
+                right={(
+                  <>
+                    <Label>{tpk("deviceInfo")}</Label>
+                    <Input
+                      value={deviceInfo}
+                      onChange={(e) => setDeviceInfo(e.target.value)}
+                      placeholder={tpk("deviceInfoPlaceholder")}
+                      autoComplete="off"
+                    />
+                  </>
+                )}
+              />
 
               {/* Notes */}
               <div className="space-y-2">
@@ -805,52 +823,60 @@ export function OrgPasswordForm({
               </div>
 
               {/* Phone & Email */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>{ti("phone")}</Label>
-                  <Input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder={ti("phonePlaceholder")}
-                    autoComplete="off"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>{ti("email")}</Label>
-                  <Input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder={ti("emailPlaceholder")}
-                    autoComplete="off"
-                  />
-                </div>
-              </div>
+              <TwoColumnFields
+                left={(
+                  <>
+                    <Label>{ti("phone")}</Label>
+                    <Input
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder={ti("phonePlaceholder")}
+                      autoComplete="off"
+                    />
+                  </>
+                )}
+                right={(
+                  <>
+                    <Label>{ti("email")}</Label>
+                    <Input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder={ti("emailPlaceholder")}
+                      autoComplete="off"
+                    />
+                  </>
+                )}
+              />
 
               {/* Date of Birth & Nationality */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>{ti("dateOfBirth")}</Label>
-                  <Input
-                    type="date"
-                    value={dateOfBirth}
-                    onChange={(e) => {
-                      setDateOfBirth(e.target.value);
-                      setDobError(null);
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>{ti("nationality")}</Label>
-                  <Input
-                    value={nationality}
-                    onChange={(e) => setNationality(e.target.value)}
-                    placeholder={ti("nationalityPlaceholder")}
-                    autoComplete="off"
-                  />
-                </div>
-              </div>
+              <TwoColumnFields
+                left={(
+                  <>
+                    <Label>{ti("dateOfBirth")}</Label>
+                    <Input
+                      type="date"
+                      value={dateOfBirth}
+                      onChange={(e) => {
+                        setDateOfBirth(e.target.value);
+                        setDobError(null);
+                      }}
+                    />
+                  </>
+                )}
+                right={(
+                  <>
+                    <Label>{ti("nationality")}</Label>
+                    <Input
+                      value={nationality}
+                      onChange={(e) => setNationality(e.target.value)}
+                      placeholder={ti("nationalityPlaceholder")}
+                      autoComplete="off"
+                    />
+                  </>
+                )}
+              />
               {dobError && (
                 <p className="text-sm text-destructive">{dobError}</p>
               )}
@@ -871,30 +897,34 @@ export function OrgPasswordForm({
               </div>
 
               {/* Issue Date & Expiry Date */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>{ti("issueDate")}</Label>
-                  <Input
-                    type="date"
-                    value={issueDate}
-                    onChange={(e) => {
-                      setIssueDate(e.target.value);
-                      setExpiryError(null);
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>{ti("expiryDate")}</Label>
-                  <Input
-                    type="date"
-                    value={expiryDate}
-                    onChange={(e) => {
-                      setExpiryDate(e.target.value);
-                      setExpiryError(null);
-                    }}
-                  />
-                </div>
-              </div>
+              <TwoColumnFields
+                left={(
+                  <>
+                    <Label>{ti("issueDate")}</Label>
+                    <Input
+                      type="date"
+                      value={issueDate}
+                      onChange={(e) => {
+                        setIssueDate(e.target.value);
+                        setExpiryError(null);
+                      }}
+                    />
+                  </>
+                )}
+                right={(
+                  <>
+                    <Label>{ti("expiryDate")}</Label>
+                    <Input
+                      type="date"
+                      value={expiryDate}
+                      onChange={(e) => {
+                        setExpiryDate(e.target.value);
+                        setExpiryError(null);
+                      }}
+                    />
+                  </>
+                )}
+              />
               {expiryError && (
                 <p className="text-sm text-destructive">{expiryError}</p>
               )}
@@ -990,57 +1020,59 @@ export function OrgPasswordForm({
               </div>
 
               {/* Expiry */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>{tcc("expiry")}</Label>
-                  <div className="flex gap-2">
-                    <Select value={expiryMonth} onValueChange={setExpiryMonth}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder={tcc("expiryMonth")} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Array.from({ length: 12 }, (_, i) =>
-                          String(i + 1).padStart(2, "0")
-                        ).map((m) => (
-                          <SelectItem key={m} value={m}>
-                            {m}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Select value={expiryYear} onValueChange={setExpiryYear}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder={tcc("expiryYear")} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Array.from({ length: 15 }, (_, i) =>
-                          String(new Date().getFullYear() + i)
-                        ).map((y) => (
-                          <SelectItem key={y} value={y}>
-                            {y}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {/* CVV */}
-                <div className="space-y-2">
-                  <Label>{tcc("cvv")}</Label>
-                  <VisibilityToggleInput
-                    show={showCvv}
-                    onToggle={() => setShowCvv(!showCvv)}
-                    inputProps={{
-                      value: cvv,
-                      onChange: (e) => setCvv(e.target.value),
-                      placeholder: tcc("cvvPlaceholder"),
-                      autoComplete: "off",
-                      maxLength: 4,
-                    }}
-                  />
-                </div>
-              </div>
+              <TwoColumnFields
+                left={(
+                  <>
+                    <Label>{tcc("expiry")}</Label>
+                    <div className="flex gap-2">
+                      <Select value={expiryMonth} onValueChange={setExpiryMonth}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder={tcc("expiryMonth")} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Array.from({ length: 12 }, (_, i) =>
+                            String(i + 1).padStart(2, "0")
+                          ).map((m) => (
+                            <SelectItem key={m} value={m}>
+                              {m}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Select value={expiryYear} onValueChange={setExpiryYear}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder={tcc("expiryYear")} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Array.from({ length: 15 }, (_, i) =>
+                            String(new Date().getFullYear() + i)
+                          ).map((y) => (
+                            <SelectItem key={y} value={y}>
+                              {y}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </>
+                )}
+                right={(
+                  <>
+                    <Label>{tcc("cvv")}</Label>
+                    <VisibilityToggleInput
+                      show={showCvv}
+                      onToggle={() => setShowCvv(!showCvv)}
+                      inputProps={{
+                        value: cvv,
+                        onChange: (e) => setCvv(e.target.value),
+                        placeholder: tcc("cvvPlaceholder"),
+                        autoComplete: "off",
+                        maxLength: 4,
+                      }}
+                    />
+                  </>
+                )}
+              />
 
               {/* Notes */}
               <div className="space-y-2">
