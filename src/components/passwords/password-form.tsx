@@ -4,9 +4,8 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
+import { PasswordFormPageShell } from "@/components/passwords/password-form-page-shell";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import {
@@ -20,7 +19,6 @@ import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
 } from "@/lib/generator-prefs";
-import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
@@ -244,28 +242,12 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   }
 
   return (
-    <div className="flex-1 overflow-auto p-4 md:p-6">
-      <div className="mx-auto max-w-4xl space-y-4">
-      <Button
-        variant="ghost"
-        className="mb-4 gap-2"
-        onClick={() => router.back()}
-      >
-        <ArrowLeft className="h-4 w-4" />
-        {tc("back")}
-      </Button>
-
-      <Card className="rounded-xl border">
-        <CardHeader>
-          <CardTitle>
-            {mode === "create" ? t("newPassword") : t("editPassword")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {formContent}
-        </CardContent>
-      </Card>
-      </div>
-    </div>
+    <PasswordFormPageShell
+      backLabel={tc("back")}
+      onBack={() => router.back()}
+      title={mode === "create" ? t("newPassword") : t("editPassword")}
+    >
+      {formContent}
+    </PasswordFormPageShell>
   );
 }
