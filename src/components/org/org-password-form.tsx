@@ -700,6 +700,424 @@ export function OrgPasswordForm({
     (isLoginEntry && !password) ||
     (isCreditCard && !cardNumberValid);
 
+  const entrySpecificFields = isPasskey ? (
+    <>
+      {/* Relying Party ID */}
+      <div className="space-y-2">
+        <Label>{tpk("relyingPartyId")}</Label>
+        <Input
+          value={relyingPartyId}
+          onChange={(e) => setRelyingPartyId(e.target.value)}
+          placeholder={tpk("relyingPartyIdPlaceholder")}
+          autoComplete="off"
+        />
+      </div>
+
+      {/* Relying Party Name */}
+      <div className="space-y-2">
+        <Label>{tpk("relyingPartyName")}</Label>
+        <Input
+          value={relyingPartyName}
+          onChange={(e) => setRelyingPartyName(e.target.value)}
+          placeholder={tpk("relyingPartyNamePlaceholder")}
+          autoComplete="off"
+        />
+      </div>
+
+      {/* Username */}
+      <div className="space-y-2">
+        <Label>{tpk("username")}</Label>
+        <Input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder={tpk("usernamePlaceholder")}
+          autoComplete="off"
+        />
+      </div>
+
+      {/* Credential ID */}
+      <div className="space-y-2">
+        <Label>{tpk("credentialId")}</Label>
+        <VisibilityToggleInput
+          show={showCredentialId}
+          onToggle={() => setShowCredentialId(!showCredentialId)}
+          inputProps={{
+            value: credentialId,
+            onChange: (e) => setCredentialId(e.target.value),
+            placeholder: tpk("credentialIdPlaceholder"),
+            autoComplete: "off",
+          }}
+        />
+      </div>
+
+      {/* Creation Date & Device Info */}
+      <TwoColumnFields
+        left={(
+          <>
+            <Label>{tpk("creationDate")}</Label>
+            <Input
+              type="date"
+              value={creationDate}
+              onChange={(e) => setCreationDate(e.target.value)}
+            />
+          </>
+        )}
+        right={(
+          <>
+            <Label>{tpk("deviceInfo")}</Label>
+            <Input
+              value={deviceInfo}
+              onChange={(e) => setDeviceInfo(e.target.value)}
+              placeholder={tpk("deviceInfoPlaceholder")}
+              autoComplete="off"
+            />
+          </>
+        )}
+      />
+
+      <NotesField
+        label={entryCopy.notesLabel}
+        value={notes}
+        onChange={setNotes}
+        placeholder={entryCopy.notesPlaceholder}
+      />
+    </>
+  ) : isIdentity ? (
+    <>
+      {/* Full Name */}
+      <div className="space-y-2">
+        <Label>{ti("fullName")}</Label>
+        <Input
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          placeholder={ti("fullNamePlaceholder")}
+          autoComplete="off"
+        />
+      </div>
+
+      {/* Address */}
+      <div className="space-y-2">
+        <Label>{ti("address")}</Label>
+        <Textarea
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          placeholder={ti("addressPlaceholder")}
+          rows={2}
+          autoComplete="off"
+        />
+      </div>
+
+      {/* Phone & Email */}
+      <TwoColumnFields
+        left={(
+          <>
+            <Label>{ti("phone")}</Label>
+            <Input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder={ti("phonePlaceholder")}
+              autoComplete="off"
+            />
+          </>
+        )}
+        right={(
+          <>
+            <Label>{ti("email")}</Label>
+            <Input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder={ti("emailPlaceholder")}
+              autoComplete="off"
+            />
+          </>
+        )}
+      />
+
+      {/* Date of Birth & Nationality */}
+      <TwoColumnFields
+        left={(
+          <>
+            <Label>{ti("dateOfBirth")}</Label>
+            <Input
+              type="date"
+              value={dateOfBirth}
+              onChange={(e) => {
+                setDateOfBirth(e.target.value);
+                setDobError(null);
+              }}
+            />
+          </>
+        )}
+        right={(
+          <>
+            <Label>{ti("nationality")}</Label>
+            <Input
+              value={nationality}
+              onChange={(e) => setNationality(e.target.value)}
+              placeholder={ti("nationalityPlaceholder")}
+              autoComplete="off"
+            />
+          </>
+        )}
+      />
+      {dobError && (
+        <p className="text-sm text-destructive">{dobError}</p>
+      )}
+
+      {/* ID Number */}
+      <div className="space-y-2">
+        <Label>{ti("idNumber")}</Label>
+        <VisibilityToggleInput
+          show={showIdNumber}
+          onToggle={() => setShowIdNumber(!showIdNumber)}
+          inputProps={{
+            value: idNumber,
+            onChange: (e) => setIdNumber(e.target.value),
+            placeholder: ti("idNumberPlaceholder"),
+            autoComplete: "off",
+          }}
+        />
+      </div>
+
+      {/* Issue Date & Expiry Date */}
+      <TwoColumnFields
+        left={(
+          <>
+            <Label>{ti("issueDate")}</Label>
+            <Input
+              type="date"
+              value={issueDate}
+              onChange={(e) => {
+                setIssueDate(e.target.value);
+                setExpiryError(null);
+              }}
+            />
+          </>
+        )}
+        right={(
+          <>
+            <Label>{ti("expiryDate")}</Label>
+            <Input
+              type="date"
+              value={expiryDate}
+              onChange={(e) => {
+                setExpiryDate(e.target.value);
+                setExpiryError(null);
+              }}
+            />
+          </>
+        )}
+      />
+      {expiryError && (
+        <p className="text-sm text-destructive">{expiryError}</p>
+      )}
+
+      <NotesField
+        label={entryCopy.notesLabel}
+        value={notes}
+        onChange={setNotes}
+        placeholder={entryCopy.notesPlaceholder}
+      />
+    </>
+  ) : isCreditCard ? (
+    <>
+      {/* Cardholder Name */}
+      <div className="space-y-2">
+        <Label>{tcc("cardholderName")}</Label>
+        <Input
+          value={cardholderName}
+          onChange={(e) => setCardholderName(e.target.value)}
+          placeholder={tcc("cardholderNamePlaceholder")}
+          autoComplete="off"
+        />
+      </div>
+
+      {/* Brand */}
+      <div className="space-y-2">
+        <Label>{tcc("brand")}</Label>
+        <Select
+          value={brand}
+          onValueChange={(value) => {
+            setBrand(value);
+            setBrandSource("manual");
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder={tcc("brandPlaceholder")} />
+          </SelectTrigger>
+          <SelectContent>
+            {CARD_BRANDS.map((b) => (
+              <SelectItem key={b} value={b}>
+                {b}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Card Number */}
+      <div className="space-y-2">
+        <Label>{tcc("cardNumber")}</Label>
+        <VisibilityToggleInput
+          show={showCardNumber}
+          onToggle={() => setShowCardNumber(!showCardNumber)}
+          inputProps={{
+            value: cardNumber,
+            onChange: (e) => handleCardNumberChange(e.target.value),
+            placeholder: tcc("cardNumberPlaceholder"),
+            autoComplete: "off",
+            inputMode: "numeric",
+            maxLength: maxInputLength,
+            "aria-invalid": showLengthError || showLuhnError,
+          }}
+        />
+        {cardValidation.detectedBrand && (
+          <p className="text-xs text-muted-foreground">
+            {tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })}
+          </p>
+        )}
+        {!hasBrandHint && cardValidation.digits.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {tcc("cardNumberLengthHintGeneric")}
+          </p>
+        )}
+        {hasBrandHint && (
+          <p className="text-xs text-muted-foreground">
+            {tcc("cardNumberLengthHint", { lengths: lengthHint })}
+          </p>
+        )}
+        {showLengthError && (
+          <p className="text-xs text-destructive">
+            {tcc("cardNumberInvalidLength", { lengths: lengthHint })}
+          </p>
+        )}
+        {!showLengthError && showLuhnError && (
+          <p className="text-xs text-destructive">
+            {tcc("cardNumberInvalidLuhn")}
+          </p>
+        )}
+      </div>
+
+      {/* Expiry */}
+      <TwoColumnFields
+        left={(
+          <>
+            <Label>{tcc("expiry")}</Label>
+            <div className="flex gap-2">
+              <Select value={expiryMonth} onValueChange={setExpiryMonth}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={tcc("expiryMonth")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 12 }, (_, i) =>
+                    String(i + 1).padStart(2, "0")
+                  ).map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {m}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={expiryYear} onValueChange={setExpiryYear}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={tcc("expiryYear")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 15 }, (_, i) =>
+                    String(new Date().getFullYear() + i)
+                  ).map((y) => (
+                    <SelectItem key={y} value={y}>
+                      {y}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </>
+        )}
+        right={(
+          <>
+            <Label>{tcc("cvv")}</Label>
+            <VisibilityToggleInput
+              show={showCvv}
+              onToggle={() => setShowCvv(!showCvv)}
+              inputProps={{
+                value: cvv,
+                onChange: (e) => setCvv(e.target.value),
+                placeholder: tcc("cvvPlaceholder"),
+                autoComplete: "off",
+                maxLength: 4,
+              }}
+            />
+          </>
+        )}
+      />
+
+      <NotesField
+        label={entryCopy.notesLabel}
+        value={notes}
+        onChange={setNotes}
+        placeholder={entryCopy.notesPlaceholder}
+      />
+    </>
+  ) : isNote ? (
+    <>
+      {/* Content (Secure Note) */}
+      <div className="space-y-2">
+        <Label>{tn("content")}</Label>
+        <Textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          placeholder={tn("contentPlaceholder")}
+          rows={10}
+          maxLength={50000}
+          className="font-mono"
+        />
+      </div>
+    </>
+  ) : (
+    <>
+      <EntryLoginMainFields
+        idPrefix="org-"
+        hideTitle
+        title={title}
+        onTitleChange={setTitle}
+        titleLabel={t("title")}
+        titlePlaceholder={t("titlePlaceholder")}
+        username={username}
+        onUsernameChange={setUsername}
+        usernameLabel={t("usernameEmail")}
+        usernamePlaceholder={t("usernamePlaceholder")}
+        password={password}
+        onPasswordChange={setPassword}
+        passwordLabel={t("password")}
+        passwordPlaceholder={t("passwordPlaceholder")}
+        showPassword={showPassword}
+        onToggleShowPassword={() => setShowPassword((v) => !v)}
+        generatorSummary={generatorSummary}
+        showGenerator={showGenerator}
+        onToggleGenerator={() => setShowGenerator((v) => !v)}
+        closeGeneratorLabel={t("closeGenerator")}
+        openGeneratorLabel={t("openGenerator")}
+        generatorSettings={generatorSettings}
+        onGeneratorUse={(pw, settings) => {
+          setPassword(pw);
+          setShowPassword(true);
+          setGeneratorSettings(settings);
+        }}
+        url={url}
+        onUrlChange={setUrl}
+        urlLabel={t("url")}
+        notes={notes}
+        onNotesChange={setNotes}
+        notesLabel={entryCopy.notesLabel}
+        notesPlaceholder={entryCopy.notesPlaceholder}
+      />
+    </>
+  );
+
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     void handleSubmit();
@@ -725,423 +1143,7 @@ export function OrgPasswordForm({
             />
           </div>
 
-          {isPasskey ? (
-            <>
-              {/* Relying Party ID */}
-              <div className="space-y-2">
-                <Label>{tpk("relyingPartyId")}</Label>
-                <Input
-                  value={relyingPartyId}
-                  onChange={(e) => setRelyingPartyId(e.target.value)}
-                  placeholder={tpk("relyingPartyIdPlaceholder")}
-                  autoComplete="off"
-                />
-              </div>
-
-              {/* Relying Party Name */}
-              <div className="space-y-2">
-                <Label>{tpk("relyingPartyName")}</Label>
-                <Input
-                  value={relyingPartyName}
-                  onChange={(e) => setRelyingPartyName(e.target.value)}
-                  placeholder={tpk("relyingPartyNamePlaceholder")}
-                  autoComplete="off"
-                />
-              </div>
-
-              {/* Username */}
-              <div className="space-y-2">
-                <Label>{tpk("username")}</Label>
-                <Input
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder={tpk("usernamePlaceholder")}
-                  autoComplete="off"
-                />
-              </div>
-
-              {/* Credential ID */}
-              <div className="space-y-2">
-                <Label>{tpk("credentialId")}</Label>
-                <VisibilityToggleInput
-                  show={showCredentialId}
-                  onToggle={() => setShowCredentialId(!showCredentialId)}
-                  inputProps={{
-                    value: credentialId,
-                    onChange: (e) => setCredentialId(e.target.value),
-                    placeholder: tpk("credentialIdPlaceholder"),
-                    autoComplete: "off",
-                  }}
-                />
-              </div>
-
-              {/* Creation Date & Device Info */}
-              <TwoColumnFields
-                left={(
-                  <>
-                    <Label>{tpk("creationDate")}</Label>
-                    <Input
-                      type="date"
-                      value={creationDate}
-                      onChange={(e) => setCreationDate(e.target.value)}
-                    />
-                  </>
-                )}
-                right={(
-                  <>
-                    <Label>{tpk("deviceInfo")}</Label>
-                    <Input
-                      value={deviceInfo}
-                      onChange={(e) => setDeviceInfo(e.target.value)}
-                      placeholder={tpk("deviceInfoPlaceholder")}
-                      autoComplete="off"
-                    />
-                  </>
-                )}
-              />
-
-              <NotesField
-                label={entryCopy.notesLabel}
-                value={notes}
-                onChange={setNotes}
-                placeholder={entryCopy.notesPlaceholder}
-              />
-            </>
-          ) : isIdentity ? (
-            <>
-              {/* Full Name */}
-              <div className="space-y-2">
-                <Label>{ti("fullName")}</Label>
-                <Input
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder={ti("fullNamePlaceholder")}
-                  autoComplete="off"
-                />
-              </div>
-
-              {/* Address */}
-              <div className="space-y-2">
-                <Label>{ti("address")}</Label>
-                <Textarea
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder={ti("addressPlaceholder")}
-                  rows={2}
-                  autoComplete="off"
-                />
-              </div>
-
-              {/* Phone & Email */}
-              <TwoColumnFields
-                left={(
-                  <>
-                    <Label>{ti("phone")}</Label>
-                    <Input
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder={ti("phonePlaceholder")}
-                      autoComplete="off"
-                    />
-                  </>
-                )}
-                right={(
-                  <>
-                    <Label>{ti("email")}</Label>
-                    <Input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder={ti("emailPlaceholder")}
-                      autoComplete="off"
-                    />
-                  </>
-                )}
-              />
-
-              {/* Date of Birth & Nationality */}
-              <TwoColumnFields
-                left={(
-                  <>
-                    <Label>{ti("dateOfBirth")}</Label>
-                    <Input
-                      type="date"
-                      value={dateOfBirth}
-                      onChange={(e) => {
-                        setDateOfBirth(e.target.value);
-                        setDobError(null);
-                      }}
-                    />
-                  </>
-                )}
-                right={(
-                  <>
-                    <Label>{ti("nationality")}</Label>
-                    <Input
-                      value={nationality}
-                      onChange={(e) => setNationality(e.target.value)}
-                      placeholder={ti("nationalityPlaceholder")}
-                      autoComplete="off"
-                    />
-                  </>
-                )}
-              />
-              {dobError && (
-                <p className="text-sm text-destructive">{dobError}</p>
-              )}
-
-              {/* ID Number */}
-              <div className="space-y-2">
-                <Label>{ti("idNumber")}</Label>
-                <VisibilityToggleInput
-                  show={showIdNumber}
-                  onToggle={() => setShowIdNumber(!showIdNumber)}
-                  inputProps={{
-                    value: idNumber,
-                    onChange: (e) => setIdNumber(e.target.value),
-                    placeholder: ti("idNumberPlaceholder"),
-                    autoComplete: "off",
-                  }}
-                />
-              </div>
-
-              {/* Issue Date & Expiry Date */}
-              <TwoColumnFields
-                left={(
-                  <>
-                    <Label>{ti("issueDate")}</Label>
-                    <Input
-                      type="date"
-                      value={issueDate}
-                      onChange={(e) => {
-                        setIssueDate(e.target.value);
-                        setExpiryError(null);
-                      }}
-                    />
-                  </>
-                )}
-                right={(
-                  <>
-                    <Label>{ti("expiryDate")}</Label>
-                    <Input
-                      type="date"
-                      value={expiryDate}
-                      onChange={(e) => {
-                        setExpiryDate(e.target.value);
-                        setExpiryError(null);
-                      }}
-                    />
-                  </>
-                )}
-              />
-              {expiryError && (
-                <p className="text-sm text-destructive">{expiryError}</p>
-              )}
-
-              <NotesField
-                label={entryCopy.notesLabel}
-                value={notes}
-                onChange={setNotes}
-                placeholder={entryCopy.notesPlaceholder}
-              />
-            </>
-          ) : isCreditCard ? (
-            <>
-              {/* Cardholder Name */}
-              <div className="space-y-2">
-                <Label>{tcc("cardholderName")}</Label>
-                <Input
-                  value={cardholderName}
-                  onChange={(e) => setCardholderName(e.target.value)}
-                  placeholder={tcc("cardholderNamePlaceholder")}
-                  autoComplete="off"
-                />
-              </div>
-
-              {/* Brand */}
-              <div className="space-y-2">
-                <Label>{tcc("brand")}</Label>
-                <Select
-                  value={brand}
-                  onValueChange={(value) => {
-                    setBrand(value);
-                    setBrandSource("manual");
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={tcc("brandPlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CARD_BRANDS.map((b) => (
-                      <SelectItem key={b} value={b}>
-                        {b}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Card Number */}
-              <div className="space-y-2">
-                <Label>{tcc("cardNumber")}</Label>
-                <VisibilityToggleInput
-                  show={showCardNumber}
-                  onToggle={() => setShowCardNumber(!showCardNumber)}
-                  inputProps={{
-                    value: cardNumber,
-                    onChange: (e) => handleCardNumberChange(e.target.value),
-                    placeholder: tcc("cardNumberPlaceholder"),
-                    autoComplete: "off",
-                    inputMode: "numeric",
-                    maxLength: maxInputLength,
-                    "aria-invalid": showLengthError || showLuhnError,
-                  }}
-                />
-                {cardValidation.detectedBrand && (
-                  <p className="text-xs text-muted-foreground">
-                    {tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })}
-                  </p>
-                )}
-                {!hasBrandHint && cardValidation.digits.length > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    {tcc("cardNumberLengthHintGeneric")}
-                  </p>
-                )}
-                {hasBrandHint && (
-                  <p className="text-xs text-muted-foreground">
-                    {tcc("cardNumberLengthHint", { lengths: lengthHint })}
-                  </p>
-                )}
-                {showLengthError && (
-                  <p className="text-xs text-destructive">
-                    {tcc("cardNumberInvalidLength", { lengths: lengthHint })}
-                  </p>
-                )}
-                {!showLengthError && showLuhnError && (
-                  <p className="text-xs text-destructive">
-                    {tcc("cardNumberInvalidLuhn")}
-                  </p>
-                )}
-              </div>
-
-              {/* Expiry */}
-              <TwoColumnFields
-                left={(
-                  <>
-                    <Label>{tcc("expiry")}</Label>
-                    <div className="flex gap-2">
-                      <Select value={expiryMonth} onValueChange={setExpiryMonth}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder={tcc("expiryMonth")} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Array.from({ length: 12 }, (_, i) =>
-                            String(i + 1).padStart(2, "0")
-                          ).map((m) => (
-                            <SelectItem key={m} value={m}>
-                              {m}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Select value={expiryYear} onValueChange={setExpiryYear}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder={tcc("expiryYear")} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Array.from({ length: 15 }, (_, i) =>
-                            String(new Date().getFullYear() + i)
-                          ).map((y) => (
-                            <SelectItem key={y} value={y}>
-                              {y}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </>
-                )}
-                right={(
-                  <>
-                    <Label>{tcc("cvv")}</Label>
-                    <VisibilityToggleInput
-                      show={showCvv}
-                      onToggle={() => setShowCvv(!showCvv)}
-                      inputProps={{
-                        value: cvv,
-                        onChange: (e) => setCvv(e.target.value),
-                        placeholder: tcc("cvvPlaceholder"),
-                        autoComplete: "off",
-                        maxLength: 4,
-                      }}
-                    />
-                  </>
-                )}
-              />
-
-              <NotesField
-                label={entryCopy.notesLabel}
-                value={notes}
-                onChange={setNotes}
-                placeholder={entryCopy.notesPlaceholder}
-              />
-            </>
-          ) : isNote ? (
-            <>
-              {/* Content (Secure Note) */}
-              <div className="space-y-2">
-                <Label>{tn("content")}</Label>
-                <Textarea
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder={tn("contentPlaceholder")}
-                  rows={10}
-                  maxLength={50000}
-                  className="font-mono"
-                />
-              </div>
-            </>
-          ) : (
-            <>
-              <EntryLoginMainFields
-                idPrefix="org-"
-                hideTitle
-                title={title}
-                onTitleChange={setTitle}
-                titleLabel={t("title")}
-                titlePlaceholder={t("titlePlaceholder")}
-                username={username}
-                onUsernameChange={setUsername}
-                usernameLabel={t("usernameEmail")}
-                usernamePlaceholder={t("usernamePlaceholder")}
-                password={password}
-                onPasswordChange={setPassword}
-                passwordLabel={t("password")}
-                passwordPlaceholder={t("passwordPlaceholder")}
-                showPassword={showPassword}
-                onToggleShowPassword={() => setShowPassword((v) => !v)}
-                generatorSummary={generatorSummary}
-                showGenerator={showGenerator}
-                onToggleGenerator={() => setShowGenerator((v) => !v)}
-                closeGeneratorLabel={t("closeGenerator")}
-                openGeneratorLabel={t("openGenerator")}
-                generatorSettings={generatorSettings}
-                onGeneratorUse={(pw, settings) => {
-                  setPassword(pw);
-                  setShowPassword(true);
-                  setGeneratorSettings(settings);
-                }}
-                url={url}
-                onUrlChange={setUrl}
-                urlLabel={t("url")}
-                notes={notes}
-                onNotesChange={setNotes}
-                notesLabel={entryCopy.notesLabel}
-                notesPlaceholder={entryCopy.notesPlaceholder}
-              />
-            </>
-          )}
+          {entrySpecificFields}
 
           <OrgTagSection
             title={entryCopy.tagsTitle}
