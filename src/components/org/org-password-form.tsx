@@ -15,6 +15,7 @@ import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custo
 import type { OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
 import { OrgCreditCardFields } from "@/components/org/org-credit-card-fields";
+import { getOrgCardValidationState } from "@/components/org/org-credit-card-validation";
 import { OrgIdentityFields } from "@/components/org/org-identity-fields";
 import { OrgLoginFields } from "@/components/org/org-login-fields";
 import { OrgPasskeyFields } from "@/components/org/org-passkey-fields";
@@ -43,9 +44,6 @@ import {
   CARD_BRANDS,
   detectCardBrand,
   formatCardNumber,
-  getAllowedLengths,
-  getCardNumberValidation,
-  getMaxLength,
   normalizeCardBrand,
   normalizeCardNumber,
 } from "@/lib/credit-card";
@@ -249,25 +247,15 @@ export function OrgPasswordForm({
     onOpenChange(v);
   };
 
-  const cardValidation = getCardNumberValidation(cardNumber, brand);
-  const allowedLengths = getAllowedLengths(cardValidation.effectiveBrand);
-  const lengthHint = allowedLengths
-    ? allowedLengths.join("/")
-    : "12-19";
-  const maxDigits = getMaxLength(cardValidation.effectiveBrand || cardValidation.detectedBrand);
-  const maxInputLength =
-    cardValidation.effectiveBrand === "American Express"
-      ? maxDigits + 2
-      : maxDigits + Math.floor((maxDigits - 1) / 4);
-  const showLengthError = cardValidation.digits.length > 0 && !cardValidation.lengthValid;
-  const showLuhnError =
-    cardValidation.digits.length > 0 &&
-    cardValidation.lengthValid &&
-    !cardValidation.luhnValid;
-  const cardNumberValid =
-    cardValidation.digits.length === 0 ||
-    (cardValidation.lengthValid && cardValidation.luhnValid);
-  const hasBrandHint = Boolean(cardValidation.effectiveBrand && cardValidation.effectiveBrand !== "Other");
+  const {
+    cardValidation,
+    lengthHint,
+    maxInputLength,
+    showLengthError,
+    showLuhnError,
+    cardNumberValid,
+    hasBrandHint,
+  } = getOrgCardValidationState(cardNumber, brand);
 
   const handleCardNumberChange = (value: string) => {
     const digits = normalizeCardNumber(value);
