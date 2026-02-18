@@ -52,6 +52,7 @@ import {
   extractTagIds,
 } from "@/lib/entry-form-helpers";
 import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
+import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
@@ -349,32 +350,21 @@ export function OrgPasswordForm({
   };
 
   const handleSubmit = async () => {
-    if (isPasskey) {
-      if (!title.trim() || !relyingPartyId.trim()) return;
-    } else if (isCreditCard) {
-      if (!title.trim()) return;
-      if (!cardNumberValid) return;
-    } else if (isIdentity) {
-      if (!title.trim()) return;
-      let hasDateError = false;
-      if (dateOfBirth && dateOfBirth > new Date().toISOString().slice(0, 10)) {
-        setDobError(ti("dobFuture"));
-        hasDateError = true;
-      } else {
-        setDobError(null);
-      }
-      if (issueDate && expiryDate && issueDate >= expiryDate) {
-        setExpiryError(ti("expiryBeforeIssue"));
-        hasDateError = true;
-      } else {
-        setExpiryError(null);
-      }
-      if (hasDateError) return;
-    } else if (isNote) {
-      if (!title.trim()) return;
-    } else {
-      if (!title.trim() || !password) return;
+    const validation = validateOrgEntryBeforeSubmit({
+      entryType: effectiveEntryType,
+      title,
+      password,
+      relyingPartyId,
+      cardNumberValid,
+      dateOfBirth,
+      issueDate,
+      expiryDate,
+    });
+    if (isIdentity) {
+      setDobError(validation.dobFuture ? ti("dobFuture") : null);
+      setExpiryError(validation.expiryBeforeIssue ? ti("expiryBeforeIssue") : null);
     }
+    if (!validation.ok) return;
     setSaving(true);
 
     try {
