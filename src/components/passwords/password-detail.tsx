@@ -361,6 +361,13 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
                                 next.add(idx);
                                 return next;
                               });
+                              setTimeout(() => {
+                                setRevealedFields((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(idx);
+                                  return next;
+                                });
+                              }, REVEAL_TIMEOUT);
                             });
                           }
                         }}
@@ -435,6 +442,13 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
                                 next.add(idx);
                                 return next;
                               });
+                              setTimeout(() => {
+                                setRevealedHistory((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(idx);
+                                  return next;
+                                });
+                              }, REVEAL_TIMEOUT);
                             });
                           }
                         }}

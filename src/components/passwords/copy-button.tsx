@@ -35,12 +35,17 @@ export function CopyButton({
       await navigator.clipboard.writeText(value);
       setCopied(true);
 
-      // Auto-clear clipboard after 30 seconds for security
+      // Auto-clear clipboard after 30 seconds if content still matches
+      const copiedValue = value;
       setTimeout(async () => {
         try {
-          await navigator.clipboard.writeText("");
+          const current = await navigator.clipboard.readText();
+          if (current === copiedValue) {
+            await navigator.clipboard.writeText("");
+          }
         } catch {
-          // Clipboard access may fail if page is not focused
+          // readText requires clipboard-read permission or page focus;
+          // silently skip if unavailable
         }
       }, CLIPBOARD_CLEAR_DELAY);
 
