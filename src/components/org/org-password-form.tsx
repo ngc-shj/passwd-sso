@@ -14,16 +14,12 @@ import { Label } from "@/components/ui/label";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import type { OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
-import { OrgCreditCardFields } from "@/components/org/org-credit-card-fields";
 import { getOrgCardValidationState } from "@/components/org/org-credit-card-validation";
-import { OrgIdentityFields } from "@/components/org/org-identity-fields";
-import { OrgLoginFields } from "@/components/org/org-login-fields";
-import { OrgPasskeyFields } from "@/components/org/org-passkey-fields";
+import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
 import {
   applyOrgEditDataToForm,
   resetOrgFormForClose,
 } from "@/components/org/org-password-form-state";
-import { OrgSecureNoteFields } from "@/components/org/org-secure-note-fields";
 import {
   buildBaselineSnapshot,
   buildCurrentSnapshot,
@@ -44,13 +40,7 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { toast } from "sonner";
-import {
-  CARD_BRANDS,
-  detectCardBrand,
-  formatCardNumber,
-  normalizeCardBrand,
-  normalizeCardNumber,
-} from "@/lib/credit-card";
+import { detectCardBrand, formatCardNumber, normalizeCardBrand, normalizeCardNumber } from "@/lib/credit-card";
 import {
   extractTagIds,
 } from "@/lib/entry-form-helpers";
@@ -58,6 +48,7 @@ import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
 import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import type { OrgEntryKind } from "@/components/org/org-password-form-types";
 
 export function OrgPasswordForm({
   orgId,
@@ -364,7 +355,7 @@ export function OrgPasswordForm({
       ? `${tGen("modePassphrase")} · ${generatorSettings.passphrase.wordCount}`
       : `${tGen("modePassword")} · ${generatorSettings.length}`;
 
-  const entryKind = isPasskey
+  const entryKind: OrgEntryKind = isPasskey
     ? "passkey"
     : isIdentity
       ? "identity"
@@ -521,205 +512,164 @@ export function OrgPasswordForm({
     (isLoginEntry && !password) ||
     (isCreditCard && !cardNumberValid);
 
-  const entrySpecificFields = (() => {
-    switch (entryKind) {
-      case "passkey":
-        return (
-          <OrgPasskeyFields
-            relyingPartyId={relyingPartyId}
-            onRelyingPartyIdChange={setRelyingPartyId}
-            relyingPartyIdPlaceholder={tpk("relyingPartyIdPlaceholder")}
-            relyingPartyName={relyingPartyName}
-            onRelyingPartyNameChange={setRelyingPartyName}
-            relyingPartyNamePlaceholder={tpk("relyingPartyNamePlaceholder")}
-            username={username}
-            onUsernameChange={setUsername}
-            usernamePlaceholder={tpk("usernamePlaceholder")}
-            credentialId={credentialId}
-            onCredentialIdChange={setCredentialId}
-            credentialIdPlaceholder={tpk("credentialIdPlaceholder")}
-            showCredentialId={showCredentialId}
-            onToggleCredentialId={() => setShowCredentialId(!showCredentialId)}
-            creationDate={creationDate}
-            onCreationDateChange={setCreationDate}
-            deviceInfo={deviceInfo}
-            onDeviceInfoChange={setDeviceInfo}
-            deviceInfoPlaceholder={tpk("deviceInfoPlaceholder")}
-            notesLabel={entryCopy.notesLabel}
-            notes={notes}
-            onNotesChange={setNotes}
-            notesPlaceholder={entryCopy.notesPlaceholder}
-            labels={{
-              relyingPartyId: tpk("relyingPartyId"),
-              relyingPartyName: tpk("relyingPartyName"),
-              username: tpk("username"),
-              credentialId: tpk("credentialId"),
-              creationDate: tpk("creationDate"),
-              deviceInfo: tpk("deviceInfo"),
-            }}
-          />
-        );
-      case "identity":
-        return (
-          <OrgIdentityFields
-            fullName={fullName}
-            onFullNameChange={setFullName}
-            fullNamePlaceholder={ti("fullNamePlaceholder")}
-            address={address}
-            onAddressChange={setAddress}
-            addressPlaceholder={ti("addressPlaceholder")}
-            phone={phone}
-            onPhoneChange={setPhone}
-            phonePlaceholder={ti("phonePlaceholder")}
-            email={email}
-            onEmailChange={setEmail}
-            emailPlaceholder={ti("emailPlaceholder")}
-            dateOfBirth={dateOfBirth}
-            onDateOfBirthChange={(value) => {
-              setDateOfBirth(value);
-              setDobError(null);
-            }}
-            nationality={nationality}
-            onNationalityChange={setNationality}
-            nationalityPlaceholder={ti("nationalityPlaceholder")}
-            idNumber={idNumber}
-            onIdNumberChange={setIdNumber}
-            idNumberPlaceholder={ti("idNumberPlaceholder")}
-            showIdNumber={showIdNumber}
-            onToggleIdNumber={() => setShowIdNumber(!showIdNumber)}
-            issueDate={issueDate}
-            onIssueDateChange={(value) => {
-              setIssueDate(value);
-              setExpiryError(null);
-            }}
-            expiryDate={expiryDate}
-            onExpiryDateChange={(value) => {
-              setExpiryDate(value);
-              setExpiryError(null);
-            }}
-            dobError={dobError}
-            expiryError={expiryError}
-            notesLabel={entryCopy.notesLabel}
-            notes={notes}
-            onNotesChange={setNotes}
-            notesPlaceholder={entryCopy.notesPlaceholder}
-            labels={{
-              fullName: ti("fullName"),
-              address: ti("address"),
-              phone: ti("phone"),
-              email: ti("email"),
-              dateOfBirth: ti("dateOfBirth"),
-              nationality: ti("nationality"),
-              idNumber: ti("idNumber"),
-              issueDate: ti("issueDate"),
-              expiryDate: ti("expiryDate"),
-            }}
-          />
-        );
-      case "creditCard":
-        return (
-          <OrgCreditCardFields
-            cardholderName={cardholderName}
-            onCardholderNameChange={setCardholderName}
-            cardholderNamePlaceholder={tcc("cardholderNamePlaceholder")}
-            brand={brand}
-            onBrandChange={(value) => {
-              setBrand(value);
-              setBrandSource("manual");
-            }}
-            brandPlaceholder={tcc("brandPlaceholder")}
-            brands={CARD_BRANDS}
-            cardNumber={cardNumber}
-            onCardNumberChange={handleCardNumberChange}
-            cardNumberPlaceholder={tcc("cardNumberPlaceholder")}
-            showCardNumber={showCardNumber}
-            onToggleCardNumber={() => setShowCardNumber(!showCardNumber)}
-            maxInputLength={maxInputLength}
-            showLengthError={showLengthError}
-            showLuhnError={showLuhnError}
-            detectedBrand={
-              cardValidation.detectedBrand
-                ? tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })
-                : undefined
-            }
-            hasBrandHint={hasBrandHint && cardValidation.digits.length > 0}
-            lengthHintGenericLabel={tcc("cardNumberLengthHintGeneric")}
-            lengthHintLabel={tcc("cardNumberLengthHint", { lengths: lengthHint })}
-            invalidLengthLabel={tcc("cardNumberInvalidLength", { lengths: lengthHint })}
-            invalidLuhnLabel={tcc("cardNumberInvalidLuhn")}
-            expiryMonth={expiryMonth}
-            onExpiryMonthChange={setExpiryMonth}
-            expiryYear={expiryYear}
-            onExpiryYearChange={setExpiryYear}
-            expiryMonthPlaceholder={tcc("expiryMonth")}
-            expiryYearPlaceholder={tcc("expiryYear")}
-            cvv={cvv}
-            onCvvChange={setCvv}
-            cvvPlaceholder={tcc("cvvPlaceholder")}
-            showCvv={showCvv}
-            onToggleCvv={() => setShowCvv(!showCvv)}
-            notesLabel={entryCopy.notesLabel}
-            notes={notes}
-            onNotesChange={setNotes}
-            notesPlaceholder={entryCopy.notesPlaceholder}
-            labels={{
-              cardholderName: tcc("cardholderName"),
-              brand: tcc("brand"),
-              cardNumber: tcc("cardNumber"),
-              expiry: tcc("expiry"),
-              cvv: tcc("cvv"),
-            }}
-          />
-        );
-      case "secureNote":
-        return (
-          <OrgSecureNoteFields
-            content={content}
-            onContentChange={setContent}
-            contentLabel={tn("content")}
-            contentPlaceholder={tn("contentPlaceholder")}
-          />
-        );
-      case "password":
-      default:
-        return (
-          <OrgLoginFields
-            title={title}
-            onTitleChange={setTitle}
-            titleLabel={t("title")}
-            titlePlaceholder={t("titlePlaceholder")}
-            username={username}
-            onUsernameChange={setUsername}
-            usernameLabel={t("usernameEmail")}
-            usernamePlaceholder={t("usernamePlaceholder")}
-            password={password}
-            onPasswordChange={setPassword}
-            passwordLabel={t("password")}
-            passwordPlaceholder={t("passwordPlaceholder")}
-            showPassword={showPassword}
-            onToggleShowPassword={() => setShowPassword((v) => !v)}
-            generatorSummary={generatorSummary}
-            showGenerator={showGenerator}
-            onToggleGenerator={() => setShowGenerator((v) => !v)}
-            closeGeneratorLabel={t("closeGenerator")}
-            openGeneratorLabel={t("openGenerator")}
-            generatorSettings={generatorSettings}
-            onGeneratorUse={(pw, settings) => {
-              setPassword(pw);
-              setShowPassword(true);
-              setGeneratorSettings(settings);
-            }}
-            url={url}
-            onUrlChange={setUrl}
-            urlLabel={t("url")}
-            notes={notes}
-            onNotesChange={setNotes}
-            notesLabel={entryCopy.notesLabel}
-            notesPlaceholder={entryCopy.notesPlaceholder}
-          />
-        );
-    }
-  })();
+  const entrySpecificFields = (
+    <OrgEntrySpecificFields
+      entryKind={entryKind}
+      notesLabel={entryCopy.notesLabel}
+      notesPlaceholder={entryCopy.notesPlaceholder}
+      notes={notes}
+      onNotesChange={setNotes}
+      title={title}
+      onTitleChange={setTitle}
+      titleLabel={t("title")}
+      titlePlaceholder={t("titlePlaceholder")}
+      username={username}
+      onUsernameChange={setUsername}
+      usernameLabel={t("usernameEmail")}
+      usernamePlaceholder={t("usernamePlaceholder")}
+      password={password}
+      onPasswordChange={setPassword}
+      passwordLabel={t("password")}
+      passwordPlaceholder={t("passwordPlaceholder")}
+      showPassword={showPassword}
+      onToggleShowPassword={() => setShowPassword((v) => !v)}
+      generatorSummary={generatorSummary}
+      showGenerator={showGenerator}
+      onToggleGenerator={() => setShowGenerator((v) => !v)}
+      closeGeneratorLabel={t("closeGenerator")}
+      openGeneratorLabel={t("openGenerator")}
+      generatorSettings={generatorSettings}
+      onGeneratorUse={(pw, settings) => {
+        setPassword(pw);
+        setShowPassword(true);
+        setGeneratorSettings(settings);
+      }}
+      url={url}
+      onUrlChange={setUrl}
+      urlLabel={t("url")}
+      content={content}
+      onContentChange={setContent}
+      contentLabel={tn("content")}
+      contentPlaceholder={tn("contentPlaceholder")}
+      cardholderName={cardholderName}
+      onCardholderNameChange={setCardholderName}
+      cardholderNamePlaceholder={tcc("cardholderNamePlaceholder")}
+      brand={brand}
+      onBrandChange={(value) => {
+        setBrand(value);
+        setBrandSource("manual");
+      }}
+      brandPlaceholder={tcc("brandPlaceholder")}
+      cardNumber={cardNumber}
+      onCardNumberChange={handleCardNumberChange}
+      cardNumberPlaceholder={tcc("cardNumberPlaceholder")}
+      showCardNumber={showCardNumber}
+      onToggleCardNumber={() => setShowCardNumber(!showCardNumber)}
+      maxInputLength={maxInputLength}
+      showLengthError={showLengthError}
+      showLuhnError={showLuhnError}
+      detectedBrand={
+        cardValidation.detectedBrand
+          ? tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })
+          : undefined
+      }
+      hasBrandHint={hasBrandHint && cardValidation.digits.length > 0}
+      lengthHintGenericLabel={tcc("cardNumberLengthHintGeneric")}
+      lengthHintLabel={tcc("cardNumberLengthHint", { lengths: lengthHint })}
+      invalidLengthLabel={tcc("cardNumberInvalidLength", { lengths: lengthHint })}
+      invalidLuhnLabel={tcc("cardNumberInvalidLuhn")}
+      creditCardLabels={{
+        cardholderName: tcc("cardholderName"),
+        brand: tcc("brand"),
+        cardNumber: tcc("cardNumber"),
+        expiry: tcc("expiry"),
+        cvv: tcc("cvv"),
+      }}
+      expiryMonth={expiryMonth}
+      onExpiryMonthChange={setExpiryMonth}
+      expiryYear={expiryYear}
+      onExpiryYearChange={setExpiryYear}
+      expiryMonthPlaceholder={tcc("expiryMonth")}
+      expiryYearPlaceholder={tcc("expiryYear")}
+      cvv={cvv}
+      onCvvChange={setCvv}
+      cvvPlaceholder={tcc("cvvPlaceholder")}
+      showCvv={showCvv}
+      onToggleCvv={() => setShowCvv(!showCvv)}
+      fullName={fullName}
+      onFullNameChange={setFullName}
+      fullNamePlaceholder={ti("fullNamePlaceholder")}
+      address={address}
+      onAddressChange={setAddress}
+      addressPlaceholder={ti("addressPlaceholder")}
+      phone={phone}
+      onPhoneChange={setPhone}
+      phonePlaceholder={ti("phonePlaceholder")}
+      email={email}
+      onEmailChange={setEmail}
+      emailPlaceholder={ti("emailPlaceholder")}
+      dateOfBirth={dateOfBirth}
+      onDateOfBirthChange={(value) => {
+        setDateOfBirth(value);
+        setDobError(null);
+      }}
+      nationality={nationality}
+      onNationalityChange={setNationality}
+      nationalityPlaceholder={ti("nationalityPlaceholder")}
+      idNumber={idNumber}
+      onIdNumberChange={setIdNumber}
+      idNumberPlaceholder={ti("idNumberPlaceholder")}
+      showIdNumber={showIdNumber}
+      onToggleIdNumber={() => setShowIdNumber(!showIdNumber)}
+      issueDate={issueDate}
+      onIssueDateChange={(value) => {
+        setIssueDate(value);
+        setExpiryError(null);
+      }}
+      expiryDate={expiryDate}
+      onExpiryDateChange={(value) => {
+        setExpiryDate(value);
+        setExpiryError(null);
+      }}
+      dobError={dobError}
+      expiryError={expiryError}
+      identityLabels={{
+        fullName: ti("fullName"),
+        address: ti("address"),
+        phone: ti("phone"),
+        email: ti("email"),
+        dateOfBirth: ti("dateOfBirth"),
+        nationality: ti("nationality"),
+        idNumber: ti("idNumber"),
+        issueDate: ti("issueDate"),
+        expiryDate: ti("expiryDate"),
+      }}
+      relyingPartyId={relyingPartyId}
+      onRelyingPartyIdChange={setRelyingPartyId}
+      relyingPartyIdPlaceholder={tpk("relyingPartyIdPlaceholder")}
+      relyingPartyName={relyingPartyName}
+      onRelyingPartyNameChange={setRelyingPartyName}
+      relyingPartyNamePlaceholder={tpk("relyingPartyNamePlaceholder")}
+      credentialId={credentialId}
+      onCredentialIdChange={setCredentialId}
+      credentialIdPlaceholder={tpk("credentialIdPlaceholder")}
+      showCredentialId={showCredentialId}
+      onToggleCredentialId={() => setShowCredentialId(!showCredentialId)}
+      creationDate={creationDate}
+      onCreationDateChange={setCreationDate}
+      deviceInfo={deviceInfo}
+      onDeviceInfoChange={setDeviceInfo}
+      deviceInfoPlaceholder={tpk("deviceInfoPlaceholder")}
+      passkeyLabels={{
+        relyingPartyId: tpk("relyingPartyId"),
+        relyingPartyName: tpk("relyingPartyName"),
+        username: tpk("username"),
+        credentialId: tpk("credentialId"),
+        creationDate: tpk("creationDate"),
+        deviceInfo: tpk("deviceInfo"),
+      }}
+    />
+  );
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();

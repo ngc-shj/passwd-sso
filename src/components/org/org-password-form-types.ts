@@ -2,6 +2,13 @@ import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { OrgTagData } from "@/components/org/org-tag-input";
 
+export type OrgEntryKind =
+  | "password"
+  | "secureNote"
+  | "creditCard"
+  | "identity"
+  | "passkey";
+
 export interface OrgFolderItem {
   id: string;
   name: string;
