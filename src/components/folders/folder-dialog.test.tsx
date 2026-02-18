@@ -259,6 +259,61 @@ describe("FolderDialog", () => {
     });
   });
 
+  // ── IME guard ──────────────────────────────────────────────
+
+  describe("IME composition", () => {
+    it("does not trigger submit when Enter is pressed during IME composition", async () => {
+      render(
+        <FolderDialog
+          open={true}
+          onOpenChange={mockOnOpenChange}
+          folders={folders}
+          onSubmit={mockOnSubmit}
+        />,
+      );
+
+      const input = screen.getByRole("textbox");
+      fireEvent.change(input, { target: { value: "テスト" } });
+
+      // Simulate Enter during IME composition (isComposing: true)
+      const composingEnter = new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        isComposing: true,
+      });
+      input.dispatchEvent(composingEnter);
+
+      // Give time for any async handlers
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(mockOnSubmit).not.toHaveBeenCalled();
+    });
+
+    it("triggers submit when Enter is pressed after IME composition is done", async () => {
+      render(
+        <FolderDialog
+          open={true}
+          onOpenChange={mockOnOpenChange}
+          folders={folders}
+          onSubmit={mockOnSubmit}
+        />,
+      );
+
+      const input = screen.getByRole("textbox");
+      fireEvent.change(input, { target: { value: "テスト" } });
+
+      // Normal Enter (isComposing: false)
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(mockOnSubmit).toHaveBeenCalledWith({
+          name: "テスト",
+          parentId: null,
+        });
+      });
+    });
+  });
+
   // ── Not rendered when closed ──────────────────────────────
 
   it("renders nothing when open is false", () => {
