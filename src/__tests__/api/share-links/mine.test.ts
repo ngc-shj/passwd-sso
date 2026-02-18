@@ -7,11 +7,24 @@ const { mockAuth, mockFindMany } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
 }));
+const { mockRequireOrgMember } = vi.hoisted(() => ({
+  mockRequireOrgMember: vi.fn(),
+}));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { findMany: mockFindMany },
+  },
+}));
+vi.mock("@/lib/org-auth", () => ({
+  requireOrgMember: mockRequireOrgMember,
+  OrgAuthError: class extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
   },
 }));
 
@@ -38,6 +51,7 @@ function makeShare(overrides: Record<string, unknown> = {}) {
 describe("GET /api/share-links/mine", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1" });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -225,6 +239,26 @@ describe("GET /api/share-links/mine", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           createdById: DEFAULT_SESSION.user.id,
+          passwordEntryId: { not: null },
+        }),
+      })
+    );
+    expect(mockRequireOrgMember).not.toHaveBeenCalled();
+  });
+
+  it("requires org membership and filters by org when org query is provided", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    await GET(req as never);
+
+    expect(mockRequireOrgMember).toHaveBeenCalledWith(DEFAULT_SESSION.user.id, "org-1");
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdById: DEFAULT_SESSION.user.id,
+          orgPasswordEntry: { orgId: "org-1" },
         }),
       })
     );

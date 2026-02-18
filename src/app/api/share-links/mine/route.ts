@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { requireOrgMember, OrgAuthError } from "@/lib/org-auth";
 
 // GET /api/share-links/mine — List all share links created by the current user
 export async function GET(req: NextRequest) {
@@ -12,12 +13,27 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status"); // "active" | "expired" | "revoked" | null (all)
+  const orgId = searchParams.get("org");
   const cursor = searchParams.get("cursor");
   const limit = 30;
 
   const where: Record<string, unknown> = {
     createdById: session.user.id,
   };
+  if (orgId) {
+    try {
+      await requireOrgMember(session.user.id, orgId);
+    } catch (e) {
+      if (e instanceof OrgAuthError) {
+        return NextResponse.json({ error: e.message }, { status: e.status });
+      }
+      throw e;
+    }
+    where.orgPasswordEntry = { orgId };
+  } else {
+    // Personal context: exclude organization share links.
+    where.passwordEntryId = { not: null };
+  }
 
   const now = new Date();
   if (status === "active") {
