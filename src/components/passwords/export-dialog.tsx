@@ -22,7 +22,12 @@ import { Switch } from "@/components/ui/switch";
 import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { EntryPasswordHistory, EntryTagNameColor } from "@/lib/entry-form-types";
+import type {
+  EntryCustomFieldPortable,
+  EntryPasswordHistory,
+  EntryTagNameColor,
+  EntryTotpPortable,
+} from "@/lib/entry-form-types";
 
 type ExportFormat = "csv" | "json";
 type ExportProfile = "compatible" | "passwd-sso";
@@ -57,15 +62,8 @@ interface DecryptedExport {
   creationDate: string | null;
   deviceInfo: string | null;
   tags: EntryTagNameColor[];
-  customFields: Array<{ label: string; value: string; type: string }>;
-  totpConfig: {
-    secret: string;
-    issuer?: string;
-    label?: string;
-    period?: number;
-    digits?: number;
-    algorithm?: string;
-  } | null;
+  customFields: EntryCustomFieldPortable[];
+  totpConfig: EntryTotpPortable | null;
   generatorSettings: Record<string, unknown> | null;
   passwordHistory: EntryPasswordHistory[];
   requireReprompt: boolean;
