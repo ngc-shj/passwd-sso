@@ -12,7 +12,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
-import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import type { OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
 import { OrgCreditCardFields } from "@/components/org/org-credit-card-fields";
@@ -20,7 +19,7 @@ import { OrgIdentityFields } from "@/components/org/org-identity-fields";
 import { OrgLoginFields } from "@/components/org/org-login-fields";
 import { OrgPasskeyFields } from "@/components/org/org-passkey-fields";
 import { OrgSecureNoteFields } from "@/components/org/org-secure-note-fields";
-import { OrgTagSection } from "@/components/org/org-tag-section";
+import { OrgTagsAndFolderSection } from "@/components/org/org-tags-and-folder-section";
 import type {
   OrgFolderItem,
   OrgPasswordFormEditData,
@@ -787,12 +786,15 @@ export function OrgPasswordForm({
 
           {entrySpecificFields}
 
-          <OrgTagSection
-            title={entryCopy.tagsTitle}
-            hint={t("tagsHint")}
+          <OrgTagsAndFolderSection
+            tagsTitle={entryCopy.tagsTitle}
+            tagsHint={t("tagsHint")}
             orgId={orgId}
             selectedTags={selectedTags}
-            onChange={setSelectedTags}
+            onTagsChange={setSelectedTags}
+            folders={orgFolders}
+            folderId={orgFolderId}
+            onFolderChange={setOrgFolderId}
             sectionCardClass={dialogSectionClass}
           />
 
@@ -808,13 +810,6 @@ export function OrgPasswordForm({
             />
           )}
           </div>
-
-        <EntryFolderSelectSection
-          folders={orgFolders}
-          value={orgFolderId}
-          onChange={setOrgFolderId}
-          sectionCardClass={dialogSectionClass}
-        />
 
         {/* Actions */}
         <EntryActionBar
