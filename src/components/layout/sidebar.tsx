@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -17,6 +17,7 @@ import { useLocalStorage } from "@/hooks/use-local-storage";
 import { ExportDialog } from "@/components/passwords/export-dialog";
 import { ImportDialog } from "@/components/passwords/import-dialog";
 import { FolderDialog } from "@/components/folders/folder-dialog";
+import { VaultSelector } from "@/components/layout/vault-selector";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +38,7 @@ import { ORG_ROLE, ENTRY_TYPE, API_PATH, apiPath } from "@/lib/constants";
 import { stripLocalePrefix } from "@/i18n/locale-utils";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { toast } from "sonner";
+import { useVaultContext } from "@/hooks/use-vault-context";
 
 // ─── Section keys ────────────────────────────────────────────────
 
@@ -233,6 +235,7 @@ function FolderTreeNode({
 // ─── Component ───────────────────────────────────────────────────
 
 export function Sidebar({ open, onOpenChange }: SidebarProps) {
+  const router = useRouter();
   const t = useTranslations("Dashboard");
   const tCommon = useTranslations("Common");
   const tOrg = useTranslations("Org");
@@ -280,6 +283,17 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const isOrgsManage = cleanPath === "/dashboard/orgs";
   const isShareLinks = cleanPath === "/dashboard/share-links";
   const isEmergencyAccess = cleanPath === "/dashboard/emergency-access" || cleanPath.startsWith("/dashboard/emergency-access/");
+  const vaultContext = useVaultContext(orgs);
+
+  const handleVaultChange = (value: string) => {
+    if (value === "personal") {
+      router.push("/dashboard");
+      onOpenChange(false);
+      return;
+    }
+    router.push(`/dashboard/orgs/${value}`);
+    onOpenChange(false);
+  };
 
   // ─── Collapsible state ──────────────────────────────────────────
 
@@ -477,6 +491,12 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 
   const content = (
     <nav className="space-y-4 p-4">
+      <VaultSelector
+        value={vaultContext.type === "org" ? vaultContext.orgId : "personal"}
+        orgs={orgs}
+        onValueChange={handleVaultChange}
+      />
+
       {/* ── Vault ──────────────────────────────────────────── */}
       <Collapsible open={isOpen("vault")} onOpenChange={toggleSection("vault")}>
         <CollapsibleSectionHeader isOpen={isOpen("vault")}>
