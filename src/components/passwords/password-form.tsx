@@ -34,6 +34,7 @@ import {
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { savePersonalEntry } from "@/lib/personal-entry-save";
 import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
+import { buildGeneratorSummary } from "@/lib/generator-summary";
 import {
   buildPersonalCurrentSnapshot,
   buildPersonalInitialSnapshot,
@@ -145,10 +146,10 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     }
   };
 
-  const generatorSummary =
-    generatorSettings.mode === "passphrase"
-      ? `${tGen("modePassphrase")} · ${generatorSettings.passphrase.wordCount}`
-      : `${tGen("modePassword")} · ${generatorSettings.length}`;
+  const generatorSummary = buildGeneratorSummary(generatorSettings, {
+    modePassphrase: tGen("modePassphrase"),
+    modePassword: tGen("modePassword"),
+  });
 
   const loginMainFields = (
     <EntryLoginMainFields

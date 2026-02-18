@@ -50,6 +50,7 @@ import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
 import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import { buildGeneratorSummary } from "@/lib/generator-summary";
 
 export function OrgPasswordForm({
   orgId,
@@ -348,10 +349,10 @@ export function OrgPasswordForm({
     }
   };
 
-  const generatorSummary =
-    generatorSettings.mode === "passphrase"
-      ? `${tGen("modePassphrase")} · ${generatorSettings.passphrase.wordCount}`
-      : `${tGen("modePassword")} · ${generatorSettings.length}`;
+  const generatorSummary = buildGeneratorSummary(generatorSettings, {
+    modePassphrase: tGen("modePassphrase"),
+    modePassword: tGen("modePassword"),
+  });
 
   const entryCopy = buildOrgEntryCopy({
     isEdit,
