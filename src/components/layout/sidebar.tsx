@@ -10,12 +10,29 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { VisuallyHidden } from "radix-ui";
 import { Separator } from "@/components/ui/separator";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, Fingerprint, ScrollText, Link as LinkIcon, HeartPulse, ChevronDown, ChevronRight } from "lucide-react";
+import { FolderOpen, Shield, Tag, Star, Archive, Trash2, Download, Upload, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, Fingerprint, ScrollText, Link as LinkIcon, HeartPulse, ChevronDown, ChevronRight, Plus, Pencil, MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { ExportDialog } from "@/components/passwords/export-dialog";
 import { ImportDialog } from "@/components/passwords/import-dialog";
+import { FolderDialog } from "@/components/folders/folder-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ORG_ROLE, ENTRY_TYPE, API_PATH, apiPath } from "@/lib/constants";
 import { stripLocalePrefix } from "@/i18n/locale-utils";
 
@@ -75,32 +92,65 @@ function FolderTreeNode({
   activeFolderId,
   depth,
   onNavigate,
+  onEdit,
+  onDelete,
 }: {
   folder: FolderItem;
   folders: FolderItem[];
   activeFolderId: string | null;
   depth: number;
   onNavigate: () => void;
+  onEdit: (folder: FolderItem) => void;
+  onDelete: (folder: FolderItem) => void;
 }) {
+  const tCommon = useTranslations("Common");
+  const tDashboard = useTranslations("Dashboard");
   const children = folders.filter((f) => f.parentId === folder.id);
   return (
     <>
-      <Button
-        variant={activeFolderId === folder.id ? "secondary" : "ghost"}
-        className="w-full justify-start gap-2"
-        style={{ paddingLeft: `${8 + depth * 12}px` }}
-        asChild
-      >
-        <Link href={`/dashboard/folders/${folder.id}`} onClick={onNavigate}>
-          <FolderOpen className="h-4 w-4 shrink-0" />
-          <span className="truncate">{folder.name}</span>
-          {folder.entryCount > 0 && (
-            <span className="ml-auto text-xs text-muted-foreground">
-              {folder.entryCount}
-            </span>
-          )}
-        </Link>
-      </Button>
+      <div className="group/folder flex items-center">
+        <Button
+          variant={activeFolderId === folder.id ? "secondary" : "ghost"}
+          className="flex-1 justify-start gap-2 min-w-0"
+          style={{ paddingLeft: `${8 + depth * 12}px` }}
+          asChild
+        >
+          <Link href={`/dashboard/folders/${folder.id}`} onClick={onNavigate}>
+            <FolderOpen className="h-4 w-4 shrink-0" />
+            <span className="truncate">{folder.name}</span>
+            {folder.entryCount > 0 && (
+              <span className="ml-auto text-xs text-muted-foreground">
+                {folder.entryCount}
+              </span>
+            )}
+          </Link>
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0 opacity-0 group-hover/folder:opacity-100 focus:opacity-100"
+              aria-label={`${folder.name} menu`}
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onEdit(folder)}>
+              <Pencil className="h-3.5 w-3.5 mr-2" />
+              {tCommon("edit")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-destructive"
+              onClick={() => onDelete(folder)}
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-2" />
+              {tDashboard("deleteFolder")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
       {children.map((child) => (
         <FolderTreeNode
           key={child.id}
@@ -109,6 +159,8 @@ function FolderTreeNode({
           activeFolderId={activeFolderId}
           depth={depth + 1}
           onNavigate={onNavigate}
+          onEdit={onEdit}
+          onDelete={onDelete}
         />
       ))}
     </>
@@ -119,11 +171,17 @@ function FolderTreeNode({
 
 export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const t = useTranslations("Dashboard");
+  const tCommon = useTranslations("Common");
   const tOrg = useTranslations("Org");
   const [tags, setTags] = useState<TagItem[]>([]);
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [orgs, setOrgs] = useState<OrgItem[]>([]);
   const [orgTagGroups, setOrgTagGroups] = useState<OrgTagGroup[]>([]);
+
+  // Folder dialog state
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [editingFolder, setEditingFolder] = useState<FolderItem | null>(null);
+  const [deletingFolder, setDeletingFolder] = useState<FolderItem | null>(null);
 
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -260,6 +318,47 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 
   const handleImportComplete = () => {
     window.dispatchEvent(new CustomEvent("vault-data-changed"));
+  };
+
+  // ─── Folder CRUD handlers ────────────────────────────────────────
+
+  const handleFolderCreate = () => {
+    setEditingFolder(null);
+    setFolderDialogOpen(true);
+  };
+
+  const handleFolderEdit = (folder: FolderItem) => {
+    setEditingFolder(folder);
+    setFolderDialogOpen(true);
+  };
+
+  const handleFolderSubmit = async (data: { name: string; parentId: string | null }) => {
+    if (editingFolder) {
+      const res = await fetch(apiPath.folderById(editingFolder.id), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update folder");
+    } else {
+      const res = await fetch(API_PATH.FOLDERS, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to create folder");
+    }
+    fetchData();
+  };
+
+  const handleFolderDelete = async () => {
+    if (!deletingFolder) return;
+    const res = await fetch(apiPath.folderById(deletingFolder.id), {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to delete folder");
+    setDeletingFolder(null);
+    fetchData();
   };
 
   // ─── Content ────────────────────────────────────────────────────
@@ -525,45 +624,93 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       </Collapsible>
 
       {/* ── Organize (folders + tags) ──────────────────────── */}
-      {(folders.length > 0 || tags.filter((tg) => tg.passwordCount > 0).length > 0 || orgTagGroups.length > 0) && (
-        <>
-          <Separator />
-          <Collapsible open={isOpen("organize")} onOpenChange={toggleSection("organize")}>
+      <Separator />
+      <Collapsible open={isOpen("organize")} onOpenChange={toggleSection("organize")}>
+        <div className="flex items-center">
+          <div className="flex-1">
             <CollapsibleSectionHeader
               icon={<Tag className="h-3 w-3" />}
               isOpen={isOpen("organize")}
             >
               {t("organize")}
             </CollapsibleSectionHeader>
-            <CollapsibleContent>
-              {folders.length > 0 && (
-                <div className="space-y-1 mb-2">
-                  {folders
-                    .filter((f) => !f.parentId)
-                    .map((folder) => (
-                      <FolderTreeNode
-                        key={folder.id}
-                        folder={folder}
-                        folders={folders}
-                        activeFolderId={activeFolderId}
-                        depth={0}
-                        onNavigate={() => onOpenChange(false)}
-                      />
-                    ))}
-                </div>
-              )}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 shrink-0 mr-1"
+            onClick={handleFolderCreate}
+            aria-label={t("createFolder")}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+        <CollapsibleContent>
+          <div className="space-y-1 mb-2">
+            {folders
+              .filter((f) => !f.parentId)
+              .map((folder) => (
+                <FolderTreeNode
+                  key={folder.id}
+                  folder={folder}
+                  folders={folders}
+                  activeFolderId={activeFolderId}
+                  depth={0}
+                  onNavigate={() => onOpenChange(false)}
+                  onEdit={handleFolderEdit}
+                  onDelete={setDeletingFolder}
+                />
+              ))}
+          </div>
+          <div className="space-y-1">
+            {tags.filter((tg) => tg.passwordCount > 0).map((tag) => {
+              const colorClass = getTagColorClass(tag.color);
+              return (
+                <Button
+                  key={tag.id}
+                  variant={activeTagId === tag.id ? "secondary" : "ghost"}
+                  className="w-full justify-start gap-2"
+                  asChild
+                >
+                  <Link
+                    href={`/dashboard/tags/${tag.id}`}
+                    onClick={() => onOpenChange(false)}
+                  >
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "h-3 w-3 rounded-full p-0",
+                        colorClass && "tag-color-bg",
+                        colorClass
+                      )}
+                    />
+                    {tag.name}
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {tag.passwordCount}
+                    </span>
+                  </Link>
+                </Button>
+              );
+            })}
+          </div>
+
+          {orgTagGroups.map((group) => (
+            <div key={group.orgId}>
+              <SectionLabel icon={<Building2 className="h-3 w-3" />}>
+                {group.orgName}
+              </SectionLabel>
               <div className="space-y-1">
-                {tags.filter((tg) => tg.passwordCount > 0).map((tag) => {
+                {group.tags.map((tag) => {
                   const colorClass = getTagColorClass(tag.color);
                   return (
                     <Button
                       key={tag.id}
-                      variant={activeTagId === tag.id ? "secondary" : "ghost"}
+                      variant={activeOrgTagId === tag.id ? "secondary" : "ghost"}
                       className="w-full justify-start gap-2"
                       asChild
                     >
                       <Link
-                        href={`/dashboard/tags/${tag.id}`}
+                        href={`/dashboard/orgs/${group.orgId}?tag=${tag.id}`}
                         onClick={() => onOpenChange(false)}
                       >
                         <Badge
@@ -576,56 +723,17 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                         />
                         {tag.name}
                         <span className="ml-auto text-xs text-muted-foreground">
-                          {tag.passwordCount}
+                          {tag.count}
                         </span>
                       </Link>
                     </Button>
                   );
                 })}
               </div>
-
-              {orgTagGroups.map((group) => (
-                <div key={group.orgId}>
-                  <SectionLabel icon={<Building2 className="h-3 w-3" />}>
-                    {group.orgName}
-                  </SectionLabel>
-                  <div className="space-y-1">
-                    {group.tags.map((tag) => {
-                      const colorClass = getTagColorClass(tag.color);
-                      return (
-                        <Button
-                          key={tag.id}
-                          variant={activeOrgTagId === tag.id ? "secondary" : "ghost"}
-                          className="w-full justify-start gap-2"
-                          asChild
-                        >
-                          <Link
-                            href={`/dashboard/orgs/${group.orgId}?tag=${tag.id}`}
-                            onClick={() => onOpenChange(false)}
-                          >
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "h-3 w-3 rounded-full p-0",
-                                colorClass && "tag-color-bg",
-                                colorClass
-                              )}
-                            />
-                            {tag.name}
-                            <span className="ml-auto text-xs text-muted-foreground">
-                              {tag.count}
-                            </span>
-                          </Link>
-                        </Button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </CollapsibleContent>
-          </Collapsible>
-        </>
-      )}
+            </div>
+          ))}
+        </CollapsibleContent>
+      </Collapsible>
 
       <Separator />
 
@@ -749,6 +857,36 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
           {content}
         </SheetContent>
       </Sheet>
+
+      {/* Folder create/edit dialog */}
+      <FolderDialog
+        open={folderDialogOpen}
+        onOpenChange={setFolderDialogOpen}
+        folders={folders}
+        editFolder={editingFolder}
+        onSubmit={handleFolderSubmit}
+      />
+
+      {/* Folder delete confirmation */}
+      <AlertDialog
+        open={!!deletingFolder}
+        onOpenChange={(open) => { if (!open) setDeletingFolder(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("deleteFolder")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("folderDeleteConfirm", { name: deletingFolder?.name ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleFolderDelete}>
+              {tCommon("delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

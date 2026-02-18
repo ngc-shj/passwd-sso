@@ -12,7 +12,8 @@
     "edit": "Edit",
     "tryAgain": "Try again",
     "or": "or",
-    "close": "Close"
+    "close": "Close",
+    "create": "Create"
   },
   "Auth": {
     "signOut": "Sign out",
@@ -306,7 +307,8 @@
     "restoreVersion": "Restore",
     "restoreConfirm": "Restore this version? The current version will be saved to history.",
     "versionFrom": "Version from {date}",
-    "viewVersion": "View"
+    "viewVersion": "View",
+    "cancel": "Cancel"
   },
   "RepromptDialog": {
     "title": "Verify Master Passphrase",
