@@ -35,6 +35,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { savePersonalEntry } from "@/lib/personal-entry-save";
+import { toTagIds, toTagPayload } from "@/components/passwords/entry-form-tags";
 
 interface CreditCardFormProps {
   mode: "create" | "edit";
@@ -155,10 +156,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
     setSubmitting(true);
 
     try {
-      const tags = selectedTags.map((t) => ({
-        name: t.name,
-        color: t.color,
-      }));
+      const tags = toTagPayload(selectedTags);
 
       const normalizedCardNumber = normalizeCardNumber(cardNumber);
       const lastFour = normalizedCardNumber ? normalizedCardNumber.slice(-4) : null;
@@ -190,7 +188,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
         userId: userId ?? undefined,
         fullBlob,
         overviewBlob,
-        tagIds: selectedTags.map((t) => t.id),
+        tagIds: toTagIds(selectedTags),
         folderId: folderId ?? null,
         entryType: ENTRY_TYPE.CREDIT_CARD,
       });

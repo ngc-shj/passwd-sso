@@ -17,6 +17,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { savePersonalEntry } from "@/lib/personal-entry-save";
+import { toTagIds, toTagPayload } from "@/components/passwords/entry-form-tags";
 
 interface SecureNoteFormProps {
   mode: "create" | "edit";
@@ -77,10 +78,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
     setSubmitting(true);
 
     try {
-      const tags = selectedTags.map((t) => ({
-        name: t.name,
-        color: t.color,
-      }));
+      const tags = toTagPayload(selectedTags);
 
       const snippet = content.slice(0, 100);
 
@@ -103,7 +101,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
         userId: userId ?? undefined,
         fullBlob,
         overviewBlob,
-        tagIds: selectedTags.map((t) => t.id),
+        tagIds: toTagIds(selectedTags),
         folderId: folderId ?? null,
         entryType: ENTRY_TYPE.SECURE_NOTE,
       });
