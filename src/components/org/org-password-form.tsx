@@ -107,6 +107,7 @@ interface OrgTagSectionProps {
   orgId: string;
   selectedTags: OrgTagData[];
   onChange: (tags: OrgTagData[]) => void;
+  sectionCardClass?: string;
 }
 
 function OrgTagSection({
@@ -115,9 +116,10 @@ function OrgTagSection({
   orgId,
   selectedTags,
   onChange,
+  sectionCardClass = "",
 }: OrgTagSectionProps) {
   return (
-    <EntryTagsSection title={title} hint={hint}>
+    <EntryTagsSection title={title} hint={hint} sectionCardClass={sectionCardClass}>
       <OrgTagInput orgId={orgId} selectedTags={selectedTags} onChange={onChange} />
     </EntryTagsSection>
   );
@@ -595,6 +597,8 @@ export function OrgPasswordForm({
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
+  const dialogSectionClass =
+    "!rounded-none !border-0 !bg-transparent !px-1 !py-2 !shadow-none hover:!bg-transparent";
   const submitDisabled =
     !title.trim() ||
     (isPasskey && !relyingPartyId.trim()) ||
@@ -726,6 +730,7 @@ export function OrgPasswordForm({
                 orgId={orgId}
                 selectedTags={selectedTags}
                 onChange={setSelectedTags}
+                sectionCardClass={dialogSectionClass}
               />
             </>
           ) : isIdentity ? (
@@ -877,6 +882,7 @@ export function OrgPasswordForm({
                 orgId={orgId}
                 selectedTags={selectedTags}
                 onChange={setSelectedTags}
+                sectionCardClass={dialogSectionClass}
               />
             </>
           ) : isCreditCard ? (
@@ -1052,6 +1058,7 @@ export function OrgPasswordForm({
                 orgId={orgId}
                 selectedTags={selectedTags}
                 onChange={setSelectedTags}
+                sectionCardClass={dialogSectionClass}
               />
             </>
           ) : isNote ? (
@@ -1075,6 +1082,7 @@ export function OrgPasswordForm({
                 orgId={orgId}
                 selectedTags={selectedTags}
                 onChange={setSelectedTags}
+                sectionCardClass={dialogSectionClass}
               />
             </>
           ) : (
@@ -1122,6 +1130,7 @@ export function OrgPasswordForm({
                 orgId={orgId}
                 selectedTags={selectedTags}
                 onChange={setSelectedTags}
+                sectionCardClass={dialogSectionClass}
               />
 
               <EntryCustomFieldsTotpSection
@@ -1131,6 +1140,7 @@ export function OrgPasswordForm({
                 onTotpChange={setTotp}
                 showTotpInput={showTotpInput}
                 setShowTotpInput={setShowTotpInput}
+                sectionCardClass={dialogSectionClass}
               />
             </>
           )}
@@ -1140,6 +1150,7 @@ export function OrgPasswordForm({
           folders={orgFolders}
           value={orgFolderId}
           onChange={setOrgFolderId}
+          sectionCardClass={dialogSectionClass}
         />
 
         {/* Actions */}

@@ -120,7 +120,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   const hasChanges = currentSnapshot !== initialSnapshot;
   const isDialogVariant = variant === "dialog";
   const dialogSectionClass = isDialogVariant
-    ? "!rounded-none !border-0 !bg-transparent !p-0 !shadow-none hover:!bg-transparent"
+    ? "!rounded-none !border-0 !bg-transparent !px-1 !py-2 !shadow-none hover:!bg-transparent"
     : "";
 
   const handleSubmit = async (e: React.FormEvent) => {
