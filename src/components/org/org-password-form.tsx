@@ -23,6 +23,7 @@ import {
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
+import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
 import { OrgTagInput, type OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
 import {
@@ -30,8 +31,8 @@ import {
   DEFAULT_GENERATOR_SETTINGS,
 } from "@/lib/generator-prefs";
 import { preventIMESubmit } from "@/lib/ime-guard";
-import { Eye, EyeOff, Tags } from "lucide-react";
-import { EntryActionBar, EntrySectionCard } from "@/components/passwords/entry-form-ui";
+import { Eye, EyeOff } from "lucide-react";
+import { EntryActionBar } from "@/components/passwords/entry-form-ui";
 import { toast } from "sonner";
 import {
   CARD_BRANDS,
@@ -682,21 +683,13 @@ export function OrgPasswordForm({
                 />
               </div>
 
-              {/* Tags */}
-              <EntrySectionCard>
-                <div className="space-y-1">
-                  <Label className="flex items-center gap-2">
-                    <Tags className="h-3.5 w-3.5" />
-                    {tpk("tags")}
-                  </Label>
-                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
-                </div>
+              <EntryTagsSection title={tpk("tags")} hint={t("tagsHint")}>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </EntrySectionCard>
+              </EntryTagsSection>
             </>
           ) : isIdentity ? (
             <>
@@ -841,21 +834,13 @@ export function OrgPasswordForm({
                 />
               </div>
 
-              {/* Tags */}
-              <EntrySectionCard>
-                <div className="space-y-1">
-                  <Label className="flex items-center gap-2">
-                    <Tags className="h-3.5 w-3.5" />
-                    {ti("tags")}
-                  </Label>
-                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
-                </div>
+              <EntryTagsSection title={ti("tags")} hint={t("tagsHint")}>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </EntrySectionCard>
+              </EntryTagsSection>
             </>
           ) : isCreditCard ? (
             <>
@@ -1024,21 +1009,13 @@ export function OrgPasswordForm({
                 />
               </div>
 
-              {/* Tags */}
-              <EntrySectionCard>
-                <div className="space-y-1">
-                  <Label className="flex items-center gap-2">
-                    <Tags className="h-3.5 w-3.5" />
-                    {tcc("tags")}
-                  </Label>
-                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
-                </div>
+              <EntryTagsSection title={tcc("tags")} hint={t("tagsHint")}>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </EntrySectionCard>
+              </EntryTagsSection>
             </>
           ) : isNote ? (
             <>
@@ -1055,21 +1032,13 @@ export function OrgPasswordForm({
                 />
               </div>
 
-              {/* Tags (org tags) */}
-              <EntrySectionCard>
-                <div className="space-y-1">
-                  <Label className="flex items-center gap-2">
-                    <Tags className="h-3.5 w-3.5" />
-                    {tn("tags")}
-                  </Label>
-                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
-                </div>
+              <EntryTagsSection title={tn("tags")} hint={t("tagsHint")}>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </EntrySectionCard>
+              </EntryTagsSection>
             </>
           ) : (
             <>
@@ -1110,21 +1079,13 @@ export function OrgPasswordForm({
                 notesPlaceholder={t("notesPlaceholder")}
               />
 
-              {/* Tags (org tags) */}
-              <EntrySectionCard>
-                <div className="space-y-1">
-                  <Label className="flex items-center gap-2">
-                    <Tags className="h-3.5 w-3.5" />
-                    {t("tags")}
-                  </Label>
-                  <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
-                </div>
+              <EntryTagsSection title={t("tags")} hint={t("tagsHint")}>
                 <OrgTagInput
                   orgId={orgId}
                   selectedTags={selectedTags}
                   onChange={setSelectedTags}
                 />
-              </EntrySectionCard>
+              </EntryTagsSection>
 
               <EntryCustomFieldsTotpSection
                 customFields={customFields}

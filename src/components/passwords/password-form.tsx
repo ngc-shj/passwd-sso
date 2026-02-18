@@ -5,19 +5,19 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
+import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
 import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
 } from "@/lib/generator-prefs";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ArrowLeft, ShieldCheck, Tags } from "lucide-react";
+import { ArrowLeft, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import type { EntryCustomField, EntryPasswordHistory, EntryTotp } from "@/lib/entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
@@ -221,20 +221,12 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
             />
             </EntryPrimaryCard>
 
-            {/* Tags section - 1Password style */}
-            <EntrySectionCard>
-              <div className="space-y-1">
-                <Label className="flex items-center gap-2">
-                  <Tags className="h-3.5 w-3.5" />
-                  {t("tags")}
-                </Label>
-                <p className="text-xs text-muted-foreground">{t("tagsHint")}</p>
-              </div>
+            <EntryTagsSection title={t("tags")} hint={t("tagsHint")}>
               <TagInput
                 selectedTags={selectedTags}
                 onChange={setSelectedTags}
               />
-            </EntrySectionCard>
+            </EntryTagsSection>
 
             <EntryCustomFieldsTotpSection
               customFields={customFields}
