@@ -1,15 +1,14 @@
 "use client";
 
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
 import { ExportDialog } from "@/components/passwords/export-dialog";
 import { ImportDialog } from "@/components/passwords/import-dialog";
 import { ORG_ROLE } from "@/lib/constants";
+import { CollapsibleSectionHeader, SectionLabel } from "@/components/layout/sidebar-shared";
 import {
   Building2,
-  ChevronDown,
-  ChevronRight,
   Download,
   FolderOpen,
   HeartPulse,
@@ -173,42 +172,5 @@ export function UtilitiesSection({
         </div>
       </CollapsibleContent>
     </Collapsible>
-  );
-}
-
-function CollapsibleSectionHeader({
-  children,
-  icon,
-  isOpen,
-}: {
-  children: React.ReactNode;
-  icon?: React.ReactNode;
-  isOpen: boolean;
-}) {
-  return (
-    <CollapsibleTrigger asChild>
-      <button type="button" className="w-full px-3 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center justify-between gap-1 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm">
-        <span className="flex items-center gap-1">
-          {icon}
-          {children}
-        </span>
-        {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-      </button>
-    </CollapsibleTrigger>
-  );
-}
-
-function SectionLabel({
-  children,
-  icon,
-}: {
-  children: React.ReactNode;
-  icon?: React.ReactNode;
-}) {
-  return (
-    <p className="px-3 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-      {icon}
-      {children}
-    </p>
   );
 }

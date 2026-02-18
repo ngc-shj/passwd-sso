@@ -9,20 +9,15 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { VisuallyHidden } from "radix-ui";
 import { Separator } from "@/components/ui/separator";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { FolderOpen, Tag, Star, Archive, Trash2, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, Fingerprint, ChevronDown, ChevronRight, Plus, Pencil, MoreHorizontal } from "lucide-react";
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
+import { FolderOpen, Tag, Star, Archive, Trash2, Building2, Settings, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { FolderDialog } from "@/components/folders/folder-dialog";
 import { VaultSelector } from "@/components/layout/vault-selector";
 import { SecuritySection, UtilitiesSection } from "@/components/layout/sidebar-section-security";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { CollapsibleSectionHeader, FolderTreeNode, type SidebarFolderItem } from "@/components/layout/sidebar-shared";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -74,13 +69,7 @@ interface OrgFolderGroup {
   folders: FolderItem[];
 }
 
-interface FolderItem {
-  id: string;
-  name: string;
-  parentId: string | null;
-  sortOrder: number;
-  entryCount: number;
-}
+type FolderItem = SidebarFolderItem;
 
 interface OrgItem {
   id: string;
@@ -92,143 +81,6 @@ interface OrgItem {
 interface SidebarProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-// ─── Folder tree helpers ────────────────────────────────────────
-
-/** Check whether `folderId` is an ancestor of `targetId` in the flat list. */
-function isAncestorOf(folderId: string, targetId: string, folders: FolderItem[]): boolean {
-  const map = new Map(folders.map((f) => [f.id, f]));
-  let current = map.get(targetId);
-  while (current) {
-    if (current.parentId === folderId) return true;
-    current = current.parentId ? map.get(current.parentId) : undefined;
-  }
-  return false;
-}
-
-function FolderTreeNode({
-  folder,
-  folders,
-  activeFolderId,
-  depth,
-  linkHref,
-  showMenu,
-  onNavigate,
-  onEdit,
-  onDelete,
-}: {
-  folder: FolderItem;
-  folders: FolderItem[];
-  activeFolderId: string | null;
-  depth: number;
-  /** Build the href for a folder link. */
-  linkHref: (folderId: string) => string;
-  /** Whether to show the edit/delete context menu (false for read-only members). */
-  showMenu?: boolean;
-  onNavigate: () => void;
-  onEdit: (folder: FolderItem) => void;
-  onDelete: (folder: FolderItem) => void;
-}) {
-  const tCommon = useTranslations("Common");
-  const tDashboard = useTranslations("Dashboard");
-  const children = folders.filter((f) => f.parentId === folder.id);
-  const hasChildren = children.length > 0;
-
-  // Auto-expand when the active folder is a descendant of this node.
-  // Uses the "adjusting state during render" pattern recommended by React
-  // to avoid useEffect + setState cascading renders.
-  const isAncestorOfActive = activeFolderId
-    ? isAncestorOf(folder.id, activeFolderId, folders)
-    : false;
-  const [open, setOpen] = useState(isAncestorOfActive);
-  const [wasAncestor, setWasAncestor] = useState(isAncestorOfActive);
-  if (isAncestorOfActive !== wasAncestor) {
-    setWasAncestor(isAncestorOfActive);
-    if (isAncestorOfActive) setOpen(true);
-  }
-
-  return (
-    <>
-      <div
-        className="group/folder flex items-center"
-        style={{ paddingLeft: `${depth * 12}px` }}
-      >
-        {hasChildren ? (
-          <button
-            type="button"
-            onClick={() => setOpen((prev) => !prev)}
-            className="h-6 w-6 shrink-0 flex items-center justify-center rounded hover:bg-accent"
-          >
-            {open ? (
-              <ChevronDown className="h-3 w-3" />
-            ) : (
-              <ChevronRight className="h-3 w-3" />
-            )}
-          </button>
-        ) : (
-          <span className="w-6 shrink-0" />
-        )}
-        <Button
-          variant={activeFolderId === folder.id ? "secondary" : "ghost"}
-          className="flex-1 justify-start gap-2 min-w-0"
-          asChild
-        >
-          <Link href={linkHref(folder.id)} onClick={onNavigate}>
-            <FolderOpen className="h-4 w-4 shrink-0" />
-            <span className="truncate">{folder.name}</span>
-            {folder.entryCount > 0 && (
-              <span className="ml-auto text-xs text-muted-foreground">
-                {folder.entryCount}
-              </span>
-            )}
-          </Link>
-        </Button>
-        {showMenu !== false && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0 opacity-0 group-hover/folder:opacity-100 focus:opacity-100"
-                aria-label={`${folder.name} menu`}
-              >
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onEdit(folder)}>
-                <Pencil className="h-3.5 w-3.5 mr-2" />
-                {tCommon("edit")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => onDelete(folder)}
-              >
-                <Trash2 className="h-3.5 w-3.5 mr-2" />
-                {tDashboard("deleteFolder")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
-      {hasChildren && open &&
-        children.map((child) => (
-          <FolderTreeNode
-            key={child.id}
-            folder={child}
-            folders={folders}
-            activeFolderId={activeFolderId}
-            depth={depth + 1}
-            linkHref={linkHref}
-            showMenu={showMenu}
-            onNavigate={onNavigate}
-            onEdit={onEdit}
-            onDelete={onDelete}
-          />
-        ))}
-    </>
-  );
 }
 
 // ─── Component ───────────────────────────────────────────────────
@@ -1015,30 +867,5 @@ function OrganizeSection({
         </div>
       </CollapsibleContent>
     </Collapsible>
-  );
-}
-
-// ─── Sub-components ──────────────────────────────────────────────
-
-/** Interactive collapsible section header with chevron indicator. */
-function CollapsibleSectionHeader({
-  children,
-  icon,
-  isOpen,
-}: {
-  children: React.ReactNode;
-  icon?: React.ReactNode;
-  isOpen: boolean;
-}) {
-  return (
-    <CollapsibleTrigger asChild>
-      <button type="button" className="w-full px-3 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center justify-between gap-1 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm">
-        <span className="flex items-center gap-1">
-          {icon}
-          {children}
-        </span>
-        {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-      </button>
-    </CollapsibleTrigger>
   );
 }
