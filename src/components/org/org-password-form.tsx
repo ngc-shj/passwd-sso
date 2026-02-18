@@ -481,55 +481,50 @@ export function OrgPasswordForm({
       ? `${tGen("modePassphrase")} · ${generatorSettings.passphrase.wordCount}`
       : `${tGen("modePassword")} · ${generatorSettings.length}`;
 
-  const dialogLabel = isPasskey
-    ? (isEdit ? tpk("editPasskey") : tpk("newPasskey"))
+  const entryCopy = isPasskey
+    ? {
+        dialogLabel: isEdit ? tpk("editPasskey") : tpk("newPasskey"),
+        titleLabel: tpk("title"),
+        titlePlaceholder: tpk("titlePlaceholder"),
+        notesLabel: tpk("notes"),
+        notesPlaceholder: tpk("notesPlaceholder"),
+        tagsTitle: tpk("tags"),
+      }
     : isIdentity
-      ? (isEdit ? ti("editIdentity") : ti("newIdentity"))
+      ? {
+          dialogLabel: isEdit ? ti("editIdentity") : ti("newIdentity"),
+          titleLabel: ti("title"),
+          titlePlaceholder: ti("titlePlaceholder"),
+          notesLabel: ti("notes"),
+          notesPlaceholder: ti("notesPlaceholder"),
+          tagsTitle: ti("tags"),
+        }
       : isCreditCard
-        ? (isEdit ? tcc("editCard") : tcc("newCard"))
+        ? {
+            dialogLabel: isEdit ? tcc("editCard") : tcc("newCard"),
+            titleLabel: tcc("title"),
+            titlePlaceholder: tcc("titlePlaceholder"),
+            notesLabel: tcc("notes"),
+            notesPlaceholder: tcc("notesPlaceholder"),
+            tagsTitle: tcc("tags"),
+          }
         : isNote
-          ? (isEdit ? tn("editNote") : tn("newNote"))
-          : (isEdit ? t("editPassword") : t("newPassword"));
-
-  const notesLabel = isPasskey
-    ? tpk("notes")
-    : isIdentity
-      ? ti("notes")
-      : isCreditCard
-        ? tcc("notes")
-        : isNote
-          ? tn("notes")
-          : t("notes");
-
-  const notesPlaceholder = isPasskey
-    ? tpk("notesPlaceholder")
-    : isIdentity
-      ? ti("notesPlaceholder")
-      : isCreditCard
-        ? tcc("notesPlaceholder")
-        : isNote
-          ? tn("notesPlaceholder")
-          : t("notesPlaceholder");
-
-  const titleLabel = isPasskey
-    ? tpk("title")
-    : isIdentity
-      ? ti("title")
-      : isCreditCard
-        ? tcc("title")
-        : isNote
-          ? tn("title")
-          : t("title");
-
-  const titlePlaceholder = isPasskey
-    ? tpk("titlePlaceholder")
-    : isIdentity
-      ? ti("titlePlaceholder")
-      : isCreditCard
-        ? tcc("titlePlaceholder")
-        : isNote
-          ? tn("titlePlaceholder")
-          : t("titlePlaceholder");
+          ? {
+              dialogLabel: isEdit ? tn("editNote") : tn("newNote"),
+              titleLabel: tn("title"),
+              titlePlaceholder: tn("titlePlaceholder"),
+              notesLabel: tn("notes"),
+              notesPlaceholder: tn("notesPlaceholder"),
+              tagsTitle: tn("tags"),
+            }
+          : {
+              dialogLabel: isEdit ? t("editPassword") : t("newPassword"),
+              titleLabel: t("title"),
+              titlePlaceholder: t("titlePlaceholder"),
+              notesLabel: t("notes"),
+              notesPlaceholder: t("notesPlaceholder"),
+              tagsTitle: t("tags"),
+            };
 
   const baselineSnapshot = useMemo(
     () =>
@@ -676,16 +671,6 @@ export function OrgPasswordForm({
     (isLoginEntry && !password) ||
     (isCreditCard && !cardNumberValid);
 
-  const orgTagsTitle = isPasskey
-    ? tpk("tags")
-    : isIdentity
-      ? ti("tags")
-      : isCreditCard
-        ? tcc("tags")
-        : isNote
-          ? tn("tags")
-          : t("tags");
-
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     void handleSubmit();
@@ -695,19 +680,19 @@ export function OrgPasswordForm({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{dialogLabel}</DialogTitle>
-          <DialogDescription className="sr-only">{dialogLabel}</DialogDescription>
+          <DialogTitle>{entryCopy.dialogLabel}</DialogTitle>
+          <DialogDescription className="sr-only">{entryCopy.dialogLabel}</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleFormSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
           <div className="space-y-5">
           {/* Title */}
           <div className="space-y-2">
-            <Label>{titleLabel}</Label>
+            <Label>{entryCopy.titleLabel}</Label>
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder={titlePlaceholder}
+              placeholder={entryCopy.titlePlaceholder}
             />
           </div>
 
@@ -788,11 +773,11 @@ export function OrgPasswordForm({
 
               {/* Notes */}
               <div className="space-y-2">
-                <Label>{notesLabel}</Label>
+                <Label>{entryCopy.notesLabel}</Label>
                 <Textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder={notesPlaceholder}
+                  placeholder={entryCopy.notesPlaceholder}
                   rows={3}
                 />
               </div>
@@ -931,11 +916,11 @@ export function OrgPasswordForm({
 
               {/* Notes */}
               <div className="space-y-2">
-                <Label>{notesLabel}</Label>
+                <Label>{entryCopy.notesLabel}</Label>
                 <Textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder={notesPlaceholder}
+                  placeholder={entryCopy.notesPlaceholder}
                   rows={3}
                 />
               </div>
@@ -1076,11 +1061,11 @@ export function OrgPasswordForm({
 
               {/* Notes */}
               <div className="space-y-2">
-                <Label>{notesLabel}</Label>
+                <Label>{entryCopy.notesLabel}</Label>
                 <Textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder={notesPlaceholder}
+                  placeholder={entryCopy.notesPlaceholder}
                   rows={3}
                 />
               </div>
@@ -1135,14 +1120,14 @@ export function OrgPasswordForm({
                 urlLabel={t("url")}
                 notes={notes}
                 onNotesChange={setNotes}
-                notesLabel={notesLabel}
-                notesPlaceholder={notesPlaceholder}
+                notesLabel={entryCopy.notesLabel}
+                notesPlaceholder={entryCopy.notesPlaceholder}
               />
             </>
           )}
 
           <OrgTagSection
-            title={orgTagsTitle}
+            title={entryCopy.tagsTitle}
             hint={t("tagsHint")}
             orgId={orgId}
             selectedTags={selectedTags}
