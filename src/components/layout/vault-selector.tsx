@@ -30,7 +30,7 @@ export function VaultSelector({ value, orgs, onValueChange }: VaultSelectorProps
 
   return (
     <div className="space-y-1">
-      <p className="px-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+      <p className="px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">
         {t("vault")}
       </p>
       <Select value={value} onValueChange={onValueChange}>
