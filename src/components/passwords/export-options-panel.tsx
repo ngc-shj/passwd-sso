@@ -44,6 +44,13 @@ export function ExportOptionsPanel({
   const protectId = `${idPrefix}password-protect`;
   const exportPasswordId = `${idPrefix}export-password`;
   const confirmPasswordId = `${idPrefix}confirm-password`;
+  const hasPasswordInputs = exportPassword.trim().length > 0 && confirmPassword.trim().length > 0;
+  const passwordsMatch = exportPassword === confirmPassword;
+  const exportButtonsDisabled = exporting || (
+    passwordProtect && (
+      !hasPasswordInputs || !passwordsMatch
+    )
+  );
 
   return (
     <>
@@ -129,7 +136,7 @@ export function ExportOptionsPanel({
           variant="outline"
           className="w-full sm:w-auto"
           onClick={() => onExport("csv")}
-          disabled={exporting}
+          disabled={exportButtonsDisabled}
         >
           {exporting ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -141,7 +148,7 @@ export function ExportOptionsPanel({
         <Button
           className="w-full sm:w-auto"
           onClick={() => onExport("json")}
-          disabled={exporting}
+          disabled={exportButtonsDisabled}
         >
           {exporting ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
