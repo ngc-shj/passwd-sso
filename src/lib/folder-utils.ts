@@ -11,6 +11,24 @@ export interface ParentNode {
 const MAX_FOLDER_DEPTH = 5;
 
 /**
+ * Validate that `parentId` exists and belongs to the expected owner.
+ *
+ * @returns The parent node if valid.
+ * @throws Error with `PARENT_NOT_FOUND` message if the parent does not exist or belongs to another owner.
+ */
+export async function validateParentFolder(
+  parentId: string,
+  ownerId: string,
+  getParent: (id: string) => Promise<ParentNode | null>,
+): Promise<ParentNode> {
+  const parent = await getParent(parentId);
+  if (!parent || parent.ownerId !== ownerId) {
+    throw new Error("PARENT_NOT_FOUND");
+  }
+  return parent;
+}
+
+/**
  * Validate that adding a child under `parentId` would not exceed max depth.
  * Walks from `parentId` to the root, counting ancestors.
  *

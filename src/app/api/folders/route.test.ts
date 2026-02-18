@@ -24,12 +24,13 @@ vi.mock("@/lib/folder-utils", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/folder-utils")>();
   return {
     ...original,
+    validateParentFolder: vi.fn().mockResolvedValue({ parentId: null, ownerId: "user-1" }),
     validateFolderDepth: vi.fn().mockResolvedValue(1),
   };
 });
 
 import { GET, POST } from "./route";
-import { validateFolderDepth } from "@/lib/folder-utils";
+import { validateParentFolder, validateFolderDepth } from "@/lib/folder-utils";
 
 const now = new Date("2025-06-01T00:00:00Z");
 
@@ -107,6 +108,21 @@ describe("POST /api/folders", () => {
       }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("returns 404 when parentId belongs to another user or does not exist", async () => {
+    vi.mocked(validateParentFolder).mockRejectedValueOnce(
+      new Error("PARENT_NOT_FOUND"),
+    );
+
+    const res = await POST(
+      createRequest("POST", "http://localhost:3000/api/folders", {
+        body: { name: "Child", parentId: "cm000000000000000other01" },
+      }),
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe("NOT_FOUND");
   });
 
   it("returns 400 when max depth exceeded", async () => {

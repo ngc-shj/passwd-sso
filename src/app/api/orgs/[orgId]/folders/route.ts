@@ -9,7 +9,7 @@ import {
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
+import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, ORG_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string }> };
@@ -99,6 +99,18 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const { name, parentId, sortOrder } = parsed.data;
+
+  // Parent ownership + existence check
+  if (parentId) {
+    try {
+      await validateParentFolder(parentId, orgId, getOrgParent);
+    } catch {
+      return NextResponse.json(
+        { error: API_ERROR.NOT_FOUND },
+        { status: 404 },
+      );
+    }
+  }
 
   try {
     await validateFolderDepth(parentId ?? null, orgId, getOrgParent);
