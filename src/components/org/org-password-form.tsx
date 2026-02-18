@@ -32,7 +32,10 @@ import {
 } from "@/lib/generator-prefs";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { Eye, EyeOff } from "lucide-react";
-import { EntryActionBar } from "@/components/passwords/entry-form-ui";
+import {
+  EntryActionBar,
+  ENTRY_DIALOG_FLAT_SECTION_CLASS,
+} from "@/components/passwords/entry-form-ui";
 import { toast } from "sonner";
 import {
   CARD_BRANDS,
@@ -597,8 +600,7 @@ export function OrgPasswordForm({
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
-  const dialogSectionClass =
-    "!rounded-none !border-0 !bg-transparent !px-1 !py-2 !shadow-none hover:!bg-transparent";
+  const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
   const submitDisabled =
     !title.trim() ||
     (isPasskey && !relyingPartyId.trim()) ||

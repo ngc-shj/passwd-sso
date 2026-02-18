@@ -9,7 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
-import { EntryActionBar, EntrySectionCard } from "@/components/passwords/entry-form-ui";
+import {
+  EntryActionBar,
+  EntrySectionCard,
+  ENTRY_DIALOG_FLAT_SECTION_CLASS,
+} from "@/components/passwords/entry-form-ui";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
 import {
@@ -119,9 +123,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   });
   const hasChanges = currentSnapshot !== initialSnapshot;
   const isDialogVariant = variant === "dialog";
-  const dialogSectionClass = isDialogVariant
-    ? "!rounded-none !border-0 !bg-transparent !px-1 !py-2 !shadow-none hover:!bg-transparent"
-    : "";
+  const dialogSectionClass = isDialogVariant ? ENTRY_DIALOG_FLAT_SECTION_CLASS : "";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

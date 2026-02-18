@@ -4,6 +4,12 @@ import type { ReactNode } from "react";
 import { BadgeCheck, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+export const ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS =
+  "!rounded-none !border-0 !bg-transparent !from-transparent !to-transparent !p-0 !shadow-none";
+
+export const ENTRY_DIALOG_FLAT_SECTION_CLASS =
+  "!rounded-none !border-0 !bg-transparent !px-1 !py-2 !shadow-none hover:!bg-transparent";
+
 interface EntryCardProps {
   children: ReactNode;
   className?: string;

@@ -11,7 +11,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { ArrowLeft, Eye, EyeOff, Tags } from "lucide-react";
-import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
+import {
+  EntryActionBar,
+  EntryPrimaryCard,
+  EntrySectionCard,
+  ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS,
+} from "@/components/passwords/entry-form-ui";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import { toast } from "sonner";
 import { ENTRY_TYPE } from "@/lib/constants";
@@ -127,9 +132,7 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
   const isDialogVariant = variant === "dialog";
-  const primaryCardClass = isDialogVariant
-    ? "!rounded-none !border-0 !bg-transparent !from-transparent !to-transparent !p-0 !shadow-none"
-    : "";
+  const primaryCardClass = isDialogVariant ? ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS : "";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
