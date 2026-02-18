@@ -51,9 +51,10 @@ vi.mock("@/components/org/org-export-dialog", () => ({
   OrgExportDialog: () => null,
 }));
 vi.mock("@/components/ui/button", () => ({
-  Button: ({ children, asChild: _asChild, ...rest }: React.ComponentProps<"button"> & { asChild?: boolean }) => (
-    <button {...rest}>{children}</button>
-  ),
+  Button: ({ children, asChild, ...rest }: React.ComponentProps<"button"> & { asChild?: boolean }) => {
+    void asChild;
+    return <button {...rest}>{children}</button>;
+  },
 }));
 vi.mock("@/components/ui/card", () => ({
   Card: ({ children, ...rest }: React.ComponentProps<"div">) => (
