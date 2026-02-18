@@ -552,7 +552,7 @@ describe("Sidebar org folder CRUD integration", () => {
     expect(orgCreateBtn).toBeInTheDocument();
   });
 
-  it("hides org folder create button for MEMBER role", async () => {
+  it("shows enabled org folder create button for MEMBER role", async () => {
     const fetchMock = mockFetchSuccess({
       orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
       orgFoldersData: ORG_FOLDERS_DATA,
@@ -570,12 +570,11 @@ describe("Sidebar org folder CRUD integration", () => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
     });
 
-    // MEMBER should not be able to create folders (button is disabled)
     const orgCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
-    expect(orgCreateBtn).toBeDisabled();
+    expect(orgCreateBtn).toBeEnabled();
   });
 
-  it("hides edit/delete menu for org folders when role is MEMBER", async () => {
+  it("shows edit/delete menu for org folders when role is MEMBER", async () => {
     const fetchMock = mockFetchSuccess({
       orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
       orgFoldersData: ORG_FOLDERS_DATA,
@@ -593,9 +592,8 @@ describe("Sidebar org folder CRUD integration", () => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
     });
 
-    // Org folder "OrgWork" should NOT have a context menu button
-    const menuButtons = sidebar.queryAllByRole("button", { name: "OrgWork menu" });
-    expect(menuButtons.length).toBe(0);
+    const orgMenuButton = sidebar.getByRole("button", { name: "OrgWork menu" });
+    expect(orgMenuButton).toBeInTheDocument();
   });
 
   it("shows edit/delete menu for org folders when role is OWNER", async () => {
@@ -688,7 +686,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
   });
 
-  it("hides org folder section when MEMBER and org has zero folders", async () => {
+  it("shows enabled org folder create button when MEMBER and org has zero folders", async () => {
     const fetchMock = mockFetchSuccess({
       orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
       orgFoldersData: [], // No folders
@@ -707,8 +705,8 @@ describe("Sidebar org folder CRUD integration", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
-    // MEMBER with 0 folders still sees disabled create button (no create permission)
+    // MEMBER can create folders, even when org has zero folders.
     const orgCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
-    expect(orgCreateBtn).toBeDisabled();
+    expect(orgCreateBtn).toBeEnabled();
   });
 });

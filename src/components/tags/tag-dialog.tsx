@@ -25,17 +25,24 @@ export function TagDialog({ open, onOpenChange, editTag, onSubmit }: TagDialogPr
   const tCommon = useTranslations("Common");
   const [name, setName] = useState("");
   const [color, setColor] = useState("#4f46e5");
+  const [colorChanged, setColorChanged] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setName(editTag?.name ?? "");
     setColor(editTag?.color ?? "#4f46e5");
+    setColorChanged(false);
   }, [open, editTag]);
 
   const handleSubmit = async () => {
     if (!name.trim()) return;
-    const normalizedColor = /^#[0-9a-fA-F]{6}$/.test(color) ? color : null;
+    const normalizedColor =
+      !colorChanged && editTag?.color === null
+        ? null
+        : /^#[0-9a-fA-F]{6}$/.test(color)
+          ? color
+          : null;
 
     setLoading(true);
     try {
@@ -75,7 +82,10 @@ export function TagDialog({ open, onOpenChange, editTag, onSubmit }: TagDialogPr
               id="tag-color"
               type="color"
               value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : "#4f46e5"}
-              onChange={(e) => setColor(e.target.value)}
+              onChange={(e) => {
+                setColor(e.target.value);
+                setColorChanged(true);
+              }}
               className="h-10 w-24 p-1"
             />
           </div>

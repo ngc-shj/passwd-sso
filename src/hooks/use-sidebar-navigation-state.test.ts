@@ -91,4 +91,22 @@ describe("useSidebarNavigationState", () => {
     expect(result.current.activeAuditOrgId).toBe("org-1");
     expect(result.current.activeOrgId).toBeNull();
   });
+
+  it("allows MEMBER to manage folders and tags in org context", () => {
+    const { result } = renderHook(() =>
+      useSidebarNavigationState({
+        pathname: "/ja/dashboard/orgs/org-1",
+        searchParams: new URLSearchParams(),
+        vaultContext: { type: "org", orgId: "org-1" },
+        orgs: [{ id: "org-1", name: "Acme", slug: "acme", role: "MEMBER" }],
+        folders,
+        tags,
+        orgFolderGroups,
+        orgTagGroups,
+      }),
+    );
+
+    expect(result.current.selectedOrgCanManageFolders).toBe(true);
+    expect(result.current.selectedOrgCanManageTags).toBe(true);
+  });
 });

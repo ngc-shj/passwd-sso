@@ -72,7 +72,7 @@ export function useSidebarNavigationState({
       : null;
 
     const selectedOrgCanManageFolders = selectedOrg
-      ? selectedOrg.role === ORG_ROLE.OWNER || selectedOrg.role === ORG_ROLE.ADMIN
+      ? selectedOrg.role !== ORG_ROLE.VIEWER
       : false;
     const selectedOrgCanManageTags = selectedOrg
       ? selectedOrg.role !== ORG_ROLE.VIEWER
