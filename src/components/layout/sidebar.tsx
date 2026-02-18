@@ -569,45 +569,15 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         onNavigate={() => onOpenChange(false)}
       />
 
-      {/* ── Organizations ──────────────────────────────────── */}
-      <Collapsible open={isOpen("organizations")} onOpenChange={toggleSection("organizations")}>
-        <CollapsibleSectionHeader
-          icon={<Building2 className="h-3 w-3" />}
-          isOpen={isOpen("organizations")}
-        >
-          {tOrg("organizations")}
-        </CollapsibleSectionHeader>
-        <CollapsibleContent>
-          <div className="space-y-1">
-            {orgs.map((org) => (
-              <Button
-                key={org.id}
-                variant={selectedOrgId === org.id ? "secondary" : "ghost"}
-                className="w-full justify-start gap-2"
-                asChild
-              >
-                <Link
-                  href={`/dashboard/orgs/${org.id}`}
-                  onClick={() => onOpenChange(false)}
-                >
-                  <Building2 className="h-4 w-4" />
-                  <span className="truncate">{org.name}</span>
-                </Link>
-              </Button>
-            ))}
-            <Button
-              variant={isOrgsManage ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link href="/dashboard/orgs" onClick={() => onOpenChange(false)}>
-                <Settings className="h-4 w-4" />
-                {tOrg("manage")}
-              </Link>
-            </Button>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+      <OrganizationsSection
+        isOpen={isOpen("organizations")}
+        onOpenChange={toggleSection("organizations")}
+        tOrg={tOrg}
+        orgs={orgs}
+        selectedOrgId={selectedOrgId}
+        isOrgsManage={isOrgsManage}
+        onNavigate={() => onOpenChange(false)}
+      />
 
       {/* ── Organize (folders + tags) ──────────────────────── */}
       <Separator />
@@ -869,6 +839,64 @@ function CategoriesSection({
               </Button>
             );
           })}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+interface OrganizationsSectionProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  tOrg: (key: string) => string;
+  orgs: OrgItem[];
+  selectedOrgId: string | null;
+  isOrgsManage: boolean;
+  onNavigate: () => void;
+}
+
+function OrganizationsSection({
+  isOpen,
+  onOpenChange,
+  tOrg,
+  orgs,
+  selectedOrgId,
+  isOrgsManage,
+  onNavigate,
+}: OrganizationsSectionProps) {
+  return (
+    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
+      <CollapsibleSectionHeader
+        icon={<Building2 className="h-3 w-3" />}
+        isOpen={isOpen}
+      >
+        {tOrg("organizations")}
+      </CollapsibleSectionHeader>
+      <CollapsibleContent>
+        <div className="space-y-1">
+          {orgs.map((org) => (
+            <Button
+              key={org.id}
+              variant={selectedOrgId === org.id ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href={`/dashboard/orgs/${org.id}`} onClick={onNavigate}>
+                <Building2 className="h-4 w-4" />
+                <span className="truncate">{org.name}</span>
+              </Link>
+            </Button>
+          ))}
+          <Button
+            variant={isOrgsManage ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link href="/dashboard/orgs" onClick={onNavigate}>
+              <Settings className="h-4 w-4" />
+              {tOrg("manage")}
+            </Link>
+          </Button>
         </div>
       </CollapsibleContent>
     </Collapsible>
