@@ -23,6 +23,7 @@ import {
 import { PasswordGenerator } from "@/components/passwords/password-generator";
 import type { TOTPEntry } from "@/components/passwords/totp-field";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
+import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import { OrgTagInput, type OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
 import {
@@ -35,7 +36,6 @@ import {
   EyeOff,
   Dices,
   Tags,
-  FolderOpen,
 } from "lucide-react";
 import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { toast } from "sonner";
@@ -55,7 +55,6 @@ import {
 } from "@/lib/entry-form-helpers";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
-import type { FolderItem } from "@/components/folders/folder-tree";
 
 export interface CustomField {
   label: string;
@@ -1271,43 +1270,11 @@ export function OrgPasswordForm({
           )}
           </EntryPrimaryCard>
 
-        {/* Folder assignment */}
-        {orgFolders.length > 0 && (
-          <EntrySectionCard>
-            <div className="space-y-1">
-              <Label className="flex items-center gap-2">
-                <FolderOpen className="h-3.5 w-3.5" />
-                {t("folder")}
-              </Label>
-              <p className="text-xs text-muted-foreground">{t("folderHint")}</p>
-            </div>
-            <Select
-              value={orgFolderId ?? "__none__"}
-              onValueChange={(v) => setOrgFolderId(v === "__none__" ? null : v)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">{t("noFolder")}</SelectItem>
-                {orgFolders.map((f) => {
-                  let depth = 0;
-                  let current: FolderItem | undefined = f;
-                  while (current?.parentId) {
-                    depth++;
-                    current = orgFolders.find((p) => p.id === current!.parentId);
-                  }
-                  const indent = depth > 0 ? "\u00A0\u00A0".repeat(depth) + "└ " : "";
-                  return (
-                    <SelectItem key={f.id} value={f.id}>
-                      {indent}{f.name}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
-          </EntrySectionCard>
-        )}
+        <EntryFolderSelectSection
+          folders={orgFolders}
+          value={orgFolderId}
+          onChange={setOrgFolderId}
+        />
 
         {/* Actions */}
         <EntryActionBar

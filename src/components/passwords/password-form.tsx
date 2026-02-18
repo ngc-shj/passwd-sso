@@ -14,20 +14,14 @@ import { PasswordGenerator } from "./password-generator";
 import type { TOTPEntry } from "./totp-field";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
+import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
 } from "@/lib/generator-prefs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Eye, EyeOff, ArrowLeft, Dices, ShieldCheck, Tags, FolderOpen } from "lucide-react";
+import { Eye, EyeOff, ArrowLeft, Dices, ShieldCheck, Tags } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, apiPath } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
@@ -38,7 +32,6 @@ import {
   parseUrlHost,
   toTagNameColor,
 } from "@/lib/entry-form-helpers";
-import type { FolderItem } from "@/components/folders/folder-tree";
 
 export interface CustomField {
   label: string;
@@ -374,44 +367,11 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
               />
             </EntrySectionCard>
 
-            {/* Folder assignment */}
-            {folders.length > 0 && (
-              <EntrySectionCard>
-                <div className="space-y-1">
-                  <Label className="flex items-center gap-2">
-                    <FolderOpen className="h-3.5 w-3.5" />
-                    {t("folder")}
-                  </Label>
-                  <p className="text-xs text-muted-foreground">{t("folderHint")}</p>
-                </div>
-                <Select
-                  value={folderId ?? "__none__"}
-                  onValueChange={(v) => setFolderId(v === "__none__" ? null : v)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">{t("noFolder")}</SelectItem>
-                    {folders.map((f) => {
-                      // Compute depth for hierarchy indentation
-                      let depth = 0;
-                      let current: FolderItem | undefined = f;
-                      while (current?.parentId) {
-                        depth++;
-                        current = folders.find((p) => p.id === current!.parentId);
-                      }
-                      const indent = depth > 0 ? "\u00A0\u00A0".repeat(depth) + "└ " : "";
-                      return (
-                        <SelectItem key={f.id} value={f.id}>
-                          {indent}{f.name}
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              </EntrySectionCard>
-            )}
+            <EntryFolderSelectSection
+              folders={folders}
+              value={folderId}
+              onChange={setFolderId}
+            />
 
             <EntryCustomFieldsTotpSection
               customFields={customFields}
