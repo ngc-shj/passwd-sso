@@ -110,6 +110,7 @@ export default function OrgDashboardPage({
     credentialId?: string | null;
     creationDate?: string | null;
     deviceInfo?: string | null;
+    orgFolderId?: string | null;
   } | null>(null);
   const isOrgArchive = activeScope === "archive";
   const isOrgTrash = activeScope === "trash";

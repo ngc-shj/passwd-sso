@@ -157,6 +157,7 @@ export const createOrgPasswordSchema = z.object({
   url: z.string().max(2000).optional().or(z.literal("")),
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
   customFields: z.array(customFieldSchema).optional(),
   totp: totpSchema.optional().nullable(),
 });
@@ -168,6 +169,7 @@ export const updateOrgPasswordSchema = z.object({
   url: z.string().max(2000).optional().or(z.literal("")),
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
   customFields: z.array(customFieldSchema).optional(),
   totp: totpSchema.optional().nullable(),
   isArchived: z.boolean().optional(),
@@ -178,12 +180,14 @@ export const createOrgSecureNoteSchema = z.object({
   title: z.string().min(1).max(200).trim(),
   content: z.string().max(50000),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
 });
 
 export const updateOrgSecureNoteSchema = z.object({
   title: z.string().min(1).max(200).trim().optional(),
   content: z.string().max(50000).optional(),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
   isArchived: z.boolean().optional(),
 });
 
@@ -198,6 +202,7 @@ export const createOrgCreditCardSchema = z.object({
   cvv: z.string().max(10).optional().or(z.literal("")),
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
 }).superRefine((data, ctx) => {
   if (!data.cardNumber) return;
 
@@ -250,6 +255,7 @@ export const updateOrgCreditCardSchema = z.object({
   cvv: z.string().max(10).optional().or(z.literal("")),
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
   isArchived: z.boolean().optional(),
 }).superRefine((data, ctx) => {
   if (!data.cardNumber) return;
@@ -310,6 +316,7 @@ export const createOrgIdentitySchema = z.object({
   expiryDate: dateSchema,
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
 }).superRefine((data, ctx) => {
   if (data.dateOfBirth) {
     const today = new Date().toISOString().slice(0, 10);
@@ -343,6 +350,7 @@ export const updateOrgIdentitySchema = z.object({
   expiryDate: dateSchema,
   notes: z.string().max(10000).optional().or(z.literal("")),
   tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
   isArchived: z.boolean().optional(),
 }).superRefine((data, ctx) => {
   if (data.dateOfBirth) {

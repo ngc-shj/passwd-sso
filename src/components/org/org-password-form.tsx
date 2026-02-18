@@ -38,6 +38,7 @@ import {
   ShieldCheck,
   Tags,
   Rows3,
+  FolderOpen,
 } from "lucide-react";
 import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { toast } from "sonner";
@@ -53,6 +54,7 @@ import {
 } from "@/lib/credit-card";
 import { ENTRY_TYPE, CUSTOM_FIELD_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
+import type { FolderItem } from "@/components/folders/folder-tree";
 
 export interface CustomField {
   label: string;
@@ -98,6 +100,7 @@ interface OrgPasswordFormProps {
     credentialId?: string | null;
     creationDate?: string | null;
     deviceInfo?: string | null;
+    orgFolderId?: string | null;
   } | null;
 }
 
@@ -177,8 +180,20 @@ export function OrgPasswordForm({
   const [deviceInfo, setDeviceInfo] = useState(editData?.deviceInfo ?? "");
   const [showCredentialId, setShowCredentialId] = useState(false);
   const [attachments, setAttachments] = useState<OrgAttachmentMeta[]>([]);
+  const [orgFolderId, setOrgFolderId] = useState<string | null>(editData?.orgFolderId ?? null);
+  const [orgFolders, setOrgFolders] = useState<FolderItem[]>([]);
 
   const isEdit = !!editData;
+
+  // Fetch org folders for the folder selector
+  useEffect(() => {
+    if (open) {
+      fetch(apiPath.orgFolders(orgId))
+        .then((res) => (res.ok ? res.json() : []))
+        .then((data) => { if (Array.isArray(data)) setOrgFolders(data); })
+        .catch(() => {});
+    }
+  }, [open, orgId]);
 
   // Sync form fields when editData changes (programmatic open)
   useEffect(() => {
@@ -214,6 +229,7 @@ export function OrgPasswordForm({
       setCredentialId(editData.credentialId ?? "");
       setCreationDate(editData.creationDate ?? "");
       setDeviceInfo(editData.deviceInfo ?? "");
+      setOrgFolderId(editData.orgFolderId ?? null);
 
       // Load attachments for edit mode
       fetch(apiPath.orgPasswordAttachments(orgId, editData.id))
@@ -263,6 +279,7 @@ export function OrgPasswordForm({
       setDeviceInfo("");
       setShowCredentialId(false);
       setAttachments([]);
+      setOrgFolderId(null);
       setSaving(false);
     } else if (editData) {
       setTitle(editData.title);
@@ -296,6 +313,7 @@ export function OrgPasswordForm({
       setCredentialId(editData.credentialId ?? "");
       setCreationDate(editData.creationDate ?? "");
       setDeviceInfo(editData.deviceInfo ?? "");
+      setOrgFolderId(editData.orgFolderId ?? null);
     }
     onOpenChange(v);
   };
@@ -382,6 +400,7 @@ export function OrgPasswordForm({
           deviceInfo: deviceInfo.trim() || undefined,
           notes: notes.trim() || undefined,
           tagIds: selectedTags.map((t) => t.id),
+          orgFolderId: orgFolderId ?? null,
         };
       } else if (isIdentity) {
         body = {
@@ -398,6 +417,7 @@ export function OrgPasswordForm({
           expiryDate: expiryDate || undefined,
           notes: notes.trim() || undefined,
           tagIds: selectedTags.map((t) => t.id),
+          orgFolderId: orgFolderId ?? null,
         };
       } else if (isCreditCard) {
         body = {
@@ -411,6 +431,7 @@ export function OrgPasswordForm({
           cvv: cvv || undefined,
           notes: notes.trim() || undefined,
           tagIds: selectedTags.map((t) => t.id),
+          orgFolderId: orgFolderId ?? null,
         };
       } else if (isNote) {
         body = {
@@ -418,6 +439,7 @@ export function OrgPasswordForm({
           title: title.trim(),
           content,
           tagIds: selectedTags.map((t) => t.id),
+          orgFolderId: orgFolderId ?? null,
         };
       } else {
         body = {
@@ -427,6 +449,7 @@ export function OrgPasswordForm({
           url: url.trim() || undefined,
           notes: notes.trim() || undefined,
           tagIds: selectedTags.map((t) => t.id),
+          orgFolderId: orgFolderId ?? null,
         };
 
         const validFields = customFields.filter(
@@ -471,6 +494,7 @@ export function OrgPasswordForm({
         title: editData?.title ?? "",
         notes: editData?.notes ?? "",
         selectedTagIds: (editData?.tags ?? []).map((tag) => tag.id).sort(),
+        orgFolderId: editData?.orgFolderId ?? null,
         login: isNote || isCreditCard || isIdentity || isPasskey
           ? null
           : {
@@ -529,6 +553,7 @@ export function OrgPasswordForm({
         title,
         notes,
         selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
+        orgFolderId,
         login: isNote || isCreditCard || isIdentity || isPasskey
           ? null
           : { username, password, url, customFields, totp },
@@ -595,6 +620,7 @@ export function OrgPasswordForm({
       credentialId,
       creationDate,
       deviceInfo,
+      orgFolderId,
     ]
   );
 
@@ -1372,6 +1398,44 @@ export function OrgPasswordForm({
             </>
           )}
           </EntryPrimaryCard>
+
+        {/* Folder assignment */}
+        {orgFolders.length > 0 && (
+          <EntrySectionCard>
+            <div className="space-y-1">
+              <Label className="flex items-center gap-2">
+                <FolderOpen className="h-3.5 w-3.5" />
+                {t("folder")}
+              </Label>
+              <p className="text-xs text-muted-foreground">{t("folderHint")}</p>
+            </div>
+            <Select
+              value={orgFolderId ?? "__none__"}
+              onValueChange={(v) => setOrgFolderId(v === "__none__" ? null : v)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">{t("noFolder")}</SelectItem>
+                {orgFolders.map((f) => {
+                  let depth = 0;
+                  let current: FolderItem | undefined = f;
+                  while (current?.parentId) {
+                    depth++;
+                    current = orgFolders.find((p) => p.id === current!.parentId);
+                  }
+                  const indent = depth > 0 ? "\u00A0\u00A0".repeat(depth) + "└ " : "";
+                  return (
+                    <SelectItem key={f.id} value={f.id}>
+                      {indent}{f.name}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </EntrySectionCard>
+        )}
 
         {/* Actions */}
         <EntryActionBar
