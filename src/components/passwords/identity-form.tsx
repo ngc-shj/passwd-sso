@@ -127,7 +127,9 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
   const isDialogVariant = variant === "dialog";
-  const primaryCardClass = isDialogVariant ? "!border-0 !bg-none" : "";
+  const primaryCardClass = isDialogVariant
+    ? "!rounded-none !border-0 !bg-transparent !from-transparent !to-transparent !p-0 !shadow-none"
+    : "";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
