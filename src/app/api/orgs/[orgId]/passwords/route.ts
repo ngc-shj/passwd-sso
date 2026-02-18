@@ -39,6 +39,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const { searchParams } = new URL(req.url);
   const tagId = searchParams.get("tag");
+  const folderId = searchParams.get("folder");
   const rawType = searchParams.get("type");
   const entryType = rawType && VALID_ENTRY_TYPES.has(rawType) ? (rawType as EntryType) : null;
   const favoritesOnly = searchParams.get("favorites") === "true";
@@ -77,6 +78,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         ? { favorites: { some: { userId: session.user.id } } }
         : {}),
       ...(tagId ? { tags: { some: { id: tagId } } } : {}),
+      ...(folderId ? { orgFolderId: folderId } : {}),
       ...(entryType ? { entryType } : {}),
     },
     include: {
