@@ -189,7 +189,9 @@ describe("EntryHistorySection", () => {
     fireEvent.click(screen.getByText(/entryHistory/));
 
     const viewButtons = screen.getAllByText(/viewVersion/);
-    fireEvent.click(viewButtons[0]);
+    await act(async () => {
+      fireEvent.click(viewButtons[0]);
+    });
 
     expect(mockRequireVerification).toHaveBeenCalledWith(
       "entry-1",
@@ -215,7 +217,9 @@ describe("EntryHistorySection", () => {
     fireEvent.click(screen.getByText(/entryHistory/));
 
     const restoreButtons = screen.getAllByText(/restoreVersion/);
-    fireEvent.click(restoreButtons[0]);
+    await act(async () => {
+      fireEvent.click(restoreButtons[0]);
+    });
 
     expect(mockRequireVerification).toHaveBeenCalledWith(
       "entry-1",
@@ -240,7 +244,9 @@ describe("EntryHistorySection", () => {
 
     fireEvent.click(screen.getByText(/entryHistory/));
     const viewButtons = screen.getAllByText(/viewVersion/);
-    fireEvent.click(viewButtons[0]);
+    await act(async () => {
+      fireEvent.click(viewButtons[0]);
+    });
 
     expect(mockRequireVerification).toHaveBeenCalledWith(
       "entry-1",
