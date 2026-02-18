@@ -933,6 +933,7 @@
     "folderAlreadyExists": "A folder with that name already exists.",
     "folderMaxDepthExceeded": "Maximum folder nesting depth exceeded.",
     "folderCircularReference": "Cannot move a folder into its own descendant.",
+    "folderNotFound": "The specified folder was not found.",
     "historyNotFound": "History version not found.",
     "notInTrash": "Item is not in the trash.",
     "attachmentNotFound": "Attachment not found.",

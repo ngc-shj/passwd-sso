@@ -933,6 +933,7 @@
     "folderAlreadyExists": "同じ名前のフォルダが既に存在します。",
     "folderMaxDepthExceeded": "フォルダの最大階層数を超えています。",
     "folderCircularReference": "フォルダを自身の子孫の下に移動することはできません。",
+    "folderNotFound": "指定されたフォルダが見つかりません。",
     "historyNotFound": "履歴バージョンが見つかりません。",
     "notInTrash": "ゴミ箱にありません。",
     "attachmentNotFound": "添付ファイルが見つかりません。",

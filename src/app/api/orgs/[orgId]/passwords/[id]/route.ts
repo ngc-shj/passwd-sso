@@ -444,6 +444,17 @@ export async function PUT(req: NextRequest, { params }: Params) {
     });
   }
 
+  // Validate orgFolderId belongs to this org
+  if (orgFolderId) {
+    const folder = await prisma.orgFolder.findUnique({
+      where: { id: orgFolderId },
+      select: { orgId: true },
+    });
+    if (!folder || folder.orgId !== orgId) {
+      return NextResponse.json({ error: API_ERROR.FOLDER_NOT_FOUND }, { status: 400 });
+    }
+  }
+
   // Always re-encrypt with AAD (save-time migration for legacy entries)
   const blobAad = Buffer.from(buildOrgEntryAAD(orgId, id, "blob"));
   const overviewAad = Buffer.from(buildOrgEntryAAD(orgId, id, "overview"));
