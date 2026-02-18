@@ -44,8 +44,13 @@ export function CopyButton({
             await navigator.clipboard.writeText("");
           }
         } catch {
-          // readText requires clipboard-read permission or page focus;
-          // silently skip if unavailable
+          // readText often fails without clipboard-read permission.
+          // Fallback to best-effort clear.
+          try {
+            await navigator.clipboard.writeText("");
+          } catch {
+            // Clipboard may be unavailable (background tab / denied)
+          }
         }
       }, CLIPBOARD_CLEAR_DELAY);
 
