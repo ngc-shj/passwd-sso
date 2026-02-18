@@ -66,6 +66,13 @@ interface OrgTagGroup {
   tags: { id: string; name: string; color: string | null; count: number }[];
 }
 
+interface OrgFolderGroup {
+  orgId: string;
+  orgName: string;
+  orgRole: string;
+  folders: FolderItem[];
+}
+
 interface FolderItem {
   id: string;
   name: string;
@@ -104,6 +111,8 @@ function FolderTreeNode({
   folders,
   activeFolderId,
   depth,
+  linkHref,
+  showMenu,
   onNavigate,
   onEdit,
   onDelete,
@@ -112,6 +121,10 @@ function FolderTreeNode({
   folders: FolderItem[];
   activeFolderId: string | null;
   depth: number;
+  /** Build the href for a folder link. */
+  linkHref: (folderId: string) => string;
+  /** Whether to show the edit/delete context menu (false for read-only members). */
+  showMenu?: boolean;
   onNavigate: () => void;
   onEdit: (folder: FolderItem) => void;
   onDelete: (folder: FolderItem) => void;
@@ -160,7 +173,7 @@ function FolderTreeNode({
           className="flex-1 justify-start gap-2 min-w-0"
           asChild
         >
-          <Link href={`/dashboard/folders/${folder.id}`} onClick={onNavigate}>
+          <Link href={linkHref(folder.id)} onClick={onNavigate}>
             <FolderOpen className="h-4 w-4 shrink-0" />
             <span className="truncate">{folder.name}</span>
             {folder.entryCount > 0 && (
@@ -170,31 +183,33 @@ function FolderTreeNode({
             )}
           </Link>
         </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0 opacity-0 group-hover/folder:opacity-100 focus:opacity-100"
-              aria-label={`${folder.name} menu`}
-            >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onEdit(folder)}>
-              <Pencil className="h-3.5 w-3.5 mr-2" />
-              {tCommon("edit")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-destructive"
-              onClick={() => onDelete(folder)}
-            >
-              <Trash2 className="h-3.5 w-3.5 mr-2" />
-              {tDashboard("deleteFolder")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {showMenu !== false && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0 opacity-0 group-hover/folder:opacity-100 focus:opacity-100"
+                aria-label={`${folder.name} menu`}
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onEdit(folder)}>
+                <Pencil className="h-3.5 w-3.5 mr-2" />
+                {tCommon("edit")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive"
+                onClick={() => onDelete(folder)}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-2" />
+                {tDashboard("deleteFolder")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
       {hasChildren && open &&
         children.map((child) => (
@@ -204,6 +219,8 @@ function FolderTreeNode({
             folders={folders}
             activeFolderId={activeFolderId}
             depth={depth + 1}
+            linkHref={linkHref}
+            showMenu={showMenu}
             onNavigate={onNavigate}
             onEdit={onEdit}
             onDelete={onDelete}
@@ -224,11 +241,14 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [orgs, setOrgs] = useState<OrgItem[]>([]);
   const [orgTagGroups, setOrgTagGroups] = useState<OrgTagGroup[]>([]);
+  const [orgFolderGroups, setOrgFolderGroups] = useState<OrgFolderGroup[]>([]);
 
-  // Folder dialog state
+  // Folder dialog state (personal + org)
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
   const [editingFolder, setEditingFolder] = useState<FolderItem | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<FolderItem | null>(null);
+  // When non-null, the folder dialog/delete dialog operates on an org's folders
+  const [folderOrgId, setFolderOrgId] = useState<string | null>(null);
 
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -254,6 +274,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const orgMatch = cleanPath.match(/^\/dashboard\/orgs\/([^/]+)/);
   const activeOrgId = orgMatch && !isAuditLog ? orgMatch[1] : null;
   const activeOrgTagId = activeOrgId ? searchParams.get("tag") : null;
+  const activeOrgFolderId = activeOrgId ? searchParams.get("folder") : null;
   const activeOrgTypeFilter = activeOrgId ? searchParams.get("type") : null;
   const activeOrgScope = activeOrgId ? searchParams.get("scope") : null;
   const isOrgsManage = cleanPath === "/dashboard/orgs";
@@ -284,7 +305,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     if (isVaultAll || isVaultFavorites || isVaultArchive || isVaultTrash) toOpen.push("vault");
     if (activeTypeFilter !== null) toOpen.push("categories");
     if (activeOrgId !== null || isOrgsManage) toOpen.push("organizations");
-    if (activeTagId !== null || activeOrgTagId !== null || activeFolderId !== null) toOpen.push("organize");
+    if (activeTagId !== null || activeOrgTagId !== null || activeFolderId !== null || activeOrgFolderId !== null) toOpen.push("organize");
     if (isWatchtower || isShareLinks || isEmergencyAccess || isAuditLog) toOpen.push("security");
 
     if (toOpen.length > 0) {
@@ -328,21 +349,31 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         if (!Array.isArray(data)) return;
         setOrgs(data);
 
-        // Fetch tags for all orgs in parallel
-        const groups: OrgTagGroup[] = [];
+        // Fetch tags and folders for all orgs in parallel
+        const tagGroups: OrgTagGroup[] = [];
+        const folderGroups: OrgFolderGroup[] = [];
         await Promise.all(
           data.map(async (org: OrgItem) => {
-            try {
-              const res = await fetch(apiPath.orgTags(org.id));
-              if (!res.ok) return;
-              const tags = await res.json();
+            const [tagsRes, foldersRes] = await Promise.all([
+              fetch(apiPath.orgTags(org.id)).catch(() => null),
+              fetch(apiPath.orgFolders(org.id)).catch(() => null),
+            ]);
+            if (tagsRes?.ok) {
+              const tags = await tagsRes.json();
               if (Array.isArray(tags) && tags.length > 0) {
-                groups.push({ orgId: org.id, orgName: org.name, tags });
+                tagGroups.push({ orgId: org.id, orgName: org.name, tags });
               }
-            } catch { /* ignore */ }
+            }
+            if (foldersRes?.ok) {
+              const folders = await foldersRes.json();
+              if (Array.isArray(folders) && folders.length > 0) {
+                folderGroups.push({ orgId: org.id, orgName: org.name, orgRole: org.role, folders });
+              }
+            }
           })
         );
-        setOrgTagGroups(groups);
+        setOrgTagGroups(tagGroups);
+        setOrgFolderGroups(folderGroups);
       })
       .catch(() => {});
   };
@@ -367,16 +398,23 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     window.dispatchEvent(new CustomEvent("vault-data-changed"));
   };
 
-  // ─── Folder CRUD handlers ────────────────────────────────────────
+  // ─── Folder CRUD handlers (personal + org) ──────────────────────
 
-  const handleFolderCreate = () => {
+  const handleFolderCreate = (orgId?: string) => {
+    setFolderOrgId(orgId ?? null);
     setEditingFolder(null);
     setFolderDialogOpen(true);
   };
 
-  const handleFolderEdit = (folder: FolderItem) => {
+  const handleFolderEdit = (folder: FolderItem, orgId?: string) => {
+    setFolderOrgId(orgId ?? null);
     setEditingFolder(folder);
     setFolderDialogOpen(true);
+  };
+
+  const handleFolderDeleteClick = (folder: FolderItem, orgId?: string) => {
+    setFolderOrgId(orgId ?? null);
+    setDeletingFolder(folder);
   };
 
   const showApiError = async (res: Response) => {
@@ -390,9 +428,14 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   };
 
   const handleFolderSubmit = async (data: { name: string; parentId: string | null }) => {
+    const isOrg = folderOrgId !== null;
     const url = editingFolder
-      ? apiPath.folderById(editingFolder.id)
-      : API_PATH.FOLDERS;
+      ? isOrg
+        ? apiPath.orgFolderById(folderOrgId!, editingFolder.id)
+        : apiPath.folderById(editingFolder.id)
+      : isOrg
+        ? apiPath.orgFolders(folderOrgId!)
+        : API_PATH.FOLDERS;
     const method = editingFolder ? "PUT" : "POST";
 
     const res = await fetch(url, {
@@ -409,9 +452,10 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 
   const handleFolderDelete = async () => {
     if (!deletingFolder) return;
-    const res = await fetch(apiPath.folderById(deletingFolder.id), {
-      method: "DELETE",
-    });
+    const url = folderOrgId
+      ? apiPath.orgFolderById(folderOrgId, deletingFolder.id)
+      : apiPath.folderById(deletingFolder.id);
+    const res = await fetch(url, { method: "DELETE" });
     if (!res.ok) {
       await showApiError(res);
       setDeletingFolder(null);
@@ -420,6 +464,11 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     setDeletingFolder(null);
     fetchData();
   };
+
+  /** Get the folder list for the current dialog context (personal or org). */
+  const dialogFolders = folderOrgId
+    ? orgFolderGroups.find((g) => g.orgId === folderOrgId)?.folders ?? []
+    : folders;
 
   // ─── Content ────────────────────────────────────────────────────
 
@@ -699,7 +748,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
             variant="ghost"
             size="icon"
             className="h-6 w-6 shrink-0 mr-1"
-            onClick={handleFolderCreate}
+            onClick={() => handleFolderCreate()}
             aria-label={t("createFolder")}
           >
             <Plus className="h-3.5 w-3.5" />
@@ -716,9 +765,10 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                   folders={folders}
                   activeFolderId={activeFolderId}
                   depth={0}
+                  linkHref={(id) => `/dashboard/folders/${id}`}
                   onNavigate={() => onOpenChange(false)}
-                  onEdit={handleFolderEdit}
-                  onDelete={setDeletingFolder}
+                  onEdit={(f) => handleFolderEdit(f)}
+                  onDelete={(f) => handleFolderDeleteClick(f)}
                 />
               ))}
           </div>
@@ -753,6 +803,50 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
               );
             })}
           </div>
+
+          {orgFolderGroups.map((group) => {
+            const canManage = group.orgRole === ORG_ROLE.OWNER || group.orgRole === ORG_ROLE.ADMIN;
+            return (
+              <div key={`orgf-${group.orgId}`}>
+                <div className="flex items-center">
+                  <div className="flex-1">
+                    <SectionLabel icon={<Building2 className="h-3 w-3" />}>
+                      {group.orgName}
+                    </SectionLabel>
+                  </div>
+                  {canManage && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 shrink-0 mr-1"
+                      onClick={() => handleFolderCreate(group.orgId)}
+                      aria-label={t("createFolder")}
+                    >
+                      <Plus className="h-3 w-3" />
+                    </Button>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  {group.folders
+                    .filter((f) => !f.parentId)
+                    .map((folder) => (
+                      <FolderTreeNode
+                        key={folder.id}
+                        folder={folder}
+                        folders={group.folders}
+                        activeFolderId={activeOrgFolderId}
+                        depth={0}
+                        linkHref={(id) => `/dashboard/orgs/${group.orgId}?folder=${id}`}
+                        showMenu={canManage}
+                        onNavigate={() => onOpenChange(false)}
+                        onEdit={(f) => handleFolderEdit(f, group.orgId)}
+                        onDelete={(f) => handleFolderDeleteClick(f, group.orgId)}
+                      />
+                    ))}
+                </div>
+              </div>
+            );
+          })}
 
           {orgTagGroups.map((group) => (
             <div key={group.orgId}>
@@ -922,7 +1016,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       <FolderDialog
         open={folderDialogOpen}
         onOpenChange={setFolderDialogOpen}
-        folders={folders}
+        folders={dialogFolders}
         editFolder={editingFolder}
         onSubmit={handleFolderSubmit}
       />
