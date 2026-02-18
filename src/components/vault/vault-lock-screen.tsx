@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useVault, VaultUnlockError } from "@/lib/vault-context";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { preventIMESubmit } from "@/lib/ime-guard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -86,7 +87,7 @@ export function VaultLockScreen() {
           <CardDescription>{t("lockedDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="unlock-passphrase">{t("passphrase")}</Label>
               <div className="relative">

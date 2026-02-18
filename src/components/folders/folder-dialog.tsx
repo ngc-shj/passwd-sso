@@ -112,7 +112,7 @@ export function FolderDialog({
               maxLength={100}
               autoFocus
               onKeyDown={(e) => {
-                if (e.key === "Enter" && name.trim()) handleSubmit();
+                if (e.key === "Enter" && !e.nativeEvent.isComposing && name.trim()) handleSubmit();
               }}
             />
           </div>

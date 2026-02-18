@@ -30,6 +30,7 @@ import { Eye, EyeOff, ArrowLeft, Dices, Plus, X, ShieldCheck, Tags, Rows3, Folde
 import { toast } from "sonner";
 import { API_PATH, CUSTOM_FIELD_TYPE, apiPath } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
+import { preventIMESubmit } from "@/lib/ime-guard";
 import type { FolderItem } from "@/components/folders/folder-tree";
 
 export interface CustomField {
@@ -258,7 +259,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
       : `${tGen("modePassword")} · ${generatorSettings.length}`;
 
   const formContent = (
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
             <EntryPrimaryCard>
             <div className="space-y-2">
               <Label htmlFor="title">{t("title")}</Label>

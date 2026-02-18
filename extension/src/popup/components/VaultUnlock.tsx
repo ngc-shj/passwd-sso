@@ -43,7 +43,7 @@ export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4 py-4">
+    <form onSubmit={handleSubmit} onKeyDown={(e) => { if (e.key === "Enter" && e.nativeEvent.isComposing) e.preventDefault(); }} className="flex flex-col gap-4 py-4">
       <p className="text-sm text-gray-600">
         {t("popup.unlockDescription")}
       </p>
