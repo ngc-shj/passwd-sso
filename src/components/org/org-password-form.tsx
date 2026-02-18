@@ -13,14 +13,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
-import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
-import { OrgTagInput, type OrgTagData } from "./org-tag-input";
+import type { OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
 import { OrgCreditCardFields } from "@/components/org/org-credit-card-fields";
 import { OrgIdentityFields } from "@/components/org/org-identity-fields";
 import { OrgLoginFields } from "@/components/org/org-login-fields";
 import { OrgPasskeyFields } from "@/components/org/org-passkey-fields";
 import { OrgSecureNoteFields } from "@/components/org/org-secure-note-fields";
+import { OrgTagSection } from "@/components/org/org-tag-section";
 import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
@@ -96,30 +96,6 @@ interface OrgPasswordFormProps {
     deviceInfo?: string | null;
     orgFolderId?: string | null;
   } | null;
-}
-
-interface OrgTagSectionProps {
-  title: string;
-  hint: string;
-  orgId: string;
-  selectedTags: OrgTagData[];
-  onChange: (tags: OrgTagData[]) => void;
-  sectionCardClass?: string;
-}
-
-function OrgTagSection({
-  title,
-  hint,
-  orgId,
-  selectedTags,
-  onChange,
-  sectionCardClass = "",
-}: OrgTagSectionProps) {
-  return (
-    <EntryTagsSection title={title} hint={hint} sectionCardClass={sectionCardClass}>
-      <OrgTagInput orgId={orgId} selectedTags={selectedTags} onChange={onChange} />
-    </EntryTagsSection>
-  );
 }
 
 export function OrgPasswordForm({
