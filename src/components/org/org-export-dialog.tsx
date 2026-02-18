@@ -21,14 +21,15 @@ import { API_PATH, apiPath } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import {
   type ExportEntry,
+  type ExportProfile,
   csvEntryType,
   csvExportHeader,
   escapeCsvValue,
+  formatExportJson,
   formatExportDate,
 } from "@/lib/export-format-common";
 
 type ExportFormat = "csv" | "json";
-type ExportProfile = "compatible" | "passwd-sso";
 
 interface OrgExportDialogProps {
   orgId: string;
@@ -330,7 +331,7 @@ function formatCsv(entries: ExportEntry[], profile: ExportProfile): string {
     const isNote = e.entryType === ENTRY_TYPE.SECURE_NOTE;
     const isCard = e.entryType === ENTRY_TYPE.CREDIT_CARD;
     const isIdentity = e.entryType === ENTRY_TYPE.IDENTITY;
-    const type = csvEntryType(e.entryType, { includePasskeyType: false });
+    const type = csvEntryType(e.entryType, { includePasskeyType: true });
     const isLogin = !isNote && !isCard && !isIdentity;
     const passwdSso = JSON.stringify({
       entryType: e.entryType,
@@ -374,88 +375,11 @@ function formatCsv(entries: ExportEntry[], profile: ExportProfile): string {
 }
 
 function formatJson(entries: ExportEntry[], profile: ExportProfile): string {
-  return JSON.stringify(
-    {
-      ...(profile === "passwd-sso" ? { format: "passwd-sso", version: 1 } : {}),
-      exportedAt: new Date().toISOString(),
-      entries: entries.map((e) => {
-        if (e.entryType === ENTRY_TYPE.IDENTITY) {
-          return {
-            type: "identity",
-            name: e.title,
-            identity: {
-              fullName: e.fullName,
-              address: e.address,
-              phone: e.phone,
-              email: e.email,
-              dateOfBirth: e.dateOfBirth,
-              nationality: e.nationality,
-              idNumber: e.idNumber,
-              issueDate: e.issueDate,
-              expiryDate: e.expiryDate,
-            },
-            notes: e.notes,
-            ...(profile === "passwd-sso"
-              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
-              : {}),
-          };
-        }
-        if (e.entryType === ENTRY_TYPE.CREDIT_CARD) {
-          return {
-            type: "card",
-            name: e.title,
-            card: {
-              cardholderName: e.cardholderName,
-              brand: e.brand,
-              number: e.cardNumber,
-              expMonth: e.expiryMonth,
-              expYear: e.expiryYear,
-              code: e.cvv,
-            },
-            notes: e.notes,
-            ...(profile === "passwd-sso"
-              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
-              : {}),
-          };
-        }
-        if (e.entryType === ENTRY_TYPE.SECURE_NOTE) {
-          return {
-            type: "securenote",
-            name: e.title,
-            notes: e.content,
-            ...(profile === "passwd-sso"
-              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
-              : {}),
-          };
-        }
-        return {
-          type: "login",
-          name: e.title,
-          login: {
-            username: e.username,
-            password: e.password,
-            uris: e.url ? [{ uri: e.url }] : [],
-            totp: e.totp,
-          },
-          notes: e.notes,
-          ...(profile === "passwd-sso"
-            ? {
-                passwdSso: {
-                  entryType: e.entryType,
-                  tags: e.tags,
-                  customFields: e.customFields,
-                  totp: e.totpConfig,
-                  generatorSettings: e.generatorSettings,
-                  passwordHistory: e.passwordHistory,
-                },
-              }
-            : {}),
-        };
-      }),
-    },
-    null,
-    2
-  );
+  return formatExportJson(entries, profile, {
+    includePasskey: true,
+    includeReprompt: false,
+    includeRequireRepromptInPasswdSso: false,
+  });
 }
 
 export const __testablesOrgExport = {

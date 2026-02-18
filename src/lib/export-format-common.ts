@@ -44,6 +44,8 @@ export interface ExportEntry {
   requireReprompt?: boolean;
 }
 
+export type ExportProfile = "compatible" | "passwd-sso";
+
 export function escapeCsvValue(val: string | null): string {
   if (!val) return "";
   if (val.includes(",") || val.includes('"') || val.includes("\n")) {
@@ -76,4 +78,154 @@ export function csvEntryType(
   if (entryType === ENTRY_TYPE.CREDIT_CARD) return "card";
   if (entryType === ENTRY_TYPE.SECURE_NOTE) return "securenote";
   return "login";
+}
+
+interface FormatExportJsonOptions {
+  includePasskey: boolean;
+  includeReprompt: boolean;
+  includeRequireRepromptInPasswdSso: boolean;
+}
+
+function withReprompt(
+  entry: ExportEntry,
+  includeReprompt: boolean
+): { reprompt?: number } {
+  if (!includeReprompt) return {};
+  return { reprompt: entry.requireReprompt ? 1 : 0 };
+}
+
+function basePasswdSsoMeta(
+  entry: ExportEntry,
+  includeRequireRepromptInPasswdSso: boolean
+): Record<string, unknown> {
+  return {
+    entryType: entry.entryType,
+    tags: entry.tags,
+    ...(includeRequireRepromptInPasswdSso
+      ? { requireReprompt: entry.requireReprompt }
+      : {}),
+  };
+}
+
+function withPasswdSsoMeta(
+  profile: ExportProfile,
+  meta: Record<string, unknown>
+): { passwdSso?: Record<string, unknown> } {
+  if (profile !== "passwd-sso") return {};
+  return { passwdSso: meta };
+}
+
+export function formatExportJson(
+  entries: ExportEntry[],
+  profile: ExportProfile,
+  options: FormatExportJsonOptions
+): string {
+  return JSON.stringify(
+    {
+      ...(profile === "passwd-sso" ? { format: "passwd-sso", version: 1 } : {}),
+      exportedAt: new Date().toISOString(),
+      entries: entries.map((e) => {
+        if (options.includePasskey && e.entryType === ENTRY_TYPE.PASSKEY) {
+          return {
+            type: "passkey",
+            name: e.title,
+            passkey: {
+              relyingPartyId: e.relyingPartyId,
+              relyingPartyName: e.relyingPartyName,
+              username: e.username,
+              credentialId: e.credentialId,
+              creationDate: e.creationDate,
+              deviceInfo: e.deviceInfo,
+            },
+            notes: e.notes,
+            ...withReprompt(e, options.includeReprompt),
+            ...withPasswdSsoMeta(
+              profile,
+              basePasswdSsoMeta(e, options.includeRequireRepromptInPasswdSso)
+            ),
+          };
+        }
+
+        if (e.entryType === ENTRY_TYPE.IDENTITY) {
+          return {
+            type: "identity",
+            name: e.title,
+            identity: {
+              fullName: e.fullName,
+              address: e.address,
+              phone: e.phone,
+              email: e.email,
+              dateOfBirth: e.dateOfBirth,
+              nationality: e.nationality,
+              idNumber: e.idNumber,
+              issueDate: e.issueDate,
+              expiryDate: e.expiryDate,
+            },
+            notes: e.notes,
+            ...withReprompt(e, options.includeReprompt),
+            ...withPasswdSsoMeta(
+              profile,
+              basePasswdSsoMeta(e, options.includeRequireRepromptInPasswdSso)
+            ),
+          };
+        }
+
+        if (e.entryType === ENTRY_TYPE.CREDIT_CARD) {
+          return {
+            type: "card",
+            name: e.title,
+            card: {
+              cardholderName: e.cardholderName,
+              brand: e.brand,
+              number: e.cardNumber,
+              expMonth: e.expiryMonth,
+              expYear: e.expiryYear,
+              code: e.cvv,
+            },
+            notes: e.notes,
+            ...withReprompt(e, options.includeReprompt),
+            ...withPasswdSsoMeta(
+              profile,
+              basePasswdSsoMeta(e, options.includeRequireRepromptInPasswdSso)
+            ),
+          };
+        }
+
+        if (e.entryType === ENTRY_TYPE.SECURE_NOTE) {
+          return {
+            type: "securenote",
+            name: e.title,
+            notes: e.content,
+            ...withReprompt(e, options.includeReprompt),
+            ...withPasswdSsoMeta(
+              profile,
+              basePasswdSsoMeta(e, options.includeRequireRepromptInPasswdSso)
+            ),
+          };
+        }
+
+        return {
+          type: "login",
+          name: e.title,
+          login: {
+            username: e.username,
+            password: e.password,
+            uris: e.url ? [{ uri: e.url }] : [],
+            totp: e.totp,
+          },
+          notes: e.notes,
+          ...withReprompt(e, options.includeReprompt),
+          ...withPasswdSsoMeta(profile, {
+            ...basePasswdSsoMeta(e, options.includeRequireRepromptInPasswdSso),
+            customFields: e.customFields,
+            totp: e.totpConfig,
+            generatorSettings: e.generatorSettings,
+            passwordHistory: e.passwordHistory,
+          }),
+        };
+      }),
+    },
+    null,
+    2
+  );
 }

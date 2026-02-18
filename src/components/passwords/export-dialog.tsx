@@ -23,14 +23,15 @@ import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react"
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import {
   type ExportEntry,
+  type ExportProfile,
   csvEntryType,
   csvExportHeader,
   escapeCsvValue,
+  formatExportJson,
   formatExportDate,
 } from "@/lib/export-format-common";
 
 type ExportFormat = "csv" | "json";
-type ExportProfile = "compatible" | "passwd-sso";
 
 interface ExportDialogProps {
   trigger: React.ReactNode;
@@ -479,112 +480,11 @@ function formatCsv(entries: ExportEntry[], profile: ExportProfile): string {
 }
 
 function formatJson(entries: ExportEntry[], profile: ExportProfile): string {
-  return JSON.stringify(
-    {
-      ...(profile === "passwd-sso" ? { format: "passwd-sso", version: 1 } : {}),
-      exportedAt: new Date().toISOString(),
-      entries: entries.map((e) => {
-        if (e.entryType === ENTRY_TYPE.PASSKEY) {
-          return {
-            type: "passkey",
-            name: e.title,
-            passkey: {
-              relyingPartyId: e.relyingPartyId,
-              relyingPartyName: e.relyingPartyName,
-              username: e.username,
-              credentialId: e.credentialId,
-              creationDate: e.creationDate,
-              deviceInfo: e.deviceInfo,
-            },
-            notes: e.notes,
-            reprompt: e.requireReprompt ? 1 : 0,
-            ...(profile === "passwd-sso"
-              ? { passwdSso: { entryType: e.entryType, tags: e.tags, requireReprompt: e.requireReprompt } }
-              : {}),
-          };
-        }
-        if (e.entryType === ENTRY_TYPE.IDENTITY) {
-          return {
-            type: "identity",
-            name: e.title,
-            identity: {
-              fullName: e.fullName,
-              address: e.address,
-              phone: e.phone,
-              email: e.email,
-              dateOfBirth: e.dateOfBirth,
-              nationality: e.nationality,
-              idNumber: e.idNumber,
-              issueDate: e.issueDate,
-              expiryDate: e.expiryDate,
-            },
-            notes: e.notes,
-            reprompt: e.requireReprompt ? 1 : 0,
-            ...(profile === "passwd-sso"
-              ? { passwdSso: { entryType: e.entryType, tags: e.tags, requireReprompt: e.requireReprompt } }
-              : {}),
-          };
-        }
-        if (e.entryType === ENTRY_TYPE.CREDIT_CARD) {
-          return {
-            type: "card",
-            name: e.title,
-            card: {
-              cardholderName: e.cardholderName,
-              brand: e.brand,
-              number: e.cardNumber,
-              expMonth: e.expiryMonth,
-              expYear: e.expiryYear,
-              code: e.cvv,
-            },
-            notes: e.notes,
-            reprompt: e.requireReprompt ? 1 : 0,
-            ...(profile === "passwd-sso"
-              ? { passwdSso: { entryType: e.entryType, tags: e.tags, requireReprompt: e.requireReprompt } }
-              : {}),
-          };
-        }
-        if (e.entryType === ENTRY_TYPE.SECURE_NOTE) {
-          return {
-            type: "securenote",
-            name: e.title,
-            notes: e.content,
-            reprompt: e.requireReprompt ? 1 : 0,
-            ...(profile === "passwd-sso"
-              ? { passwdSso: { entryType: e.entryType, tags: e.tags, requireReprompt: e.requireReprompt } }
-              : {}),
-          };
-        }
-        return {
-          type: "login",
-          name: e.title,
-          login: {
-            username: e.username,
-            password: e.password,
-            uris: e.url ? [{ uri: e.url }] : [],
-            totp: e.totp,
-          },
-          notes: e.notes,
-          reprompt: e.requireReprompt ? 1 : 0,
-          ...(profile === "passwd-sso"
-            ? {
-                passwdSso: {
-                  entryType: e.entryType,
-                  tags: e.tags,
-                  customFields: e.customFields,
-                  totp: e.totpConfig,
-                  generatorSettings: e.generatorSettings,
-                  passwordHistory: e.passwordHistory,
-                  requireReprompt: e.requireReprompt,
-                },
-              }
-            : {}),
-        };
-      }),
-    },
-    null,
-    2
-  );
+  return formatExportJson(entries, profile, {
+    includePasskey: true,
+    includeReprompt: true,
+    includeRequireRepromptInPasswdSso: true,
+  });
 }
 
 export const __testablesPersonalExport = {
