@@ -163,7 +163,10 @@
     "openGenerator": "生成",
     "closeGenerator": "閉じる",
     "requireReprompt": "マスターパスワード再確認を要求",
-    "requireRepromptHelp": "機密フィールドの表示・コピー時にマスターパスフレーズの再入力を求めます。"
+    "requireRepromptHelp": "機密フィールドの表示・コピー時にマスターパスフレーズの再入力を求めます。",
+    "folder": "フォルダ",
+    "folderHint": "このエントリをフォルダに整理します。",
+    "noFolder": "（なし）"
   },
   "SecureNoteForm": {
     "newNote": "新規セキュアノート",

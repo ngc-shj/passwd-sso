@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
@@ -26,10 +26,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Eye, EyeOff, ArrowLeft, Dices, Plus, X, ShieldCheck, Tags, Rows3 } from "lucide-react";
+import { Eye, EyeOff, ArrowLeft, Dices, Plus, X, ShieldCheck, Tags, Rows3, FolderOpen } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, CUSTOM_FIELD_TYPE, apiPath } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
+import type { FolderItem } from "@/components/folders/folder-tree";
 
 export interface CustomField {
   label: string;
@@ -59,6 +60,7 @@ interface PasswordFormProps {
     customFields?: CustomField[];
     totp?: TOTPEntry;
     requireReprompt?: boolean;
+    folderId?: string | null;
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
@@ -93,6 +95,16 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   );
   const [showTotpInput, setShowTotpInput] = useState(!!initialData?.totp);
   const [requireReprompt, setRequireReprompt] = useState(initialData?.requireReprompt ?? false);
+  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
+  const [folders, setFolders] = useState<FolderItem[]>([]);
+
+  // Fetch folders for the folder selector
+  useEffect(() => {
+    fetch(API_PATH.FOLDERS)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => { if (Array.isArray(data)) setFolders(data); })
+      .catch(() => {});
+  }, []);
 
   const initialSnapshot = useMemo(
     () =>
@@ -108,6 +120,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
         customFields: initialData?.customFields ?? [],
         totp: initialData?.totp ?? null,
         requireReprompt: initialData?.requireReprompt ?? false,
+        folderId: initialData?.folderId ?? null,
       }),
     [initialData]
   );
@@ -123,6 +136,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     customFields,
     totp,
     requireReprompt,
+    folderId,
   });
   const hasChanges = currentSnapshot !== initialSnapshot;
 
@@ -197,6 +211,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
         aadVersion: aad ? AAD_VERSION : 0,
         tagIds: selectedTags.map((t) => t.id),
         requireReprompt,
+        folderId: folderId ?? null,
       };
 
       const endpoint =
@@ -360,6 +375,45 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
                 onChange={setSelectedTags}
               />
             </EntrySectionCard>
+
+            {/* Folder assignment */}
+            {folders.length > 0 && (
+              <EntrySectionCard>
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    {t("folder")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("folderHint")}</p>
+                </div>
+                <Select
+                  value={folderId ?? "__none__"}
+                  onValueChange={(v) => setFolderId(v === "__none__" ? null : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">{t("noFolder")}</SelectItem>
+                    {folders.map((f) => {
+                      // Compute depth for hierarchy indentation
+                      let depth = 0;
+                      let current: FolderItem | undefined = f;
+                      while (current?.parentId) {
+                        depth++;
+                        current = folders.find((p) => p.id === current!.parentId);
+                      }
+                      const indent = depth > 0 ? "\u00A0\u00A0".repeat(depth) + "└ " : "";
+                      return (
+                        <SelectItem key={f.id} value={f.id}>
+                          {indent}{f.name}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </EntrySectionCard>
+            )}
 
             {/* Custom fields */}
             <EntrySectionCard>

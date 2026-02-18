@@ -62,6 +62,21 @@ export function FolderDialog({
     return true;
   });
 
+  // Compute display depth for each folder so the Select shows hierarchy
+  const depthMap = new Map<string, number>();
+  function computeDepth(id: string): number {
+    if (depthMap.has(id)) return depthMap.get(id)!;
+    const folder = folders.find((f) => f.id === id);
+    if (!folder || !folder.parentId) {
+      depthMap.set(id, 0);
+      return 0;
+    }
+    const d = computeDepth(folder.parentId) + 1;
+    depthMap.set(id, d);
+    return d;
+  }
+  for (const f of folders) computeDepth(f.id);
+
   const handleSubmit = async () => {
     if (!name.trim()) return;
     setLoading(true);
@@ -113,11 +128,15 @@ export function FolderDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__root__">{t("noParent")}</SelectItem>
-                {availableParents.map((f) => (
-                  <SelectItem key={f.id} value={f.id}>
-                    {f.name}
-                  </SelectItem>
-                ))}
+                {availableParents.map((f) => {
+                  const depth = depthMap.get(f.id) ?? 0;
+                  const indent = depth > 0 ? "\u00A0\u00A0".repeat(depth) + "└ " : "";
+                  return (
+                    <SelectItem key={f.id} value={f.id}>
+                      {indent}{f.name}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           </div>
