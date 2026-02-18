@@ -12,7 +12,8 @@
     "edit": "編集",
     "tryAgain": "再試行",
     "or": "または",
-    "close": "閉じる"
+    "close": "閉じる",
+    "create": "作成"
   },
   "Auth": {
     "signOut": "サインアウト",
@@ -306,7 +307,8 @@
     "restoreVersion": "復元",
     "restoreConfirm": "このバージョンを復元しますか？現在のバージョンは履歴に保存されます。",
     "versionFrom": "{date} のバージョン",
-    "viewVersion": "表示"
+    "viewVersion": "表示",
+    "cancel": "キャンセル"
   },
   "RepromptDialog": {
     "title": "マスターパスフレーズの確認",

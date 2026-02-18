@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -37,11 +37,20 @@ export function FolderDialog({
   onSubmit,
 }: FolderDialogProps) {
   const t = useTranslations("Dashboard");
+  const tCommon = useTranslations("Common");
   const [name, setName] = useState(editFolder?.name ?? "");
   const [parentId, setParentId] = useState<string | null>(
     editFolder?.parentId ?? null,
   );
   const [loading, setLoading] = useState(false);
+
+  // Reset form when dialog opens or editFolder changes
+  useEffect(() => {
+    if (open) {
+      setName(editFolder?.name ?? "");
+      setParentId(editFolder?.parentId ?? null);
+    }
+  }, [open, editFolder]);
 
   const isEdit = !!editFolder;
 
@@ -113,10 +122,10 @@ export function FolderDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {tCommon("cancel")}
           </Button>
           <Button onClick={handleSubmit} disabled={!name.trim() || loading}>
-            {isEdit ? "Save" : "Create"}
+            {isEdit ? tCommon("save") : tCommon("create")}
           </Button>
         </DialogFooter>
       </DialogContent>
