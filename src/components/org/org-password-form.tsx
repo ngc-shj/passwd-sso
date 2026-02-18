@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, type ComponentProps, type ReactNode } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -9,7 +9,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,11 +26,15 @@ import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
 import { OrgTagInput, type OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
 import {
+  NotesField,
+  TwoColumnFields,
+  VisibilityToggleInput,
+} from "@/components/org/org-form-fields";
+import {
   type GeneratorSettings,
   DEFAULT_GENERATOR_SETTINGS,
 } from "@/lib/generator-prefs";
 import { preventIMESubmit } from "@/lib/ime-guard";
-import { Eye, EyeOff } from "lucide-react";
 import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
@@ -113,25 +116,6 @@ interface OrgTagSectionProps {
   sectionCardClass?: string;
 }
 
-interface VisibilityToggleInputProps {
-  show: boolean;
-  onToggle: () => void;
-  inputProps: ComponentProps<typeof Input>;
-}
-
-interface TwoColumnFieldsProps {
-  left: ReactNode;
-  right: ReactNode;
-}
-
-interface NotesFieldProps {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  rows?: number;
-}
-
 function OrgTagSection({
   title,
   hint,
@@ -144,63 +128,6 @@ function OrgTagSection({
     <EntryTagsSection title={title} hint={hint} sectionCardClass={sectionCardClass}>
       <OrgTagInput orgId={orgId} selectedTags={selectedTags} onChange={onChange} />
     </EntryTagsSection>
-  );
-}
-
-function VisibilityToggleInput({
-  show,
-  onToggle,
-  inputProps,
-}: VisibilityToggleInputProps) {
-  return (
-    <div className="relative">
-      <Input
-        {...inputProps}
-        type={show ? "text" : "password"}
-      />
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-        onClick={onToggle}
-      >
-        {show ? (
-          <EyeOff className="h-4 w-4" />
-        ) : (
-          <Eye className="h-4 w-4" />
-        )}
-      </Button>
-    </div>
-  );
-}
-
-function TwoColumnFields({ left, right }: TwoColumnFieldsProps) {
-  return (
-    <div className="grid grid-cols-2 gap-4">
-      <div className="space-y-2">{left}</div>
-      <div className="space-y-2">{right}</div>
-    </div>
-  );
-}
-
-function NotesField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  rows = 3,
-}: NotesFieldProps) {
-  return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      <Textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        rows={rows}
-      />
-    </div>
   );
 }
 
