@@ -126,4 +126,64 @@ describe("useSidebarFolderCrud", () => {
     expect(result.current.deletingFolder).toBeNull();
     expect(params.refreshData).toHaveBeenCalledTimes(1);
   });
+
+  it("uses unknownError when submit failure response is not JSON", async () => {
+    const params = makeParams();
+    const fetchMock = vi.fn(
+      async () =>
+        new Response("not-json", {
+          status: 500,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    ) as Mock;
+    globalThis.fetch = fetchMock;
+
+    const { result } = renderHook(() => useSidebarFolderCrud(params));
+
+    await expect(
+      result.current.handleFolderSubmit({ name: "bad", parentId: null }),
+    ).rejects.toThrow("API error");
+
+    expect(mockToastError).toHaveBeenCalledWith("unknownError");
+  });
+
+  it("shows mapped error and clears deleting state when delete fails", async () => {
+    const params = makeParams();
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: "FOLDER_NOT_FOUND" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as Mock;
+    globalThis.fetch = fetchMock;
+
+    const { result } = renderHook(() => useSidebarFolderCrud(params));
+
+    act(() => {
+      result.current.handleFolderDeleteClick(personalFolders[0]);
+    });
+
+    await act(async () => {
+      await result.current.handleFolderDelete();
+    });
+
+    expect(mockToastError).toHaveBeenCalledWith("folderNotFound");
+    expect(result.current.deletingFolder).toBeNull();
+    expect(params.refreshData).not.toHaveBeenCalled();
+  });
+
+  it("clears deleting folder manually", () => {
+    const { result } = renderHook(() => useSidebarFolderCrud(makeParams()));
+
+    act(() => {
+      result.current.handleFolderDeleteClick(personalFolders[0]);
+    });
+    expect(result.current.deletingFolder).not.toBeNull();
+
+    act(() => {
+      result.current.clearDeletingFolder();
+    });
+    expect(result.current.deletingFolder).toBeNull();
+  });
 });
