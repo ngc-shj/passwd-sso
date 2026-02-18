@@ -13,6 +13,7 @@ import { VaultSelector } from "@/components/layout/vault-selector";
 import { SecuritySection, UtilitiesSection } from "@/components/layout/sidebar-section-security";
 import { type SidebarFolderItem } from "@/components/layout/sidebar-shared";
 import { VaultSection, CategoriesSection, OrganizationsSection, OrganizeSection } from "@/components/layout/sidebar-sections";
+import { useSidebarData } from "@/hooks/use-sidebar-data";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,36 +43,7 @@ const COLLAPSE_DEFAULTS: Record<SidebarSection, boolean> = {
   utilities: true,      // closed
 };
 
-// ─── Interfaces ──────────────────────────────────────────────────
-
-interface TagItem {
-  id: string;
-  name: string;
-  color: string | null;
-  passwordCount: number;
-}
-
-interface OrgTagGroup {
-  orgId: string;
-  orgName: string;
-  tags: { id: string; name: string; color: string | null; count: number }[];
-}
-
-interface OrgFolderGroup {
-  orgId: string;
-  orgName: string;
-  orgRole: string;
-  folders: FolderItem[];
-}
-
 type FolderItem = SidebarFolderItem;
-
-interface OrgItem {
-  id: string;
-  name: string;
-  slug: string;
-  role: string;
-}
 
 interface SidebarProps {
   open: boolean;
@@ -86,11 +58,6 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const tCommon = useTranslations("Common");
   const tOrg = useTranslations("Org");
   const tErrors = useTranslations("ApiErrors");
-  const [tags, setTags] = useState<TagItem[]>([]);
-  const [folders, setFolders] = useState<FolderItem[]>([]);
-  const [orgs, setOrgs] = useState<OrgItem[]>([]);
-  const [orgTagGroups, setOrgTagGroups] = useState<OrgTagGroup[]>([]);
-  const [orgFolderGroups, setOrgFolderGroups] = useState<OrgFolderGroup[]>([]);
 
   // Folder dialog state (personal + org)
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
@@ -101,6 +68,8 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { tags, folders, orgs, orgTagGroups, orgFolderGroups, refreshData, notifyDataChanged } =
+    useSidebarData(pathname);
 
   // Strip locale prefix for route matching
   const cleanPath = stripLocalePrefix(pathname);
@@ -227,88 +196,8 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     }
   }, [pathname, searchParams, isSelectedVaultAll, isSelectedVaultFavorites, isSelectedVaultArchive, isSelectedVaultTrash, selectedTypeFilter, selectedTagId, selectedFolderId, activeOrgId, isOrgsManage, isWatchtower, isShareLinks, isEmergencyAccess, isAuditLog]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Data fetching ──────────────────────────────────────────────
-
-  const fetchData = () => {
-    fetch(API_PATH.TAGS)
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch tags");
-        return res.json();
-      })
-      .then((data) => {
-        if (Array.isArray(data)) setTags(data);
-      })
-      .catch(() => {});
-
-    fetch(API_PATH.FOLDERS)
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch folders");
-        return res.json();
-      })
-      .then((data) => {
-        if (Array.isArray(data)) setFolders(data);
-      })
-      .catch(() => {});
-
-    fetch(API_PATH.ORGS)
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch orgs");
-        return res.json();
-      })
-      .then(async (data) => {
-        if (!Array.isArray(data)) return;
-        setOrgs(data);
-
-        // Fetch tags and folders for all orgs in parallel
-        const tagGroups: OrgTagGroup[] = [];
-        const folderGroups: OrgFolderGroup[] = [];
-        await Promise.all(
-          data.map(async (org: OrgItem) => {
-            const [tagsRes, foldersRes] = await Promise.all([
-              fetch(apiPath.orgTags(org.id)).catch(() => null),
-              fetch(apiPath.orgFolders(org.id)).catch(() => null),
-            ]);
-            if (tagsRes?.ok) {
-              const tags = await tagsRes.json();
-              if (Array.isArray(tags) && tags.length > 0) {
-                tagGroups.push({ orgId: org.id, orgName: org.name, tags });
-              }
-            }
-            if (foldersRes?.ok) {
-              const folders = await foldersRes.json();
-              if (Array.isArray(folders)) {
-                const canManage = org.role === ORG_ROLE.OWNER || org.role === ORG_ROLE.ADMIN;
-                if (folders.length > 0 || canManage) {
-                  folderGroups.push({ orgId: org.id, orgName: org.name, orgRole: org.role, folders });
-                }
-              }
-            }
-          })
-        );
-        setOrgTagGroups(tagGroups);
-        setOrgFolderGroups(folderGroups);
-      })
-      .catch(() => {});
-  };
-
-  // Fetch data on mount and when pathname changes
-  useEffect(() => {
-    fetchData();
-  }, [pathname]);
-
-  // Listen for data-changed events (import, create, etc.)
-  useEffect(() => {
-    const handler = () => fetchData();
-    window.addEventListener("vault-data-changed", handler);
-    window.addEventListener("org-data-changed", handler);
-    return () => {
-      window.removeEventListener("vault-data-changed", handler);
-      window.removeEventListener("org-data-changed", handler);
-    };
-  }, []);
-
   const handleImportComplete = () => {
-    window.dispatchEvent(new CustomEvent("vault-data-changed"));
+    notifyDataChanged();
   };
 
   // ─── Folder CRUD handlers (personal + org) ──────────────────────
@@ -360,7 +249,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       await showApiError(res);
       throw new Error("API error"); // propagate to keep dialog open
     }
-    fetchData();
+    refreshData();
   };
 
   const handleFolderDelete = async () => {
@@ -375,7 +264,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       return;
     }
     setDeletingFolder(null);
-    fetchData();
+    refreshData();
   };
 
   /** Get the folder list for the current dialog context (personal or org). */
