@@ -44,7 +44,6 @@ interface UseSidebarViewModelParams {
   handleFolderDeleteClick: (folder: SidebarFolderItem, orgId?: string) => void;
   handleTagEdit: (tag: OrganizeTagItem, orgId?: string) => void;
   handleTagDeleteClick: (tag: OrganizeTagItem, orgId?: string) => void;
-  notifyDataChanged: () => void;
 }
 
 export function useSidebarViewModel({
@@ -78,7 +77,6 @@ export function useSidebarViewModel({
   handleFolderDeleteClick,
   handleTagEdit,
   handleTagDeleteClick,
-  notifyDataChanged,
 }: UseSidebarViewModelParams): SidebarContentProps {
   const onNavigate = useCallback(() => {
     onOpenChange(false);
@@ -96,10 +94,6 @@ export function useSidebarViewModel({
     },
     [router, onOpenChange],
   );
-
-  const onImportComplete = useCallback(() => {
-    notifyDataChanged();
-  }, [notifyDataChanged]);
 
   return {
     t,
@@ -131,7 +125,6 @@ export function useSidebarViewModel({
     onDeleteFolder: handleFolderDeleteClick,
     onEditTag: handleTagEdit,
     onDeleteTag: handleTagDeleteClick,
-    onImportComplete,
     onNavigate,
   };
 }

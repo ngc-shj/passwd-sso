@@ -50,7 +50,6 @@ export interface SidebarContentProps {
   onDeleteFolder: (folder: SidebarFolderItem, orgId?: string) => void;
   onEditTag: (tag: OrganizeTagItem, orgId?: string) => void;
   onDeleteTag: (tag: OrganizeTagItem, orgId?: string) => void;
-  onImportComplete: () => void;
   onNavigate: () => void;
 }
 
@@ -84,7 +83,6 @@ export function SidebarContent({
   onDeleteFolder,
   onEditTag,
   onDeleteTag,
-  onImportComplete,
   onNavigate,
 }: SidebarContentProps) {
   return (
@@ -195,7 +193,6 @@ export function SidebarContent({
         t={t}
         tOrg={tOrg}
         selectedOrg={selectedOrg}
-        onImportComplete={onImportComplete}
         onNavigate={onNavigate}
       />
     </nav>

@@ -73,7 +73,6 @@ interface UtilitiesSectionProps {
   t: (key: string) => string;
   tOrg: (key: string) => string;
   selectedOrg: SecurityOrg | null;
-  onImportComplete: () => void;
   onNavigate: () => void;
 }
 
@@ -83,10 +82,8 @@ export function UtilitiesSection({
   t,
   tOrg,
   selectedOrg,
-  onImportComplete: _onImportComplete,
   onNavigate,
 }: UtilitiesSectionProps) {
-  void _onImportComplete;
   const exportHref = selectedOrg
     ? `/dashboard/orgs/${selectedOrg.id}/export`
     : "/dashboard/export";

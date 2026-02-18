@@ -53,7 +53,6 @@ describe("UtilitiesSection", () => {
         t={(k) => k}
         tOrg={(k) => k}
         selectedOrg={{ id: "org-1", name: "Acme", role: "ADMIN" }}
-        onImportComplete={() => {}}
         onNavigate={() => {}}
       />
     );
@@ -72,7 +71,6 @@ describe("UtilitiesSection", () => {
         t={(k) => k}
         tOrg={(k) => k}
         selectedOrg={{ id: "org-1", name: "Acme", role: "MEMBER" }}
-        onImportComplete={() => {}}
         onNavigate={() => {}}
       />
     );

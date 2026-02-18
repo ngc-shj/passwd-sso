@@ -15,9 +15,7 @@ vi.mock("@/components/layout/vault-selector", () => ({
 
 vi.mock("@/components/layout/sidebar-section-security", () => ({
   SecuritySection: () => <div>security</div>,
-  UtilitiesSection: ({ onImportComplete }: { onImportComplete: () => void }) => (
-    <button onClick={onImportComplete}>import-complete</button>
-  ),
+  UtilitiesSection: () => <div>utilities</div>,
 }));
 
 vi.mock("@/components/layout/sidebar-sections", () => ({
@@ -62,7 +60,6 @@ function baseProps(overrides: Partial<SidebarContentProps> = {}): SidebarContent
     onDeleteFolder: vi.fn(),
     onEditTag: vi.fn(),
     onDeleteTag: vi.fn(),
-    onImportComplete: vi.fn(),
     onNavigate: vi.fn(),
     ...overrides,
   };
@@ -94,14 +91,5 @@ describe("SidebarContent", () => {
     fireEvent.click(screen.getByRole("button", { name: "create-folder" }));
 
     expect(props.onCreateFolder).toHaveBeenCalledWith("org-1");
-  });
-
-  it("calls onImportComplete from utilities section", () => {
-    const props = baseProps();
-    render(<SidebarContent {...props} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "import-complete" }));
-
-    expect(props.onImportComplete).toHaveBeenCalledTimes(1);
   });
 });

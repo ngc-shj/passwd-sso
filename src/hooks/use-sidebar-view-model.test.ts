@@ -35,7 +35,6 @@ function makeParams() {
     handleFolderDeleteClick: vi.fn(),
     handleTagEdit: vi.fn(),
     handleTagDeleteClick: vi.fn(),
-    notifyDataChanged: vi.fn(),
   };
 }
 
@@ -64,16 +63,14 @@ describe("useSidebarViewModel", () => {
     expect(params.onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("propagates import completion and onNavigate behavior", () => {
+  it("exposes onNavigate behavior", () => {
     const params = makeParams();
     const { result } = renderHook(() => useSidebarViewModel(params));
 
     act(() => {
-      result.current.onImportComplete();
       result.current.onNavigate();
     });
 
-    expect(params.notifyDataChanged).toHaveBeenCalledTimes(1);
     expect(params.onOpenChange).toHaveBeenCalledWith(false);
   });
 });

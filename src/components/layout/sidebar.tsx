@@ -42,7 +42,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { tags, folders, orgs, orgTagGroups, orgFolderGroups, refreshData, notifyDataChanged } =
+  const { tags, folders, orgs, orgTagGroups, orgFolderGroups, refreshData } =
     useSidebarData(pathname);
   const {
     folderDialogOpen,
@@ -150,7 +150,6 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     handleFolderDeleteClick,
     handleTagEdit,
     handleTagDeleteClick,
-    notifyDataChanged,
   });
 
   return (
