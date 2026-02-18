@@ -40,6 +40,7 @@ function makeShare(overrides: Record<string, unknown> = {}) {
     revokedAt: null,
     createdAt: new Date(),
     createdById: DEFAULT_SESSION.user.id,
+    createdBy: { id: DEFAULT_SESSION.user.id, name: "Alice", email: "alice@example.com" },
     passwordEntryId: "pe-1",
     orgPasswordEntryId: null,
     passwordEntry: { id: "pe-1" },
@@ -80,6 +81,8 @@ describe("GET /api/share-links/mine", () => {
     expect(json.items[0].isActive).toBe(true);
     expect(json.items[0].hasPersonalEntry).toBe(true);
     expect(json.items[0].orgName).toBeNull();
+    expect(json.items[0].sharedBy).toBe("Alice");
+    expect(json.items[0].canRevoke).toBe(true);
     expect(json.nextCursor).toBeNull();
   });
 
@@ -128,6 +131,7 @@ describe("GET /api/share-links/mine", () => {
       makeShare({
         passwordEntryId: null,
         orgPasswordEntryId: "ope-1",
+        createdBy: { id: "user-2", name: "Bob", email: "bob@example.com" },
         passwordEntry: null,
         orgPasswordEntry: { id: "ope-1", org: { name: "Acme Corp" } },
       }),
@@ -139,6 +143,8 @@ describe("GET /api/share-links/mine", () => {
 
     expect(json.items[0].orgName).toBe("Acme Corp");
     expect(json.items[0].hasPersonalEntry).toBe(false);
+    expect(json.items[0].sharedBy).toBe("Bob");
+    expect(json.items[0].canRevoke).toBe(false);
   });
 
   it("filters by status=active", async () => {
@@ -257,8 +263,14 @@ describe("GET /api/share-links/mine", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          createdById: DEFAULT_SESSION.user.id,
           orgPasswordEntry: { orgId: "org-1" },
+        }),
+      })
+    );
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({
+          createdById: DEFAULT_SESSION.user.id,
         }),
       })
     );

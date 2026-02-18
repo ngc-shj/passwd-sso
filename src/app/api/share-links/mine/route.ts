@@ -4,7 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { requireOrgMember, OrgAuthError } from "@/lib/org-auth";
 
-// GET /api/share-links/mine — List all share links created by the current user
+// GET /api/share-links/mine
+// - Personal context (no `org`): links created by current user, personal entries only
+// - Org context (`org` present): all links in the organization
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -17,9 +19,7 @@ export async function GET(req: NextRequest) {
   const cursor = searchParams.get("cursor");
   const limit = 30;
 
-  const where: Record<string, unknown> = {
-    createdById: session.user.id,
-  };
+  const where: Record<string, unknown> = {};
   if (orgId) {
     try {
       await requireOrgMember(session.user.id, orgId);
@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
     where.orgPasswordEntry = { orgId };
   } else {
     // Personal context: exclude organization share links.
+    where.createdById = session.user.id;
     where.passwordEntryId = { not: null };
   }
 
@@ -54,6 +55,9 @@ export async function GET(req: NextRequest) {
       take: limit + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       include: {
+        createdBy: {
+          select: { id: true, name: true, email: true },
+        },
         passwordEntry: {
           select: { id: true },
         },
@@ -83,6 +87,11 @@ export async function GET(req: NextRequest) {
       orgPasswordEntryId: s.orgPasswordEntryId,
       orgName: s.orgPasswordEntry?.org?.name ?? null,
       hasPersonalEntry: !!s.passwordEntry,
+      sharedBy:
+        s.createdBy.name?.trim() ||
+        s.createdBy.email ||
+        null,
+      canRevoke: s.createdBy.id === session.user.id,
       isActive:
         !s.revokedAt &&
         s.expiresAt > now &&
