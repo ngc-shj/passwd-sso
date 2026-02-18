@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
-import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
+import { EntryActionBar, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
 import {
@@ -119,7 +119,6 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   });
   const hasChanges = currentSnapshot !== initialSnapshot;
   const isDialogVariant = variant === "dialog";
-  const primaryCardClass = isDialogVariant ? "!border-0 !bg-none" : "";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -180,46 +179,54 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
       ? `${tGen("modePassphrase")} · ${generatorSettings.passphrase.wordCount}`
       : `${tGen("modePassword")} · ${generatorSettings.length}`;
 
+  const loginMainFields = (
+    <EntryLoginMainFields
+      title={title}
+      onTitleChange={setTitle}
+      titleLabel={t("title")}
+      titlePlaceholder={t("titlePlaceholder")}
+      titleRequired
+      username={username}
+      onUsernameChange={setUsername}
+      usernameLabel={t("usernameEmail")}
+      usernamePlaceholder={t("usernamePlaceholder")}
+      password={password}
+      onPasswordChange={setPassword}
+      passwordLabel={t("password")}
+      passwordPlaceholder={t("passwordPlaceholder")}
+      passwordRequired
+      showPassword={showPassword}
+      onToggleShowPassword={() => setShowPassword((v) => !v)}
+      generatorSummary={generatorSummary}
+      showGenerator={showGenerator}
+      onToggleGenerator={() => setShowGenerator((v) => !v)}
+      closeGeneratorLabel={t("closeGenerator")}
+      openGeneratorLabel={t("openGenerator")}
+      generatorSettings={generatorSettings}
+      onGeneratorUse={(pw, settings) => {
+        setPassword(pw);
+        setShowPassword(true);
+        setGeneratorSettings(settings);
+      }}
+      url={url}
+      onUrlChange={setUrl}
+      urlLabel={t("url")}
+      notes={notes}
+      onNotesChange={setNotes}
+      notesLabel={t("notes")}
+      notesPlaceholder={t("notesPlaceholder")}
+    />
+  );
+
   const formContent = (
           <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
-            <EntryPrimaryCard className={primaryCardClass}>
-            <EntryLoginMainFields
-              title={title}
-              onTitleChange={setTitle}
-              titleLabel={t("title")}
-              titlePlaceholder={t("titlePlaceholder")}
-              titleRequired
-              username={username}
-              onUsernameChange={setUsername}
-              usernameLabel={t("usernameEmail")}
-              usernamePlaceholder={t("usernamePlaceholder")}
-              password={password}
-              onPasswordChange={setPassword}
-              passwordLabel={t("password")}
-              passwordPlaceholder={t("passwordPlaceholder")}
-              passwordRequired
-              showPassword={showPassword}
-              onToggleShowPassword={() => setShowPassword((v) => !v)}
-              generatorSummary={generatorSummary}
-              showGenerator={showGenerator}
-              onToggleGenerator={() => setShowGenerator((v) => !v)}
-              closeGeneratorLabel={t("closeGenerator")}
-              openGeneratorLabel={t("openGenerator")}
-              generatorSettings={generatorSettings}
-              onGeneratorUse={(pw, settings) => {
-                setPassword(pw);
-                setShowPassword(true);
-                setGeneratorSettings(settings);
-              }}
-              url={url}
-              onUrlChange={setUrl}
-              urlLabel={t("url")}
-              notes={notes}
-              onNotesChange={setNotes}
-              notesLabel={t("notes")}
-              notesPlaceholder={t("notesPlaceholder")}
-            />
-            </EntryPrimaryCard>
+            {isDialogVariant ? (
+              loginMainFields
+            ) : (
+              <EntrySectionCard className="space-y-4 bg-gradient-to-b from-muted/30 to-background hover:bg-transparent">
+                {loginMainFields}
+              </EntrySectionCard>
+            )}
 
             <EntryTagsSection title={t("tags")} hint={t("tagsHint")}>
               <TagInput
