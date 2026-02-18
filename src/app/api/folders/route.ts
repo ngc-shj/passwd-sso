@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createFolderSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
+import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 
 function getPersonalParent(id: string): Promise<ParentNode | null> {
@@ -70,6 +70,18 @@ export async function POST(req: NextRequest) {
   }
 
   const { name, parentId, sortOrder } = parsed.data;
+
+  // Parent ownership + existence check
+  if (parentId) {
+    try {
+      await validateParentFolder(parentId, session.user.id, getPersonalParent);
+    } catch {
+      return NextResponse.json(
+        { error: API_ERROR.NOT_FOUND },
+        { status: 404 },
+      );
+    }
+  }
 
   // Depth check
   try {

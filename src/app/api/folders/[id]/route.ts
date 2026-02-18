@@ -5,6 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateFolderSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import {
+  validateParentFolder,
   validateFolderDepth,
   checkCircularReference,
   type ParentNode,
@@ -64,6 +65,16 @@ export async function PUT(
 
     if (newParentId !== existing.parentId) {
       if (newParentId) {
+        // Parent ownership + existence check
+        try {
+          await validateParentFolder(newParentId, session.user.id, getPersonalParent);
+        } catch {
+          return NextResponse.json(
+            { error: API_ERROR.NOT_FOUND },
+            { status: 404 },
+          );
+        }
+
         // Cannot set parent to self
         if (newParentId === id) {
           return NextResponse.json(

@@ -34,13 +34,14 @@ vi.mock("@/lib/folder-utils", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/folder-utils")>();
   return {
     ...original,
+    validateParentFolder: vi.fn().mockResolvedValue({ parentId: null, ownerId: "user-1" }),
     validateFolderDepth: vi.fn().mockResolvedValue(1),
     checkCircularReference: vi.fn().mockResolvedValue(false),
   };
 });
 
 import { PUT, DELETE } from "./route";
-import { validateFolderDepth, checkCircularReference } from "@/lib/folder-utils";
+import { validateParentFolder, validateFolderDepth, checkCircularReference } from "@/lib/folder-utils";
 
 const FOLDER_ID = "cm000000000000000folder1";
 const now = new Date("2025-06-01T00:00:00Z");
@@ -113,6 +114,23 @@ describe("PUT /api/folders/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.name).toBe("Updated");
+  });
+
+  it("returns 404 when parentId belongs to another user or does not exist", async () => {
+    mockPrismaFolder.findUnique.mockResolvedValue(ownedFolder);
+    vi.mocked(validateParentFolder).mockRejectedValueOnce(
+      new Error("PARENT_NOT_FOUND"),
+    );
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/folders/${FOLDER_ID}`, {
+        body: { parentId: "cm000000000000000other01" },
+      }),
+      createParams({ id: FOLDER_ID }),
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe("NOT_FOUND");
   });
 
   it("returns 400 when parentId creates circular reference", async () => {

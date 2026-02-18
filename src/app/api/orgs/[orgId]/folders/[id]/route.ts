@@ -6,6 +6,7 @@ import { updateFolderSchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import {
+  validateParentFolder,
   validateFolderDepth,
   checkCircularReference,
   type ParentNode,
@@ -69,6 +70,16 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
     if (newParentId !== existing.parentId) {
       if (newParentId) {
+        // Parent ownership + existence check
+        try {
+          await validateParentFolder(newParentId, orgId, getOrgParent);
+        } catch {
+          return NextResponse.json(
+            { error: API_ERROR.NOT_FOUND },
+            { status: 404 },
+          );
+        }
+
         if (newParentId === id) {
           return NextResponse.json(
             { error: API_ERROR.FOLDER_CIRCULAR_REFERENCE },
