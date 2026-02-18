@@ -356,16 +356,11 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     "sidebar-collapsed",
     COLLAPSE_DEFAULTS
   );
-  const [orgMenuOpen, setOrgMenuOpen] = useState<Record<string, boolean>>({});
 
   const isOpen = (k: SidebarSection) => !collapsed[k];
 
   const toggleSection = (k: SidebarSection) => (open: boolean) =>
     setCollapsed((prev) => ({ ...prev, [k]: !open }));
-  const isOrgMenuOpen = (orgId: string) =>
-    orgMenuOpen[orgId] ?? (activeOrgId === orgId);
-  const setOrgMenuSection = (orgId: string, open: boolean) =>
-    setOrgMenuOpen((prev) => ({ ...prev, [orgId]: open }));
 
   // Auto-expand section when navigating to a route within it.
   // One-time per navigation — user can manually close afterward.
@@ -731,170 +726,20 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         <CollapsibleContent>
           <div className="space-y-1">
             {orgs.map((org) => (
-              <div key={org.id}>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant={
-                      activeOrgId === org.id &&
-                      !activeOrgTypeFilter &&
-                      !activeOrgScope
-                        ? "secondary"
-                        : "ghost"
-                    }
-                    className="flex-1 justify-start gap-2"
-                    asChild
-                  >
-                    <Link
-                      href={`/dashboard/orgs/${org.id}`}
-                      onClick={() => onOpenChange(false)}
-                    >
-                      <Building2 className="h-4 w-4" />
-                      <span className="truncate">{org.name}</span>
-                    </Link>
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() =>
-                      setOrgMenuSection(org.id, !isOrgMenuOpen(org.id))
-                    }
-                    aria-label={`toggle-${org.id}`}
-                  >
-                    {isOrgMenuOpen(org.id) ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                    )}
-                  </Button>
-                </div>
-                {isOrgMenuOpen(org.id) && (() => {
-                  const orgFolderGroup = orgFolderGroups.find((g) => g.orgId === org.id);
-                  const orgFolders = orgFolderGroup?.folders ?? [];
-                  const canManageFolders = org.role === ORG_ROLE.OWNER || org.role === ORG_ROLE.ADMIN;
-                  return (
-                  <div className="ml-6 space-y-0.5">
-                    <Button
-                      variant={activeOrgTypeFilter === ENTRY_TYPE.LOGIN ? "secondary" : "ghost"}
-                      size="sm"
-                      className="w-full justify-start gap-2 h-8"
-                      asChild
-                    >
-                    <Link href={`/dashboard/orgs/${org.id}?type=${ENTRY_TYPE.LOGIN}`} onClick={() => onOpenChange(false)}>
-                        <KeyRound className="h-3.5 w-3.5" />
-                        {t("catLogin")}
-                      </Link>
-                    </Button>
-                    <Button
-                      variant={activeOrgTypeFilter === ENTRY_TYPE.SECURE_NOTE ? "secondary" : "ghost"}
-                      size="sm"
-                      className="w-full justify-start gap-2 h-8"
-                      asChild
-                    >
-                      <Link href={`/dashboard/orgs/${org.id}?type=SECURE_NOTE`} onClick={() => onOpenChange(false)}>
-                        <FileText className="h-3.5 w-3.5" />
-                        {t("catSecureNote")}
-                      </Link>
-                    </Button>
-                    <Button
-                      variant={activeOrgTypeFilter === ENTRY_TYPE.CREDIT_CARD ? "secondary" : "ghost"}
-                      size="sm"
-                      className="w-full justify-start gap-2 h-8"
-                      asChild
-                    >
-                      <Link href={`/dashboard/orgs/${org.id}?type=CREDIT_CARD`} onClick={() => onOpenChange(false)}>
-                        <CreditCard className="h-3.5 w-3.5" />
-                        {t("catCreditCard")}
-                      </Link>
-                    </Button>
-                    <Button
-                      variant={activeOrgTypeFilter === ENTRY_TYPE.IDENTITY ? "secondary" : "ghost"}
-                      size="sm"
-                      className="w-full justify-start gap-2 h-8"
-                      asChild
-                    >
-                      <Link href={`/dashboard/orgs/${org.id}?type=IDENTITY`} onClick={() => onOpenChange(false)}>
-                        <IdCard className="h-3.5 w-3.5" />
-                        {t("catIdentity")}
-                      </Link>
-                    </Button>
-                    <Button
-                      variant={activeOrgTypeFilter === ENTRY_TYPE.PASSKEY ? "secondary" : "ghost"}
-                      size="sm"
-                      className="w-full justify-start gap-2 h-8"
-                      asChild
-                    >
-                      <Link href={`/dashboard/orgs/${org.id}?type=PASSKEY`} onClick={() => onOpenChange(false)}>
-                        <Fingerprint className="h-3.5 w-3.5" />
-                        {t("catPasskey")}
-                      </Link>
-                    </Button>
-                    {(orgFolders.length > 0 || canManageFolders) && (
-                      <>
-                        <Separator className="my-1" />
-                        <div className="flex items-center">
-                          <SectionLabel icon={<FolderOpen className="h-3 w-3" />}>
-                            {t("folders")}
-                          </SectionLabel>
-                          {canManageFolders && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-5 w-5 shrink-0 ml-auto"
-                              onClick={() => handleFolderCreate(org.id)}
-                              aria-label={`${org.name} createFolder`}
-                            >
-                              <Plus className="h-3 w-3" />
-                            </Button>
-                          )}
-                        </div>
-                        <div className="space-y-0.5">
-                          {orgFolders
-                            .filter((f) => !f.parentId)
-                            .map((folder) => (
-                              <FolderTreeNode
-                                key={folder.id}
-                                folder={folder}
-                                folders={orgFolders}
-                                activeFolderId={activeOrgFolderId}
-                                depth={0}
-                                linkHref={(id) => `/dashboard/orgs/${org.id}?folder=${id}`}
-                                showMenu={canManageFolders}
-                                onNavigate={() => onOpenChange(false)}
-                                onEdit={(f) => handleFolderEdit(f, org.id)}
-                                onDelete={(f) => handleFolderDeleteClick(f, org.id)}
-                              />
-                            ))}
-                        </div>
-                      </>
-                    )}
-                    <Separator className="my-1" />
-                    <Button
-                      variant={activeOrgScope === "archive" ? "secondary" : "ghost"}
-                      size="sm"
-                      className="w-full justify-start gap-2 h-8"
-                      asChild
-                    >
-                      <Link href={`/dashboard/orgs/${org.id}?scope=archive`} onClick={() => onOpenChange(false)}>
-                        <Archive className="h-3.5 w-3.5" />
-                        {t("archive")}
-                      </Link>
-                    </Button>
-                    <Button
-                      variant={activeOrgScope === "trash" ? "secondary" : "ghost"}
-                      size="sm"
-                      className="w-full justify-start gap-2 h-8"
-                      asChild
-                    >
-                      <Link href={`/dashboard/orgs/${org.id}?scope=trash`} onClick={() => onOpenChange(false)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                        {t("trash")}
-                      </Link>
-                    </Button>
-                  </div>
-                  );
-                })()}
-              </div>
+              <Button
+                key={org.id}
+                variant={selectedOrgId === org.id ? "secondary" : "ghost"}
+                className="w-full justify-start gap-2"
+                asChild
+              >
+                <Link
+                  href={`/dashboard/orgs/${org.id}`}
+                  onClick={() => onOpenChange(false)}
+                >
+                  <Building2 className="h-4 w-4" />
+                  <span className="truncate">{org.name}</span>
+                </Link>
+              </Button>
             ))}
             <Button
               variant={isOrgsManage ? "secondary" : "ghost"}
@@ -1089,6 +934,14 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         </CollapsibleSectionHeader>
         <CollapsibleContent>
           <div className="space-y-1">
+            {selectedOrg && (selectedOrg.role === ORG_ROLE.OWNER || selectedOrg.role === ORG_ROLE.ADMIN) && (
+              <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+                <Link href={`/dashboard/orgs/${selectedOrg.id}/settings`} onClick={() => onOpenChange(false)}>
+                  <Settings className="h-4 w-4" />
+                  {tOrg("orgSettings")}
+                </Link>
+              </Button>
+            )}
             <ExportDialog
               trigger={
                 <Button variant="ghost" className="w-full justify-start gap-2">
