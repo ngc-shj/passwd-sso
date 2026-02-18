@@ -470,12 +470,23 @@ describe("Sidebar folder CRUD integration", () => {
 });
 
 // ── Org folder CRUD / permission tests ──────────────────────────
+// Org folders are now inside the org's expanded submenu (Organizations section).
+// Tests must toggle the org submenu open before checking folder UI.
 
 describe("Sidebar org folder CRUD integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     capturedFolderDialogProps = null;
   });
+
+  /** Open org submenu by clicking the toggle button, then wait for folders. */
+  async function openOrgSubmenu(sidebar: ReturnType<typeof within>, orgId: string) {
+    // Wait for org toggle to appear
+    await waitFor(() => {
+      expect(sidebar.getByRole("button", { name: `toggle-${orgId}` })).toBeInTheDocument();
+    });
+    fireEvent.click(sidebar.getByRole("button", { name: `toggle-${orgId}` }));
+  }
 
   it("shows org folder create button for OWNER role", async () => {
     const fetchMock = mockFetchSuccess({
@@ -489,15 +500,16 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
+    await openOrgSubmenu(sidebar, "org-1");
 
-    // Wait for org folder to render
+    // Wait for org folder to appear inside the submenu
     await waitFor(() => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
     });
 
-    // The "createFolder" buttons: one for personal, one for org (OWNER)
-    const createButtons = sidebar.getAllByRole("button", { name: "createFolder" });
-    expect(createButtons.length).toBe(2);
+    // Org folder create button with org-specific aria-label
+    const orgCreateBtn = sidebar.getByRole("button", { name: "Acme Corp createFolder" });
+    expect(orgCreateBtn).toBeInTheDocument();
   });
 
   it("shows org folder create button for ADMIN role", async () => {
@@ -512,14 +524,14 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
+    await openOrgSubmenu(sidebar, "org-1");
 
     await waitFor(() => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
     });
 
-    // Personal + Org create buttons
-    const createButtons = sidebar.getAllByRole("button", { name: "createFolder" });
-    expect(createButtons.length).toBe(2);
+    const orgCreateBtn = sidebar.getByRole("button", { name: "Acme Corp createFolder" });
+    expect(orgCreateBtn).toBeInTheDocument();
   });
 
   it("hides org folder create button for MEMBER role", async () => {
@@ -534,14 +546,15 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
+    await openOrgSubmenu(sidebar, "org-1");
 
     await waitFor(() => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
     });
 
-    // Only personal create button should be present (no org create button for MEMBER)
-    const createButtons = sidebar.getAllByRole("button", { name: "createFolder" });
-    expect(createButtons.length).toBe(1);
+    // MEMBER should NOT see the org folder create button
+    const orgCreateBtns = sidebar.queryAllByRole("button", { name: "Acme Corp createFolder" });
+    expect(orgCreateBtns.length).toBe(0);
   });
 
   it("hides edit/delete menu for org folders when role is MEMBER", async () => {
@@ -556,6 +569,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
+    await openOrgSubmenu(sidebar, "org-1");
 
     await waitFor(() => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
@@ -578,12 +592,12 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
+    await openOrgSubmenu(sidebar, "org-1");
 
     await waitFor(() => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
     });
 
-    // Org folder "OrgWork" should have a context menu button (plus personal "Work" menu)
     const orgMenuButton = sidebar.getByRole("button", { name: "OrgWork menu" });
     expect(orgMenuButton).toBeInTheDocument();
   });
@@ -600,15 +614,15 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
+    await openOrgSubmenu(sidebar, "org-1");
 
     await waitFor(() => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
     });
 
-    // Click the org folder create button (the second "createFolder" button)
-    const createButtons = sidebar.getAllByRole("button", { name: "createFolder" });
-    expect(createButtons.length).toBe(2);
-    fireEvent.click(createButtons[1]); // Second one is the org folder create
+    // Click the org folder create button
+    const orgCreateBtn = sidebar.getByRole("button", { name: "Acme Corp createFolder" });
+    fireEvent.click(orgCreateBtn);
 
     expect(capturedFolderDialogProps).not.toBeNull();
     expect(capturedFolderDialogProps!.open).toBe(true);
@@ -648,17 +662,12 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
+    await openOrgSubmenu(sidebar, "org-1");
 
-    // Wait for org data to load — "Acme Corp" appears in both Organizations and Organize sections
+    // Even with zero org folders, OWNER should see the create button inside org submenu
     await waitFor(() => {
-      const matches = sidebar.getAllByText("Acme Corp");
-      // At least 2: one in Organizations section, one in Organize (org folder) section
-      expect(matches.length).toBeGreaterThanOrEqual(2);
+      expect(sidebar.getByRole("button", { name: "Acme Corp createFolder" })).toBeInTheDocument();
     });
-
-    // Personal + Org create buttons (org section rendered despite 0 folders)
-    const createButtons = sidebar.getAllByRole("button", { name: "createFolder" });
-    expect(createButtons.length).toBe(2);
   });
 
   it("hides org folder section when MEMBER and org has zero folders", async () => {
@@ -673,14 +682,15 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
+    await openOrgSubmenu(sidebar, "org-1");
 
     // Give time for async fetch to resolve
     await act(async () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
-    // Only personal create button — org section not rendered for MEMBER with 0 folders
-    const createButtons = sidebar.getAllByRole("button", { name: "createFolder" });
-    expect(createButtons.length).toBe(1);
+    // MEMBER with 0 folders should NOT see any org folder create button
+    const orgCreateBtns = sidebar.queryAllByRole("button", { name: "Acme Corp createFolder" });
+    expect(orgCreateBtns.length).toBe(0);
   });
 });
