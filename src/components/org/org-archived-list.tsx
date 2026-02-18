@@ -8,6 +8,10 @@ import { OrgPasswordForm } from "@/components/org/org-password-form";
 import { Building2 } from "lucide-react";
 import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, TotpAlgorithm, CustomFieldType } from "@/lib/constants";
+import {
+  compareEntriesWithFavorite,
+  type EntrySortOption,
+} from "@/lib/entry-sort";
 
 interface OrgArchivedEntry {
   id: string;
@@ -37,7 +41,7 @@ interface OrgArchivedListProps {
   orgId?: string;
   searchQuery: string;
   refreshKey: number;
-  sortBy?: "updatedAt" | "createdAt" | "title";
+  sortBy?: EntrySortOption;
 }
 
 export function OrgArchivedList({
@@ -230,18 +234,9 @@ export function OrgArchivedList({
     );
   });
 
-  const sortedFiltered = [...filtered].sort((a, b) => {
-    if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
-    switch (sortBy) {
-      case "title":
-        return a.title.localeCompare(b.title);
-      case "createdAt":
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      case "updatedAt":
-      default:
-        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-    }
-  });
+  const sortedFiltered = [...filtered].sort((a, b) =>
+    compareEntriesWithFavorite(a, b, sortBy)
+  );
 
   if (loading || sortedFiltered.length === 0) return null;
 

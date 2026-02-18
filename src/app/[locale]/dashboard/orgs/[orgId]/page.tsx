@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { PasswordCard } from "@/components/passwords/password-card";
 import { EntryListHeader } from "@/components/passwords/entry-list-header";
-import { EntrySortMenu, type EntrySortOption } from "@/components/passwords/entry-sort-menu";
+import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { OrgPasswordForm } from "@/components/org/org-password-form";
 import { OrgArchivedList } from "@/components/org/org-archived-list";
@@ -25,6 +25,7 @@ import { Plus, KeyRound, Search, FileText, CreditCard, IdCard, Fingerprint } fro
 import { toast } from "sonner";
 import { ORG_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, TotpAlgorithm, CustomFieldType } from "@/lib/constants";
+import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-sort";
 
 interface OrgInfo {
   id: string;
@@ -343,18 +344,9 @@ export default function OrgDashboardPage({
       p.relyingPartyId?.toLowerCase().includes(q)
     );
   });
-  const sortedFiltered = [...filtered].sort((a, b) => {
-    if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
-    switch (sortBy) {
-      case "title":
-        return a.title.localeCompare(b.title);
-      case "createdAt":
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      case "updatedAt":
-      default:
-        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-    }
-  });
+  const sortedFiltered = [...filtered].sort((a, b) =>
+    compareEntriesWithFavorite(a, b, sortBy)
+  );
 
   if (loadError) {
     return (

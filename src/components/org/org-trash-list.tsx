@@ -17,6 +17,10 @@ import { Building2, Trash2, RotateCcw, FileText, CreditCard, IdCard } from "luci
 import { toast } from "sonner";
 import { ORG_ROLE, ENTRY_TYPE, API_PATH, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
+import {
+  compareEntriesByDeletedAt,
+  type EntrySortOption,
+} from "@/lib/entry-sort";
 
 interface OrgTrashEntry {
   id: string;
@@ -38,7 +42,7 @@ interface OrgTrashListProps {
   orgId?: string;
   searchQuery?: string;
   refreshKey: number;
-  sortBy?: "updatedAt" | "createdAt" | "title";
+  sortBy?: EntrySortOption;
 }
 
 export function OrgTrashList({
@@ -120,16 +124,9 @@ export function OrgTrashList({
     );
   });
 
-  const sortedFiltered = [...filtered].sort((a, b) => {
-    switch (sortBy) {
-      case "title":
-        return a.title.localeCompare(b.title);
-      case "createdAt":
-      case "updatedAt":
-      default:
-        return new Date(b.deletedAt).getTime() - new Date(a.deletedAt).getTime();
-    }
-  });
+  const sortedFiltered = [...filtered].sort((a, b) =>
+    compareEntriesByDeletedAt(a, b, sortBy)
+  );
 
   if (loading || sortedFiltered.length === 0) return null;
 

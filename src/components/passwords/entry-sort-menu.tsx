@@ -7,9 +7,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import type { EntrySortOption } from "@/lib/entry-sort";
 import { ArrowUpDown } from "lucide-react";
-
-export type EntrySortOption = "updatedAt" | "createdAt" | "title";
 
 interface EntrySortMenuProps {
   sortBy: EntrySortOption;
@@ -55,4 +54,3 @@ export function EntrySortMenu({
     </DropdownMenu>
   );
 }
-
