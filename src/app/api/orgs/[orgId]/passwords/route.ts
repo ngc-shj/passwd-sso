@@ -234,6 +234,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   let overviewBlob: string;
   let entryType: EntryTypeValue = ENTRY_TYPE.LOGIN;
   let tagIds: string[] | undefined;
+  let orgFolderId: string | null | undefined;
   let responseTitle: string;
   let responseUsername: string | null = null;
   let responseUrlHost: string | null = null;
@@ -249,6 +250,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const { title, content } = parsed.data;
     tagIds = parsed.data.tagIds;
+    orgFolderId = parsed.data.orgFolderId;
     entryType = ENTRY_TYPE.SECURE_NOTE;
     responseTitle = title;
 
@@ -266,6 +268,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const { title, cardholderName, cardNumber, brand, expiryMonth, expiryYear, cvv, notes } = parsed.data;
     tagIds = parsed.data.tagIds;
+    orgFolderId = parsed.data.orgFolderId;
     entryType = ENTRY_TYPE.CREDIT_CARD;
     responseTitle = title;
 
@@ -297,6 +300,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const { title, fullName, address, phone, email, dateOfBirth, nationality, idNumber, issueDate, expiryDate, notes } = parsed.data;
     tagIds = parsed.data.tagIds;
+    orgFolderId = parsed.data.orgFolderId;
     entryType = ENTRY_TYPE.IDENTITY;
     responseTitle = title;
 
@@ -330,6 +334,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const { title, username, password, url, notes, customFields, totp } = parsed.data;
     tagIds = parsed.data.tagIds;
+    orgFolderId = parsed.data.orgFolderId;
     responseTitle = title;
     responseUsername = username || null;
 
@@ -382,6 +387,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       orgId,
       createdById: session.user.id,
       updatedById: session.user.id,
+      ...(orgFolderId ? { orgFolderId } : {}),
       ...(tagIds?.length
         ? { tags: { connect: tagIds.map((id) => ({ id })) } }
         : {}),
