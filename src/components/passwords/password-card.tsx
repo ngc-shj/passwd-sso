@@ -47,6 +47,7 @@ import {
   IdCard,
   Fingerprint,
   Link as LinkIcon,
+  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useVault } from "@/lib/vault-context";
@@ -91,6 +92,8 @@ interface PasswordCardProps {
   createdBy?: string | null;
   // Optional: org context for share dialog
   orgId?: string;
+  // Optional: reprompt indicator
+  requireReprompt?: boolean;
 }
 
 interface VaultEntryFull {
@@ -128,6 +131,25 @@ interface VaultEntryFull {
 
 const CLIPBOARD_CLEAR_DELAY = 30_000;
 
+function scheduleClearClipboard(copiedValue: string) {
+  setTimeout(async () => {
+    try {
+      const current = await navigator.clipboard.readText();
+      if (current === copiedValue) {
+        await navigator.clipboard.writeText("");
+      }
+    } catch {
+      // readText often fails without clipboard-read permission.
+      // Fallback to best-effort clear.
+      try {
+        await navigator.clipboard.writeText("");
+      } catch {
+        // Clipboard may be unavailable (background tab / denied)
+      }
+    }
+  }, CLIPBOARD_CLEAR_DELAY);
+}
+
 export function PasswordCard({
   id,
   entryType = ENTRY_TYPE.LOGIN,
@@ -158,6 +180,7 @@ export function PasswordCard({
   canDelete = true,
   createdBy,
   orgId,
+  requireReprompt = false,
 }: PasswordCardProps) {
   const isOrgMode = !!getPasswordProp;
   const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
@@ -260,6 +283,7 @@ export function PasswordCard({
           setDetailData({
             id,
             entryType,
+            requireReprompt: (raw.requireReprompt as boolean | undefined) ?? requireReprompt,
             password: entry.password ?? "",
             content: entry.content,
             url: entry.url ?? null,
@@ -310,11 +334,7 @@ export function PasswordCard({
       const content = await fetchContent();
       await navigator.clipboard.writeText(content);
       toast.success(tCopy("copied"));
-      setTimeout(async () => {
-        try {
-          await navigator.clipboard.writeText("");
-        } catch {}
-      }, CLIPBOARD_CLEAR_DELAY);
+      scheduleClearClipboard(content);
     } catch {
       toast.error(t("networkError"));
     }
@@ -325,11 +345,7 @@ export function PasswordCard({
     try {
       await navigator.clipboard.writeText(username);
       toast.success(tCopy("copied"));
-      setTimeout(async () => {
-        try {
-          await navigator.clipboard.writeText("");
-        } catch {}
-      }, CLIPBOARD_CLEAR_DELAY);
+      scheduleClearClipboard(username);
     } catch {}
   };
 
@@ -338,11 +354,7 @@ export function PasswordCard({
       const pw = await fetchPassword();
       await navigator.clipboard.writeText(pw);
       toast.success(tCopy("copied"));
-      setTimeout(async () => {
-        try {
-          await navigator.clipboard.writeText("");
-        } catch {}
-      }, CLIPBOARD_CLEAR_DELAY);
+      scheduleClearClipboard(pw);
     } catch {
       toast.error(t("networkError"));
     }
@@ -354,9 +366,7 @@ export function PasswordCard({
       if (!num) return;
       await navigator.clipboard.writeText(num);
       toast.success(tCopy("copied"));
-      setTimeout(async () => {
-        try { await navigator.clipboard.writeText(""); } catch {}
-      }, CLIPBOARD_CLEAR_DELAY);
+      scheduleClearClipboard(num);
     } catch {
       toast.error(t("networkError"));
     }
@@ -368,9 +378,7 @@ export function PasswordCard({
       if (!code) return;
       await navigator.clipboard.writeText(code);
       toast.success(tCopy("copied"));
-      setTimeout(async () => {
-        try { await navigator.clipboard.writeText(""); } catch {}
-      }, CLIPBOARD_CLEAR_DELAY);
+      scheduleClearClipboard(code);
     } catch {
       toast.error(t("networkError"));
     }
@@ -391,9 +399,7 @@ export function PasswordCard({
       if (!cid) return;
       await navigator.clipboard.writeText(cid);
       toast.success(tCopy("copied"));
-      setTimeout(async () => {
-        try { await navigator.clipboard.writeText(""); } catch {}
-      }, CLIPBOARD_CLEAR_DELAY);
+      scheduleClearClipboard(cid);
     } catch {
       toast.error(t("networkError"));
     }
@@ -405,9 +411,7 @@ export function PasswordCard({
       if (!num) return;
       await navigator.clipboard.writeText(num);
       toast.success(tCopy("copied"));
-      setTimeout(async () => {
-        try { await navigator.clipboard.writeText(""); } catch {}
-      }, CLIPBOARD_CLEAR_DELAY);
+      scheduleClearClipboard(num);
     } catch {
       toast.error(t("networkError"));
     }
@@ -470,6 +474,9 @@ export function PasswordCard({
           <div className="flex-1 min-w-0">
             <span className="font-medium truncate block text-left">
               {title}
+              {requireReprompt && (
+                <ShieldCheck className="inline-block ml-1 h-3.5 w-3.5 text-muted-foreground align-text-bottom" />
+              )}
             </span>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               {isPasskey ? (

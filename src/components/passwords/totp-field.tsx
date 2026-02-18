@@ -20,6 +20,7 @@ export interface TOTPEntry {
 interface TOTPFieldDisplayProps {
   mode: "display";
   totp: TOTPEntry;
+  wrapCopyGetter?: (getter: () => string) => () => Promise<string>;
 }
 
 interface TOTPFieldInputProps {
@@ -69,7 +70,7 @@ function formatCode(code: string): string {
   return code.slice(0, mid) + " " + code.slice(mid);
 }
 
-function TOTPCodeDisplay({ totp: totpEntry }: { totp: TOTPEntry }) {
+function TOTPCodeDisplay({ totp: totpEntry, wrapCopyGetter }: { totp: TOTPEntry; wrapCopyGetter?: (getter: () => string) => () => Promise<string> }) {
   const t = useTranslations("TOTP");
   const [code, setCode] = useState("");
   const [remaining, setRemaining] = useState(0);
@@ -120,7 +121,7 @@ function TOTPCodeDisplay({ totp: totpEntry }: { totp: TOTPEntry }) {
         >
           {remaining}s
         </span>
-        <CopyButton getValue={() => code} />
+        <CopyButton getValue={wrapCopyGetter ? wrapCopyGetter(() => code) : () => code} />
       </div>
     </div>
   );
@@ -142,7 +143,7 @@ export function TOTPField(props: TOTPFieldProps) {
   }, [props.mode, secret]);
 
   if (props.mode === "display") {
-    return <TOTPCodeDisplay totp={props.totp} />;
+    return <TOTPCodeDisplay totp={props.totp} wrapCopyGetter={props.wrapCopyGetter} />;
   }
 
   const { totp, onChange, onRemove } = props;

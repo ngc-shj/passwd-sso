@@ -96,6 +96,7 @@ interface FormData {
   credentialId?: string | null;
   creationDate?: string | null;
   deviceInfo?: string | null;
+  requireReprompt?: boolean;
 }
 
 interface PasswordEditDialogProps {
@@ -194,6 +195,7 @@ export function PasswordEditDialog({
           credentialId: entry.credentialId,
           creationDate: entry.creationDate,
           deviceInfo: entry.deviceInfo,
+          requireReprompt: raw.requireReprompt ?? false,
         });
       } catch (e) {
         if (!cancelled) {

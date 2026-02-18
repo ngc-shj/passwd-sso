@@ -150,7 +150,9 @@
     "statusUnsaved": "未保存の変更があります",
     "statusSaved": "変更は保存済みです",
     "openGenerator": "生成",
-    "closeGenerator": "閉じる"
+    "closeGenerator": "閉じる",
+    "requireReprompt": "マスターパスワード再確認を要求",
+    "requireRepromptHelp": "機密フィールドの表示・コピー時にマスターパスフレーズの再入力を求めます。"
   },
   "SecureNoteForm": {
     "newNote": "新規セキュアノート",
@@ -289,6 +291,14 @@
     "credentialId": "クレデンシャルID",
     "creationDate": "作成日",
     "deviceInfo": "デバイス情報"
+  },
+  "RepromptDialog": {
+    "title": "マスターパスフレーズの確認",
+    "description": "このアイテムにアクセスするにはマスターパスフレーズを再入力してください。",
+    "label": "マスターパスフレーズ",
+    "verify": "確認",
+    "cancel": "キャンセル",
+    "incorrect": "パスフレーズが正しくありません"
   },
   "PasswordGenerator": {
     "use": "使用",

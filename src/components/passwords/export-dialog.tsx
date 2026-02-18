@@ -67,6 +67,7 @@ interface DecryptedExport {
   } | null;
   generatorSettings: Record<string, unknown> | null;
   passwordHistory: Array<{ password: string; changedAt: string }>;
+  requireReprompt: boolean;
 }
 
 interface ExportDialogProps {
@@ -166,6 +167,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
             totpConfig: parsed.totp ?? null,
             generatorSettings: parsed.generatorSettings ?? null,
             passwordHistory: Array.isArray(parsed.passwordHistory) ? parsed.passwordHistory : [],
+            requireReprompt: raw.requireReprompt ?? false,
           });
         } catch {
           // Skip entries that fail to decrypt
@@ -221,6 +223,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
                     totpConfig: data.totp ?? null,
                     generatorSettings: data.generatorSettings ?? null,
                     passwordHistory: Array.isArray(data.passwordHistory) ? data.passwordHistory : [],
+                    requireReprompt: false,
                   });
                 } catch {
                   // Skip entries that fail to fetch
@@ -512,7 +515,7 @@ function formatCsv(entries: DecryptedExport[], profile: ExportProfile): string {
       escapeCsv(e.title),
       escapeCsv(isNote ? e.content : e.notes),
       "", // fields
-      "", // reprompt
+      e.requireReprompt ? "1" : "",
       isLogin ? escapeCsv(e.url) : "",
       isLogin ? escapeCsv(e.username) : "",
       isLogin ? escapeCsv(e.password) : "",
@@ -542,8 +545,9 @@ function formatJson(entries: DecryptedExport[], profile: ExportProfile): string 
               deviceInfo: e.deviceInfo,
             },
             notes: e.notes,
+            reprompt: e.requireReprompt ? 1 : 0,
             ...(profile === "passwd-sso"
-              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
+              ? { passwdSso: { entryType: e.entryType, tags: e.tags, requireReprompt: e.requireReprompt } }
               : {}),
           };
         }
@@ -563,8 +567,9 @@ function formatJson(entries: DecryptedExport[], profile: ExportProfile): string 
               expiryDate: e.expiryDate,
             },
             notes: e.notes,
+            reprompt: e.requireReprompt ? 1 : 0,
             ...(profile === "passwd-sso"
-              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
+              ? { passwdSso: { entryType: e.entryType, tags: e.tags, requireReprompt: e.requireReprompt } }
               : {}),
           };
         }
@@ -581,8 +586,9 @@ function formatJson(entries: DecryptedExport[], profile: ExportProfile): string 
               code: e.cvv,
             },
             notes: e.notes,
+            reprompt: e.requireReprompt ? 1 : 0,
             ...(profile === "passwd-sso"
-              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
+              ? { passwdSso: { entryType: e.entryType, tags: e.tags, requireReprompt: e.requireReprompt } }
               : {}),
           };
         }
@@ -591,8 +597,9 @@ function formatJson(entries: DecryptedExport[], profile: ExportProfile): string 
             type: "securenote",
             name: e.title,
             notes: e.content,
+            reprompt: e.requireReprompt ? 1 : 0,
             ...(profile === "passwd-sso"
-              ? { passwdSso: { entryType: e.entryType, tags: e.tags } }
+              ? { passwdSso: { entryType: e.entryType, tags: e.tags, requireReprompt: e.requireReprompt } }
               : {}),
           };
         }
@@ -606,6 +613,7 @@ function formatJson(entries: DecryptedExport[], profile: ExportProfile): string 
             totp: e.totp,
           },
           notes: e.notes,
+          reprompt: e.requireReprompt ? 1 : 0,
           ...(profile === "passwd-sso"
             ? {
                 passwdSso: {
@@ -615,6 +623,7 @@ function formatJson(entries: DecryptedExport[], profile: ExportProfile): string 
                   totp: e.totpConfig,
                   generatorSettings: e.generatorSettings,
                   passwordHistory: e.passwordHistory,
+                  requireReprompt: e.requireReprompt,
                 },
               }
             : {}),

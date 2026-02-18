@@ -16,6 +16,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { apiPath } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format-datetime";
+import { useReprompt } from "@/hooks/use-reprompt";
 import {
   Edit,
   Eye,
@@ -39,6 +40,7 @@ interface CustomField {
 export interface InlineDetailData {
   id: string;
   entryType?: EntryTypeValue;
+  requireReprompt?: boolean;
   password: string;
   content?: string;
   url: string | null;
@@ -84,6 +86,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
   const t = useTranslations("PasswordDetail");
   const tc = useTranslations("Common");
   const locale = useLocale();
+  const { requireVerification, createGuardedGetter, repromptDialog } = useReprompt();
   const [showPassword, setShowPassword] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [revealedHistory, setRevealedHistory] = useState<Set<number>>(
@@ -127,24 +130,32 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
   }, [data.id, orgId]);
 
   const handleReveal = useCallback(() => {
-    setShowPassword(true);
-    setTimeout(() => setShowPassword(false), REVEAL_TIMEOUT);
-  }, []);
+    requireVerification(data.id, data.requireReprompt ?? false, () => {
+      setShowPassword(true);
+      setTimeout(() => setShowPassword(false), REVEAL_TIMEOUT);
+    });
+  }, [data.id, data.requireReprompt, requireVerification]);
 
   const handleRevealCardNumber = useCallback(() => {
-    setShowCardNumber(true);
-    setTimeout(() => setShowCardNumber(false), REVEAL_TIMEOUT);
-  }, []);
+    requireVerification(data.id, data.requireReprompt ?? false, () => {
+      setShowCardNumber(true);
+      setTimeout(() => setShowCardNumber(false), REVEAL_TIMEOUT);
+    });
+  }, [data.id, data.requireReprompt, requireVerification]);
 
   const handleRevealCvv = useCallback(() => {
-    setShowCvv(true);
-    setTimeout(() => setShowCvv(false), REVEAL_TIMEOUT);
-  }, []);
+    requireVerification(data.id, data.requireReprompt ?? false, () => {
+      setShowCvv(true);
+      setTimeout(() => setShowCvv(false), REVEAL_TIMEOUT);
+    });
+  }, [data.id, data.requireReprompt, requireVerification]);
 
   const handleRevealIdNumber = useCallback(() => {
-    setShowIdNumber(true);
-    setTimeout(() => setShowIdNumber(false), REVEAL_TIMEOUT);
-  }, []);
+    requireVerification(data.id, data.requireReprompt ?? false, () => {
+      setShowIdNumber(true);
+      setTimeout(() => setShowIdNumber(false), REVEAL_TIMEOUT);
+    });
+  }, [data.id, data.requireReprompt, requireVerification]);
 
   const isNote = data.entryType === ENTRY_TYPE.SECURE_NOTE;
   const isCreditCard = data.entryType === ENTRY_TYPE.CREDIT_CARD;
@@ -152,9 +163,11 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
   const isPasskey = data.entryType === ENTRY_TYPE.PASSKEY;
 
   const handleRevealCredentialId = useCallback(() => {
-    setShowCredentialId(true);
-    setTimeout(() => setShowCredentialId(false), REVEAL_TIMEOUT);
-  }, []);
+    requireVerification(data.id, data.requireReprompt ?? false, () => {
+      setShowCredentialId(true);
+      setTimeout(() => setShowCredentialId(false), REVEAL_TIMEOUT);
+    });
+  }, [data.id, data.requireReprompt, requireVerification]);
 
   return (
     <div className="space-y-3 border-t pt-3 px-4 pb-3">
@@ -206,7 +219,13 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
                 >
                   {showCredentialId ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
-                <CopyButton getValue={() => data.credentialId ?? ""} />
+                <CopyButton
+                  getValue={createGuardedGetter(
+                    data.id,
+                    data.requireReprompt ?? false,
+                    () => data.credentialId ?? "",
+                  )}
+                />
               </div>
             </div>
           )}
@@ -315,7 +334,13 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
                 >
                   {showIdNumber ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
-                <CopyButton getValue={() => data.idNumber ?? ""} />
+                <CopyButton
+                  getValue={createGuardedGetter(
+                    data.id,
+                    data.requireReprompt ?? false,
+                    () => data.idNumber ?? "",
+                  )}
+                />
               </div>
             </div>
           )}
@@ -366,7 +391,13 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
                 >
                   {showCardNumber ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
-                <CopyButton getValue={() => data.cardNumber ?? ""} />
+                <CopyButton
+                  getValue={createGuardedGetter(
+                    data.id,
+                    data.requireReprompt ?? false,
+                    () => data.cardNumber ?? "",
+                  )}
+                />
               </div>
             </div>
           )}
@@ -416,7 +447,13 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
                 >
                   {showCvv ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
-                <CopyButton getValue={() => data.cvv ?? ""} />
+                <CopyButton
+                  getValue={createGuardedGetter(
+                    data.id,
+                    data.requireReprompt ?? false,
+                    () => data.cvv ?? "",
+                  )}
+                />
               </div>
             </div>
           )}
@@ -463,7 +500,13 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
                   <Eye className="h-4 w-4" />
                 )}
               </Button>
-              <CopyButton getValue={() => data.password} />
+              <CopyButton
+                getValue={createGuardedGetter(
+                  data.id,
+                  data.requireReprompt ?? false,
+                  () => data.password,
+                )}
+              />
             </div>
             {showPassword && (
               <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
@@ -471,7 +514,15 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           </div>
 
           {/* TOTP */}
-          {data.totp && <TOTPField mode="display" totp={data.totp} />}
+          {data.totp && (
+            <TOTPField
+              mode="display"
+              totp={data.totp}
+              wrapCopyGetter={(getter) =>
+                createGuardedGetter(data.id, data.requireReprompt ?? false, getter)
+              }
+            />
+          )}
 
           {/* URL */}
           {data.url && (
@@ -529,14 +580,30 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
-                        onClick={() =>
-                          setRevealedFields((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(idx)) next.delete(idx);
-                            else next.add(idx);
-                            return next;
-                          })
-                        }
+                        onClick={() => {
+                          if (revealedFields.has(idx)) {
+                            setRevealedFields((prev) => {
+                              const next = new Set(prev);
+                              next.delete(idx);
+                              return next;
+                            });
+                          } else {
+                            requireVerification(data.id, data.requireReprompt ?? false, () => {
+                              setRevealedFields((prev) => {
+                                const next = new Set(prev);
+                                next.add(idx);
+                                return next;
+                              });
+                              setTimeout(() => {
+                                setRevealedFields((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(idx);
+                                  return next;
+                                });
+                              }, REVEAL_TIMEOUT);
+                            });
+                          }
+                        }}
                       >
                         {revealedFields.has(idx) ? (
                           <EyeOff className="h-4 w-4" />
@@ -548,7 +615,17 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
                   ) : (
                     <span className="text-sm">{field.value}</span>
                   )}
-                  <CopyButton getValue={() => field.value} />
+                  <CopyButton
+                    getValue={
+                      field.type === CUSTOM_FIELD_TYPE.HIDDEN
+                        ? createGuardedGetter(
+                            data.id,
+                            data.requireReprompt ?? false,
+                            () => field.value,
+                          )
+                        : () => Promise.resolve(field.value)
+                    }
+                  />
                 </div>
               </div>
             ))}
@@ -591,12 +668,28 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
                         size="icon"
                         className="h-7 w-7 shrink-0"
                         onClick={() => {
-                          setRevealedHistory((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(idx)) next.delete(idx);
-                            else next.add(idx);
-                            return next;
-                          });
+                          if (revealedHistory.has(idx)) {
+                            setRevealedHistory((prev) => {
+                              const next = new Set(prev);
+                              next.delete(idx);
+                              return next;
+                            });
+                          } else {
+                            requireVerification(data.id, data.requireReprompt ?? false, () => {
+                              setRevealedHistory((prev) => {
+                                const next = new Set(prev);
+                                next.add(idx);
+                                return next;
+                              });
+                              setTimeout(() => {
+                                setRevealedHistory((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(idx);
+                                  return next;
+                                });
+                              }, REVEAL_TIMEOUT);
+                            });
+                          }
                         }}
                       >
                         {revealedHistory.has(idx) ? (
@@ -605,7 +698,13 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
                           <Eye className="h-3.5 w-3.5" />
                         )}
                       </Button>
-                      <CopyButton getValue={() => entry.password} />
+                      <CopyButton
+                        getValue={createGuardedGetter(
+                          data.id,
+                          data.requireReprompt ?? false,
+                          () => entry.password,
+                        )}
+                      />
                     </div>
                   ))}
                 </div>
@@ -652,6 +751,7 @@ export function PasswordDetailInline({ data, onEdit, orgId }: PasswordDetailInli
           </Button>
         )}
       </div>
+      {repromptDialog}
     </div>
   );
 }
