@@ -180,6 +180,84 @@ export function OrgPasswordForm({
 
   const isEdit = !!editData;
 
+  const applyEditDataToForm = (data: NonNullable<OrgPasswordFormProps["editData"]>) => {
+    setTitle(data.title);
+    setUsername(data.username ?? "");
+    setPassword(data.password ?? "");
+    setContent(data.content ?? "");
+    setUrl(data.url ?? "");
+    setNotes(data.notes ?? "");
+    setSelectedTags(data.tags ?? []);
+    setCustomFields(data.customFields ?? []);
+    setTotp(data.totp ?? null);
+    setShowTotpInput(!!data.totp);
+    setCardholderName(data.cardholderName ?? "");
+    setCardNumber(formatCardNumber(data.cardNumber ?? "", data.brand ?? ""));
+    setBrand(data.brand ?? "");
+    setBrandSource(data.brand ? "manual" : "auto");
+    setExpiryMonth(data.expiryMonth ?? "");
+    setExpiryYear(data.expiryYear ?? "");
+    setCvv(data.cvv ?? "");
+    setFullName(data.fullName ?? "");
+    setAddress(data.address ?? "");
+    setPhone(data.phone ?? "");
+    setEmail(data.email ?? "");
+    setDateOfBirth(data.dateOfBirth ?? "");
+    setNationality(data.nationality ?? "");
+    setIdNumber(data.idNumber ?? "");
+    setIssueDate(data.issueDate ?? "");
+    setExpiryDate(data.expiryDate ?? "");
+    setRelyingPartyId(data.relyingPartyId ?? "");
+    setRelyingPartyName(data.relyingPartyName ?? "");
+    setCredentialId(data.credentialId ?? "");
+    setCreationDate(data.creationDate ?? "");
+    setDeviceInfo(data.deviceInfo ?? "");
+    setOrgFolderId(data.orgFolderId ?? null);
+  };
+
+  const resetFormForClose = () => {
+    setTitle("");
+    setUsername("");
+    setPassword("");
+    setContent("");
+    setUrl("");
+    setNotes("");
+    setSelectedTags([]);
+    setCustomFields([]);
+    setTotp(null);
+    setShowTotpInput(false);
+    setShowPassword(false);
+    setShowGenerator(false);
+    setCardholderName("");
+    setCardNumber("");
+    setBrand("");
+    setBrandSource("auto");
+    setExpiryMonth("");
+    setExpiryYear("");
+    setCvv("");
+    setShowCardNumber(false);
+    setShowCvv(false);
+    setFullName("");
+    setAddress("");
+    setPhone("");
+    setEmail("");
+    setDateOfBirth("");
+    setNationality("");
+    setIdNumber("");
+    setIssueDate("");
+    setExpiryDate("");
+    setShowIdNumber(false);
+    setRelyingPartyId("");
+    setRelyingPartyName("");
+    setCredentialId("");
+    setCreationDate("");
+    setDeviceInfo("");
+    setShowCredentialId(false);
+    setAttachments([]);
+    setOrgFolderId(null);
+    setSaving(false);
+  };
+
   // Fetch org folders for the folder selector
   useEffect(() => {
     if (open) {
@@ -193,38 +271,7 @@ export function OrgPasswordForm({
   // Sync form fields when editData changes (programmatic open)
   useEffect(() => {
     if (open && editData) {
-      setTitle(editData.title);
-      setUsername(editData.username ?? "");
-      setPassword(editData.password ?? "");
-      setContent(editData.content ?? "");
-      setUrl(editData.url ?? "");
-      setNotes(editData.notes ?? "");
-      setSelectedTags(editData.tags ?? []);
-      setCustomFields(editData.customFields ?? []);
-      setTotp(editData.totp ?? null);
-      setShowTotpInput(!!editData.totp);
-      setCardholderName(editData.cardholderName ?? "");
-      setCardNumber(formatCardNumber(editData.cardNumber ?? "", editData.brand ?? ""));
-      setBrand(editData.brand ?? "");
-      setBrandSource(editData.brand ? "manual" : "auto");
-      setExpiryMonth(editData.expiryMonth ?? "");
-      setExpiryYear(editData.expiryYear ?? "");
-      setCvv(editData.cvv ?? "");
-      setFullName(editData.fullName ?? "");
-      setAddress(editData.address ?? "");
-      setPhone(editData.phone ?? "");
-      setEmail(editData.email ?? "");
-      setDateOfBirth(editData.dateOfBirth ?? "");
-      setNationality(editData.nationality ?? "");
-      setIdNumber(editData.idNumber ?? "");
-      setIssueDate(editData.issueDate ?? "");
-      setExpiryDate(editData.expiryDate ?? "");
-      setRelyingPartyId(editData.relyingPartyId ?? "");
-      setRelyingPartyName(editData.relyingPartyName ?? "");
-      setCredentialId(editData.credentialId ?? "");
-      setCreationDate(editData.creationDate ?? "");
-      setDeviceInfo(editData.deviceInfo ?? "");
-      setOrgFolderId(editData.orgFolderId ?? null);
+      applyEditDataToForm(editData);
 
       // Load attachments for edit mode
       fetch(apiPath.orgPasswordAttachments(orgId, editData.id))
@@ -236,79 +283,9 @@ export function OrgPasswordForm({
 
   const handleOpenChange = (v: boolean) => {
     if (!v) {
-      setTitle("");
-      setUsername("");
-      setPassword("");
-      setContent("");
-      setUrl("");
-      setNotes("");
-      setSelectedTags([]);
-      setCustomFields([]);
-      setTotp(null);
-      setShowTotpInput(false);
-      setShowPassword(false);
-      setShowGenerator(false);
-      setCardholderName("");
-      setCardNumber("");
-      setBrand("");
-      setBrandSource("auto");
-      setExpiryMonth("");
-      setExpiryYear("");
-      setCvv("");
-      setShowCardNumber(false);
-      setShowCvv(false);
-      setFullName("");
-      setAddress("");
-      setPhone("");
-      setEmail("");
-      setDateOfBirth("");
-      setNationality("");
-      setIdNumber("");
-      setIssueDate("");
-      setExpiryDate("");
-      setShowIdNumber(false);
-      setRelyingPartyId("");
-      setRelyingPartyName("");
-      setCredentialId("");
-      setCreationDate("");
-      setDeviceInfo("");
-      setShowCredentialId(false);
-      setAttachments([]);
-      setOrgFolderId(null);
-      setSaving(false);
+      resetFormForClose();
     } else if (editData) {
-      setTitle(editData.title);
-      setUsername(editData.username ?? "");
-      setPassword(editData.password);
-      setContent(editData.content ?? "");
-      setUrl(editData.url ?? "");
-      setNotes(editData.notes ?? "");
-      setSelectedTags(editData.tags ?? []);
-      setCustomFields(editData.customFields ?? []);
-      setTotp(editData.totp ?? null);
-      setShowTotpInput(!!editData.totp);
-      setCardholderName(editData.cardholderName ?? "");
-      setCardNumber(formatCardNumber(editData.cardNumber ?? "", editData.brand ?? ""));
-      setBrand(editData.brand ?? "");
-      setBrandSource(editData.brand ? "manual" : "auto");
-      setExpiryMonth(editData.expiryMonth ?? "");
-      setExpiryYear(editData.expiryYear ?? "");
-      setCvv(editData.cvv ?? "");
-      setFullName(editData.fullName ?? "");
-      setAddress(editData.address ?? "");
-      setPhone(editData.phone ?? "");
-      setEmail(editData.email ?? "");
-      setDateOfBirth(editData.dateOfBirth ?? "");
-      setNationality(editData.nationality ?? "");
-      setIdNumber(editData.idNumber ?? "");
-      setIssueDate(editData.issueDate ?? "");
-      setExpiryDate(editData.expiryDate ?? "");
-      setRelyingPartyId(editData.relyingPartyId ?? "");
-      setRelyingPartyName(editData.relyingPartyName ?? "");
-      setCredentialId(editData.credentialId ?? "");
-      setCreationDate(editData.creationDate ?? "");
-      setDeviceInfo(editData.deviceInfo ?? "");
-      setOrgFolderId(editData.orgFolderId ?? null);
+      applyEditDataToForm(editData);
     }
     onOpenChange(v);
   };
