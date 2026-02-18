@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { PasswordCard } from "@/components/passwords/password-card";
 import { EntryListHeader } from "@/components/passwords/entry-list-header";
+import { EntrySortMenu, type EntrySortOption } from "@/components/passwords/entry-sort-menu";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { OrgPasswordForm } from "@/components/org/org-password-form";
 import { OrgArchivedList } from "@/components/org/org-archived-list";
@@ -20,7 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, KeyRound, Search, FileText, CreditCard, IdCard, Fingerprint, ArrowUpDown } from "lucide-react";
+import { Plus, KeyRound, Search, FileText, CreditCard, IdCard, Fingerprint } from "lucide-react";
 import { toast } from "sonner";
 import { ORG_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, TotpAlgorithm, CustomFieldType } from "@/lib/constants";
@@ -56,8 +57,6 @@ interface OrgPasswordEntry {
   updatedAt: string;
 }
 
-type SortOption = "updatedAt" | "createdAt" | "title";
-
 export default function OrgDashboardPage({
   params,
 }: {
@@ -77,7 +76,7 @@ export default function OrgDashboardPage({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState<SortOption>("updatedAt");
+  const [sortBy, setSortBy] = useState<EntrySortOption>("updatedAt");
   const [formOpen, setFormOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newEntryType, setNewEntryType] = useState<EntryTypeValue>(ENTRY_TYPE.LOGIN);
@@ -389,29 +388,15 @@ export default function OrgDashboardPage({
           titleExtra={!isPrimaryScopeLabel && org ? <OrgRoleBadge role={org.role} /> : null}
           actions={
             <>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    <ArrowUpDown className="h-4 w-4 mr-1" />
-                    {sortBy === "title"
-                      ? tDash("sortTitle")
-                      : sortBy === "createdAt"
-                        ? tDash("sortCreated")
-                        : tDash("sortUpdated")}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setSortBy("updatedAt")}>
-                    {tDash("sortUpdated")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSortBy("createdAt")}>
-                    {tDash("sortCreated")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSortBy("title")}>
-                    {tDash("sortTitle")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <EntrySortMenu
+                sortBy={sortBy}
+                onSortByChange={setSortBy}
+                labels={{
+                  updated: tDash("sortUpdated"),
+                  created: tDash("sortCreated"),
+                  title: tDash("sortTitle"),
+                }}
+              />
               {canCreate && !isOrgSpecialView && (
                 contextualEntryType ? (
                   <Button

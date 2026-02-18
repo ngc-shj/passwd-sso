@@ -8,6 +8,7 @@ import { TrashList } from "@/components/passwords/trash-list";
 import { OrgFavoritesList } from "@/components/org/org-favorites-list";
 import { PasswordNewDialog } from "@/components/passwords/password-new-dialog";
 import { EntryListHeader } from "@/components/passwords/entry-list-header";
+import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,7 +22,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, ArrowUpDown, KeyRound, FileText, CreditCard, IdCard, Fingerprint } from "lucide-react";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 
@@ -158,25 +159,15 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
           actions={
             <>
               {!isTrash && !isArchive && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm">
-                      <ArrowUpDown className="h-4 w-4 mr-1" />
-                      {sortBy === "title" ? t("sortTitle") : sortBy === "createdAt" ? t("sortCreated") : t("sortUpdated")}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => setSortBy("updatedAt")}>
-                      {t("sortUpdated")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSortBy("createdAt")}>
-                      {t("sortCreated")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSortBy("title")}>
-                      {t("sortTitle")}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <EntrySortMenu
+                  sortBy={sortBy}
+                  onSortByChange={setSortBy}
+                  labels={{
+                    updated: t("sortUpdated"),
+                    created: t("sortCreated"),
+                    title: t("sortTitle"),
+                  }}
+                />
               )}
               {!isTrash && !isArchive && (
                 contextualEntryType ? (
