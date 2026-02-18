@@ -6,7 +6,7 @@ import { encryptExport } from "@/lib/export-crypto";
 import {
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Card } from "@/components/ui/card";
+import { PageTitleCard } from "@/components/layout/page-title-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -310,15 +310,11 @@ export function OrgExportPagePanel({ orgId }: OrgExportPagePanelProps) {
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-6">
-        <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
-          <div className="space-y-1.5">
-            <h1 className="flex items-center gap-2 text-2xl font-bold leading-none tracking-tight">
-              <Building2 className="h-5 w-5" />
-              {t("title")}
-            </h1>
-            <p className="text-sm text-muted-foreground">{t("description")}</p>
-          </div>
-        </Card>
+        <PageTitleCard
+          icon={<Building2 className="h-5 w-5" />}
+          title={t("title")}
+          description={t("description")}
+        />
         <OrgExportPanelContent orgId={orgId} hideHeader />
       </div>
     </div>
