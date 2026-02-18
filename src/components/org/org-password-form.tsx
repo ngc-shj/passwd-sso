@@ -25,6 +25,7 @@ import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fi
 import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
 import { OrgTagInput, type OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
+import { OrgPasskeyFields } from "@/components/org/org-passkey-fields";
 import {
   NotesField,
   TwoColumnFields,
@@ -628,87 +629,39 @@ export function OrgPasswordForm({
     (isCreditCard && !cardNumberValid);
 
   const entrySpecificFields = isPasskey ? (
-    <>
-      {/* Relying Party ID */}
-      <div className="space-y-2">
-        <Label>{tpk("relyingPartyId")}</Label>
-        <Input
-          value={relyingPartyId}
-          onChange={(e) => setRelyingPartyId(e.target.value)}
-          placeholder={tpk("relyingPartyIdPlaceholder")}
-          autoComplete="off"
-        />
-      </div>
-
-      {/* Relying Party Name */}
-      <div className="space-y-2">
-        <Label>{tpk("relyingPartyName")}</Label>
-        <Input
-          value={relyingPartyName}
-          onChange={(e) => setRelyingPartyName(e.target.value)}
-          placeholder={tpk("relyingPartyNamePlaceholder")}
-          autoComplete="off"
-        />
-      </div>
-
-      {/* Username */}
-      <div className="space-y-2">
-        <Label>{tpk("username")}</Label>
-        <Input
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder={tpk("usernamePlaceholder")}
-          autoComplete="off"
-        />
-      </div>
-
-      {/* Credential ID */}
-      <div className="space-y-2">
-        <Label>{tpk("credentialId")}</Label>
-        <VisibilityToggleInput
-          show={showCredentialId}
-          onToggle={() => setShowCredentialId(!showCredentialId)}
-          inputProps={{
-            value: credentialId,
-            onChange: (e) => setCredentialId(e.target.value),
-            placeholder: tpk("credentialIdPlaceholder"),
-            autoComplete: "off",
-          }}
-        />
-      </div>
-
-      {/* Creation Date & Device Info */}
-      <TwoColumnFields
-        left={(
-          <>
-            <Label>{tpk("creationDate")}</Label>
-            <Input
-              type="date"
-              value={creationDate}
-              onChange={(e) => setCreationDate(e.target.value)}
-            />
-          </>
-        )}
-        right={(
-          <>
-            <Label>{tpk("deviceInfo")}</Label>
-            <Input
-              value={deviceInfo}
-              onChange={(e) => setDeviceInfo(e.target.value)}
-              placeholder={tpk("deviceInfoPlaceholder")}
-              autoComplete="off"
-            />
-          </>
-        )}
-      />
-
-      <NotesField
-        label={entryCopy.notesLabel}
-        value={notes}
-        onChange={setNotes}
-        placeholder={entryCopy.notesPlaceholder}
-      />
-    </>
+    <OrgPasskeyFields
+      relyingPartyId={relyingPartyId}
+      onRelyingPartyIdChange={setRelyingPartyId}
+      relyingPartyIdPlaceholder={tpk("relyingPartyIdPlaceholder")}
+      relyingPartyName={relyingPartyName}
+      onRelyingPartyNameChange={setRelyingPartyName}
+      relyingPartyNamePlaceholder={tpk("relyingPartyNamePlaceholder")}
+      username={username}
+      onUsernameChange={setUsername}
+      usernamePlaceholder={tpk("usernamePlaceholder")}
+      credentialId={credentialId}
+      onCredentialIdChange={setCredentialId}
+      credentialIdPlaceholder={tpk("credentialIdPlaceholder")}
+      showCredentialId={showCredentialId}
+      onToggleCredentialId={() => setShowCredentialId(!showCredentialId)}
+      creationDate={creationDate}
+      onCreationDateChange={setCreationDate}
+      deviceInfo={deviceInfo}
+      onDeviceInfoChange={setDeviceInfo}
+      deviceInfoPlaceholder={tpk("deviceInfoPlaceholder")}
+      notesLabel={entryCopy.notesLabel}
+      notes={notes}
+      onNotesChange={setNotes}
+      notesPlaceholder={entryCopy.notesPlaceholder}
+      labels={{
+        relyingPartyId: tpk("relyingPartyId"),
+        relyingPartyName: tpk("relyingPartyName"),
+        username: tpk("username"),
+        credentialId: tpk("credentialId"),
+        creationDate: tpk("creationDate"),
+        deviceInfo: tpk("deviceInfo"),
+      }}
+    />
   ) : isIdentity ? (
     <>
       {/* Full Name */}
