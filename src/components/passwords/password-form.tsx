@@ -31,6 +31,12 @@ import { toast } from "sonner";
 import { API_PATH, CUSTOM_FIELD_TYPE, apiPath } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
+import {
+  extractTagIds,
+  filterNonEmptyCustomFields,
+  parseUrlHost,
+  toTagNameColor,
+} from "@/lib/entry-form-helpers";
 import type { FolderItem } from "@/components/folders/folder-tree";
 
 export interface CustomField {
@@ -147,19 +153,9 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     setSubmitting(true);
 
     try {
-      let urlHost: string | null = null;
-      if (url) {
-        try {
-          urlHost = new URL(url).hostname;
-        } catch {
-          /* invalid url */
-        }
-      }
-
-      const tags = selectedTags.map((t) => ({
-        name: t.name,
-        color: t.color,
-      }));
+      const urlHost = parseUrlHost(url);
+      const tags = toTagNameColor(selectedTags);
+      const validCustomFields = filterNonEmptyCustomFields(customFields);
 
       // Build password history on edit
       let passwordHistory: PasswordHistoryEntry[] =
@@ -184,7 +180,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
         tags,
         generatorSettings,
         ...(passwordHistory.length > 0 && { passwordHistory }),
-        ...(customFields.length > 0 && { customFields }),
+        ...(validCustomFields.length > 0 && { customFields: validCustomFields }),
         ...(totp && { totp }),
       });
 
@@ -210,7 +206,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
         encryptedOverview,
         keyVersion: 1,
         aadVersion: aad ? AAD_VERSION : 0,
-        tagIds: selectedTags.map((t) => t.id),
+        tagIds: extractTagIds(selectedTags),
         requireReprompt,
         folderId: folderId ?? null,
       };

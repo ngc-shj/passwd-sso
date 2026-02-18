@@ -236,7 +236,7 @@ export function OrgFavoritesList({ searchQuery, refreshKey }: OrgFavoritesListPr
           {t("favorites")}
         </h2>
       </div>
-      <div className="space-y-2 rounded-xl border bg-card/80 p-2">
+      <div className="space-y-2">
         {filtered.map((entry) => (
           <PasswordCard
             key={entry.id}

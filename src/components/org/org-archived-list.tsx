@@ -37,9 +37,15 @@ interface OrgArchivedListProps {
   orgId?: string;
   searchQuery: string;
   refreshKey: number;
+  sortBy?: "updatedAt" | "createdAt" | "title";
 }
 
-export function OrgArchivedList({ orgId, searchQuery, refreshKey }: OrgArchivedListProps) {
+export function OrgArchivedList({
+  orgId,
+  searchQuery,
+  refreshKey,
+  sortBy = "updatedAt",
+}: OrgArchivedListProps) {
   const t = useTranslations("Org");
   const [entries, setEntries] = useState<OrgArchivedEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -224,7 +230,20 @@ export function OrgArchivedList({ orgId, searchQuery, refreshKey }: OrgArchivedL
     );
   });
 
-  if (loading || filtered.length === 0) return null;
+  const sortedFiltered = [...filtered].sort((a, b) => {
+    if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
+    switch (sortBy) {
+      case "title":
+        return a.title.localeCompare(b.title);
+      case "createdAt":
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      case "updatedAt":
+      default:
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    }
+  });
+
+  if (loading || sortedFiltered.length === 0) return null;
 
   return (
     <div className="mt-6">
@@ -237,7 +256,7 @@ export function OrgArchivedList({ orgId, searchQuery, refreshKey }: OrgArchivedL
         </div>
       )}
       <div className="space-y-2">
-        {filtered.map((entry) => (
+        {sortedFiltered.map((entry) => (
           <PasswordCard
             key={entry.id}
             id={entry.id}

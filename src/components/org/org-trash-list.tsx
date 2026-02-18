@@ -38,9 +38,15 @@ interface OrgTrashListProps {
   orgId?: string;
   searchQuery?: string;
   refreshKey: number;
+  sortBy?: "updatedAt" | "createdAt" | "title";
 }
 
-export function OrgTrashList({ orgId, searchQuery = "", refreshKey }: OrgTrashListProps) {
+export function OrgTrashList({
+  orgId,
+  searchQuery = "",
+  refreshKey,
+  sortBy = "updatedAt",
+}: OrgTrashListProps) {
   const t = useTranslations("Trash");
   const tOrg = useTranslations("Org");
   const [entries, setEntries] = useState<OrgTrashEntry[]>([]);
@@ -114,7 +120,18 @@ export function OrgTrashList({ orgId, searchQuery = "", refreshKey }: OrgTrashLi
     );
   });
 
-  if (loading || filtered.length === 0) return null;
+  const sortedFiltered = [...filtered].sort((a, b) => {
+    switch (sortBy) {
+      case "title":
+        return a.title.localeCompare(b.title);
+      case "createdAt":
+      case "updatedAt":
+      default:
+        return new Date(b.deletedAt).getTime() - new Date(a.deletedAt).getTime();
+    }
+  });
+
+  if (loading || sortedFiltered.length === 0) return null;
 
   return (
     <div className="mt-6">
@@ -127,9 +144,9 @@ export function OrgTrashList({ orgId, searchQuery = "", refreshKey }: OrgTrashLi
         </div>
       )}
       <div className="space-y-2">
-        {filtered.map((entry) => (
-          <Card key={entry.id} className="rounded-xl border bg-background/80 transition-colors hover:bg-accent">
-            <CardContent className="flex items-center gap-4 p-4">
+        {sortedFiltered.map((entry) => (
+          <Card key={entry.id} className="transition-colors hover:bg-accent">
+            <CardContent className="flex items-center gap-3 px-4 py-2">
               {entry.entryType === ENTRY_TYPE.IDENTITY ? (
                 <IdCard className="h-4 w-4 shrink-0 text-muted-foreground" />
               ) : entry.entryType === ENTRY_TYPE.CREDIT_CARD ? (
@@ -139,7 +156,7 @@ export function OrgTrashList({ orgId, searchQuery = "", refreshKey }: OrgTrashLi
               ) : null}
               <div className="flex-1 min-w-0">
                 <p className="font-medium truncate">{entry.title}</p>
-                <div className="flex items-center gap-2 mt-0.5">
+                <div className="flex items-center gap-2">
                   {entry.entryType === ENTRY_TYPE.IDENTITY ? (
                     (entry.fullName || entry.idNumberLast4) && (
                       <p className="text-sm text-muted-foreground truncate">

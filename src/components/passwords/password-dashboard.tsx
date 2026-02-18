@@ -7,6 +7,7 @@ import { PasswordList, type SortOption } from "@/components/passwords/password-l
 import { TrashList } from "@/components/passwords/trash-list";
 import { OrgFavoritesList } from "@/components/org/org-favorites-list";
 import { PasswordNewDialog } from "@/components/passwords/password-new-dialog";
+import { EntryListHeader } from "@/components/passwords/entry-list-header";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -150,17 +151,12 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   return (
     <div className="flex-1 p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-4">
-        <div className="mb-4 rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1">
-              <h1 className="truncate text-2xl font-bold tracking-tight">
-                {isPrimaryScopeLabel ? subtitle : t("personalVault")}
-              </h1>
-              {!isPrimaryScopeLabel && (
-                <p className="text-sm text-muted-foreground">{subtitle}</p>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
+        <EntryListHeader
+          title={isPrimaryScopeLabel ? subtitle : t("personalVault")}
+          subtitle={subtitle}
+          showSubtitle={!isPrimaryScopeLabel}
+          actions={
+            <>
               {!isTrash && !isArchive && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -226,9 +222,9 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
                   </DropdownMenu>
                 )
               )}
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        />
 
         <div className="mb-4 rounded-xl border bg-card/80 p-3">
           <SearchBar ref={searchRef} value={searchQuery} onChange={setSearchQuery} />

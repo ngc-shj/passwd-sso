@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { PasswordCard } from "@/components/passwords/password-card";
+import { EntryListHeader } from "@/components/passwords/entry-list-header";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { OrgPasswordForm } from "@/components/org/org-password-form";
 import { OrgArchivedList } from "@/components/org/org-archived-list";
@@ -19,8 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { OrgExportDialog } from "@/components/org/org-export-dialog";
-import { Plus, Settings, KeyRound, Search, FileText, CreditCard, IdCard, Fingerprint, Download } from "lucide-react";
+import { Plus, KeyRound, Search, FileText, CreditCard, IdCard, Fingerprint, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
 import { ORG_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, TotpAlgorithm, CustomFieldType } from "@/lib/constants";
@@ -56,6 +56,8 @@ interface OrgPasswordEntry {
   updatedAt: string;
 }
 
+type SortOption = "updatedAt" | "createdAt" | "title";
+
 export default function OrgDashboardPage({
   params,
 }: {
@@ -75,6 +77,7 @@ export default function OrgDashboardPage({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<SortOption>("updatedAt");
   const [formOpen, setFormOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newEntryType, setNewEntryType] = useState<EntryTypeValue>(ENTRY_TYPE.LOGIN);
@@ -341,6 +344,18 @@ export default function OrgDashboardPage({
       p.relyingPartyId?.toLowerCase().includes(q)
     );
   });
+  const sortedFiltered = [...filtered].sort((a, b) => {
+    if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
+    switch (sortBy) {
+      case "title":
+        return a.title.localeCompare(b.title);
+      case "createdAt":
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      case "updatedAt":
+      default:
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    }
+  });
 
   if (loadError) {
     return (
@@ -367,43 +382,39 @@ export default function OrgDashboardPage({
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-6">
-        <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1">
-              <div className="flex min-w-0 items-center gap-3">
-                <h1 className="truncate text-2xl font-bold">
-                  {isPrimaryScopeLabel ? subtitle : (org?.name ?? "...")}
-                </h1>
-                {!isPrimaryScopeLabel && org && <OrgRoleBadge role={org.role} />}
-              </div>
-              {!isPrimaryScopeLabel && (
-                <p className="text-sm text-muted-foreground">
-                  {subtitle}
-                </p>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              {(org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN) && (
-                <OrgExportDialog
-                  orgId={orgId}
-                  trigger={
-                    <Button variant="ghost" size="icon">
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  }
-                />
-              )}
-              {(org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN) && (
-                <Button variant="ghost" size="icon" asChild>
-                  <Link href={`/dashboard/orgs/${orgId}/settings`}>
-                    <Settings className="h-4 w-4" />
-                  </Link>
-                </Button>
-              )}
+        <EntryListHeader
+          title={isPrimaryScopeLabel ? subtitle : (org?.name ?? "...")}
+          subtitle={subtitle}
+          showSubtitle={!isPrimaryScopeLabel}
+          titleExtra={!isPrimaryScopeLabel && org ? <OrgRoleBadge role={org.role} /> : null}
+          actions={
+            <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <ArrowUpDown className="h-4 w-4 mr-1" />
+                    {sortBy === "title"
+                      ? tDash("sortTitle")
+                      : sortBy === "createdAt"
+                        ? tDash("sortCreated")
+                        : tDash("sortUpdated")}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setSortBy("updatedAt")}>
+                    {tDash("sortUpdated")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSortBy("createdAt")}>
+                    {tDash("sortCreated")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSortBy("title")}>
+                    {tDash("sortTitle")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               {canCreate && !isOrgSpecialView && (
                 contextualEntryType ? (
                   <Button
-                    size="sm"
                     onClick={() => {
                       setEditData(null);
                       setNewEntryType(contextualEntryType);
@@ -416,7 +427,7 @@ export default function OrgDashboardPage({
                 ) : (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button size="sm">
+                      <Button>
                         <Plus className="mr-2 h-4 w-4" />
                         {t("newItem")}
                       </Button>
@@ -446,9 +457,9 @@ export default function OrgDashboardPage({
                   </DropdownMenu>
                 )
               )}
-            </div>
-          </div>
-        </Card>
+            </>
+          }
+        />
 
         <Card className="rounded-xl border bg-card/80 p-3">
           <div className="relative">
@@ -467,18 +478,20 @@ export default function OrgDashboardPage({
             orgId={orgId}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
+            sortBy={sortBy}
           />
         ) : isOrgTrash ? (
           <OrgTrashList
             orgId={orgId}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
+            sortBy={sortBy}
           />
         ) : loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
-        ) : filtered.length === 0 ? (
+        ) : sortedFiltered.length === 0 ? (
           <Card className="rounded-xl border bg-card/80 p-10">
             <div className="flex flex-col items-center justify-center text-center">
               <KeyRound className="mb-4 h-12 w-12 text-muted-foreground" />
@@ -492,7 +505,7 @@ export default function OrgDashboardPage({
           </Card>
         ) : (
           <div className="space-y-2">
-            {filtered.map((entry) => (
+            {sortedFiltered.map((entry) => (
               <PasswordCard
                 key={entry.id}
                 id={entry.id}

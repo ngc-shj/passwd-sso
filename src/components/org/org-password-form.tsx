@@ -52,6 +52,10 @@ import {
   normalizeCardBrand,
   normalizeCardNumber,
 } from "@/lib/credit-card";
+import {
+  extractTagIds,
+  filterNonEmptyCustomFields,
+} from "@/lib/entry-form-helpers";
 import { ENTRY_TYPE, CUSTOM_FIELD_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
 import type { FolderItem } from "@/components/folders/folder-tree";
@@ -385,6 +389,7 @@ export function OrgPasswordForm({
       const endpoint = isEdit
         ? apiPath.orgPasswordById(orgId, editData.id)
         : apiPath.orgPasswords(orgId);
+      const tagIds = extractTagIds(selectedTags);
 
       let body: Record<string, unknown>;
 
@@ -399,7 +404,7 @@ export function OrgPasswordForm({
           creationDate: creationDate || undefined,
           deviceInfo: deviceInfo.trim() || undefined,
           notes: notes.trim() || undefined,
-          tagIds: selectedTags.map((t) => t.id),
+          tagIds,
           orgFolderId: orgFolderId ?? null,
         };
       } else if (isIdentity) {
@@ -416,7 +421,7 @@ export function OrgPasswordForm({
           issueDate: issueDate || undefined,
           expiryDate: expiryDate || undefined,
           notes: notes.trim() || undefined,
-          tagIds: selectedTags.map((t) => t.id),
+          tagIds,
           orgFolderId: orgFolderId ?? null,
         };
       } else if (isCreditCard) {
@@ -430,7 +435,7 @@ export function OrgPasswordForm({
           expiryYear: expiryYear || undefined,
           cvv: cvv || undefined,
           notes: notes.trim() || undefined,
-          tagIds: selectedTags.map((t) => t.id),
+          tagIds,
           orgFolderId: orgFolderId ?? null,
         };
       } else if (isNote) {
@@ -438,7 +443,7 @@ export function OrgPasswordForm({
           entryType: ENTRY_TYPE.SECURE_NOTE,
           title: title.trim(),
           content,
-          tagIds: selectedTags.map((t) => t.id),
+          tagIds,
           orgFolderId: orgFolderId ?? null,
         };
       } else {
@@ -448,13 +453,11 @@ export function OrgPasswordForm({
           password,
           url: url.trim() || undefined,
           notes: notes.trim() || undefined,
-          tagIds: selectedTags.map((t) => t.id),
+          tagIds,
           orgFolderId: orgFolderId ?? null,
         };
 
-        const validFields = customFields.filter(
-          (f) => f.label.trim() && f.value.trim()
-        );
+        const validFields = filterNonEmptyCustomFields(customFields);
         if (validFields.length > 0) {
           body.customFields = validFields;
         }
