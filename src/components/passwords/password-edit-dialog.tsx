@@ -5,12 +5,12 @@ import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
-import {
-  PasswordForm,
-  type PasswordHistoryEntry,
-  type CustomField,
-  type TOTPEntry,
-} from "./password-form";
+import { PasswordForm } from "./password-form";
+import type {
+  EntryCustomField,
+  EntryPasswordHistory,
+  EntryTotp,
+} from "@/lib/entry-form-types";
 import { SecureNoteForm } from "./secure-note-form";
 import { CreditCardForm } from "./credit-card-form";
 import { IdentityForm } from "./identity-form";
@@ -37,9 +37,9 @@ interface VaultEntryFull {
   notes?: string | null;
   tags: Array<{ name: string; color: string | null }>;
   generatorSettings?: GeneratorSettings;
-  passwordHistory?: PasswordHistoryEntry[];
-  customFields?: CustomField[];
-  totp?: TOTPEntry;
+  passwordHistory?: EntryPasswordHistory[];
+  customFields?: EntryCustomField[];
+  totp?: EntryTotp;
   cardholderName?: string | null;
   cardNumber?: string | null;
   brand?: string | null;
@@ -73,9 +73,9 @@ interface FormData {
   notes: string;
   tags: TagData[];
   generatorSettings?: GeneratorSettings;
-  passwordHistory?: PasswordHistoryEntry[];
-  customFields?: CustomField[];
-  totp?: TOTPEntry;
+  passwordHistory?: EntryPasswordHistory[];
+  customFields?: EntryCustomField[];
+  totp?: EntryTotp;
   cardholderName?: string | null;
   cardNumber?: string | null;
   brand?: string | null;

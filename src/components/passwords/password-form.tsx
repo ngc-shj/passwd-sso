@@ -34,11 +34,6 @@ import {
 } from "@/lib/personal-entry-payload";
 import type { FolderItem } from "@/components/folders/folder-tree";
 
-export type CustomField = EntryCustomField;
-export type PasswordHistoryEntry = EntryPasswordHistory;
-
-export type TOTPEntry = EntryTotp;
-
 interface PasswordFormProps {
   mode: "create" | "edit";
   initialData?: {
@@ -50,7 +45,7 @@ interface PasswordFormProps {
     notes: string;
     tags: TagData[];
     generatorSettings?: GeneratorSettings;
-    passwordHistory?: PasswordHistoryEntry[];
+    passwordHistory?: EntryPasswordHistory[];
     customFields?: EntryCustomField[];
     totp?: EntryTotp;
     requireReprompt?: boolean;

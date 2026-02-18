@@ -57,8 +57,6 @@ import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 
-export type CustomField = EntryCustomField;
-
 interface OrgPasswordFormProps {
   orgId: string;
   open: boolean;
