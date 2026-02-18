@@ -19,6 +19,7 @@ import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { savePersonalEntry } from "@/lib/personal-entry-save";
 import { toTagIds, toTagPayload } from "@/components/passwords/entry-form-tags";
+import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
 
 interface IdentityFormProps {
   mode: "create" | "edit";
@@ -185,17 +186,7 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
         entryType: ENTRY_TYPE.IDENTITY,
       });
 
-      if (res.ok) {
-        toast.success(mode === "create" ? t("saved") : t("updated"));
-        if (onSaved) {
-          onSaved();
-        } else {
-          router.push("/dashboard");
-          router.refresh();
-        }
-      } else {
-        toast.error(t("failedToSave"));
-      }
+      handlePersonalSaveFeedback({ res, mode, t, router, onSaved });
     } catch {
       toast.error(t("networkError"));
     } finally {

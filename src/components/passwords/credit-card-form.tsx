@@ -36,6 +36,7 @@ import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { savePersonalEntry } from "@/lib/personal-entry-save";
 import { toTagIds, toTagPayload } from "@/components/passwords/entry-form-tags";
+import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
 
 interface CreditCardFormProps {
   mode: "create" | "edit";
@@ -193,17 +194,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
         entryType: ENTRY_TYPE.CREDIT_CARD,
       });
 
-      if (res.ok) {
-        toast.success(mode === "create" ? t("saved") : t("updated"));
-        if (onSaved) {
-          onSaved();
-        } else {
-          router.push("/dashboard");
-          router.refresh();
-        }
-      } else {
-        toast.error(t("failedToSave"));
-      }
+      handlePersonalSaveFeedback({ res, mode, t, router, onSaved });
     } catch {
       toast.error(t("networkError"));
     } finally {

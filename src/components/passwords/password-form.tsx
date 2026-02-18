@@ -31,6 +31,7 @@ import {
 } from "@/lib/personal-entry-payload";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { savePersonalEntry } from "@/lib/personal-entry-save";
+import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
 
 interface PasswordFormProps {
   mode: "create" | "edit";
@@ -157,17 +158,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
         folderId: folderId ?? null,
       });
 
-      if (res.ok) {
-        toast.success(mode === "create" ? t("saved") : t("updated"));
-        if (onSaved) {
-          onSaved();
-        } else {
-          router.push("/dashboard");
-          router.refresh();
-        }
-      } else {
-        toast.error(t("failedToSave"));
-      }
+      handlePersonalSaveFeedback({ res, mode, t, router, onSaved });
     } catch {
       toast.error(t("networkError"));
     } finally {

@@ -19,6 +19,7 @@ import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { savePersonalEntry } from "@/lib/personal-entry-save";
 import { toTagIds, toTagPayload } from "@/components/passwords/entry-form-tags";
+import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
 
 interface PasskeyFormProps {
   mode: "create" | "edit";
@@ -148,17 +149,7 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
         entryType: ENTRY_TYPE.PASSKEY,
       });
 
-      if (res.ok) {
-        toast.success(mode === "create" ? t("saved") : t("updated"));
-        if (onSaved) {
-          onSaved();
-        } else {
-          router.push("/dashboard");
-          router.refresh();
-        }
-      } else {
-        toast.error(t("failedToSave"));
-      }
+      handlePersonalSaveFeedback({ res, mode, t, router, onSaved });
     } catch {
       toast.error(t("networkError"));
     } finally {
