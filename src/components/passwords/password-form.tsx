@@ -4,8 +4,6 @@ import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
-import { encryptData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,7 +20,6 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Eye, EyeOff, ArrowLeft, Dices, ShieldCheck, Tags } from "lucide-react";
 import { toast } from "sonner";
-import { API_PATH, apiPath } from "@/lib/constants";
 import type { EntryCustomField, EntryPasswordHistory, EntryTotp } from "@/lib/entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import {
@@ -33,6 +30,7 @@ import {
   buildPersonalEntryPayload,
 } from "@/lib/personal-entry-payload";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
+import { savePersonalEntry } from "@/lib/personal-entry-save";
 
 interface PasswordFormProps {
   mode: "create" | "edit";
@@ -147,35 +145,16 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
         existingHistory,
       });
 
-      // For create: generate client-side UUID for AAD binding
-      // For edit: use existing entry ID, re-encrypt with AAD (save-time migration)
-      const entryId = mode === "create" ? crypto.randomUUID() : initialData!.id;
-      const aad = userId ? buildPersonalEntryAAD(userId, entryId) : undefined;
-
-      const encryptedBlob = await encryptData(fullBlob, encryptionKey, aad);
-      const encryptedOverview = await encryptData(overviewBlob, encryptionKey, aad);
-
-      const body = {
-        ...(mode === "create" ? { id: entryId } : {}),
-        encryptedBlob,
-        encryptedOverview,
-        keyVersion: 1,
-        aadVersion: aad ? AAD_VERSION : 0,
+      const res = await savePersonalEntry({
+        mode,
+        initialId: initialData?.id,
+        encryptionKey,
+        userId: userId ?? undefined,
+        fullBlob,
+        overviewBlob,
         tagIds: extractTagIds(selectedTags),
         requireReprompt,
         folderId: folderId ?? null,
-      };
-
-      const endpoint =
-        mode === "create"
-          ? API_PATH.PASSWORDS
-          : apiPath.passwordById(initialData!.id);
-      const method = mode === "create" ? "POST" : "PUT";
-
-      const res = await fetch(endpoint, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
       });
 
       if (res.ok) {

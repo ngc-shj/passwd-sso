@@ -4,8 +4,6 @@ import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
-import { encryptData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,9 +14,10 @@ import { ArrowLeft, Eye, EyeOff, Tags } from "lucide-react";
 import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
 import { toast } from "sonner";
-import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
+import { savePersonalEntry } from "@/lib/personal-entry-save";
 
 interface PasskeyFormProps {
   mode: "create" | "edit";
@@ -139,33 +138,16 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
         tags,
       });
 
-      const entryId = mode === "create" ? crypto.randomUUID() : initialData!.id;
-      const aad = userId ? buildPersonalEntryAAD(userId, entryId) : undefined;
-
-      const encryptedBlob = await encryptData(fullBlob, encryptionKey, aad);
-      const encryptedOverview = await encryptData(overviewBlob, encryptionKey, aad);
-
-      const body = {
-        ...(mode === "create" ? { id: entryId } : {}),
-        encryptedBlob,
-        encryptedOverview,
-        keyVersion: 1,
-        aadVersion: aad ? AAD_VERSION : 0,
+      const res = await savePersonalEntry({
+        mode,
+        initialId: initialData?.id,
+        encryptionKey,
+        userId: userId ?? undefined,
+        fullBlob,
+        overviewBlob,
         tagIds: selectedTags.map((t) => t.id),
         folderId: folderId ?? null,
         entryType: ENTRY_TYPE.PASSKEY,
-      };
-
-      const endpoint =
-        mode === "create"
-          ? API_PATH.PASSWORDS
-          : apiPath.passwordById(initialData!.id);
-      const method = mode === "create" ? "POST" : "PUT";
-
-      const res = await fetch(endpoint, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
       });
 
       if (res.ok) {
