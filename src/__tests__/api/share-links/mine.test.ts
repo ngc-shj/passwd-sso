@@ -307,4 +307,52 @@ describe("GET /api/share-links/mine", () => {
       })
     );
   });
+
+  it("does not limit org scoped list to self-created links for MEMBER", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.MEMBER });
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    await GET(req as never);
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orgPasswordEntry: { orgId: "org-1" },
+        }),
+      })
+    );
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({
+          createdById: DEFAULT_SESSION.user.id,
+        }),
+      })
+    );
+  });
+
+  it("does not limit org scoped list to self-created links for OWNER", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.OWNER });
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    await GET(req as never);
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orgPasswordEntry: { orgId: "org-1" },
+        }),
+      })
+    );
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({
+          createdById: DEFAULT_SESSION.user.id,
+        }),
+      })
+    );
+  });
 });

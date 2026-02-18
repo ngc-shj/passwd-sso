@@ -21,7 +21,10 @@ const orgTagGroups = [
   {
     orgId: "org-1",
     orgName: "Acme",
-    tags: [{ id: "ot1", name: "OrgTag", color: "blue", count: 4 }],
+    tags: [
+      { id: "ot1", name: "OrgTag", color: "blue", count: 4 },
+      { id: "ot2", name: "OrgEmpty", color: null, count: 0 },
+    ],
   },
 ];
 
@@ -108,5 +111,24 @@ describe("useSidebarNavigationState", () => {
 
     expect(result.current.selectedOrgCanManageFolders).toBe(true);
     expect(result.current.selectedOrgCanManageTags).toBe(true);
+  });
+
+  it("filters out zero-count org tags for consistency with personal tags", () => {
+    const { result } = renderHook(() =>
+      useSidebarNavigationState({
+        pathname: "/ja/dashboard/orgs/org-1",
+        searchParams: new URLSearchParams(),
+        vaultContext: { type: "org", orgId: "org-1" },
+        orgs,
+        folders,
+        tags,
+        orgFolderGroups,
+        orgTagGroups,
+      }),
+    );
+
+    expect(result.current.selectedTags).toEqual([
+      { id: "ot1", name: "OrgTag", color: "blue", count: 4 },
+    ]);
   });
 });
