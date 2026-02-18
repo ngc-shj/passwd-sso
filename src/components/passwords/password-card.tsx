@@ -139,7 +139,13 @@ function scheduleClearClipboard(copiedValue: string) {
         await navigator.clipboard.writeText("");
       }
     } catch {
-      // readText requires clipboard-read permission or page focus
+      // readText often fails without clipboard-read permission.
+      // Fallback to best-effort clear.
+      try {
+        await navigator.clipboard.writeText("");
+      } catch {
+        // Clipboard may be unavailable (background tab / denied)
+      }
     }
   }, CLIPBOARD_CLEAR_DELAY);
 }
