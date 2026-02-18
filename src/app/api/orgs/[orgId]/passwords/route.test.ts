@@ -340,6 +340,41 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     );
   });
 
+  it("filters by folder when folder param is provided", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+        searchParams: { folder: "folder-789" },
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orgFolderId: "folder-789",
+        }),
+      })
+    );
+  });
+
+  it("does not filter by folder when folder param is absent", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createParams({ orgId: ORG_ID }),
+    );
+    const call = mockPrismaOrgPasswordEntry.findMany.mock.calls[0][0];
+    expect(call.where).not.toHaveProperty("orgFolderId");
+  });
+
   it("passes AAD to decryptServerData for entries with aadVersion >= 1", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
       encryptedOrgKey: "ek",
