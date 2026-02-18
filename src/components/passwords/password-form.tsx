@@ -119,6 +119,9 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   });
   const hasChanges = currentSnapshot !== initialSnapshot;
   const isDialogVariant = variant === "dialog";
+  const dialogSectionClass = isDialogVariant
+    ? "!rounded-none !border-0 !bg-transparent !p-0 !shadow-none hover:!bg-transparent"
+    : "";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -228,7 +231,11 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
               </EntrySectionCard>
             )}
 
-            <EntryTagsSection title={t("tags")} hint={t("tagsHint")}>
+            <EntryTagsSection
+              title={t("tags")}
+              hint={t("tagsHint")}
+              sectionCardClass={dialogSectionClass}
+            >
               <TagInput
                 selectedTags={selectedTags}
                 onChange={setSelectedTags}
@@ -242,16 +249,18 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
               onTotpChange={setTotp}
               showTotpInput={showTotpInput}
               setShowTotpInput={setShowTotpInput}
+              sectionCardClass={dialogSectionClass}
             />
 
             <EntryFolderSelectSection
               folders={folders}
               value={folderId}
               onChange={setFolderId}
+              sectionCardClass={dialogSectionClass}
             />
 
             {/* Reprompt */}
-            <EntrySectionCard>
+            <EntrySectionCard className={dialogSectionClass}>
               <label className="flex items-center gap-3 cursor-pointer" htmlFor="require-reprompt">
                 <Checkbox
                   id="require-reprompt"

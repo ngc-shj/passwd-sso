@@ -22,6 +22,7 @@ interface EntryFolderSelectSectionProps {
   folders: FolderLike[];
   value: string | null;
   onChange: (next: string | null) => void;
+  sectionCardClass?: string;
 }
 
 function withIndent(folder: FolderLike, folders: FolderLike[]): string {
@@ -38,13 +39,14 @@ export function EntryFolderSelectSection({
   folders,
   value,
   onChange,
+  sectionCardClass = "",
 }: EntryFolderSelectSectionProps) {
   const t = useTranslations("PasswordForm");
 
   if (folders.length === 0) return null;
 
   return (
-    <EntrySectionCard>
+    <EntrySectionCard className={sectionCardClass}>
       <div className="space-y-1">
         <Label className="flex items-center gap-2">
           <FolderOpen className="h-3.5 w-3.5" />
@@ -72,4 +74,3 @@ export function EntryFolderSelectSection({
     </EntrySectionCard>
   );
 }
-

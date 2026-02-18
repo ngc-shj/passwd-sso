@@ -9,11 +9,17 @@ interface EntryTagsSectionProps {
   title: string;
   hint: string;
   children: ReactNode;
+  sectionCardClass?: string;
 }
 
-export function EntryTagsSection({ title, hint, children }: EntryTagsSectionProps) {
+export function EntryTagsSection({
+  title,
+  hint,
+  children,
+  sectionCardClass = "",
+}: EntryTagsSectionProps) {
   return (
-    <EntrySectionCard>
+    <EntrySectionCard className={sectionCardClass}>
       <div className="space-y-1">
         <Label className="flex items-center gap-2">
           <Tags className="h-3.5 w-3.5" />
