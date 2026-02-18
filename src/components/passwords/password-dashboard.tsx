@@ -69,6 +69,11 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
         : entryType && ENTRY_TYPE_TITLES[entryType]
           ? ENTRY_TYPE_TITLES[entryType]
           : t("passwords");
+  const isPersonalAll = !isTrash && !isArchive && !isFavorites && !entryType && !tagId && !folderId;
+  const isCategorySelected = !!(entryType && ENTRY_TYPE_TITLES[entryType]);
+  const isFolderOrTagSelected = Boolean(tagId || folderId);
+  const isPrimaryScopeLabel =
+    isTrash || isArchive || isFavorites || isPersonalAll || isCategorySelected || isFolderOrTagSelected;
 
   // Listen for vault-data-changed (import, etc.)
   useEffect(() => {
@@ -149,9 +154,11 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
               <h1 className="truncate text-2xl font-bold tracking-tight">
-                {t("personalVault")}
+                {isPrimaryScopeLabel ? subtitle : t("personalVault")}
               </h1>
-              <p className="text-sm text-muted-foreground">{subtitle}</p>
+              {!isPrimaryScopeLabel && (
+                <p className="text-sm text-muted-foreground">{subtitle}</p>
+              )}
             </div>
             <div className="flex items-center gap-2">
               {!isTrash && !isArchive && (
@@ -221,11 +228,6 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
               )}
             </div>
           </div>
-          {(isTrash || isArchive) && (
-            <p className="mt-2 text-sm text-muted-foreground">
-              {t("personalVaultScopeNote")}
-            </p>
-          )}
         </div>
 
         <div className="mb-4 rounded-xl border bg-card/80 p-3">

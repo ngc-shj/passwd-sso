@@ -114,6 +114,7 @@ export default function OrgDashboardPage({
   } | null>(null);
   const isOrgArchive = activeScope === "archive";
   const isOrgTrash = activeScope === "trash";
+  const isOrgFavorites = activeScope === "favorites";
   const isOrgSpecialView = isOrgArchive || isOrgTrash;
 
   const fetchOrg = async (): Promise<boolean> => {
@@ -141,6 +142,7 @@ export default function OrgDashboardPage({
     if (activeTagId) params.set("tag", activeTagId);
     if (activeFolderId) params.set("folder", activeFolderId);
     if (activeEntryType) params.set("type", activeEntryType);
+    if (isOrgFavorites) params.set("favorites", "true");
     const qs = params.toString();
     const url = `${apiPath.orgPasswords(orgId)}${qs ? `?${qs}` : ""}`;
     fetch(url)
@@ -150,7 +152,7 @@ export default function OrgDashboardPage({
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [orgId, activeTagId, activeFolderId, activeEntryType]);
+  }, [orgId, activeTagId, activeFolderId, activeEntryType, isOrgFavorites]);
 
   useEffect(() => {
     setLoadError(false);
@@ -178,16 +180,38 @@ export default function OrgDashboardPage({
       } as Record<string, string>)[activeEntryType] ?? activeEntryType
     : null;
   const subtitle = isOrgTrash
-    ? t("organizationTrash")
+    ? t("trash")
     : isOrgArchive
-      ? t("organizationArchive")
-      : (activeCategoryLabel ?? t("allPasswords"));
+      ? t("archive")
+      : isOrgFavorites
+        ? t("favorites")
+      : (activeCategoryLabel ?? t("passwords"));
+  const isOrgAll =
+    !isOrgTrash &&
+    !isOrgArchive &&
+    !isOrgFavorites &&
+    !activeCategoryLabel &&
+    !activeTagId &&
+    !activeFolderId;
+  const isCategorySelected = !!activeCategoryLabel;
+  const isFolderOrTagSelected = Boolean(activeTagId || activeFolderId);
+  const isPrimaryScopeLabel =
+    isOrgTrash ||
+    isOrgArchive ||
+    isOrgFavorites ||
+    isOrgAll ||
+    isCategorySelected ||
+    isFolderOrTagSelected;
 
   const handleToggleFavorite = async (id: string, current: boolean) => {
     // Optimistic update
-    setPasswords((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, isFavorite: !current } : e))
-    );
+    if (isOrgFavorites && current) {
+      setPasswords((prev) => prev.filter((e) => e.id !== id));
+    } else {
+      setPasswords((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, isFavorite: !current } : e))
+      );
+    }
     try {
       const res = await fetch(apiPath.orgPasswordFavorite(orgId, id), {
         method: "POST",
@@ -348,13 +372,15 @@ export default function OrgDashboardPage({
             <div className="min-w-0 space-y-1">
               <div className="flex min-w-0 items-center gap-3">
                 <h1 className="truncate text-2xl font-bold">
-                  {org?.name ?? "..."}
+                  {isPrimaryScopeLabel ? subtitle : (org?.name ?? "...")}
                 </h1>
-                {org && <OrgRoleBadge role={org.role} />}
+                {!isPrimaryScopeLabel && org && <OrgRoleBadge role={org.role} />}
               </div>
-              <p className="text-sm text-muted-foreground">
-                {subtitle}
-              </p>
+              {!isPrimaryScopeLabel && (
+                <p className="text-sm text-muted-foreground">
+                  {subtitle}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2">
               {(org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN) && (
