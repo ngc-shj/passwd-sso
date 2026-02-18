@@ -1061,6 +1061,14 @@ export function ImportDialog({ trigger, onComplete, mode = "dialog" }: ImportDia
   );
 }
 
+interface ImportPagePanelProps {
+  onComplete: () => void;
+}
+
+export function ImportPagePanel({ onComplete }: ImportPagePanelProps) {
+  return <ImportDialog onComplete={onComplete} mode="page" />;
+}
+
 export const __testablesImport = {
   detectFormat,
   parseCsvLine,

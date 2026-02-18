@@ -326,3 +326,11 @@ export function OrgExportDialog({
     </Dialog>
   );
 }
+
+interface OrgExportPagePanelProps {
+  orgId: string;
+}
+
+export function OrgExportPagePanel({ orgId }: OrgExportPagePanelProps) {
+  return <OrgExportDialog orgId={orgId} mode="page" />;
+}

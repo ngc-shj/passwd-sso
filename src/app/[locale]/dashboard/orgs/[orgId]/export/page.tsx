@@ -1,4 +1,4 @@
-import { OrgExportDialog } from "@/components/org/org-export-dialog";
+import { OrgExportPagePanel } from "@/components/org/org-export-dialog";
 
 export default async function OrgExportPage({
   params,
@@ -6,6 +6,5 @@ export default async function OrgExportPage({
   params: Promise<{ orgId: string }>;
 }) {
   const { orgId } = await params;
-  return <OrgExportDialog orgId={orgId} mode="page" />;
+  return <OrgExportPagePanel orgId={orgId} />;
 }
-

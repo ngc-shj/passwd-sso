@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { ImportDialog } from "@/components/passwords/import-dialog";
+import { ImportPagePanel } from "@/components/passwords/import-dialog";
 
 export default function ImportPage() {
   const router = useRouter();
@@ -12,6 +12,5 @@ export default function ImportPage() {
     router.refresh();
   }, [router]);
 
-  return <ImportDialog mode="page" onComplete={handleComplete} />;
+  return <ImportPagePanel onComplete={handleComplete} />;
 }
-

@@ -340,3 +340,7 @@ export function ExportDialog({ trigger, mode = "dialog" }: ExportDialogProps) {
     </Dialog>
   );
 }
+
+export function ExportPagePanel() {
+  return <ExportDialog mode="page" />;
+}
