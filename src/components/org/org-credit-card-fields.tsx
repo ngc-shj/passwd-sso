@@ -18,7 +18,7 @@ interface OrgCreditCardFieldsProps {
   brand: string;
   onBrandChange: (value: string) => void;
   brandPlaceholder: string;
-  brands: string[];
+  brands: readonly string[];
   cardNumber: string;
   onCardNumberChange: (value: string) => void;
   cardNumberPlaceholder: string;
