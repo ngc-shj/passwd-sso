@@ -23,6 +23,7 @@ const {
     mockPrismaOrgFolder: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
+      findMany: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
       delete: vi.fn(),
@@ -255,7 +256,15 @@ describe("DELETE /api/orgs/[orgId]/folders/[id]", () => {
 
   it("deletes folder and promotes children", async () => {
     mockPrismaOrgFolder.findUnique.mockResolvedValue(ownedFolder);
-    mockPrismaTransaction.mockResolvedValue([]);
+    mockPrismaOrgFolder.findMany
+      .mockResolvedValueOnce([]) // no children
+      .mockResolvedValueOnce([]); // no siblings at target
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
+      await fn({
+        orgFolder: mockPrismaOrgFolder,
+        orgPasswordEntry: mockPrismaOrgPasswordEntry,
+      });
+    });
 
     const res = await DELETE(
       createRequest("DELETE", BASE),

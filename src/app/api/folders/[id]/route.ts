@@ -194,20 +194,67 @@ export async function DELETE(
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
-  await prisma.$transaction([
-    // Promote children to deleted folder's parent
-    prisma.folder.updateMany({
-      where: { parentId: id },
-      data: { parentId: existing.parentId },
-    }),
+  // Collect children and detect name conflicts at the target parent level.
+  // The deleted folder still occupies a name slot during the transaction,
+  // so we must include it when computing used names.
+  const children = await prisma.folder.findMany({
+    where: { parentId: id },
+    select: { id: true, name: true },
+  });
+
+  const siblingsAtTarget = await prisma.folder.findMany({
+    where: { parentId: existing.parentId, userId: session.user.id },
+    select: { id: true, name: true },
+  });
+
+  const usedNames = new Set(
+    siblingsAtTarget
+      .filter((s) => s.id !== id) // exclude the folder being deleted
+      .map((s) => s.name),
+  );
+
+  // Build rename map for children that would collide (including with the
+  // deleted folder's own name, which still exists during the transaction).
+  // Also account for children colliding among themselves after adding the
+  // deleted folder's name to usedNames.
+  usedNames.add(existing.name);
+
+  const renames: Array<{ childId: string; newName: string }> = [];
+  for (const child of children) {
+    if (usedNames.has(child.name)) {
+      let suffix = 2;
+      let newName = `${child.name} (${suffix})`;
+      while (usedNames.has(newName)) {
+        suffix++;
+        newName = `${child.name} (${suffix})`;
+      }
+      renames.push({ childId: child.id, newName });
+      usedNames.add(newName);
+    } else {
+      usedNames.add(child.name);
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Promote children individually, renaming conflicts in the same update
+    for (const child of children) {
+      const rename = renames.find((r) => r.childId === child.id);
+      await tx.folder.update({
+        where: { id: child.id },
+        data: {
+          parentId: existing.parentId,
+          ...(rename ? { name: rename.newName } : {}),
+        },
+      });
+    }
     // Unassign entries from this folder
-    prisma.passwordEntry.updateMany({
+    await tx.passwordEntry.updateMany({
       where: { folderId: id },
       data: { folderId: null },
-    }),
+    });
     // Delete the folder
-    prisma.folder.delete({ where: { id } }),
-  ]);
+    await tx.folder.delete({ where: { id } });
+  });
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,

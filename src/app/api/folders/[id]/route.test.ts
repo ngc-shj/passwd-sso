@@ -7,6 +7,7 @@ const { mockAuth, mockPrismaFolder, mockPrismaPasswordEntry, mockPrismaTransacti
     mockPrismaFolder: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
+      findMany: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
       delete: vi.fn(),
@@ -233,7 +234,16 @@ describe("DELETE /api/folders/[id]", () => {
 
   it("deletes folder and promotes children", async () => {
     mockPrismaFolder.findUnique.mockResolvedValue(ownedFolder);
-    mockPrismaTransaction.mockResolvedValue([]);
+    // findMany: 1st call = children, 2nd call = siblings at target
+    mockPrismaFolder.findMany
+      .mockResolvedValueOnce([]) // no children
+      .mockResolvedValueOnce([]); // no siblings
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
+      await fn({
+        folder: mockPrismaFolder,
+        passwordEntry: mockPrismaPasswordEntry,
+      });
+    });
 
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/folders/${FOLDER_ID}`),
@@ -243,5 +253,46 @@ describe("DELETE /api/folders/[id]", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockPrismaTransaction).toHaveBeenCalled();
+  });
+
+  it("renames children that would conflict at the target parent level", async () => {
+    // Folder "テスト" (root) has child "テスト". Deleting parent should
+    // rename child to "テスト (2)" to avoid unique constraint violation.
+    const parentFolder = { ...ownedFolder, name: "テスト" };
+    mockPrismaFolder.findUnique.mockResolvedValue(parentFolder);
+
+    const childId = "cm000000000000000child01";
+    // findMany: 1st = children, 2nd = siblings at root (includes the folder being deleted)
+    mockPrismaFolder.findMany
+      .mockResolvedValueOnce([{ id: childId, name: "テスト" }])
+      .mockResolvedValueOnce([{ id: FOLDER_ID, name: "テスト" }]);
+
+    const txUpdates: Array<{ where: unknown; data: unknown }> = [];
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
+      await fn({
+        folder: {
+          update: vi.fn(({ where, data }: { where: unknown; data: unknown }) => {
+            txUpdates.push({ where, data });
+            return Promise.resolve({});
+          }),
+          delete: vi.fn().mockResolvedValue({}),
+        },
+        passwordEntry: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      });
+    });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/folders/${FOLDER_ID}`),
+      createParams({ id: FOLDER_ID }),
+    );
+    expect(res.status).toBe(200);
+
+    // The child should be promoted AND renamed in a single update
+    const childUpdate = txUpdates.find(
+      (u) => (u.where as { id: string }).id === childId,
+    );
+    expect(childUpdate).toBeDefined();
+    expect((childUpdate!.data as { name: string }).name).toBe("テスト (2)");
+    expect((childUpdate!.data as { parentId: string | null }).parentId).toBeNull();
   });
 });

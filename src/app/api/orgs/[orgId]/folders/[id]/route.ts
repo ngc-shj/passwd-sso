@@ -187,17 +187,59 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  await prisma.$transaction([
-    prisma.orgFolder.updateMany({
-      where: { parentId: id },
-      data: { parentId: existing.parentId },
-    }),
-    prisma.orgPasswordEntry.updateMany({
+  // Collect children and detect name conflicts at the target parent level.
+  const children = await prisma.orgFolder.findMany({
+    where: { parentId: id },
+    select: { id: true, name: true },
+  });
+
+  const siblingsAtTarget = await prisma.orgFolder.findMany({
+    where: { parentId: existing.parentId, orgId },
+    select: { id: true, name: true },
+  });
+
+  const usedNames = new Set(
+    siblingsAtTarget
+      .filter((s) => s.id !== id)
+      .map((s) => s.name),
+  );
+
+  // Include the deleted folder's name (it still exists during the transaction)
+  usedNames.add(existing.name);
+
+  const renames: Array<{ childId: string; newName: string }> = [];
+  for (const child of children) {
+    if (usedNames.has(child.name)) {
+      let suffix = 2;
+      let newName = `${child.name} (${suffix})`;
+      while (usedNames.has(newName)) {
+        suffix++;
+        newName = `${child.name} (${suffix})`;
+      }
+      renames.push({ childId: child.id, newName });
+      usedNames.add(newName);
+    } else {
+      usedNames.add(child.name);
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    for (const child of children) {
+      const rename = renames.find((r) => r.childId === child.id);
+      await tx.orgFolder.update({
+        where: { id: child.id },
+        data: {
+          parentId: existing.parentId,
+          ...(rename ? { name: rename.newName } : {}),
+        },
+      });
+    }
+    await tx.orgPasswordEntry.updateMany({
       where: { orgFolderId: id },
       data: { orgFolderId: null },
-    }),
-    prisma.orgFolder.delete({ where: { id } }),
-  ]);
+    });
+    await tx.orgFolder.delete({ where: { id } });
+  });
 
   logAudit({
     scope: AUDIT_SCOPE.ORG,
