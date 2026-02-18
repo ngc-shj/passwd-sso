@@ -97,6 +97,7 @@ interface FormData {
   creationDate?: string | null;
   deviceInfo?: string | null;
   requireReprompt?: boolean;
+  folderId?: string | null;
 }
 
 interface PasswordEditDialogProps {
@@ -196,6 +197,7 @@ export function PasswordEditDialog({
           creationDate: entry.creationDate,
           deviceInfo: entry.deviceInfo,
           requireReprompt: raw.requireReprompt ?? false,
+          folderId: raw.folderId ?? null,
         });
       } catch (e) {
         if (!cancelled) {
