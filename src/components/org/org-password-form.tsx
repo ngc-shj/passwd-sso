@@ -477,6 +477,26 @@ export function OrgPasswordForm({
           ? (isEdit ? tn("editNote") : tn("newNote"))
           : (isEdit ? t("editPassword") : t("newPassword"));
 
+  const notesLabel = isPasskey
+    ? tpk("notes")
+    : isIdentity
+      ? ti("notes")
+      : isCreditCard
+        ? tcc("notes")
+        : isNote
+          ? tn("notes")
+          : t("notes");
+
+  const notesPlaceholder = isPasskey
+    ? tpk("notesPlaceholder")
+    : isIdentity
+      ? ti("notesPlaceholder")
+      : isCreditCard
+        ? tcc("notesPlaceholder")
+        : isNote
+          ? tn("notesPlaceholder")
+          : t("notesPlaceholder");
+
   const titleLabel = isPasskey
     ? tpk("title")
     : isIdentity
@@ -750,11 +770,11 @@ export function OrgPasswordForm({
 
               {/* Notes */}
               <div className="space-y-2">
-                <Label>{tpk("notes")}</Label>
+                <Label>{notesLabel}</Label>
                 <Textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder={tpk("notesPlaceholder")}
+                  placeholder={notesPlaceholder}
                   rows={3}
                 />
               </div>
@@ -881,11 +901,11 @@ export function OrgPasswordForm({
 
               {/* Notes */}
               <div className="space-y-2">
-                <Label>{ti("notes")}</Label>
+                <Label>{notesLabel}</Label>
                 <Textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder={ti("notesPlaceholder")}
+                  placeholder={notesPlaceholder}
                   rows={3}
                 />
               </div>
@@ -1024,11 +1044,11 @@ export function OrgPasswordForm({
 
               {/* Notes */}
               <div className="space-y-2">
-                <Label>{tcc("notes")}</Label>
+                <Label>{notesLabel}</Label>
                 <Textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder={tcc("notesPlaceholder")}
+                  placeholder={notesPlaceholder}
                   rows={3}
                 />
               </div>
@@ -1083,8 +1103,8 @@ export function OrgPasswordForm({
                 urlLabel={t("url")}
                 notes={notes}
                 onNotesChange={setNotes}
-                notesLabel={t("notes")}
-                notesPlaceholder={t("notesPlaceholder")}
+                notesLabel={notesLabel}
+                notesPlaceholder={notesPlaceholder}
               />
             </>
           )}
