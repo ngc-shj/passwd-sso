@@ -9,14 +9,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
-import { ArrowLeft, Tags } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import {
   EntryActionBar,
   EntryPrimaryCard,
-  EntrySectionCard,
   ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS,
+  ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
+import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
 import { toast } from "sonner";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
@@ -79,6 +80,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
   const hasChanges = currentSnapshot !== baselineSnapshot;
   const isDialogVariant = variant === "dialog";
   const primaryCardClass = isDialogVariant ? ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS : "";
+  const dialogSectionClass = isDialogVariant ? ENTRY_DIALOG_FLAT_SECTION_CLASS : "";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,24 +161,22 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
         </div>
       </EntryPrimaryCard>
 
-      <EntrySectionCard>
-        <div className="space-y-1">
-          <Label className="flex items-center gap-2">
-            <Tags className="h-3.5 w-3.5" />
-            {t("tags")}
-          </Label>
-          <p className="text-xs text-muted-foreground">{tPw("tagsHint")}</p>
-        </div>
+      <EntryTagsSection
+        title={t("tags")}
+        hint={tPw("tagsHint")}
+        sectionCardClass={dialogSectionClass}
+      >
         <TagInput
           selectedTags={selectedTags}
           onChange={setSelectedTags}
         />
-      </EntrySectionCard>
+      </EntryTagsSection>
 
       <EntryFolderSelectSection
         folders={folders}
         value={folderId}
         onChange={setFolderId}
+        sectionCardClass={dialogSectionClass}
       />
 
       <EntryActionBar
