@@ -15,6 +15,7 @@ import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custo
 import type { OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
 import { getOrgCardValidationState } from "@/components/org/org-credit-card-validation";
+import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
 import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
 import {
   applyOrgEditDataToForm,
@@ -365,50 +366,57 @@ export function OrgPasswordForm({
           ? "secureNote"
           : "password";
 
-  const entryCopies = {
-    passkey: {
-      dialogLabel: isEdit ? tpk("editPasskey") : tpk("newPasskey"),
-      titleLabel: tpk("title"),
-      titlePlaceholder: tpk("titlePlaceholder"),
-      notesLabel: tpk("notes"),
-      notesPlaceholder: tpk("notesPlaceholder"),
-      tagsTitle: tpk("tags"),
+  const entryCopy = buildOrgEntryCopy({
+    isEdit,
+    entryKind,
+    copyByKind: {
+      passkey: {
+        edit: tpk("editPasskey"),
+        create: tpk("newPasskey"),
+        titleLabel: tpk("title"),
+        titlePlaceholder: tpk("titlePlaceholder"),
+        notesLabel: tpk("notes"),
+        notesPlaceholder: tpk("notesPlaceholder"),
+        tagsTitle: tpk("tags"),
+      },
+      identity: {
+        edit: ti("editIdentity"),
+        create: ti("newIdentity"),
+        titleLabel: ti("title"),
+        titlePlaceholder: ti("titlePlaceholder"),
+        notesLabel: ti("notes"),
+        notesPlaceholder: ti("notesPlaceholder"),
+        tagsTitle: ti("tags"),
+      },
+      creditCard: {
+        edit: tcc("editCard"),
+        create: tcc("newCard"),
+        titleLabel: tcc("title"),
+        titlePlaceholder: tcc("titlePlaceholder"),
+        notesLabel: tcc("notes"),
+        notesPlaceholder: tcc("notesPlaceholder"),
+        tagsTitle: tcc("tags"),
+      },
+      secureNote: {
+        edit: tn("editNote"),
+        create: tn("newNote"),
+        titleLabel: tn("title"),
+        titlePlaceholder: tn("titlePlaceholder"),
+        notesLabel: tn("notes"),
+        notesPlaceholder: tn("notesPlaceholder"),
+        tagsTitle: tn("tags"),
+      },
+      password: {
+        edit: t("editPassword"),
+        create: t("newPassword"),
+        titleLabel: t("title"),
+        titlePlaceholder: t("titlePlaceholder"),
+        notesLabel: t("notes"),
+        notesPlaceholder: t("notesPlaceholder"),
+        tagsTitle: t("tags"),
+      },
     },
-    identity: {
-      dialogLabel: isEdit ? ti("editIdentity") : ti("newIdentity"),
-      titleLabel: ti("title"),
-      titlePlaceholder: ti("titlePlaceholder"),
-      notesLabel: ti("notes"),
-      notesPlaceholder: ti("notesPlaceholder"),
-      tagsTitle: ti("tags"),
-    },
-    creditCard: {
-      dialogLabel: isEdit ? tcc("editCard") : tcc("newCard"),
-      titleLabel: tcc("title"),
-      titlePlaceholder: tcc("titlePlaceholder"),
-      notesLabel: tcc("notes"),
-      notesPlaceholder: tcc("notesPlaceholder"),
-      tagsTitle: tcc("tags"),
-    },
-    secureNote: {
-      dialogLabel: isEdit ? tn("editNote") : tn("newNote"),
-      titleLabel: tn("title"),
-      titlePlaceholder: tn("titlePlaceholder"),
-      notesLabel: tn("notes"),
-      notesPlaceholder: tn("notesPlaceholder"),
-      tagsTitle: tn("tags"),
-    },
-    password: {
-      dialogLabel: isEdit ? t("editPassword") : t("newPassword"),
-      titleLabel: t("title"),
-      titlePlaceholder: t("titlePlaceholder"),
-      notesLabel: t("notes"),
-      notesPlaceholder: t("notesPlaceholder"),
-      tagsTitle: t("tags"),
-    },
-  } as const;
-
-  const entryCopy = entryCopies[entryKind];
+  });
 
   const baselineSnapshot = useMemo(
     () =>
