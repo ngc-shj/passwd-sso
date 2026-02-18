@@ -13,12 +13,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
 import { OrgTagInput, type OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
 import { OrgCreditCardFields } from "@/components/org/org-credit-card-fields";
 import { OrgIdentityFields } from "@/components/org/org-identity-fields";
+import { OrgLoginFields } from "@/components/org/org-login-fields";
 import { OrgPasskeyFields } from "@/components/org/org-passkey-fields";
 import { OrgSecureNoteFields } from "@/components/org/org-secure-note-fields";
 import {
@@ -768,44 +768,40 @@ export function OrgPasswordForm({
       contentPlaceholder={tn("contentPlaceholder")}
     />
   ) : (
-    <>
-      <EntryLoginMainFields
-        idPrefix="org-"
-        hideTitle
-        title={title}
-        onTitleChange={setTitle}
-        titleLabel={t("title")}
-        titlePlaceholder={t("titlePlaceholder")}
-        username={username}
-        onUsernameChange={setUsername}
-        usernameLabel={t("usernameEmail")}
-        usernamePlaceholder={t("usernamePlaceholder")}
-        password={password}
-        onPasswordChange={setPassword}
-        passwordLabel={t("password")}
-        passwordPlaceholder={t("passwordPlaceholder")}
-        showPassword={showPassword}
-        onToggleShowPassword={() => setShowPassword((v) => !v)}
-        generatorSummary={generatorSummary}
-        showGenerator={showGenerator}
-        onToggleGenerator={() => setShowGenerator((v) => !v)}
-        closeGeneratorLabel={t("closeGenerator")}
-        openGeneratorLabel={t("openGenerator")}
-        generatorSettings={generatorSettings}
-        onGeneratorUse={(pw, settings) => {
-          setPassword(pw);
-          setShowPassword(true);
-          setGeneratorSettings(settings);
-        }}
-        url={url}
-        onUrlChange={setUrl}
-        urlLabel={t("url")}
-        notes={notes}
-        onNotesChange={setNotes}
-        notesLabel={entryCopy.notesLabel}
-        notesPlaceholder={entryCopy.notesPlaceholder}
-      />
-    </>
+    <OrgLoginFields
+      title={title}
+      onTitleChange={setTitle}
+      titleLabel={t("title")}
+      titlePlaceholder={t("titlePlaceholder")}
+      username={username}
+      onUsernameChange={setUsername}
+      usernameLabel={t("usernameEmail")}
+      usernamePlaceholder={t("usernamePlaceholder")}
+      password={password}
+      onPasswordChange={setPassword}
+      passwordLabel={t("password")}
+      passwordPlaceholder={t("passwordPlaceholder")}
+      showPassword={showPassword}
+      onToggleShowPassword={() => setShowPassword((v) => !v)}
+      generatorSummary={generatorSummary}
+      showGenerator={showGenerator}
+      onToggleGenerator={() => setShowGenerator((v) => !v)}
+      closeGeneratorLabel={t("closeGenerator")}
+      openGeneratorLabel={t("openGenerator")}
+      generatorSettings={generatorSettings}
+      onGeneratorUse={(pw, settings) => {
+        setPassword(pw);
+        setShowPassword(true);
+        setGeneratorSettings(settings);
+      }}
+      url={url}
+      onUrlChange={setUrl}
+      urlLabel={t("url")}
+      notes={notes}
+      onNotesChange={setNotes}
+      notesLabel={entryCopy.notesLabel}
+      notesPlaceholder={entryCopy.notesPlaceholder}
+    />
   );
 
   const handleFormSubmit = (e: React.FormEvent) => {
