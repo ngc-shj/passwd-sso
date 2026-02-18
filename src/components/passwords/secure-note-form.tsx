@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TagInput, type TagData } from "@/components/tags/tag-input";
+import type { TagData } from "@/components/tags/tag-input";
 import { ArrowLeft } from "lucide-react";
 import {
   EntryActionBar,
@@ -16,8 +16,7 @@ import {
   ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
-import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
+import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import { toast } from "sonner";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
@@ -161,21 +160,14 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
         </div>
       </EntryPrimaryCard>
 
-      <EntryTagsSection
-        title={t("tags")}
-        hint={tPw("tagsHint")}
-        sectionCardClass={dialogSectionClass}
-      >
-        <TagInput
-          selectedTags={selectedTags}
-          onChange={setSelectedTags}
-        />
-      </EntryTagsSection>
-
-      <EntryFolderSelectSection
+      <EntryTagsAndFolderSection
+        tagsTitle={t("tags")}
+        tagsHint={tPw("tagsHint")}
+        selectedTags={selectedTags}
+        onTagsChange={setSelectedTags}
         folders={folders}
-        value={folderId}
-        onChange={setFolderId}
+        folderId={folderId}
+        onFolderChange={setFolderId}
         sectionCardClass={dialogSectionClass}
       />
 
