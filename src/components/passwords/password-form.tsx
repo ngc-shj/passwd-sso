@@ -28,10 +28,11 @@ import type { CustomFieldType } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   extractTagIds,
-  filterNonEmptyCustomFields,
-  parseUrlHost,
-  toTagNameColor,
 } from "@/lib/entry-form-helpers";
+import {
+  buildPasswordHistory,
+  buildPersonalEntryPayload,
+} from "@/lib/personal-entry-payload";
 
 export interface CustomField {
   label: string;
@@ -147,43 +148,24 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     setSubmitting(true);
 
     try {
-      const urlHost = parseUrlHost(url);
-      const tags = toTagNameColor(selectedTags);
-      const validCustomFields = filterNonEmptyCustomFields(customFields);
-
-      // Build password history on edit
-      let passwordHistory: PasswordHistoryEntry[] =
-        initialData?.passwordHistory ?? [];
-      if (
-        mode === "edit" &&
-        initialData &&
-        password !== initialData.password
-      ) {
-        passwordHistory = [
-          { password: initialData.password, changedAt: new Date().toISOString() },
-          ...passwordHistory,
-        ].slice(0, 10); // Keep max 10 entries
-      }
-
-      const fullBlob = JSON.stringify({
-        title,
-        username: username || null,
+      const existingHistory = buildPasswordHistory(
+        mode === "edit" && initialData ? initialData.password : "",
         password,
-        url: url || null,
-        notes: notes || null,
-        tags,
-        generatorSettings,
-        ...(passwordHistory.length > 0 && { passwordHistory }),
-        ...(validCustomFields.length > 0 && { customFields: validCustomFields }),
-        ...(totp && { totp }),
-      });
-
-      const overviewBlob = JSON.stringify({
+        initialData?.passwordHistory ?? [],
+        new Date().toISOString()
+      );
+      const { fullBlob, overviewBlob } = buildPersonalEntryPayload({
         title,
-        username: username || null,
-        urlHost,
-        tags,
+        username,
+        password,
+        url,
+        notes,
+        selectedTags,
+        generatorSettings,
+        customFields,
+        totp,
         requireReprompt,
+        existingHistory,
       });
 
       // For create: generate client-side UUID for AAD binding
