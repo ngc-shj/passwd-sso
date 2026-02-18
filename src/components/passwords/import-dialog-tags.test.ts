@@ -32,7 +32,11 @@ describe("import tag resolution", () => {
       entryWithTags([{ name: "new", color: "#222222" }]),
     ];
 
-    const map = await __testablesImport.resolveTagNameToIdForImport(entries, fetcher as never);
+    const map = await __testablesImport.resolveTagNameToIdForImport(
+      entries,
+      API_PATH.TAGS,
+      fetcher as never
+    );
 
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(fetcher).toHaveBeenNthCalledWith(1, API_PATH.TAGS);
@@ -62,7 +66,11 @@ describe("import tag resolution", () => {
       ]),
     ];
 
-    const map = await __testablesImport.resolveTagNameToIdForImport(entries, fetcher as never);
+    const map = await __testablesImport.resolveTagNameToIdForImport(
+      entries,
+      API_PATH.TAGS,
+      fetcher as never
+    );
 
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(map.get("work")).toBe("t-work");
@@ -77,7 +85,11 @@ describe("import tag resolution", () => {
 
     const entries = [entryWithTags([{ name: "new", color: "#222222" }])];
 
-    const map = await __testablesImport.resolveTagNameToIdForImport(entries, fetcher as never);
+    const map = await __testablesImport.resolveTagNameToIdForImport(
+      entries,
+      API_PATH.TAGS,
+      fetcher as never
+    );
 
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(map.has("new")).toBe(false);

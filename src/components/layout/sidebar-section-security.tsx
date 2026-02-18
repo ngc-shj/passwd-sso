@@ -87,6 +87,9 @@ export function UtilitiesSection({
   const exportHref = selectedOrg
     ? `/dashboard/orgs/${selectedOrg.id}/export`
     : "/dashboard/export";
+  const importHref = selectedOrg
+    ? `/dashboard/orgs/${selectedOrg.id}/import`
+    : "/dashboard/import";
 
   return (
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
@@ -109,7 +112,7 @@ export function UtilitiesSection({
             </Link>
           </Button>
           <Button variant="ghost" className="w-full justify-start gap-2" asChild>
-            <Link href="/dashboard/import" onClick={onNavigate}>
+            <Link href={importHref} onClick={onNavigate}>
               <Upload className="h-4 w-4" />
               {t("import")}
             </Link>

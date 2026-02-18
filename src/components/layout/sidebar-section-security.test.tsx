@@ -77,4 +77,26 @@ describe("UtilitiesSection", () => {
 
     expect(screen.queryByRole("link", { name: "orgSettings" })).toBeNull();
   });
+
+  it("routes import/export to org pages when org is selected", () => {
+    render(
+      <UtilitiesSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        tOrg={(k) => k}
+        selectedOrg={{ id: "org-1", name: "Acme", role: "MEMBER" }}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "export" })).toHaveAttribute(
+      "href",
+      "/dashboard/orgs/org-1/export"
+    );
+    expect(screen.getByRole("link", { name: "import" })).toHaveAttribute(
+      "href",
+      "/dashboard/orgs/org-1/import"
+    );
+  });
 });

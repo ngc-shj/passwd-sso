@@ -22,6 +22,7 @@ import { Upload, Loader2, FileUp, CheckCircle2, AlertCircle, Lock } from "lucide
 import { toast } from "sonner";
 import { API_PATH, ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
+import { apiPath } from "@/lib/constants/api-path";
 import type {
   EntryCustomFieldPortable,
   EntryPasswordHistory,
@@ -152,12 +153,13 @@ function resolveEntryTagIds(
 
 async function resolveTagNameToIdForImport(
   entries: ParsedEntry[],
+  tagsPath: string,
   fetcher: FetchLike = fetch
 ): Promise<Map<string, string>> {
   const tagNameToId = new Map<string, string>();
 
   try {
-    const tagsRes = await fetcher(API_PATH.TAGS);
+    const tagsRes = await fetcher(tagsPath);
     if (tagsRes.ok) {
       const existingTags = (await tagsRes.json()) as ExistingTag[];
       for (const tag of existingTags) {
@@ -182,7 +184,7 @@ async function resolveTagNameToIdForImport(
 
   for (const [name, color] of missingTags) {
     try {
-      const createRes = await fetcher(API_PATH.TAGS, {
+      const createRes = await fetcher(tagsPath, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, color }),
@@ -557,17 +559,22 @@ const formatLabels: Record<CsvFormat, string> = {
 
 interface ImportPanelContentProps {
   onComplete: () => void;
+  orgId?: string;
 }
 
-function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
+function ImportPanelContent({ onComplete, orgId }: ImportPanelContentProps) {
   const t = useTranslations("Import");
   const { encryptionKey, userId } = useVault();
+  const isOrgImport = Boolean(orgId);
+  const tagsPath = orgId ? apiPath.orgTags(orgId) : API_PATH.TAGS;
+  const passwordsPath = orgId ? apiPath.orgPasswords(orgId) : API_PATH.PASSWORDS;
   const fileRef = useRef<HTMLInputElement>(null);
   const [entries, setEntries] = useState<ParsedEntry[]>([]);
   const [format, setFormat] = useState<CsvFormat>("unknown");
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [done, setDone] = useState(false);
+  const [result, setResult] = useState({ success: 0, failed: 0 });
   const [dragOver, setDragOver] = useState(false);
   const [encryptedFile, setEncryptedFile] = useState<EncryptedExportFile | null>(null);
   const [decryptPassword, setDecryptPassword] = useState("");
@@ -582,6 +589,7 @@ function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
     setImporting(false);
     setProgress({ current: 0, total: 0 });
     setDone(false);
+    setResult({ success: 0, failed: 0 });
     setDragOver(false);
     setEncryptedFile(null);
     setDecryptPassword("");
@@ -663,12 +671,13 @@ function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
   };
 
   const handleImport = async () => {
-    if (!encryptionKey || entries.length === 0) return;
+    if (entries.length === 0) return;
+    if (!isOrgImport && !encryptionKey) return;
     setImporting(true);
     setProgress({ current: 0, total: entries.length });
 
     let successCount = 0;
-    const tagNameToId = await resolveTagNameToIdForImport(entries);
+    const tagNameToId = await resolveTagNameToIdForImport(entries, tagsPath);
 
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
@@ -679,143 +688,207 @@ function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
         const isCard = entry.entryType === ENTRY_TYPE.CREDIT_CARD;
         const isIdentity = entry.entryType === ENTRY_TYPE.IDENTITY;
         const isPasskey = entry.entryType === ENTRY_TYPE.PASSKEY;
-        let fullBlob: string;
-        let overviewBlob: string;
-
-        if (isPasskey) {
-          fullBlob = JSON.stringify({
-            title: entry.title,
-            relyingPartyId: entry.relyingPartyId || null,
-            relyingPartyName: entry.relyingPartyName || null,
-            username: entry.username || null,
-            credentialId: entry.credentialId || null,
-            creationDate: entry.creationDate || null,
-            deviceInfo: entry.deviceInfo || null,
-            notes: entry.notes || null,
-            tags: entry.tags,
-          });
-          overviewBlob = JSON.stringify({
-            title: entry.title,
-            relyingPartyId: entry.relyingPartyId || null,
-            username: entry.username || null,
-            tags: entry.tags,
-            requireReprompt: entry.requireReprompt,
-          });
-        } else if (isIdentity) {
-          const idNumberLast4 = entry.idNumber ? entry.idNumber.slice(-4) : null;
-          fullBlob = JSON.stringify({
-            title: entry.title,
-            fullName: entry.fullName || null,
-            address: entry.address || null,
-            phone: entry.phone || null,
-            email: entry.email || null,
-            dateOfBirth: entry.dateOfBirth || null,
-            nationality: entry.nationality || null,
-            idNumber: entry.idNumber || null,
-            issueDate: entry.issueDate || null,
-            expiryDate: entry.expiryDate || null,
-            notes: entry.notes || null,
-            tags: entry.tags,
-          });
-          overviewBlob = JSON.stringify({
-            title: entry.title,
-            fullName: entry.fullName || null,
-            idNumberLast4,
-            tags: entry.tags,
-            requireReprompt: entry.requireReprompt,
-          });
-        } else if (isCard) {
-          const lastFour = entry.cardNumber
-            ? entry.cardNumber.replace(/\s/g, "").slice(-4)
-            : null;
-          fullBlob = JSON.stringify({
-            title: entry.title,
-            cardholderName: entry.cardholderName || null,
-            cardNumber: entry.cardNumber || null,
-            brand: entry.brand || null,
-            expiryMonth: entry.expiryMonth || null,
-            expiryYear: entry.expiryYear || null,
-            cvv: entry.cvv || null,
-            notes: entry.notes || null,
-            tags: entry.tags,
-          });
-          overviewBlob = JSON.stringify({
-            title: entry.title,
-            cardholderName: entry.cardholderName || null,
-            brand: entry.brand || null,
-            lastFour,
-            tags: entry.tags,
-            requireReprompt: entry.requireReprompt,
-          });
-        } else if (isNote) {
-          fullBlob = JSON.stringify({
-            title: entry.title,
-            content: entry.content || "",
-            tags: entry.tags,
-          });
-          overviewBlob = JSON.stringify({
-            title: entry.title,
-            snippet: (entry.content || "").slice(0, 100),
-            tags: entry.tags,
-            requireReprompt: entry.requireReprompt,
+        const tagIds = resolveEntryTagIds(entry, tagNameToId);
+        let res: Response;
+        if (isOrgImport) {
+          if (isPasskey) {
+            continue;
+          }
+          res = await fetch(passwordsPath, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-passwd-sso-source": "import",
+              ...(sourceFilename
+                ? { "x-passwd-sso-filename": sourceFilename }
+                : {}),
+            },
+            body: JSON.stringify(
+              isNote
+                ? {
+                    entryType: ENTRY_TYPE.SECURE_NOTE,
+                    title: entry.title,
+                    content: entry.content || "",
+                    tagIds,
+                  }
+                : isCard
+                  ? {
+                      entryType: ENTRY_TYPE.CREDIT_CARD,
+                      title: entry.title,
+                      cardholderName: entry.cardholderName || "",
+                      cardNumber: entry.cardNumber || "",
+                      brand: entry.brand || "",
+                      expiryMonth: entry.expiryMonth || "",
+                      expiryYear: entry.expiryYear || "",
+                      cvv: entry.cvv || "",
+                      notes: entry.notes || "",
+                      tagIds,
+                    }
+                  : isIdentity
+                    ? {
+                        entryType: ENTRY_TYPE.IDENTITY,
+                        title: entry.title,
+                        fullName: entry.fullName || "",
+                        address: entry.address || "",
+                        phone: entry.phone || "",
+                        email: entry.email || "",
+                        dateOfBirth: entry.dateOfBirth || "",
+                        nationality: entry.nationality || "",
+                        idNumber: entry.idNumber || "",
+                        issueDate: entry.issueDate || "",
+                        expiryDate: entry.expiryDate || "",
+                        notes: entry.notes || "",
+                        tagIds,
+                      }
+                    : {
+                        title: entry.title,
+                        username: entry.username || "",
+                        password: entry.password,
+                        url: entry.url || "",
+                        notes: entry.notes || "",
+                        customFields: entry.customFields,
+                        ...(entry.totp ? { totp: entry.totp } : {}),
+                        tagIds,
+                      }
+            ),
           });
         } else {
-          let urlHost: string | null = null;
-          if (entry.url) {
-            try {
-              urlHost = new URL(entry.url).hostname;
-            } catch {
-              /* invalid url */
+          let fullBlob: string;
+          let overviewBlob: string;
+
+          if (isPasskey) {
+            fullBlob = JSON.stringify({
+              title: entry.title,
+              relyingPartyId: entry.relyingPartyId || null,
+              relyingPartyName: entry.relyingPartyName || null,
+              username: entry.username || null,
+              credentialId: entry.credentialId || null,
+              creationDate: entry.creationDate || null,
+              deviceInfo: entry.deviceInfo || null,
+              notes: entry.notes || null,
+              tags: entry.tags,
+            });
+            overviewBlob = JSON.stringify({
+              title: entry.title,
+              relyingPartyId: entry.relyingPartyId || null,
+              username: entry.username || null,
+              tags: entry.tags,
+              requireReprompt: entry.requireReprompt,
+            });
+          } else if (isIdentity) {
+            const idNumberLast4 = entry.idNumber ? entry.idNumber.slice(-4) : null;
+            fullBlob = JSON.stringify({
+              title: entry.title,
+              fullName: entry.fullName || null,
+              address: entry.address || null,
+              phone: entry.phone || null,
+              email: entry.email || null,
+              dateOfBirth: entry.dateOfBirth || null,
+              nationality: entry.nationality || null,
+              idNumber: entry.idNumber || null,
+              issueDate: entry.issueDate || null,
+              expiryDate: entry.expiryDate || null,
+              notes: entry.notes || null,
+              tags: entry.tags,
+            });
+            overviewBlob = JSON.stringify({
+              title: entry.title,
+              fullName: entry.fullName || null,
+              idNumberLast4,
+              tags: entry.tags,
+              requireReprompt: entry.requireReprompt,
+            });
+          } else if (isCard) {
+            const lastFour = entry.cardNumber
+              ? entry.cardNumber.replace(/\s/g, "").slice(-4)
+              : null;
+            fullBlob = JSON.stringify({
+              title: entry.title,
+              cardholderName: entry.cardholderName || null,
+              cardNumber: entry.cardNumber || null,
+              brand: entry.brand || null,
+              expiryMonth: entry.expiryMonth || null,
+              expiryYear: entry.expiryYear || null,
+              cvv: entry.cvv || null,
+              notes: entry.notes || null,
+              tags: entry.tags,
+            });
+            overviewBlob = JSON.stringify({
+              title: entry.title,
+              cardholderName: entry.cardholderName || null,
+              brand: entry.brand || null,
+              lastFour,
+              tags: entry.tags,
+              requireReprompt: entry.requireReprompt,
+            });
+          } else if (isNote) {
+            fullBlob = JSON.stringify({
+              title: entry.title,
+              content: entry.content || "",
+              tags: entry.tags,
+            });
+            overviewBlob = JSON.stringify({
+              title: entry.title,
+              snippet: (entry.content || "").slice(0, 100),
+              tags: entry.tags,
+              requireReprompt: entry.requireReprompt,
+            });
+          } else {
+            let urlHost: string | null = null;
+            if (entry.url) {
+              try {
+                urlHost = new URL(entry.url).hostname;
+              } catch {
+                /* invalid url */
+              }
             }
+            fullBlob = JSON.stringify({
+              title: entry.title,
+              username: entry.username || null,
+              password: entry.password,
+              url: entry.url || null,
+              notes: entry.notes || null,
+              tags: entry.tags,
+              generatorSettings: entry.generatorSettings,
+              ...(entry.passwordHistory.length > 0 && { passwordHistory: entry.passwordHistory }),
+              ...(entry.customFields.length > 0 && { customFields: entry.customFields }),
+              ...(entry.totp && { totp: entry.totp }),
+            });
+            overviewBlob = JSON.stringify({
+              title: entry.title,
+              username: entry.username || null,
+              urlHost,
+              tags: entry.tags,
+              requireReprompt: entry.requireReprompt,
+            });
           }
-          fullBlob = JSON.stringify({
-            title: entry.title,
-            username: entry.username || null,
-            password: entry.password,
-            url: entry.url || null,
-            notes: entry.notes || null,
-            tags: entry.tags,
-            generatorSettings: entry.generatorSettings,
-            ...(entry.passwordHistory.length > 0 && { passwordHistory: entry.passwordHistory }),
-            ...(entry.customFields.length > 0 && { customFields: entry.customFields }),
-            ...(entry.totp && { totp: entry.totp }),
-          });
-          overviewBlob = JSON.stringify({
-            title: entry.title,
-            username: entry.username || null,
-            urlHost,
-            tags: entry.tags,
-            requireReprompt: entry.requireReprompt,
+
+          const entryId = crypto.randomUUID();
+          const aad = userId ? buildPersonalEntryAAD(userId, entryId) : undefined;
+          const encryptedBlob = await encryptData(fullBlob, encryptionKey!, aad);
+          const encryptedOverview = await encryptData(overviewBlob, encryptionKey!, aad);
+
+          res = await fetch(passwordsPath, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-passwd-sso-source": "import",
+              ...(sourceFilename
+                ? { "x-passwd-sso-filename": sourceFilename }
+                : {}),
+            },
+            body: JSON.stringify({
+              id: entryId,
+              encryptedBlob,
+              encryptedOverview,
+              entryType: entry.entryType,
+              keyVersion: 1,
+              aadVersion: aad ? AAD_VERSION : 0,
+              tagIds,
+              ...(entry.requireReprompt ? { requireReprompt: true } : {}),
+            }),
           });
         }
-
-        const entryId = crypto.randomUUID();
-        const aad = userId ? buildPersonalEntryAAD(userId, entryId) : undefined;
-
-        const encryptedBlob = await encryptData(fullBlob, encryptionKey, aad);
-        const encryptedOverview = await encryptData(overviewBlob, encryptionKey, aad);
-        const tagIds = resolveEntryTagIds(entry, tagNameToId);
-
-        const res = await fetch(API_PATH.PASSWORDS, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-passwd-sso-source": "import",
-            ...(sourceFilename
-              ? { "x-passwd-sso-filename": sourceFilename }
-              : {}),
-          },
-          body: JSON.stringify({
-            id: entryId,
-            encryptedBlob,
-            encryptedOverview,
-            entryType: entry.entryType,
-            keyVersion: 1,
-            aadVersion: aad ? AAD_VERSION : 0,
-            tagIds,
-            ...(entry.requireReprompt ? { requireReprompt: true } : {}),
-          }),
-        });
 
         if (res.ok) successCount++;
       } catch {
@@ -827,18 +900,21 @@ function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
     setImporting(false);
 
     const failedCount = Math.max(0, entries.length - successCount);
-    fetch(API_PATH.AUDIT_LOGS_IMPORT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        requestedCount: entries.length,
-        successCount,
-        failedCount,
-        filename: sourceFilename || undefined,
-        format: sourceFilename.toLowerCase().endsWith(".json") ? "json" : "csv",
-        encrypted: encryptedInput,
-      }),
-    }).catch(() => {});
+    setResult({ success: successCount, failed: failedCount });
+    if (!isOrgImport) {
+      fetch(API_PATH.AUDIT_LOGS_IMPORT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestedCount: entries.length,
+          successCount,
+          failedCount,
+          filename: sourceFilename || undefined,
+          format: sourceFilename.toLowerCase().endsWith(".json") ? "json" : "csv",
+          encrypted: encryptedInput,
+        }),
+      }).catch(() => {});
+    }
 
     if (successCount > 0) {
       toast.success(t("importedCount", { count: successCount }));
@@ -852,7 +928,7 @@ function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
           <div className="flex flex-col items-center gap-3 py-6">
             <CheckCircle2 className="h-10 w-10 text-green-500" />
             <p className="text-sm text-muted-foreground">
-              {t("importedCount", { count: progress.total })}
+              {t("importedCount", { count: result.success })}
             </p>
             <Button type="button" onClick={reset}>
               {t("close")}
@@ -1025,9 +1101,10 @@ function ImportPanelContent({ onComplete }: ImportPanelContentProps) {
 
 interface ImportPagePanelProps {
   onComplete: () => void;
+  orgId?: string;
 }
 
-export function ImportPagePanel({ onComplete }: ImportPagePanelProps) {
+export function ImportPagePanel({ onComplete, orgId }: ImportPagePanelProps) {
   const t = useTranslations("Import");
   return (
     <PagePane
@@ -1039,9 +1116,18 @@ export function ImportPagePanel({ onComplete }: ImportPagePanelProps) {
         />
       }
     >
-      <ImportPanelContent onComplete={onComplete} />
+      <ImportPanelContent onComplete={onComplete} orgId={orgId} />
     </PagePane>
   );
+}
+
+interface OrgImportPagePanelProps {
+  orgId: string;
+  onComplete: () => void;
+}
+
+export function OrgImportPagePanel({ orgId, onComplete }: OrgImportPagePanelProps) {
+  return <ImportPagePanel onComplete={onComplete} orgId={orgId} />;
 }
 
 export const __testablesImport = {
