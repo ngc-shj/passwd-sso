@@ -38,7 +38,7 @@ import { ORG_ROLE, ENTRY_TYPE, API_PATH, apiPath } from "@/lib/constants";
 import { stripLocalePrefix } from "@/i18n/locale-utils";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { toast } from "sonner";
-import { useVaultContext } from "@/hooks/use-vault-context";
+import { useVaultContext, type VaultContext } from "@/hooks/use-vault-context";
 
 // ─── Section keys ────────────────────────────────────────────────
 
@@ -547,173 +547,27 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         onValueChange={handleVaultChange}
       />
 
-      {/* ── Vault ──────────────────────────────────────────── */}
-      <Collapsible open={isOpen("vault")} onOpenChange={toggleSection("vault")}>
-        <CollapsibleSectionHeader isOpen={isOpen("vault")}>
-          {vaultContext.type === "org" ? (selectedOrg?.name ?? t("personalVault")) : t("personalVault")}
-        </CollapsibleSectionHeader>
-        <CollapsibleContent>
-          <div className="space-y-1">
-            <Button
-              variant={isSelectedVaultAll ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link href={vaultContext.type === "org" ? `/dashboard/orgs/${vaultContext.orgId}` : "/dashboard"} onClick={() => onOpenChange(false)}>
-                <FolderOpen className="h-4 w-4" />
-                {t("allPasswords")}
-              </Link>
-            </Button>
-            <Button
-              variant={isSelectedVaultFavorites ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link
-                href={
-                  vaultContext.type === "org"
-                    ? `/dashboard/orgs/${vaultContext.orgId}?scope=favorites`
-                    : "/dashboard/favorites"
-                }
-                onClick={() => onOpenChange(false)}
-              >
-                <Star className="h-4 w-4" />
-                {t("favorites")}
-              </Link>
-            </Button>
-            <Button
-              variant={isSelectedVaultArchive ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link
-                href={
-                  vaultContext.type === "org"
-                    ? `/dashboard/orgs/${vaultContext.orgId}?scope=archive`
-                    : "/dashboard/archive"
-                }
-                onClick={() => onOpenChange(false)}
-              >
-                <Archive className="h-4 w-4" />
-                {t("personalArchive")}
-              </Link>
-            </Button>
-            <Button
-              variant={isSelectedVaultTrash ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link
-                href={
-                  vaultContext.type === "org"
-                    ? `/dashboard/orgs/${vaultContext.orgId}?scope=trash`
-                    : "/dashboard/trash"
-                }
-                onClick={() => onOpenChange(false)}
-              >
-                <Trash2 className="h-4 w-4" />
-                {t("personalTrash")}
-              </Link>
-            </Button>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+      <VaultSection
+        isOpen={isOpen("vault")}
+        onOpenChange={toggleSection("vault")}
+        t={t}
+        vaultContext={vaultContext}
+        selectedOrgName={selectedOrg?.name}
+        isSelectedVaultAll={isSelectedVaultAll}
+        isSelectedVaultFavorites={isSelectedVaultFavorites}
+        isSelectedVaultArchive={isSelectedVaultArchive}
+        isSelectedVaultTrash={isSelectedVaultTrash}
+        onNavigate={() => onOpenChange(false)}
+      />
 
-      {/* ── Categories ─────────────────────────────────────── */}
-      <Collapsible open={isOpen("categories")} onOpenChange={toggleSection("categories")}>
-        <CollapsibleSectionHeader isOpen={isOpen("categories")}>
-          {t("categories")}
-        </CollapsibleSectionHeader>
-        <CollapsibleContent>
-          <div className="space-y-1">
-            <Button
-              variant={selectedTypeFilter === ENTRY_TYPE.LOGIN ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-            <Link
-              href={
-                vaultContext.type === "org"
-                  ? `/dashboard/orgs/${vaultContext.orgId}?type=${ENTRY_TYPE.LOGIN}`
-                  : `/dashboard?type=${ENTRY_TYPE.LOGIN}`
-              }
-              onClick={() => onOpenChange(false)}
-            >
-                <KeyRound className="h-4 w-4" />
-                {t("catLogin")}
-              </Link>
-            </Button>
-            <Button
-              variant={selectedTypeFilter === ENTRY_TYPE.SECURE_NOTE ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link
-                href={
-                  vaultContext.type === "org"
-                    ? "/dashboard/orgs/" + vaultContext.orgId + "?type=SECURE_NOTE"
-                    : "/dashboard?type=SECURE_NOTE"
-                }
-                onClick={() => onOpenChange(false)}
-              >
-                <FileText className="h-4 w-4" />
-                {t("catSecureNote")}
-              </Link>
-            </Button>
-            <Button
-              variant={selectedTypeFilter === ENTRY_TYPE.CREDIT_CARD ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link
-                href={
-                  vaultContext.type === "org"
-                    ? "/dashboard/orgs/" + vaultContext.orgId + "?type=CREDIT_CARD"
-                    : "/dashboard?type=CREDIT_CARD"
-                }
-                onClick={() => onOpenChange(false)}
-              >
-                <CreditCard className="h-4 w-4" />
-                {t("catCreditCard")}
-              </Link>
-            </Button>
-            <Button
-              variant={selectedTypeFilter === ENTRY_TYPE.IDENTITY ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link
-                href={
-                  vaultContext.type === "org"
-                    ? "/dashboard/orgs/" + vaultContext.orgId + "?type=IDENTITY"
-                    : "/dashboard?type=IDENTITY"
-                }
-                onClick={() => onOpenChange(false)}
-              >
-                <IdCard className="h-4 w-4" />
-                {t("catIdentity")}
-              </Link>
-            </Button>
-            <Button
-              variant={selectedTypeFilter === ENTRY_TYPE.PASSKEY ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link
-                href={
-                  vaultContext.type === "org"
-                    ? "/dashboard/orgs/" + vaultContext.orgId + "?type=PASSKEY"
-                    : "/dashboard?type=PASSKEY"
-                }
-                onClick={() => onOpenChange(false)}
-              >
-                <Fingerprint className="h-4 w-4" />
-                {t("catPasskey")}
-              </Link>
-            </Button>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+      <CategoriesSection
+        isOpen={isOpen("categories")}
+        onOpenChange={toggleSection("categories")}
+        t={t}
+        vaultContext={vaultContext}
+        selectedTypeFilter={selectedTypeFilter}
+        onNavigate={() => onOpenChange(false)}
+      />
 
       {/* ── Organizations ──────────────────────────────────── */}
       <Collapsible open={isOpen("organizations")} onOpenChange={toggleSection("organizations")}>
@@ -1012,6 +866,153 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+interface VaultSectionProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  t: (key: string) => string;
+  vaultContext: VaultContext;
+  selectedOrgName?: string;
+  isSelectedVaultAll: boolean;
+  isSelectedVaultFavorites: boolean;
+  isSelectedVaultArchive: boolean;
+  isSelectedVaultTrash: boolean;
+  onNavigate: () => void;
+}
+
+function VaultSection({
+  isOpen,
+  onOpenChange,
+  t,
+  vaultContext,
+  selectedOrgName,
+  isSelectedVaultAll,
+  isSelectedVaultFavorites,
+  isSelectedVaultArchive,
+  isSelectedVaultTrash,
+  onNavigate,
+}: VaultSectionProps) {
+  const isOrg = vaultContext.type === "org";
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
+      <CollapsibleSectionHeader isOpen={isOpen}>
+        {isOrg ? (selectedOrgName ?? t("personalVault")) : t("personalVault")}
+      </CollapsibleSectionHeader>
+      <CollapsibleContent>
+        <div className="space-y-1">
+          <Button
+            variant={isSelectedVaultAll ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}` : "/dashboard"} onClick={onNavigate}>
+              <FolderOpen className="h-4 w-4" />
+              {t("allPasswords")}
+            </Link>
+          </Button>
+          <Button
+            variant={isSelectedVaultFavorites ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link
+              href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=favorites` : "/dashboard/favorites"}
+              onClick={onNavigate}
+            >
+              <Star className="h-4 w-4" />
+              {t("favorites")}
+            </Link>
+          </Button>
+          <Button
+            variant={isSelectedVaultArchive ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link
+              href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=archive` : "/dashboard/archive"}
+              onClick={onNavigate}
+            >
+              <Archive className="h-4 w-4" />
+              {t("personalArchive")}
+            </Link>
+          </Button>
+          <Button
+            variant={isSelectedVaultTrash ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            asChild
+          >
+            <Link
+              href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=trash` : "/dashboard/trash"}
+              onClick={onNavigate}
+            >
+              <Trash2 className="h-4 w-4" />
+              {t("personalTrash")}
+            </Link>
+          </Button>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+interface CategoriesSectionProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  t: (key: string) => string;
+  vaultContext: VaultContext;
+  selectedTypeFilter: string | null;
+  onNavigate: () => void;
+}
+
+function CategoriesSection({
+  isOpen,
+  onOpenChange,
+  t,
+  vaultContext,
+  selectedTypeFilter,
+  onNavigate,
+}: CategoriesSectionProps) {
+  const categories = [
+    { type: ENTRY_TYPE.LOGIN, labelKey: "catLogin", icon: KeyRound },
+    { type: ENTRY_TYPE.SECURE_NOTE, labelKey: "catSecureNote", icon: FileText },
+    { type: ENTRY_TYPE.CREDIT_CARD, labelKey: "catCreditCard", icon: CreditCard },
+    { type: ENTRY_TYPE.IDENTITY, labelKey: "catIdentity", icon: IdCard },
+    { type: ENTRY_TYPE.PASSKEY, labelKey: "catPasskey", icon: Fingerprint },
+  ] as const;
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
+      <CollapsibleSectionHeader isOpen={isOpen}>
+        {t("categories")}
+      </CollapsibleSectionHeader>
+      <CollapsibleContent>
+        <div className="space-y-1">
+          {categories.map((category) => {
+            const Icon = category.icon;
+            const href =
+              vaultContext.type === "org"
+                ? `/dashboard/orgs/${vaultContext.orgId}?type=${category.type}`
+                : `/dashboard?type=${category.type}`;
+            return (
+              <Button
+                key={category.type}
+                variant={selectedTypeFilter === category.type ? "secondary" : "ghost"}
+                className="w-full justify-start gap-2"
+                asChild
+              >
+                <Link href={href} onClick={onNavigate}>
+                  <Icon className="h-4 w-4" />
+                  {t(category.labelKey)}
+                </Link>
+              </Button>
+            );
+          })}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
