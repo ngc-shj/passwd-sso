@@ -21,13 +21,28 @@ import { API_PATH, apiPath } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import {
   type ExportEntry,
+  type ExportFormat,
+  type FormatExportOptions,
   type ExportProfile,
+  formatExportContent as formatExportContentShared,
   formatExportCsv,
   formatExportJson,
   formatExportDate,
 } from "@/lib/export-format-common";
 
-type ExportFormat = "csv" | "json";
+const ORG_EXPORT_OPTIONS: FormatExportOptions = {
+  csv: {
+    includePasskeyType: true,
+    includeReprompt: false,
+    includeRequireRepromptInPasswdSso: false,
+    includePasskeyFieldsInPasswdSso: false,
+  },
+  json: {
+    includePasskey: true,
+    includeReprompt: false,
+    includeRequireRepromptInPasswdSso: false,
+  },
+};
 
 interface OrgExportDialogProps {
   orgId: string;
@@ -317,27 +332,15 @@ function formatExportContent(
   format: ExportFormat,
   profile: ExportProfile
 ): string {
-  if (format === "csv") {
-    return formatCsv(entries, profile);
-  }
-  return formatJson(entries, profile);
+  return formatExportContentShared(entries, format, profile, ORG_EXPORT_OPTIONS);
 }
 
 function formatCsv(entries: ExportEntry[], profile: ExportProfile): string {
-  return formatExportCsv(entries, profile, {
-    includePasskeyType: true,
-    includeReprompt: false,
-    includeRequireRepromptInPasswdSso: false,
-    includePasskeyFieldsInPasswdSso: false,
-  });
+  return formatExportCsv(entries, profile, ORG_EXPORT_OPTIONS.csv);
 }
 
 function formatJson(entries: ExportEntry[], profile: ExportProfile): string {
-  return formatExportJson(entries, profile, {
-    includePasskey: true,
-    includeReprompt: false,
-    includeRequireRepromptInPasswdSso: false,
-  });
+  return formatExportJson(entries, profile, ORG_EXPORT_OPTIONS.json);
 }
 
 export const __testablesOrgExport = {

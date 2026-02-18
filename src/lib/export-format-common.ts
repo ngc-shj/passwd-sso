@@ -45,6 +45,7 @@ export interface ExportEntry {
 }
 
 export type ExportProfile = "compatible" | "passwd-sso";
+export type ExportFormat = "csv" | "json";
 
 export function escapeCsvValue(val: string | null): string {
   if (!val) return "";
@@ -86,11 +87,16 @@ interface FormatExportJsonOptions {
   includeRequireRepromptInPasswdSso: boolean;
 }
 
-interface FormatExportCsvOptions {
+export interface FormatExportCsvOptions {
   includePasskeyType: boolean;
   includeReprompt: boolean;
   includeRequireRepromptInPasswdSso: boolean;
   includePasskeyFieldsInPasswdSso: boolean;
+}
+
+export interface FormatExportOptions {
+  csv: FormatExportCsvOptions;
+  json: FormatExportJsonOptions;
 }
 
 function withReprompt(
@@ -318,4 +324,16 @@ export function formatExportCsv(
     ].join(",");
   });
   return [header, ...rows].join("\n");
+}
+
+export function formatExportContent(
+  entries: ExportEntry[],
+  format: ExportFormat,
+  profile: ExportProfile,
+  options: FormatExportOptions
+): string {
+  if (format === "csv") {
+    return formatExportCsv(entries, profile, options.csv);
+  }
+  return formatExportJson(entries, profile, options.json);
 }

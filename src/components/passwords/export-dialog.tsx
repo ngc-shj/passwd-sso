@@ -23,13 +23,28 @@ import { Download, Loader2, AlertTriangle, Lock, Building2 } from "lucide-react"
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import {
   type ExportEntry,
+  type ExportFormat,
+  type FormatExportOptions,
   type ExportProfile,
+  formatExportContent as formatExportContentShared,
   formatExportCsv,
   formatExportJson,
   formatExportDate,
 } from "@/lib/export-format-common";
 
-type ExportFormat = "csv" | "json";
+const PERSONAL_EXPORT_OPTIONS: FormatExportOptions = {
+  csv: {
+    includePasskeyType: true,
+    includeReprompt: true,
+    includeRequireRepromptInPasswdSso: true,
+    includePasskeyFieldsInPasswdSso: true,
+  },
+  json: {
+    includePasskey: true,
+    includeReprompt: true,
+    includeRequireRepromptInPasswdSso: true,
+  },
+};
 
 interface ExportDialogProps {
   trigger: React.ReactNode;
@@ -416,27 +431,20 @@ function formatExportContent(
   format: ExportFormat,
   profile: ExportProfile
 ): string {
-  if (format === "csv") {
-    return formatCsv(entries, profile);
-  }
-  return formatJson(entries, profile);
+  return formatExportContentShared(
+    entries,
+    format,
+    profile,
+    PERSONAL_EXPORT_OPTIONS
+  );
 }
 
 function formatCsv(entries: ExportEntry[], profile: ExportProfile): string {
-  return formatExportCsv(entries, profile, {
-    includePasskeyType: true,
-    includeReprompt: true,
-    includeRequireRepromptInPasswdSso: true,
-    includePasskeyFieldsInPasswdSso: true,
-  });
+  return formatExportCsv(entries, profile, PERSONAL_EXPORT_OPTIONS.csv);
 }
 
 function formatJson(entries: ExportEntry[], profile: ExportProfile): string {
-  return formatExportJson(entries, profile, {
-    includePasskey: true,
-    includeReprompt: true,
-    includeRequireRepromptInPasswdSso: true,
-  });
+  return formatExportJson(entries, profile, PERSONAL_EXPORT_OPTIONS.json);
 }
 
 export const __testablesPersonalExport = {
