@@ -25,6 +25,7 @@ import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fi
 import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
 import { OrgTagInput, type OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
+import { OrgIdentityFields } from "@/components/org/org-identity-fields";
 import { OrgPasskeyFields } from "@/components/org/org-passkey-fields";
 import {
   NotesField,
@@ -663,144 +664,60 @@ export function OrgPasswordForm({
       }}
     />
   ) : isIdentity ? (
-    <>
-      {/* Full Name */}
-      <div className="space-y-2">
-        <Label>{ti("fullName")}</Label>
-        <Input
-          value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
-          placeholder={ti("fullNamePlaceholder")}
-          autoComplete="off"
-        />
-      </div>
-
-      {/* Address */}
-      <div className="space-y-2">
-        <Label>{ti("address")}</Label>
-        <Textarea
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          placeholder={ti("addressPlaceholder")}
-          rows={2}
-          autoComplete="off"
-        />
-      </div>
-
-      {/* Phone & Email */}
-      <TwoColumnFields
-        left={(
-          <>
-            <Label>{ti("phone")}</Label>
-            <Input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder={ti("phonePlaceholder")}
-              autoComplete="off"
-            />
-          </>
-        )}
-        right={(
-          <>
-            <Label>{ti("email")}</Label>
-            <Input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder={ti("emailPlaceholder")}
-              autoComplete="off"
-            />
-          </>
-        )}
-      />
-
-      {/* Date of Birth & Nationality */}
-      <TwoColumnFields
-        left={(
-          <>
-            <Label>{ti("dateOfBirth")}</Label>
-            <Input
-              type="date"
-              value={dateOfBirth}
-              onChange={(e) => {
-                setDateOfBirth(e.target.value);
-                setDobError(null);
-              }}
-            />
-          </>
-        )}
-        right={(
-          <>
-            <Label>{ti("nationality")}</Label>
-            <Input
-              value={nationality}
-              onChange={(e) => setNationality(e.target.value)}
-              placeholder={ti("nationalityPlaceholder")}
-              autoComplete="off"
-            />
-          </>
-        )}
-      />
-      {dobError && (
-        <p className="text-sm text-destructive">{dobError}</p>
-      )}
-
-      {/* ID Number */}
-      <div className="space-y-2">
-        <Label>{ti("idNumber")}</Label>
-        <VisibilityToggleInput
-          show={showIdNumber}
-          onToggle={() => setShowIdNumber(!showIdNumber)}
-          inputProps={{
-            value: idNumber,
-            onChange: (e) => setIdNumber(e.target.value),
-            placeholder: ti("idNumberPlaceholder"),
-            autoComplete: "off",
-          }}
-        />
-      </div>
-
-      {/* Issue Date & Expiry Date */}
-      <TwoColumnFields
-        left={(
-          <>
-            <Label>{ti("issueDate")}</Label>
-            <Input
-              type="date"
-              value={issueDate}
-              onChange={(e) => {
-                setIssueDate(e.target.value);
-                setExpiryError(null);
-              }}
-            />
-          </>
-        )}
-        right={(
-          <>
-            <Label>{ti("expiryDate")}</Label>
-            <Input
-              type="date"
-              value={expiryDate}
-              onChange={(e) => {
-                setExpiryDate(e.target.value);
-                setExpiryError(null);
-              }}
-            />
-          </>
-        )}
-      />
-      {expiryError && (
-        <p className="text-sm text-destructive">{expiryError}</p>
-      )}
-
-      <NotesField
-        label={entryCopy.notesLabel}
-        value={notes}
-        onChange={setNotes}
-        placeholder={entryCopy.notesPlaceholder}
-      />
-    </>
+    <OrgIdentityFields
+      fullName={fullName}
+      onFullNameChange={setFullName}
+      fullNamePlaceholder={ti("fullNamePlaceholder")}
+      address={address}
+      onAddressChange={setAddress}
+      addressPlaceholder={ti("addressPlaceholder")}
+      phone={phone}
+      onPhoneChange={setPhone}
+      phonePlaceholder={ti("phonePlaceholder")}
+      email={email}
+      onEmailChange={setEmail}
+      emailPlaceholder={ti("emailPlaceholder")}
+      dateOfBirth={dateOfBirth}
+      onDateOfBirthChange={(value) => {
+        setDateOfBirth(value);
+        setDobError(null);
+      }}
+      nationality={nationality}
+      onNationalityChange={setNationality}
+      nationalityPlaceholder={ti("nationalityPlaceholder")}
+      idNumber={idNumber}
+      onIdNumberChange={setIdNumber}
+      idNumberPlaceholder={ti("idNumberPlaceholder")}
+      showIdNumber={showIdNumber}
+      onToggleIdNumber={() => setShowIdNumber(!showIdNumber)}
+      issueDate={issueDate}
+      onIssueDateChange={(value) => {
+        setIssueDate(value);
+        setExpiryError(null);
+      }}
+      expiryDate={expiryDate}
+      onExpiryDateChange={(value) => {
+        setExpiryDate(value);
+        setExpiryError(null);
+      }}
+      dobError={dobError}
+      expiryError={expiryError}
+      notesLabel={entryCopy.notesLabel}
+      notes={notes}
+      onNotesChange={setNotes}
+      notesPlaceholder={entryCopy.notesPlaceholder}
+      labels={{
+        fullName: ti("fullName"),
+        address: ti("address"),
+        phone: ti("phone"),
+        email: ti("email"),
+        dateOfBirth: ti("dateOfBirth"),
+        nationality: ti("nationality"),
+        idNumber: ti("idNumber"),
+        issueDate: ti("issueDate"),
+        expiryDate: ti("expiryDate"),
+      }}
+    />
   ) : isCreditCard ? (
     <>
       {/* Cardholder Name */}
