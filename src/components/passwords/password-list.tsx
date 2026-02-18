@@ -39,6 +39,7 @@ interface DecryptedOverview {
   fullName?: string | null;
   idNumberLast4?: string | null;
   relyingPartyId?: string | null;
+  requireReprompt?: boolean;
   tags: Array<{ name: string; color: string | null }>;
 }
 
@@ -58,6 +59,7 @@ interface DisplayEntry {
   tags: Array<{ name: string; color: string | null }>;
   isFavorite: boolean;
   isArchived: boolean;
+  requireReprompt: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -163,6 +165,7 @@ export function PasswordList({
             tags: overview.tags ?? [],
             isFavorite: entry.isFavorite ?? false,
             isArchived: entry.isArchived ?? false,
+            requireReprompt: entry.requireReprompt ?? overview.requireReprompt ?? false,
             createdAt: entry.createdAt,
             updatedAt: entry.updatedAt,
           });
@@ -442,6 +445,7 @@ export function PasswordList({
               tags={entry.tags}
               isFavorite={entry.isFavorite}
               isArchived={entry.isArchived}
+              requireReprompt={entry.requireReprompt}
               expanded={expandedId === entry.id}
               onToggleFavorite={handleToggleFavorite}
               onToggleArchive={handleToggleArchive}

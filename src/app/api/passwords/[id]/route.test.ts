@@ -37,6 +37,7 @@ const ownedEntry = {
   entryType: ENTRY_TYPE.LOGIN,
   isFavorite: false,
   isArchived: false,
+  requireReprompt: false,
   tags: [{ id: "t1" }],
   createdAt: now,
   updatedAt: now,
@@ -150,6 +151,17 @@ describe("GET /api/passwords/[id]", () => {
     expect(json.aadVersion).toBe(0);
   });
 
+  it("returns requireReprompt in response", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ ...ownedEntry, requireReprompt: true });
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.requireReprompt).toBe(true);
+  });
+
   it("returns PASSKEY entryType", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue({
       ...ownedEntry,
@@ -253,6 +265,34 @@ describe("PUT /api/passwords/[id]", () => {
     expect(mockPrismaPasswordEntry.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ aadVersion: 1 }),
+      }),
+    );
+  });
+
+  it("updates requireReprompt flag", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "overview-cipher",
+      overviewIv: "overview-iv",
+      overviewAuthTag: "overview-tag",
+      keyVersion: 1,
+      requireReprompt: true,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { requireReprompt: true },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrismaPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ requireReprompt: true }),
       }),
     );
   });

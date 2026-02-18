@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/format-datetime";
+import { useReprompt } from "@/hooks/use-reprompt";
 
 interface PasswordHistoryEntry {
   password: string;
@@ -64,6 +65,7 @@ interface PasswordDetailProps {
     totp?: TOTPEntry;
     isFavorite: boolean;
     isArchived: boolean;
+    requireReprompt: boolean;
     createdAt: string;
     updatedAt: string;
   };
@@ -89,12 +91,20 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [revealedHistory, setRevealedHistory] = useState<Set<number>>(new Set());
   const [revealedFields, setRevealedFields] = useState<Set<number>>(new Set());
+  const { requireVerification, createGuardedGetter, repromptDialog } = useReprompt();
+
+  const guardedPasswordGetter = createGuardedGetter(
+    data.id,
+    data.requireReprompt,
+    () => data.password,
+  );
 
   const handleReveal = useCallback(() => {
-    setShowPassword(true);
-    // Auto-hide after 30 seconds for security
-    setTimeout(() => setShowPassword(false), REVEAL_TIMEOUT);
-  }, []);
+    requireVerification(data.id, data.requireReprompt, () => {
+      setShowPassword(true);
+      setTimeout(() => setShowPassword(false), REVEAL_TIMEOUT);
+    });
+  }, [data.id, data.requireReprompt, requireVerification]);
 
   const handleToggleFavorite = async () => {
     const next = !isFavorite;
@@ -266,7 +276,7 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
                   <Eye className="h-4 w-4" />
                 )}
               </Button>
-              <CopyButton getValue={() => data.password} />
+              <CopyButton getValue={guardedPasswordGetter} />
             </div>
             {showPassword && (
               <p className="text-xs text-muted-foreground">
@@ -331,14 +341,23 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() =>
-                          setRevealedFields((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(idx)) next.delete(idx);
-                            else next.add(idx);
-                            return next;
-                          })
-                        }
+                        onClick={() => {
+                          if (revealedFields.has(idx)) {
+                            setRevealedFields((prev) => {
+                              const next = new Set(prev);
+                              next.delete(idx);
+                              return next;
+                            });
+                          } else {
+                            requireVerification(data.id, data.requireReprompt, () => {
+                              setRevealedFields((prev) => {
+                                const next = new Set(prev);
+                                next.add(idx);
+                                return next;
+                              });
+                            });
+                          }
+                        }}
                       >
                         {revealedFields.has(idx) ? (
                           <EyeOff className="h-4 w-4" />
@@ -350,7 +369,11 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
                   ) : (
                     <span className="text-sm">{field.value}</span>
                   )}
-                  <CopyButton getValue={() => field.value} />
+                  <CopyButton getValue={
+                    field.type === CUSTOM_FIELD_TYPE.HIDDEN
+                      ? createGuardedGetter(data.id, data.requireReprompt, () => field.value)
+                      : () => field.value
+                  } />
                 </div>
               </div>
             ))}
@@ -425,6 +448,7 @@ export function PasswordDetail({ data }: PasswordDetailProps) {
           </div>
         </CardContent>
       </Card>
+      {repromptDialog}
       </div>
     </div>
   );

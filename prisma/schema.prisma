@@ -176,6 +176,7 @@ model PasswordEntry {
   // Metadata (unencrypted)
   isFavorite        Boolean  @default(false) @map("is_favorite")
   isArchived        Boolean  @default(false) @map("is_archived")
+  requireReprompt   Boolean  @default(false) @map("require_reprompt")
   deletedAt         DateTime? @map("deleted_at")
 
   userId            String   @map("user_id")

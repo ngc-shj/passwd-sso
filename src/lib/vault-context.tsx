@@ -71,6 +71,7 @@ interface VaultContextValue {
   lock: () => void;
   setup: (passphrase: string) => Promise<void>;
   changePassphrase: (currentPassphrase: string, newPassphrase: string) => Promise<void>;
+  verifyPassphrase: (passphrase: string) => Promise<boolean>;
   getSecretKey: () => Uint8Array | null;
   getAccountSalt: () => Uint8Array | null;
   setHasRecoveryKey: (value: boolean) => void;
@@ -142,6 +143,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const secretKeyRef = useRef<Uint8Array | null>(null);
   const keyVersionRef = useRef<number>(0);
   const accountSaltRef = useRef<Uint8Array | null>(null);
+  const wrappedKeyRef = useRef<{ ciphertext: string; iv: string; authTag: string } | null>(null);
   const lastActivityRef = useRef(Date.now());
   const hiddenAtRef = useRef<number | null>(null);
 
@@ -186,6 +188,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       secretKeyRef.current.fill(0);
       secretKeyRef.current = null;
     }
+    wrappedKeyRef.current = null;
     setEncryptionKey(null);
     setVaultStatus((prev) =>
       prev === VAULT_STATUS.UNLOCKED ? VAULT_STATUS.LOCKED : prev
@@ -382,10 +385,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       throw new Error(err.error || "Setup failed");
     }
 
-    // 9. Store secretKey, keyVersion, accountSalt, and encryption key in memory
+    // 9. Store secretKey, keyVersion, accountSalt, wrappedKey, and encryption key in memory
     secretKeyRef.current = new Uint8Array(secretKey);
     keyVersionRef.current = 1;
     accountSaltRef.current = accountSalt;
+    wrappedKeyRef.current = { ciphertext: wrappedKey.ciphertext, iv: wrappedKey.iv, authTag: wrappedKey.authTag };
     secretKey.fill(0);
     setEncryptionKey(encKey);
     setVaultStatus(VAULT_STATUS.UNLOCKED);
@@ -463,10 +467,15 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         return false;
       }
 
-      // 6. Store secretKey, keyVersion, accountSalt for EA auto-confirm and changePassphrase
+      // 6. Store secretKey, keyVersion, accountSalt, wrappedKey for EA auto-confirm and changePassphrase
       secretKeyRef.current = new Uint8Array(secretKey);
       keyVersionRef.current = vaultData.keyVersion ?? 1;
       accountSaltRef.current = accountSalt;
+      wrappedKeyRef.current = {
+        ciphertext: vaultData.encryptedSecretKey,
+        iv: vaultData.secretKeyIv,
+        authTag: vaultData.secretKeyAuthTag,
+      };
       secretKey.fill(0);
 
       // 7. Auto-confirm pending emergency access grants (fire-and-forget)
@@ -541,6 +550,18 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const verifyPassphrase = useCallback(async (passphrase: string): Promise<boolean> => {
+    if (!accountSaltRef.current || !wrappedKeyRef.current) return false;
+    try {
+      const wrappingKey = await deriveWrappingKey(passphrase, accountSaltRef.current);
+      const sk = await unwrapSecretKey(wrappedKeyRef.current, wrappingKey);
+      sk.fill(0);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const getSecretKey = useCallback(() => {
     return secretKeyRef.current ? new Uint8Array(secretKeyRef.current) : null;
   }, []);
@@ -560,6 +581,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         lock,
         setup,
         changePassphrase,
+        verifyPassphrase,
         getSecretKey,
         getAccountSalt,
         setHasRecoveryKey,
