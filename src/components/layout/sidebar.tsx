@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
@@ -11,9 +11,9 @@ import { useLocalStorage } from "@/hooks/use-local-storage";
 import { FolderDialog } from "@/components/folders/folder-dialog";
 import { VaultSelector } from "@/components/layout/vault-selector";
 import { SecuritySection, UtilitiesSection } from "@/components/layout/sidebar-section-security";
-import { type SidebarFolderItem } from "@/components/layout/sidebar-shared";
 import { VaultSection, CategoriesSection, OrganizationsSection, OrganizeSection } from "@/components/layout/sidebar-sections";
 import { useSidebarData } from "@/hooks/use-sidebar-data";
+import { useSidebarFolderCrud } from "@/hooks/use-sidebar-folder-crud";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,10 +24,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
+import { ORG_ROLE } from "@/lib/constants";
 import { stripLocalePrefix } from "@/i18n/locale-utils";
-import { apiErrorToI18nKey } from "@/lib/api-error-codes";
-import { toast } from "sonner";
 import { useVaultContext } from "@/hooks/use-vault-context";
 
 // ─── Section keys ────────────────────────────────────────────────
@@ -43,8 +41,6 @@ const COLLAPSE_DEFAULTS: Record<SidebarSection, boolean> = {
   utilities: true,      // closed
 };
 
-type FolderItem = SidebarFolderItem;
-
 interface SidebarProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -59,17 +55,28 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const tOrg = useTranslations("Org");
   const tErrors = useTranslations("ApiErrors");
 
-  // Folder dialog state (personal + org)
-  const [folderDialogOpen, setFolderDialogOpen] = useState(false);
-  const [editingFolder, setEditingFolder] = useState<FolderItem | null>(null);
-  const [deletingFolder, setDeletingFolder] = useState<FolderItem | null>(null);
-  // When non-null, the folder dialog/delete dialog operates on an org's folders
-  const [folderOrgId, setFolderOrgId] = useState<string | null>(null);
-
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { tags, folders, orgs, orgTagGroups, orgFolderGroups, refreshData, notifyDataChanged } =
     useSidebarData(pathname);
+  const {
+    folderDialogOpen,
+    setFolderDialogOpen,
+    editingFolder,
+    deletingFolder,
+    dialogFolders,
+    handleFolderCreate,
+    handleFolderEdit,
+    handleFolderDeleteClick,
+    handleFolderSubmit,
+    handleFolderDelete,
+    clearDeletingFolder,
+  } = useSidebarFolderCrud({
+    folders,
+    orgFolderGroups,
+    refreshData,
+    tErrors,
+  });
 
   // Strip locale prefix for route matching
   const cleanPath = stripLocalePrefix(pathname);
@@ -199,78 +206,6 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const handleImportComplete = () => {
     notifyDataChanged();
   };
-
-  // ─── Folder CRUD handlers (personal + org) ──────────────────────
-
-  const handleFolderCreate = (orgId?: string) => {
-    setFolderOrgId(orgId ?? null);
-    setEditingFolder(null);
-    setFolderDialogOpen(true);
-  };
-
-  const handleFolderEdit = (folder: FolderItem, orgId?: string) => {
-    setFolderOrgId(orgId ?? null);
-    setEditingFolder(folder);
-    setFolderDialogOpen(true);
-  };
-
-  const handleFolderDeleteClick = (folder: FolderItem, orgId?: string) => {
-    setFolderOrgId(orgId ?? null);
-    setDeletingFolder(folder);
-  };
-
-  const showApiError = async (res: Response) => {
-    try {
-      const json = await res.json();
-      const i18nKey = apiErrorToI18nKey(json.error);
-      toast.error(tErrors(i18nKey));
-    } catch {
-      toast.error(tErrors("unknownError"));
-    }
-  };
-
-  const handleFolderSubmit = async (data: { name: string; parentId: string | null }) => {
-    const isOrg = folderOrgId !== null;
-    const url = editingFolder
-      ? isOrg
-        ? apiPath.orgFolderById(folderOrgId!, editingFolder.id)
-        : apiPath.folderById(editingFolder.id)
-      : isOrg
-        ? apiPath.orgFolders(folderOrgId!)
-        : API_PATH.FOLDERS;
-    const method = editingFolder ? "PUT" : "POST";
-
-    const res = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      await showApiError(res);
-      throw new Error("API error"); // propagate to keep dialog open
-    }
-    refreshData();
-  };
-
-  const handleFolderDelete = async () => {
-    if (!deletingFolder) return;
-    const url = folderOrgId
-      ? apiPath.orgFolderById(folderOrgId, deletingFolder.id)
-      : apiPath.folderById(deletingFolder.id);
-    const res = await fetch(url, { method: "DELETE" });
-    if (!res.ok) {
-      await showApiError(res);
-      setDeletingFolder(null);
-      return;
-    }
-    setDeletingFolder(null);
-    refreshData();
-  };
-
-  /** Get the folder list for the current dialog context (personal or org). */
-  const dialogFolders = folderOrgId
-    ? orgFolderGroups.find((g) => g.orgId === folderOrgId)?.folders ?? []
-    : folders;
 
   // ─── Content ────────────────────────────────────────────────────
 
@@ -412,7 +347,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       {/* Folder delete confirmation */}
       <AlertDialog
         open={!!deletingFolder}
-        onOpenChange={(open) => { if (!open) setDeletingFolder(null); }}
+        onOpenChange={(open) => { if (!open) clearDeletingFolder(); }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
