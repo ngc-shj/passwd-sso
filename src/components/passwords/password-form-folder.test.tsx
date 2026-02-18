@@ -439,4 +439,43 @@ describe("PasswordForm folder selector", () => {
       expect(projects?.text).toContain("Projects");
     });
   });
+
+  // ── IME guard ──────────────────────────────────────────────
+
+  it("does not submit when Enter is pressed during IME composition", async () => {
+    const fetchMock = mockFetch();
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(
+        <PasswordForm mode="create" variant="dialog" onSaved={vi.fn()} />,
+      );
+    });
+
+    // Fill required fields
+    const titleInput = screen.getByPlaceholderText("titlePlaceholder");
+    fireEvent.change(titleInput, { target: { value: "テスト" } });
+
+    const passwordInput = screen.getByPlaceholderText("passwordPlaceholder");
+    fireEvent.change(passwordInput, { target: { value: "pass123" } });
+
+    // Simulate Enter during IME composition on the form
+    const form = screen.getByText("save").closest("form")!;
+    const composingEnter = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+      isComposing: true,
+    });
+    form.dispatchEvent(composingEnter);
+
+    // Give time for any async handlers
+    await new Promise((r) => setTimeout(r, 50));
+
+    // No POST should have been made (only the initial GET for folders)
+    const postCalls = fetchMock.mock.calls.filter(
+      (c: [string, RequestInit?]) => c[1]?.method === "POST",
+    );
+    expect(postCalls).toHaveLength(0);
+  });
 });
