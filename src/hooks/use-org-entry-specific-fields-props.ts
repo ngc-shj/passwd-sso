@@ -15,89 +15,55 @@ type OrgEntrySpecificFieldTranslations = Pick<
   "t" | "tn" | "tcc" | "ti" | "tpk"
 >;
 
-export interface OrgEntrySpecificFieldsBuilderArgs {
-  entryKind: OrgEntrySpecificFieldsProps["entryKind"];
+type OrgEntrySpecificComputedProps =
+  | "notesLabel"
+  | "notesPlaceholder"
+  | "titleLabel"
+  | "titlePlaceholder"
+  | "usernameLabel"
+  | "usernamePlaceholder"
+  | "passwordLabel"
+  | "passwordPlaceholder"
+  | "closeGeneratorLabel"
+  | "openGeneratorLabel"
+  | "urlLabel"
+  | "contentLabel"
+  | "contentPlaceholder"
+  | "cardholderNamePlaceholder"
+  | "brandPlaceholder"
+  | "cardNumberPlaceholder"
+  | "lengthHintGenericLabel"
+  | "lengthHintLabel"
+  | "invalidLengthLabel"
+  | "invalidLuhnLabel"
+  | "creditCardLabels"
+  | "expiryMonthPlaceholder"
+  | "expiryYearPlaceholder"
+  | "cvvPlaceholder"
+  | "fullNamePlaceholder"
+  | "addressPlaceholder"
+  | "phonePlaceholder"
+  | "emailPlaceholder"
+  | "nationalityPlaceholder"
+  | "idNumberPlaceholder"
+  | "identityLabels"
+  | "relyingPartyIdPlaceholder"
+  | "relyingPartyNamePlaceholder"
+  | "credentialIdPlaceholder"
+  | "deviceInfoPlaceholder"
+  | "passkeyLabels";
+
+export type OrgEntrySpecificFieldsBuilderArgs = Omit<
+  OrgEntrySpecificFieldsProps,
+  OrgEntrySpecificComputedProps
+> & {
   entryCopy: {
     notesLabel: string;
     notesPlaceholder: string;
   };
   translations: OrgEntrySpecificFieldTranslations;
-  notes: string;
-  onNotesChange: (value: string) => void;
-  title: string;
-  onTitleChange: (value: string) => void;
-  username: string;
-  onUsernameChange: (value: string) => void;
-  password: string;
-  onPasswordChange: (value: string) => void;
-  showPassword: boolean;
-  onToggleShowPassword: () => void;
-  generatorSummary: string;
-  showGenerator: boolean;
-  onToggleGenerator: () => void;
-  generatorSettings: GeneratorSettings;
-  onGeneratorUse: (password: string, settings: GeneratorSettings) => void;
-  url: string;
-  onUrlChange: (value: string) => void;
-  content: string;
-  onContentChange: (value: string) => void;
-  cardholderName: string;
-  onCardholderNameChange: (value: string) => void;
-  brand: string;
-  onBrandChange: (value: string) => void;
-  cardNumber: string;
-  onCardNumberChange: (value: string) => void;
-  showCardNumber: boolean;
-  onToggleCardNumber: () => void;
-  maxInputLength: number;
-  showLengthError: boolean;
-  showLuhnError: boolean;
-  detectedBrand?: string;
-  hasBrandHint: boolean;
   lengthHint: string;
-  expiryMonth: string;
-  onExpiryMonthChange: (value: string) => void;
-  expiryYear: string;
-  onExpiryYearChange: (value: string) => void;
-  cvv: string;
-  onCvvChange: (value: string) => void;
-  showCvv: boolean;
-  onToggleCvv: () => void;
-  fullName: string;
-  onFullNameChange: (value: string) => void;
-  address: string;
-  onAddressChange: (value: string) => void;
-  phone: string;
-  onPhoneChange: (value: string) => void;
-  email: string;
-  onEmailChange: (value: string) => void;
-  dateOfBirth: string;
-  onDateOfBirthChange: (value: string) => void;
-  nationality: string;
-  onNationalityChange: (value: string) => void;
-  idNumber: string;
-  onIdNumberChange: (value: string) => void;
-  showIdNumber: boolean;
-  onToggleIdNumber: () => void;
-  issueDate: string;
-  onIssueDateChange: (value: string) => void;
-  expiryDate: string;
-  onExpiryDateChange: (value: string) => void;
-  dobError: string | null;
-  expiryError: string | null;
-  relyingPartyId: string;
-  onRelyingPartyIdChange: (value: string) => void;
-  relyingPartyName: string;
-  onRelyingPartyNameChange: (value: string) => void;
-  credentialId: string;
-  onCredentialIdChange: (value: string) => void;
-  showCredentialId: boolean;
-  onToggleCredentialId: () => void;
-  creationDate: string;
-  onCreationDateChange: (value: string) => void;
-  deviceInfo: string;
-  onDeviceInfoChange: (value: string) => void;
-}
+};
 
 export function buildOrgEntrySpecificFieldsProps({
   entryKind,

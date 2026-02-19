@@ -78,6 +78,83 @@ describe("useOrgEntrySpecificFieldsPropsFromState", () => {
     expect(setters.setExpiryDate).toHaveBeenCalledWith("2030-01-01");
     expect(setters.setExpiryError).toHaveBeenCalledWith(null);
   });
+
+  it("uses generator output to update password and generator settings", () => {
+    const { values, setters } = createState();
+    const { result } = renderHook(() =>
+      useOrgEntrySpecificFieldsPropsFromState({
+        entryKind: "password",
+        entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
+        translations: {
+          t: (k) => k,
+          tn: (k) => k,
+          tcc: (k) => k,
+          ti: (k) => k,
+          tpk: (k) => k,
+        },
+        values,
+        setters,
+        generatorSummary: "summary",
+        onCardNumberChange: vi.fn(),
+        maxInputLength: 19,
+        showLengthError: false,
+        showLuhnError: false,
+        detectedBrand: undefined,
+        hasBrandHint: false,
+        lengthHint: "16",
+      }),
+    );
+
+    const nextSettings = { length: 24 } as OrgPasswordFormValues["generatorSettings"];
+    result.current.onGeneratorUse("generated-password", nextSettings);
+    expect(setters.setPassword).toHaveBeenCalledWith("generated-password");
+    expect(setters.setShowPassword).toHaveBeenCalledWith(true);
+    expect(setters.setGeneratorSettings).toHaveBeenCalledWith(nextSettings);
+  });
+
+  it("toggles sensitive field visibility using current values", () => {
+    const { values, setters } = createState();
+    values.showPassword = true;
+    values.showCardNumber = true;
+    values.showCvv = true;
+    values.showIdNumber = true;
+    values.showCredentialId = true;
+
+    const { result } = renderHook(() =>
+      useOrgEntrySpecificFieldsPropsFromState({
+        entryKind: "passkey",
+        entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
+        translations: {
+          t: (k) => k,
+          tn: (k) => k,
+          tcc: (k) => k,
+          ti: (k) => k,
+          tpk: (k) => k,
+        },
+        values,
+        setters,
+        generatorSummary: "summary",
+        onCardNumberChange: vi.fn(),
+        maxInputLength: 19,
+        showLengthError: false,
+        showLuhnError: false,
+        detectedBrand: undefined,
+        hasBrandHint: false,
+        lengthHint: "16",
+      }),
+    );
+
+    result.current.onToggleShowPassword();
+    result.current.onToggleCardNumber();
+    result.current.onToggleCvv();
+    result.current.onToggleIdNumber();
+    result.current.onToggleCredentialId();
+    expect(setters.setShowPassword).toHaveBeenCalledWith(false);
+    expect(setters.setShowCardNumber).toHaveBeenCalledWith(false);
+    expect(setters.setShowCvv).toHaveBeenCalledWith(false);
+    expect(setters.setShowIdNumber).toHaveBeenCalledWith(false);
+    expect(setters.setShowCredentialId).toHaveBeenCalledWith(false);
+  });
 });
 
 function createState(): {
