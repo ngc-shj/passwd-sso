@@ -1,12 +1,19 @@
 import type { EntryLocaleCopy } from "@/components/org/org-entry-copy";
 import type { OrgEntryKind } from "@/components/org/org-password-form-types";
+import type {
+  CreditCardFormTranslator,
+  IdentityFormTranslator,
+  PasswordFormTranslator,
+  PasskeyFormTranslator,
+  SecureNoteFormTranslator,
+} from "@/lib/translation-types";
 
 interface BuildOrgEntryCopyDataArgs {
-  t: (key: string) => string;
-  tn: (key: string) => string;
-  tcc: (key: string) => string;
-  ti: (key: string) => string;
-  tpk: (key: string) => string;
+  t: PasswordFormTranslator;
+  tn: SecureNoteFormTranslator;
+  tcc: CreditCardFormTranslator;
+  ti: IdentityFormTranslator;
+  tpk: PasskeyFormTranslator;
 }
 
 export function buildOrgEntryCopyData({
