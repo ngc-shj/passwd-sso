@@ -1,11 +1,16 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import type {
+  CommonTranslator,
+  PasswordFormTranslator,
+  PasswordGeneratorTranslator,
+} from "@/lib/translation-types";
 
 export function useEntryFormTranslations() {
-  const t = useTranslations("PasswordForm");
-  const tGen = useTranslations("PasswordGenerator");
-  const tc = useTranslations("Common");
+  const t: PasswordFormTranslator = useTranslations("PasswordForm");
+  const tGen: PasswordGeneratorTranslator = useTranslations("PasswordGenerator");
+  const tc: CommonTranslator = useTranslations("Common");
   const tn = useTranslations("SecureNoteForm");
   const tcc = useTranslations("CreditCardForm");
   const ti = useTranslations("IdentityForm");

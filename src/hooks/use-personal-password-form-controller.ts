@@ -3,6 +3,7 @@
 import { submitPersonalPasswordForm } from "@/components/passwords/personal-password-submit";
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
+import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 interface UsePersonalPasswordFormControllerArgs {
   mode: "create" | "edit";
@@ -12,7 +13,7 @@ interface UsePersonalPasswordFormControllerArgs {
   userId?: string;
   values: PersonalPasswordFormEntryValues;
   setSubmitting: (value: boolean) => void;
-  t: (key: string) => string;
+  t: PasswordFormTranslator;
   router: { push: (href: string) => void; refresh: () => void; back: () => void };
 }
 

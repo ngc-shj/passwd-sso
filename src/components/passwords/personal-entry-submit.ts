@@ -2,6 +2,7 @@ import { toast } from "sonner";
 import { savePersonalEntry } from "@/lib/personal-entry-save";
 import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
 import type { EntryTypeValue } from "@/lib/constants";
+import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 interface RouterLike {
   push: (href: string) => void;
@@ -20,7 +21,7 @@ interface ExecutePersonalEntrySubmitArgs {
   requireReprompt?: boolean;
   folderId?: string | null;
   setSubmitting: (value: boolean) => void;
-  t: (key: string) => string;
+  t: PasswordFormTranslator;
   router: RouterLike;
   onSaved?: () => void;
 }

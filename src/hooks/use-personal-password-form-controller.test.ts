@@ -4,6 +4,7 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import { usePersonalPasswordFormController } from "@/hooks/use-personal-password-form-controller";
+import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 const submitPersonalPasswordFormMock = vi.fn();
 
@@ -30,7 +31,7 @@ describe("usePersonalPasswordFormController", () => {
         userId: "user-1",
         values: buildValues(),
         setSubmitting: vi.fn(),
-        t: (key) => key,
+        t: ((key: string) => key) as PasswordFormTranslator,
         router: { push: vi.fn(), refresh: vi.fn(), back },
       }),
     );

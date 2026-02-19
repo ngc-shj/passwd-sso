@@ -7,11 +7,12 @@ import {
 } from "@/components/passwords/personal-password-form-snapshot";
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
+import type { PasswordGeneratorTranslator } from "@/lib/translation-types";
 
 interface UsePersonalPasswordFormDerivedArgs {
   initialData?: PersonalPasswordFormInitialData;
   values: PersonalPasswordFormEntryValues;
-  tGen: (key: string) => string;
+  tGen: PasswordGeneratorTranslator;
 }
 
 export function usePersonalPasswordFormDerived({

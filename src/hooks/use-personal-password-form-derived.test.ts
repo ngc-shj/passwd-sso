@@ -4,6 +4,7 @@ import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import { usePersonalPasswordFormDerived } from "@/hooks/use-personal-password-form-derived";
+import type { PasswordGeneratorTranslator } from "@/lib/translation-types";
 
 describe("usePersonalPasswordFormDerived", () => {
   it("computes hasChanges from snapshot values", () => {
@@ -20,7 +21,7 @@ describe("usePersonalPasswordFormDerived", () => {
             tags: [],
           },
           values: buildValues({ title }),
-          tGen: (key) => key,
+          tGen: ((key: string) => key) as PasswordGeneratorTranslator,
         }),
       { initialProps: { title: "same" } },
     );
@@ -35,7 +36,8 @@ describe("usePersonalPasswordFormDerived", () => {
     const { result } = renderHook(() =>
       usePersonalPasswordFormDerived({
         values: buildValues(),
-        tGen: (key) => (key === "modePassword" ? "Password" : "Passphrase"),
+        tGen: ((key: string) =>
+          key === "modePassword" ? "Password" : "Passphrase") as PasswordGeneratorTranslator,
       }),
     );
 

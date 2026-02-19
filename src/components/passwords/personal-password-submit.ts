@@ -8,6 +8,7 @@ import type { PersonalPasswordFormInitialData } from "@/components/passwords/pas
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { TagData } from "@/components/tags/tag-input";
+import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 interface SubmitPersonalPasswordFormArgs {
   mode: "create" | "edit";
@@ -26,7 +27,7 @@ interface SubmitPersonalPasswordFormArgs {
   requireReprompt: boolean;
   folderId: string | null;
   setSubmitting: (value: boolean) => void;
-  t: (key: string) => string;
+  t: PasswordFormTranslator;
   router: { push: (href: string) => void; refresh: () => void };
   onSaved?: () => void;
 }
