@@ -23,10 +23,6 @@ import {
   applyOrgEditDataToForm,
   resetOrgFormForClose,
 } from "@/components/org/org-password-form-state";
-import {
-  buildBaselineSnapshot,
-  buildCurrentSnapshot,
-} from "@/components/org/org-password-form-snapshot";
 import { OrgTagsAndFolderSection } from "@/components/org/org-tags-and-folder-section";
 import type {
   OrgPasswordFormEditData,
@@ -53,6 +49,7 @@ import { buildGeneratorSummary } from "@/lib/generator-summary";
 import { executeOrgEntrySubmit } from "@/components/org/org-entry-submit";
 import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgAttachments } from "@/hooks/use-org-attachments";
+import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 
 export function OrgPasswordForm({
   orgId,
@@ -295,7 +292,7 @@ export function OrgPasswordForm({
     copyByKind: buildOrgEntryCopyData({ t, tn, tcc, ti, tpk }),
   });
 
-  const baselineSnapshot = buildBaselineSnapshot({
+  const { hasChanges, submitDisabled } = useOrgPasswordFormDerived({
     effectiveEntryType,
     editData,
     isLoginEntry,
@@ -303,19 +300,10 @@ export function OrgPasswordForm({
     isCreditCard,
     isIdentity,
     isPasskey,
-  });
-
-  const currentSnapshot = buildCurrentSnapshot({
-    effectiveEntryType,
     title,
     notes,
     selectedTags,
     orgFolderId,
-    isLoginEntry,
-    isNote,
-    isCreditCard,
-    isIdentity,
-    isPasskey,
     username,
     password,
     url,
@@ -342,15 +330,9 @@ export function OrgPasswordForm({
     credentialId,
     creationDate,
     deviceInfo,
+    cardNumberValid,
   });
-
-  const hasChanges = currentSnapshot !== baselineSnapshot;
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
-  const submitDisabled =
-    !title.trim() ||
-    (isPasskey && !relyingPartyId.trim()) ||
-    (isLoginEntry && !password) ||
-    (isCreditCard && !cardNumberValid);
 
   const loginFieldProps = {
     title,
