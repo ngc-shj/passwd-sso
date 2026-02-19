@@ -205,6 +205,16 @@ export function decryptShareData(encrypted: ServerEncryptedData): string {
   return decryptServerData(encrypted, masterKey);
 }
 
+/** Encrypt binary data with the master key directly (AES-256-GCM). */
+export function encryptShareBinary(data: Buffer): ServerEncryptedBinary {
+  return encryptServerBinary(data, getMasterKey());
+}
+
+/** Decrypt binary data with the master key directly (AES-256-GCM). */
+export function decryptShareBinary(encrypted: ServerEncryptedBinary): Buffer {
+  return decryptServerBinary(encrypted, getMasterKey());
+}
+
 // ─── Passphrase Verifier (HMAC pepper) ──────────────────────────
 
 const VERIFIER_HEX_RE = /^[0-9a-f]{64}$/;

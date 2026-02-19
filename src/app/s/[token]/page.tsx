@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { hashToken, decryptShareData } from "@/lib/crypto-server";
 import { ShareEntryView } from "@/components/share/share-entry-view";
+import { ShareSendView } from "@/components/share/share-send-view";
 import { ShareError } from "@/components/share/share-error";
 import { createRateLimiter } from "@/lib/rate-limit";
 
@@ -35,10 +36,15 @@ export default async function SharePage({ params }: Props) {
     where: { tokenHash },
     select: {
       id: true,
+      shareType: true,
       entryType: true,
       encryptedData: true,
       dataIv: true,
       dataAuthTag: true,
+      sendName: true,
+      sendFilename: true,
+      sendContentType: true,
+      sendSizeBytes: true,
       expiresAt: true,
       maxViews: true,
       viewCount: true,
@@ -97,10 +103,42 @@ export default async function SharePage({ params }: Props) {
     return <ShareError reason="notFound" />;
   }
 
+  // Branch on shareType
+  if (share.shareType === "TEXT") {
+    return (
+      <ShareSendView
+        sendType="TEXT"
+        name={String(data.name ?? share.sendName ?? "")}
+        text={String(data.text ?? "")}
+        token={token}
+        expiresAt={share.expiresAt.toISOString()}
+        viewCount={share.viewCount + 1}
+        maxViews={share.maxViews}
+      />
+    );
+  }
+
+  if (share.shareType === "FILE") {
+    return (
+      <ShareSendView
+        sendType="FILE"
+        name={String(data.name ?? share.sendName ?? "")}
+        filename={share.sendFilename}
+        contentType={share.sendContentType}
+        sizeBytes={share.sendSizeBytes}
+        token={token}
+        expiresAt={share.expiresAt.toISOString()}
+        viewCount={share.viewCount + 1}
+        maxViews={share.maxViews}
+      />
+    );
+  }
+
+  // ENTRY_SHARE (default)
   return (
     <ShareEntryView
       data={data}
-      entryType={share.entryType}
+      entryType={share.entryType!}
       expiresAt={share.expiresAt.toISOString()}
       viewCount={share.viewCount + 1}
       maxViews={share.maxViews}

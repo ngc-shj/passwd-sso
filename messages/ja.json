@@ -60,6 +60,7 @@
     "catPasskey": "パスキー",
     "newPasskey": "パスキー",
     "shareLinks": "共有リンク",
+    "send": "Send",
     "emergencyAccess": "緊急アクセス",
     "sidebar": "ナビゲーション",
     "folders": "フォルダ",
@@ -89,7 +90,14 @@
     "loadMore": "もっと読み込む",
     "sharedBy": "共有者: {name}",
     "personalEntry": "個人エントリー",
-    "deletedEntry": "削除済みエントリー"
+    "deletedEntry": "削除済みエントリー",
+    "typeFilter": "タイプ",
+    "allTypes": "すべて",
+    "entryShares": "エントリ共有",
+    "sends": "Send",
+    "newSend": "新規Send",
+    "textSend": "テキスト",
+    "fileSend": "ファイル"
   },
   "PasswordList": {
     "noMatch": "検索に一致するアイテムがありません。",
@@ -730,6 +738,8 @@
     "ORG_ROLE_UPDATE": "ロール変更",
     "SHARE_CREATE": "共有リンク作成",
     "SHARE_REVOKE": "共有リンク取り消し",
+    "SEND_CREATE": "Send作成",
+    "SEND_REVOKE": "Send取り消し",
     "EMERGENCY_GRANT_CREATE": "緊急アクセス権限の作成",
     "EMERGENCY_GRANT_ACCEPT": "緊急アクセス権限の受諾",
     "EMERGENCY_GRANT_REJECT": "緊急アクセス権限の拒否",
@@ -781,6 +791,7 @@
     "groupHistory": "履歴",
     "groupOrg": "組織",
     "groupShare": "共有リンク",
+    "groupSend": "Send",
     "groupEmergency": "緊急アクセス",
     "yes": "あり",
     "no": "なし",
@@ -855,7 +866,20 @@
     "accessTime": "日時",
     "ipAddress": "IPアドレス",
     "noAccessLogs": "アクセスログはまだありません",
-    "loadMoreLogs": "さらに読み込む"
+    "loadMoreLogs": "さらに読み込む",
+    "sendText": "テキスト",
+    "sendFile": "ファイル",
+    "sendName": "名前",
+    "sendContent": "内容",
+    "sendDownload": "ダウンロード",
+    "sendTextPlaceholder": "送信するテキストを入力...",
+    "sendNamePlaceholder": "名前を入力...",
+    "sendDropzone": "ファイルをドロップまたはクリック",
+    "sendMaxFileSize": "最大 10 MB",
+    "sendCreateSuccess": "Sendを作成しました",
+    "newSend": "新規Send",
+    "newSendDesc": "テキストまたはファイルを一時リンクで安全に送信します。",
+    "remove": "削除"
   },
   "EmergencyAccess": {
     "title": "緊急アクセス",
@@ -1004,7 +1028,11 @@
     "invalidRecoveryKey": "無効な回復キーです。",
     "recoveryKeyNotSet": "回復キーが設定されていません。",
     "vaultResetConfirmationMismatch": "確認テキストが一致しません。",
-    "invalidOrigin": "リクエスト元が許可されていません。"
+    "invalidOrigin": "リクエスト元が許可されていません。",
+    "sendTextTooLarge": "テキストが大きすぎます。",
+    "sendFileTooLarge": "ファイルが大きすぎます（最大 10 MB）。",
+    "sendFileTypeNotAllowed": "許可されていないファイル形式です。",
+    "sendStorageLimitExceeded": "ストレージ制限を超えています。"
   },
   "Attachments": {
     "title": "添付ファイル",

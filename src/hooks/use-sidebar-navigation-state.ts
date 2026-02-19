@@ -57,7 +57,9 @@ export function useSidebarNavigationState({
     const activeOrgTypeFilter = activeOrgId ? searchParams.get("type") : null;
     const activeOrgScope = activeOrgId ? searchParams.get("scope") : null;
     const isOrgsManage = cleanPath === "/dashboard/orgs";
-    const isShareLinks = cleanPath === "/dashboard/share-links";
+    const shareLinksTypeParam = cleanPath === "/dashboard/share-links" ? searchParams.get("type") : null;
+    const isSend = cleanPath === "/dashboard/share-links" && shareLinksTypeParam === "send";
+    const isShareLinks = cleanPath === "/dashboard/share-links" && !isSend;
     const isEmergencyAccess =
       cleanPath === "/dashboard/emergency-access" ||
       cleanPath.startsWith("/dashboard/emergency-access/");
@@ -142,6 +144,7 @@ export function useSidebarNavigationState({
       isOrgsManage,
       isWatchtower,
       isShareLinks,
+      isSend,
       isEmergencyAccess,
       isAuditLog,
       isPersonalAuditLog,
