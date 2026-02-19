@@ -3,11 +3,9 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
 import type { TagData } from "@/components/tags/tag-input";
-import {
-  type GeneratorSettings,
-  DEFAULT_GENERATOR_SETTINGS,
-} from "@/lib/generator-prefs";
+import { type GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import { buildPersonalPasswordFormInitialValues } from "@/hooks/personal-password-form-initial-values";
 
 export interface PersonalPasswordFormValues {
   showPassword: boolean;
@@ -67,23 +65,23 @@ export interface PersonalPasswordFormState {
 export function usePersonalPasswordFormState(
   initialData?: PersonalPasswordFormInitialData,
 ): PersonalPasswordFormState {
+  const initial = buildPersonalPasswordFormInitialValues(initialData);
+
   const [showPassword, setShowPassword] = useState(false);
   const [showGenerator, setShowGenerator] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [title, setTitle] = useState(initialData?.title ?? "");
-  const [username, setUsername] = useState(initialData?.username ?? "");
-  const [password, setPassword] = useState(initialData?.password ?? "");
-  const [url, setUrl] = useState(initialData?.url ?? "");
-  const [notes, setNotes] = useState(initialData?.notes ?? "");
-  const [selectedTags, setSelectedTags] = useState<TagData[]>(initialData?.tags ?? []);
-  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(
-    initialData?.generatorSettings ?? { ...DEFAULT_GENERATOR_SETTINGS },
-  );
-  const [customFields, setCustomFields] = useState<EntryCustomField[]>(initialData?.customFields ?? []);
-  const [totp, setTotp] = useState<EntryTotp | null>(initialData?.totp ?? null);
-  const [showTotpInput, setShowTotpInput] = useState(!!initialData?.totp);
-  const [requireReprompt, setRequireReprompt] = useState(initialData?.requireReprompt ?? false);
-  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
+  const [title, setTitle] = useState(initial.title);
+  const [username, setUsername] = useState(initial.username);
+  const [password, setPassword] = useState(initial.password);
+  const [url, setUrl] = useState(initial.url);
+  const [notes, setNotes] = useState(initial.notes);
+  const [selectedTags, setSelectedTags] = useState<TagData[]>(initial.selectedTags);
+  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(initial.generatorSettings);
+  const [customFields, setCustomFields] = useState<EntryCustomField[]>(initial.customFields);
+  const [totp, setTotp] = useState<EntryTotp | null>(initial.totp);
+  const [showTotpInput, setShowTotpInput] = useState(initial.showTotpInput);
+  const [requireReprompt, setRequireReprompt] = useState(initial.requireReprompt);
+  const [folderId, setFolderId] = useState<string | null>(initial.folderId);
 
   return {
     values: {
