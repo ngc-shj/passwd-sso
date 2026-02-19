@@ -1,30 +1,26 @@
 "use client";
 
-import type { ComponentProps } from "react";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
-import type { PersonalPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
-import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
 import { buildPersonalEntryLoginFieldCallbacks } from "@/hooks/personal-entry-login-fields-callbacks";
 import { buildPersonalEntryLoginFieldTextProps } from "@/hooks/personal-entry-login-fields-text-props";
+import type {
+  EntryLoginMainFieldsProps,
+  PersonalEntryLoginFieldTextProps,
+  UsePersonalEntryLoginFieldsPropsArgs,
+} from "@/hooks/personal-entry-login-fields-types";
 
-type EntryLoginMainFieldsProps = ComponentProps<typeof EntryLoginMainFields>;
+type PersonalEntryLoginFieldCallbacks = ReturnType<typeof buildPersonalEntryLoginFieldCallbacks>;
 
-interface UsePersonalEntryLoginFieldsPropsArgs {
-  formState: PersonalPasswordFormState;
-  generatorSummary: string;
-  translations: Pick<PersonalPasswordFormTranslations, "t">;
-}
-
-export function usePersonalEntryLoginFieldsProps({
-  formState,
+export function buildPersonalEntryLoginFieldPropsFromState({
+  values,
+  callbacks,
   generatorSummary,
-  translations,
-}: UsePersonalEntryLoginFieldsPropsArgs): EntryLoginMainFieldsProps {
-  const { values, setters } = formState;
-  const { t } = translations;
-  const callbacks = buildPersonalEntryLoginFieldCallbacks(values, setters);
-  const textProps = buildPersonalEntryLoginFieldTextProps(t);
-
+  textProps,
+}: {
+  values: UsePersonalEntryLoginFieldsPropsArgs["formState"]["values"];
+  callbacks: PersonalEntryLoginFieldCallbacks;
+  generatorSummary: string;
+  textProps: PersonalEntryLoginFieldTextProps;
+}): EntryLoginMainFieldsProps {
   return {
     ...textProps,
     title: values.title,
@@ -47,4 +43,22 @@ export function usePersonalEntryLoginFieldsProps({
     notes: values.notes,
     onNotesChange: callbacks.onNotesChange,
   };
+}
+
+export function usePersonalEntryLoginFieldsProps({
+  formState,
+  generatorSummary,
+  translations,
+}: UsePersonalEntryLoginFieldsPropsArgs): EntryLoginMainFieldsProps {
+  const { values, setters } = formState;
+  const { t } = translations;
+  const callbacks = buildPersonalEntryLoginFieldCallbacks(values, setters);
+  const textProps = buildPersonalEntryLoginFieldTextProps(t);
+
+  return buildPersonalEntryLoginFieldPropsFromState({
+    values,
+    callbacks,
+    generatorSummary,
+    textProps,
+  });
 }

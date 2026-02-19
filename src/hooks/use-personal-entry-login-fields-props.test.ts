@@ -3,10 +3,36 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
-import { usePersonalEntryLoginFieldsProps } from "@/hooks/use-personal-entry-login-fields-props";
+import {
+  buildPersonalEntryLoginFieldPropsFromState,
+  usePersonalEntryLoginFieldsProps,
+} from "@/hooks/use-personal-entry-login-fields-props";
+import { buildPersonalEntryLoginFieldCallbacks } from "@/hooks/personal-entry-login-fields-callbacks";
+import { buildPersonalEntryLoginFieldTextProps } from "@/hooks/personal-entry-login-fields-text-props";
 import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
 
 describe("usePersonalEntryLoginFieldsProps", () => {
+  it("builds complete login field props from state", () => {
+    const state = createState();
+    const callbacks = buildPersonalEntryLoginFieldCallbacks(state.values, state.setters);
+    const textProps = buildPersonalEntryLoginFieldTextProps((k) => `label.${k}`);
+
+    const props = buildPersonalEntryLoginFieldPropsFromState({
+      values: state.values,
+      callbacks,
+      generatorSummary: "summary",
+      textProps,
+    });
+
+    expect(props.title).toBe(state.values.title);
+    expect(props.username).toBe(state.values.username);
+    expect(props.password).toBe(state.values.password);
+    expect(props.onPasswordChange).toBe(callbacks.onPasswordChange);
+    expect(props.titleLabel).toBe("label.title");
+    expect(props.notesPlaceholder).toBe("label.notesPlaceholder");
+    expect(props.generatorSummary).toBe("summary");
+  });
+
   it("maps values and labels from personal form state", () => {
     const state = createState();
     const { result } = renderHook(() =>

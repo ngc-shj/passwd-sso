@@ -1,24 +1,11 @@
 "use client";
 
 import type { PasswordFormTranslator } from "@/lib/translation-types";
-
-type TextProps = {
-  titleLabel: string;
-  titlePlaceholder: string;
-  usernameLabel: string;
-  usernamePlaceholder: string;
-  passwordLabel: string;
-  passwordPlaceholder: string;
-  closeGeneratorLabel: string;
-  openGeneratorLabel: string;
-  urlLabel: string;
-  notesLabel: string;
-  notesPlaceholder: string;
-};
+import type { PersonalEntryLoginFieldTextProps } from "@/hooks/personal-entry-login-fields-types";
 
 export function buildPersonalEntryLoginFieldTextProps(
   t: PasswordFormTranslator,
-): TextProps {
+): PersonalEntryLoginFieldTextProps {
   return {
     titleLabel: t("title"),
     titlePlaceholder: t("titlePlaceholder"),
