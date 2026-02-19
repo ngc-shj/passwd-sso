@@ -3,9 +3,9 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
+import type { PersonalPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
 import {
   usePersonalPasswordFormController,
-  type PersonalPasswordFormTranslations,
 } from "@/hooks/use-personal-password-form-controller";
 
 const submitPersonalPasswordFormMock = vi.fn();

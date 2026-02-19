@@ -6,10 +6,12 @@ import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
 import {
   usePersonalPasswordFormController,
-  type PersonalPasswordFormTranslations,
 } from "@/hooks/use-personal-password-form-controller";
 import { usePersonalPasswordFormDerived } from "@/hooks/use-personal-password-form-derived";
-import { useEntryFormTranslations } from "@/hooks/use-entry-form-translations";
+import {
+  toPersonalPasswordFormTranslations,
+  useEntryFormTranslations,
+} from "@/hooks/use-entry-form-translations";
 import {
   selectPersonalEntryValues,
   usePersonalPasswordFormState,
@@ -22,8 +24,8 @@ export function usePersonalPasswordFormModel({
   initialData,
   onSaved,
 }: PersonalPasswordFormModelInput) {
-  const { t, tGen, tc } = useEntryFormTranslations();
-  const translations: PersonalPasswordFormTranslations = { t, tGen, tc };
+  const translationBundle = useEntryFormTranslations();
+  const translations = toPersonalPasswordFormTranslations(translationBundle);
   const router = useRouter();
   const { encryptionKey, userId } = useVault();
   const formState = usePersonalPasswordFormState(initialData);
@@ -48,8 +50,8 @@ export function usePersonalPasswordFormModel({
   });
 
   return {
-    t: translations.t,
-    tc: translations.tc,
+    t: translationBundle.t,
+    tc: translationBundle.tc,
     mode,
     formState,
     folders,

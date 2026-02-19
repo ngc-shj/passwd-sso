@@ -7,8 +7,10 @@ import { useOrgAttachments } from "@/hooks/use-org-attachments";
 import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgPasswordFormController } from "@/hooks/use-org-password-form-controller";
 import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
-import type { OrgPasswordFormTranslations } from "@/hooks/use-org-password-form-presenter";
-import { useEntryFormTranslations } from "@/hooks/use-entry-form-translations";
+import {
+  toOrgPasswordFormTranslations,
+  useEntryFormTranslations,
+} from "@/hooks/use-entry-form-translations";
 import {
   type OrgPasswordFormLifecycleSetters,
   useOrgPasswordFormState,
@@ -27,8 +29,9 @@ export function useOrgPasswordFormModel({
   entryType: entryTypeProp = ENTRY_TYPE.LOGIN,
   editData,
 }: OrgPasswordFormModelInput) {
-  const { t, tGen, tn, tcc, ti, tpk, tc } = useEntryFormTranslations();
-  const translations: OrgPasswordFormTranslations = { t, tGen, tn, tcc, ti, tpk };
+  const translationBundle = useEntryFormTranslations();
+  const { t, tc } = translationBundle;
+  const translations = toOrgPasswordFormTranslations(translationBundle);
 
   const effectiveEntryType = editData?.entryType ?? entryTypeProp;
   const entryKindState = getOrgEntryKindState(effectiveEntryType);
