@@ -11,13 +11,19 @@ interface BuildOrgPasswordDerivedArgsInput {
   cardNumberValid: boolean;
 }
 
+export interface OrgPasswordFormDerivedArgs extends OrgEntryKindState, OrgEntryFieldValues {
+  effectiveEntryType: EntryTypeValue;
+  editData?: OrgPasswordFormEditData | null;
+  cardNumberValid: boolean;
+}
+
 export function buildOrgPasswordDerivedArgs({
   effectiveEntryType,
   editData,
   entryKindState,
   values,
   cardNumberValid,
-}: BuildOrgPasswordDerivedArgsInput) {
+}: BuildOrgPasswordDerivedArgsInput): OrgPasswordFormDerivedArgs {
   return {
     effectiveEntryType,
     editData,

@@ -2,7 +2,7 @@ import type { PersonalPasswordFormInitialData } from "@/components/passwords/pas
 import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
 
-interface BuildPersonalPasswordDerivedArgsInput {
+export interface PersonalPasswordFormDerivedArgs {
   initialData?: PersonalPasswordFormInitialData;
   values: PersonalPasswordFormEntryValues;
   translations: PersonalPasswordFormTranslations;
@@ -12,7 +12,7 @@ export function buildPersonalPasswordDerivedArgs({
   initialData,
   values,
   translations,
-}: BuildPersonalPasswordDerivedArgsInput) {
+}: PersonalPasswordFormDerivedArgs): PersonalPasswordFormDerivedArgs {
   return {
     initialData,
     values,
