@@ -7,12 +7,6 @@ import type {
 } from "@/lib/translation-types";
 import type { EntryFormTranslationsBundle } from "@/hooks/entry-form-translations";
 
-export type {
-  PersonalPasswordFormTranslations,
-  OrgPasswordFormTranslations,
-  EntryFormTranslationsBundle,
-} from "@/hooks/entry-form-translations";
-
 export {
   toPersonalPasswordFormTranslations,
   toOrgPasswordFormTranslations,

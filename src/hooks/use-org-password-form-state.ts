@@ -6,9 +6,6 @@ import { useOrgPasswordFormUiState } from "@/hooks/use-org-password-form-ui-stat
 import { useOrgPasswordFormValueState } from "@/hooks/use-org-password-form-value-state";
 import { buildOrgPasswordFormInitialValues } from "@/hooks/org-password-form-initial-values";
 
-export type { OrgPasswordFormInitialValues } from "@/hooks/org-password-form-initial-values";
-export { buildOrgPasswordFormInitialValues } from "@/hooks/org-password-form-initial-values";
-
 export function useOrgPasswordFormState(editData?: OrgPasswordFormEditData | null) {
   const initial = buildOrgPasswordFormInitialValues(editData);
   const uiState = useOrgPasswordFormUiState();

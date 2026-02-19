@@ -8,9 +8,6 @@ import {
   resetOrgFormForClose,
 } from "@/hooks/org-password-form-lifecycle-actions";
 
-export type { OrgPasswordFormSetters } from "@/hooks/org-password-form-lifecycle-actions";
-export { applyOrgEditDataToForm, resetOrgFormForClose } from "@/hooks/org-password-form-lifecycle-actions";
-
 export interface OrgPasswordFormLifecycleArgs {
   open: OrgPasswordFormProps["open"];
   editData?: OrgPasswordFormProps["editData"];

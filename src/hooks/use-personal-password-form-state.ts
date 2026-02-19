@@ -9,9 +9,6 @@ import { usePersonalPasswordFormUiState } from "@/hooks/use-personal-password-fo
 import { usePersonalPasswordFormValueState } from "@/hooks/use-personal-password-form-value-state";
 import { buildPersonalPasswordFormInitialValues } from "@/hooks/personal-password-form-initial-values";
 
-export type { PersonalPasswordFormInitialValues } from "@/hooks/personal-password-form-initial-values";
-export { buildPersonalPasswordFormInitialValues } from "@/hooks/personal-password-form-initial-values";
-
 export interface PersonalPasswordFormValues {
   showPassword: boolean;
   showGenerator: boolean;

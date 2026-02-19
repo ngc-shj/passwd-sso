@@ -11,12 +11,6 @@ import {
   buildOrgSubmitDisabled,
 } from "@/hooks/org-password-form-derived-helpers";
 
-export {
-  buildBaselineSnapshot,
-  buildCurrentSnapshot,
-  buildOrgSubmitDisabled,
-} from "@/hooks/org-password-form-derived-helpers";
-
 export type OrgPasswordFormDerivedArgs = {
   effectiveEntryType: EntryTypeValue;
   editData?: OrgPasswordFormProps["editData"];
