@@ -35,7 +35,7 @@ export function useOrgPasswordFormController({
   formState,
   handleOpenChange,
 }: OrgPasswordFormControllerArgs) {
-  const { values, setters } = formState;
+  const { setters } = formState;
   const { isIdentity } = entryKindState;
   const { entryValues, cardNumberValid, entryCopy, entrySpecificFieldsProps } =
     useOrgPasswordFormPresenter({
