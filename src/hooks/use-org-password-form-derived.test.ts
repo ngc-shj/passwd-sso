@@ -3,10 +3,8 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import {
-  buildOrgSubmitDisabled,
-  useOrgPasswordFormDerived,
-} from "@/hooks/use-org-password-form-derived";
+import { buildOrgSubmitDisabled } from "@/hooks/org-password-form-derived-helpers";
+import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
 import type { OrgEntryFieldValues } from "@/hooks/use-org-password-form-state";
 

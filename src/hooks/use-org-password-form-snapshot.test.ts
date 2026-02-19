@@ -3,7 +3,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import {
   buildBaselineSnapshot,
   buildCurrentSnapshot,
-} from "@/hooks/use-org-password-form-derived";
+} from "@/hooks/org-password-form-derived-helpers";
 
 describe("use-org-password-form-derived snapshot helpers", () => {
   it("buildBaselineSnapshot serializes edit data for login entries", () => {

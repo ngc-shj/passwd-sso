@@ -2,44 +2,26 @@
 
 import { useTranslations } from "next-intl";
 import type {
-  CommonTranslator,
-  CreditCardFormTranslator,
-  IdentityFormTranslator,
   PasswordFormTranslator,
   PasswordGeneratorTranslator,
-  PasskeyFormTranslator,
-  SecureNoteFormTranslator,
 } from "@/lib/translation-types";
+import type { EntryFormTranslationsBundle } from "@/hooks/entry-form-translations";
 
-export interface PersonalPasswordFormTranslations {
-  t: PasswordFormTranslator;
-  tGen: PasswordGeneratorTranslator;
-  tc: CommonTranslator;
-}
+export type {
+  PersonalPasswordFormTranslations,
+  OrgPasswordFormTranslations,
+  EntryFormTranslationsBundle,
+} from "@/hooks/entry-form-translations";
 
-export interface OrgPasswordFormTranslations {
-  t: PasswordFormTranslator;
-  tGen: PasswordGeneratorTranslator;
-  tn: SecureNoteFormTranslator;
-  tcc: CreditCardFormTranslator;
-  ti: IdentityFormTranslator;
-  tpk: PasskeyFormTranslator;
-}
-
-export interface EntryFormTranslationsBundle {
-  t: PasswordFormTranslator;
-  tGen: PasswordGeneratorTranslator;
-  tc: CommonTranslator;
-  tn: SecureNoteFormTranslator;
-  tcc: CreditCardFormTranslator;
-  ti: IdentityFormTranslator;
-  tpk: PasskeyFormTranslator;
-}
+export {
+  toPersonalPasswordFormTranslations,
+  toOrgPasswordFormTranslations,
+} from "@/hooks/entry-form-translations";
 
 export function useEntryFormTranslations() {
   const t: PasswordFormTranslator = useTranslations("PasswordForm");
   const tGen: PasswordGeneratorTranslator = useTranslations("PasswordGenerator");
-  const tc: CommonTranslator = useTranslations("Common");
+  const tc = useTranslations("Common");
   const tn = useTranslations("SecureNoteForm");
   const tcc = useTranslations("CreditCardForm");
   const ti = useTranslations("IdentityForm");
@@ -54,27 +36,4 @@ export function useEntryFormTranslations() {
     ti,
     tpk,
   } satisfies EntryFormTranslationsBundle;
-}
-
-export function toPersonalPasswordFormTranslations(
-  translations: EntryFormTranslationsBundle,
-): PersonalPasswordFormTranslations {
-  return {
-    t: translations.t,
-    tGen: translations.tGen,
-    tc: translations.tc,
-  };
-}
-
-export function toOrgPasswordFormTranslations(
-  translations: EntryFormTranslationsBundle,
-): OrgPasswordFormTranslations {
-  return {
-    t: translations.t,
-    tGen: translations.tGen,
-    tn: translations.tn,
-    tcc: translations.tcc,
-    ti: translations.ti,
-    tpk: translations.tpk,
-  };
 }
