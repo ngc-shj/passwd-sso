@@ -5,12 +5,6 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
-import { buildGeneratorSummary } from "@/lib/generator-summary";
-import {
-  buildPersonalCurrentSnapshot,
-  buildPersonalInitialSnapshot,
-} from "@/components/passwords/personal-password-form-snapshot";
-import { submitPersonalPasswordForm } from "@/components/passwords/personal-password-submit";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
 import type { TagData } from "@/components/tags/tag-input";
 import {
@@ -18,6 +12,7 @@ import {
   DEFAULT_GENERATOR_SETTINGS,
 } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import { usePersonalPasswordFormController } from "@/hooks/use-personal-password-form-controller";
 
 type PersonalPasswordFormModelInput = Pick<PasswordFormProps, "mode" | "initialData" | "onSaved">;
 
@@ -51,63 +46,32 @@ export function usePersonalPasswordFormModel({
   const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
   const folders = usePersonalFolders();
 
-  const initialSnapshot = buildPersonalInitialSnapshot(initialData);
-  const currentSnapshot = buildPersonalCurrentSnapshot({
+  const values = {
     title,
     username,
     password,
     url,
     notes,
-    tags: selectedTags,
+    selectedTags,
     generatorSettings,
     customFields,
     totp,
     requireReprompt,
     folderId,
-  });
-  const hasChanges = currentSnapshot !== initialSnapshot;
-
-  const generatorSummary = buildGeneratorSummary(generatorSettings, {
-    modePassphrase: tGen("modePassphrase"),
-    modePassword: tGen("modePassword"),
-  });
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await submitPersonalPasswordForm({
+  };
+  const { hasChanges, generatorSummary, handleSubmit, handleCancel, handleBack } =
+    usePersonalPasswordFormController({
       mode,
       initialData,
+      onSaved,
       encryptionKey,
       userId: userId ?? undefined,
-      title,
-      username,
-      password,
-      url,
-      notes,
-      selectedTags,
-      generatorSettings,
-      customFields,
-      totp,
-      requireReprompt,
-      folderId,
+      values,
       setSubmitting,
       t,
+      tGen,
       router,
-      onSaved,
     });
-  };
-
-  const handleCancel = () => {
-    if (onSaved) {
-      onSaved();
-      return;
-    }
-    router.back();
-  };
-
-  const handleBack = () => {
-    router.back();
-  };
 
   return {
     t,
