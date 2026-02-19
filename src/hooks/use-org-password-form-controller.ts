@@ -3,7 +3,6 @@
 import { submitOrgPasswordForm } from "@/components/org/org-password-form-actions";
 import type { OrgPasswordFormControllerArgs } from "@/hooks/org-password-form-controller-args";
 import type { OrgPasswordFormDerivedArgs } from "@/hooks/org-password-form-derived-args";
-import { buildOrgPasswordPresenterArgs } from "@/hooks/org-password-form-presenter-args";
 import { buildOrgPasswordSubmitArgs } from "@/hooks/org-password-form-submit-args";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 import { useOrgPasswordFormPresenter } from "@/hooks/use-org-password-form-presenter";
@@ -23,15 +22,12 @@ export function useOrgPasswordFormController({
   const { values, setters } = formState;
   const { isIdentity } = entryKindState;
   const entryValues = selectOrgEntryFieldValues(values);
-  const { cardNumberValid, entryCopy, entrySpecificFieldsProps } =
-    useOrgPasswordFormPresenter(
-      buildOrgPasswordPresenterArgs({
-        isEdit,
-        entryKindState,
-        translations,
-        formState,
-      }),
-    );
+  const { cardNumberValid, entryCopy, entrySpecificFieldsProps } = useOrgPasswordFormPresenter({
+    isEdit,
+    entryKind: entryKindState.entryKind,
+    ...translations,
+    formState,
+  });
 
   const derivedArgs: OrgPasswordFormDerivedArgs = {
     effectiveEntryType,

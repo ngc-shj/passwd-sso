@@ -5,9 +5,17 @@ import { getOrgCardValidationState } from "@/components/org/org-credit-card-vali
 import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
 import { buildOrgEntryCopyData } from "@/components/org/org-entry-copy-data";
 import { handleOrgCardNumberChange } from "@/components/org/org-password-form-actions";
-import type { OrgPasswordFormPresenterArgs } from "@/hooks/org-password-form-presenter-args";
+import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
+import type { OrgPasswordFormTranslations } from "@/hooks/org-password-form-translations";
 import { useOrgEntrySpecificFieldsPropsFromState } from "@/hooks/use-org-entry-specific-fields-props";
+import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
+
+export type OrgPasswordFormPresenterArgs = OrgPasswordFormTranslations & {
+  isEdit: boolean;
+  entryKind: OrgEntryKindState["entryKind"];
+  formState: OrgPasswordFormState;
+};
 
 export function useOrgPasswordFormPresenter({
   isEdit,
