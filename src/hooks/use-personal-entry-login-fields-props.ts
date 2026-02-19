@@ -4,7 +4,8 @@ import type { ComponentProps } from "react";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import type { PersonalPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
 import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
+import { buildPersonalEntryLoginFieldCallbacks } from "@/hooks/personal-entry-login-fields-callbacks";
+import { buildPersonalEntryLoginFieldTextProps } from "@/hooks/personal-entry-login-fields-text-props";
 
 type EntryLoginMainFieldsProps = ComponentProps<typeof EntryLoginMainFields>;
 
@@ -21,41 +22,29 @@ export function usePersonalEntryLoginFieldsProps({
 }: UsePersonalEntryLoginFieldsPropsArgs): EntryLoginMainFieldsProps {
   const { values, setters } = formState;
   const { t } = translations;
+  const callbacks = buildPersonalEntryLoginFieldCallbacks(values, setters);
+  const textProps = buildPersonalEntryLoginFieldTextProps(t);
 
   return {
+    ...textProps,
     title: values.title,
-    onTitleChange: setters.setTitle,
-    titleLabel: t("title"),
-    titlePlaceholder: t("titlePlaceholder"),
+    onTitleChange: callbacks.onTitleChange,
     titleRequired: true,
     username: values.username,
-    onUsernameChange: setters.setUsername,
-    usernameLabel: t("usernameEmail"),
-    usernamePlaceholder: t("usernamePlaceholder"),
+    onUsernameChange: callbacks.onUsernameChange,
     password: values.password,
-    onPasswordChange: setters.setPassword,
-    passwordLabel: t("password"),
-    passwordPlaceholder: t("passwordPlaceholder"),
+    onPasswordChange: callbacks.onPasswordChange,
     passwordRequired: true,
     showPassword: values.showPassword,
-    onToggleShowPassword: () => setters.setShowPassword(!values.showPassword),
+    onToggleShowPassword: callbacks.onToggleShowPassword,
     generatorSummary,
     showGenerator: values.showGenerator,
-    onToggleGenerator: () => setters.setShowGenerator(!values.showGenerator),
-    closeGeneratorLabel: t("closeGenerator"),
-    openGeneratorLabel: t("openGenerator"),
+    onToggleGenerator: callbacks.onToggleGenerator,
     generatorSettings: values.generatorSettings,
-    onGeneratorUse: (pw: string, settings: GeneratorSettings) => {
-      setters.setPassword(pw);
-      setters.setShowPassword(true);
-      setters.setGeneratorSettings(settings);
-    },
+    onGeneratorUse: callbacks.onGeneratorUse,
     url: values.url,
-    onUrlChange: setters.setUrl,
-    urlLabel: t("url"),
+    onUrlChange: callbacks.onUrlChange,
     notes: values.notes,
-    onNotesChange: setters.setNotes,
-    notesLabel: t("notes"),
-    notesPlaceholder: t("notesPlaceholder"),
+    onNotesChange: callbacks.onNotesChange,
   };
 }
