@@ -1,7 +1,6 @@
 "use client";
 
 import { submitOrgPasswordForm } from "@/components/org/org-password-form-actions";
-import type { SubmitOrgPasswordFormArgs } from "@/components/org/org-password-form-actions";
 import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -11,6 +10,7 @@ import {
 } from "@/hooks/use-org-password-form-presenter";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 import { type OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
+import { buildOrgSubmitArgs } from "@/hooks/org-password-form-submit-args";
 
 export interface OrgPasswordFormControllerArgs {
   orgId: OrgPasswordFormProps["orgId"];
@@ -36,7 +36,6 @@ export function useOrgPasswordFormController({
   handleOpenChange,
 }: OrgPasswordFormControllerArgs) {
   const { setters } = formState;
-  const { isIdentity } = entryKindState;
   const { entryValues, cardNumberValid, entryCopy, entrySpecificFieldsProps } =
     useOrgPasswordFormPresenter({
     isEdit,
@@ -54,25 +53,19 @@ export function useOrgPasswordFormController({
   });
 
   const handleSubmit = async () => {
-    const submitArgs: SubmitOrgPasswordFormArgs = {
+    const submitArgs = buildOrgSubmitArgs({
       orgId,
+      onSaved,
       isEdit,
       editData,
       effectiveEntryType,
-      ...entryValues,
-      cardNumberValid,
-      isIdentity,
-      setDobError: setters.setDobError,
-      setExpiryError: setters.setExpiryError,
-      identityErrorCopy: {
-        dobFuture: translations.ti("dobFuture"),
-        expiryBeforeIssue: translations.ti("expiryBeforeIssue"),
-      },
-      t: translations.t,
-      setSaving: setters.setSaving,
+      entryKindState,
+      translations,
       handleOpenChange,
-      onSaved,
-    };
+      setters,
+      entryValues,
+      cardNumberValid,
+    });
     await submitOrgPasswordForm(submitArgs);
   };
 
