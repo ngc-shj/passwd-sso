@@ -7,15 +7,14 @@ import type { PasswordFormProps } from "@/components/passwords/password-form-typ
 import {
   usePersonalPasswordFormController,
 } from "@/hooks/use-personal-password-form-controller";
-import { usePersonalPasswordFormDerived } from "@/hooks/use-personal-password-form-derived";
+import {
+  usePersonalPasswordFormPresenter,
+} from "@/hooks/use-personal-password-form-presenter";
 import {
   toPersonalPasswordFormTranslations,
   useEntryFormTranslations,
 } from "@/hooks/use-entry-form-translations";
-import {
-  selectPersonalEntryValues,
-  usePersonalPasswordFormState,
-} from "@/hooks/use-personal-password-form-state";
+import { usePersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
 
 type PersonalPasswordFormModelInput = Pick<PasswordFormProps, "mode" | "initialData" | "onSaved">;
 
@@ -31,10 +30,10 @@ export function usePersonalPasswordFormModel({
   const formState = usePersonalPasswordFormState(initialData);
   const folders = usePersonalFolders();
 
-  const values = selectPersonalEntryValues(formState.values);
-  const { hasChanges, generatorSummary } = usePersonalPasswordFormDerived({
+  const { values, hasChanges, generatorSummary, loginMainFieldsProps } =
+    usePersonalPasswordFormPresenter({
     initialData,
-    values,
+    formState,
     translations,
   });
   const { handleSubmit, handleCancel, handleBack } = usePersonalPasswordFormController({
@@ -57,6 +56,7 @@ export function usePersonalPasswordFormModel({
     folders,
     hasChanges,
     generatorSummary,
+    loginMainFieldsProps,
     handleSubmit,
     handleCancel,
     handleBack,

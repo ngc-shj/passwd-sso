@@ -12,7 +12,6 @@ import {
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
-import { usePersonalEntryLoginFieldsProps } from "@/hooks/use-personal-entry-login-fields-props";
 import { usePersonalPasswordFormModel } from "@/hooks/use-personal-password-form-model";
 
 export function PasswordForm({ mode, initialData, variant = "page", onSaved }: PasswordFormProps) {
@@ -22,7 +21,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     formState,
     folders,
     hasChanges,
-    generatorSummary,
+    loginMainFieldsProps,
     handleSubmit,
     handleCancel,
     handleBack,
@@ -34,11 +33,6 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   const { values, setters } = formState;
   const isDialogVariant = variant === "dialog";
   const dialogSectionClass = isDialogVariant ? ENTRY_DIALOG_FLAT_SECTION_CLASS : "";
-  const loginMainFieldsProps = usePersonalEntryLoginFieldsProps({
-    formState,
-    generatorSummary,
-    translations: { t },
-  });
 
   const loginMainFields = (
     <EntryLoginMainFields {...loginMainFieldsProps} />
