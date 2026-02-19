@@ -2,9 +2,11 @@
 
 import { submitOrgPasswordForm } from "@/components/org/org-password-form-actions";
 import type { OrgPasswordFormControllerArgs } from "@/hooks/org-password-form-controller-args";
-import type { OrgPasswordFormDerivedArgs } from "@/hooks/org-password-form-derived-args";
 import { buildOrgPasswordSubmitArgs } from "@/hooks/org-password-form-submit-args";
-import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
+import {
+  useOrgPasswordFormDerived,
+  type OrgPasswordFormDerivedArgs,
+} from "@/hooks/use-org-password-form-derived";
 import { useOrgPasswordFormPresenter } from "@/hooks/use-org-password-form-presenter";
 import { selectOrgEntryFieldValues } from "@/hooks/use-org-password-form-state";
 
