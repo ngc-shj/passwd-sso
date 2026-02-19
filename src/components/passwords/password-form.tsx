@@ -1,9 +1,5 @@
 "use client";
 
-import { useState } from "react";
-import { useTranslations } from "next-intl";
-import { useRouter } from "@/i18n/navigation";
-import { useVault } from "@/lib/vault-context";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { PasswordFormPageShell } from "@/components/passwords/password-form-page-shell";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
@@ -14,110 +10,56 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
-import type { TagData } from "@/components/tags/tag-input";
-import {
-  type GeneratorSettings,
-  DEFAULT_GENERATOR_SETTINGS,
-} from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
-import { usePersonalFolders } from "@/hooks/use-personal-folders";
-import { buildGeneratorSummary } from "@/lib/generator-summary";
-import {
-  buildPersonalCurrentSnapshot,
-  buildPersonalInitialSnapshot,
-} from "@/components/passwords/personal-password-form-snapshot";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
-import { submitPersonalPasswordForm } from "@/components/passwords/personal-password-submit";
+import { usePersonalPasswordFormModel } from "@/hooks/use-personal-password-form-model";
 
 export function PasswordForm({ mode, initialData, variant = "page", onSaved }: PasswordFormProps) {
-  const t = useTranslations("PasswordForm");
-  const tGen = useTranslations("PasswordGenerator");
-  const tc = useTranslations("Common");
-  const router = useRouter();
-  const { encryptionKey, userId } = useVault();
-  const [showPassword, setShowPassword] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  const [title, setTitle] = useState(initialData?.title ?? "");
-  const [username, setUsername] = useState(initialData?.username ?? "");
-  const [password, setPassword] = useState(initialData?.password ?? "");
-  const [url, setUrl] = useState(initialData?.url ?? "");
-  const [notes, setNotes] = useState(initialData?.notes ?? "");
-  const [selectedTags, setSelectedTags] = useState<TagData[]>(
-    initialData?.tags ?? []
-  );
-  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(
-    initialData?.generatorSettings ?? { ...DEFAULT_GENERATOR_SETTINGS }
-  );
-  const [customFields, setCustomFields] = useState<EntryCustomField[]>(
-    initialData?.customFields ?? []
-  );
-  const [totp, setTotp] = useState<EntryTotp | null>(
-    initialData?.totp ?? null
-  );
-  const [showTotpInput, setShowTotpInput] = useState(!!initialData?.totp);
-  const [requireReprompt, setRequireReprompt] = useState(initialData?.requireReprompt ?? false);
-  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
-  const folders = usePersonalFolders();
-
-  const initialSnapshot = buildPersonalInitialSnapshot(initialData);
-
-  const currentSnapshot = buildPersonalCurrentSnapshot({
+  const {
+    t,
+    tc,
+    submitting,
     title,
     username,
     password,
     url,
     notes,
-    tags: selectedTags,
+    selectedTags,
     generatorSettings,
     customFields,
     totp,
+    showTotpInput,
     requireReprompt,
     folderId,
+    folders,
+    showPassword,
+    showGenerator,
+    hasChanges,
+    generatorSummary,
+    setTitle,
+    setUsername,
+    setPassword,
+    setUrl,
+    setNotes,
+    setSelectedTags,
+    setGeneratorSettings,
+    setCustomFields,
+    setTotp,
+    setShowTotpInput,
+    setRequireReprompt,
+    setFolderId,
+    setShowPassword,
+    setShowGenerator,
+    handleSubmit,
+    handleCancel,
+    handleBack,
+  } = usePersonalPasswordFormModel({
+    mode,
+    initialData,
+    onSaved,
   });
-  const hasChanges = currentSnapshot !== initialSnapshot;
   const isDialogVariant = variant === "dialog";
   const dialogSectionClass = isDialogVariant ? ENTRY_DIALOG_FLAT_SECTION_CLASS : "";
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await submitPersonalPasswordForm({
-      mode,
-      initialData,
-      encryptionKey,
-      userId: userId ?? undefined,
-      title,
-      username,
-      password,
-      url,
-      notes,
-      selectedTags,
-      generatorSettings,
-      customFields,
-      totp,
-      requireReprompt,
-      folderId,
-      setSubmitting,
-      t,
-      router,
-      onSaved,
-    });
-  };
-
-  const handleCancel = () => {
-    if (onSaved) {
-      onSaved();
-    } else {
-      router.back();
-    }
-  };
-
-  const generatorSummary = buildGeneratorSummary(generatorSettings, {
-    modePassphrase: tGen("modePassphrase"),
-    modePassword: tGen("modePassword"),
-  });
 
   const loginMainFields = (
     <EntryLoginMainFields
@@ -216,7 +158,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   return (
     <PasswordFormPageShell
       backLabel={tc("back")}
-      onBack={() => router.back()}
+      onBack={handleBack}
       title={mode === "create" ? t("newPassword") : t("editPassword")}
     >
       {formContent}
