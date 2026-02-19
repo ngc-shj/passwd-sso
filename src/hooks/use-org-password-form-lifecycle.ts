@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef } from "react";
 import {
   applyOrgEditDataToForm,
   resetOrgFormForClose,
-} from "@/components/org/org-password-form-state";
+} from "@/hooks/org-password-form-lifecycle-state";
 import type { OrgPasswordFormLifecycleSetters } from "@/hooks/use-org-password-form-state";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
 

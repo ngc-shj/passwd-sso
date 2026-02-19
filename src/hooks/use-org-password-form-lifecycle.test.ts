@@ -7,7 +7,7 @@ import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifec
 const applyOrgEditDataToFormMock = vi.fn();
 const resetOrgFormForCloseMock = vi.fn();
 
-vi.mock("@/components/org/org-password-form-state", () => ({
+vi.mock("@/hooks/org-password-form-lifecycle-state", () => ({
   applyOrgEditDataToForm: (...args: unknown[]) => applyOrgEditDataToFormMock(...args),
   resetOrgFormForClose: (...args: unknown[]) => resetOrgFormForCloseMock(...args),
 }));
