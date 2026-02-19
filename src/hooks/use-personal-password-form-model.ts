@@ -2,6 +2,7 @@
 
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
+import { buildPersonalPasswordDerivedArgs } from "@/hooks/personal-password-form-derived-args";
 import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
@@ -28,11 +29,13 @@ export function usePersonalPasswordFormModel({
   const folders = usePersonalFolders();
 
   const values = selectPersonalEntryValues(formState.values);
-  const { hasChanges, generatorSummary } = usePersonalPasswordFormDerived({
-    initialData,
-    values,
-    translations,
-  });
+  const { hasChanges, generatorSummary } = usePersonalPasswordFormDerived(
+    buildPersonalPasswordDerivedArgs({
+      initialData,
+      values,
+      translations,
+    }),
+  );
   const { handleSubmit, handleCancel, handleBack } =
     usePersonalPasswordFormController({
       mode,
