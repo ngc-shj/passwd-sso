@@ -5,6 +5,7 @@ import { useVault } from "@/lib/vault-context";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
 import { usePersonalPasswordFormController } from "@/hooks/use-personal-password-form-controller";
+import { usePersonalPasswordFormDerived } from "@/hooks/use-personal-password-form-derived";
 import { useEntryFormTranslations } from "@/hooks/use-entry-form-translations";
 import {
   selectPersonalEntryValues,
@@ -61,7 +62,12 @@ export function usePersonalPasswordFormModel({
   const folders = usePersonalFolders();
 
   const values = selectPersonalEntryValues(formState.values);
-  const { hasChanges, generatorSummary, handleSubmit, handleCancel, handleBack } =
+  const { hasChanges, generatorSummary } = usePersonalPasswordFormDerived({
+    initialData,
+    values,
+    tGen,
+  });
+  const { handleSubmit, handleCancel, handleBack } =
     usePersonalPasswordFormController({
       mode,
       initialData,
@@ -71,7 +77,6 @@ export function usePersonalPasswordFormModel({
       values,
       setSubmitting,
       t,
-      tGen,
       router,
     });
 

@@ -17,36 +17,6 @@ describe("usePersonalPasswordFormController", () => {
     submitPersonalPasswordFormMock.mockResolvedValue(undefined);
   });
 
-  it("computes hasChanges from snapshot values", () => {
-    const { result, rerender } = renderHook(
-      ({ title }) =>
-        usePersonalPasswordFormController({
-          mode: "edit",
-          initialData: {
-            id: "entry-1",
-            title: "same",
-            username: "user",
-            password: "pass",
-            url: "",
-            notes: "",
-            tags: [],
-          },
-          encryptionKey: null,
-          values: buildValues({ title }),
-          setSubmitting: vi.fn(),
-          t: (key) => key,
-          tGen: (key) => key,
-          router: { push: vi.fn(), refresh: vi.fn(), back: vi.fn() },
-        }),
-      { initialProps: { title: "same" } },
-    );
-
-    expect(result.current.hasChanges).toBe(false);
-
-    rerender({ title: "changed" });
-    expect(result.current.hasChanges).toBe(true);
-  });
-
   it("delegates submit and cancel/back actions", async () => {
     const preventDefault = vi.fn();
     const onSaved = vi.fn();
@@ -61,7 +31,6 @@ describe("usePersonalPasswordFormController", () => {
         values: buildValues(),
         setSubmitting: vi.fn(),
         t: (key) => key,
-        tGen: (key) => key,
         router: { push: vi.fn(), refresh: vi.fn(), back },
       }),
     );
