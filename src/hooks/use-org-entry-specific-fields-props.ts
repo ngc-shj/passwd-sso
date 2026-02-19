@@ -2,56 +2,20 @@
 
 import type { ComponentProps } from "react";
 import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { OrgPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
 import type {
   OrgPasswordFormValues,
   OrgPasswordFormSettersState,
 } from "@/hooks/use-org-password-form-state";
+import {
+  buildOrgEntrySpecificCallbacks,
+} from "@/hooks/org-entry-specific-fields-callbacks";
+import {
+  buildOrgEntrySpecificTextProps,
+  type OrgEntrySpecificComputedProps,
+  type OrgEntrySpecificFieldTranslations,
+} from "@/hooks/org-entry-specific-fields-text-props";
 
 export type OrgEntrySpecificFieldsProps = ComponentProps<typeof OrgEntrySpecificFields>;
-type OrgEntrySpecificFieldTranslations = Pick<
-  OrgPasswordFormTranslations,
-  "t" | "tn" | "tcc" | "ti" | "tpk"
->;
-
-type OrgEntrySpecificComputedProps =
-  | "notesLabel"
-  | "notesPlaceholder"
-  | "titleLabel"
-  | "titlePlaceholder"
-  | "usernameLabel"
-  | "usernamePlaceholder"
-  | "passwordLabel"
-  | "passwordPlaceholder"
-  | "closeGeneratorLabel"
-  | "openGeneratorLabel"
-  | "urlLabel"
-  | "contentLabel"
-  | "contentPlaceholder"
-  | "cardholderNamePlaceholder"
-  | "brandPlaceholder"
-  | "cardNumberPlaceholder"
-  | "lengthHintGenericLabel"
-  | "lengthHintLabel"
-  | "invalidLengthLabel"
-  | "invalidLuhnLabel"
-  | "creditCardLabels"
-  | "expiryMonthPlaceholder"
-  | "expiryYearPlaceholder"
-  | "cvvPlaceholder"
-  | "fullNamePlaceholder"
-  | "addressPlaceholder"
-  | "phonePlaceholder"
-  | "emailPlaceholder"
-  | "nationalityPlaceholder"
-  | "idNumberPlaceholder"
-  | "identityLabels"
-  | "relyingPartyIdPlaceholder"
-  | "relyingPartyNamePlaceholder"
-  | "credentialIdPlaceholder"
-  | "deviceInfoPlaceholder"
-  | "passkeyLabels";
 
 export type OrgEntrySpecificFieldsBuilderArgs = Omit<
   OrgEntrySpecificFieldsProps,
@@ -64,76 +28,6 @@ export type OrgEntrySpecificFieldsBuilderArgs = Omit<
   translations: OrgEntrySpecificFieldTranslations;
   lengthHint: string;
 };
-
-function buildOrgEntrySpecificTextProps(
-  translations: OrgEntrySpecificFieldTranslations,
-  entryCopy: OrgEntrySpecificFieldsBuilderArgs["entryCopy"],
-  lengthHint: string,
-): Pick<OrgEntrySpecificFieldsProps, OrgEntrySpecificComputedProps> {
-  const { t, tn, tcc, ti, tpk } = translations;
-
-  return {
-    notesLabel: entryCopy.notesLabel,
-    notesPlaceholder: entryCopy.notesPlaceholder,
-    titleLabel: t("title"),
-    titlePlaceholder: t("titlePlaceholder"),
-    usernameLabel: t("usernameEmail"),
-    usernamePlaceholder: t("usernamePlaceholder"),
-    passwordLabel: t("password"),
-    passwordPlaceholder: t("passwordPlaceholder"),
-    closeGeneratorLabel: t("closeGenerator"),
-    openGeneratorLabel: t("openGenerator"),
-    urlLabel: t("url"),
-    contentLabel: tn("content"),
-    contentPlaceholder: tn("contentPlaceholder"),
-    cardholderNamePlaceholder: tcc("cardholderNamePlaceholder"),
-    brandPlaceholder: tcc("brandPlaceholder"),
-    cardNumberPlaceholder: tcc("cardNumberPlaceholder"),
-    lengthHintGenericLabel: tcc("cardNumberLengthHintGeneric"),
-    lengthHintLabel: tcc("cardNumberLengthHint", { lengths: lengthHint }),
-    invalidLengthLabel: tcc("cardNumberInvalidLength", { lengths: lengthHint }),
-    invalidLuhnLabel: tcc("cardNumberInvalidLuhn"),
-    creditCardLabels: {
-      cardholderName: tcc("cardholderName"),
-      brand: tcc("brand"),
-      cardNumber: tcc("cardNumber"),
-      expiry: tcc("expiry"),
-      cvv: tcc("cvv"),
-    },
-    expiryMonthPlaceholder: tcc("expiryMonth"),
-    expiryYearPlaceholder: tcc("expiryYear"),
-    cvvPlaceholder: tcc("cvvPlaceholder"),
-    fullNamePlaceholder: ti("fullNamePlaceholder"),
-    addressPlaceholder: ti("addressPlaceholder"),
-    phonePlaceholder: ti("phonePlaceholder"),
-    emailPlaceholder: ti("emailPlaceholder"),
-    nationalityPlaceholder: ti("nationalityPlaceholder"),
-    idNumberPlaceholder: ti("idNumberPlaceholder"),
-    identityLabels: {
-      fullName: ti("fullName"),
-      address: ti("address"),
-      phone: ti("phone"),
-      email: ti("email"),
-      dateOfBirth: ti("dateOfBirth"),
-      nationality: ti("nationality"),
-      idNumber: ti("idNumber"),
-      issueDate: ti("issueDate"),
-      expiryDate: ti("expiryDate"),
-    },
-    relyingPartyIdPlaceholder: tpk("relyingPartyIdPlaceholder"),
-    relyingPartyNamePlaceholder: tpk("relyingPartyNamePlaceholder"),
-    credentialIdPlaceholder: tpk("credentialIdPlaceholder"),
-    deviceInfoPlaceholder: tpk("deviceInfoPlaceholder"),
-    passkeyLabels: {
-      relyingPartyId: tpk("relyingPartyId"),
-      relyingPartyName: tpk("relyingPartyName"),
-      username: tpk("username"),
-      credentialId: tpk("credentialId"),
-      creationDate: tpk("creationDate"),
-      deviceInfo: tpk("deviceInfo"),
-    },
-  };
-}
 
 export function buildOrgEntrySpecificFieldsProps({
   entryKind,
@@ -314,62 +208,6 @@ type UseOrgEntrySpecificFieldsPropsFromStateArgs = Pick<
   values: OrgPasswordFormValues;
   setters: OrgPasswordFormSettersState;
 };
-
-function buildOrgEntrySpecificCallbacks(
-  values: OrgPasswordFormValues,
-  setters: OrgPasswordFormSettersState,
-) {
-  return {
-    onNotesChange: setters.setNotes,
-    onTitleChange: setters.setTitle,
-    onUsernameChange: setters.setUsername,
-    onPasswordChange: setters.setPassword,
-    onToggleShowPassword: () => setters.setShowPassword(!values.showPassword),
-    onToggleGenerator: () => setters.setShowGenerator(!values.showGenerator),
-    onGeneratorUse: (pw: string, settings: GeneratorSettings) => {
-      setters.setPassword(pw);
-      setters.setShowPassword(true);
-      setters.setGeneratorSettings(settings);
-    },
-    onUrlChange: setters.setUrl,
-    onContentChange: setters.setContent,
-    onCardholderNameChange: setters.setCardholderName,
-    onBrandChange: (value: string) => {
-      setters.setBrand(value);
-      setters.setBrandSource("manual");
-    },
-    onToggleCardNumber: () => setters.setShowCardNumber(!values.showCardNumber),
-    onExpiryMonthChange: setters.setExpiryMonth,
-    onExpiryYearChange: setters.setExpiryYear,
-    onCvvChange: setters.setCvv,
-    onToggleCvv: () => setters.setShowCvv(!values.showCvv),
-    onFullNameChange: setters.setFullName,
-    onAddressChange: setters.setAddress,
-    onPhoneChange: setters.setPhone,
-    onEmailChange: setters.setEmail,
-    onDateOfBirthChange: (value: string) => {
-      setters.setDateOfBirth(value);
-      setters.setDobError(null);
-    },
-    onNationalityChange: setters.setNationality,
-    onIdNumberChange: setters.setIdNumber,
-    onToggleIdNumber: () => setters.setShowIdNumber(!values.showIdNumber),
-    onIssueDateChange: (value: string) => {
-      setters.setIssueDate(value);
-      setters.setExpiryError(null);
-    },
-    onExpiryDateChange: (value: string) => {
-      setters.setExpiryDate(value);
-      setters.setExpiryError(null);
-    },
-    onRelyingPartyIdChange: setters.setRelyingPartyId,
-    onRelyingPartyNameChange: setters.setRelyingPartyName,
-    onCredentialIdChange: setters.setCredentialId,
-    onToggleCredentialId: () => setters.setShowCredentialId(!values.showCredentialId),
-    onCreationDateChange: setters.setCreationDate,
-    onDeviceInfoChange: setters.setDeviceInfo,
-  };
-}
 
 export function useOrgEntrySpecificFieldsPropsFromState({
   entryKind,
