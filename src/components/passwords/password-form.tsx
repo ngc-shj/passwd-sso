@@ -12,6 +12,7 @@ import {
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
+import { usePersonalEntryLoginFieldsProps } from "@/hooks/use-personal-entry-login-fields-props";
 import { usePersonalPasswordFormModel } from "@/hooks/use-personal-password-form-model";
 
 export function PasswordForm({ mode, initialData, variant = "page", onSaved }: PasswordFormProps) {
@@ -37,6 +38,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
         showGenerator,
       },
       setters: {
+        setSubmitting,
         setTitle,
         setUsername,
         setPassword,
@@ -66,44 +68,47 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   });
   const isDialogVariant = variant === "dialog";
   const dialogSectionClass = isDialogVariant ? ENTRY_DIALOG_FLAT_SECTION_CLASS : "";
+  const loginMainFieldsProps = usePersonalEntryLoginFieldsProps({
+    values: {
+      submitting,
+      title,
+      username,
+      password,
+      url,
+      notes,
+      selectedTags,
+      generatorSettings,
+      customFields,
+      totp,
+      showTotpInput,
+      requireReprompt,
+      folderId,
+      showPassword,
+      showGenerator,
+    },
+    setters: {
+      setSubmitting,
+      setTitle,
+      setUsername,
+      setPassword,
+      setUrl,
+      setNotes,
+      setSelectedTags,
+      setGeneratorSettings,
+      setCustomFields,
+      setTotp,
+      setShowTotpInput,
+      setRequireReprompt,
+      setFolderId,
+      setShowPassword,
+      setShowGenerator,
+    },
+    generatorSummary,
+    translations: { t },
+  });
 
   const loginMainFields = (
-    <EntryLoginMainFields
-      title={title}
-      onTitleChange={setTitle}
-      titleLabel={t("title")}
-      titlePlaceholder={t("titlePlaceholder")}
-      titleRequired
-      username={username}
-      onUsernameChange={setUsername}
-      usernameLabel={t("usernameEmail")}
-      usernamePlaceholder={t("usernamePlaceholder")}
-      password={password}
-      onPasswordChange={setPassword}
-      passwordLabel={t("password")}
-      passwordPlaceholder={t("passwordPlaceholder")}
-      passwordRequired
-      showPassword={showPassword}
-      onToggleShowPassword={() => setShowPassword(!showPassword)}
-      generatorSummary={generatorSummary}
-      showGenerator={showGenerator}
-      onToggleGenerator={() => setShowGenerator(!showGenerator)}
-      closeGeneratorLabel={t("closeGenerator")}
-      openGeneratorLabel={t("openGenerator")}
-      generatorSettings={generatorSettings}
-      onGeneratorUse={(pw, settings) => {
-        setPassword(pw);
-        setShowPassword(true);
-        setGeneratorSettings(settings);
-      }}
-      url={url}
-      onUrlChange={setUrl}
-      urlLabel={t("url")}
-      notes={notes}
-      onNotesChange={setNotes}
-      notesLabel={t("notes")}
-      notesPlaceholder={t("notesPlaceholder")}
-    />
+    <EntryLoginMainFields {...loginMainFieldsProps} />
   );
 
   const formContent = (
