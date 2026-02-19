@@ -28,7 +28,6 @@ import {
 } from "@/components/org/org-password-form-snapshot";
 import { OrgTagsAndFolderSection } from "@/components/org/org-tags-and-folder-section";
 import type {
-  OrgFolderItem,
   OrgPasswordFormEditData,
   OrgPasswordFormProps,
 } from "@/components/org/org-password-form-types";
@@ -51,6 +50,7 @@ import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
 import { executeOrgEntrySubmit } from "@/components/org/org-entry-submit";
+import { useOrgFolders } from "@/hooks/use-org-folders";
 
 export function OrgPasswordForm({
   orgId,
@@ -127,7 +127,7 @@ export function OrgPasswordForm({
   const [showCredentialId, setShowCredentialId] = useState(false);
   const [attachments, setAttachments] = useState<OrgAttachmentMeta[]>([]);
   const [orgFolderId, setOrgFolderId] = useState<string | null>(editData?.orgFolderId ?? null);
-  const [orgFolders, setOrgFolders] = useState<OrgFolderItem[]>([]);
+  const orgFolders = useOrgFolders(open, orgId);
 
   const isEdit = !!editData;
 
@@ -218,16 +218,6 @@ export function OrgPasswordForm({
       setAttachments,
       setSaving,
     });
-
-  // Fetch org folders for the folder selector
-  useEffect(() => {
-    if (open) {
-      fetch(apiPath.orgFolders(orgId))
-        .then((res) => (res.ok ? res.json() : []))
-        .then((data) => { if (Array.isArray(data)) setOrgFolders(data); })
-        .catch(() => {});
-    }
-  }, [open, orgId]);
 
   // Sync form fields when editData changes (programmatic open)
   useEffect(() => {
