@@ -31,7 +31,7 @@ export function buildOrgPasswordControllerArgs({
     orgId,
     onSaved,
     isEdit,
-    editData: editData ?? null,
+    editData,
     effectiveEntryType,
     entryKindState,
     translations,

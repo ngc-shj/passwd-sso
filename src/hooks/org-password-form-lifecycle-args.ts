@@ -16,7 +16,7 @@ export function buildOrgPasswordLifecycleArgs({
 }: OrgPasswordFormLifecycleArgs): OrgPasswordFormLifecycleArgs {
   return {
     open,
-    editData: editData ?? null,
+    editData,
     onOpenChange,
     setters,
   };

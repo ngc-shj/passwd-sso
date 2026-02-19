@@ -35,4 +35,26 @@ describe("buildOrgPasswordControllerArgs", () => {
     expect(args.effectiveEntryType).toBe(ENTRY_TYPE.LOGIN);
     expect(args.handleOpenChange).toBe(handleOpenChange);
   });
+
+  it("keeps editData undefined when omitted", () => {
+    const args = buildOrgPasswordControllerArgs({
+      orgId: "org-1",
+      onSaved: vi.fn(),
+      isEdit: false,
+      effectiveEntryType: ENTRY_TYPE.LOGIN,
+      entryKindState: getOrgEntryKindState(ENTRY_TYPE.LOGIN),
+      translations: buildOrgPasswordFormTranslations({
+        t: (key) => key,
+        ti: (key) => key,
+        tn: (key) => key,
+        tcc: (key) => key,
+        tpk: (key) => key,
+        tGen: (key) => key,
+      }),
+      formState: {} as OrgPasswordFormState,
+      handleOpenChange: vi.fn(),
+    });
+
+    expect(args.editData).toBeUndefined();
+  });
 });

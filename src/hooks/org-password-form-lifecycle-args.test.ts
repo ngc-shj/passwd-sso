@@ -19,4 +19,14 @@ describe("buildOrgPasswordLifecycleArgs", () => {
     expect(args.onOpenChange).toBe(onOpenChange);
     expect(args.setters).toBe(setters);
   });
+
+  it("keeps editData undefined when omitted", () => {
+    const args = buildOrgPasswordLifecycleArgs({
+      open: true,
+      onOpenChange: vi.fn(),
+      setters: {} as OrgPasswordFormLifecycleSetters,
+    });
+
+    expect(args.editData).toBeUndefined();
+  });
 });
