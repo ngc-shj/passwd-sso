@@ -22,7 +22,7 @@ export type PersonalEntryLoginFieldTextProps = Pick<
   | "notesPlaceholder"
 >;
 
-export interface UsePersonalEntryLoginFieldsPropsArgs {
+export interface BuildPersonalEntryLoginFieldsPropsArgs {
   formState: PersonalPasswordFormState;
   generatorSummary: string;
   translations: Pick<PersonalPasswordFormTranslations, "t">;

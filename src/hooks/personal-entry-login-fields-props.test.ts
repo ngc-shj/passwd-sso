@@ -1,17 +1,14 @@
-// @vitest-environment jsdom
-
-import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import {
   buildPersonalEntryLoginFieldPropsFromState,
-  usePersonalEntryLoginFieldsProps,
-} from "@/hooks/use-personal-entry-login-fields-props";
+  buildPersonalEntryLoginFieldsProps,
+} from "@/hooks/personal-entry-login-fields-props";
 import { buildPersonalEntryLoginFieldCallbacks } from "@/hooks/personal-entry-login-fields-callbacks";
 import { buildPersonalEntryLoginFieldTextProps } from "@/hooks/personal-entry-login-fields-text-props";
 import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
 
-describe("usePersonalEntryLoginFieldsProps", () => {
+describe("buildPersonalEntryLoginFieldsProps", () => {
   it("builds complete login field props from state", () => {
     const state = createState();
     const callbacks = buildPersonalEntryLoginFieldCallbacks(state.values, state.setters);
@@ -35,21 +32,19 @@ describe("usePersonalEntryLoginFieldsProps", () => {
 
   it("maps values and labels from personal form state", () => {
     const state = createState();
-    const { result } = renderHook(() =>
-      usePersonalEntryLoginFieldsProps({
-        formState: state,
-        generatorSummary: "summary",
-        translations: { t: (k) => `label.${k}` },
-      }),
-    );
+    const props = buildPersonalEntryLoginFieldsProps({
+      formState: state,
+      generatorSummary: "summary",
+      translations: { t: (k) => `label.${k}` },
+    });
 
-    expect(result.current.title).toBe(state.values.title);
-    expect(result.current.username).toBe(state.values.username);
-    expect(result.current.password).toBe(state.values.password);
-    expect(result.current.notes).toBe(state.values.notes);
-    expect(result.current.titleLabel).toBe("label.title");
-    expect(result.current.passwordLabel).toBe("label.password");
-    expect(result.current.notesLabel).toBe("label.notes");
+    expect(props.title).toBe(state.values.title);
+    expect(props.username).toBe(state.values.username);
+    expect(props.password).toBe(state.values.password);
+    expect(props.notes).toBe(state.values.notes);
+    expect(props.titleLabel).toBe("label.title");
+    expect(props.passwordLabel).toBe("label.password");
+    expect(props.notesLabel).toBe("label.notes");
   });
 
   it("toggles visibility and applies generated password", () => {
@@ -57,21 +52,19 @@ describe("usePersonalEntryLoginFieldsProps", () => {
     state.values.showPassword = true;
     state.values.showGenerator = true;
 
-    const { result } = renderHook(() =>
-      usePersonalEntryLoginFieldsProps({
-        formState: state,
-        generatorSummary: "summary",
-        translations: { t: (k) => k },
-      }),
-    );
+    const props = buildPersonalEntryLoginFieldsProps({
+      formState: state,
+      generatorSummary: "summary",
+      translations: { t: (k) => k },
+    });
 
-    result.current.onToggleShowPassword();
-    result.current.onToggleGenerator();
+    props.onToggleShowPassword();
+    props.onToggleGenerator();
     expect(state.setters.setShowPassword).toHaveBeenCalledWith(false);
     expect(state.setters.setShowGenerator).toHaveBeenCalledWith(false);
 
     const nextSettings = { length: 42 } as typeof DEFAULT_GENERATOR_SETTINGS;
-    result.current.onGeneratorUse("generated", nextSettings);
+    props.onGeneratorUse("generated", nextSettings);
     expect(state.setters.setPassword).toHaveBeenCalledWith("generated");
     expect(state.setters.setShowPassword).toHaveBeenCalledWith(true);
     expect(state.setters.setGeneratorSettings).toHaveBeenCalledWith(nextSettings);

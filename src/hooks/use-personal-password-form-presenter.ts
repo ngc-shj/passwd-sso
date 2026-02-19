@@ -5,8 +5,8 @@ import {
   usePersonalPasswordFormDerived,
 } from "@/hooks/use-personal-password-form-derived";
 import {
-  usePersonalEntryLoginFieldsProps,
-} from "@/hooks/use-personal-entry-login-fields-props";
+  buildPersonalEntryLoginFieldsProps,
+} from "@/hooks/personal-entry-login-fields-props";
 import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
 import {
   selectPersonalEntryValues,
@@ -31,7 +31,7 @@ export function usePersonalPasswordFormPresenter({
     translations,
   });
 
-  const loginMainFieldsProps = usePersonalEntryLoginFieldsProps({
+  const loginMainFieldsProps = buildPersonalEntryLoginFieldsProps({
     formState,
     generatorSummary,
     translations: { t: translations.t },

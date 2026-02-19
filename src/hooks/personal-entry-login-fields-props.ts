@@ -5,7 +5,7 @@ import { buildPersonalEntryLoginFieldTextProps } from "@/hooks/personal-entry-lo
 import type {
   EntryLoginMainFieldsProps,
   PersonalEntryLoginFieldTextProps,
-  UsePersonalEntryLoginFieldsPropsArgs,
+  BuildPersonalEntryLoginFieldsPropsArgs,
 } from "@/hooks/personal-entry-login-fields-types";
 
 type PersonalEntryLoginFieldCallbacks = ReturnType<typeof buildPersonalEntryLoginFieldCallbacks>;
@@ -16,7 +16,7 @@ export function buildPersonalEntryLoginFieldPropsFromState({
   generatorSummary,
   textProps,
 }: {
-  values: UsePersonalEntryLoginFieldsPropsArgs["formState"]["values"];
+  values: BuildPersonalEntryLoginFieldsPropsArgs["formState"]["values"];
   callbacks: PersonalEntryLoginFieldCallbacks;
   generatorSummary: string;
   textProps: PersonalEntryLoginFieldTextProps;
@@ -45,11 +45,11 @@ export function buildPersonalEntryLoginFieldPropsFromState({
   };
 }
 
-export function usePersonalEntryLoginFieldsProps({
+export function buildPersonalEntryLoginFieldsProps({
   formState,
   generatorSummary,
   translations,
-}: UsePersonalEntryLoginFieldsPropsArgs): EntryLoginMainFieldsProps {
+}: BuildPersonalEntryLoginFieldsPropsArgs): EntryLoginMainFieldsProps {
   const { values, setters } = formState;
   const { t } = translations;
   const callbacks = buildPersonalEntryLoginFieldCallbacks(values, setters);

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { API_PATH, apiPath } from "@/lib/constants";
-import { showSidebarCrudError } from "@/hooks/use-sidebar-crud-error";
+import { showSidebarCrudError } from "@/hooks/sidebar-crud-error";
 
 interface SidebarTagItem {
   id: string;
