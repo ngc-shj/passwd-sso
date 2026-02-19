@@ -56,8 +56,7 @@ export function useOrgPasswordFormController({
 }: UseOrgPasswordFormControllerArgs) {
   const { t, ti, tn, tcc, tpk, tGen } = translations;
   const { values, setters } = formState;
-  const { entryKind, isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey } =
-    entryKindState;
+  const { entryKind, isIdentity } = entryKindState;
   const entryValues = selectOrgEntryFieldValues(values);
   const { cardNumberValid, entryCopy, entrySpecificFieldsProps } =
     useOrgPasswordFormPresenter({
@@ -76,11 +75,7 @@ export function useOrgPasswordFormController({
     ...buildOrgPasswordDerivedArgs({
       effectiveEntryType,
       editData,
-      isLoginEntry,
-      isNote,
-      isCreditCard,
-      isIdentity,
-      isPasskey,
+      entryKindState,
       values: entryValues,
       cardNumberValid,
     }),
