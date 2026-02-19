@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
 import { buildOrgPasswordControllerArgs } from "@/hooks/org-password-form-controller-args";
-import { buildOrgPasswordFormTranslations } from "@/hooks/org-password-form-translations";
+import type { OrgPasswordFormTranslations } from "@/hooks/org-password-form-translations";
 import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 
 describe("buildOrgPasswordControllerArgs", () => {
@@ -16,14 +16,14 @@ describe("buildOrgPasswordControllerArgs", () => {
       editData: null,
       effectiveEntryType: ENTRY_TYPE.LOGIN,
       entryKindState: getOrgEntryKindState(ENTRY_TYPE.LOGIN),
-      translations: buildOrgPasswordFormTranslations({
+      translations: {
         t: (key) => key,
         ti: (key) => key,
         tn: (key) => key,
         tcc: (key) => key,
         tpk: (key) => key,
         tGen: (key) => key,
-      }),
+      } satisfies OrgPasswordFormTranslations,
       formState: {} as OrgPasswordFormState,
       handleOpenChange,
     });
@@ -43,14 +43,14 @@ describe("buildOrgPasswordControllerArgs", () => {
       isEdit: false,
       effectiveEntryType: ENTRY_TYPE.LOGIN,
       entryKindState: getOrgEntryKindState(ENTRY_TYPE.LOGIN),
-      translations: buildOrgPasswordFormTranslations({
+      translations: {
         t: (key) => key,
         ti: (key) => key,
         tn: (key) => key,
         tcc: (key) => key,
         tpk: (key) => key,
         tGen: (key) => key,
-      }),
+      } satisfies OrgPasswordFormTranslations,
       formState: {} as OrgPasswordFormState,
       handleOpenChange: vi.fn(),
     });

@@ -15,14 +15,3 @@ export interface OrgPasswordFormTranslations {
   tpk: PasskeyFormTranslator;
   tGen: PasswordGeneratorTranslator;
 }
-
-export function buildOrgPasswordFormTranslations({
-  t,
-  ti,
-  tn,
-  tcc,
-  tpk,
-  tGen,
-}: OrgPasswordFormTranslations): OrgPasswordFormTranslations {
-  return { t, ti, tn, tcc, tpk, tGen };
-}

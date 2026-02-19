@@ -9,11 +9,3 @@ export interface PersonalPasswordFormTranslations {
   tGen: PasswordGeneratorTranslator;
   tc: CommonTranslator;
 }
-
-export function buildPersonalPasswordFormTranslations({
-  t,
-  tGen,
-  tc,
-}: PersonalPasswordFormTranslations): PersonalPasswordFormTranslations {
-  return { t, tGen, tc };
-}
