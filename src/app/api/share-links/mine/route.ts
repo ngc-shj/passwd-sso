@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { requireOrgMember, OrgAuthError } from "@/lib/org-auth";
+import { ORG_ROLE } from "@/lib/constants";
 
-// GET /api/share-links/mine — List all share links created by the current user
+// GET /api/share-links/mine
+// - Personal context (no `org`): links created by current user, personal entries only
+// - Org context (`org` present): all links in the organization
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -12,12 +16,32 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status"); // "active" | "expired" | "revoked" | null (all)
+  const orgId = searchParams.get("org");
   const cursor = searchParams.get("cursor");
   const limit = 30;
 
-  const where: Record<string, unknown> = {
-    createdById: session.user.id,
-  };
+  const where: Record<string, unknown> = {};
+  if (orgId) {
+    let membershipRole: string | undefined;
+    try {
+      const membership = await requireOrgMember(session.user.id, orgId);
+      membershipRole = membership.role;
+    } catch (e) {
+      if (e instanceof OrgAuthError) {
+        return NextResponse.json({ error: e.message }, { status: e.status });
+      }
+      throw e;
+    }
+    where.orgPasswordEntry = { orgId };
+    // VIEWER can only see links they created. Higher roles can view org-wide links.
+    if (membershipRole === ORG_ROLE.VIEWER) {
+      where.createdById = session.user.id;
+    }
+  } else {
+    // Personal context: exclude organization share links.
+    where.createdById = session.user.id;
+    where.passwordEntryId = { not: null };
+  }
 
   const now = new Date();
   if (status === "active") {
@@ -38,6 +62,9 @@ export async function GET(req: NextRequest) {
       take: limit + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       include: {
+        createdBy: {
+          select: { id: true, name: true, email: true },
+        },
         passwordEntry: {
           select: { id: true },
         },
@@ -67,6 +94,11 @@ export async function GET(req: NextRequest) {
       orgPasswordEntryId: s.orgPasswordEntryId,
       orgName: s.orgPasswordEntry?.org?.name ?? null,
       hasPersonalEntry: !!s.passwordEntry,
+      sharedBy:
+        s.createdBy.name?.trim() ||
+        s.createdBy.email ||
+        null,
+      canRevoke: s.createdBy.id === session.user.id,
       isActive:
         !s.revokedAt &&
         s.expiresAt > now &&

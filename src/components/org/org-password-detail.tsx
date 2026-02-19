@@ -19,15 +19,10 @@ import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { Eye, EyeOff, ExternalLink } from "lucide-react";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
-import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format-datetime";
-
-interface CustomField {
-  label: string;
-  value: string;
-  type: CustomFieldType;
-}
+import type { EntryCustomField } from "@/lib/entry-form-types";
 
 interface OrgPasswordDetailProps {
   orgId: string;
@@ -45,7 +40,7 @@ interface PasswordData {
   content?: string;
   url: string | null;
   notes: string | null;
-  customFields: CustomField[];
+  customFields: EntryCustomField[];
   totp: TOTPEntry | null;
   cardholderName?: string | null;
   cardNumber?: string | null;

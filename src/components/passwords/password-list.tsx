@@ -5,10 +5,12 @@ import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
+import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-sort";
 import { PasswordCard } from "./password-card";
 import { Archive, KeyRound, Loader2, Star } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import type { EntryTagNameColor } from "@/lib/entry-form-types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -40,7 +42,7 @@ interface DecryptedOverview {
   idNumberLast4?: string | null;
   relyingPartyId?: string | null;
   requireReprompt?: boolean;
-  tags: Array<{ name: string; color: string | null }>;
+  tags: EntryTagNameColor[];
 }
 
 interface DisplayEntry {
@@ -56,7 +58,7 @@ interface DisplayEntry {
   fullName: string | null;
   idNumberLast4: string | null;
   relyingPartyId: string | null;
-  tags: Array<{ name: string; color: string | null }>;
+  tags: EntryTagNameColor[];
   isFavorite: boolean;
   isArchived: boolean;
   requireReprompt: boolean;
@@ -64,7 +66,7 @@ interface DisplayEntry {
   updatedAt: string;
 }
 
-export type SortOption = "updatedAt" | "createdAt" | "title";
+export type SortOption = EntrySortOption;
 
 interface PasswordListProps {
   searchQuery: string;
@@ -178,20 +180,7 @@ export function PasswordList({
       }
 
       // Client-side sorting
-      decrypted.sort((a, b) => {
-        // Favorites always first
-        if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
-
-        switch (sortBy) {
-          case "title":
-            return a.title.localeCompare(b.title);
-          case "createdAt":
-            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-          case "updatedAt":
-          default:
-            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-        }
-      });
+      decrypted.sort((a, b) => compareEntriesWithFavorite(a, b, sortBy));
 
       setEntries(decrypted);
     } catch {

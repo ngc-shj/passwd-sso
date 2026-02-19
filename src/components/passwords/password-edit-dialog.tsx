@@ -5,12 +5,13 @@ import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
-import {
-  PasswordForm,
-  type PasswordHistoryEntry,
-  type CustomField,
-  type TOTPEntry,
-} from "./password-form";
+import { PasswordForm } from "./password-form";
+import type {
+  EntryCustomField,
+  EntryPasswordHistory,
+  EntryTagNameColor,
+  EntryTotp,
+} from "@/lib/entry-form-types";
 import { SecureNoteForm } from "./secure-note-form";
 import { CreditCardForm } from "./credit-card-form";
 import { IdentityForm } from "./identity-form";
@@ -35,11 +36,11 @@ interface VaultEntryFull {
   content?: string;
   url?: string | null;
   notes?: string | null;
-  tags: Array<{ name: string; color: string | null }>;
+  tags: EntryTagNameColor[];
   generatorSettings?: GeneratorSettings;
-  passwordHistory?: PasswordHistoryEntry[];
-  customFields?: CustomField[];
-  totp?: TOTPEntry;
+  passwordHistory?: EntryPasswordHistory[];
+  customFields?: EntryCustomField[];
+  totp?: EntryTotp;
   cardholderName?: string | null;
   cardNumber?: string | null;
   brand?: string | null;
@@ -73,9 +74,9 @@ interface FormData {
   notes: string;
   tags: TagData[];
   generatorSettings?: GeneratorSettings;
-  passwordHistory?: PasswordHistoryEntry[];
-  customFields?: CustomField[];
-  totp?: TOTPEntry;
+  passwordHistory?: EntryPasswordHistory[];
+  customFields?: EntryCustomField[];
+  totp?: EntryTotp;
   cardholderName?: string | null;
   cardNumber?: string | null;
   brand?: string | null;
@@ -259,6 +260,7 @@ export function PasswordEditDialog({
               deviceInfo: data.deviceInfo ?? null,
               notes: data.notes || null,
               tags: data.tags,
+              folderId: data.folderId ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -280,6 +282,7 @@ export function PasswordEditDialog({
               expiryDate: data.expiryDate ?? null,
               notes: data.notes,
               tags: data.tags,
+              folderId: data.folderId ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -298,6 +301,7 @@ export function PasswordEditDialog({
               cvv: data.cvv ?? null,
               notes: data.notes,
               tags: data.tags,
+              folderId: data.folderId ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -310,6 +314,7 @@ export function PasswordEditDialog({
               title: data.title,
               content: data.content,
               tags: data.tags,
+              folderId: data.folderId ?? null,
             }}
             onSaved={handleSaved}
           />

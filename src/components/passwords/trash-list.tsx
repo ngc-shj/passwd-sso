@@ -260,8 +260,8 @@ export function TrashList({ refreshKey }: TrashListProps) {
 
       <div className="space-y-2">
         {entries.map((entry) => (
-          <Card key={entry.id} className="rounded-xl border bg-background/80 transition-colors hover:bg-accent">
-            <CardContent className="flex items-center gap-4 p-4">
+          <Card key={entry.id} className="transition-colors hover:bg-accent">
+            <CardContent className="flex items-center gap-3 px-4 py-2">
               <Checkbox
                 checked={selectedIds.has(entry.id)}
                 onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}

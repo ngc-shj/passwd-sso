@@ -4,19 +4,26 @@ import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
-import { encryptData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TagInput, type TagData } from "@/components/tags/tag-input";
-import { ArrowLeft, Eye, EyeOff, Tags } from "lucide-react";
-import { EntryActionBar, EntryPrimaryCard, EntrySectionCard } from "@/components/passwords/entry-form-ui";
-import { toast } from "sonner";
-import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import type { TagData } from "@/components/tags/tag-input";
+import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import {
+  EntryActionBar,
+  EntryPrimaryCard,
+  ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS,
+  ENTRY_DIALOG_FLAT_SECTION_CLASS,
+} from "@/components/passwords/entry-form-ui";
+import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
+import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
+import { usePersonalFolders } from "@/hooks/use-personal-folders";
+import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
+import { toTagIds, toTagPayload } from "@/components/passwords/entry-form-tags";
+import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
 
 interface PasskeyFormProps {
   mode: "create" | "edit";
@@ -31,6 +38,7 @@ interface PasskeyFormProps {
     deviceInfo: string | null;
     notes: string | null;
     tags: TagData[];
+    folderId?: string | null;
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
@@ -56,6 +64,8 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
   const [selectedTags, setSelectedTags] = useState<TagData[]>(
     initialData?.tags ?? []
   );
+  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
+  const { folders } = usePersonalFolders();
 
   const baselineSnapshot = useMemo(
     () =>
@@ -69,6 +79,7 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
         deviceInfo: initialData?.deviceInfo ?? "",
         notes: initialData?.notes ?? "",
         selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
+        folderId: initialData?.folderId ?? null,
       }),
     [initialData]
   );
@@ -85,6 +96,7 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
         deviceInfo,
         notes,
         selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
+        folderId,
       }),
     [
       title,
@@ -96,98 +108,58 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
       deviceInfo,
       notes,
       selectedTags,
+      folderId,
     ]
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
+  const isDialogVariant = variant === "dialog";
+  const primaryCardClass = isDialogVariant ? ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS : "";
+  const dialogSectionClass = isDialogVariant ? ENTRY_DIALOG_FLAT_SECTION_CLASS : "";
+  const { handleCancel, handleBack } = createFormNavigationHandlers({ onSaved, router });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!encryptionKey) return;
-    setSubmitting(true);
+    const tags = toTagPayload(selectedTags);
+    const fullBlob = JSON.stringify({
+      title,
+      relyingPartyId: relyingPartyId || null,
+      relyingPartyName: relyingPartyName || null,
+      username: username || null,
+      credentialId: credentialId || null,
+      creationDate: creationDate || null,
+      deviceInfo: deviceInfo || null,
+      notes: notes || null,
+      tags,
+    });
+    const overviewBlob = JSON.stringify({
+      title,
+      relyingPartyId: relyingPartyId || null,
+      username: username || null,
+      tags,
+    });
 
-    try {
-      const tags = selectedTags.map((t) => ({
-        name: t.name,
-        color: t.color,
-      }));
-
-      const fullBlob = JSON.stringify({
-        title,
-        relyingPartyId: relyingPartyId || null,
-        relyingPartyName: relyingPartyName || null,
-        username: username || null,
-        credentialId: credentialId || null,
-        creationDate: creationDate || null,
-        deviceInfo: deviceInfo || null,
-        notes: notes || null,
-        tags,
-      });
-
-      const overviewBlob = JSON.stringify({
-        title,
-        relyingPartyId: relyingPartyId || null,
-        username: username || null,
-        tags,
-      });
-
-      const entryId = mode === "create" ? crypto.randomUUID() : initialData!.id;
-      const aad = userId ? buildPersonalEntryAAD(userId, entryId) : undefined;
-
-      const encryptedBlob = await encryptData(fullBlob, encryptionKey, aad);
-      const encryptedOverview = await encryptData(overviewBlob, encryptionKey, aad);
-
-      const body = {
-        ...(mode === "create" ? { id: entryId } : {}),
-        encryptedBlob,
-        encryptedOverview,
-        keyVersion: 1,
-        aadVersion: aad ? AAD_VERSION : 0,
-        tagIds: selectedTags.map((t) => t.id),
-        entryType: ENTRY_TYPE.PASSKEY,
-      };
-
-      const endpoint =
-        mode === "create"
-          ? API_PATH.PASSWORDS
-          : apiPath.passwordById(initialData!.id);
-      const method = mode === "create" ? "POST" : "PUT";
-
-      const res = await fetch(endpoint, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      if (res.ok) {
-        toast.success(mode === "create" ? t("saved") : t("updated"));
-        if (onSaved) {
-          onSaved();
-        } else {
-          router.push("/dashboard");
-          router.refresh();
-        }
-      } else {
-        toast.error(t("failedToSave"));
-      }
-    } catch {
-      toast.error(t("networkError"));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleCancel = () => {
-    if (onSaved) {
-      onSaved();
-    } else {
-      router.back();
-    }
+    await executePersonalEntrySubmit({
+      mode,
+      initialId: initialData?.id,
+      encryptionKey,
+      userId: userId ?? undefined,
+      fullBlob,
+      overviewBlob,
+      tagIds: toTagIds(selectedTags),
+      folderId: folderId ?? null,
+      entryType: ENTRY_TYPE.PASSKEY,
+      setSubmitting,
+      t,
+      router,
+      onSaved,
+    });
   };
 
   const formContent = (
     <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
-      <EntryPrimaryCard>
+      <EntryPrimaryCard className={primaryCardClass}>
       <div className="space-y-2">
         <Label htmlFor="title">{t("title")}</Label>
         <Input
@@ -295,19 +267,16 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
       </div>
       </EntryPrimaryCard>
 
-      <EntrySectionCard>
-        <div className="space-y-1">
-          <Label className="flex items-center gap-2">
-            <Tags className="h-3.5 w-3.5" />
-            {t("tags")}
-          </Label>
-          <p className="text-xs text-muted-foreground">{tPw("tagsHint")}</p>
-        </div>
-        <TagInput
-          selectedTags={selectedTags}
-          onChange={setSelectedTags}
-        />
-      </EntrySectionCard>
+      <EntryTagsAndFolderSection
+        tagsTitle={t("tags")}
+        tagsHint={tPw("tagsHint")}
+        selectedTags={selectedTags}
+        onTagsChange={setSelectedTags}
+        folders={folders}
+        folderId={folderId}
+        onFolderChange={setFolderId}
+        sectionCardClass={dialogSectionClass}
+      />
 
       <EntryActionBar
         hasChanges={hasChanges}
@@ -331,7 +300,7 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
       <Button
         variant="ghost"
         className="mb-4 gap-2"
-        onClick={() => router.back()}
+        onClick={handleBack}
       >
         <ArrowLeft className="h-4 w-4" />
         {tc("back")}

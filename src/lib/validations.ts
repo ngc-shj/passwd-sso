@@ -372,6 +372,34 @@ export const updateOrgIdentitySchema = z.object({
   }
 });
 
+export const createOrgPasskeySchema = z.object({
+  entryType: z.literal(ENTRY_TYPE.PASSKEY),
+  title: z.string().min(1).max(200).trim(),
+  relyingPartyId: z.string().min(1).max(200).trim(),
+  relyingPartyName: z.string().max(200).optional().or(z.literal("")),
+  username: z.string().max(200).optional().or(z.literal("")),
+  credentialId: z.string().max(500).optional().or(z.literal("")),
+  creationDate: z.string().optional().or(z.literal("")),
+  deviceInfo: z.string().max(200).optional().or(z.literal("")),
+  notes: z.string().max(10000).optional().or(z.literal("")),
+  tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
+});
+
+export const updateOrgPasskeySchema = z.object({
+  title: z.string().min(1).max(200).trim().optional(),
+  relyingPartyId: z.string().min(1).max(200).trim().optional(),
+  relyingPartyName: z.string().max(200).optional().or(z.literal("")),
+  username: z.string().max(200).optional().or(z.literal("")),
+  credentialId: z.string().max(500).optional().or(z.literal("")),
+  creationDate: z.string().optional().or(z.literal("")),
+  deviceInfo: z.string().max(200).optional().or(z.literal("")),
+  notes: z.string().max(10000).optional().or(z.literal("")),
+  tagIds: z.array(z.string().cuid()).optional(),
+  orgFolderId: z.string().cuid().optional().nullable(),
+  isArchived: z.boolean().optional(),
+});
+
 export const createOrgTagSchema = z.object({
   name: z.string().min(1).max(50).trim(),
   color: z
@@ -506,6 +534,8 @@ export type CreateOrgCreditCardInput = z.infer<typeof createOrgCreditCardSchema>
 export type UpdateOrgCreditCardInput = z.infer<typeof updateOrgCreditCardSchema>;
 export type CreateOrgIdentityInput = z.infer<typeof createOrgIdentitySchema>;
 export type UpdateOrgIdentityInput = z.infer<typeof updateOrgIdentitySchema>;
+export type CreateOrgPasskeyInput = z.infer<typeof createOrgPasskeySchema>;
+export type UpdateOrgPasskeyInput = z.infer<typeof updateOrgPasskeySchema>;
 export type CreateOrgTagInput = z.infer<typeof createOrgTagSchema>;
 export type CreateShareLinkInput = z.infer<typeof createShareLinkSchema>;
 export type CreateEmergencyGrantInput = z.infer<typeof createEmergencyGrantSchema>;

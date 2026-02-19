@@ -146,6 +146,10 @@ vi.mock("@/components/org/org-attachment-section", () => ({
 }));
 
 vi.mock("@/components/passwords/entry-form-ui", () => ({
+  ENTRY_DIALOG_FLAT_SECTION_CLASS:
+    "!rounded-none !border-0 !bg-transparent !px-1 !py-2 !shadow-none hover:!bg-transparent",
+  ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS:
+    "!rounded-none !border-0 !bg-transparent !from-transparent !to-transparent !p-0 !shadow-none",
   EntryActionBar: ({
     onCancel,
     submitDisabled,
@@ -317,7 +321,7 @@ describe("OrgPasswordForm — folder selection", () => {
       const folderSelect = selects.find(
         (el) => el.getAttribute("data-value") === "folder-1",
       );
-      expect(folderSelect).toBeDefined();
+      expect(folderSelect).toBeInTheDocument();
     });
   });
 
@@ -406,6 +410,78 @@ describe("OrgPasswordForm — folder selection", () => {
       expect(putCall).toBeDefined();
       const body = JSON.parse(putCall![1]!.body as string);
       expect(body.orgFolderId).toBeNull();
+    });
+  });
+
+  it("re-applies latest editData after close and reopen", async () => {
+    setupFetch();
+    const onOpenChange = vi.fn();
+
+    const view = render(
+      <OrgPasswordForm
+        orgId="org-1"
+        open={true}
+        onOpenChange={onOpenChange}
+        onSaved={vi.fn()}
+        editData={{
+          id: "entry-1",
+          title: "First Title",
+          username: "first-user",
+          password: "first-pass",
+          url: null,
+          notes: null,
+          orgFolderId: "folder-1",
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("First Title")).toBeInTheDocument();
+    });
+
+    view.rerender(
+      <OrgPasswordForm
+        orgId="org-1"
+        open={false}
+        onOpenChange={onOpenChange}
+        onSaved={vi.fn()}
+        editData={{
+          id: "entry-1",
+          title: "First Title",
+          username: "first-user",
+          password: "first-pass",
+          url: null,
+          notes: null,
+          orgFolderId: "folder-1",
+        }}
+      />,
+    );
+
+    view.rerender(
+      <OrgPasswordForm
+        orgId="org-1"
+        open={true}
+        onOpenChange={onOpenChange}
+        onSaved={vi.fn()}
+        editData={{
+          id: "entry-2",
+          title: "Second Title",
+          username: "second-user",
+          password: "second-pass",
+          url: null,
+          notes: null,
+          orgFolderId: "folder-2",
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Second Title")).toBeInTheDocument();
+      const selects = screen.getAllByTestId("select");
+      const folderSelect = selects.find(
+        (el) => el.getAttribute("data-value") === "folder-2",
+      );
+      expect(folderSelect).toBeInTheDocument();
     });
   });
 });

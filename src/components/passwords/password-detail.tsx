@@ -20,7 +20,11 @@ import { CopyButton } from "./copy-button";
 import { Favicon } from "./favicon";
 import { TOTPField, type TOTPEntry } from "./totp-field";
 import { CUSTOM_FIELD_TYPE, apiPath } from "@/lib/constants";
-import type { CustomFieldType } from "@/lib/constants";
+import type {
+  EntryCustomField,
+  EntryPasswordHistory,
+  EntryTagNameColor,
+} from "@/lib/entry-form-types";
 import {
   ArrowLeft,
   Edit,
@@ -40,17 +44,6 @@ import { toast } from "sonner";
 import { formatDateTime } from "@/lib/format-datetime";
 import { useReprompt } from "@/hooks/use-reprompt";
 
-interface PasswordHistoryEntry {
-  password: string;
-  changedAt: string;
-}
-
-interface CustomField {
-  label: string;
-  value: string;
-  type: CustomFieldType;
-}
-
 interface PasswordDetailProps {
   data: {
     id: string;
@@ -59,9 +52,9 @@ interface PasswordDetailProps {
     password: string;
     url: string | null;
     notes: string | null;
-    tags: Array<{ name: string; color: string | null }>;
-    passwordHistory: PasswordHistoryEntry[];
-    customFields: CustomField[];
+    tags: EntryTagNameColor[];
+    passwordHistory: EntryPasswordHistory[];
+    customFields: EntryCustomField[];
     totp?: TOTPEntry;
     isFavorite: boolean;
     isArchived: boolean;

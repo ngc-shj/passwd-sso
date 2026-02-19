@@ -823,6 +823,37 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
     expect(mockEncryptServerData).toHaveBeenCalledTimes(2); // blob + overview
   });
 
+  it("creates PASSKEY entry (201)", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+    });
+    mockPrismaOrgPasswordEntry.create.mockResolvedValue({
+      id: "new-passkey",
+      entryType: ENTRY_TYPE.PASSKEY,
+      tags: [],
+      createdAt: now,
+    });
+
+    const passkeyBody = {
+      entryType: "PASSKEY",
+      title: "FIDO Key",
+      relyingPartyId: "example.com",
+      relyingPartyName: "Example",
+      username: "alice@example.com",
+      credentialId: "cred-123",
+    };
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: passkeyBody }),
+      createParams({ orgId: ORG_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(201);
+    expect(json.id).toBe("new-passkey");
+    expect(json.title).toBe("FIDO Key");
+    expect(json.entryType).toBe(ENTRY_TYPE.PASSKEY);
+    expect(mockEncryptServerData).toHaveBeenCalledTimes(2);
+  });
+
   it("returns 400 when IDENTITY has no title", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
       encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",

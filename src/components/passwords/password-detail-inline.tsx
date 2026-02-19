@@ -12,7 +12,10 @@ import { OrgAttachmentSection, type OrgAttachmentMeta } from "@/components/org/o
 import { EntryHistorySection } from "./entry-history-section";
 import { formatCardNumber } from "@/lib/credit-card";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
-import type { CustomFieldType } from "@/lib/constants";
+import type {
+  EntryCustomField,
+  EntryPasswordHistory,
+} from "@/lib/entry-form-types";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { apiPath } from "@/lib/constants";
@@ -27,17 +30,6 @@ import {
   ChevronRight,
 } from "lucide-react";
 
-interface PasswordHistoryEntry {
-  password: string;
-  changedAt: string;
-}
-
-interface CustomField {
-  label: string;
-  value: string;
-  type: CustomFieldType;
-}
-
 export interface InlineDetailData {
   id: string;
   entryType?: EntryTypeValue;
@@ -47,8 +39,8 @@ export interface InlineDetailData {
   url: string | null;
   urlHost: string | null;
   notes: string | null;
-  customFields: CustomField[];
-  passwordHistory: PasswordHistoryEntry[];
+  customFields: EntryCustomField[];
+  passwordHistory: EntryPasswordHistory[];
   totp?: TOTPEntry;
   cardholderName?: string | null;
   cardNumber?: string | null;

@@ -46,9 +46,8 @@ describe("audit log target labels", () => {
     );
 
     for (const page of [personalPage, orgPage]) {
-      expect(page).toContain("try {");
-      expect(page).toContain("parentActionLabel = t(parentAction as never)");
-      expect(page).toContain("return String(action)");
+      expect(page).toContain("const key = normalizeAuditActionKey(String(action));");
+      expect(page).toContain("return t.has(key as never) ? t(key as never) : String(action);");
     }
   });
 });
