@@ -5,21 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
 import { createOrgPasswordFormLifecycleSettersMock } from "@/test-utils/org-password-form-setters";
 
-const applyOrgEditDataToFormMock = vi.fn();
-const resetOrgFormForCloseMock = vi.fn();
-
-vi.mock("@/hooks/org-password-form-lifecycle-state", () => ({
-  applyOrgEditDataToForm: (...args: unknown[]) => applyOrgEditDataToFormMock(...args),
-  resetOrgFormForClose: (...args: unknown[]) => resetOrgFormForCloseMock(...args),
-}));
-
 describe("useOrgPasswordFormLifecycle", () => {
   beforeEach(() => {
-    applyOrgEditDataToFormMock.mockReset();
-    resetOrgFormForCloseMock.mockReset();
+    vi.clearAllMocks();
   });
 
   it("applies edit data when opened with editData", () => {
+    const setters = createOrgPasswordFormLifecycleSettersMock();
+
     renderHook(() =>
       useOrgPasswordFormLifecycle({
         open: true,
@@ -33,28 +26,32 @@ describe("useOrgPasswordFormLifecycle", () => {
           tags: [],
         },
         onOpenChange: vi.fn(),
-        setters: createOrgPasswordFormLifecycleSettersMock(),
+        setters,
       }),
     );
 
-    expect(applyOrgEditDataToFormMock).toHaveBeenCalledTimes(1);
+    expect(setters.setTitle).toHaveBeenCalledWith("t");
+    expect(setters.setUsername).toHaveBeenCalledWith("u");
+    expect(setters.setPassword).toHaveBeenCalledWith("p");
   });
 
   it("resets form when closing via handleOpenChange", () => {
     const onOpenChange = vi.fn();
+    const setters = createOrgPasswordFormLifecycleSettersMock();
 
     const { result } = renderHook(() =>
       useOrgPasswordFormLifecycle({
         open: true,
         editData: null,
         onOpenChange,
-        setters: createOrgPasswordFormLifecycleSettersMock(),
+        setters,
       }),
     );
 
     result.current.handleOpenChange(false);
 
-    expect(resetOrgFormForCloseMock).toHaveBeenCalledTimes(1);
+    expect(setters.setTitle).toHaveBeenCalledWith("");
+    expect(setters.setSaving).toHaveBeenCalledWith(false);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
