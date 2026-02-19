@@ -12,13 +12,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { OrgAttachmentSection } from "./org-attachment-section";
-import { getOrgCardValidationState } from "@/components/org/org-credit-card-validation";
-import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
-import { buildOrgEntryCopyData } from "@/components/org/org-entry-copy-data";
-import {
-  handleOrgCardNumberChange,
-  submitOrgPasswordForm,
-} from "@/components/org/org-password-form-actions";
 import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
 import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
 import {
@@ -34,11 +27,9 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { buildGeneratorSummary } from "@/lib/generator-summary";
 import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgAttachments } from "@/hooks/use-org-attachments";
-import { useOrgEntrySpecificFieldsPropsFromState } from "@/hooks/use-org-entry-specific-fields-props";
-import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
+import { useOrgPasswordFormController } from "@/hooks/use-org-password-form-controller";
 import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
 import { useOrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 
@@ -66,50 +57,18 @@ export function OrgPasswordForm({
     values: {
       saving,
       title,
-      username,
-      password,
-      content,
-      url,
-      notes,
       selectedTags,
-      generatorSettings,
       customFields,
       totp,
       showTotpInput,
-      cardholderName,
-      cardNumber,
-      brand,
-      brandSource,
-      expiryMonth,
-      expiryYear,
-      cvv,
-      fullName,
-      address,
-      phone,
-      email,
-      dateOfBirth,
-      nationality,
-      idNumber,
-      issueDate,
-      expiryDate,
-      relyingPartyId,
-      relyingPartyName,
-      credentialId,
-      creationDate,
-      deviceInfo,
       orgFolderId,
     },
     setters: {
-      setSaving,
       setTitle,
       setSelectedTags,
       setCustomFields,
       setTotp,
       setShowTotpInput,
-      setCardNumber,
-      setBrand,
-      setDobError,
-      setExpiryError,
       setOrgFolderId,
     },
   } = formState;
@@ -126,151 +85,29 @@ export function OrgPasswordForm({
     setters: formSetters,
   });
 
-  const {
-    cardValidation,
-    lengthHint,
-    maxInputLength,
-    showLengthError,
-    showLuhnError,
-    cardNumberValid,
-    hasBrandHint,
-  } = getOrgCardValidationState(cardNumber, brand);
-
-  const handleCardNumberChange = (value: string) => {
-    handleOrgCardNumberChange({
-      value,
-      brand,
-      brandSource,
-      setCardNumber,
-      setBrand,
-    });
-  };
-
-  const handleSubmit = async () => {
-    await submitOrgPasswordForm({
+  const { entryCopy, entrySpecificFieldsProps, handleSubmit, hasChanges, submitDisabled } =
+    useOrgPasswordFormController({
       orgId,
+      onSaved,
       isEdit,
       editData,
       effectiveEntryType,
-      title,
-      notes,
-      selectedTags,
-      orgFolderId,
-      username,
-      password,
-      url,
-      customFields,
-      totp,
-      content,
-      cardholderName,
-      cardNumber,
-      brand,
-      expiryMonth,
-      expiryYear,
-      cvv,
-      fullName,
-      address,
-      phone,
-      email,
-      dateOfBirth,
-      nationality,
-      idNumber,
-      issueDate,
-      expiryDate,
-      relyingPartyId,
-      relyingPartyName,
-      credentialId,
-      creationDate,
-      deviceInfo,
-      cardNumberValid,
+      entryKind,
+      isLoginEntry,
+      isNote,
+      isCreditCard,
       isIdentity,
-      setDobError,
-      setExpiryError,
-      identityErrorCopy: {
-        dobFuture: ti("dobFuture"),
-        expiryBeforeIssue: ti("expiryBeforeIssue"),
-      },
+      isPasskey,
       t,
-      setSaving,
+      ti,
+      tn,
+      tcc,
+      tpk,
+      tGen,
+      formState,
       handleOpenChange,
-      onSaved,
     });
-  };
-
-  const generatorSummary = buildGeneratorSummary(generatorSettings, {
-    modePassphrase: tGen("modePassphrase"),
-    modePassword: tGen("modePassword"),
-  });
-
-  const entryCopy = buildOrgEntryCopy({
-    isEdit,
-    entryKind,
-    copyByKind: buildOrgEntryCopyData({ t, tn, tcc, ti, tpk }),
-  });
-
-  const { hasChanges, submitDisabled } = useOrgPasswordFormDerived({
-    effectiveEntryType,
-    editData,
-    isLoginEntry,
-    isNote,
-    isCreditCard,
-    isIdentity,
-    isPasskey,
-    title,
-    notes,
-    selectedTags,
-    orgFolderId,
-    username,
-    password,
-    url,
-    customFields,
-    totp,
-    content,
-    cardholderName,
-    cardNumber,
-    brand,
-    expiryMonth,
-    expiryYear,
-    cvv,
-    fullName,
-    address,
-    phone,
-    email,
-    dateOfBirth,
-    nationality,
-    idNumber,
-    issueDate,
-    expiryDate,
-    relyingPartyId,
-    relyingPartyName,
-    credentialId,
-    creationDate,
-    deviceInfo,
-    cardNumberValid,
-  });
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
-
-  const entrySpecificFieldsProps = useOrgEntrySpecificFieldsPropsFromState({
-    entryKind,
-    entryCopy,
-    t,
-    tn,
-    tcc,
-    ti,
-    tpk,
-    values: formState.values,
-    setters: formState.setters,
-    generatorSummary,
-    onCardNumberChange: handleCardNumberChange,
-    maxInputLength,
-    showLengthError,
-    showLuhnError,
-    detectedBrand: cardValidation.detectedBrand
-      ? tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })
-      : undefined,
-    hasBrandHint: hasBrandHint && cardValidation.digits.length > 0,
-    lengthHint,
-  });
 
   const entrySpecificFields = <OrgEntrySpecificFields {...entrySpecificFieldsProps} />;
 
