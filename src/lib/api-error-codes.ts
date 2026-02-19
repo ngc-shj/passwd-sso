@@ -90,6 +90,12 @@ export const API_ERROR = {
   // ── Share Links ───────────────────────────────────────────
   ALREADY_REVOKED: "ALREADY_REVOKED",
 
+  // ── Send ────────────────────────────────────────────────
+  SEND_TEXT_TOO_LARGE: "SEND_TEXT_TOO_LARGE",
+  SEND_FILE_TOO_LARGE: "SEND_FILE_TOO_LARGE",
+  SEND_FILE_TYPE_NOT_ALLOWED: "SEND_FILE_TYPE_NOT_ALLOWED",
+  SEND_STORAGE_LIMIT_EXCEEDED: "SEND_STORAGE_LIMIT_EXCEEDED",
+
   // ── Watchtower ────────────────────────────────────────────
   INVALID_PREFIX: "INVALID_PREFIX",
   UPSTREAM_ERROR: "UPSTREAM_ERROR",
@@ -176,6 +182,10 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   INVITATION_ALREADY_SENT: "invitationAlreadySent",
   INVITATION_NOT_FOUND: "invitationNotFound",
   ALREADY_REVOKED: "alreadyRevoked",
+  SEND_TEXT_TOO_LARGE: "sendTextTooLarge",
+  SEND_FILE_TOO_LARGE: "sendFileTooLarge",
+  SEND_FILE_TYPE_NOT_ALLOWED: "sendFileTypeNotAllowed",
+  SEND_STORAGE_LIMIT_EXCEEDED: "sendStorageLimitExceeded",
   INVALID_PREFIX: "invalidRequest",
   UPSTREAM_ERROR: "upstreamError",
   INVALID_CURSOR: "invalidRequest",

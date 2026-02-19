@@ -132,6 +132,7 @@ describe("VaultManagementSection", () => {
         isSelectedVaultArchive={false}
         isSelectedVaultTrash={false}
         isShareLinks={false}
+        isSend={false}
         isPersonalAuditLog={false}
         activeAuditOrgId={null}
         onNavigate={() => {}}
@@ -141,10 +142,11 @@ describe("VaultManagementSection", () => {
     expect(screen.getByRole("link", { name: "archive" })).toHaveAttribute("href", "/dashboard/archive");
     expect(screen.getByRole("link", { name: "trash" })).toHaveAttribute("href", "/dashboard/trash");
     expect(screen.getByRole("link", { name: "shareLinks" })).toHaveAttribute("href", "/dashboard/share-links");
+    expect(screen.getByRole("link", { name: "send" })).toHaveAttribute("href", "/dashboard/share-links?type=send");
     expect(screen.getByRole("link", { name: "auditLog" })).toHaveAttribute("href", "/dashboard/audit-logs");
   });
 
-  it("renders org scoped links", () => {
+  it("renders org scoped links without Send", () => {
     render(
       <VaultManagementSection
         t={(k) => k}
@@ -152,6 +154,7 @@ describe("VaultManagementSection", () => {
         isSelectedVaultArchive={false}
         isSelectedVaultTrash={false}
         isShareLinks={false}
+        isSend={false}
         isPersonalAuditLog={false}
         activeAuditOrgId="org-1"
         onNavigate={() => {}}
@@ -162,6 +165,8 @@ describe("VaultManagementSection", () => {
     expect(screen.getByRole("link", { name: "trash" })).toHaveAttribute("href", "/dashboard/orgs/org-1?scope=trash");
     expect(screen.getByRole("link", { name: "shareLinks" })).toHaveAttribute("href", "/dashboard/share-links?org=org-1");
     expect(screen.getByRole("link", { name: "auditLog" })).toHaveAttribute("href", "/dashboard/orgs/org-1/audit-logs");
+    // Send should not appear for org context
+    expect(screen.queryByRole("link", { name: "send" })).not.toBeInTheDocument();
   });
 });
 

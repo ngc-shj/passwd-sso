@@ -409,6 +409,52 @@ export const createOrgTagSchema = z.object({
     .or(z.literal("")),
 });
 
+// ─── Send Schemas ─────────────────────────────────────────
+
+export const SEND_MAX_TEXT_LENGTH = 50_000;
+export const SEND_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+export const SEND_MAX_ACTIVE_TOTAL_BYTES = 100 * 1024 * 1024; // ユーザーごと合計 100MB
+
+/**
+ * Safe filename pattern: alphanumeric, CJK, hyphens, underscores, dots, spaces.
+ * Rejects path separators, CRLF, null bytes, control characters, and emoji.
+ */
+const SAFE_FILENAME_RE = /^[\w\u3000-\u9FFF\uF900-\uFAFF\s.\-]+$/;
+
+/** Windows reserved device names (case-insensitive) */
+const WINDOWS_RESERVED_RE = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)/i;
+
+/**
+ * Validate a filename for Send. Returns true if the filename is safe.
+ */
+export function isValidSendFilename(name: string): boolean {
+  if (!name || name.length === 0) return false;
+  // UTF-8 byte length ≤ 255
+  if (new TextEncoder().encode(name).length > 255) return false;
+  // No leading/trailing dots
+  if (name.startsWith(".") || name.endsWith(".")) return false;
+  // No path separators or null bytes
+  if (/[/\\]/.test(name) || name.includes("\0")) return false;
+  // No Windows reserved names
+  if (WINDOWS_RESERVED_RE.test(name)) return false;
+  // Must match safe character set
+  if (!SAFE_FILENAME_RE.test(name)) return false;
+  return true;
+}
+
+export const createSendTextSchema = z.object({
+  name: z.string().min(1).max(200).trim(),
+  text: z.string().min(1).max(SEND_MAX_TEXT_LENGTH),
+  expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
+  maxViews: z.number().int().min(1).max(100).optional(),
+});
+
+export const createSendFileMetaSchema = z.object({
+  name: z.string().min(1).max(200).trim(),
+  expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
+  maxViews: z.coerce.number().int().min(1).max(100).optional(),
+});
+
 // ─── Share Link Schemas ───────────────────────────────────
 
 const shareDataSchema = z.object({
@@ -537,6 +583,8 @@ export type UpdateOrgIdentityInput = z.infer<typeof updateOrgIdentitySchema>;
 export type CreateOrgPasskeyInput = z.infer<typeof createOrgPasskeySchema>;
 export type UpdateOrgPasskeyInput = z.infer<typeof updateOrgPasskeySchema>;
 export type CreateOrgTagInput = z.infer<typeof createOrgTagSchema>;
+export type CreateSendTextInput = z.infer<typeof createSendTextSchema>;
+export type CreateSendFileMetaInput = z.infer<typeof createSendFileMetaSchema>;
 export type CreateShareLinkInput = z.infer<typeof createShareLinkSchema>;
 export type CreateEmergencyGrantInput = z.infer<typeof createEmergencyGrantSchema>;
 export type AcceptEmergencyGrantInput = z.infer<typeof acceptEmergencyGrantSchema>;

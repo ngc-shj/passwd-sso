@@ -34,6 +34,7 @@ export interface SidebarContentProps {
   isSelectedVaultTrash: boolean;
   isWatchtower: boolean;
   isShareLinks: boolean;
+  isSend: boolean;
   isEmergencyAccess: boolean;
   isPersonalAuditLog: boolean;
   activeAuditOrgId: string | null;
@@ -67,6 +68,7 @@ export function SidebarContent({
   isSelectedVaultTrash,
   isWatchtower,
   isShareLinks,
+  isSend,
   isEmergencyAccess,
   isPersonalAuditLog,
   activeAuditOrgId,
@@ -166,6 +168,7 @@ export function SidebarContent({
         isSelectedVaultArchive={isSelectedVaultArchive}
         isSelectedVaultTrash={isSelectedVaultTrash}
         isShareLinks={isShareLinks}
+        isSend={isSend}
         isPersonalAuditLog={isPersonalAuditLog}
         activeAuditOrgId={activeAuditOrgId}
         onNavigate={onNavigate}

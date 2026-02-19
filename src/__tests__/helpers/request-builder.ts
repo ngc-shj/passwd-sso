@@ -36,6 +36,23 @@ export function createRequest(
   return new NextRequest(urlObj.toString(), init as ConstructorParameters<typeof NextRequest>[1]);
 }
 
+/**
+ * Creates a NextRequest from FormData for multipart upload tests.
+ * Note: Do NOT set Content-Type header manually — the boundary is auto-generated.
+ */
+export function createMultipartRequest(
+  url: string,
+  formData: FormData,
+  options: { headers?: Record<string, string> } = {}
+): NextRequest {
+  const { headers = {} } = options;
+  return new NextRequest(url, {
+    method: "POST",
+    body: formData,
+    headers,
+  } as ConstructorParameters<typeof NextRequest>[1]);
+}
+
 /** Parse a Response to { status, json } */
 export async function parseResponse(response: Response) {
   const json = await response.json();

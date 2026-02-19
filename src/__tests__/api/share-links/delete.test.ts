@@ -54,6 +54,7 @@ describe("DELETE /api/share-links/[id]", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue({
       id: "s1",
+      shareType: "ENTRY_SHARE",
       createdById: "other-user",
       revokedAt: null,
       orgPasswordEntryId: null,
@@ -71,6 +72,7 @@ describe("DELETE /api/share-links/[id]", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue({
       id: "s1",
+      shareType: "ENTRY_SHARE",
       createdById: DEFAULT_SESSION.user.id,
       revokedAt: new Date(),
       orgPasswordEntryId: null,
@@ -88,6 +90,7 @@ describe("DELETE /api/share-links/[id]", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue({
       id: "s1",
+      shareType: "ENTRY_SHARE",
       createdById: DEFAULT_SESSION.user.id,
       revokedAt: null,
       orgPasswordEntryId: null,
@@ -104,5 +107,53 @@ describe("DELETE /api/share-links/[id]", () => {
       where: { id: "s1" },
       data: { revokedAt: expect.any(Date) },
     });
+  });
+
+  it("logs SEND_REVOKE when revoking a TEXT send", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique.mockResolvedValue({
+      id: "s1",
+      shareType: "TEXT",
+      createdById: DEFAULT_SESSION.user.id,
+      revokedAt: null,
+      orgPasswordEntryId: null,
+    });
+    mockUpdate.mockResolvedValue({});
+
+    const { logAudit } = await import("@/lib/audit");
+
+    const req = createRequest("DELETE", "http://localhost/api/share-links/s1");
+    const res = await DELETE(req as never, createParams({ id: "s1" }));
+
+    expect(res.status).toBe(200);
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "SEND_REVOKE",
+      })
+    );
+  });
+
+  it("logs SEND_REVOKE when revoking a FILE send", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique.mockResolvedValue({
+      id: "s1",
+      shareType: "FILE",
+      createdById: DEFAULT_SESSION.user.id,
+      revokedAt: null,
+      orgPasswordEntryId: null,
+    });
+    mockUpdate.mockResolvedValue({});
+
+    const { logAudit } = await import("@/lib/audit");
+
+    const req = createRequest("DELETE", "http://localhost/api/share-links/s1");
+    const res = await DELETE(req as never, createParams({ id: "s1" }));
+
+    expect(res.status).toBe(200);
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "SEND_REVOKE",
+      })
+    );
   });
 });

@@ -60,6 +60,7 @@
     "catPasskey": "Passkeys",
     "newPasskey": "Passkey",
     "shareLinks": "Share Links",
+    "send": "Send",
     "emergencyAccess": "Emergency Access",
     "sidebar": "Navigation",
     "folders": "Folders",
@@ -89,7 +90,14 @@
     "loadMore": "Load more",
     "sharedBy": "Shared by {name}",
     "personalEntry": "Personal entry",
-    "deletedEntry": "Deleted entry"
+    "deletedEntry": "Deleted entry",
+    "typeFilter": "Type",
+    "allTypes": "All types",
+    "entryShares": "Entry shares",
+    "sends": "Sends",
+    "newSend": "New Send",
+    "textSend": "Text",
+    "fileSend": "File"
   },
   "PasswordList": {
     "noMatch": "No items match your search.",
@@ -730,6 +738,8 @@
     "ORG_ROLE_UPDATE": "Changed role",
     "SHARE_CREATE": "Created share link",
     "SHARE_REVOKE": "Revoked share link",
+    "SEND_CREATE": "Created send",
+    "SEND_REVOKE": "Revoked send",
     "EMERGENCY_GRANT_CREATE": "Created emergency grant",
     "EMERGENCY_GRANT_ACCEPT": "Accepted emergency grant",
     "EMERGENCY_GRANT_REJECT": "Rejected emergency grant",
@@ -781,6 +791,7 @@
     "groupHistory": "History",
     "groupOrg": "Organization",
     "groupShare": "Share Links",
+    "groupSend": "Send",
     "groupEmergency": "Emergency Access",
     "yes": "yes",
     "no": "no",
@@ -855,7 +866,20 @@
     "accessTime": "Time",
     "ipAddress": "IP Address",
     "noAccessLogs": "No access logs yet",
-    "loadMoreLogs": "Load more"
+    "loadMoreLogs": "Load more",
+    "sendText": "Text",
+    "sendFile": "File",
+    "sendName": "Name",
+    "sendContent": "Content",
+    "sendDownload": "Download",
+    "sendTextPlaceholder": "Enter text to send...",
+    "sendNamePlaceholder": "Name this send...",
+    "sendDropzone": "Drop a file or click to browse",
+    "sendMaxFileSize": "Max 10 MB",
+    "sendCreateSuccess": "Send created",
+    "newSend": "New Send",
+    "newSendDesc": "Send text or a file securely via a temporary link.",
+    "remove": "Remove"
   },
   "EmergencyAccess": {
     "title": "Emergency Access",
@@ -1004,7 +1028,11 @@
     "invalidRecoveryKey": "Invalid Recovery Key.",
     "recoveryKeyNotSet": "No Recovery Key has been set up.",
     "vaultResetConfirmationMismatch": "Confirmation text does not match.",
-    "invalidOrigin": "Request origin is not allowed."
+    "invalidOrigin": "Request origin is not allowed.",
+    "sendTextTooLarge": "Text content is too large.",
+    "sendFileTooLarge": "File is too large (max 10 MB).",
+    "sendFileTypeNotAllowed": "File type is not allowed.",
+    "sendStorageLimitExceeded": "Storage limit exceeded."
   },
   "Attachments": {
     "title": "Attachments",

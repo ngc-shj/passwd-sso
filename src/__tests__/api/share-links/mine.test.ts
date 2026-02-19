@@ -33,7 +33,11 @@ import { GET } from "@/app/api/share-links/mine/route";
 function makeShare(overrides: Record<string, unknown> = {}) {
   return {
     id: "share-1",
+    shareType: "ENTRY_SHARE",
     entryType: ENTRY_TYPE.LOGIN,
+    sendName: null,
+    sendFilename: null,
+    sendSizeBytes: null,
     expiresAt: new Date(Date.now() + 86400_000), // +1 day
     maxViews: null,
     viewCount: 0,
@@ -234,7 +238,7 @@ describe("GET /api/share-links/mine", () => {
     );
   });
 
-  it("queries only authenticated user's shares", async () => {
+  it("queries only authenticated user's shares (default: all types)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindMany.mockResolvedValue([]);
 
@@ -245,7 +249,6 @@ describe("GET /api/share-links/mine", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           createdById: DEFAULT_SESSION.user.id,
-          passwordEntryId: { not: null },
         }),
       })
     );
@@ -354,5 +357,64 @@ describe("GET /api/share-links/mine", () => {
         }),
       })
     );
+  });
+
+  it("filters by shareType=send for personal context", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest(
+      "GET",
+      "http://localhost/api/share-links/mine?shareType=send"
+    );
+    await GET(req as never);
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdById: DEFAULT_SESSION.user.id,
+          shareType: { in: ["TEXT", "FILE"] },
+        }),
+      })
+    );
+  });
+
+  it("returns empty for shareType=send with org context", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+
+    const req = createRequest(
+      "GET",
+      "http://localhost/api/share-links/mine?org=org-1&shareType=send"
+    );
+    const res = await GET(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.items).toHaveLength(0);
+    expect(json.nextCursor).toBeNull();
+    expect(mockFindMany).not.toHaveBeenCalled();
+  });
+
+  it("includes shareType, sendName, sendFilename, sendSizeBytes in response", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindMany.mockResolvedValue([
+      makeShare({
+        shareType: "TEXT",
+        entryType: null,
+        sendName: "My Text",
+        passwordEntryId: null,
+        passwordEntry: null,
+      }),
+    ]);
+
+    const req = createRequest("GET", "http://localhost/api/share-links/mine");
+    const res = await GET(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.items[0].shareType).toBe("TEXT");
+    expect(json.items[0].sendName).toBe("My Text");
+    expect(json.items[0].sendFilename).toBeNull();
+    expect(json.items[0].sendSizeBytes).toBeNull();
   });
 });
