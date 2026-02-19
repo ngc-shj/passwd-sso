@@ -1,11 +1,31 @@
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
 import type { OrgPasswordFormTranslations } from "@/hooks/org-password-form-translations";
 import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
+import type {
+  CreditCardFormTranslator,
+  IdentityFormTranslator,
+  PasswordFormTranslator,
+  PasswordGeneratorTranslator,
+  PasskeyFormTranslator,
+  SecureNoteFormTranslator,
+} from "@/lib/translation-types";
 
-interface BuildOrgPasswordPresenterArgsInput {
+export interface OrgPasswordFormPresenterArgsInput {
   isEdit: boolean;
   entryKindState: OrgEntryKindState;
   translations: OrgPasswordFormTranslations;
+  formState: OrgPasswordFormState;
+}
+
+export interface OrgPasswordFormPresenterArgs {
+  isEdit: boolean;
+  entryKind: OrgEntryKindState["entryKind"];
+  t: PasswordFormTranslator;
+  ti: IdentityFormTranslator;
+  tn: SecureNoteFormTranslator;
+  tcc: CreditCardFormTranslator;
+  tpk: PasskeyFormTranslator;
+  tGen: PasswordGeneratorTranslator;
   formState: OrgPasswordFormState;
 }
 
@@ -14,7 +34,7 @@ export function buildOrgPasswordPresenterArgs({
   entryKindState,
   translations,
   formState,
-}: BuildOrgPasswordPresenterArgsInput) {
+}: OrgPasswordFormPresenterArgsInput): OrgPasswordFormPresenterArgs {
   const { t, ti, tn, tcc, tpk, tGen } = translations;
 
   return {

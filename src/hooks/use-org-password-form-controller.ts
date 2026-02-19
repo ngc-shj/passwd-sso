@@ -5,23 +5,9 @@ import type { OrgPasswordFormControllerArgs } from "@/hooks/org-password-form-co
 import { buildOrgPasswordDerivedArgs } from "@/hooks/org-password-form-derived-args";
 import { buildOrgPasswordPresenterArgs } from "@/hooks/org-password-form-presenter-args";
 import { buildOrgPasswordSubmitArgs } from "@/hooks/org-password-form-submit-args";
-import type { OrgPasswordFormTranslations } from "@/hooks/org-password-form-translations";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 import { useOrgPasswordFormPresenter } from "@/hooks/use-org-password-form-presenter";
-import {
-  selectOrgEntryFieldValues,
-  type OrgPasswordFormState,
-} from "@/hooks/use-org-password-form-state";
-import type { EntryTypeValue } from "@/lib/constants";
-import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
-
-type OrgFormState = OrgPasswordFormState;
-type UseOrgPasswordFormControllerArgs = OrgPasswordFormControllerArgs & {
-  effectiveEntryType: EntryTypeValue;
-  entryKindState: OrgEntryKindState;
-  translations: OrgPasswordFormTranslations;
-  formState: OrgFormState;
-};
+import { selectOrgEntryFieldValues } from "@/hooks/use-org-password-form-state";
 
 export function useOrgPasswordFormController({
   orgId,
@@ -33,7 +19,7 @@ export function useOrgPasswordFormController({
   translations,
   formState,
   handleOpenChange,
-}: UseOrgPasswordFormControllerArgs) {
+}: OrgPasswordFormControllerArgs) {
   const { values, setters } = formState;
   const { isIdentity } = entryKindState;
   const entryValues = selectOrgEntryFieldValues(values);
