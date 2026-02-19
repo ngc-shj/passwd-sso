@@ -1,15 +1,14 @@
 import { useState } from "react";
-import { formatCardNumber } from "@/lib/credit-card";
-import type {
-  GeneratorSettings,
-} from "@/lib/generator-prefs";
-import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
+import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { OrgTagData } from "@/components/org/org-tag-input";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
 import type { OrgAttachmentMeta } from "@/components/org/org-attachment-section";
+import { buildOrgPasswordFormInitialValues } from "@/hooks/org-password-form-initial-values";
 
 export function useOrgPasswordFormState(editData?: OrgPasswordFormEditData | null) {
+  const initial = buildOrgPasswordFormInitialValues(editData);
+
   const [saving, setSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showGenerator, setShowGenerator] = useState(false);
@@ -18,50 +17,44 @@ export function useOrgPasswordFormState(editData?: OrgPasswordFormEditData | nul
   const [showIdNumber, setShowIdNumber] = useState(false);
   const [showCredentialId, setShowCredentialId] = useState(false);
 
-  const [title, setTitle] = useState(editData?.title ?? "");
-  const [username, setUsername] = useState(editData?.username ?? "");
-  const [password, setPassword] = useState(editData?.password ?? "");
-  const [content, setContent] = useState(editData?.content ?? "");
-  const [url, setUrl] = useState(editData?.url ?? "");
-  const [notes, setNotes] = useState(editData?.notes ?? "");
-  const [selectedTags, setSelectedTags] = useState<OrgTagData[]>(editData?.tags ?? []);
-  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>({
-    ...DEFAULT_GENERATOR_SETTINGS,
-  });
-  const [customFields, setCustomFields] = useState<EntryCustomField[]>(editData?.customFields ?? []);
-  const [totp, setTotp] = useState<EntryTotp | null>(editData?.totp ?? null);
-  const [showTotpInput, setShowTotpInput] = useState(!!editData?.totp);
+  const [title, setTitle] = useState(initial.title);
+  const [username, setUsername] = useState(initial.username);
+  const [password, setPassword] = useState(initial.password);
+  const [content, setContent] = useState(initial.content);
+  const [url, setUrl] = useState(initial.url);
+  const [notes, setNotes] = useState(initial.notes);
+  const [selectedTags, setSelectedTags] = useState<OrgTagData[]>(initial.selectedTags);
+  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(initial.generatorSettings);
+  const [customFields, setCustomFields] = useState<EntryCustomField[]>(initial.customFields);
+  const [totp, setTotp] = useState<EntryTotp | null>(initial.totp);
+  const [showTotpInput, setShowTotpInput] = useState(initial.showTotpInput);
 
-  const [cardholderName, setCardholderName] = useState(editData?.cardholderName ?? "");
-  const [cardNumber, setCardNumber] = useState(
-    formatCardNumber(editData?.cardNumber ?? "", editData?.brand ?? ""),
-  );
-  const [brand, setBrand] = useState(editData?.brand ?? "");
-  const [brandSource, setBrandSource] = useState<"auto" | "manual">(
-    editData?.brand ? "manual" : "auto",
-  );
-  const [expiryMonth, setExpiryMonth] = useState(editData?.expiryMonth ?? "");
-  const [expiryYear, setExpiryYear] = useState(editData?.expiryYear ?? "");
-  const [cvv, setCvv] = useState(editData?.cvv ?? "");
+  const [cardholderName, setCardholderName] = useState(initial.cardholderName);
+  const [cardNumber, setCardNumber] = useState(initial.cardNumber);
+  const [brand, setBrand] = useState(initial.brand);
+  const [brandSource, setBrandSource] = useState<"auto" | "manual">(initial.brandSource);
+  const [expiryMonth, setExpiryMonth] = useState(initial.expiryMonth);
+  const [expiryYear, setExpiryYear] = useState(initial.expiryYear);
+  const [cvv, setCvv] = useState(initial.cvv);
 
-  const [fullName, setFullName] = useState(editData?.fullName ?? "");
-  const [address, setAddress] = useState(editData?.address ?? "");
-  const [phone, setPhone] = useState(editData?.phone ?? "");
-  const [email, setEmail] = useState(editData?.email ?? "");
-  const [dateOfBirth, setDateOfBirth] = useState(editData?.dateOfBirth ?? "");
-  const [nationality, setNationality] = useState(editData?.nationality ?? "");
-  const [idNumber, setIdNumber] = useState(editData?.idNumber ?? "");
-  const [issueDate, setIssueDate] = useState(editData?.issueDate ?? "");
-  const [expiryDate, setExpiryDate] = useState(editData?.expiryDate ?? "");
+  const [fullName, setFullName] = useState(initial.fullName);
+  const [address, setAddress] = useState(initial.address);
+  const [phone, setPhone] = useState(initial.phone);
+  const [email, setEmail] = useState(initial.email);
+  const [dateOfBirth, setDateOfBirth] = useState(initial.dateOfBirth);
+  const [nationality, setNationality] = useState(initial.nationality);
+  const [idNumber, setIdNumber] = useState(initial.idNumber);
+  const [issueDate, setIssueDate] = useState(initial.issueDate);
+  const [expiryDate, setExpiryDate] = useState(initial.expiryDate);
   const [dobError, setDobError] = useState<string | null>(null);
   const [expiryError, setExpiryError] = useState<string | null>(null);
 
-  const [relyingPartyId, setRelyingPartyId] = useState(editData?.relyingPartyId ?? "");
-  const [relyingPartyName, setRelyingPartyName] = useState(editData?.relyingPartyName ?? "");
-  const [credentialId, setCredentialId] = useState(editData?.credentialId ?? "");
-  const [creationDate, setCreationDate] = useState(editData?.creationDate ?? "");
-  const [deviceInfo, setDeviceInfo] = useState(editData?.deviceInfo ?? "");
-  const [orgFolderId, setOrgFolderId] = useState<string | null>(editData?.orgFolderId ?? null);
+  const [relyingPartyId, setRelyingPartyId] = useState(initial.relyingPartyId);
+  const [relyingPartyName, setRelyingPartyName] = useState(initial.relyingPartyName);
+  const [credentialId, setCredentialId] = useState(initial.credentialId);
+  const [creationDate, setCreationDate] = useState(initial.creationDate);
+  const [deviceInfo, setDeviceInfo] = useState(initial.deviceInfo);
+  const [orgFolderId, setOrgFolderId] = useState<string | null>(initial.orgFolderId);
 
   const values = {
     saving,
