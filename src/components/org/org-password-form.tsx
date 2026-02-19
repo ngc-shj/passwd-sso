@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, type ComponentProps } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -49,6 +49,7 @@ import { buildGeneratorSummary } from "@/lib/generator-summary";
 import { executeOrgEntrySubmit } from "@/components/org/org-entry-submit";
 import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgAttachments } from "@/hooks/use-org-attachments";
+import { useOrgEntrySpecificFieldsProps } from "@/hooks/use-org-entry-specific-fields-props";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 
 export function OrgPasswordForm({
@@ -334,50 +335,46 @@ export function OrgPasswordForm({
   });
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
-  const loginFieldProps = {
+  const entrySpecificFieldsProps = useOrgEntrySpecificFieldsProps({
+    entryKind,
+    entryCopy,
+    t,
+    tn,
+    tcc,
+    ti,
+    tpk,
+    notes,
+    onNotesChange: setNotes,
     title,
     onTitleChange: setTitle,
-    titleLabel: t("title"),
-    titlePlaceholder: t("titlePlaceholder"),
     username,
     onUsernameChange: setUsername,
-    usernameLabel: t("usernameEmail"),
-    usernamePlaceholder: t("usernamePlaceholder"),
     password,
     onPasswordChange: setPassword,
-    passwordLabel: t("password"),
-    passwordPlaceholder: t("passwordPlaceholder"),
     showPassword,
     onToggleShowPassword: () => setShowPassword((v) => !v),
     generatorSummary,
     showGenerator,
     onToggleGenerator: () => setShowGenerator((v) => !v),
-    closeGeneratorLabel: t("closeGenerator"),
-    openGeneratorLabel: t("openGenerator"),
     generatorSettings,
-    onGeneratorUse: (pw: string, settings: typeof generatorSettings) => {
+    onGeneratorUse: (pw, settings) => {
       setPassword(pw);
       setShowPassword(true);
       setGeneratorSettings(settings);
     },
     url,
     onUrlChange: setUrl,
-    urlLabel: t("url"),
-  };
-
-  const creditCardFieldProps = {
+    content,
+    onContentChange: setContent,
     cardholderName,
     onCardholderNameChange: setCardholderName,
-    cardholderNamePlaceholder: tcc("cardholderNamePlaceholder"),
     brand,
-    onBrandChange: (value: string) => {
+    onBrandChange: (value) => {
       setBrand(value);
       setBrandSource("manual");
     },
-    brandPlaceholder: tcc("brandPlaceholder"),
     cardNumber,
     onCardNumberChange: handleCardNumberChange,
-    cardNumberPlaceholder: tcc("cardNumberPlaceholder"),
     showCardNumber,
     onToggleCardNumber: () => setShowCardNumber(!showCardNumber),
     maxInputLength,
@@ -387,123 +384,59 @@ export function OrgPasswordForm({
       ? tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })
       : undefined,
     hasBrandHint: hasBrandHint && cardValidation.digits.length > 0,
-    lengthHintGenericLabel: tcc("cardNumberLengthHintGeneric"),
-    lengthHintLabel: tcc("cardNumberLengthHint", { lengths: lengthHint }),
-    invalidLengthLabel: tcc("cardNumberInvalidLength", { lengths: lengthHint }),
-    invalidLuhnLabel: tcc("cardNumberInvalidLuhn"),
-    creditCardLabels: {
-      cardholderName: tcc("cardholderName"),
-      brand: tcc("brand"),
-      cardNumber: tcc("cardNumber"),
-      expiry: tcc("expiry"),
-      cvv: tcc("cvv"),
-    },
+    lengthHint,
     expiryMonth,
     onExpiryMonthChange: setExpiryMonth,
     expiryYear,
     onExpiryYearChange: setExpiryYear,
-    expiryMonthPlaceholder: tcc("expiryMonth"),
-    expiryYearPlaceholder: tcc("expiryYear"),
     cvv,
     onCvvChange: setCvv,
-    cvvPlaceholder: tcc("cvvPlaceholder"),
     showCvv,
     onToggleCvv: () => setShowCvv(!showCvv),
-  };
-
-  const identityFieldProps = {
     fullName,
     onFullNameChange: setFullName,
-    fullNamePlaceholder: ti("fullNamePlaceholder"),
     address,
     onAddressChange: setAddress,
-    addressPlaceholder: ti("addressPlaceholder"),
     phone,
     onPhoneChange: setPhone,
-    phonePlaceholder: ti("phonePlaceholder"),
     email,
     onEmailChange: setEmail,
-    emailPlaceholder: ti("emailPlaceholder"),
     dateOfBirth,
-    onDateOfBirthChange: (value: string) => {
+    onDateOfBirthChange: (value) => {
       setDateOfBirth(value);
       setDobError(null);
     },
     nationality,
     onNationalityChange: setNationality,
-    nationalityPlaceholder: ti("nationalityPlaceholder"),
     idNumber,
     onIdNumberChange: setIdNumber,
-    idNumberPlaceholder: ti("idNumberPlaceholder"),
     showIdNumber,
     onToggleIdNumber: () => setShowIdNumber(!showIdNumber),
     issueDate,
-    onIssueDateChange: (value: string) => {
+    onIssueDateChange: (value) => {
       setIssueDate(value);
       setExpiryError(null);
     },
     expiryDate,
-    onExpiryDateChange: (value: string) => {
+    onExpiryDateChange: (value) => {
       setExpiryDate(value);
       setExpiryError(null);
     },
     dobError,
     expiryError,
-    identityLabels: {
-      fullName: ti("fullName"),
-      address: ti("address"),
-      phone: ti("phone"),
-      email: ti("email"),
-      dateOfBirth: ti("dateOfBirth"),
-      nationality: ti("nationality"),
-      idNumber: ti("idNumber"),
-      issueDate: ti("issueDate"),
-      expiryDate: ti("expiryDate"),
-    },
-  };
-
-  const passkeyFieldProps = {
     relyingPartyId,
     onRelyingPartyIdChange: setRelyingPartyId,
-    relyingPartyIdPlaceholder: tpk("relyingPartyIdPlaceholder"),
     relyingPartyName,
     onRelyingPartyNameChange: setRelyingPartyName,
-    relyingPartyNamePlaceholder: tpk("relyingPartyNamePlaceholder"),
     credentialId,
     onCredentialIdChange: setCredentialId,
-    credentialIdPlaceholder: tpk("credentialIdPlaceholder"),
     showCredentialId,
     onToggleCredentialId: () => setShowCredentialId(!showCredentialId),
     creationDate,
     onCreationDateChange: setCreationDate,
     deviceInfo,
     onDeviceInfoChange: setDeviceInfo,
-    deviceInfoPlaceholder: tpk("deviceInfoPlaceholder"),
-    passkeyLabels: {
-      relyingPartyId: tpk("relyingPartyId"),
-      relyingPartyName: tpk("relyingPartyName"),
-      username: tpk("username"),
-      credentialId: tpk("credentialId"),
-      creationDate: tpk("creationDate"),
-      deviceInfo: tpk("deviceInfo"),
-    },
-  };
-
-  const entrySpecificFieldsProps: ComponentProps<typeof OrgEntrySpecificFields> = {
-    entryKind,
-    notesLabel: entryCopy.notesLabel,
-    notesPlaceholder: entryCopy.notesPlaceholder,
-    notes,
-    onNotesChange: setNotes,
-    content,
-    onContentChange: setContent,
-    contentLabel: tn("content"),
-    contentPlaceholder: tn("contentPlaceholder"),
-    ...loginFieldProps,
-    ...creditCardFieldProps,
-    ...identityFieldProps,
-    ...passkeyFieldProps,
-  };
+  });
 
   const entrySpecificFields = <OrgEntrySpecificFields {...entrySpecificFieldsProps} />;
 
