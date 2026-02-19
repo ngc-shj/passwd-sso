@@ -1,13 +1,14 @@
 import { toast } from "sonner";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
 import { apiPath } from "@/lib/constants";
+import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 interface ExecuteOrgEntrySubmitArgs {
   orgId: string;
   isEdit: boolean;
   editData?: OrgPasswordFormEditData | null;
   body: unknown;
-  t: (key: string) => string;
+  t: PasswordFormTranslator;
   setSaving: (value: boolean) => void;
   handleOpenChange: (open: boolean) => void;
   onSaved: () => void;

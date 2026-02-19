@@ -18,8 +18,15 @@ import {
 } from "@/hooks/use-org-password-form-state";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
+import type {
+  CreditCardFormTranslator,
+  IdentityFormTranslator,
+  PasswordFormTranslator,
+  PasswordGeneratorTranslator,
+  PasskeyFormTranslator,
+  SecureNoteFormTranslator,
+} from "@/lib/translation-types";
 
-type TFn = (key: string, values?: Record<string, string | number | Date>) => string;
 type OrgFormState = OrgPasswordFormState;
 
 interface UseOrgPasswordFormControllerArgs {
@@ -34,12 +41,12 @@ interface UseOrgPasswordFormControllerArgs {
   isCreditCard: boolean;
   isIdentity: boolean;
   isPasskey: boolean;
-  t: TFn;
-  ti: TFn;
-  tn: TFn;
-  tcc: TFn;
-  tpk: TFn;
-  tGen: TFn;
+  t: PasswordFormTranslator;
+  ti: IdentityFormTranslator;
+  tn: SecureNoteFormTranslator;
+  tcc: CreditCardFormTranslator;
+  tpk: PasskeyFormTranslator;
+  tGen: PasswordGeneratorTranslator;
   formState: OrgFormState;
   handleOpenChange: (open: boolean) => void;
 }
@@ -96,8 +103,8 @@ export function useOrgPasswordFormController({
         effectiveEntryType,
         cardNumberValid,
         isIdentity,
-        t: (key) => t(key),
-        ti: (key) => ti(key),
+        t,
+        ti,
         onSaved,
         handleOpenChange,
         values: entryValues,

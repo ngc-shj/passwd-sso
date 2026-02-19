@@ -7,6 +7,7 @@ import type { EntryTypeValue } from "@/lib/constants";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { OrgTagData } from "@/components/org/org-tag-input";
+import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 interface HandleOrgCardNumberChangeArgs {
   value: string;
@@ -77,7 +78,7 @@ export interface SubmitOrgPasswordFormArgs {
     dobFuture: string;
     expiryBeforeIssue: string;
   };
-  t: (key: string) => string;
+  t: PasswordFormTranslator;
   setSaving: (value: boolean) => void;
   handleOpenChange: (open: boolean) => void;
   onSaved: () => void;
