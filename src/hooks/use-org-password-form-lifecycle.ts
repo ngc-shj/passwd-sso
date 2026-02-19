@@ -8,14 +8,12 @@ import {
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
 import type { OrgPasswordFormLifecycleArgs } from "@/hooks/org-password-form-lifecycle-args";
 
-type UseOrgPasswordFormLifecycleArgs = OrgPasswordFormLifecycleArgs;
-
 export function useOrgPasswordFormLifecycle({
   open,
   editData,
   onOpenChange,
   setters,
-}: UseOrgPasswordFormLifecycleArgs) {
+}: OrgPasswordFormLifecycleArgs) {
   const settersRef = useRef(setters);
 
   useEffect(() => {

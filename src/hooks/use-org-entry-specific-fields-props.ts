@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
 import {
   buildOrgEntrySpecificFieldsProps,
   type OrgEntrySpecificFieldsBuilderArgs,
@@ -85,7 +84,7 @@ export function useOrgEntrySpecificFieldsPropsFromState({
     generatorSummary,
     showGenerator: values.showGenerator,
     onToggleGenerator: callbacks.onToggleGenerator,
-    generatorSettings: values.generatorSettings as GeneratorSettings,
+    generatorSettings: values.generatorSettings,
     onGeneratorUse: callbacks.onGeneratorUse,
     url: values.url,
     onUrlChange: callbacks.onUrlChange,
