@@ -13,6 +13,7 @@ import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fi
 import { preventIMESubmit } from "@/lib/ime-guard";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
 import { usePersonalPasswordFormModel } from "@/hooks/use-personal-password-form-model";
+import { usePersonalFormSectionsProps } from "@/hooks/use-personal-form-sections-props";
 
 export function PasswordForm({ mode, initialData, variant = "page", onSaved }: PasswordFormProps) {
   const {
@@ -33,6 +34,28 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   const { values, setters } = formState;
   const isDialogVariant = variant === "dialog";
   const dialogSectionClass = isDialogVariant ? ENTRY_DIALOG_FLAT_SECTION_CLASS : "";
+  const {
+    tagsAndFolderProps,
+    customFieldsTotpProps,
+    repromptSectionProps,
+    actionBarProps,
+  } = usePersonalFormSectionsProps({
+    tagsTitle: t("tags"),
+    tagsHint: t("tagsHint"),
+    folders,
+    sectionCardClass: dialogSectionClass,
+    repromptTitle: t("requireReprompt"),
+    repromptDescription: t("requireRepromptHelp"),
+    hasChanges,
+    submitting: values.submitting,
+    saveLabel: mode === "create" ? tc("save") : tc("update"),
+    cancelLabel: tc("cancel"),
+    statusUnsavedLabel: t("statusUnsaved"),
+    statusSavedLabel: t("statusSaved"),
+    onCancel: handleCancel,
+    values,
+    setters,
+  });
 
   const loginMainFields = (
     <EntryLoginMainFields {...loginMainFieldsProps} />
@@ -48,44 +71,13 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
         </EntrySectionCard>
       )}
 
-      <EntryTagsAndFolderSection
-        tagsTitle={t("tags")}
-        tagsHint={t("tagsHint")}
-        selectedTags={values.selectedTags}
-        onTagsChange={setters.setSelectedTags}
-        folders={folders}
-        folderId={values.folderId}
-        onFolderChange={setters.setFolderId}
-        sectionCardClass={dialogSectionClass}
-      />
+      <EntryTagsAndFolderSection {...tagsAndFolderProps} />
 
-      <EntryCustomFieldsTotpSection
-        customFields={values.customFields}
-        setCustomFields={setters.setCustomFields}
-        totp={values.totp}
-        onTotpChange={setters.setTotp}
-        showTotpInput={values.showTotpInput}
-        setShowTotpInput={setters.setShowTotpInput}
-        sectionCardClass={dialogSectionClass}
-      />
+      <EntryCustomFieldsTotpSection {...customFieldsTotpProps} />
 
-      <EntryRepromptSection
-        checked={values.requireReprompt}
-        onCheckedChange={setters.setRequireReprompt}
-        title={t("requireReprompt")}
-        description={t("requireRepromptHelp")}
-        sectionCardClass={dialogSectionClass}
-      />
+      <EntryRepromptSection {...repromptSectionProps} />
 
-      <EntryActionBar
-        hasChanges={hasChanges}
-        submitting={values.submitting}
-        saveLabel={mode === "create" ? tc("save") : tc("update")}
-        cancelLabel={tc("cancel")}
-        statusUnsavedLabel={t("statusUnsaved")}
-        statusSavedLabel={t("statusSaved")}
-        onCancel={handleCancel}
-      />
+      <EntryActionBar {...actionBarProps} />
     </form>
   );
 
