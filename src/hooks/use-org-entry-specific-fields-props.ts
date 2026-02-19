@@ -450,6 +450,8 @@ export function useOrgEntrySpecificFieldsPropsFromState({
   hasBrandHint,
   lengthHint,
 }: UseOrgEntrySpecificFieldsPropsFromStateArgs): OrgEntrySpecificFieldsProps {
+  const callbacks = buildEntrySpecificCallbacks(values, setters);
+
   return useOrgEntrySpecificFieldsProps({
     entryKind,
     entryCopy,
@@ -459,39 +461,32 @@ export function useOrgEntrySpecificFieldsPropsFromState({
     ti,
     tpk,
     notes: values.notes,
-    onNotesChange: setters.setNotes,
+    onNotesChange: callbacks.onNotesChange,
     title: values.title,
-    onTitleChange: setters.setTitle,
+    onTitleChange: callbacks.onTitleChange,
     username: values.username,
-    onUsernameChange: setters.setUsername,
+    onUsernameChange: callbacks.onUsernameChange,
     password: values.password,
-    onPasswordChange: setters.setPassword,
+    onPasswordChange: callbacks.onPasswordChange,
     showPassword: values.showPassword,
-    onToggleShowPassword: () => setters.setShowPassword(!values.showPassword),
+    onToggleShowPassword: callbacks.onToggleShowPassword,
     generatorSummary,
     showGenerator: values.showGenerator,
-    onToggleGenerator: () => setters.setShowGenerator(!values.showGenerator),
+    onToggleGenerator: callbacks.onToggleGenerator,
     generatorSettings: values.generatorSettings as GeneratorSettings,
-    onGeneratorUse: (pw, settings) => {
-      setters.setPassword(pw);
-      setters.setShowPassword(true);
-      setters.setGeneratorSettings(settings);
-    },
+    onGeneratorUse: callbacks.onGeneratorUse,
     url: values.url,
-    onUrlChange: setters.setUrl,
+    onUrlChange: callbacks.onUrlChange,
     content: values.content,
-    onContentChange: setters.setContent,
+    onContentChange: callbacks.onContentChange,
     cardholderName: values.cardholderName,
-    onCardholderNameChange: setters.setCardholderName,
+    onCardholderNameChange: callbacks.onCardholderNameChange,
     brand: values.brand,
-    onBrandChange: (value) => {
-      setters.setBrand(value);
-      setters.setBrandSource("manual");
-    },
+    onBrandChange: callbacks.onBrandChange,
     cardNumber: values.cardNumber,
     onCardNumberChange,
     showCardNumber: values.showCardNumber,
-    onToggleCardNumber: () => setters.setShowCardNumber(!values.showCardNumber),
+    onToggleCardNumber: callbacks.onToggleCardNumber,
     maxInputLength,
     showLengthError,
     showLuhnError,
@@ -499,55 +494,99 @@ export function useOrgEntrySpecificFieldsPropsFromState({
     hasBrandHint,
     lengthHint,
     expiryMonth: values.expiryMonth,
-    onExpiryMonthChange: setters.setExpiryMonth,
+    onExpiryMonthChange: callbacks.onExpiryMonthChange,
     expiryYear: values.expiryYear,
-    onExpiryYearChange: setters.setExpiryYear,
+    onExpiryYearChange: callbacks.onExpiryYearChange,
     cvv: values.cvv,
-    onCvvChange: setters.setCvv,
+    onCvvChange: callbacks.onCvvChange,
     showCvv: values.showCvv,
-    onToggleCvv: () => setters.setShowCvv(!values.showCvv),
+    onToggleCvv: callbacks.onToggleCvv,
     fullName: values.fullName,
-    onFullNameChange: setters.setFullName,
+    onFullNameChange: callbacks.onFullNameChange,
     address: values.address,
-    onAddressChange: setters.setAddress,
+    onAddressChange: callbacks.onAddressChange,
     phone: values.phone,
-    onPhoneChange: setters.setPhone,
+    onPhoneChange: callbacks.onPhoneChange,
     email: values.email,
-    onEmailChange: setters.setEmail,
+    onEmailChange: callbacks.onEmailChange,
     dateOfBirth: values.dateOfBirth,
-    onDateOfBirthChange: (value) => {
-      setters.setDateOfBirth(value);
-      setters.setDobError(null);
-    },
+    onDateOfBirthChange: callbacks.onDateOfBirthChange,
     nationality: values.nationality,
-    onNationalityChange: setters.setNationality,
+    onNationalityChange: callbacks.onNationalityChange,
     idNumber: values.idNumber,
-    onIdNumberChange: setters.setIdNumber,
+    onIdNumberChange: callbacks.onIdNumberChange,
     showIdNumber: values.showIdNumber,
-    onToggleIdNumber: () => setters.setShowIdNumber(!values.showIdNumber),
+    onToggleIdNumber: callbacks.onToggleIdNumber,
     issueDate: values.issueDate,
-    onIssueDateChange: (value) => {
-      setters.setIssueDate(value);
-      setters.setExpiryError(null);
-    },
+    onIssueDateChange: callbacks.onIssueDateChange,
     expiryDate: values.expiryDate,
-    onExpiryDateChange: (value) => {
-      setters.setExpiryDate(value);
-      setters.setExpiryError(null);
-    },
+    onExpiryDateChange: callbacks.onExpiryDateChange,
     dobError: values.dobError,
     expiryError: values.expiryError,
     relyingPartyId: values.relyingPartyId,
-    onRelyingPartyIdChange: setters.setRelyingPartyId,
+    onRelyingPartyIdChange: callbacks.onRelyingPartyIdChange,
     relyingPartyName: values.relyingPartyName,
-    onRelyingPartyNameChange: setters.setRelyingPartyName,
+    onRelyingPartyNameChange: callbacks.onRelyingPartyNameChange,
     credentialId: values.credentialId,
-    onCredentialIdChange: setters.setCredentialId,
+    onCredentialIdChange: callbacks.onCredentialIdChange,
     showCredentialId: values.showCredentialId,
-    onToggleCredentialId: () => setters.setShowCredentialId(!values.showCredentialId),
+    onToggleCredentialId: callbacks.onToggleCredentialId,
     creationDate: values.creationDate,
-    onCreationDateChange: setters.setCreationDate,
+    onCreationDateChange: callbacks.onCreationDateChange,
     deviceInfo: values.deviceInfo,
-    onDeviceInfoChange: setters.setDeviceInfo,
+    onDeviceInfoChange: callbacks.onDeviceInfoChange,
   });
+}
+
+function buildEntrySpecificCallbacks(values: OrgFormValues, setters: OrgFormSetters) {
+  return {
+    onNotesChange: setters.setNotes,
+    onTitleChange: setters.setTitle,
+    onUsernameChange: setters.setUsername,
+    onPasswordChange: setters.setPassword,
+    onToggleShowPassword: () => setters.setShowPassword(!values.showPassword),
+    onToggleGenerator: () => setters.setShowGenerator(!values.showGenerator),
+    onGeneratorUse: (pw: string, settings: GeneratorSettings) => {
+      setters.setPassword(pw);
+      setters.setShowPassword(true);
+      setters.setGeneratorSettings(settings);
+    },
+    onUrlChange: setters.setUrl,
+    onContentChange: setters.setContent,
+    onCardholderNameChange: setters.setCardholderName,
+    onBrandChange: (value: string) => {
+      setters.setBrand(value);
+      setters.setBrandSource("manual");
+    },
+    onToggleCardNumber: () => setters.setShowCardNumber(!values.showCardNumber),
+    onExpiryMonthChange: setters.setExpiryMonth,
+    onExpiryYearChange: setters.setExpiryYear,
+    onCvvChange: setters.setCvv,
+    onToggleCvv: () => setters.setShowCvv(!values.showCvv),
+    onFullNameChange: setters.setFullName,
+    onAddressChange: setters.setAddress,
+    onPhoneChange: setters.setPhone,
+    onEmailChange: setters.setEmail,
+    onDateOfBirthChange: (value: string) => {
+      setters.setDateOfBirth(value);
+      setters.setDobError(null);
+    },
+    onNationalityChange: setters.setNationality,
+    onIdNumberChange: setters.setIdNumber,
+    onToggleIdNumber: () => setters.setShowIdNumber(!values.showIdNumber),
+    onIssueDateChange: (value: string) => {
+      setters.setIssueDate(value);
+      setters.setExpiryError(null);
+    },
+    onExpiryDateChange: (value: string) => {
+      setters.setExpiryDate(value);
+      setters.setExpiryError(null);
+    },
+    onRelyingPartyIdChange: setters.setRelyingPartyId,
+    onRelyingPartyNameChange: setters.setRelyingPartyName,
+    onCredentialIdChange: setters.setCredentialId,
+    onToggleCredentialId: () => setters.setShowCredentialId(!values.showCredentialId),
+    onCreationDateChange: setters.setCreationDate,
+    onDeviceInfoChange: setters.setDeviceInfo,
+  };
 }
