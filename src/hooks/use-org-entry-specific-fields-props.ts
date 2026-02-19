@@ -65,6 +65,76 @@ export type OrgEntrySpecificFieldsBuilderArgs = Omit<
   lengthHint: string;
 };
 
+function buildOrgEntrySpecificTextProps(
+  translations: OrgEntrySpecificFieldTranslations,
+  entryCopy: OrgEntrySpecificFieldsBuilderArgs["entryCopy"],
+  lengthHint: string,
+): Pick<OrgEntrySpecificFieldsProps, OrgEntrySpecificComputedProps> {
+  const { t, tn, tcc, ti, tpk } = translations;
+
+  return {
+    notesLabel: entryCopy.notesLabel,
+    notesPlaceholder: entryCopy.notesPlaceholder,
+    titleLabel: t("title"),
+    titlePlaceholder: t("titlePlaceholder"),
+    usernameLabel: t("usernameEmail"),
+    usernamePlaceholder: t("usernamePlaceholder"),
+    passwordLabel: t("password"),
+    passwordPlaceholder: t("passwordPlaceholder"),
+    closeGeneratorLabel: t("closeGenerator"),
+    openGeneratorLabel: t("openGenerator"),
+    urlLabel: t("url"),
+    contentLabel: tn("content"),
+    contentPlaceholder: tn("contentPlaceholder"),
+    cardholderNamePlaceholder: tcc("cardholderNamePlaceholder"),
+    brandPlaceholder: tcc("brandPlaceholder"),
+    cardNumberPlaceholder: tcc("cardNumberPlaceholder"),
+    lengthHintGenericLabel: tcc("cardNumberLengthHintGeneric"),
+    lengthHintLabel: tcc("cardNumberLengthHint", { lengths: lengthHint }),
+    invalidLengthLabel: tcc("cardNumberInvalidLength", { lengths: lengthHint }),
+    invalidLuhnLabel: tcc("cardNumberInvalidLuhn"),
+    creditCardLabels: {
+      cardholderName: tcc("cardholderName"),
+      brand: tcc("brand"),
+      cardNumber: tcc("cardNumber"),
+      expiry: tcc("expiry"),
+      cvv: tcc("cvv"),
+    },
+    expiryMonthPlaceholder: tcc("expiryMonth"),
+    expiryYearPlaceholder: tcc("expiryYear"),
+    cvvPlaceholder: tcc("cvvPlaceholder"),
+    fullNamePlaceholder: ti("fullNamePlaceholder"),
+    addressPlaceholder: ti("addressPlaceholder"),
+    phonePlaceholder: ti("phonePlaceholder"),
+    emailPlaceholder: ti("emailPlaceholder"),
+    nationalityPlaceholder: ti("nationalityPlaceholder"),
+    idNumberPlaceholder: ti("idNumberPlaceholder"),
+    identityLabels: {
+      fullName: ti("fullName"),
+      address: ti("address"),
+      phone: ti("phone"),
+      email: ti("email"),
+      dateOfBirth: ti("dateOfBirth"),
+      nationality: ti("nationality"),
+      idNumber: ti("idNumber"),
+      issueDate: ti("issueDate"),
+      expiryDate: ti("expiryDate"),
+    },
+    relyingPartyIdPlaceholder: tpk("relyingPartyIdPlaceholder"),
+    relyingPartyNamePlaceholder: tpk("relyingPartyNamePlaceholder"),
+    credentialIdPlaceholder: tpk("credentialIdPlaceholder"),
+    deviceInfoPlaceholder: tpk("deviceInfoPlaceholder"),
+    passkeyLabels: {
+      relyingPartyId: tpk("relyingPartyId"),
+      relyingPartyName: tpk("relyingPartyName"),
+      username: tpk("username"),
+      credentialId: tpk("credentialId"),
+      creationDate: tpk("creationDate"),
+      deviceInfo: tpk("deviceInfo"),
+    },
+  };
+}
+
 export function buildOrgEntrySpecificFieldsProps({
   entryKind,
   entryCopy,
@@ -145,105 +215,36 @@ export function buildOrgEntrySpecificFieldsProps({
   deviceInfo,
   onDeviceInfoChange,
 }: OrgEntrySpecificFieldsBuilderArgs): OrgEntrySpecificFieldsProps {
-  const { t, tn, tcc, ti, tpk } = translations;
-  const closeGeneratorLabel = t("closeGenerator");
-  const openGeneratorLabel = t("openGenerator");
-  const urlLabel = t("url");
-  const contentLabel = tn("content");
-  const contentPlaceholder = tn("contentPlaceholder");
-
-  const cardholderNamePlaceholder = tcc("cardholderNamePlaceholder");
-  const brandPlaceholder = tcc("brandPlaceholder");
-  const cardNumberPlaceholder = tcc("cardNumberPlaceholder");
-  const lengthHintGenericLabel = tcc("cardNumberLengthHintGeneric");
-  const lengthHintLabel = tcc("cardNumberLengthHint", { lengths: lengthHint });
-  const invalidLengthLabel = tcc("cardNumberInvalidLength", { lengths: lengthHint });
-  const invalidLuhnLabel = tcc("cardNumberInvalidLuhn");
-  const expiryMonthPlaceholder = tcc("expiryMonth");
-  const expiryYearPlaceholder = tcc("expiryYear");
-  const cvvPlaceholder = tcc("cvvPlaceholder");
-  const creditCardLabels = {
-    cardholderName: tcc("cardholderName"),
-    brand: tcc("brand"),
-    cardNumber: tcc("cardNumber"),
-    expiry: tcc("expiry"),
-    cvv: tcc("cvv"),
-  };
-
-  const fullNamePlaceholder = ti("fullNamePlaceholder");
-  const addressPlaceholder = ti("addressPlaceholder");
-  const phonePlaceholder = ti("phonePlaceholder");
-  const emailPlaceholder = ti("emailPlaceholder");
-  const nationalityPlaceholder = ti("nationalityPlaceholder");
-  const idNumberPlaceholder = ti("idNumberPlaceholder");
-  const identityLabels = {
-    fullName: ti("fullName"),
-    address: ti("address"),
-    phone: ti("phone"),
-    email: ti("email"),
-    dateOfBirth: ti("dateOfBirth"),
-    nationality: ti("nationality"),
-    idNumber: ti("idNumber"),
-    issueDate: ti("issueDate"),
-    expiryDate: ti("expiryDate"),
-  };
-
-  const relyingPartyIdPlaceholder = tpk("relyingPartyIdPlaceholder");
-  const relyingPartyNamePlaceholder = tpk("relyingPartyNamePlaceholder");
-  const credentialIdPlaceholder = tpk("credentialIdPlaceholder");
-  const deviceInfoPlaceholder = tpk("deviceInfoPlaceholder");
-  const passkeyLabels = {
-    relyingPartyId: tpk("relyingPartyId"),
-    relyingPartyName: tpk("relyingPartyName"),
-    username: tpk("username"),
-    credentialId: tpk("credentialId"),
-    creationDate: tpk("creationDate"),
-    deviceInfo: tpk("deviceInfo"),
-  };
+  const computedTextProps = buildOrgEntrySpecificTextProps(translations, entryCopy, lengthHint);
 
   return {
     entryKind,
-    notesLabel: entryCopy.notesLabel,
-    notesPlaceholder: entryCopy.notesPlaceholder,
+    ...computedTextProps,
     notes,
     onNotesChange,
     content,
     onContentChange,
-    contentLabel,
-    contentPlaceholder,
     title,
     onTitleChange,
-    titleLabel: t("title"),
-    titlePlaceholder: t("titlePlaceholder"),
     username,
     onUsernameChange,
-    usernameLabel: t("usernameEmail"),
-    usernamePlaceholder: t("usernamePlaceholder"),
     password,
     onPasswordChange,
-    passwordLabel: t("password"),
-    passwordPlaceholder: t("passwordPlaceholder"),
     showPassword,
     onToggleShowPassword,
     generatorSummary,
     showGenerator,
     onToggleGenerator,
-    closeGeneratorLabel,
-    openGeneratorLabel,
     generatorSettings,
     onGeneratorUse,
     url,
     onUrlChange,
-    urlLabel,
     cardholderName,
     onCardholderNameChange,
-    cardholderNamePlaceholder,
     brand,
     onBrandChange,
-    brandPlaceholder,
     cardNumber,
     onCardNumberChange,
-    cardNumberPlaceholder,
     showCardNumber,
     onToggleCardNumber,
     maxInputLength,
@@ -251,42 +252,28 @@ export function buildOrgEntrySpecificFieldsProps({
     showLuhnError,
     detectedBrand,
     hasBrandHint,
-    lengthHintGenericLabel,
-    lengthHintLabel,
-    invalidLengthLabel,
-    invalidLuhnLabel,
-    creditCardLabels,
     expiryMonth,
     onExpiryMonthChange,
     expiryYear,
     onExpiryYearChange,
-    expiryMonthPlaceholder,
-    expiryYearPlaceholder,
     cvv,
     onCvvChange,
-    cvvPlaceholder,
     showCvv,
     onToggleCvv,
     fullName,
     onFullNameChange,
-    fullNamePlaceholder,
     address,
     onAddressChange,
-    addressPlaceholder,
     phone,
     onPhoneChange,
-    phonePlaceholder,
     email,
     onEmailChange,
-    emailPlaceholder,
     dateOfBirth,
     onDateOfBirthChange,
     nationality,
     onNationalityChange,
-    nationalityPlaceholder,
     idNumber,
     onIdNumberChange,
-    idNumberPlaceholder,
     showIdNumber,
     onToggleIdNumber,
     issueDate,
@@ -295,24 +282,18 @@ export function buildOrgEntrySpecificFieldsProps({
     onExpiryDateChange,
     dobError,
     expiryError,
-    identityLabels,
     relyingPartyId,
     onRelyingPartyIdChange,
-    relyingPartyIdPlaceholder,
     relyingPartyName,
     onRelyingPartyNameChange,
-    relyingPartyNamePlaceholder,
     credentialId,
     onCredentialIdChange,
-    credentialIdPlaceholder,
     showCredentialId,
     onToggleCredentialId,
     creationDate,
     onCreationDateChange,
     deviceInfo,
     onDeviceInfoChange,
-    deviceInfoPlaceholder,
-    passkeyLabels,
   };
 }
 
