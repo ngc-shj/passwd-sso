@@ -1,15 +1,17 @@
 "use client";
 
-import { useMemo, type ComponentProps } from "react";
-import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
+import { useMemo } from "react";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
+import {
+  buildOrgEntrySpecificFieldsProps,
+  type OrgEntrySpecificFieldsProps,
+  type OrgFieldTranslator,
+} from "@/hooks/org-entry-specific-fields-builder";
+import { buildOrgEntrySpecificCallbacks } from "@/hooks/org-entry-specific-fields-callbacks";
 import type {
   OrgPasswordFormValues,
   OrgPasswordFormSettersState,
 } from "@/hooks/use-org-password-form-state";
-
-type OrgEntrySpecificFieldsProps = ComponentProps<typeof OrgEntrySpecificFields>;
-type TFn = (key: string, values?: Record<string, string | number | Date>) => string;
 
 interface UseOrgEntrySpecificFieldsPropsArgs {
   entryKind: OrgEntrySpecificFieldsProps["entryKind"];
@@ -17,11 +19,11 @@ interface UseOrgEntrySpecificFieldsPropsArgs {
     notesLabel: string;
     notesPlaceholder: string;
   };
-  t: TFn;
-  tn: TFn;
-  tcc: TFn;
-  ti: TFn;
-  tpk: TFn;
+  t: OrgFieldTranslator;
+  tn: OrgFieldTranslator;
+  tcc: OrgFieldTranslator;
+  ti: OrgFieldTranslator;
+  tpk: OrgFieldTranslator;
   notes: string;
   onNotesChange: (value: string) => void;
   title: string;
@@ -99,22 +101,19 @@ interface UseOrgEntrySpecificFieldsPropsArgs {
   onDeviceInfoChange: (value: string) => void;
 }
 
-type OrgFormValues = OrgPasswordFormValues;
-type OrgFormSetters = OrgPasswordFormSettersState;
-
 interface UseOrgEntrySpecificFieldsPropsFromStateArgs {
   entryKind: OrgEntrySpecificFieldsProps["entryKind"];
   entryCopy: {
     notesLabel: string;
     notesPlaceholder: string;
   };
-  t: TFn;
-  tn: TFn;
-  tcc: TFn;
-  ti: TFn;
-  tpk: TFn;
-  values: OrgFormValues;
-  setters: OrgFormSetters;
+  t: OrgFieldTranslator;
+  tn: OrgFieldTranslator;
+  tcc: OrgFieldTranslator;
+  ti: OrgFieldTranslator;
+  tpk: OrgFieldTranslator;
+  values: OrgPasswordFormValues;
+  setters: OrgPasswordFormSettersState;
   generatorSummary: string;
   onCardNumberChange: (value: string) => void;
   maxInputLength: number;
@@ -125,313 +124,10 @@ interface UseOrgEntrySpecificFieldsPropsFromStateArgs {
   lengthHint: string;
 }
 
-export function useOrgEntrySpecificFieldsProps({
-  entryKind,
-  entryCopy,
-  t,
-  tn,
-  tcc,
-  ti,
-  tpk,
-  notes,
-  onNotesChange,
-  title,
-  onTitleChange,
-  username,
-  onUsernameChange,
-  password,
-  onPasswordChange,
-  showPassword,
-  onToggleShowPassword,
-  generatorSummary,
-  showGenerator,
-  onToggleGenerator,
-  generatorSettings,
-  onGeneratorUse,
-  url,
-  onUrlChange,
-  content,
-  onContentChange,
-  cardholderName,
-  onCardholderNameChange,
-  brand,
-  onBrandChange,
-  cardNumber,
-  onCardNumberChange,
-  showCardNumber,
-  onToggleCardNumber,
-  maxInputLength,
-  showLengthError,
-  showLuhnError,
-  detectedBrand,
-  hasBrandHint,
-  lengthHint,
-  expiryMonth,
-  onExpiryMonthChange,
-  expiryYear,
-  onExpiryYearChange,
-  cvv,
-  onCvvChange,
-  showCvv,
-  onToggleCvv,
-  fullName,
-  onFullNameChange,
-  address,
-  onAddressChange,
-  phone,
-  onPhoneChange,
-  email,
-  onEmailChange,
-  dateOfBirth,
-  onDateOfBirthChange,
-  nationality,
-  onNationalityChange,
-  idNumber,
-  onIdNumberChange,
-  showIdNumber,
-  onToggleIdNumber,
-  issueDate,
-  onIssueDateChange,
-  expiryDate,
-  onExpiryDateChange,
-  dobError,
-  expiryError,
-  relyingPartyId,
-  onRelyingPartyIdChange,
-  relyingPartyName,
-  onRelyingPartyNameChange,
-  credentialId,
-  onCredentialIdChange,
-  showCredentialId,
-  onToggleCredentialId,
-  creationDate,
-  onCreationDateChange,
-  deviceInfo,
-  onDeviceInfoChange,
-}: UseOrgEntrySpecificFieldsPropsArgs): OrgEntrySpecificFieldsProps {
-  return useMemo(
-    () => ({
-      entryKind,
-      notesLabel: entryCopy.notesLabel,
-      notesPlaceholder: entryCopy.notesPlaceholder,
-      notes,
-      onNotesChange,
-      content,
-      onContentChange,
-      contentLabel: tn("content"),
-      contentPlaceholder: tn("contentPlaceholder"),
-      title,
-      onTitleChange,
-      titleLabel: t("title"),
-      titlePlaceholder: t("titlePlaceholder"),
-      username,
-      onUsernameChange,
-      usernameLabel: t("usernameEmail"),
-      usernamePlaceholder: t("usernamePlaceholder"),
-      password,
-      onPasswordChange,
-      passwordLabel: t("password"),
-      passwordPlaceholder: t("passwordPlaceholder"),
-      showPassword,
-      onToggleShowPassword,
-      generatorSummary,
-      showGenerator,
-      onToggleGenerator,
-      closeGeneratorLabel: t("closeGenerator"),
-      openGeneratorLabel: t("openGenerator"),
-      generatorSettings,
-      onGeneratorUse,
-      url,
-      onUrlChange,
-      urlLabel: t("url"),
-      cardholderName,
-      onCardholderNameChange,
-      cardholderNamePlaceholder: tcc("cardholderNamePlaceholder"),
-      brand,
-      onBrandChange,
-      brandPlaceholder: tcc("brandPlaceholder"),
-      cardNumber,
-      onCardNumberChange,
-      cardNumberPlaceholder: tcc("cardNumberPlaceholder"),
-      showCardNumber,
-      onToggleCardNumber,
-      maxInputLength,
-      showLengthError,
-      showLuhnError,
-      detectedBrand,
-      hasBrandHint,
-      lengthHintGenericLabel: tcc("cardNumberLengthHintGeneric"),
-      lengthHintLabel: tcc("cardNumberLengthHint", { lengths: lengthHint }),
-      invalidLengthLabel: tcc("cardNumberInvalidLength", { lengths: lengthHint }),
-      invalidLuhnLabel: tcc("cardNumberInvalidLuhn"),
-      creditCardLabels: {
-        cardholderName: tcc("cardholderName"),
-        brand: tcc("brand"),
-        cardNumber: tcc("cardNumber"),
-        expiry: tcc("expiry"),
-        cvv: tcc("cvv"),
-      },
-      expiryMonth,
-      onExpiryMonthChange,
-      expiryYear,
-      onExpiryYearChange,
-      expiryMonthPlaceholder: tcc("expiryMonth"),
-      expiryYearPlaceholder: tcc("expiryYear"),
-      cvv,
-      onCvvChange,
-      cvvPlaceholder: tcc("cvvPlaceholder"),
-      showCvv,
-      onToggleCvv,
-      fullName,
-      onFullNameChange,
-      fullNamePlaceholder: ti("fullNamePlaceholder"),
-      address,
-      onAddressChange,
-      addressPlaceholder: ti("addressPlaceholder"),
-      phone,
-      onPhoneChange,
-      phonePlaceholder: ti("phonePlaceholder"),
-      email,
-      onEmailChange,
-      emailPlaceholder: ti("emailPlaceholder"),
-      dateOfBirth,
-      onDateOfBirthChange,
-      nationality,
-      onNationalityChange,
-      nationalityPlaceholder: ti("nationalityPlaceholder"),
-      idNumber,
-      onIdNumberChange,
-      idNumberPlaceholder: ti("idNumberPlaceholder"),
-      showIdNumber,
-      onToggleIdNumber,
-      issueDate,
-      onIssueDateChange,
-      expiryDate,
-      onExpiryDateChange,
-      dobError,
-      expiryError,
-      identityLabels: {
-        fullName: ti("fullName"),
-        address: ti("address"),
-        phone: ti("phone"),
-        email: ti("email"),
-        dateOfBirth: ti("dateOfBirth"),
-        nationality: ti("nationality"),
-        idNumber: ti("idNumber"),
-        issueDate: ti("issueDate"),
-        expiryDate: ti("expiryDate"),
-      },
-      relyingPartyId,
-      onRelyingPartyIdChange,
-      relyingPartyIdPlaceholder: tpk("relyingPartyIdPlaceholder"),
-      relyingPartyName,
-      onRelyingPartyNameChange,
-      relyingPartyNamePlaceholder: tpk("relyingPartyNamePlaceholder"),
-      credentialId,
-      onCredentialIdChange,
-      credentialIdPlaceholder: tpk("credentialIdPlaceholder"),
-      showCredentialId,
-      onToggleCredentialId,
-      creationDate,
-      onCreationDateChange,
-      deviceInfo,
-      onDeviceInfoChange,
-      deviceInfoPlaceholder: tpk("deviceInfoPlaceholder"),
-      passkeyLabels: {
-        relyingPartyId: tpk("relyingPartyId"),
-        relyingPartyName: tpk("relyingPartyName"),
-        username: tpk("username"),
-        credentialId: tpk("credentialId"),
-        creationDate: tpk("creationDate"),
-        deviceInfo: tpk("deviceInfo"),
-      },
-    }),
-    [
-      entryKind,
-      entryCopy.notesLabel,
-      entryCopy.notesPlaceholder,
-      notes,
-      onNotesChange,
-      content,
-      onContentChange,
-      tn,
-      title,
-      onTitleChange,
-      t,
-      username,
-      onUsernameChange,
-      password,
-      onPasswordChange,
-      showPassword,
-      onToggleShowPassword,
-      generatorSummary,
-      showGenerator,
-      onToggleGenerator,
-      generatorSettings,
-      onGeneratorUse,
-      url,
-      onUrlChange,
-      cardholderName,
-      onCardholderNameChange,
-      tcc,
-      brand,
-      onBrandChange,
-      cardNumber,
-      onCardNumberChange,
-      showCardNumber,
-      onToggleCardNumber,
-      maxInputLength,
-      showLengthError,
-      showLuhnError,
-      detectedBrand,
-      hasBrandHint,
-      lengthHint,
-      expiryMonth,
-      onExpiryMonthChange,
-      expiryYear,
-      onExpiryYearChange,
-      cvv,
-      onCvvChange,
-      showCvv,
-      onToggleCvv,
-      fullName,
-      onFullNameChange,
-      ti,
-      address,
-      onAddressChange,
-      phone,
-      onPhoneChange,
-      email,
-      onEmailChange,
-      dateOfBirth,
-      onDateOfBirthChange,
-      nationality,
-      onNationalityChange,
-      idNumber,
-      onIdNumberChange,
-      showIdNumber,
-      onToggleIdNumber,
-      issueDate,
-      onIssueDateChange,
-      expiryDate,
-      onExpiryDateChange,
-      dobError,
-      expiryError,
-      relyingPartyId,
-      onRelyingPartyIdChange,
-      tpk,
-      relyingPartyName,
-      onRelyingPartyNameChange,
-      credentialId,
-      onCredentialIdChange,
-      showCredentialId,
-      onToggleCredentialId,
-      creationDate,
-      onCreationDateChange,
-      deviceInfo,
-      onDeviceInfoChange,
-    ],
-  );
+export function useOrgEntrySpecificFieldsProps(
+  args: UseOrgEntrySpecificFieldsPropsArgs,
+): OrgEntrySpecificFieldsProps {
+  return useMemo(() => buildOrgEntrySpecificFieldsProps(args), [args]);
 }
 
 export function useOrgEntrySpecificFieldsPropsFromState({
@@ -453,7 +149,7 @@ export function useOrgEntrySpecificFieldsPropsFromState({
   hasBrandHint,
   lengthHint,
 }: UseOrgEntrySpecificFieldsPropsFromStateArgs): OrgEntrySpecificFieldsProps {
-  const callbacks = buildEntrySpecificCallbacks(values, setters);
+  const callbacks = buildOrgEntrySpecificCallbacks(values, setters);
 
   return useOrgEntrySpecificFieldsProps({
     entryKind,
@@ -539,57 +235,4 @@ export function useOrgEntrySpecificFieldsPropsFromState({
     deviceInfo: values.deviceInfo,
     onDeviceInfoChange: callbacks.onDeviceInfoChange,
   });
-}
-
-function buildEntrySpecificCallbacks(values: OrgFormValues, setters: OrgFormSetters) {
-  return {
-    onNotesChange: setters.setNotes,
-    onTitleChange: setters.setTitle,
-    onUsernameChange: setters.setUsername,
-    onPasswordChange: setters.setPassword,
-    onToggleShowPassword: () => setters.setShowPassword(!values.showPassword),
-    onToggleGenerator: () => setters.setShowGenerator(!values.showGenerator),
-    onGeneratorUse: (pw: string, settings: GeneratorSettings) => {
-      setters.setPassword(pw);
-      setters.setShowPassword(true);
-      setters.setGeneratorSettings(settings);
-    },
-    onUrlChange: setters.setUrl,
-    onContentChange: setters.setContent,
-    onCardholderNameChange: setters.setCardholderName,
-    onBrandChange: (value: string) => {
-      setters.setBrand(value);
-      setters.setBrandSource("manual");
-    },
-    onToggleCardNumber: () => setters.setShowCardNumber(!values.showCardNumber),
-    onExpiryMonthChange: setters.setExpiryMonth,
-    onExpiryYearChange: setters.setExpiryYear,
-    onCvvChange: setters.setCvv,
-    onToggleCvv: () => setters.setShowCvv(!values.showCvv),
-    onFullNameChange: setters.setFullName,
-    onAddressChange: setters.setAddress,
-    onPhoneChange: setters.setPhone,
-    onEmailChange: setters.setEmail,
-    onDateOfBirthChange: (value: string) => {
-      setters.setDateOfBirth(value);
-      setters.setDobError(null);
-    },
-    onNationalityChange: setters.setNationality,
-    onIdNumberChange: setters.setIdNumber,
-    onToggleIdNumber: () => setters.setShowIdNumber(!values.showIdNumber),
-    onIssueDateChange: (value: string) => {
-      setters.setIssueDate(value);
-      setters.setExpiryError(null);
-    },
-    onExpiryDateChange: (value: string) => {
-      setters.setExpiryDate(value);
-      setters.setExpiryError(null);
-    },
-    onRelyingPartyIdChange: setters.setRelyingPartyId,
-    onRelyingPartyNameChange: setters.setRelyingPartyName,
-    onCredentialIdChange: setters.setCredentialId,
-    onToggleCredentialId: () => setters.setShowCredentialId(!values.showCredentialId),
-    onCreationDateChange: setters.setCreationDate,
-    onDeviceInfoChange: setters.setDeviceInfo,
-  };
 }
