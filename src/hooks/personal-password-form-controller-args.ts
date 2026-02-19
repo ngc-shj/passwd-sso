@@ -2,7 +2,7 @@ import type { PasswordFormProps } from "@/components/passwords/password-form-typ
 import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
 
-interface BuildPersonalPasswordControllerArgsInput {
+export interface PersonalPasswordFormControllerArgs {
   mode: Pick<PasswordFormProps, "mode">["mode"];
   initialData: Pick<PasswordFormProps, "initialData">["initialData"];
   onSaved: Pick<PasswordFormProps, "onSaved">["onSaved"];
@@ -24,7 +24,7 @@ export function buildPersonalPasswordControllerArgs({
   setSubmitting,
   translations,
   router,
-}: BuildPersonalPasswordControllerArgsInput) {
+}: PersonalPasswordFormControllerArgs): PersonalPasswordFormControllerArgs {
   return {
     mode,
     initialData,

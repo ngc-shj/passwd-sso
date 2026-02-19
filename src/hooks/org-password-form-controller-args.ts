@@ -4,7 +4,7 @@ import type { EntryTypeValue } from "@/lib/constants";
 import type { OrgPasswordFormTranslations } from "@/hooks/org-password-form-translations";
 import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 
-interface BuildOrgPasswordControllerArgsInput {
+export interface OrgPasswordFormControllerArgs {
   orgId: OrgPasswordFormProps["orgId"];
   onSaved: OrgPasswordFormProps["onSaved"];
   isEdit: boolean;
@@ -26,7 +26,7 @@ export function buildOrgPasswordControllerArgs({
   translations,
   formState,
   handleOpenChange,
-}: BuildOrgPasswordControllerArgsInput) {
+}: OrgPasswordFormControllerArgs): OrgPasswordFormControllerArgs {
   return {
     orgId,
     onSaved,
