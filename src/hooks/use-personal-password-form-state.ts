@@ -6,6 +6,7 @@ import type { TagData } from "@/components/tags/tag-input";
 import { type GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { buildPersonalPasswordFormInitialValues } from "@/hooks/personal-password-form-initial-values";
+import { usePersonalPasswordFormUiState } from "@/hooks/use-personal-password-form-ui-state";
 
 export interface PersonalPasswordFormValues {
   showPassword: boolean;
@@ -66,10 +67,8 @@ export function usePersonalPasswordFormState(
   initialData?: PersonalPasswordFormInitialData,
 ): PersonalPasswordFormState {
   const initial = buildPersonalPasswordFormInitialValues(initialData);
+  const uiState = usePersonalPasswordFormUiState();
 
-  const [showPassword, setShowPassword] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [title, setTitle] = useState(initial.title);
   const [username, setUsername] = useState(initial.username);
   const [password, setPassword] = useState(initial.password);
@@ -85,9 +84,7 @@ export function usePersonalPasswordFormState(
 
   return {
     values: {
-      showPassword,
-      showGenerator,
-      submitting,
+      ...uiState.values,
       title,
       username,
       password,
@@ -102,9 +99,7 @@ export function usePersonalPasswordFormState(
       folderId,
     },
     setters: {
-      setShowPassword,
-      setShowGenerator,
-      setSubmitting,
+      ...uiState.setters,
       setTitle,
       setUsername,
       setPassword,

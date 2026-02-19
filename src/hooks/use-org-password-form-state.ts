@@ -5,17 +5,11 @@ import type { OrgTagData } from "@/components/org/org-tag-input";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
 import type { OrgAttachmentMeta } from "@/components/org/org-attachment-section";
 import { buildOrgPasswordFormInitialValues } from "@/hooks/org-password-form-initial-values";
+import { useOrgPasswordFormUiState } from "@/hooks/use-org-password-form-ui-state";
 
 export function useOrgPasswordFormState(editData?: OrgPasswordFormEditData | null) {
   const initial = buildOrgPasswordFormInitialValues(editData);
-
-  const [saving, setSaving] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
-  const [showCardNumber, setShowCardNumber] = useState(false);
-  const [showCvv, setShowCvv] = useState(false);
-  const [showIdNumber, setShowIdNumber] = useState(false);
-  const [showCredentialId, setShowCredentialId] = useState(false);
+  const uiState = useOrgPasswordFormUiState();
 
   const [title, setTitle] = useState(initial.title);
   const [username, setUsername] = useState(initial.username);
@@ -57,13 +51,7 @@ export function useOrgPasswordFormState(editData?: OrgPasswordFormEditData | nul
   const [orgFolderId, setOrgFolderId] = useState<string | null>(initial.orgFolderId);
 
   const values = {
-    saving,
-    showPassword,
-    showGenerator,
-    showCardNumber,
-    showCvv,
-    showIdNumber,
-    showCredentialId,
+    ...uiState.values,
     title,
     username,
     password,
@@ -102,13 +90,7 @@ export function useOrgPasswordFormState(editData?: OrgPasswordFormEditData | nul
   };
 
   const setters = {
-    setSaving,
-    setShowPassword,
-    setShowGenerator,
-    setShowCardNumber,
-    setShowCvv,
-    setShowIdNumber,
-    setShowCredentialId,
+    ...uiState.setters,
     setTitle,
     setUsername,
     setPassword,
