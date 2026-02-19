@@ -250,7 +250,7 @@ describe("PasswordForm folder selector", () => {
         const options = s.querySelectorAll("option");
         return Array.from(options).some((o) => o.value === "__none__");
       });
-      expect(folderSelect).toBeDefined();
+      expect(folderSelect).toBeInTheDocument();
     });
   });
 
@@ -296,7 +296,7 @@ describe("PasswordForm folder selector", () => {
         const options = s.querySelectorAll("option");
         return Array.from(options).some((o) => o.value === "__none__");
       });
-      expect(folderSelect).toBeDefined();
+      expect(folderSelect).toBeInTheDocument();
       expect((folderSelect as HTMLSelectElement).value).toBe("f1");
     });
   });
@@ -425,7 +425,7 @@ describe("PasswordForm folder selector", () => {
           (o) => o.value === "__none__",
         ),
       );
-      expect(folderSelect).toBeDefined();
+      expect(folderSelect).toBeInTheDocument();
 
       const options = folderSelect!.querySelectorAll("option");
       const optionTexts = Array.from(options).map((o) => ({

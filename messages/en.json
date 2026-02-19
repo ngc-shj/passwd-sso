@@ -542,7 +542,9 @@
     "passwordTooShort": "Password must be at least 8 characters",
     "encryptedWarning": "The exported file will be encrypted. If you forget the password, the data cannot be recovered.",
     "includeOrgs": "Include organization entries",
-    "includeOrgsDesc": "Also export passwords from organizations you belong to"
+    "includeOrgsDesc": "Also export passwords from organizations you belong to",
+    "exportSkipped": "{count} entries could not be exported and were skipped.",
+    "exportFailed": "Export failed. Please try again."
   },
   "Watchtower": {
     "title": "Watchtower",

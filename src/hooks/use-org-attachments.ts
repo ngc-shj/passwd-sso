@@ -6,15 +6,26 @@ import type { OrgAttachmentMeta } from "@/components/org/org-attachment-section"
 
 export function useOrgAttachments(open: boolean, orgId: string, entryId?: string) {
   const [attachments, setAttachments] = useState<OrgAttachmentMeta[]>([]);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !entryId) return;
 
-    fetch(apiPath.orgPasswordAttachments(orgId, entryId))
-      .then((res) => (res.ok ? res.json() : []))
-      .then((loaded: OrgAttachmentMeta[]) => setAttachments(loaded))
-      .catch(() => setAttachments([]));
+    const url = apiPath.orgPasswordAttachments(orgId, entryId);
+    fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(`${res.status}`);
+        return res.json();
+      })
+      .then((loaded: OrgAttachmentMeta[]) => {
+        setAttachments(loaded);
+        setFetchError(null);
+      })
+      .catch((e: unknown) => {
+        setAttachments([]);
+        setFetchError(`Failed to load ${url}: ${e instanceof Error ? e.message : "unknown"}`);
+      });
   }, [open, orgId, entryId]);
 
-  return { attachments, setAttachments };
+  return { attachments, setAttachments, fetchError };
 }

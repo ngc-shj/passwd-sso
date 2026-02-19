@@ -28,7 +28,7 @@ export function usePersonalPasswordFormModel({
   const router = useRouter();
   const { encryptionKey, userId } = useVault();
   const formState = usePersonalPasswordFormState(initialData);
-  const folders = usePersonalFolders();
+  const { folders } = usePersonalFolders();
 
   const { values, hasChanges, loginMainFieldsProps } = buildPersonalPasswordFormPresenter({
     initialData,

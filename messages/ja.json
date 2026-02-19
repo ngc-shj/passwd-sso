@@ -542,7 +542,9 @@
     "passwordTooShort": "パスワードは8文字以上で入力してください",
     "encryptedWarning": "エクスポートファイルは暗号化されます。パスワードを忘れるとデータを復元できません。",
     "includeOrgs": "組織のエントリーを含める",
-    "includeOrgsDesc": "所属する組織のパスワードもエクスポートします"
+    "includeOrgsDesc": "所属する組織のパスワードもエクスポートします",
+    "exportSkipped": "{count} 件のエントリをエクスポートできませんでした（スキップ）。",
+    "exportFailed": "エクスポートに失敗しました。もう一度お試しください。"
   },
   "Watchtower": {
     "title": "Watchtower",

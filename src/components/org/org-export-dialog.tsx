@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { encryptExport } from "@/lib/export-crypto";
 import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
@@ -65,10 +66,14 @@ function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
 
       // Fetch full details for each entry
       const entries: ExportEntry[] = [];
+      let skippedCount = 0;
       for (const item of list) {
         try {
           const res = await fetch(apiPath.orgPasswordById(orgId, item.id));
-          if (!res.ok) continue;
+          if (!res.ok) {
+            skippedCount++;
+            continue;
+          }
           const data = await res.json();
 
           entries.push({
@@ -102,7 +107,7 @@ function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
             passwordHistory: Array.isArray(data.passwordHistory) ? data.passwordHistory : [],
           });
         } catch {
-          // Skip entries that fail to fetch
+          skippedCount++;
         }
       }
 
@@ -150,9 +155,13 @@ function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
         }),
       }).catch(() => {});
 
+      if (skippedCount > 0) {
+        toast.warning(t("exportSkipped", { count: String(skippedCount) }));
+      }
+
       resetState();
     } catch {
-      // Export failed silently
+      toast.error(t("exportFailed"));
     } finally {
       setExporting(false);
     }

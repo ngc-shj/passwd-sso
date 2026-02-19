@@ -18,6 +18,7 @@ describe("useOrgAttachments", () => {
     const { result } = renderHook(() => useOrgAttachments(true, "org-1"));
 
     expect(result.current.attachments).toEqual([]);
+    expect(result.current.fetchError).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -32,6 +33,32 @@ describe("useOrgAttachments", () => {
     await waitFor(() => {
       expect(result.current.attachments).toHaveLength(1);
     });
+    expect(result.current.fetchError).toBeNull();
     expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/orgs/org-1/passwords/entry-1/attachments");
+  });
+
+  it("sets fetchError on non-ok response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 500,
+    } as Response);
+
+    const { result } = renderHook(() => useOrgAttachments(true, "org-1", "entry-1"));
+
+    await waitFor(() => {
+      expect(result.current.fetchError).toContain("500");
+    });
+    expect(result.current.attachments).toEqual([]);
+  });
+
+  it("sets fetchError on network error", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network error"));
+
+    const { result } = renderHook(() => useOrgAttachments(true, "org-1", "entry-1"));
+
+    await waitFor(() => {
+      expect(result.current.fetchError).toContain("network error");
+    });
+    expect(result.current.attachments).toEqual([]);
   });
 });

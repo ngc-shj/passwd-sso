@@ -109,6 +109,34 @@ function renderPage() {
   );
 }
 
+vi.mock("@/components/passwords/entry-list-header", () => ({
+  EntryListHeader: ({
+    title,
+    subtitle,
+    actions,
+  }: {
+    title: string;
+    subtitle: string;
+    showSubtitle: boolean;
+    titleExtra: React.ReactNode;
+    actions: React.ReactNode;
+  }) => (
+    <div data-testid="entry-list-header">
+      <span data-testid="header-title">{title}</span>
+      <span data-testid="header-subtitle">{subtitle}</span>
+      <div data-testid="header-actions">{actions}</div>
+    </div>
+  ),
+}));
+
+vi.mock("@/components/passwords/entry-sort-menu", () => ({
+  EntrySortMenu: () => null,
+}));
+
+vi.mock("@/components/org/org-favorites-list", () => ({
+  OrgFavoritesList: () => null,
+}));
+
 /* ---------- tests ---------- */
 
 describe("OrgDashboardPage — folder query propagation", () => {
@@ -167,6 +195,143 @@ describe("OrgDashboardPage — folder query propagation", () => {
       expect(passwordCall).toBeDefined();
       expect(passwordCall).toContain("folder=folder-abc");
       expect(passwordCall).toContain("tag=tag-xyz");
+    });
+  });
+});
+
+describe("OrgDashboardPage — scopes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    for (const key of [...mockSearchParams.keys()]) {
+      mockSearchParams.delete(key);
+    }
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+  });
+
+  it("does NOT fetch passwords when scope=archive", async () => {
+    mockSearchParams.set("scope", "archive");
+    setupFetch();
+
+    await act(async () => {
+      renderPage();
+    });
+
+    await waitFor(() => {
+      // Org fetch should happen
+      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      expect(calls.some((u: string) => u.includes("/api/orgs/org-1") && !u.includes("/passwords"))).toBe(true);
+    });
+
+    // Password fetch should NOT happen for archive scope
+    const passwordCalls = (mockFetch.mock.calls as string[][])
+      .map((c) => c[0])
+      .filter((u) => u.includes("/passwords"));
+    expect(passwordCalls).toHaveLength(0);
+  });
+
+  it("does NOT fetch passwords when scope=trash", async () => {
+    mockSearchParams.set("scope", "trash");
+    setupFetch();
+
+    await act(async () => {
+      renderPage();
+    });
+
+    await waitFor(() => {
+      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      expect(calls.some((u: string) => u.includes("/api/orgs/org-1") && !u.includes("/passwords"))).toBe(true);
+    });
+
+    const passwordCalls = mockFetch.mock.calls
+      .map((c: [string]) => c[0])
+      .filter((u: string) => u.includes("/passwords"));
+    expect(passwordCalls).toHaveLength(0);
+  });
+
+  it("includes favorites=true when scope=favorites", async () => {
+    mockSearchParams.set("scope", "favorites");
+    setupFetch();
+
+    await act(async () => {
+      renderPage();
+    });
+
+    await waitFor(() => {
+      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      const passwordCall = calls.find((u: string) => u.includes("/passwords"));
+      expect(passwordCall).toBeDefined();
+      expect(passwordCall).toContain("favorites=true");
+    });
+  });
+});
+
+describe("OrgDashboardPage — role-based rendering", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    for (const key of [...mockSearchParams.keys()]) {
+      mockSearchParams.delete(key);
+    }
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+  });
+
+  it("shows newItem button for OWNER role", async () => {
+    setupFetch(makeOrgResponse("OWNER"));
+
+    let view: ReturnType<typeof render>;
+    await act(async () => {
+      view = renderPage();
+    });
+
+    await waitFor(() => {
+      const actions = view!.container.querySelector("[data-testid='header-actions']");
+      expect(actions?.textContent).toContain("newItem");
+    });
+  });
+
+  it("does NOT show newItem button for VIEWER role", async () => {
+    setupFetch(makeOrgResponse("VIEWER"));
+
+    let view: ReturnType<typeof render>;
+    await act(async () => {
+      view = renderPage();
+    });
+
+    await waitFor(() => {
+      // Wait for org data to load
+      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      expect(calls.some((u: string) => u.includes("/api/orgs/org-1"))).toBe(true);
+    });
+
+    // newItem should not appear in actions
+    const actions = view!.container.querySelector("[data-testid='header-actions']");
+    expect(actions?.textContent ?? "").not.toContain("newItem");
+  });
+});
+
+describe("OrgDashboardPage — error handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    for (const key of [...mockSearchParams.keys()]) {
+      mockSearchParams.delete(key);
+    }
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+  });
+
+  it("shows error state when org fetch fails", async () => {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes("/api/orgs/org-1") && !url.includes("/passwords")) {
+        return Promise.resolve({ ok: false, status: 403 });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+    });
+
+    let view: ReturnType<typeof render>;
+    await act(async () => {
+      view = renderPage();
+    });
+
+    await waitFor(() => {
+      expect(view!.container.textContent).toContain("forbidden");
     });
   });
 });

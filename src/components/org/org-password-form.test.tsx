@@ -321,7 +321,7 @@ describe("OrgPasswordForm — folder selection", () => {
       const folderSelect = selects.find(
         (el) => el.getAttribute("data-value") === "folder-1",
       );
-      expect(folderSelect).toBeDefined();
+      expect(folderSelect).toBeInTheDocument();
     });
   });
 
@@ -481,7 +481,7 @@ describe("OrgPasswordForm — folder selection", () => {
       const folderSelect = selects.find(
         (el) => el.getAttribute("data-value") === "folder-2",
       );
-      expect(folderSelect).toBeDefined();
+      expect(folderSelect).toBeInTheDocument();
     });
   });
 });

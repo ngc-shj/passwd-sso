@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
+import { toast } from "sonner";
 import { encryptExport } from "@/lib/export-crypto";
 import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
@@ -64,6 +65,7 @@ function ExportPanelContent() {
       const rawEntries = await res.json();
 
       const entries: ExportEntry[] = [];
+      let skippedCount = 0;
       for (const raw of rawEntries) {
         if (!raw.encryptedBlob) continue;
         try {
@@ -113,7 +115,7 @@ function ExportPanelContent() {
             requireReprompt: raw.requireReprompt ?? false,
           });
         } catch {
-          // Skip entries that fail to decrypt
+          skippedCount++;
         }
       }
 
@@ -161,9 +163,13 @@ function ExportPanelContent() {
         }),
       }).catch(() => {});
 
+      if (skippedCount > 0) {
+        toast.warning(t("exportSkipped", { count: String(skippedCount) }));
+      }
+
       resetState();
     } catch {
-      // Export failed silently
+      toast.error(t("exportFailed"));
     } finally {
       setExporting(false);
     }

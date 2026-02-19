@@ -41,7 +41,7 @@ export function useOrgPasswordFormModel({
   const formState = useOrgPasswordFormState(editData);
 
   const { attachments, setAttachments } = useOrgAttachments(open, orgId, editData?.id);
-  const orgFolders = useOrgFolders(open, orgId);
+  const { folders: orgFolders } = useOrgFolders(open, orgId);
 
   const formSetters: OrgPasswordFormLifecycleSetters = { ...formState.setters, setAttachments };
   const { handleOpenChange } = useOrgPasswordFormLifecycle({

@@ -88,7 +88,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
     initialData?.tags ?? []
   );
   const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
-  const folders = usePersonalFolders();
+  const { folders } = usePersonalFolders();
 
   const baselineSnapshot = useMemo(
     () =>

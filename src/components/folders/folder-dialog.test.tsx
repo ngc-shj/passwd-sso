@@ -185,7 +185,7 @@ describe("FolderDialog", () => {
 
       const buttons = screen.getAllByRole("button");
       const submitBtn = buttons.find((b) => b.textContent === "save");
-      expect(submitBtn).toBeDefined();
+      expect(submitBtn).toBeInTheDocument();
       expect(submitBtn).not.toBeDisabled();
     });
 

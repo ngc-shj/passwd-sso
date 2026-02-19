@@ -78,14 +78,38 @@ describe("useSidebarViewModel", () => {
     const params = makeParams();
     const { result } = renderHook(() => useSidebarViewModel(params));
 
-    expect(result.current.selectedTags).toBe(params.selectedTags);
-    expect(result.current.selectedFolders).toBe(params.selectedFolders);
-    expect(result.current.isOpen).toBe(params.isOpen);
-    expect(result.current.toggleSection).toBe(params.toggleSection);
+    // Handlers (renamed props)
     expect(result.current.onCreateFolder).toBe(params.handleFolderCreate);
     expect(result.current.onEditFolder).toBe(params.handleFolderEdit);
     expect(result.current.onDeleteFolder).toBe(params.handleFolderDeleteClick);
     expect(result.current.onEditTag).toBe(params.handleTagEdit);
     expect(result.current.onDeleteTag).toBe(params.handleTagDeleteClick);
+
+    // Accordion state
+    expect(result.current.selectedTags).toBe(params.selectedTags);
+    expect(result.current.selectedFolders).toBe(params.selectedFolders);
+    expect(result.current.isOpen).toBe(params.isOpen);
+    expect(result.current.toggleSection).toBe(params.toggleSection);
+
+    // Pass-through props
+    expect(result.current.t).toBe(params.t);
+    expect(result.current.tOrg).toBe(params.tOrg);
+    expect(result.current.vaultContext).toBe(params.vaultContext);
+    expect(result.current.orgs).toBe(params.orgs);
+    expect(result.current.selectedOrg).toBe(params.selectedOrg);
+    expect(result.current.selectedOrgCanManageFolders).toBe(false);
+    expect(result.current.selectedOrgCanManageTags).toBe(false);
+    expect(result.current.selectedTypeFilter).toBeNull();
+    expect(result.current.selectedFolderId).toBeNull();
+    expect(result.current.selectedTagId).toBeNull();
+    expect(result.current.isSelectedVaultAll).toBe(true);
+    expect(result.current.isSelectedVaultFavorites).toBe(false);
+    expect(result.current.isSelectedVaultArchive).toBe(false);
+    expect(result.current.isSelectedVaultTrash).toBe(false);
+    expect(result.current.isWatchtower).toBe(false);
+    expect(result.current.isShareLinks).toBe(false);
+    expect(result.current.isEmergencyAccess).toBe(false);
+    expect(result.current.isPersonalAuditLog).toBe(false);
+    expect(result.current.activeAuditOrgId).toBeNull();
   });
 });
