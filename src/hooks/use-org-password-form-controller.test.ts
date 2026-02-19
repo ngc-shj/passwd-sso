@@ -10,9 +10,10 @@ const submitOrgPasswordFormMock = vi.fn();
 const useOrgEntrySpecificFieldsPropsFromStateMock = vi.fn();
 const useOrgPasswordFormDerivedMock = vi.fn();
 const getOrgCardValidationStateMock = vi.fn();
+const handleOrgCardNumberChangeMock = vi.fn();
 
 vi.mock("@/components/org/org-password-form-actions", () => ({
-  handleOrgCardNumberChange: vi.fn(),
+  handleOrgCardNumberChange: (...args: unknown[]) => handleOrgCardNumberChangeMock(...args),
   submitOrgPasswordForm: (...args: unknown[]) => submitOrgPasswordFormMock(...args),
 }));
 
@@ -35,6 +36,7 @@ describe("useOrgPasswordFormController", () => {
     useOrgEntrySpecificFieldsPropsFromStateMock.mockReset();
     useOrgPasswordFormDerivedMock.mockReset();
     getOrgCardValidationStateMock.mockReset();
+    handleOrgCardNumberChangeMock.mockReset();
 
     useOrgEntrySpecificFieldsPropsFromStateMock.mockReturnValue({ kind: "props" });
     useOrgPasswordFormDerivedMock.mockReturnValue({ hasChanges: true, submitDisabled: false });
@@ -116,6 +118,50 @@ describe("useOrgPasswordFormController", () => {
       onSaved,
       handleOpenChange,
     });
+  });
+
+  it("delegates card number change through entry-specific callback", () => {
+    renderHook(() =>
+      useOrgPasswordFormController({
+        orgId: "org-1",
+        onSaved: vi.fn(),
+        isEdit: false,
+        editData: null,
+        effectiveEntryType: ENTRY_TYPE.CREDIT_CARD,
+        entryKind: "creditCard",
+        isLoginEntry: false,
+        isNote: false,
+        isCreditCard: true,
+        isIdentity: false,
+        isPasskey: false,
+        t: (k) => k,
+        ti: (k) => k,
+        tn: (k) => k,
+        tcc: (k) => k,
+        tpk: (k) => k,
+        tGen: (k) => k,
+        formState: buildFormState(),
+        handleOpenChange: vi.fn(),
+      }),
+    );
+
+    const propsArgs = useOrgEntrySpecificFieldsPropsFromStateMock.mock.calls[0]?.[0] as
+      | { onCardNumberChange?: (value: string) => void }
+      | undefined;
+    expect(propsArgs?.onCardNumberChange).toBeTypeOf("function");
+
+    propsArgs?.onCardNumberChange?.("4111 1111 1111 1111");
+
+    expect(handleOrgCardNumberChangeMock).toHaveBeenCalledTimes(1);
+    expect(handleOrgCardNumberChangeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: "4111 1111 1111 1111",
+        brand: "visa",
+        brandSource: "manual",
+        setCardNumber: expect.any(Function),
+        setBrand: expect.any(Function),
+      }),
+    );
   });
 });
 

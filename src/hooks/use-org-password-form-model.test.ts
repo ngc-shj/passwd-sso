@@ -94,4 +94,25 @@ describe("useOrgPasswordFormModel", () => {
     expect(result.current.entryCopy.dialogLabel).toBe("x");
     expect(result.current.hasChanges).toBe(false);
   });
+
+  it("passes attachment setter into lifecycle setters", () => {
+    const setAttachments = vi.fn();
+    useOrgAttachmentsMock.mockReturnValue({ attachments: [], setAttachments });
+
+    renderHook(() =>
+      useOrgPasswordFormModel({
+        orgId: "org-1",
+        open: true,
+        onOpenChange: vi.fn(),
+        onSaved: vi.fn(),
+        entryType: ENTRY_TYPE.LOGIN,
+        editData: null,
+      }),
+    );
+
+    const lifecycleArgs = useOrgPasswordFormLifecycleMock.mock.calls[0]?.[0] as
+      | { setters?: { setAttachments?: unknown } }
+      | undefined;
+    expect(lifecycleArgs?.setters?.setAttachments).toBe(setAttachments);
+  });
 });
