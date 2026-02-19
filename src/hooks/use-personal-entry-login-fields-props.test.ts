@@ -11,8 +11,7 @@ describe("usePersonalEntryLoginFieldsProps", () => {
     const state = createState();
     const { result } = renderHook(() =>
       usePersonalEntryLoginFieldsProps({
-        values: state.values,
-        setters: state.setters,
+        formState: state,
         generatorSummary: "summary",
         translations: { t: (k) => `label.${k}` },
       }),
@@ -34,8 +33,7 @@ describe("usePersonalEntryLoginFieldsProps", () => {
 
     const { result } = renderHook(() =>
       usePersonalEntryLoginFieldsProps({
-        values: state.values,
-        setters: state.setters,
+        formState: state,
         generatorSummary: "summary",
         translations: { t: (k) => k },
       }),

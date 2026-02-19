@@ -9,18 +9,17 @@ import type { GeneratorSettings } from "@/lib/generator-prefs";
 type EntryLoginMainFieldsProps = ComponentProps<typeof EntryLoginMainFields>;
 
 interface UsePersonalEntryLoginFieldsPropsArgs {
-  values: PersonalPasswordFormState["values"];
-  setters: PersonalPasswordFormState["setters"];
+  formState: PersonalPasswordFormState;
   generatorSummary: string;
   translations: Pick<PersonalPasswordFormTranslations, "t">;
 }
 
 export function usePersonalEntryLoginFieldsProps({
-  values,
-  setters,
+  formState,
   generatorSummary,
   translations,
 }: UsePersonalEntryLoginFieldsPropsArgs): EntryLoginMainFieldsProps {
+  const { values, setters } = formState;
   const { t } = translations;
 
   return {

@@ -19,42 +19,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   const {
     t,
     tc,
-    formState: {
-      values: {
-        submitting,
-        title,
-        username,
-        password,
-        url,
-        notes,
-        selectedTags,
-        generatorSettings,
-        customFields,
-        totp,
-        showTotpInput,
-        requireReprompt,
-        folderId,
-        showPassword,
-        showGenerator,
-      },
-      setters: {
-        setSubmitting,
-        setTitle,
-        setUsername,
-        setPassword,
-        setUrl,
-        setNotes,
-        setSelectedTags,
-        setGeneratorSettings,
-        setCustomFields,
-        setTotp,
-        setShowTotpInput,
-        setRequireReprompt,
-        setFolderId,
-        setShowPassword,
-        setShowGenerator,
-      },
-    },
+    formState,
     folders,
     hasChanges,
     generatorSummary,
@@ -66,43 +31,11 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     initialData,
     onSaved,
   });
+  const { values, setters } = formState;
   const isDialogVariant = variant === "dialog";
   const dialogSectionClass = isDialogVariant ? ENTRY_DIALOG_FLAT_SECTION_CLASS : "";
   const loginMainFieldsProps = usePersonalEntryLoginFieldsProps({
-    values: {
-      submitting,
-      title,
-      username,
-      password,
-      url,
-      notes,
-      selectedTags,
-      generatorSettings,
-      customFields,
-      totp,
-      showTotpInput,
-      requireReprompt,
-      folderId,
-      showPassword,
-      showGenerator,
-    },
-    setters: {
-      setSubmitting,
-      setTitle,
-      setUsername,
-      setPassword,
-      setUrl,
-      setNotes,
-      setSelectedTags,
-      setGeneratorSettings,
-      setCustomFields,
-      setTotp,
-      setShowTotpInput,
-      setRequireReprompt,
-      setFolderId,
-      setShowPassword,
-      setShowGenerator,
-    },
+    formState,
     generatorSummary,
     translations: { t },
   });
@@ -124,27 +57,27 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
       <EntryTagsAndFolderSection
         tagsTitle={t("tags")}
         tagsHint={t("tagsHint")}
-        selectedTags={selectedTags}
-        onTagsChange={setSelectedTags}
+        selectedTags={values.selectedTags}
+        onTagsChange={setters.setSelectedTags}
         folders={folders}
-        folderId={folderId}
-        onFolderChange={setFolderId}
+        folderId={values.folderId}
+        onFolderChange={setters.setFolderId}
         sectionCardClass={dialogSectionClass}
       />
 
       <EntryCustomFieldsTotpSection
-        customFields={customFields}
-        setCustomFields={setCustomFields}
-        totp={totp}
-        onTotpChange={setTotp}
-        showTotpInput={showTotpInput}
-        setShowTotpInput={setShowTotpInput}
+        customFields={values.customFields}
+        setCustomFields={setters.setCustomFields}
+        totp={values.totp}
+        onTotpChange={setters.setTotp}
+        showTotpInput={values.showTotpInput}
+        setShowTotpInput={setters.setShowTotpInput}
         sectionCardClass={dialogSectionClass}
       />
 
       <EntryRepromptSection
-        checked={requireReprompt}
-        onCheckedChange={setRequireReprompt}
+        checked={values.requireReprompt}
+        onCheckedChange={setters.setRequireReprompt}
         title={t("requireReprompt")}
         description={t("requireRepromptHelp")}
         sectionCardClass={dialogSectionClass}
@@ -152,7 +85,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
 
       <EntryActionBar
         hasChanges={hasChanges}
-        submitting={submitting}
+        submitting={values.submitting}
         saveLabel={mode === "create" ? tc("save") : tc("update")}
         cancelLabel={tc("cancel")}
         statusUnsavedLabel={t("statusUnsaved")}
