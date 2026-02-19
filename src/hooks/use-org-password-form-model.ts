@@ -6,10 +6,7 @@ import type { OrgPasswordFormProps } from "@/components/org/org-password-form-ty
 import { useOrgAttachments } from "@/hooks/use-org-attachments";
 import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgPasswordFormController } from "@/hooks/use-org-password-form-controller";
-import {
-  useOrgPasswordFormLifecycle,
-  type OrgPasswordFormLifecycleArgs,
-} from "@/hooks/use-org-password-form-lifecycle";
+import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
 import type { OrgPasswordFormTranslations } from "@/hooks/use-org-password-form-presenter";
 import { useEntryFormTranslations } from "@/hooks/use-entry-form-translations";
 import {
@@ -44,30 +41,25 @@ export function useOrgPasswordFormModel({
   const orgFolders = useOrgFolders(open, orgId);
 
   const formSetters: OrgPasswordFormLifecycleSetters = { ...formState.setters, setAttachments };
-  const lifecycleArgs: OrgPasswordFormLifecycleArgs = {
+  const { handleOpenChange } = useOrgPasswordFormLifecycle({
     open,
     editData,
     onOpenChange,
     setters: formSetters,
-  };
-  const { handleOpenChange } = useOrgPasswordFormLifecycle(
-    lifecycleArgs,
-  );
+  });
 
   const { entryCopy, entrySpecificFieldsProps, handleSubmit, hasChanges, submitDisabled } =
-    useOrgPasswordFormController(
-      {
-        orgId,
-        onSaved,
-        isEdit,
-        editData,
-        effectiveEntryType,
-        entryKindState,
-        translations,
-        formState,
-        handleOpenChange,
-      },
-    );
+    useOrgPasswordFormController({
+      orgId,
+      onSaved,
+      isEdit,
+      editData,
+      effectiveEntryType,
+      entryKindState,
+      translations,
+      formState,
+      handleOpenChange,
+    });
 
   return {
     t,

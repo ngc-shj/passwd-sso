@@ -8,10 +8,7 @@ import {
   usePersonalPasswordFormController,
   type PersonalPasswordFormTranslations,
 } from "@/hooks/use-personal-password-form-controller";
-import {
-  usePersonalPasswordFormDerived,
-  type PersonalPasswordFormDerivedArgs,
-} from "@/hooks/use-personal-password-form-derived";
+import { usePersonalPasswordFormDerived } from "@/hooks/use-personal-password-form-derived";
 import { useEntryFormTranslations } from "@/hooks/use-entry-form-translations";
 import {
   selectPersonalEntryValues,
@@ -33,23 +30,22 @@ export function usePersonalPasswordFormModel({
   const folders = usePersonalFolders();
 
   const values = selectPersonalEntryValues(formState.values);
-  const derivedArgs: PersonalPasswordFormDerivedArgs = { initialData, values, translations };
-  const { hasChanges, generatorSummary } = usePersonalPasswordFormDerived(
-    derivedArgs,
-  );
-  const { handleSubmit, handleCancel, handleBack } = usePersonalPasswordFormController(
-    {
-      mode,
-      initialData,
-      onSaved,
-      encryptionKey,
-      userId: userId ?? undefined,
-      values,
-      setSubmitting: formState.setters.setSubmitting,
-      translations,
-      router,
-    },
-  );
+  const { hasChanges, generatorSummary } = usePersonalPasswordFormDerived({
+    initialData,
+    values,
+    translations,
+  });
+  const { handleSubmit, handleCancel, handleBack } = usePersonalPasswordFormController({
+    mode,
+    initialData,
+    onSaved,
+    encryptionKey,
+    userId: userId ?? undefined,
+    values,
+    setSubmitting: formState.setters.setSubmitting,
+    translations,
+    router,
+  });
 
   return {
     t: translations.t,
