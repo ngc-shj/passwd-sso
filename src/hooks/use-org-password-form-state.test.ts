@@ -2,7 +2,10 @@
 
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { useOrgPasswordFormState } from "@/hooks/use-org-password-form-state";
+import {
+  selectOrgEntryFieldValues,
+  useOrgPasswordFormState,
+} from "@/hooks/use-org-password-form-state";
 import { ENTRY_TYPE } from "@/lib/constants";
 
 describe("useOrgPasswordFormState", () => {
@@ -45,5 +48,31 @@ describe("useOrgPasswordFormState", () => {
     expect(result.current.values.showTotpInput).toBe(true);
     expect(result.current.values.brandSource).toBe("manual");
     expect(result.current.values.orgFolderId).toBe("f1");
+  });
+
+  it("selects entry field values for submit/derived consumers", () => {
+    const { result } = renderHook(() =>
+      useOrgPasswordFormState({
+        id: "e1",
+        entryType: ENTRY_TYPE.IDENTITY,
+        title: "Identity",
+        username: "identity-user",
+        password: "identity-pass",
+        notes: "id note",
+        orgFolderId: "folder-1",
+      }),
+    );
+
+    const selected = selectOrgEntryFieldValues(result.current.values);
+
+    expect(selected).toEqual(
+      expect.objectContaining({
+        title: "Identity",
+        username: "identity-user",
+        password: "identity-pass",
+        notes: "id note",
+        orgFolderId: "folder-1",
+      }),
+    );
   });
 });

@@ -21,7 +21,8 @@ describe("buildOrgPasswordSubmitArgs", () => {
       ti: (key) => key,
       onSaved,
       handleOpenChange,
-      formState: createFormState({ setDobError, setExpiryError, setSaving }),
+      values: createValues(),
+      setters: { setDobError, setExpiryError, setSaving },
     });
 
     expect(args.orgId).toBe("org-1");
@@ -38,52 +39,37 @@ describe("buildOrgPasswordSubmitArgs", () => {
   });
 });
 
-function createFormState({
-  setDobError,
-  setExpiryError,
-  setSaving,
-}: {
-  setDobError: (value: string | null) => void;
-  setExpiryError: (value: string | null) => void;
-  setSaving: (value: boolean) => void;
-}) {
+function createValues() {
   return {
-    values: {
-      title: "title",
-      notes: "notes",
-      selectedTags: [],
-      orgFolderId: null,
-      username: "user",
-      password: "pass",
-      url: "https://example.com",
-      customFields: [],
-      totp: null,
-      content: "",
-      cardholderName: "",
-      cardNumber: "",
-      brand: "",
-      expiryMonth: "",
-      expiryYear: "",
-      cvv: "",
-      fullName: "",
-      address: "",
-      phone: "",
-      email: "",
-      dateOfBirth: "",
-      nationality: "",
-      idNumber: "",
-      issueDate: "",
-      expiryDate: "",
-      relyingPartyId: "",
-      relyingPartyName: "",
-      credentialId: "",
-      creationDate: "",
-      deviceInfo: "",
-    },
-    setters: {
-      setDobError,
-      setExpiryError,
-      setSaving,
-    },
+    title: "title",
+    notes: "notes",
+    selectedTags: [],
+    orgFolderId: null,
+    username: "user",
+    password: "pass",
+    url: "https://example.com",
+    customFields: [],
+    totp: null,
+    content: "",
+    cardholderName: "",
+    cardNumber: "",
+    brand: "",
+    expiryMonth: "",
+    expiryYear: "",
+    cvv: "",
+    fullName: "",
+    address: "",
+    phone: "",
+    email: "",
+    dateOfBirth: "",
+    nationality: "",
+    idNumber: "",
+    issueDate: "",
+    expiryDate: "",
+    relyingPartyId: "",
+    relyingPartyName: "",
+    credentialId: "",
+    creationDate: "",
+    deviceInfo: "",
   };
 }

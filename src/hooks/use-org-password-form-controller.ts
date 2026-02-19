@@ -12,7 +12,10 @@ import { buildOrgPasswordSubmitArgs } from "@/hooks/org-password-form-submit-arg
 import { useOrgEntrySpecificFieldsPropsFromState } from "@/hooks/use-org-entry-specific-fields-props";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
-import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
+import {
+  selectOrgEntryFieldValues,
+  type OrgPasswordFormState,
+} from "@/hooks/use-org-password-form-state";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
 
@@ -63,6 +66,7 @@ export function useOrgPasswordFormController({
   handleOpenChange,
 }: UseOrgPasswordFormControllerArgs) {
   const { values, setters } = formState;
+  const entryValues = selectOrgEntryFieldValues(values);
   const {
     cardValidation,
     lengthHint,
@@ -96,7 +100,8 @@ export function useOrgPasswordFormController({
         ti: (key) => ti(key),
         onSaved,
         handleOpenChange,
-        formState,
+        values: entryValues,
+        setters,
       }),
     );
   };
@@ -128,36 +133,7 @@ export function useOrgPasswordFormController({
     isCreditCard,
     isIdentity,
     isPasskey,
-    title: values.title,
-    notes: values.notes,
-    selectedTags: values.selectedTags,
-    orgFolderId: values.orgFolderId,
-    username: values.username,
-    password: values.password,
-    url: values.url,
-    customFields: values.customFields,
-    totp: values.totp,
-    content: values.content,
-    cardholderName: values.cardholderName,
-    cardNumber: values.cardNumber,
-    brand: values.brand,
-    expiryMonth: values.expiryMonth,
-    expiryYear: values.expiryYear,
-    cvv: values.cvv,
-    fullName: values.fullName,
-    address: values.address,
-    phone: values.phone,
-    email: values.email,
-    dateOfBirth: values.dateOfBirth,
-    nationality: values.nationality,
-    idNumber: values.idNumber,
-    issueDate: values.issueDate,
-    expiryDate: values.expiryDate,
-    relyingPartyId: values.relyingPartyId,
-    relyingPartyName: values.relyingPartyName,
-    credentialId: values.credentialId,
-    creationDate: values.creationDate,
-    deviceInfo: values.deviceInfo,
+    ...entryValues,
     cardNumberValid,
   });
 
