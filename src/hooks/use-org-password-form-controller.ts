@@ -47,8 +47,8 @@ export function useOrgPasswordFormController({
   const { hasChanges, submitDisabled } = useOrgPasswordFormDerived({
     effectiveEntryType,
     editData,
-    ...entryKindState,
-    ...entryValues,
+    entryKindState,
+    entryValues,
     cardNumberValid,
   });
 
