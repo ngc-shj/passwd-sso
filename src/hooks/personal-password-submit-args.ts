@@ -1,19 +1,19 @@
 import type { SubmitPersonalPasswordFormArgs } from "@/components/passwords/personal-password-submit";
-import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
-import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
-import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
+import type { PersonalPasswordFormControllerArgs } from "@/hooks/personal-password-form-controller-args";
 
-interface BuildPersonalPasswordSubmitArgsInput {
-  mode: "create" | "edit";
-  initialData?: PersonalPasswordFormInitialData;
-  encryptionKey: CryptoKey | null;
-  userId?: string;
-  values: PersonalPasswordFormEntryValues;
-  setSubmitting: (value: boolean) => void;
-  translations: PersonalPasswordFormTranslations;
-  router: { push: (href: string) => void; refresh: () => void };
-  onSaved?: () => void;
-}
+type BuildPersonalPasswordSubmitArgsInput = Pick<
+  PersonalPasswordFormControllerArgs,
+  | "mode"
+  | "initialData"
+  | "encryptionKey"
+  | "userId"
+  | "values"
+  | "setSubmitting"
+  | "translations"
+  | "onSaved"
+> & {
+  router: Pick<PersonalPasswordFormControllerArgs["router"], "push" | "refresh">;
+};
 
 export function buildPersonalPasswordSubmitArgs({
   mode,

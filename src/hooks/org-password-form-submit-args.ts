@@ -1,26 +1,22 @@
 import type { SubmitOrgPasswordFormArgs } from "@/components/org/org-password-form-actions";
-import type { EntryTypeValue } from "@/lib/constants";
-import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
-import type { OrgPasswordFormTranslations } from "@/hooks/org-password-form-translations";
-import type { OrgEntryFieldValues } from "@/hooks/use-org-password-form-state";
+import type { OrgPasswordFormControllerArgs } from "@/hooks/org-password-form-controller-args";
+import type { OrgEntryFieldValues, OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 
-interface BuildOrgPasswordSubmitArgsInput {
-  orgId: string;
-  isEdit: boolean;
-  editData?: OrgPasswordFormEditData | null;
-  effectiveEntryType: EntryTypeValue;
+type BuildOrgPasswordSubmitArgsInput = Pick<
+  OrgPasswordFormControllerArgs,
+  | "orgId"
+  | "isEdit"
+  | "editData"
+  | "effectiveEntryType"
+  | "translations"
+  | "onSaved"
+  | "handleOpenChange"
+> & {
   cardNumberValid: boolean;
   isIdentity: boolean;
-  translations: OrgPasswordFormTranslations;
-  onSaved: () => void;
-  handleOpenChange: (open: boolean) => void;
   values: OrgEntryFieldValues;
-  setters: {
-    setDobError: (value: string | null) => void;
-    setExpiryError: (value: string | null) => void;
-    setSaving: (value: boolean) => void;
-  };
-}
+  setters: Pick<OrgPasswordFormState["setters"], "setDobError" | "setExpiryError" | "setSaving">;
+};
 
 export function buildOrgPasswordSubmitArgs({
   orgId,
