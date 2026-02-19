@@ -31,7 +31,7 @@ export function useOrgPasswordFormModel({
 
   const effectiveEntryType = editData?.entryType ?? entryTypeProp;
   const entryKindState = getOrgEntryKindState(effectiveEntryType);
-  const { entryKind, isLoginEntry } = entryKindState;
+  const { isLoginEntry } = entryKindState;
   const isEdit = !!editData;
 
   const formState = useOrgPasswordFormState(editData);
