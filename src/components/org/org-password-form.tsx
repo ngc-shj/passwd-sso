@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import type { OrgTagData } from "./org-tag-input";
-import { OrgAttachmentSection, type OrgAttachmentMeta } from "./org-attachment-section";
+import { OrgAttachmentSection } from "./org-attachment-section";
 import { getOrgCardValidationState } from "@/components/org/org-credit-card-validation";
 import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
 import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
@@ -46,11 +46,12 @@ import {
 } from "@/lib/entry-form-helpers";
 import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
 import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
-import { ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
 import { executeOrgEntrySubmit } from "@/components/org/org-entry-submit";
 import { useOrgFolders } from "@/hooks/use-org-folders";
+import { useOrgAttachments } from "@/hooks/use-org-attachments";
 
 export function OrgPasswordForm({
   orgId,
@@ -125,112 +126,67 @@ export function OrgPasswordForm({
   const [creationDate, setCreationDate] = useState(editData?.creationDate ?? "");
   const [deviceInfo, setDeviceInfo] = useState(editData?.deviceInfo ?? "");
   const [showCredentialId, setShowCredentialId] = useState(false);
-  const [attachments, setAttachments] = useState<OrgAttachmentMeta[]>([]);
+  const { attachments, setAttachments } = useOrgAttachments(open, orgId, editData?.id);
   const [orgFolderId, setOrgFolderId] = useState<string | null>(editData?.orgFolderId ?? null);
   const orgFolders = useOrgFolders(open, orgId);
 
   const isEdit = !!editData;
 
+  const formSettersRef = useRef({
+    setTitle,
+    setUsername,
+    setPassword,
+    setContent,
+    setUrl,
+    setNotes,
+    setSelectedTags,
+    setCustomFields,
+    setTotp,
+    setShowTotpInput,
+    setCardholderName,
+    setCardNumber,
+    setBrand,
+    setBrandSource,
+    setExpiryMonth,
+    setExpiryYear,
+    setCvv,
+    setFullName,
+    setAddress,
+    setPhone,
+    setEmail,
+    setDateOfBirth,
+    setNationality,
+    setIdNumber,
+    setIssueDate,
+    setExpiryDate,
+    setRelyingPartyId,
+    setRelyingPartyName,
+    setCredentialId,
+    setCreationDate,
+    setDeviceInfo,
+    setOrgFolderId,
+    setShowPassword,
+    setShowGenerator,
+    setShowCardNumber,
+    setShowCvv,
+    setShowIdNumber,
+    setShowCredentialId,
+    setAttachments,
+    setSaving,
+  });
+
   const applyEditDataToForm = (data: OrgPasswordFormEditData) =>
-    applyOrgEditDataToForm(data, {
-      setTitle,
-      setUsername,
-      setPassword,
-      setContent,
-      setUrl,
-      setNotes,
-      setSelectedTags,
-      setCustomFields,
-      setTotp,
-      setShowTotpInput,
-      setCardholderName,
-      setCardNumber,
-      setBrand,
-      setBrandSource,
-      setExpiryMonth,
-      setExpiryYear,
-      setCvv,
-      setFullName,
-      setAddress,
-      setPhone,
-      setEmail,
-      setDateOfBirth,
-      setNationality,
-      setIdNumber,
-      setIssueDate,
-      setExpiryDate,
-      setRelyingPartyId,
-      setRelyingPartyName,
-      setCredentialId,
-      setCreationDate,
-      setDeviceInfo,
-      setOrgFolderId,
-      setShowPassword,
-      setShowGenerator,
-      setShowCardNumber,
-      setShowCvv,
-      setShowIdNumber,
-      setShowCredentialId,
-      setAttachments,
-      setSaving,
-    });
+    applyOrgEditDataToForm(data, formSettersRef.current);
 
   const resetFormForClose = () =>
-    resetOrgFormForClose({
-      setTitle,
-      setUsername,
-      setPassword,
-      setContent,
-      setUrl,
-      setNotes,
-      setSelectedTags,
-      setCustomFields,
-      setTotp,
-      setShowTotpInput,
-      setCardholderName,
-      setCardNumber,
-      setBrand,
-      setBrandSource,
-      setExpiryMonth,
-      setExpiryYear,
-      setCvv,
-      setFullName,
-      setAddress,
-      setPhone,
-      setEmail,
-      setDateOfBirth,
-      setNationality,
-      setIdNumber,
-      setIssueDate,
-      setExpiryDate,
-      setRelyingPartyId,
-      setRelyingPartyName,
-      setCredentialId,
-      setCreationDate,
-      setDeviceInfo,
-      setOrgFolderId,
-      setShowPassword,
-      setShowGenerator,
-      setShowCardNumber,
-      setShowCvv,
-      setShowIdNumber,
-      setShowCredentialId,
-      setAttachments,
-      setSaving,
-    });
+    resetOrgFormForClose(formSettersRef.current);
 
   // Sync form fields when editData changes (programmatic open)
   useEffect(() => {
     if (open && editData) {
-      applyEditDataToForm(editData);
-
-      // Load attachments for edit mode
-      fetch(apiPath.orgPasswordAttachments(orgId, editData.id))
-        .then((res) => (res.ok ? res.json() : []))
-        .then((loaded: OrgAttachmentMeta[]) => setAttachments(loaded))
-        .catch(() => setAttachments([]));
+      applyOrgEditDataToForm(editData, formSettersRef.current);
     }
-  }, [open, editData, orgId]);
+  }, [open, editData]);
 
   const handleOpenChange = (v: boolean) => {
     if (!v) {
