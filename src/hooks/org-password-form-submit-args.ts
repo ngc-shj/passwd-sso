@@ -1,7 +1,7 @@
 import type { SubmitOrgPasswordFormArgs } from "@/components/org/org-password-form-actions";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
-import type { OrgPasswordSubmitTranslations } from "@/hooks/org-password-form-translations";
+import type { OrgPasswordFormTranslations } from "@/hooks/org-password-form-translations";
 import type { OrgEntryFieldValues } from "@/hooks/use-org-password-form-state";
 
 interface BuildOrgPasswordSubmitArgsInput {
@@ -11,7 +11,7 @@ interface BuildOrgPasswordSubmitArgsInput {
   effectiveEntryType: EntryTypeValue;
   cardNumberValid: boolean;
   isIdentity: boolean;
-  translations: OrgPasswordSubmitTranslations;
+  translations: OrgPasswordFormTranslations;
   onSaved: () => void;
   handleOpenChange: (open: boolean) => void;
   values: OrgEntryFieldValues;

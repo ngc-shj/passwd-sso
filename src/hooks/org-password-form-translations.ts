@@ -15,5 +15,3 @@ export interface OrgPasswordFormTranslations {
   tpk: PasskeyFormTranslator;
   tGen: PasswordGeneratorTranslator;
 }
-
-export type OrgPasswordSubmitTranslations = Pick<OrgPasswordFormTranslations, "t" | "ti">;
