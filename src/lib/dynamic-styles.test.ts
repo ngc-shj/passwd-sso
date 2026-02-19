@@ -11,11 +11,6 @@ describe("getTagColorClass", () => {
     document.querySelectorAll('meta[name="csp-nonce"]').forEach((el) => el.remove());
   });
 
-  async function freshImport() {
-    const mod = await import("./dynamic-styles");
-    return mod.getTagColorClass;
-  }
-
   it("returns null for null or empty color", async () => {
     const getTagColorClass = (await import("./dynamic-styles")).getTagColorClass;
     expect(getTagColorClass(null)).toBeNull();

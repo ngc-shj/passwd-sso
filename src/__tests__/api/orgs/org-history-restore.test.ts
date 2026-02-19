@@ -62,7 +62,7 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/history/[historyId]/restore", ()
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const req = createRequest("POST");
     const res = await POST(req, createParams({ orgId: "o1", id: "p1", historyId: "h1" }));
-    const { status, json } = await parseResponse(res);
+    const { status } = await parseResponse(res);
     expect(status).toBe(403);
   });
 
@@ -83,7 +83,7 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/history/[historyId]/restore", ()
     mockEntryFindUnique.mockResolvedValue({ id: "p1", orgId: "other-org" });
     const req = createRequest("POST");
     const res = await POST(req, createParams({ orgId: "o1", id: "p1", historyId: "h1" }));
-    const { status, json } = await parseResponse(res);
+    const { status } = await parseResponse(res);
     expect(status).toBe(404);
   });
 
@@ -106,7 +106,7 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/history/[historyId]/restore", ()
     mockHistoryFindUnique.mockResolvedValue({ id: "h1", entryId: "other-entry" });
     const req = createRequest("POST");
     const res = await POST(req, createParams({ orgId: "o1", id: "p1", historyId: "h1" }));
-    const { status, json } = await parseResponse(res);
+    const { status } = await parseResponse(res);
     expect(status).toBe(404);
   });
 

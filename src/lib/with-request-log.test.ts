@@ -7,11 +7,11 @@ const { mockInfo, mockError, mockChild } = vi.hoisted(() => {
   return { mockInfo, mockError, mockChild };
 });
 
-vi.mock("@/lib/logger", () => {
+vi.mock("@/lib/logger", async () => {
   const childLogger = { info: mockInfo, error: mockError };
   mockChild.mockReturnValue(childLogger);
   const logger = { child: mockChild };
-  const { AsyncLocalStorage } = require("node:async_hooks");
+  const { AsyncLocalStorage } = await import("node:async_hooks");
   return {
     default: logger,
     requestContext: new AsyncLocalStorage(),

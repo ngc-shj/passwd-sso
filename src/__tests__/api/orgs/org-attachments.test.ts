@@ -66,6 +66,7 @@ vi.mock("@/lib/crypto-aad", () => ({
   AAD_VERSION: 1,
 }));
 
+import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/orgs/[orgId]/passwords/[id]/attachments/route";
 import { OrgAuthError } from "@/lib/org-auth";
 
@@ -74,7 +75,6 @@ function makeParams(orgId: string, id: string) {
 }
 
 function createGetRequest() {
-  const { NextRequest } = require("next/server");
   return new NextRequest("http://localhost/api/orgs/o1/passwords/e1/attachments", {
     method: "GET",
   });
@@ -88,7 +88,6 @@ function createFormDataRequest(
   for (const [key, value] of Object.entries(fields)) {
     formData.append(key, value);
   }
-  const { NextRequest } = require("next/server");
   return new NextRequest("http://localhost/api/orgs/o1/passwords/e1/attachments", {
     method: "POST",
     body: formData,

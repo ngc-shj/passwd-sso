@@ -36,7 +36,7 @@ vi.mock("@/lib/audit", () => ({
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
 }));
 vi.mock("@/lib/with-request-log", () => ({
-  withRequestLog: (fn: Function) => fn,
+  withRequestLog: (fn: (...args: unknown[]) => unknown) => fn,
 }));
 vi.mock("@/lib/blob-store", () => ({
   getAttachmentBlobStore: () => ({
@@ -45,6 +45,7 @@ vi.mock("@/lib/blob-store", () => ({
   }),
 }));
 
+import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/passwords/[id]/attachments/route";
 
 function createParams(id: string) {
@@ -52,7 +53,6 @@ function createParams(id: string) {
 }
 
 function createGetRequest() {
-  const { NextRequest } = require("next/server");
   return new NextRequest("http://localhost/api/passwords/e1/attachments", {
     method: "GET",
   });
@@ -66,7 +66,6 @@ function createFormDataRequest(
   for (const [key, value] of Object.entries(fields)) {
     formData.append(key, value);
   }
-  const { NextRequest } = require("next/server");
   return new NextRequest("http://localhost/api/passwords/e1/attachments", {
     method: "POST",
     body: formData,
@@ -182,7 +181,6 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
     mockAttachmentCount.mockResolvedValue(0);
-    const { NextRequest } = require("next/server");
     const req = new NextRequest("http://localhost/api/passwords/e1/attachments", {
       method: "POST",
       body: "not form data",

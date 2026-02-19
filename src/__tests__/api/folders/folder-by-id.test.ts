@@ -60,7 +60,7 @@ describe("PUT /api/folders/[id]", () => {
     mockFolderFindUnique.mockResolvedValue(null);
     const req = createRequest("PUT", "http://localhost/api/folders/f1", { body: { name: "x" } });
     const res = await PUT(req, createParams({ id: "f1" }));
-    const { status, json } = await parseResponse(res);
+    const { status } = await parseResponse(res);
     expect(status).toBe(404);
   });
 
@@ -69,7 +69,7 @@ describe("PUT /api/folders/[id]", () => {
     mockFolderFindUnique.mockResolvedValue({ id: "f1", userId: "other-user", parentId: null, name: "Old" });
     const req = createRequest("PUT", "http://localhost/api/folders/f1", { body: { name: "x" } });
     const res = await PUT(req, createParams({ id: "f1" }));
-    const { status, json } = await parseResponse(res);
+    const { status } = await parseResponse(res);
     expect(status).toBe(403);
   });
 

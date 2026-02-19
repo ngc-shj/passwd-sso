@@ -11,7 +11,6 @@ import {
   buildOrgEntrySpecificTextProps,
 } from "@/hooks/org-entry-specific-fields-text-props";
 import type {
-  OrgEntrySpecificFieldTranslations,
   OrgEntrySpecificFieldsBuilderArgs,
   OrgEntrySpecificFieldsProps,
 } from "@/hooks/org-entry-specific-fields-types";

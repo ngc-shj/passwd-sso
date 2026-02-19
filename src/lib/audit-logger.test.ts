@@ -49,7 +49,7 @@ describe("createAuditLogger", () => {
   });
 
   it("produces no output when disabled", () => {
-    const output = collectOutput(() => {});
+    collectOutput(() => {});
     // re-create disabled logger
     let buf = "";
     const dest = new Writable({

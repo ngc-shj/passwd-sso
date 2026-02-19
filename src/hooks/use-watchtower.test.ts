@@ -163,7 +163,7 @@ describe("useWatchtower", () => {
     mockCheckHIBP.mockResolvedValue({ breached: false, count: 0 });
 
     // Default decrypt: parse _plaintext from raw entry
-    mockDecryptData.mockImplementation((_blob: unknown) => {
+    mockDecryptData.mockImplementation(() => {
       // We'll override per-test; default returns a valid JSON
       return Promise.resolve(
         JSON.stringify({

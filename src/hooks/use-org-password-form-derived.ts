@@ -35,6 +35,7 @@ export function useOrgPasswordFormDerived({
         editData,
         entryKindState,
       }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [effectiveEntryType, editData, isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey],
   );
 

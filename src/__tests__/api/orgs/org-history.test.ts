@@ -74,7 +74,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/history", () => {
     mockEntryFindUnique.mockResolvedValue({ orgId: "other-org" });
     const req = createRequest("GET");
     const res = await GET(req, createParams({ orgId: "o1", id: "p1" }));
-    const { status, json } = await parseResponse(res);
+    const { status } = await parseResponse(res);
     expect(status).toBe(404);
   });
 
