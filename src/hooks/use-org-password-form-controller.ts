@@ -4,6 +4,7 @@ import { submitOrgPasswordForm } from "@/components/org/org-password-form-action
 import { buildOrgPasswordDerivedArgs } from "@/hooks/org-password-form-derived-args";
 import { buildOrgPasswordPresenterArgs } from "@/hooks/org-password-form-presenter-args";
 import { buildOrgPasswordSubmitArgs } from "@/hooks/org-password-form-submit-args";
+import type { OrgPasswordFormTranslations } from "@/hooks/org-password-form-translations";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 import { useOrgPasswordFormPresenter } from "@/hooks/use-org-password-form-presenter";
 import {
@@ -13,24 +14,8 @@ import {
 import type { EntryTypeValue } from "@/lib/constants";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
-import type {
-  CreditCardFormTranslator,
-  IdentityFormTranslator,
-  PasswordFormTranslator,
-  PasswordGeneratorTranslator,
-  PasskeyFormTranslator,
-  SecureNoteFormTranslator,
-} from "@/lib/translation-types";
 
 type OrgFormState = OrgPasswordFormState;
-interface OrgPasswordFormTranslations {
-  t: PasswordFormTranslator;
-  ti: IdentityFormTranslator;
-  tn: SecureNoteFormTranslator;
-  tcc: CreditCardFormTranslator;
-  tpk: PasskeyFormTranslator;
-  tGen: PasswordGeneratorTranslator;
-}
 
 interface UseOrgPasswordFormControllerArgs {
   orgId: string;
