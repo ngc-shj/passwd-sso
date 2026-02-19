@@ -52,6 +52,8 @@ describe("useOrgPasswordFormPresenter", () => {
     );
 
     expect(result.current.cardNumberValid).toBe(true);
+    expect(result.current.entryValues.title).toBe("title");
+    expect(result.current.entryValues.orgFolderId).toBeNull();
     expect(result.current.entrySpecificFieldsProps).toEqual({ kind: "props" });
     expect(result.current.entryCopy.dialogLabel).toBeDefined();
   });
