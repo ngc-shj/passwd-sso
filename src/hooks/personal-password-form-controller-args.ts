@@ -13,27 +13,3 @@ export interface PersonalPasswordFormControllerArgs {
   translations: PersonalPasswordFormTranslations;
   router: { push: (href: string) => void; refresh: () => void; back: () => void };
 }
-
-export function buildPersonalPasswordControllerArgs({
-  mode,
-  initialData,
-  onSaved,
-  encryptionKey,
-  userId,
-  values,
-  setSubmitting,
-  translations,
-  router,
-}: PersonalPasswordFormControllerArgs): PersonalPasswordFormControllerArgs {
-  return {
-    mode,
-    initialData,
-    onSaved,
-    encryptionKey,
-    userId,
-    values,
-    setSubmitting,
-    translations,
-    router,
-  };
-}

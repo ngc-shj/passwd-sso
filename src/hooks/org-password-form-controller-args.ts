@@ -15,27 +15,3 @@ export interface OrgPasswordFormControllerArgs {
   formState: OrgPasswordFormState;
   handleOpenChange: (open: boolean) => void;
 }
-
-export function buildOrgPasswordControllerArgs({
-  orgId,
-  onSaved,
-  isEdit,
-  editData,
-  effectiveEntryType,
-  entryKindState,
-  translations,
-  formState,
-  handleOpenChange,
-}: OrgPasswordFormControllerArgs): OrgPasswordFormControllerArgs {
-  return {
-    orgId,
-    onSaved,
-    isEdit,
-    editData,
-    effectiveEntryType,
-    entryKindState,
-    translations,
-    formState,
-    handleOpenChange,
-  };
-}
