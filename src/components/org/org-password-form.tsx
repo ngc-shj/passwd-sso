@@ -61,6 +61,7 @@ export function OrgPasswordForm({
   const effectiveEntryType = editData?.entryType ?? entryTypeProp;
   const { entryKind, isNote, isCreditCard, isIdentity, isPasskey, isLoginEntry } =
     getOrgEntryKindState(effectiveEntryType);
+  const formState = useOrgPasswordFormState(editData);
   const {
     values: {
       saving,
@@ -150,54 +151,13 @@ export function OrgPasswordForm({
       setDeviceInfo,
       setOrgFolderId,
     },
-  } = useOrgPasswordFormState(editData);
+  } = formState;
   const { attachments, setAttachments } = useOrgAttachments(open, orgId, editData?.id);
   const orgFolders = useOrgFolders(open, orgId);
 
   const isEdit = !!editData;
 
-  const formSetters: OrgPasswordFormSetters = {
-    setTitle,
-    setUsername,
-    setPassword,
-    setContent,
-    setUrl,
-    setNotes,
-    setSelectedTags,
-    setCustomFields,
-    setTotp,
-    setShowTotpInput,
-    setCardholderName,
-    setCardNumber,
-    setBrand,
-    setBrandSource,
-    setExpiryMonth,
-    setExpiryYear,
-    setCvv,
-    setFullName,
-    setAddress,
-    setPhone,
-    setEmail,
-    setDateOfBirth,
-    setNationality,
-    setIdNumber,
-    setIssueDate,
-    setExpiryDate,
-    setRelyingPartyId,
-    setRelyingPartyName,
-    setCredentialId,
-    setCreationDate,
-    setDeviceInfo,
-    setOrgFolderId,
-    setShowPassword,
-    setShowGenerator,
-    setShowCardNumber,
-    setShowCvv,
-    setShowIdNumber,
-    setShowCredentialId,
-    setAttachments,
-    setSaving,
-  };
+  const formSetters: OrgPasswordFormSetters = { ...formState.setters, setAttachments };
   const { handleOpenChange } = useOrgPasswordFormLifecycle({
     open,
     editData,
