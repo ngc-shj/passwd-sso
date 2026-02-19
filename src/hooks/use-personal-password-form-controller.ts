@@ -2,9 +2,9 @@
 
 import { submitPersonalPasswordForm } from "@/components/passwords/personal-password-submit";
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
+import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
 import { buildPersonalPasswordSubmitArgs } from "@/hooks/personal-password-submit-args";
-import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 interface UsePersonalPasswordFormControllerArgs {
   mode: "create" | "edit";
@@ -14,7 +14,7 @@ interface UsePersonalPasswordFormControllerArgs {
   userId?: string;
   values: PersonalPasswordFormEntryValues;
   setSubmitting: (value: boolean) => void;
-  t: PasswordFormTranslator;
+  translations: PersonalPasswordFormTranslations;
   router: { push: (href: string) => void; refresh: () => void; back: () => void };
 }
 
@@ -26,7 +26,7 @@ export function usePersonalPasswordFormController({
   userId,
   values,
   setSubmitting,
-  t,
+  translations,
   router,
 }: UsePersonalPasswordFormControllerArgs) {
   const handleSubmit = async (e: React.FormEvent) => {
@@ -39,7 +39,7 @@ export function usePersonalPasswordFormController({
         userId,
         values,
         setSubmitting,
-        t,
+        translations,
         router,
         onSaved,
       }),

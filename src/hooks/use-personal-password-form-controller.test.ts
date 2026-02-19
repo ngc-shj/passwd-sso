@@ -3,8 +3,8 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
+import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
 import { usePersonalPasswordFormController } from "@/hooks/use-personal-password-form-controller";
-import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 const submitPersonalPasswordFormMock = vi.fn();
 
@@ -31,7 +31,7 @@ describe("usePersonalPasswordFormController", () => {
         userId: "user-1",
         values: buildValues(),
         setSubmitting: vi.fn(),
-        t: ((key: string) => key) as PasswordFormTranslator,
+        translations: buildTranslations(),
         router: { push: vi.fn(), refresh: vi.fn(), back },
       }),
     );
@@ -73,5 +73,13 @@ function buildValues(overrides: Partial<{ title: string }> = {}) {
     totp: null,
     requireReprompt: false,
     folderId: null,
+  };
+}
+
+function buildTranslations(): PersonalPasswordFormTranslations {
+  return {
+    t: (key) => key,
+    tGen: (key) => key,
+    tc: (key) => key,
   };
 }

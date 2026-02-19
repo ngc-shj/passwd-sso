@@ -6,20 +6,21 @@ import {
   buildPersonalInitialSnapshot,
 } from "@/components/passwords/personal-password-form-snapshot";
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
+import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
-import type { PasswordGeneratorTranslator } from "@/lib/translation-types";
 
 interface UsePersonalPasswordFormDerivedArgs {
   initialData?: PersonalPasswordFormInitialData;
   values: PersonalPasswordFormEntryValues;
-  tGen: PasswordGeneratorTranslator;
+  translations: PersonalPasswordFormTranslations;
 }
 
 export function usePersonalPasswordFormDerived({
   initialData,
   values,
-  tGen,
+  translations,
 }: UsePersonalPasswordFormDerivedArgs) {
+  const { tGen } = translations;
   const initialSnapshot = buildPersonalInitialSnapshot(initialData);
   const currentSnapshot = buildPersonalCurrentSnapshot({
     title: values.title,

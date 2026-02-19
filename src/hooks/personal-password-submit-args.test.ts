@@ -27,7 +27,11 @@ describe("buildPersonalPasswordSubmitArgs", () => {
         folderId: "folder-1",
       },
       setSubmitting,
-      t,
+      translations: {
+        t,
+        tGen: (key) => key,
+        tc: (key) => key,
+      },
       router,
       onSaved,
     });
