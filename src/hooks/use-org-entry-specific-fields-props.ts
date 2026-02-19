@@ -3,13 +3,17 @@
 import type { ComponentProps } from "react";
 import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
+import type { OrgPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
 import type {
   OrgPasswordFormValues,
   OrgPasswordFormSettersState,
 } from "@/hooks/use-org-password-form-state";
 
 export type OrgEntrySpecificFieldsProps = ComponentProps<typeof OrgEntrySpecificFields>;
-export type OrgFieldTranslator = (key: string, values?: Record<string, string | number | Date>) => string;
+type OrgEntrySpecificFieldTranslations = Pick<
+  OrgPasswordFormTranslations,
+  "t" | "tn" | "tcc" | "ti" | "tpk"
+>;
 
 export interface OrgEntrySpecificFieldsBuilderArgs {
   entryKind: OrgEntrySpecificFieldsProps["entryKind"];
@@ -17,11 +21,7 @@ export interface OrgEntrySpecificFieldsBuilderArgs {
     notesLabel: string;
     notesPlaceholder: string;
   };
-  t: OrgFieldTranslator;
-  tn: OrgFieldTranslator;
-  tcc: OrgFieldTranslator;
-  ti: OrgFieldTranslator;
-  tpk: OrgFieldTranslator;
+  translations: OrgEntrySpecificFieldTranslations;
   notes: string;
   onNotesChange: (value: string) => void;
   title: string;
@@ -102,11 +102,7 @@ export interface OrgEntrySpecificFieldsBuilderArgs {
 export function buildOrgEntrySpecificFieldsProps({
   entryKind,
   entryCopy,
-  t,
-  tn,
-  tcc,
-  ti,
-  tpk,
+  translations,
   notes,
   onNotesChange,
   title,
@@ -183,6 +179,8 @@ export function buildOrgEntrySpecificFieldsProps({
   deviceInfo,
   onDeviceInfoChange,
 }: OrgEntrySpecificFieldsBuilderArgs): OrgEntrySpecificFieldsProps {
+  const { t, tn, tcc, ti, tpk } = translations;
+
   return {
     entryKind,
     notesLabel: entryCopy.notesLabel,
@@ -325,11 +323,7 @@ type UseOrgEntrySpecificFieldsPropsFromStateArgs = Pick<
   OrgEntrySpecificFieldsBuilderArgs,
   | "entryKind"
   | "entryCopy"
-  | "t"
-  | "tn"
-  | "tcc"
-  | "ti"
-  | "tpk"
+  | "translations"
   | "generatorSummary"
   | "maxInputLength"
   | "showLengthError"
@@ -402,11 +396,7 @@ function buildOrgEntrySpecificCallbacks(
 export function useOrgEntrySpecificFieldsPropsFromState({
   entryKind,
   entryCopy,
-  t,
-  tn,
-  tcc,
-  ti,
-  tpk,
+  translations,
   values,
   setters,
   generatorSummary,
@@ -423,11 +413,7 @@ export function useOrgEntrySpecificFieldsPropsFromState({
   return buildOrgEntrySpecificFieldsProps({
     entryKind,
     entryCopy,
-    t,
-    tn,
-    tcc,
-    ti,
-    tpk,
+    translations,
     notes: values.notes,
     onNotesChange: callbacks.onNotesChange,
     title: values.title,

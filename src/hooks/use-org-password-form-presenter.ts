@@ -71,11 +71,7 @@ export function useOrgPasswordFormPresenter({
   const entrySpecificFieldsProps = useOrgEntrySpecificFieldsPropsFromState({
     entryKind,
     entryCopy,
-    t,
-    tn,
-    tcc,
-    ti,
-    tpk,
+    translations: { t, tn, tcc, ti, tpk },
     values,
     setters,
     generatorSummary,
