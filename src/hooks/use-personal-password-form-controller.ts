@@ -3,11 +3,11 @@
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
 import {
   submitPersonalPasswordForm,
-  type SubmitPersonalPasswordFormArgs,
 } from "@/components/passwords/personal-password-submit";
 import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
 import type { PersonalPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
+import { buildPersonalSubmitArgs } from "@/hooks/personal-password-form-submit-args";
 
 export interface PersonalPasswordFormControllerArgs {
   mode: Pick<PasswordFormProps, "mode">["mode"];
@@ -36,17 +36,17 @@ export function usePersonalPasswordFormController({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const submitArgs: SubmitPersonalPasswordFormArgs = {
+    const submitArgs = buildPersonalSubmitArgs({
       mode,
       initialData,
-      encryptionKey,
-      userId: userId ?? undefined,
-      ...values,
-      setSubmitting,
-      t: translations.t,
-      router,
       onSaved,
-    };
+      encryptionKey,
+      userId,
+      values,
+      setSubmitting,
+      translations,
+      router,
+    });
     await submitPersonalPasswordForm(submitArgs);
   };
 

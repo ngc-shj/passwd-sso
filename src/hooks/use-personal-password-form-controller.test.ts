@@ -60,6 +60,28 @@ describe("usePersonalPasswordFormController", () => {
     });
     expect(back).toHaveBeenCalledTimes(1);
   });
+
+  it("normalizes null userId to undefined in submit args", async () => {
+    const { result } = renderHook(() =>
+      usePersonalPasswordFormController({
+        mode: "create",
+        onSaved: vi.fn(),
+        encryptionKey: {} as CryptoKey,
+        userId: null,
+        values: buildValues(),
+        setSubmitting: vi.fn(),
+        translations: buildTranslations(),
+        router: { push: vi.fn(), refresh: vi.fn(), back: vi.fn() },
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as unknown as React.FormEvent);
+    });
+
+    expect(submitPersonalPasswordFormMock).toHaveBeenCalledTimes(1);
+    expect(submitPersonalPasswordFormMock.mock.calls[0]?.[0]?.userId).toBeUndefined();
+  });
 });
 
 function buildValues(overrides: Partial<{ title: string }> = {}) {
