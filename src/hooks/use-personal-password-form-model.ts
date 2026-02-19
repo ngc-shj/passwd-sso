@@ -40,7 +40,7 @@ export function usePersonalPasswordFormModel({
     initialData,
     onSaved,
     encryptionKey,
-    userId: userId ?? undefined,
+    userId,
     values,
     setSubmitting: formState.setters.setSubmitting,
     translations,

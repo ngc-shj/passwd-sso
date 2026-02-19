@@ -14,7 +14,7 @@ export interface PersonalPasswordFormControllerArgs {
   initialData: Pick<PasswordFormProps, "initialData">["initialData"];
   onSaved: Pick<PasswordFormProps, "onSaved">["onSaved"];
   encryptionKey: CryptoKey | null;
-  userId?: string;
+  userId?: string | null;
   values: PersonalPasswordFormEntryValues;
   setSubmitting: (value: boolean) => void;
   translations: PersonalPasswordFormTranslations;
