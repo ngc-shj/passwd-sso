@@ -1,6 +1,7 @@
 "use client";
 
 import { submitPersonalPasswordForm } from "@/components/passwords/personal-password-submit";
+import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
 import { buildPersonalPasswordSubmitArgs } from "@/hooks/personal-password-submit-args";
 import type { PersonalPasswordFormControllerArgs } from "@/hooks/personal-password-form-controller-args";
 
@@ -15,6 +16,8 @@ export function usePersonalPasswordFormController({
   translations,
   router,
 }: PersonalPasswordFormControllerArgs) {
+  const { handleCancel, handleBack } = createFormNavigationHandlers({ onSaved, router });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     await submitPersonalPasswordForm(
@@ -30,18 +33,6 @@ export function usePersonalPasswordFormController({
         onSaved,
       }),
     );
-  };
-
-  const handleCancel = () => {
-    if (onSaved) {
-      onSaved();
-      return;
-    }
-    router.back();
-  };
-
-  const handleBack = () => {
-    router.back();
   };
 
   return {
