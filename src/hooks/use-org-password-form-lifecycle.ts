@@ -4,15 +4,15 @@ import { useCallback, useEffect, useRef } from "react";
 import {
   applyOrgEditDataToForm,
   resetOrgFormForClose,
-  type OrgPasswordFormSetters,
 } from "@/components/org/org-password-form-state";
+import type { OrgPasswordFormLifecycleSetters } from "@/hooks/use-org-password-form-state";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
 
 interface UseOrgPasswordFormLifecycleArgs {
   open: boolean;
   editData?: OrgPasswordFormEditData | null;
   onOpenChange: (open: boolean) => void;
-  setters: OrgPasswordFormSetters;
+  setters: OrgPasswordFormLifecycleSetters;
 }
 
 export function useOrgPasswordFormLifecycle({

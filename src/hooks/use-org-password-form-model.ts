@@ -3,13 +3,15 @@
 import { useTranslations } from "next-intl";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
-import type { OrgPasswordFormSetters } from "@/components/org/org-password-form-state";
 import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
 import { useOrgAttachments } from "@/hooks/use-org-attachments";
 import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgPasswordFormController } from "@/hooks/use-org-password-form-controller";
 import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
-import { useOrgPasswordFormState } from "@/hooks/use-org-password-form-state";
+import {
+  type OrgPasswordFormLifecycleSetters,
+  useOrgPasswordFormState,
+} from "@/hooks/use-org-password-form-state";
 
 type OrgPasswordFormModelInput = Pick<
   OrgPasswordFormProps,
@@ -46,7 +48,7 @@ export function useOrgPasswordFormModel({
   const { attachments, setAttachments } = useOrgAttachments(open, orgId, editData?.id);
   const orgFolders = useOrgFolders(open, orgId);
 
-  const formSetters: OrgPasswordFormSetters = { ...formState.setters, setAttachments };
+  const formSetters: OrgPasswordFormLifecycleSetters = { ...formState.setters, setAttachments };
   const { handleOpenChange } = useOrgPasswordFormLifecycle({
     open,
     editData,

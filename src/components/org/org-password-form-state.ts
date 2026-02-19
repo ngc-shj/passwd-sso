@@ -1,51 +1,8 @@
 import { formatCardNumber } from "@/lib/credit-card";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
-import type { OrgAttachmentMeta } from "@/components/org/org-attachment-section";
-import type { OrgTagData } from "@/components/org/org-tag-input";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import type { OrgPasswordFormLifecycleSetters } from "@/hooks/use-org-password-form-state";
 
-export interface OrgPasswordFormSetters {
-  setTitle: (value: string) => void;
-  setUsername: (value: string) => void;
-  setPassword: (value: string) => void;
-  setContent: (value: string) => void;
-  setUrl: (value: string) => void;
-  setNotes: (value: string) => void;
-  setSelectedTags: (value: OrgTagData[]) => void;
-  setCustomFields: (value: EntryCustomField[]) => void;
-  setTotp: (value: EntryTotp | null) => void;
-  setShowTotpInput: (value: boolean) => void;
-  setCardholderName: (value: string) => void;
-  setCardNumber: (value: string) => void;
-  setBrand: (value: string) => void;
-  setBrandSource: (value: "auto" | "manual") => void;
-  setExpiryMonth: (value: string) => void;
-  setExpiryYear: (value: string) => void;
-  setCvv: (value: string) => void;
-  setFullName: (value: string) => void;
-  setAddress: (value: string) => void;
-  setPhone: (value: string) => void;
-  setEmail: (value: string) => void;
-  setDateOfBirth: (value: string) => void;
-  setNationality: (value: string) => void;
-  setIdNumber: (value: string) => void;
-  setIssueDate: (value: string) => void;
-  setExpiryDate: (value: string) => void;
-  setRelyingPartyId: (value: string) => void;
-  setRelyingPartyName: (value: string) => void;
-  setCredentialId: (value: string) => void;
-  setCreationDate: (value: string) => void;
-  setDeviceInfo: (value: string) => void;
-  setOrgFolderId: (value: string | null) => void;
-  setShowPassword: (value: boolean) => void;
-  setShowGenerator: (value: boolean) => void;
-  setShowCardNumber: (value: boolean) => void;
-  setShowCvv: (value: boolean) => void;
-  setShowIdNumber: (value: boolean) => void;
-  setShowCredentialId: (value: boolean) => void;
-  setAttachments: (value: OrgAttachmentMeta[]) => void;
-  setSaving: (value: boolean) => void;
-}
+export type OrgPasswordFormSetters = OrgPasswordFormLifecycleSetters;
 
 export function applyOrgEditDataToForm(
   data: OrgPasswordFormEditData,

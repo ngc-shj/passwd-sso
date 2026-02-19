@@ -7,6 +7,7 @@ import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { OrgTagData } from "@/components/org/org-tag-input";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
+import type { OrgAttachmentMeta } from "@/components/org/org-attachment-section";
 
 export function useOrgPasswordFormState(editData?: OrgPasswordFormEditData | null) {
   const [saving, setSaving] = useState(false);
@@ -158,6 +159,9 @@ export function useOrgPasswordFormState(editData?: OrgPasswordFormEditData | nul
 export type OrgPasswordFormState = ReturnType<typeof useOrgPasswordFormState>;
 export type OrgPasswordFormValues = OrgPasswordFormState["values"];
 export type OrgPasswordFormSettersState = OrgPasswordFormState["setters"];
+export type OrgPasswordFormLifecycleSetters = OrgPasswordFormSettersState & {
+  setAttachments: (value: OrgAttachmentMeta[]) => void;
+};
 
 export interface OrgEntryFieldValues {
   title: string;
