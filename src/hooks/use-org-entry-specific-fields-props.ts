@@ -343,12 +343,6 @@ type UseOrgEntrySpecificFieldsPropsFromStateArgs = Pick<
   setters: OrgPasswordFormSettersState;
 };
 
-export function useOrgEntrySpecificFieldsProps(
-  args: OrgEntrySpecificFieldsBuilderArgs,
-): OrgEntrySpecificFieldsProps {
-  return buildOrgEntrySpecificFieldsProps(args);
-}
-
 function buildOrgEntrySpecificCallbacks(
   values: OrgPasswordFormValues,
   setters: OrgPasswordFormSettersState,
@@ -426,7 +420,7 @@ export function useOrgEntrySpecificFieldsPropsFromState({
 }: UseOrgEntrySpecificFieldsPropsFromStateArgs): OrgEntrySpecificFieldsProps {
   const callbacks = buildOrgEntrySpecificCallbacks(values, setters);
 
-  return useOrgEntrySpecificFieldsProps({
+  return buildOrgEntrySpecificFieldsProps({
     entryKind,
     entryCopy,
     t,
