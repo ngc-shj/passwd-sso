@@ -4,6 +4,7 @@ import type { SubmitPersonalPasswordFormArgs } from "@/components/passwords/pers
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
 import type { PersonalPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
+import type { PasswordFormRouter } from "@/hooks/password-form-router";
 
 interface BuildPersonalSubmitArgsParams {
   mode: Pick<PasswordFormProps, "mode">["mode"];
@@ -14,7 +15,7 @@ interface BuildPersonalSubmitArgsParams {
   values: PersonalPasswordFormEntryValues;
   setSubmitting: (value: boolean) => void;
   translations: PersonalPasswordFormTranslations;
-  router: { push: (href: string) => void; refresh: () => void; back: () => void };
+  router: PasswordFormRouter;
 }
 
 export function buildPersonalSubmitArgs({

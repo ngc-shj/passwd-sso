@@ -8,6 +8,7 @@ import { createFormNavigationHandlers } from "@/components/passwords/form-naviga
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
 import type { PersonalPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
 import { buildPersonalSubmitArgs } from "@/hooks/personal-password-form-submit-args";
+import type { PasswordFormRouter } from "@/hooks/password-form-router";
 
 export interface PersonalPasswordFormControllerArgs {
   mode: Pick<PasswordFormProps, "mode">["mode"];
@@ -18,7 +19,7 @@ export interface PersonalPasswordFormControllerArgs {
   values: PersonalPasswordFormEntryValues;
   setSubmitting: (value: boolean) => void;
   translations: PersonalPasswordFormTranslations;
-  router: { push: (href: string) => void; refresh: () => void; back: () => void };
+  router: PasswordFormRouter;
 }
 
 export function usePersonalPasswordFormController({
