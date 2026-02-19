@@ -4,10 +4,12 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
 import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
 import { useOrgAttachments } from "@/hooks/use-org-attachments";
-import type { OrgPasswordFormLifecycleArgs } from "@/hooks/org-password-form-lifecycle-args";
 import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgPasswordFormController } from "@/hooks/use-org-password-form-controller";
-import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
+import {
+  useOrgPasswordFormLifecycle,
+  type OrgPasswordFormLifecycleArgs,
+} from "@/hooks/use-org-password-form-lifecycle";
 import type { OrgPasswordFormTranslations } from "@/hooks/use-org-password-form-presenter";
 import { useEntryFormTranslations } from "@/hooks/use-entry-form-translations";
 import {

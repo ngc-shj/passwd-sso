@@ -5,8 +5,15 @@ import {
   applyOrgEditDataToForm,
   resetOrgFormForClose,
 } from "@/hooks/org-password-form-lifecycle-state";
-import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
-import type { OrgPasswordFormLifecycleArgs } from "@/hooks/org-password-form-lifecycle-args";
+import type { OrgPasswordFormEditData, OrgPasswordFormProps } from "@/components/org/org-password-form-types";
+import type { OrgPasswordFormLifecycleSetters } from "@/hooks/use-org-password-form-state";
+
+export interface OrgPasswordFormLifecycleArgs {
+  open: OrgPasswordFormProps["open"];
+  editData?: OrgPasswordFormProps["editData"];
+  onOpenChange: OrgPasswordFormProps["onOpenChange"];
+  setters: OrgPasswordFormLifecycleSetters;
+}
 
 export function useOrgPasswordFormLifecycle({
   open,
