@@ -115,4 +115,39 @@ describe("useOrgPasswordFormModel", () => {
       | undefined;
     expect(lifecycleArgs?.setters?.setAttachments).toBe(setAttachments);
   });
+
+  it("prefers editData entryType and forwards derived kind flags to controller", () => {
+    renderHook(() =>
+      useOrgPasswordFormModel({
+        orgId: "org-1",
+        open: true,
+        onOpenChange: vi.fn(),
+        onSaved: vi.fn(),
+        entryType: ENTRY_TYPE.LOGIN,
+        editData: {
+          id: "entry-1",
+          entryType: ENTRY_TYPE.CREDIT_CARD,
+          title: "t",
+          username: null,
+          password: "p",
+          url: null,
+          notes: null,
+        },
+      }),
+    );
+
+    const controllerArgs = useOrgPasswordFormControllerMock.mock.calls[0]?.[0] as
+      | {
+          effectiveEntryType?: string;
+          entryKind?: string;
+          isCreditCard?: boolean;
+          isLoginEntry?: boolean;
+        }
+      | undefined;
+
+    expect(controllerArgs?.effectiveEntryType).toBe(ENTRY_TYPE.CREDIT_CARD);
+    expect(controllerArgs?.entryKind).toBe("creditCard");
+    expect(controllerArgs?.isCreditCard).toBe(true);
+    expect(controllerArgs?.isLoginEntry).toBe(false);
+  });
 });
