@@ -1,6 +1,6 @@
 import type { OrgEntryKind } from "@/components/org/org-password-form-types";
 
-interface EntryLocaleCopy {
+export interface EntryLocaleCopy {
   edit: string;
   create: string;
   titleLabel: string;

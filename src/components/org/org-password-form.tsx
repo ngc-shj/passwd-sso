@@ -16,6 +16,7 @@ import type { OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection } from "./org-attachment-section";
 import { getOrgCardValidationState } from "@/components/org/org-credit-card-validation";
 import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
+import { buildOrgEntryCopyData } from "@/components/org/org-entry-copy-data";
 import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
 import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
 import {
@@ -291,53 +292,7 @@ export function OrgPasswordForm({
   const entryCopy = buildOrgEntryCopy({
     isEdit,
     entryKind,
-    copyByKind: {
-      passkey: {
-        edit: tpk("editPasskey"),
-        create: tpk("newPasskey"),
-        titleLabel: tpk("title"),
-        titlePlaceholder: tpk("titlePlaceholder"),
-        notesLabel: tpk("notes"),
-        notesPlaceholder: tpk("notesPlaceholder"),
-        tagsTitle: tpk("tags"),
-      },
-      identity: {
-        edit: ti("editIdentity"),
-        create: ti("newIdentity"),
-        titleLabel: ti("title"),
-        titlePlaceholder: ti("titlePlaceholder"),
-        notesLabel: ti("notes"),
-        notesPlaceholder: ti("notesPlaceholder"),
-        tagsTitle: ti("tags"),
-      },
-      creditCard: {
-        edit: tcc("editCard"),
-        create: tcc("newCard"),
-        titleLabel: tcc("title"),
-        titlePlaceholder: tcc("titlePlaceholder"),
-        notesLabel: tcc("notes"),
-        notesPlaceholder: tcc("notesPlaceholder"),
-        tagsTitle: tcc("tags"),
-      },
-      secureNote: {
-        edit: tn("editNote"),
-        create: tn("newNote"),
-        titleLabel: tn("title"),
-        titlePlaceholder: tn("titlePlaceholder"),
-        notesLabel: tn("notes"),
-        notesPlaceholder: tn("notesPlaceholder"),
-        tagsTitle: tn("tags"),
-      },
-      password: {
-        edit: t("editPassword"),
-        create: t("newPassword"),
-        titleLabel: t("title"),
-        titlePlaceholder: t("titlePlaceholder"),
-        notesLabel: t("notes"),
-        notesPlaceholder: t("notesPlaceholder"),
-        tagsTitle: t("tags"),
-      },
-    },
+    copyByKind: buildOrgEntryCopyData({ t, tn, tcc, ti, tpk }),
   });
 
   const baselineSnapshot = buildBaselineSnapshot({
