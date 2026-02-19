@@ -11,12 +11,7 @@ import {
 } from "@/components/ui/select";
 import { EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { FolderOpen } from "lucide-react";
-
-interface FolderLike {
-  id: string;
-  name: string;
-  parentId: string | null;
-}
+import type { FolderLike } from "@/components/passwords/folder-like";
 
 interface EntryFolderSelectSectionProps {
   folders: FolderLike[];

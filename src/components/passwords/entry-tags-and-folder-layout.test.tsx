@@ -3,6 +3,7 @@
 import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import type { FolderLike } from "@/components/passwords/folder-like";
 import { EntryTagsAndFolderLayout } from "@/components/passwords/entry-tags-and-folder-layout";
 
 const tagsSectionMock = vi.fn();
@@ -22,7 +23,7 @@ vi.mock("@/components/passwords/entry-tags-section", () => ({
 
 vi.mock("@/components/passwords/entry-folder-select-section", () => ({
   EntryFolderSelectSection: (props: {
-    folders: Array<{ id: string; name: string; parentId: string | null }>;
+    folders: FolderLike[];
     value: string | null;
     onChange: (next: string | null) => void;
     sectionCardClass?: string;

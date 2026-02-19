@@ -2,13 +2,8 @@
 
 import type { ReactNode } from "react";
 import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
+import type { FolderLike } from "@/components/passwords/folder-like";
 import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
-
-interface FolderLike {
-  id: string;
-  name: string;
-  parentId: string | null;
-}
 
 interface EntryTagsAndFolderLayoutProps {
   tagsTitle: string;
