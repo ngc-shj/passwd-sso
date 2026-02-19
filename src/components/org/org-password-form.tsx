@@ -15,6 +15,10 @@ import { OrgAttachmentSection } from "./org-attachment-section";
 import { getOrgCardValidationState } from "@/components/org/org-credit-card-validation";
 import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
 import { buildOrgEntryCopyData } from "@/components/org/org-entry-copy-data";
+import {
+  handleOrgCardNumberChange,
+  submitOrgPasswordForm,
+} from "@/components/org/org-password-form-actions";
 import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
 import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
 import {
@@ -29,15 +33,8 @@ import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import { detectCardBrand, formatCardNumber, normalizeCardBrand, normalizeCardNumber } from "@/lib/credit-card";
-import {
-  extractTagIds,
-} from "@/lib/entry-form-helpers";
-import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
-import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
-import { executeOrgEntrySubmit } from "@/components/org/org-entry-submit";
 import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgAttachments } from "@/hooks/use-org-attachments";
 import { useOrgEntrySpecificFieldsProps } from "@/hooks/use-org-entry-specific-fields-props";
@@ -219,41 +216,24 @@ export function OrgPasswordForm({
   } = getOrgCardValidationState(cardNumber, brand);
 
   const handleCardNumberChange = (value: string) => {
-    const digits = normalizeCardNumber(value);
-    const detected = detectCardBrand(digits);
-    const nextBrand =
-      brandSource === "manual" ? brand : (detected || "");
-    const formatted = formatCardNumber(digits, nextBrand || detected);
-
-    setCardNumber(formatted);
-
-    if (brandSource === "auto") {
-      setBrand(detected);
-    }
+    handleOrgCardNumberChange({
+      value,
+      brand,
+      brandSource,
+      setCardNumber,
+      setBrand,
+    });
   };
 
   const handleSubmit = async () => {
-    const validation = validateOrgEntryBeforeSubmit({
-      entryType: effectiveEntryType,
-      title,
-      password,
-      relyingPartyId,
-      cardNumberValid,
-      dateOfBirth,
-      issueDate,
-      expiryDate,
-    });
-    if (isIdentity) {
-      setDobError(validation.dobFuture ? ti("dobFuture") : null);
-      setExpiryError(validation.expiryBeforeIssue ? ti("expiryBeforeIssue") : null);
-    }
-    if (!validation.ok) return;
-    const tagIds = extractTagIds(selectedTags);
-    const body = buildOrgEntryPayload({
-      entryType: effectiveEntryType,
+    await submitOrgPasswordForm({
+      orgId,
+      isEdit,
+      editData,
+      effectiveEntryType,
       title,
       notes,
-      tagIds,
+      selectedTags,
       orgFolderId,
       username,
       password,
@@ -262,8 +242,8 @@ export function OrgPasswordForm({
       totp,
       content,
       cardholderName,
-      cardNumber: normalizeCardNumber(cardNumber),
-      brand: normalizeCardBrand(brand),
+      cardNumber,
+      brand,
       expiryMonth,
       expiryYear,
       cvv,
@@ -281,12 +261,14 @@ export function OrgPasswordForm({
       credentialId,
       creationDate,
       deviceInfo,
-    });
-    await executeOrgEntrySubmit({
-      orgId,
-      isEdit,
-      editData,
-      body,
+      cardNumberValid,
+      isIdentity,
+      setDobError,
+      setExpiryError,
+      identityErrorCopy: {
+        dobFuture: ti("dobFuture"),
+        expiryBeforeIssue: ti("expiryBeforeIssue"),
+      },
       t,
       setSaving,
       handleOpenChange,
