@@ -78,10 +78,10 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
       passwordPlaceholder={t("passwordPlaceholder")}
       passwordRequired
       showPassword={showPassword}
-      onToggleShowPassword={() => setShowPassword((v) => !v)}
+      onToggleShowPassword={() => setShowPassword(!showPassword)}
       generatorSummary={generatorSummary}
       showGenerator={showGenerator}
-      onToggleGenerator={() => setShowGenerator((v) => !v)}
+      onToggleGenerator={() => setShowGenerator(!showGenerator)}
       closeGeneratorLabel={t("closeGenerator")}
       openGeneratorLabel={t("openGenerator")}
       generatorSettings={generatorSettings}
