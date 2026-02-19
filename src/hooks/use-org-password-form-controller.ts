@@ -40,7 +40,6 @@ export function useOrgPasswordFormController({
   formState,
   handleOpenChange,
 }: UseOrgPasswordFormControllerArgs) {
-  const { t, ti } = translations;
   const { values, setters } = formState;
   const { isIdentity } = entryKindState;
   const entryValues = selectOrgEntryFieldValues(values);
@@ -73,7 +72,7 @@ export function useOrgPasswordFormController({
         effectiveEntryType,
         cardNumberValid,
         isIdentity,
-        translations: { t, ti },
+        translations,
         onSaved,
         handleOpenChange,
         values: entryValues,
