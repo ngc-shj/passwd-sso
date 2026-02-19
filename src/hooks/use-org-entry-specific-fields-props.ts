@@ -1,7 +1,5 @@
 "use client";
 
-import type { ComponentProps } from "react";
-import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
 import type {
   OrgPasswordFormValues,
   OrgPasswordFormSettersState,
@@ -11,23 +9,12 @@ import {
 } from "@/hooks/org-entry-specific-fields-callbacks";
 import {
   buildOrgEntrySpecificTextProps,
-  type OrgEntrySpecificComputedProps,
-  type OrgEntrySpecificFieldTranslations,
 } from "@/hooks/org-entry-specific-fields-text-props";
-
-export type OrgEntrySpecificFieldsProps = ComponentProps<typeof OrgEntrySpecificFields>;
-
-export type OrgEntrySpecificFieldsBuilderArgs = Omit<
+import type {
+  OrgEntrySpecificFieldTranslations,
+  OrgEntrySpecificFieldsBuilderArgs,
   OrgEntrySpecificFieldsProps,
-  OrgEntrySpecificComputedProps
-> & {
-  entryCopy: {
-    notesLabel: string;
-    notesPlaceholder: string;
-  };
-  translations: OrgEntrySpecificFieldTranslations;
-  lengthHint: string;
-};
+} from "@/hooks/org-entry-specific-fields-types";
 
 export function buildOrgEntrySpecificFieldsProps({
   entryKind,
@@ -191,7 +178,7 @@ export function buildOrgEntrySpecificFieldsProps({
   };
 }
 
-type UseOrgEntrySpecificFieldsPropsFromStateArgs = Pick<
+export type UseOrgEntrySpecificFieldsPropsFromStateArgs = Pick<
   OrgEntrySpecificFieldsBuilderArgs,
   | "entryKind"
   | "entryCopy"
@@ -209,12 +196,14 @@ type UseOrgEntrySpecificFieldsPropsFromStateArgs = Pick<
   setters: OrgPasswordFormSettersState;
 };
 
-export function useOrgEntrySpecificFieldsPropsFromState({
+type OrgEntrySpecificCallbacks = ReturnType<typeof buildOrgEntrySpecificCallbacks>;
+
+export function buildOrgEntrySpecificFieldsBuilderArgsFromState({
   entryKind,
   entryCopy,
   translations,
   values,
-  setters,
+  callbacks,
   generatorSummary,
   onCardNumberChange,
   maxInputLength,
@@ -223,10 +212,10 @@ export function useOrgEntrySpecificFieldsPropsFromState({
   detectedBrand,
   hasBrandHint,
   lengthHint,
-}: UseOrgEntrySpecificFieldsPropsFromStateArgs): OrgEntrySpecificFieldsProps {
-  const callbacks = buildOrgEntrySpecificCallbacks(values, setters);
-
-  return buildOrgEntrySpecificFieldsProps({
+}: Omit<UseOrgEntrySpecificFieldsPropsFromStateArgs, "setters"> & {
+  callbacks: OrgEntrySpecificCallbacks;
+}): OrgEntrySpecificFieldsBuilderArgs {
+  return {
     entryKind,
     entryCopy,
     translations,
@@ -305,5 +294,40 @@ export function useOrgEntrySpecificFieldsPropsFromState({
     onCreationDateChange: callbacks.onCreationDateChange,
     deviceInfo: values.deviceInfo,
     onDeviceInfoChange: callbacks.onDeviceInfoChange,
+  };
+}
+
+export function useOrgEntrySpecificFieldsPropsFromState({
+  entryKind,
+  entryCopy,
+  translations,
+  values,
+  setters,
+  generatorSummary,
+  onCardNumberChange,
+  maxInputLength,
+  showLengthError,
+  showLuhnError,
+  detectedBrand,
+  hasBrandHint,
+  lengthHint,
+}: UseOrgEntrySpecificFieldsPropsFromStateArgs): OrgEntrySpecificFieldsProps {
+  const callbacks = buildOrgEntrySpecificCallbacks(values, setters);
+  const builderArgs = buildOrgEntrySpecificFieldsBuilderArgsFromState({
+    entryKind,
+    entryCopy,
+    translations,
+    values,
+    callbacks,
+    generatorSummary,
+    onCardNumberChange,
+    maxInputLength,
+    showLengthError,
+    showLuhnError,
+    detectedBrand,
+    hasBrandHint,
+    lengthHint,
   });
+
+  return buildOrgEntrySpecificFieldsProps(builderArgs);
 }

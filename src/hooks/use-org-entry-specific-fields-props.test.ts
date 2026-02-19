@@ -2,13 +2,54 @@
 
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { useOrgEntrySpecificFieldsPropsFromState } from "@/hooks/use-org-entry-specific-fields-props";
+import {
+  buildOrgEntrySpecificFieldsBuilderArgsFromState,
+  useOrgEntrySpecificFieldsPropsFromState,
+} from "@/hooks/use-org-entry-specific-fields-props";
+import { buildOrgEntrySpecificCallbacks } from "@/hooks/org-entry-specific-fields-callbacks";
 import type {
   OrgPasswordFormValues,
   OrgPasswordFormSettersState,
 } from "@/hooks/use-org-password-form-state";
 
 describe("useOrgEntrySpecificFieldsPropsFromState", () => {
+  it("builds complete builder args from state and callbacks", () => {
+    const { values, setters } = createState();
+    values.title = "Entry";
+    values.brand = "Visa";
+    const onCardNumberChange = vi.fn();
+    const callbacks = buildOrgEntrySpecificCallbacks(values, setters);
+
+    const args = buildOrgEntrySpecificFieldsBuilderArgsFromState({
+      entryKind: "creditCard",
+      entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
+      translations: {
+        t: (k) => k,
+        tn: (k) => k,
+        tcc: (k) => k,
+        ti: (k) => k,
+        tpk: (k) => k,
+      },
+      values,
+      callbacks,
+      generatorSummary: "summary",
+      onCardNumberChange,
+      maxInputLength: 19,
+      showLengthError: false,
+      showLuhnError: false,
+      detectedBrand: "visa",
+      hasBrandHint: true,
+      lengthHint: "16",
+    });
+
+    expect(args.title).toBe("Entry");
+    expect(args.brand).toBe("Visa");
+    expect(args.onCardNumberChange).toBe(onCardNumberChange);
+    expect(args.onBrandChange).toBe(callbacks.onBrandChange);
+    expect(args.detectedBrand).toBe("visa");
+    expect(args.hasBrandHint).toBe(true);
+  });
+
   it("sets brand and switches source to manual on brand change", () => {
     const { values, setters } = createState();
     const { result } = renderHook(() =>
