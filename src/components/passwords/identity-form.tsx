@@ -23,6 +23,7 @@ import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
 import { toTagIds, toTagPayload } from "@/components/passwords/entry-form-tags";
+import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
 
 interface IdentityFormProps {
   mode: "create" | "edit";
@@ -132,6 +133,7 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
   const isDialogVariant = variant === "dialog";
   const primaryCardClass = isDialogVariant ? ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS : "";
   const dialogSectionClass = isDialogVariant ? ENTRY_DIALOG_FLAT_SECTION_CLASS : "";
+  const { handleCancel, handleBack } = createFormNavigationHandlers({ onSaved, router });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -189,14 +191,6 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
       router,
       onSaved,
     });
-  };
-
-  const handleCancel = () => {
-    if (onSaved) {
-      onSaved();
-    } else {
-      router.back();
-    }
   };
 
   const formContent = (
@@ -394,7 +388,7 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
       <Button
         variant="ghost"
         className="mb-4 gap-2"
-        onClick={() => router.back()}
+        onClick={handleBack}
       >
         <ArrowLeft className="h-4 w-4" />
         {tc("back")}
