@@ -23,42 +23,6 @@ export function usePersonalPasswordFormModel({
   const router = useRouter();
   const { encryptionKey, userId } = useVault();
   const formState = usePersonalPasswordFormState(initialData);
-  const {
-    values: {
-      showPassword,
-      showGenerator,
-      submitting,
-      title,
-      username,
-      password,
-      url,
-      notes,
-      selectedTags,
-      generatorSettings,
-      customFields,
-      totp,
-      showTotpInput,
-      requireReprompt,
-      folderId,
-    },
-    setters: {
-      setShowPassword,
-      setShowGenerator,
-      setSubmitting,
-      setTitle,
-      setUsername,
-      setPassword,
-      setUrl,
-      setNotes,
-      setSelectedTags,
-      setGeneratorSettings,
-      setCustomFields,
-      setTotp,
-      setShowTotpInput,
-      setRequireReprompt,
-      setFolderId,
-    },
-  } = formState;
   const folders = usePersonalFolders();
 
   const values = selectPersonalEntryValues(formState.values);
@@ -75,7 +39,7 @@ export function usePersonalPasswordFormModel({
       encryptionKey,
       userId: userId ?? undefined,
       values,
-      setSubmitting,
+      setSubmitting: formState.setters.setSubmitting,
       t,
       router,
     });
