@@ -10,7 +10,7 @@ import {
   useOrgPasswordFormPresenter,
 } from "@/hooks/use-org-password-form-presenter";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
-import { selectOrgEntryFieldValues, type OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
+import { type OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 
 export interface OrgPasswordFormControllerArgs {
   orgId: OrgPasswordFormProps["orgId"];
@@ -37,8 +37,8 @@ export function useOrgPasswordFormController({
 }: OrgPasswordFormControllerArgs) {
   const { values, setters } = formState;
   const { isIdentity } = entryKindState;
-  const entryValues = selectOrgEntryFieldValues(values);
-  const { cardNumberValid, entryCopy, entrySpecificFieldsProps } = useOrgPasswordFormPresenter({
+  const { entryValues, cardNumberValid, entryCopy, entrySpecificFieldsProps } =
+    useOrgPasswordFormPresenter({
     isEdit,
     entryKind: entryKindState.entryKind,
     translations,

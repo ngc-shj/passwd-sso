@@ -7,7 +7,10 @@ import { buildOrgEntryCopyData } from "@/components/org/org-entry-copy-data";
 import { handleOrgCardNumberChange } from "@/components/org/org-password-form-actions";
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
 import { useOrgEntrySpecificFieldsPropsFromState } from "@/hooks/use-org-entry-specific-fields-props";
-import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
+import {
+  selectOrgEntryFieldValues,
+  type OrgPasswordFormState,
+} from "@/hooks/use-org-password-form-state";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
 import type { OrgPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
 
@@ -26,6 +29,7 @@ export function useOrgPasswordFormPresenter({
 }: OrgPasswordFormPresenterArgs) {
   const { t, ti, tn, tcc, tpk, tGen } = translations;
   const { values, setters } = formState;
+  const entryValues = selectOrgEntryFieldValues(values);
   const {
     cardValidation,
     lengthHint,
@@ -84,6 +88,7 @@ export function useOrgPasswordFormPresenter({
   });
 
   return {
+    entryValues,
     cardNumberValid,
     entryCopy,
     entrySpecificFieldsProps,
