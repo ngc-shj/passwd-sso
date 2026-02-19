@@ -2,6 +2,7 @@
 
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
+import { buildPersonalPasswordControllerArgs } from "@/hooks/personal-password-form-controller-args";
 import { buildPersonalPasswordDerivedArgs } from "@/hooks/personal-password-form-derived-args";
 import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
@@ -36,8 +37,8 @@ export function usePersonalPasswordFormModel({
       translations,
     }),
   );
-  const { handleSubmit, handleCancel, handleBack } =
-    usePersonalPasswordFormController({
+  const { handleSubmit, handleCancel, handleBack } = usePersonalPasswordFormController(
+    buildPersonalPasswordControllerArgs({
       mode,
       initialData,
       onSaved,
@@ -47,7 +48,8 @@ export function usePersonalPasswordFormModel({
       setSubmitting: formState.setters.setSubmitting,
       translations,
       router,
-    });
+    }),
+  );
 
   return {
     t: translations.t,
