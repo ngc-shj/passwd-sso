@@ -5,7 +5,7 @@ import {
   buildCurrentSnapshot,
 } from "@/hooks/org-password-form-derived-helpers";
 
-describe("use-org-password-form-derived snapshot helpers", () => {
+describe("org-password-form-derived-helpers snapshot helpers", () => {
   it("buildBaselineSnapshot serializes edit data for login entries", () => {
     const snapshot = buildBaselineSnapshot({
       effectiveEntryType: ENTRY_TYPE.LOGIN,

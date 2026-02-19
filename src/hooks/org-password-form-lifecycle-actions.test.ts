@@ -9,7 +9,7 @@ function createSetters() {
   return createOrgPasswordFormLifecycleSettersMock();
 }
 
-describe("use-org-password-form-lifecycle state helpers", () => {
+describe("org-password-form-lifecycle-actions", () => {
   it("applyOrgEditDataToForm applies incoming edit values", () => {
     const setters = createSetters();
 
