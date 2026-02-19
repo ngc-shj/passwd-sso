@@ -41,7 +41,7 @@ export function useOrgPasswordFormController({
   const { cardNumberValid, entryCopy, entrySpecificFieldsProps } = useOrgPasswordFormPresenter({
     isEdit,
     entryKind: entryKindState.entryKind,
-    ...translations,
+    translations,
     formState,
   });
 

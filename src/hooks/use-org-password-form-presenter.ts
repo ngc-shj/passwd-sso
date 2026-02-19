@@ -11,23 +11,20 @@ import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
 import type { OrgPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
 
-export type OrgPasswordFormPresenterArgs = OrgPasswordFormTranslations & {
+export interface OrgPasswordFormPresenterArgs {
   isEdit: boolean;
   entryKind: OrgEntryKindState["entryKind"];
+  translations: OrgPasswordFormTranslations;
   formState: OrgPasswordFormState;
-};
+}
 
 export function useOrgPasswordFormPresenter({
   isEdit,
   entryKind,
-  t,
-  ti,
-  tn,
-  tcc,
-  tpk,
-  tGen,
+  translations,
   formState,
 }: OrgPasswordFormPresenterArgs) {
+  const { t, ti, tn, tcc, tpk, tGen } = translations;
   const { values, setters } = formState;
   const {
     cardValidation,

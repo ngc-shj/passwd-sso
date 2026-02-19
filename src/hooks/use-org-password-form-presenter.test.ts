@@ -2,16 +2,9 @@
 
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { OrgPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
 import { useOrgPasswordFormPresenter } from "@/hooks/use-org-password-form-presenter";
 import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
-import type {
-  CreditCardFormTranslator,
-  IdentityFormTranslator,
-  PasswordFormTranslator,
-  PasswordGeneratorTranslator,
-  PasskeyFormTranslator,
-  SecureNoteFormTranslator,
-} from "@/lib/translation-types";
 
 const getOrgCardValidationStateMock = vi.fn();
 const handleOrgCardNumberChangeMock = vi.fn();
@@ -53,12 +46,7 @@ describe("useOrgPasswordFormPresenter", () => {
       useOrgPasswordFormPresenter({
         isEdit: false,
         entryKind: "password",
-        t: ((k: string) => k) as PasswordFormTranslator,
-        ti: ((k: string) => k) as IdentityFormTranslator,
-        tn: ((k: string) => k) as SecureNoteFormTranslator,
-        tcc: ((k: string) => k) as CreditCardFormTranslator,
-        tpk: ((k: string) => k) as PasskeyFormTranslator,
-        tGen: ((k: string) => k) as PasswordGeneratorTranslator,
+        translations: buildTranslations(),
         formState: buildFormState(),
       }),
     );
@@ -73,12 +61,7 @@ describe("useOrgPasswordFormPresenter", () => {
       useOrgPasswordFormPresenter({
         isEdit: false,
         entryKind: "creditCard",
-        t: ((k: string) => k) as PasswordFormTranslator,
-        ti: ((k: string) => k) as IdentityFormTranslator,
-        tn: ((k: string) => k) as SecureNoteFormTranslator,
-        tcc: ((k: string) => k) as CreditCardFormTranslator,
-        tpk: ((k: string) => k) as PasskeyFormTranslator,
-        tGen: ((k: string) => k) as PasswordGeneratorTranslator,
+        translations: buildTranslations(),
         formState: buildFormState(),
       }),
     );
@@ -190,5 +173,16 @@ function buildFormState(): OrgPasswordFormState {
       setDeviceInfo: vi.fn(),
       setOrgFolderId: vi.fn(),
     },
+  };
+}
+
+function buildTranslations(): OrgPasswordFormTranslations {
+  return {
+    t: (key) => key,
+    tGen: (key) => key,
+    tn: (key) => key,
+    tcc: (key) => key,
+    ti: (key) => key,
+    tpk: (key) => key,
   };
 }
