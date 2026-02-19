@@ -29,7 +29,6 @@ interface UseSidebarViewModelParams {
   isSelectedVaultTrash: boolean;
   isWatchtower: boolean;
   isShareLinks: boolean;
-  isSend: boolean;
   isEmergencyAccess: boolean;
   isPersonalAuditLog: boolean;
   activeAuditOrgId: string | null;
@@ -63,7 +62,6 @@ export function useSidebarViewModel({
   isSelectedVaultTrash,
   isWatchtower,
   isShareLinks,
-  isSend,
   isEmergencyAccess,
   isPersonalAuditLog,
   activeAuditOrgId,
@@ -111,7 +109,6 @@ export function useSidebarViewModel({
     isSelectedVaultTrash,
     isWatchtower,
     isShareLinks,
-    isSend,
     isEmergencyAccess,
     isPersonalAuditLog,
     activeAuditOrgId,
