@@ -2,7 +2,7 @@ import type { OrgPasswordFormControllerArgs } from "@/hooks/org-password-form-co
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
 import type { OrgEntryFieldValues } from "@/hooks/use-org-password-form-state";
 
-type BuildOrgPasswordDerivedArgsInput = Pick<
+type OrgPasswordDerivedBuilderArgs = Pick<
   OrgPasswordFormControllerArgs,
   "effectiveEntryType" | "editData" | "entryKindState"
 > & {
@@ -25,7 +25,7 @@ export function buildOrgPasswordDerivedArgs({
   entryKindState,
   values,
   cardNumberValid,
-}: BuildOrgPasswordDerivedArgsInput): OrgPasswordFormDerivedArgs {
+}: OrgPasswordDerivedBuilderArgs): OrgPasswordFormDerivedArgs {
   return {
     effectiveEntryType,
     editData,

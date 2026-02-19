@@ -1,7 +1,7 @@
 import type { SubmitPersonalPasswordFormArgs } from "@/components/passwords/personal-password-submit";
 import type { PersonalPasswordFormControllerArgs } from "@/hooks/personal-password-form-controller-args";
 
-type BuildPersonalPasswordSubmitArgsInput = Pick<
+type PersonalPasswordSubmitBuilderArgs = Pick<
   PersonalPasswordFormControllerArgs,
   | "mode"
   | "initialData"
@@ -25,7 +25,7 @@ export function buildPersonalPasswordSubmitArgs({
   translations,
   router,
   onSaved,
-}: BuildPersonalPasswordSubmitArgsInput): SubmitPersonalPasswordFormArgs {
+}: PersonalPasswordSubmitBuilderArgs): SubmitPersonalPasswordFormArgs {
   const { t } = translations;
   return {
     mode,

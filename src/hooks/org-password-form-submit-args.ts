@@ -2,7 +2,7 @@ import type { SubmitOrgPasswordFormArgs } from "@/components/org/org-password-fo
 import type { OrgPasswordFormControllerArgs } from "@/hooks/org-password-form-controller-args";
 import type { OrgEntryFieldValues, OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 
-type BuildOrgPasswordSubmitArgsInput = Pick<
+type OrgPasswordSubmitBuilderArgs = Pick<
   OrgPasswordFormControllerArgs,
   | "orgId"
   | "isEdit"
@@ -30,7 +30,7 @@ export function buildOrgPasswordSubmitArgs({
   handleOpenChange,
   values,
   setters,
-}: BuildOrgPasswordSubmitArgsInput): SubmitOrgPasswordFormArgs {
+}: OrgPasswordSubmitBuilderArgs): SubmitOrgPasswordFormArgs {
   const { t, ti } = translations;
   return {
     orgId,
