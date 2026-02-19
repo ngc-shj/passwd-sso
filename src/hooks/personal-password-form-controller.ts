@@ -4,7 +4,7 @@ import {
 } from "@/components/passwords/personal-password-submit";
 import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
-import type { PersonalPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
+import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import { buildPersonalSubmitArgs } from "@/hooks/personal-password-form-submit-args";
 import type { PasswordFormRouter } from "@/hooks/password-form-router";
 

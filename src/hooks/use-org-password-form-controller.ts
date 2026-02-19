@@ -4,7 +4,7 @@ import { submitOrgPasswordForm } from "@/components/org/org-password-form-action
 import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { OrgPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
+import type { OrgPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import {
   useOrgPasswordFormPresenter,
 } from "@/hooks/use-org-password-form-presenter";

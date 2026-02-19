@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
-import type { PersonalPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
+import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import { buildPersonalPasswordFormDerived } from "@/hooks/personal-password-form-derived";
 
 describe("buildPersonalPasswordFormDerived", () => {

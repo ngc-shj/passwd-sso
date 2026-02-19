@@ -2,7 +2,7 @@
 
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { OrgPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
+import type { OrgPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import { useOrgPasswordFormPresenter } from "@/hooks/use-org-password-form-presenter";
 import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 

@@ -2,7 +2,7 @@
 
 import type { ComponentProps } from "react";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
-import type { PersonalPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
+import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
 
 export type EntryLoginMainFieldsProps = ComponentProps<typeof EntryLoginMainFields>;

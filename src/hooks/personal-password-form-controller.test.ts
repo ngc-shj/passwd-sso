@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
-import type { PersonalPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
+import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import {
   buildPersonalPasswordFormController,
 } from "@/hooks/personal-password-form-controller";

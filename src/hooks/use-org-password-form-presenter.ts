@@ -15,7 +15,7 @@ import {
   type OrgPasswordFormState,
 } from "@/hooks/use-org-password-form-state";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
-import type { OrgPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
+import type { OrgPasswordFormTranslations } from "@/hooks/entry-form-translations";
 
 export interface OrgPasswordFormPresenterArgs {
   isEdit: boolean;

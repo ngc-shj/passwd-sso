@@ -9,7 +9,7 @@ import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-fo
 import {
   selectPersonalEntryValues,
 } from "@/hooks/use-personal-password-form-state";
-import type { PersonalPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
+import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
 
 export interface PersonalPasswordFormPresenterArgs {
   initialData?: PersonalPasswordFormInitialData;
