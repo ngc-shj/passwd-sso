@@ -16,15 +16,6 @@ export interface OrgPasswordFormTranslations {
   tGen: PasswordGeneratorTranslator;
 }
 
-interface BuildOrgPasswordFormTranslationsInput {
-  t: PasswordFormTranslator;
-  ti: IdentityFormTranslator;
-  tn: SecureNoteFormTranslator;
-  tcc: CreditCardFormTranslator;
-  tpk: PasskeyFormTranslator;
-  tGen: PasswordGeneratorTranslator;
-}
-
 export function buildOrgPasswordFormTranslations({
   t,
   ti,
@@ -32,6 +23,6 @@ export function buildOrgPasswordFormTranslations({
   tcc,
   tpk,
   tGen,
-}: BuildOrgPasswordFormTranslationsInput): OrgPasswordFormTranslations {
+}: OrgPasswordFormTranslations): OrgPasswordFormTranslations {
   return { t, ti, tn, tcc, tpk, tGen };
 }
