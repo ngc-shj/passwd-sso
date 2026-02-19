@@ -68,7 +68,7 @@ describe("usePersonalPasswordFormModel", () => {
     expect(result.current.hasChanges).toBe(false);
 
     act(() => {
-      result.current.setTitle("new title");
+      result.current.formState.setters.setTitle("new title");
     });
 
     expect(result.current.hasChanges).toBe(true);
