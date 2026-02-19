@@ -2,7 +2,7 @@
 
 import { submitOrgPasswordForm } from "@/components/org/org-password-form-actions";
 import type { OrgPasswordFormControllerArgs } from "@/hooks/org-password-form-controller-args";
-import { buildOrgPasswordDerivedArgs } from "@/hooks/org-password-form-derived-args";
+import type { OrgPasswordFormDerivedArgs } from "@/hooks/org-password-form-derived-args";
 import { buildOrgPasswordPresenterArgs } from "@/hooks/org-password-form-presenter-args";
 import { buildOrgPasswordSubmitArgs } from "@/hooks/org-password-form-submit-args";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
@@ -33,14 +33,15 @@ export function useOrgPasswordFormController({
       }),
     );
 
+  const derivedArgs: OrgPasswordFormDerivedArgs = {
+    effectiveEntryType,
+    editData,
+    ...entryKindState,
+    ...entryValues,
+    cardNumberValid,
+  };
   const { hasChanges, submitDisabled } = useOrgPasswordFormDerived(
-    buildOrgPasswordDerivedArgs({
-      effectiveEntryType,
-      editData,
-      entryKindState,
-      values: entryValues,
-      cardNumberValid,
-    }),
+    derivedArgs,
   );
 
   const handleSubmit = async () => {
