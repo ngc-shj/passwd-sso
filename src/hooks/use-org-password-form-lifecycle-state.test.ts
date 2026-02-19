@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyOrgEditDataToForm,
   resetOrgFormForClose,
-} from "@/hooks/use-org-password-form-lifecycle";
+} from "@/hooks/org-password-form-lifecycle-actions";
 import { createOrgPasswordFormLifecycleSettersMock } from "@/test-utils/org-password-form-setters";
 
 function createSetters() {
