@@ -1,11 +1,11 @@
 "use client";
 
-import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
 import { usePersonalPasswordFormController } from "@/hooks/use-personal-password-form-controller";
+import { useEntryFormTranslations } from "@/hooks/use-entry-form-translations";
 import {
   selectPersonalEntryValues,
   usePersonalPasswordFormState,
@@ -18,9 +18,7 @@ export function usePersonalPasswordFormModel({
   initialData,
   onSaved,
 }: PersonalPasswordFormModelInput) {
-  const t = useTranslations("PasswordForm");
-  const tGen = useTranslations("PasswordGenerator");
-  const tc = useTranslations("Common");
+  const { t, tGen, tc } = useEntryFormTranslations();
   const router = useRouter();
   const { encryptionKey, userId } = useVault();
   const formState = usePersonalPasswordFormState(initialData);

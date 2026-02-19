@@ -1,6 +1,5 @@
 "use client";
 
-import { useTranslations } from "next-intl";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
 import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
@@ -8,6 +7,7 @@ import { useOrgAttachments } from "@/hooks/use-org-attachments";
 import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgPasswordFormController } from "@/hooks/use-org-password-form-controller";
 import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
+import { useEntryFormTranslations } from "@/hooks/use-entry-form-translations";
 import {
   type OrgPasswordFormLifecycleSetters,
   useOrgPasswordFormState,
@@ -26,13 +26,7 @@ export function useOrgPasswordFormModel({
   entryType: entryTypeProp = ENTRY_TYPE.LOGIN,
   editData,
 }: OrgPasswordFormModelInput) {
-  const t = useTranslations("PasswordForm");
-  const tGen = useTranslations("PasswordGenerator");
-  const tn = useTranslations("SecureNoteForm");
-  const tcc = useTranslations("CreditCardForm");
-  const ti = useTranslations("IdentityForm");
-  const tpk = useTranslations("PasskeyForm");
-  const tc = useTranslations("Common");
+  const { t, tGen, tn, tcc, ti, tpk, tc } = useEntryFormTranslations();
 
   const effectiveEntryType = editData?.entryType ?? entryTypeProp;
   const { entryKind, isNote, isCreditCard, isIdentity, isPasskey, isLoginEntry } =
