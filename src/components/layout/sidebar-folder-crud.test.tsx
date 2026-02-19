@@ -15,11 +15,12 @@ import "@testing-library/jest-dom/vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────
 
-const { mockToast, mockApiErrorToI18nKey } = vi.hoisted(() => ({
+const { mockToast, mockApiErrorToI18nKey, mockUseVaultContext } = vi.hoisted(() => ({
   mockToast: { error: vi.fn(), success: vi.fn() },
   mockApiErrorToI18nKey: vi.fn((code: unknown) =>
     typeof code === "string" ? code : "unknownError",
   ),
+  mockUseVaultContext: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({ toast: mockToast }));
@@ -52,12 +53,17 @@ vi.mock("@/components/folders/folder-dialog", () => ({
   },
 }));
 
+vi.mock("@/components/tags/tag-dialog", () => ({
+  TagDialog: () => null,
+}));
+
 vi.mock("next/navigation", () => ({
   usePathname: () => "/ja/dashboard",
   useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("@/i18n/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
   Link: ({ children, href, ...rest }: { children: React.ReactNode; href: string; onClick?: () => void }) => (
     <a href={href} {...rest}>{children}</a>
   ),
@@ -73,6 +79,10 @@ vi.mock("@/hooks/use-local-storage", () => ({
 
 vi.mock("@/lib/dynamic-styles", () => ({
   getTagColorClass: () => "",
+}));
+
+vi.mock("@/hooks/use-vault-context", () => ({
+  useVaultContext: (orgs: unknown[]) => mockUseVaultContext(orgs),
 }));
 
 // Stub heavy UI components
@@ -169,12 +179,8 @@ vi.mock("radix-ui", () => ({
   },
 }));
 
-vi.mock("@/components/passwords/export-dialog", () => ({
-  ExportDialog: () => null,
-}));
-
-vi.mock("@/components/passwords/import-dialog", () => ({
-  ImportDialog: () => null,
+vi.mock("@/components/layout/vault-selector", () => ({
+  VaultSelector: () => null,
 }));
 
 import { Sidebar } from "./sidebar";
@@ -246,6 +252,7 @@ describe("Sidebar folder CRUD integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     capturedFolderDialogProps = null;
+    mockUseVaultContext.mockReturnValue({ type: "personal" });
   });
 
   // ── Create folder: API error shows toast ────────────────────
@@ -477,15 +484,18 @@ describe("Sidebar org folder CRUD integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     capturedFolderDialogProps = null;
+    mockUseVaultContext.mockReturnValue({
+      type: "org",
+      orgId: "org-1",
+      orgName: "Acme Corp",
+      orgRole: "OWNER",
+    });
   });
 
   /** Open org submenu by clicking the toggle button, then wait for folders. */
   async function openOrgSubmenu(sidebar: ReturnType<typeof within>, orgId: string) {
-    // Wait for org toggle to appear
-    await waitFor(() => {
-      expect(sidebar.getByRole("button", { name: `toggle-${orgId}` })).toBeInTheDocument();
-    });
-    fireEvent.click(sidebar.getByRole("button", { name: `toggle-${orgId}` }));
+    const toggle = sidebar.queryByRole("button", { name: `toggle-${orgId}` });
+    if (toggle) fireEvent.click(toggle);
   }
 
   it("shows org folder create button for OWNER role", async () => {
@@ -508,7 +518,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     // Org folder create button with org-specific aria-label
-    const orgCreateBtn = sidebar.getByRole("button", { name: "Acme Corp createFolder" });
+    const orgCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
     expect(orgCreateBtn).toBeInTheDocument();
   });
 
@@ -530,11 +540,11 @@ describe("Sidebar org folder CRUD integration", () => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
     });
 
-    const orgCreateBtn = sidebar.getByRole("button", { name: "Acme Corp createFolder" });
+    const orgCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
     expect(orgCreateBtn).toBeInTheDocument();
   });
 
-  it("hides org folder create button for MEMBER role", async () => {
+  it("shows enabled org folder create button for MEMBER role", async () => {
     const fetchMock = mockFetchSuccess({
       orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
       orgFoldersData: ORG_FOLDERS_DATA,
@@ -552,12 +562,11 @@ describe("Sidebar org folder CRUD integration", () => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
     });
 
-    // MEMBER should NOT see the org folder create button
-    const orgCreateBtns = sidebar.queryAllByRole("button", { name: "Acme Corp createFolder" });
-    expect(orgCreateBtns.length).toBe(0);
+    const orgCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
+    expect(orgCreateBtn).toBeEnabled();
   });
 
-  it("hides edit/delete menu for org folders when role is MEMBER", async () => {
+  it("shows edit/delete menu for org folders when role is MEMBER", async () => {
     const fetchMock = mockFetchSuccess({
       orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
       orgFoldersData: ORG_FOLDERS_DATA,
@@ -575,9 +584,8 @@ describe("Sidebar org folder CRUD integration", () => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
     });
 
-    // Org folder "OrgWork" should NOT have a context menu button
-    const menuButtons = sidebar.queryAllByRole("button", { name: "OrgWork menu" });
-    expect(menuButtons.length).toBe(0);
+    const orgMenuButton = sidebar.getByRole("button", { name: "OrgWork menu" });
+    expect(orgMenuButton).toBeInTheDocument();
   });
 
   it("shows edit/delete menu for org folders when role is OWNER", async () => {
@@ -621,7 +629,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     // Click the org folder create button
-    const orgCreateBtn = sidebar.getByRole("button", { name: "Acme Corp createFolder" });
+    const orgCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
     fireEvent.click(orgCreateBtn);
 
     expect(capturedFolderDialogProps).not.toBeNull();
@@ -666,11 +674,11 @@ describe("Sidebar org folder CRUD integration", () => {
 
     // Even with zero org folders, OWNER should see the create button inside org submenu
     await waitFor(() => {
-      expect(sidebar.getByRole("button", { name: "Acme Corp createFolder" })).toBeInTheDocument();
+      expect(sidebar.getByRole("button", { name: "createFolder" })).toBeInTheDocument();
     });
   });
 
-  it("hides org folder section when MEMBER and org has zero folders", async () => {
+  it("shows enabled org folder create button when MEMBER and org has zero folders", async () => {
     const fetchMock = mockFetchSuccess({
       orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
       orgFoldersData: [], // No folders
@@ -689,8 +697,8 @@ describe("Sidebar org folder CRUD integration", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
-    // MEMBER with 0 folders should NOT see any org folder create button
-    const orgCreateBtns = sidebar.queryAllByRole("button", { name: "Acme Corp createFolder" });
-    expect(orgCreateBtns.length).toBe(0);
+    // MEMBER can create folders, even when org has zero folders.
+    const orgCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
+    expect(orgCreateBtn).toBeEnabled();
   });
 });

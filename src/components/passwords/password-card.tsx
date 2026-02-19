@@ -27,7 +27,6 @@ import {
   PasswordDetailInline,
   type InlineDetailData,
 } from "./password-detail-inline";
-import type { TOTPEntry } from "./totp-field";
 import { PasswordEditDialog } from "./password-edit-dialog";
 import {
   User,
@@ -55,7 +54,13 @@ import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { ShareDialog } from "@/components/share/share-dialog";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
-import type { EntryTypeValue, CustomFieldType } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
+import type {
+  EntryCustomField,
+  EntryPasswordHistory,
+  EntryTagNameColor,
+  EntryTotp,
+} from "@/lib/entry-form-types";
 
 interface PasswordCardProps {
   id: string;
@@ -70,7 +75,7 @@ interface PasswordCardProps {
   fullName?: string | null;
   idNumberLast4?: string | null;
   relyingPartyId?: string | null;
-  tags: Array<{ name: string; color: string | null }>;
+  tags: EntryTagNameColor[];
   isFavorite: boolean;
   isArchived: boolean;
   expanded: boolean;
@@ -103,10 +108,10 @@ interface VaultEntryFull {
   url?: string | null;
   notes?: string | null;
   content?: string;
-  tags: Array<{ name: string; color: string | null }>;
-  customFields?: Array<{ label: string; value: string; type: CustomFieldType }>;
-  passwordHistory?: Array<{ password: string; changedAt: string }>;
-  totp?: TOTPEntry;
+  tags: EntryTagNameColor[];
+  customFields?: EntryCustomField[];
+  passwordHistory?: EntryPasswordHistory[];
+  totp?: EntryTotp;
   cardholderName?: string | null;
   cardNumber?: string | null;
   brand?: string | null;

@@ -73,6 +73,10 @@ vi.mock("@/components/tags/tag-input", () => ({
 }));
 
 vi.mock("@/components/passwords/entry-form-ui", () => ({
+  ENTRY_DIALOG_FLAT_SECTION_CLASS:
+    "!rounded-none !border-0 !bg-transparent !px-1 !py-2 !shadow-none hover:!bg-transparent",
+  ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS:
+    "!rounded-none !border-0 !bg-transparent !from-transparent !to-transparent !p-0 !shadow-none",
   EntryActionBar: ({
     onCancel,
     saveLabel,
@@ -246,7 +250,7 @@ describe("PasswordForm folder selector", () => {
         const options = s.querySelectorAll("option");
         return Array.from(options).some((o) => o.value === "__none__");
       });
-      expect(folderSelect).toBeDefined();
+      expect(folderSelect).toBeInTheDocument();
     });
   });
 
@@ -292,7 +296,7 @@ describe("PasswordForm folder selector", () => {
         const options = s.querySelectorAll("option");
         return Array.from(options).some((o) => o.value === "__none__");
       });
-      expect(folderSelect).toBeDefined();
+      expect(folderSelect).toBeInTheDocument();
       expect((folderSelect as HTMLSelectElement).value).toBe("f1");
     });
   });
@@ -421,7 +425,7 @@ describe("PasswordForm folder selector", () => {
           (o) => o.value === "__none__",
         ),
       );
-      expect(folderSelect).toBeDefined();
+      expect(folderSelect).toBeInTheDocument();
 
       const options = folderSelect!.querySelectorAll("option");
       const optionTexts = Array.from(options).map((o) => ({

@@ -9,18 +9,12 @@ import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { PasswordDetail } from "@/components/passwords/password-detail";
 import type { TOTPEntry } from "@/components/passwords/totp-field";
 import { Loader2 } from "lucide-react";
-import { apiPath, type CustomFieldType } from "@/lib/constants";
-
-interface PasswordHistoryEntry {
-  password: string;
-  changedAt: string;
-}
-
-interface CustomField {
-  label: string;
-  value: string;
-  type: CustomFieldType;
-}
+import { apiPath } from "@/lib/constants";
+import type {
+  EntryCustomField,
+  EntryPasswordHistory,
+  EntryTagNameColor,
+} from "@/lib/entry-form-types";
 
 interface VaultEntryFull {
   title: string;
@@ -28,9 +22,9 @@ interface VaultEntryFull {
   password: string;
   url: string | null;
   notes: string | null;
-  tags: Array<{ name: string; color: string | null }>;
-  passwordHistory?: PasswordHistoryEntry[];
-  customFields?: CustomField[];
+  tags: EntryTagNameColor[];
+  passwordHistory?: EntryPasswordHistory[];
+  customFields?: EntryCustomField[];
   totp?: TOTPEntry;
 }
 
@@ -41,9 +35,9 @@ interface DetailData {
   password: string;
   url: string | null;
   notes: string | null;
-  tags: Array<{ name: string; color: string | null }>;
-  passwordHistory: PasswordHistoryEntry[];
-  customFields: CustomField[];
+  tags: EntryTagNameColor[];
+  passwordHistory: EntryPasswordHistory[];
+  customFields: EntryCustomField[];
   totp?: TOTPEntry;
   isFavorite: boolean;
   isArchived: boolean;

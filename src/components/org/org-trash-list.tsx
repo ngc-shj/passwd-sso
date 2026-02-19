@@ -17,6 +17,10 @@ import { Building2, Trash2, RotateCcw, FileText, CreditCard, IdCard } from "luci
 import { toast } from "sonner";
 import { ORG_ROLE, ENTRY_TYPE, API_PATH, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
+import {
+  compareEntriesByDeletedAt,
+  type EntrySortOption,
+} from "@/lib/entry-sort";
 
 interface OrgTrashEntry {
   id: string;
@@ -38,9 +42,15 @@ interface OrgTrashListProps {
   orgId?: string;
   searchQuery?: string;
   refreshKey: number;
+  sortBy?: EntrySortOption;
 }
 
-export function OrgTrashList({ orgId, searchQuery = "", refreshKey }: OrgTrashListProps) {
+export function OrgTrashList({
+  orgId,
+  searchQuery = "",
+  refreshKey,
+  sortBy = "updatedAt",
+}: OrgTrashListProps) {
   const t = useTranslations("Trash");
   const tOrg = useTranslations("Org");
   const [entries, setEntries] = useState<OrgTrashEntry[]>([]);
@@ -114,7 +124,11 @@ export function OrgTrashList({ orgId, searchQuery = "", refreshKey }: OrgTrashLi
     );
   });
 
-  if (loading || filtered.length === 0) return null;
+  const sortedFiltered = [...filtered].sort((a, b) =>
+    compareEntriesByDeletedAt(a, b, sortBy)
+  );
+
+  if (loading || sortedFiltered.length === 0) return null;
 
   return (
     <div className="mt-6">
@@ -122,14 +136,14 @@ export function OrgTrashList({ orgId, searchQuery = "", refreshKey }: OrgTrashLi
         <div className="mb-3 flex items-center gap-2">
           <Building2 className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-medium text-muted-foreground">
-            {tOrg("organizationTrash")}
+            {tOrg("trash")}
           </h2>
         </div>
       )}
       <div className="space-y-2">
-        {filtered.map((entry) => (
-          <Card key={entry.id} className="rounded-xl border bg-background/80 transition-colors hover:bg-accent">
-            <CardContent className="flex items-center gap-4 p-4">
+        {sortedFiltered.map((entry) => (
+          <Card key={entry.id} className="transition-colors hover:bg-accent">
+            <CardContent className="flex items-center gap-3 px-4 py-2">
               {entry.entryType === ENTRY_TYPE.IDENTITY ? (
                 <IdCard className="h-4 w-4 shrink-0 text-muted-foreground" />
               ) : entry.entryType === ENTRY_TYPE.CREDIT_CARD ? (
@@ -139,7 +153,7 @@ export function OrgTrashList({ orgId, searchQuery = "", refreshKey }: OrgTrashLi
               ) : null}
               <div className="flex-1 min-w-0">
                 <p className="font-medium truncate">{entry.title}</p>
-                <div className="flex items-center gap-2 mt-0.5">
+                <div className="flex items-center gap-2">
                   {entry.entryType === ENTRY_TYPE.IDENTITY ? (
                     (entry.fullName || entry.idNumberLast4) && (
                       <p className="text-sm text-muted-foreground truncate">

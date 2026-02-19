@@ -7,7 +7,12 @@ import type { InlineDetailData } from "@/components/passwords/password-detail-in
 import { OrgPasswordForm } from "@/components/org/org-password-form";
 import { Building2 } from "lucide-react";
 import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
-import type { EntryTypeValue, TotpAlgorithm, CustomFieldType } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
+import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import {
+  compareEntriesWithFavorite,
+  type EntrySortOption,
+} from "@/lib/entry-sort";
 
 interface OrgArchivedEntry {
   id: string;
@@ -37,9 +42,15 @@ interface OrgArchivedListProps {
   orgId?: string;
   searchQuery: string;
   refreshKey: number;
+  sortBy?: EntrySortOption;
 }
 
-export function OrgArchivedList({ orgId, searchQuery, refreshKey }: OrgArchivedListProps) {
+export function OrgArchivedList({
+  orgId,
+  searchQuery,
+  refreshKey,
+  sortBy = "updatedAt",
+}: OrgArchivedListProps) {
   const t = useTranslations("Org");
   const [entries, setEntries] = useState<OrgArchivedEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,8 +65,8 @@ export function OrgArchivedList({ orgId, searchQuery, refreshKey }: OrgArchivedL
     url: string | null;
     notes: string | null;
     tags?: { id: string; name: string; color: string | null }[];
-    customFields?: { label: string; value: string; type: CustomFieldType }[];
-    totp?: { secret: string; algorithm?: TotpAlgorithm; digits?: number; period?: number } | null;
+    customFields?: EntryCustomField[];
+    totp?: EntryTotp | null;
   } | null>(null);
 
   const fetchArchived = useCallback(async () => {
@@ -224,7 +235,11 @@ export function OrgArchivedList({ orgId, searchQuery, refreshKey }: OrgArchivedL
     );
   });
 
-  if (loading || filtered.length === 0) return null;
+  const sortedFiltered = [...filtered].sort((a, b) =>
+    compareEntriesWithFavorite(a, b, sortBy)
+  );
+
+  if (loading || sortedFiltered.length === 0) return null;
 
   return (
     <div className="mt-6">
@@ -232,12 +247,12 @@ export function OrgArchivedList({ orgId, searchQuery, refreshKey }: OrgArchivedL
         <div className="mb-3 flex items-center gap-2">
           <Building2 className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-medium text-muted-foreground">
-            {t("organizationArchive")}
+            {t("archive")}
           </h2>
         </div>
       )}
       <div className="space-y-2">
-        {filtered.map((entry) => (
+        {sortedFiltered.map((entry) => (
           <PasswordCard
             key={entry.id}
             id={entry.id}

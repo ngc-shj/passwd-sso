@@ -5,8 +5,9 @@ import { useTranslations } from "next-intl";
 import { SearchBar } from "@/components/layout/search-bar";
 import { PasswordList, type SortOption } from "@/components/passwords/password-list";
 import { TrashList } from "@/components/passwords/trash-list";
-import { OrgFavoritesList } from "@/components/org/org-favorites-list";
 import { PasswordNewDialog } from "@/components/passwords/password-new-dialog";
+import { EntryListHeader } from "@/components/passwords/entry-list-header";
+import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -20,7 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, ArrowUpDown, KeyRound, FileText, CreditCard, IdCard, Fingerprint } from "lucide-react";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 
@@ -69,6 +70,11 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
         : entryType && ENTRY_TYPE_TITLES[entryType]
           ? ENTRY_TYPE_TITLES[entryType]
           : t("passwords");
+  const isPersonalAll = !isTrash && !isArchive && !isFavorites && !entryType && !tagId && !folderId;
+  const isCategorySelected = !!(entryType && ENTRY_TYPE_TITLES[entryType]);
+  const isFolderOrTagSelected = Boolean(tagId || folderId);
+  const isPrimaryScopeLabel =
+    isTrash || isArchive || isFavorites || isPersonalAll || isCategorySelected || isFolderOrTagSelected;
 
   // Listen for vault-data-changed (import, etc.)
   useEffect(() => {
@@ -145,35 +151,22 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   return (
     <div className="flex-1 p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-4">
-        <div className="mb-4 rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1">
-              <h1 className="truncate text-2xl font-bold tracking-tight">
-                {t("personalVault")}
-              </h1>
-              <p className="text-sm text-muted-foreground">{subtitle}</p>
-            </div>
-            <div className="flex items-center gap-2">
+        <EntryListHeader
+          title={isPrimaryScopeLabel ? subtitle : t("personalVault")}
+          subtitle={subtitle}
+          showSubtitle={!isPrimaryScopeLabel}
+          actions={
+            <>
               {!isTrash && !isArchive && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm">
-                      <ArrowUpDown className="h-4 w-4 mr-1" />
-                      {sortBy === "title" ? t("sortTitle") : sortBy === "createdAt" ? t("sortCreated") : t("sortUpdated")}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => setSortBy("updatedAt")}>
-                      {t("sortUpdated")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSortBy("createdAt")}>
-                      {t("sortCreated")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSortBy("title")}>
-                      {t("sortTitle")}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <EntrySortMenu
+                  sortBy={sortBy}
+                  onSortByChange={setSortBy}
+                  labels={{
+                    updated: t("sortUpdated"),
+                    created: t("sortCreated"),
+                    title: t("sortTitle"),
+                  }}
+                />
               )}
               {!isTrash && !isArchive && (
                 contextualEntryType ? (
@@ -219,14 +212,9 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
                   </DropdownMenu>
                 )
               )}
-            </div>
-          </div>
-          {(isTrash || isArchive) && (
-            <p className="mt-2 text-sm text-muted-foreground">
-              {t("personalVaultScopeNote")}
-            </p>
-          )}
-        </div>
+            </>
+          }
+        />
 
         <div className="mb-4 rounded-xl border bg-card/80 p-3">
           <SearchBar ref={searchRef} value={searchQuery} onChange={setSearchQuery} />
@@ -250,12 +238,6 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
                 sortBy={sortBy}
                 onDataChange={handleDataChange}
               />
-              {isFavorites && (
-                <OrgFavoritesList
-                  searchQuery={searchQuery}
-                  refreshKey={refreshKey}
-                />
-              )}
             </>
           )}
         </div>

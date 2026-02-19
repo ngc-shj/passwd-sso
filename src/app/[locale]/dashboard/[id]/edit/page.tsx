@@ -6,12 +6,13 @@ import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
-import {
-  PasswordForm,
-  type PasswordHistoryEntry,
-  type CustomField,
-  type TOTPEntry,
-} from "@/components/passwords/password-form";
+import { PasswordForm } from "@/components/passwords/password-form";
+import type {
+  EntryCustomField,
+  EntryPasswordHistory,
+  EntryTagNameColor,
+  EntryTotp,
+} from "@/lib/entry-form-types";
 import type { TagData } from "@/components/tags/tag-input";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import { Loader2 } from "lucide-react";
@@ -23,11 +24,11 @@ interface VaultEntryFull {
   password: string;
   url: string | null;
   notes: string | null;
-  tags: Array<{ name: string; color: string | null }>;
+  tags: EntryTagNameColor[];
   generatorSettings?: GeneratorSettings;
-  passwordHistory?: PasswordHistoryEntry[];
-  customFields?: CustomField[];
-  totp?: TOTPEntry;
+  passwordHistory?: EntryPasswordHistory[];
+  customFields?: EntryCustomField[];
+  totp?: EntryTotp;
 }
 
 interface FormData {
@@ -39,9 +40,9 @@ interface FormData {
   notes: string;
   tags: TagData[];
   generatorSettings?: GeneratorSettings;
-  passwordHistory?: PasswordHistoryEntry[];
-  customFields?: CustomField[];
-  totp?: TOTPEntry;
+  passwordHistory?: EntryPasswordHistory[];
+  customFields?: EntryCustomField[];
+  totp?: EntryTotp;
   requireReprompt?: boolean;
 }
 

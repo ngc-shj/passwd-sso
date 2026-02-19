@@ -8,14 +8,9 @@ import { Input } from "@/components/ui/input";
 import { CopyButton } from "./copy-button";
 import { X, ShieldCheck } from "lucide-react";
 import { TOTP_ALGORITHM } from "@/lib/constants";
-import type { TotpAlgorithm } from "@/lib/constants";
+import type { EntryTotp } from "@/lib/entry-form-types";
 
-export interface TOTPEntry {
-  secret: string;
-  algorithm?: TotpAlgorithm;
-  digits?: number;
-  period?: number;
-}
+export type TOTPEntry = EntryTotp;
 
 interface TOTPFieldDisplayProps {
   mode: "display";

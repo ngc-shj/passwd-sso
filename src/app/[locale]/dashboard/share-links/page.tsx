@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +25,7 @@ import {
   FileText,
   CreditCard,
   IdCard,
-  Building2,
+  User,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -44,6 +45,8 @@ interface ShareLinkItem {
   orgPasswordEntryId: string | null;
   orgName: string | null;
   hasPersonalEntry: boolean;
+  sharedBy: string | null;
+  canRevoke: boolean;
   isActive: boolean;
 }
 
@@ -58,6 +61,8 @@ export default function ShareLinksPage() {
   const t = useTranslations("ShareLinks");
   const tShare = useTranslations("Share");
   const locale = useLocale();
+  const searchParams = useSearchParams();
+  const orgFilter = searchParams.get("org");
   const [links, setLinks] = useState<ShareLinkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -75,13 +80,14 @@ export default function ShareLinksPage() {
     async (cursor?: string) => {
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.set("status", statusFilter);
+      if (orgFilter) params.set("org", orgFilter);
       if (cursor) params.set("cursor", cursor);
 
       const res = await fetch(`${API_PATH.SHARE_LINKS_MINE}?${params.toString()}`);
       if (!res.ok) return null;
       return res.json();
     },
-    [statusFilter]
+    [statusFilter, orgFilter]
   );
 
   useEffect(() => {
@@ -168,17 +174,20 @@ export default function ShareLinksPage() {
   const formatDate = (iso: string) => formatDateTime(iso, locale);
 
   const getStatusBadge = (link: ShareLinkItem) => {
+    if (link.isActive) {
+      return (
+        <Badge
+          variant="outline"
+          className="text-xs border-green-500 text-green-600 dark:text-green-400"
+        >
+          {t("active")}
+        </Badge>
+      );
+    }
     if (link.revokedAt) {
       return (
         <Badge variant="destructive" className="text-xs">
           {tShare("revoked")}
-        </Badge>
-      );
-    }
-    if (new Date(link.expiresAt) <= new Date()) {
-      return (
-        <Badge variant="secondary" className="text-xs">
-          {tShare("expired")}
         </Badge>
       );
     }
@@ -190,11 +199,8 @@ export default function ShareLinksPage() {
       );
     }
     return (
-      <Badge
-        variant="outline"
-        className="text-xs border-green-500 text-green-600 dark:text-green-400"
-      >
-        {t("active")}
+      <Badge variant="secondary" className="text-xs">
+        {tShare("expired")}
       </Badge>
     );
   };
@@ -261,10 +267,10 @@ export default function ShareLinksPage() {
                         {ENTRY_TYPE_ICONS[link.entryType]}
                         {link.entryType}
                       </span>
-                      {link.orgName && (
+                      {link.sharedBy && (
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Building2 className="h-3 w-3" />
-                          {link.orgName}
+                          <User className="h-3 w-3" />
+                          {t("sharedBy", { name: link.sharedBy })}
                         </span>
                       )}
                     </div>
@@ -314,7 +320,7 @@ export default function ShareLinksPage() {
                         )}
                       </Button>
                     )}
-                  {link.isActive && (
+                  {link.isActive && link.canRevoke && (
                     <Button
                       variant="ghost"
                       size="icon"

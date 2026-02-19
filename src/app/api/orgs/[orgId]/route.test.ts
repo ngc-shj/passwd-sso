@@ -95,6 +95,15 @@ describe("GET /api/orgs/[orgId]", () => {
     expect(json.memberCount).toBe(5);
     expect(json.passwordCount).toBe(10);
   });
+
+  it("returns 404 when org not found", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue(null);
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}`),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(404);
+  });
 });
 
 describe("PUT /api/orgs/[orgId]", () => {
@@ -138,6 +147,67 @@ describe("PUT /api/orgs/[orgId]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.name).toBe("Updated Org");
+  });
+
+  it("returns 400 for invalid JSON body", async () => {
+    const { NextRequest } = await import("next/server");
+    const req = new NextRequest(`http://localhost:3000/api/orgs/${ORG_ID}`, {
+      method: "PUT",
+      body: "not json",
+      headers: { "Content-Type": "text/plain" },
+    });
+    const res = await PUT(req, createParams({ orgId: ORG_ID }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("INVALID_JSON");
+  });
+
+  it("returns 400 for validation error", async () => {
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}`, { body: { name: "" } }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("sets description to null when empty string", async () => {
+    mockPrismaOrganization.update.mockResolvedValue({
+      id: ORG_ID,
+      name: "Org",
+      slug: "org",
+      description: null,
+      updatedAt: now,
+    });
+
+    await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}`, { body: { description: "" } }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(mockPrismaOrganization.update).toHaveBeenCalledWith({
+      where: { id: ORG_ID },
+      data: { description: null },
+    });
+  });
+
+  it("sets description to value when non-empty", async () => {
+    mockPrismaOrganization.update.mockResolvedValue({
+      id: ORG_ID,
+      name: "Org",
+      slug: "org",
+      description: "Hello",
+      updatedAt: now,
+    });
+
+    await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}`, { body: { description: "Hello" } }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(mockPrismaOrganization.update).toHaveBeenCalledWith({
+      where: { id: ORG_ID },
+      data: { description: "Hello" },
+    });
   });
 });
 

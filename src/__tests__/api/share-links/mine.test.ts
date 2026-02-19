@@ -1,17 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
-import { ENTRY_TYPE } from "@/lib/constants";
+import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
 
 const { mockAuth, mockFindMany } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
+}));
+const { mockRequireOrgMember } = vi.hoisted(() => ({
+  mockRequireOrgMember: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { findMany: mockFindMany },
+  },
+}));
+vi.mock("@/lib/org-auth", () => ({
+  requireOrgMember: mockRequireOrgMember,
+  OrgAuthError: class extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
   },
 }));
 
@@ -27,6 +40,7 @@ function makeShare(overrides: Record<string, unknown> = {}) {
     revokedAt: null,
     createdAt: new Date(),
     createdById: DEFAULT_SESSION.user.id,
+    createdBy: { id: DEFAULT_SESSION.user.id, name: "Alice", email: "alice@example.com" },
     passwordEntryId: "pe-1",
     orgPasswordEntryId: null,
     passwordEntry: { id: "pe-1" },
@@ -38,6 +52,7 @@ function makeShare(overrides: Record<string, unknown> = {}) {
 describe("GET /api/share-links/mine", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.ADMIN });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -66,6 +81,8 @@ describe("GET /api/share-links/mine", () => {
     expect(json.items[0].isActive).toBe(true);
     expect(json.items[0].hasPersonalEntry).toBe(true);
     expect(json.items[0].orgName).toBeNull();
+    expect(json.items[0].sharedBy).toBe("Alice");
+    expect(json.items[0].canRevoke).toBe(true);
     expect(json.nextCursor).toBeNull();
   });
 
@@ -114,6 +131,7 @@ describe("GET /api/share-links/mine", () => {
       makeShare({
         passwordEntryId: null,
         orgPasswordEntryId: "ope-1",
+        createdBy: { id: "user-2", name: "Bob", email: "bob@example.com" },
         passwordEntry: null,
         orgPasswordEntry: { id: "ope-1", org: { name: "Acme Corp" } },
       }),
@@ -125,6 +143,8 @@ describe("GET /api/share-links/mine", () => {
 
     expect(json.items[0].orgName).toBe("Acme Corp");
     expect(json.items[0].hasPersonalEntry).toBe(false);
+    expect(json.items[0].sharedBy).toBe("Bob");
+    expect(json.items[0].canRevoke).toBe(false);
   });
 
   it("filters by status=active", async () => {
@@ -224,6 +244,112 @@ describe("GET /api/share-links/mine", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
+          createdById: DEFAULT_SESSION.user.id,
+          passwordEntryId: { not: null },
+        }),
+      })
+    );
+    expect(mockRequireOrgMember).not.toHaveBeenCalled();
+  });
+
+  it("requires org membership and filters by org when org query is provided", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    await GET(req as never);
+
+    expect(mockRequireOrgMember).toHaveBeenCalledWith(DEFAULT_SESSION.user.id, "org-1");
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orgPasswordEntry: { orgId: "org-1" },
+        }),
+      })
+    );
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({
+          createdById: DEFAULT_SESSION.user.id,
+        }),
+      })
+    );
+  });
+
+  it("returns OrgAuthError status when org membership check fails", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    const { OrgAuthError } = await import("@/lib/org-auth");
+    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    const res = await GET(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("FORBIDDEN");
+    expect(mockFindMany).not.toHaveBeenCalled();
+  });
+
+  it("limits org scoped list to self-created links for VIEWER", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.VIEWER });
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    await GET(req as never);
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orgPasswordEntry: { orgId: "org-1" },
+          createdById: DEFAULT_SESSION.user.id,
+        }),
+      })
+    );
+  });
+
+  it("does not limit org scoped list to self-created links for MEMBER", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.MEMBER });
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    await GET(req as never);
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orgPasswordEntry: { orgId: "org-1" },
+        }),
+      })
+    );
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({
+          createdById: DEFAULT_SESSION.user.id,
+        }),
+      })
+    );
+  });
+
+  it("does not limit org scoped list to self-created links for OWNER", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.OWNER });
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    await GET(req as never);
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orgPasswordEntry: { orgId: "org-1" },
+        }),
+      })
+    );
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({
           createdById: DEFAULT_SESSION.user.id,
         }),
       })

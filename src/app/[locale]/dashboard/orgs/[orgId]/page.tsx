@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { PasswordCard } from "@/components/passwords/password-card";
+import { EntryListHeader } from "@/components/passwords/entry-list-header";
+import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { OrgPasswordForm } from "@/components/org/org-password-form";
 import { OrgArchivedList } from "@/components/org/org-archived-list";
@@ -19,11 +21,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { OrgExportDialog } from "@/components/org/org-export-dialog";
-import { Plus, Settings, KeyRound, Search, FileText, CreditCard, IdCard, Fingerprint, Download } from "lucide-react";
+import { Plus, KeyRound, Search, FileText, CreditCard, IdCard, Fingerprint } from "lucide-react";
 import { toast } from "sonner";
 import { ORG_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
-import type { EntryTypeValue, TotpAlgorithm, CustomFieldType } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
+import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-sort";
 
 interface OrgInfo {
   id: string;
@@ -75,6 +78,7 @@ export default function OrgDashboardPage({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<EntrySortOption>("updatedAt");
   const [formOpen, setFormOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newEntryType, setNewEntryType] = useState<EntryTypeValue>(ENTRY_TYPE.LOGIN);
@@ -88,8 +92,8 @@ export default function OrgDashboardPage({
     url: string | null;
     notes: string | null;
     tags?: { id: string; name: string; color: string | null }[];
-    customFields?: { label: string; value: string; type: CustomFieldType }[];
-    totp?: { secret: string; algorithm?: TotpAlgorithm; digits?: number; period?: number } | null;
+    customFields?: EntryCustomField[];
+    totp?: EntryTotp | null;
     cardholderName?: string | null;
     cardNumber?: string | null;
     brand?: string | null;
@@ -114,6 +118,7 @@ export default function OrgDashboardPage({
   } | null>(null);
   const isOrgArchive = activeScope === "archive";
   const isOrgTrash = activeScope === "trash";
+  const isOrgFavorites = activeScope === "favorites";
   const isOrgSpecialView = isOrgArchive || isOrgTrash;
 
   const fetchOrg = async (): Promise<boolean> => {
@@ -141,6 +146,7 @@ export default function OrgDashboardPage({
     if (activeTagId) params.set("tag", activeTagId);
     if (activeFolderId) params.set("folder", activeFolderId);
     if (activeEntryType) params.set("type", activeEntryType);
+    if (isOrgFavorites) params.set("favorites", "true");
     const qs = params.toString();
     const url = `${apiPath.orgPasswords(orgId)}${qs ? `?${qs}` : ""}`;
     fetch(url)
@@ -150,7 +156,7 @@ export default function OrgDashboardPage({
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [orgId, activeTagId, activeFolderId, activeEntryType]);
+  }, [orgId, activeTagId, activeFolderId, activeEntryType, isOrgFavorites]);
 
   useEffect(() => {
     setLoadError(false);
@@ -178,16 +184,38 @@ export default function OrgDashboardPage({
       } as Record<string, string>)[activeEntryType] ?? activeEntryType
     : null;
   const subtitle = isOrgTrash
-    ? t("organizationTrash")
+    ? t("trash")
     : isOrgArchive
-      ? t("organizationArchive")
-      : (activeCategoryLabel ?? t("allPasswords"));
+      ? t("archive")
+      : isOrgFavorites
+        ? t("favorites")
+      : (activeCategoryLabel ?? t("passwords"));
+  const isOrgAll =
+    !isOrgTrash &&
+    !isOrgArchive &&
+    !isOrgFavorites &&
+    !activeCategoryLabel &&
+    !activeTagId &&
+    !activeFolderId;
+  const isCategorySelected = !!activeCategoryLabel;
+  const isFolderOrTagSelected = Boolean(activeTagId || activeFolderId);
+  const isPrimaryScopeLabel =
+    isOrgTrash ||
+    isOrgArchive ||
+    isOrgFavorites ||
+    isOrgAll ||
+    isCategorySelected ||
+    isFolderOrTagSelected;
 
   const handleToggleFavorite = async (id: string, current: boolean) => {
     // Optimistic update
-    setPasswords((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, isFavorite: !current } : e))
-    );
+    if (isOrgFavorites && current) {
+      setPasswords((prev) => prev.filter((e) => e.id !== id));
+    } else {
+      setPasswords((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, isFavorite: !current } : e))
+      );
+    }
     try {
       const res = await fetch(apiPath.orgPasswordFavorite(orgId, id), {
         method: "POST",
@@ -310,13 +338,16 @@ export default function OrgDashboardPage({
       p.urlHost?.toLowerCase().includes(q) ||
       p.snippet?.toLowerCase().includes(q) ||
       p.brand?.toLowerCase().includes(q) ||
-      p.lastFour?.includes(q) ||
+      p.lastFour?.toLowerCase().includes(q) ||
       p.cardholderName?.toLowerCase().includes(q) ||
       p.fullName?.toLowerCase().includes(q) ||
-      p.idNumberLast4?.includes(q) ||
+      p.idNumberLast4?.toLowerCase().includes(q) ||
       p.relyingPartyId?.toLowerCase().includes(q)
     );
   });
+  const sortedFiltered = [...filtered].sort((a, b) =>
+    compareEntriesWithFavorite(a, b, sortBy)
+  );
 
   if (loadError) {
     return (
@@ -343,41 +374,25 @@ export default function OrgDashboardPage({
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-6">
-        <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1">
-              <div className="flex min-w-0 items-center gap-3">
-                <h1 className="truncate text-2xl font-bold">
-                  {org?.name ?? "..."}
-                </h1>
-                {org && <OrgRoleBadge role={org.role} />}
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {subtitle}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {(org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN) && (
-                <OrgExportDialog
-                  orgId={orgId}
-                  trigger={
-                    <Button variant="ghost" size="icon">
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  }
-                />
-              )}
-              {(org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN) && (
-                <Button variant="ghost" size="icon" asChild>
-                  <Link href={`/dashboard/orgs/${orgId}/settings`}>
-                    <Settings className="h-4 w-4" />
-                  </Link>
-                </Button>
-              )}
+        <EntryListHeader
+          title={isPrimaryScopeLabel ? subtitle : (org?.name ?? "...")}
+          subtitle={subtitle}
+          showSubtitle={!isPrimaryScopeLabel}
+          titleExtra={!isPrimaryScopeLabel && org ? <OrgRoleBadge role={org.role} /> : null}
+          actions={
+            <>
+              <EntrySortMenu
+                sortBy={sortBy}
+                onSortByChange={setSortBy}
+                labels={{
+                  updated: tDash("sortUpdated"),
+                  created: tDash("sortCreated"),
+                  title: tDash("sortTitle"),
+                }}
+              />
               {canCreate && !isOrgSpecialView && (
                 contextualEntryType ? (
                   <Button
-                    size="sm"
                     onClick={() => {
                       setEditData(null);
                       setNewEntryType(contextualEntryType);
@@ -390,7 +405,7 @@ export default function OrgDashboardPage({
                 ) : (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button size="sm">
+                      <Button>
                         <Plus className="mr-2 h-4 w-4" />
                         {t("newItem")}
                       </Button>
@@ -420,9 +435,9 @@ export default function OrgDashboardPage({
                   </DropdownMenu>
                 )
               )}
-            </div>
-          </div>
-        </Card>
+            </>
+          }
+        />
 
         <Card className="rounded-xl border bg-card/80 p-3">
           <div className="relative">
@@ -441,18 +456,20 @@ export default function OrgDashboardPage({
             orgId={orgId}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
+            sortBy={sortBy}
           />
         ) : isOrgTrash ? (
           <OrgTrashList
             orgId={orgId}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
+            sortBy={sortBy}
           />
         ) : loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
-        ) : filtered.length === 0 ? (
+        ) : sortedFiltered.length === 0 ? (
           <Card className="rounded-xl border bg-card/80 p-10">
             <div className="flex flex-col items-center justify-center text-center">
               <KeyRound className="mb-4 h-12 w-12 text-muted-foreground" />
@@ -466,7 +483,7 @@ export default function OrgDashboardPage({
           </Card>
         ) : (
           <div className="space-y-2">
-            {filtered.map((entry) => (
+            {sortedFiltered.map((entry) => (
               <PasswordCard
                 key={entry.id}
                 id={entry.id}

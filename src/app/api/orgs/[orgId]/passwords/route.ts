@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { createOrgPasswordSchema, createOrgSecureNoteSchema, createOrgCreditCardSchema, createOrgIdentitySchema } from "@/lib/validations";
+import {
+  createOrgPasswordSchema,
+  createOrgSecureNoteSchema,
+  createOrgCreditCardSchema,
+  createOrgIdentitySchema,
+  createOrgPasskeySchema,
+} from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { EntryType } from "@prisma/client";
@@ -210,6 +216,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const isSecureNote = rawBody.entryType === ENTRY_TYPE.SECURE_NOTE;
   const isCreditCard = rawBody.entryType === ENTRY_TYPE.CREDIT_CARD;
   const isIdentity = rawBody.entryType === ENTRY_TYPE.IDENTITY;
+  const isPasskey = rawBody.entryType === ENTRY_TYPE.PASSKEY;
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
@@ -322,6 +329,46 @@ export async function POST(req: NextRequest, { params }: Params) {
       title,
       fullName: fullName || null,
       idNumberLast4,
+    });
+  } else if (isPasskey) {
+    const parsed = createOrgPasskeySchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const {
+      title,
+      relyingPartyId,
+      relyingPartyName,
+      username,
+      credentialId,
+      creationDate,
+      deviceInfo,
+      notes,
+    } = parsed.data;
+    tagIds = parsed.data.tagIds;
+    orgFolderId = parsed.data.orgFolderId;
+    entryType = ENTRY_TYPE.PASSKEY;
+    responseTitle = title;
+    responseUsername = username || null;
+
+    fullBlob = JSON.stringify({
+      title,
+      relyingPartyId: relyingPartyId || null,
+      relyingPartyName: relyingPartyName || null,
+      username: username || null,
+      credentialId: credentialId || null,
+      creationDate: creationDate || null,
+      deviceInfo: deviceInfo || null,
+      notes: notes || null,
+    });
+    overviewBlob = JSON.stringify({
+      title,
+      relyingPartyId: relyingPartyId || null,
+      username: username || null,
     });
   } else {
     const parsed = createOrgPasswordSchema.safeParse(body);

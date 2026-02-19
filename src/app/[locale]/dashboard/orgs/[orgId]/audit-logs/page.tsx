@@ -42,6 +42,7 @@ import {
   type AuditActionValue,
 } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format-datetime";
+import { normalizeAuditActionKey } from "@/lib/audit-action-key";
 
 interface OrgAuditLogItem {
   id: string;
@@ -109,9 +110,9 @@ export default function OrgAuditLogsPage({
   const { orgId } = use(params);
   const t = useTranslations("AuditLog");
   const locale = useLocale();
-  const [orgName, setOrgName] = useState<string>("");
   const [logs, setLogs] = useState<OrgAuditLogItem[]>([]);
   const [entryNames, setEntryNames] = useState<Record<string, string>>({});
+  const [orgName, setOrgName] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -119,15 +120,6 @@ export default function OrgAuditLogsPage({
   const [actionSearch, setActionSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-
-  useEffect(() => {
-    fetch(apiPath.orgById(orgId))
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.name) setOrgName(data.name);
-      })
-      .catch(() => {});
-  }, [orgId]);
 
   const fetchLogs = useCallback(
     async (cursor?: string) => {
@@ -151,6 +143,15 @@ export default function OrgAuditLogsPage({
     },
     [orgId, selectedActions, dateFrom, dateTo]
   );
+
+  useEffect(() => {
+    fetch(`/api/orgs/${orgId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.name) setOrgName(String(data.name));
+      })
+      .catch(() => {});
+  }, [orgId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -287,12 +288,7 @@ export default function OrgAuditLogsPage({
       typeof meta?.parentAction === "string" ? meta.parentAction : null;
     let parentActionText: string | null = null;
     if (parentAction) {
-      let parentActionLabel = parentAction;
-      try {
-        parentActionLabel = t(parentAction as never);
-      } catch {
-        // fallback to action key when the translation does not exist
-      }
+      const parentActionLabel = actionLabel(parentAction);
       parentActionText = t("fromAction", { action: parentActionLabel });
     }
 
@@ -340,11 +336,8 @@ export default function OrgAuditLogsPage({
   };
 
   const actionLabel = (action: AuditActionValue | string) => {
-    try {
-      return t(action as never);
-    } catch {
-      return String(action);
-    }
+    const key = normalizeAuditActionKey(String(action));
+    return t.has(key as never) ? t(key as never) : String(action);
   };
   const getActionLabel = (log: OrgAuditLogItem) =>
     log.action === AUDIT_ACTION.ENTRY_BULK_TRASH
@@ -411,8 +404,9 @@ export default function OrgAuditLogsPage({
         <div className="flex items-center gap-3">
           <ScrollText className="h-6 w-6" />
           <div>
-            <h1 className="text-2xl font-bold">{t("orgAuditLog", { orgName: orgName || "..." })}</h1>
-            <p className="text-sm text-muted-foreground">{t("orgAuditLogDesc", { orgName: orgName || "..." })}</p>
+            <h1 className="text-2xl font-bold">
+              {orgName ? t("orgAuditLog", { orgName }) : t("title")}
+            </h1>
           </div>
         </div>
       </Card>
