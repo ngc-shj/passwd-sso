@@ -3,9 +3,9 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import {
   buildBaselineSnapshot,
   buildCurrentSnapshot,
-} from "@/components/org/org-password-form-snapshot";
+} from "@/hooks/use-org-password-form-derived";
 
-describe("org-password-form-snapshot", () => {
+describe("use-org-password-form-derived snapshot helpers", () => {
   it("buildBaselineSnapshot serializes edit data for login entries", () => {
     const snapshot = buildBaselineSnapshot({
       effectiveEntryType: ENTRY_TYPE.LOGIN,
