@@ -5,15 +5,10 @@ import {
   applyOrgEditDataToForm,
   resetOrgFormForClose,
 } from "@/hooks/org-password-form-lifecycle-state";
-import type { OrgPasswordFormLifecycleSetters } from "@/hooks/use-org-password-form-state";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
+import type { OrgPasswordFormLifecycleArgs } from "@/hooks/org-password-form-lifecycle-args";
 
-interface UseOrgPasswordFormLifecycleArgs {
-  open: boolean;
-  editData?: OrgPasswordFormEditData | null;
-  onOpenChange: (open: boolean) => void;
-  setters: OrgPasswordFormLifecycleSetters;
-}
+type UseOrgPasswordFormLifecycleArgs = OrgPasswordFormLifecycleArgs;
 
 export function useOrgPasswordFormLifecycle({
   open,

@@ -1,7 +1,7 @@
 import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
 import type { OrgPasswordFormLifecycleSetters } from "@/hooks/use-org-password-form-state";
 
-interface BuildOrgPasswordLifecycleArgsInput {
+export interface OrgPasswordFormLifecycleArgs {
   open: OrgPasswordFormProps["open"];
   editData?: OrgPasswordFormProps["editData"];
   onOpenChange: OrgPasswordFormProps["onOpenChange"];
@@ -13,7 +13,7 @@ export function buildOrgPasswordLifecycleArgs({
   editData,
   onOpenChange,
   setters,
-}: BuildOrgPasswordLifecycleArgsInput) {
+}: OrgPasswordFormLifecycleArgs): OrgPasswordFormLifecycleArgs {
   return {
     open,
     editData: editData ?? null,
