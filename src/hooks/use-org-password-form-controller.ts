@@ -1,6 +1,7 @@
 "use client";
 
 import { submitOrgPasswordForm } from "@/components/org/org-password-form-actions";
+import { buildOrgPasswordDerivedArgs } from "@/hooks/org-password-form-derived-args";
 import { buildOrgPasswordSubmitArgs } from "@/hooks/org-password-form-submit-args";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 import { useOrgPasswordFormPresenter } from "@/hooks/use-org-password-form-presenter";
@@ -80,15 +81,17 @@ export function useOrgPasswordFormController({
     });
 
   const { hasChanges, submitDisabled } = useOrgPasswordFormDerived({
-    effectiveEntryType,
-    editData,
-    isLoginEntry,
-    isNote,
-    isCreditCard,
-    isIdentity,
-    isPasskey,
-    ...entryValues,
-    cardNumberValid,
+    ...buildOrgPasswordDerivedArgs({
+      effectiveEntryType,
+      editData,
+      isLoginEntry,
+      isNote,
+      isCreditCard,
+      isIdentity,
+      isPasskey,
+      values: entryValues,
+      cardNumberValid,
+    }),
   });
 
   const handleSubmit = async () => {
