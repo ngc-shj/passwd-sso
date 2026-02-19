@@ -4,6 +4,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
 import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
 import { useOrgAttachments } from "@/hooks/use-org-attachments";
+import { buildOrgPasswordControllerArgs } from "@/hooks/org-password-form-controller-args";
 import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgPasswordFormController } from "@/hooks/use-org-password-form-controller";
 import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
@@ -49,17 +50,19 @@ export function useOrgPasswordFormModel({
   });
 
   const { entryCopy, entrySpecificFieldsProps, handleSubmit, hasChanges, submitDisabled } =
-    useOrgPasswordFormController({
-      orgId,
-      onSaved,
-      isEdit,
-      editData,
-      effectiveEntryType,
-      entryKindState,
-      translations,
-      formState,
-      handleOpenChange,
-    });
+    useOrgPasswordFormController(
+      buildOrgPasswordControllerArgs({
+        orgId,
+        onSaved,
+        isEdit,
+        editData,
+        effectiveEntryType,
+        entryKindState,
+        translations,
+        formState,
+        handleOpenChange,
+      }),
+    );
 
   return {
     t,
