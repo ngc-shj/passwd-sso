@@ -1,4 +1,4 @@
-import { submitPersonalPasswordForm } from "@/components/passwords/personal-password-submit";
+import type { SubmitPersonalPasswordFormArgs } from "@/components/passwords/personal-password-submit";
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
 import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
@@ -25,7 +25,7 @@ export function buildPersonalPasswordSubmitArgs({
   translations,
   router,
   onSaved,
-}: BuildPersonalPasswordSubmitArgsInput): Parameters<typeof submitPersonalPasswordForm>[0] {
+}: BuildPersonalPasswordSubmitArgsInput): SubmitPersonalPasswordFormArgs {
   const { t } = translations;
   return {
     mode,

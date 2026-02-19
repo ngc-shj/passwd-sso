@@ -10,7 +10,7 @@ import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { TagData } from "@/components/tags/tag-input";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 
-interface SubmitPersonalPasswordFormArgs {
+export interface SubmitPersonalPasswordFormArgs {
   mode: "create" | "edit";
   initialData?: PersonalPasswordFormInitialData;
   encryptionKey: CryptoKey | null;
