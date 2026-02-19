@@ -2,12 +2,14 @@
 
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
-import type { PersonalPasswordFormDerivedArgs } from "@/hooks/personal-password-form-derived-args";
 import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
 import { usePersonalPasswordFormController } from "@/hooks/use-personal-password-form-controller";
-import { usePersonalPasswordFormDerived } from "@/hooks/use-personal-password-form-derived";
+import {
+  usePersonalPasswordFormDerived,
+  type PersonalPasswordFormDerivedArgs,
+} from "@/hooks/use-personal-password-form-derived";
 import { useEntryFormTranslations } from "@/hooks/use-entry-form-translations";
 import {
   selectPersonalEntryValues,

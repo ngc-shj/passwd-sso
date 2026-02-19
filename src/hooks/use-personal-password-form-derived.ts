@@ -5,7 +5,15 @@ import {
   buildPersonalCurrentSnapshot,
   buildPersonalInitialSnapshot,
 } from "@/components/passwords/personal-password-form-snapshot";
-import type { PersonalPasswordFormDerivedArgs } from "@/hooks/personal-password-form-derived-args";
+import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
+import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
+import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
+
+export type PersonalPasswordFormDerivedArgs = {
+  initialData?: PersonalPasswordFormInitialData;
+  values: PersonalPasswordFormEntryValues;
+  translations: PersonalPasswordFormTranslations;
+};
 
 export function usePersonalPasswordFormDerived({
   initialData,

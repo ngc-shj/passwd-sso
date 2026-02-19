@@ -1,14 +1,29 @@
 "use client";
 
 import { submitOrgPasswordForm } from "@/components/org/org-password-form-actions";
-import type { OrgPasswordFormControllerArgs } from "@/hooks/org-password-form-controller-args";
 import type { SubmitOrgPasswordFormArgs } from "@/components/org/org-password-form-actions";
+import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
+import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
+import type { EntryTypeValue } from "@/lib/constants";
+import type { OrgPasswordFormTranslations } from "@/hooks/org-password-form-translations";
 import {
   useOrgPasswordFormDerived,
   type OrgPasswordFormDerivedArgs,
 } from "@/hooks/use-org-password-form-derived";
 import { useOrgPasswordFormPresenter } from "@/hooks/use-org-password-form-presenter";
-import { selectOrgEntryFieldValues } from "@/hooks/use-org-password-form-state";
+import { selectOrgEntryFieldValues, type OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
+
+export interface OrgPasswordFormControllerArgs {
+  orgId: OrgPasswordFormProps["orgId"];
+  onSaved: OrgPasswordFormProps["onSaved"];
+  isEdit: boolean;
+  editData?: OrgPasswordFormProps["editData"];
+  effectiveEntryType: EntryTypeValue;
+  entryKindState: OrgEntryKindState;
+  translations: OrgPasswordFormTranslations;
+  formState: OrgPasswordFormState;
+  handleOpenChange: (open: boolean) => void;
+}
 
 export function useOrgPasswordFormController({
   orgId,
