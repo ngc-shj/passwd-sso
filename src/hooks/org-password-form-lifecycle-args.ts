@@ -7,17 +7,3 @@ export interface OrgPasswordFormLifecycleArgs {
   onOpenChange: OrgPasswordFormProps["onOpenChange"];
   setters: OrgPasswordFormLifecycleSetters;
 }
-
-export function buildOrgPasswordLifecycleArgs({
-  open,
-  editData,
-  onOpenChange,
-  setters,
-}: OrgPasswordFormLifecycleArgs): OrgPasswordFormLifecycleArgs {
-  return {
-    open,
-    editData,
-    onOpenChange,
-    setters,
-  };
-}

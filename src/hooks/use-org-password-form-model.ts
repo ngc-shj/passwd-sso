@@ -4,7 +4,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
 import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
 import { useOrgAttachments } from "@/hooks/use-org-attachments";
-import { buildOrgPasswordLifecycleArgs } from "@/hooks/org-password-form-lifecycle-args";
+import type { OrgPasswordFormLifecycleArgs } from "@/hooks/org-password-form-lifecycle-args";
 import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgPasswordFormController } from "@/hooks/use-org-password-form-controller";
 import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
@@ -42,13 +42,14 @@ export function useOrgPasswordFormModel({
   const orgFolders = useOrgFolders(open, orgId);
 
   const formSetters: OrgPasswordFormLifecycleSetters = { ...formState.setters, setAttachments };
+  const lifecycleArgs: OrgPasswordFormLifecycleArgs = {
+    open,
+    editData,
+    onOpenChange,
+    setters: formSetters,
+  };
   const { handleOpenChange } = useOrgPasswordFormLifecycle(
-    buildOrgPasswordLifecycleArgs({
-      open,
-      editData,
-      onOpenChange,
-      setters: formSetters,
-    }),
+    lifecycleArgs,
   );
 
   const { entryCopy, entrySpecificFieldsProps, handleSubmit, hasChanges, submitDisabled } =

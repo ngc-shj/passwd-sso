@@ -5,15 +5,3 @@ export type PersonalPasswordFormDerivedArgs = Pick<
   PersonalPasswordFormControllerArgs,
   "initialData" | "values" | "translations"
 >;
-
-export function buildPersonalPasswordDerivedArgs({
-  initialData,
-  values,
-  translations,
-}: PersonalPasswordFormDerivedArgs): PersonalPasswordFormDerivedArgs {
-  return {
-    initialData,
-    values,
-    translations,
-  };
-}
