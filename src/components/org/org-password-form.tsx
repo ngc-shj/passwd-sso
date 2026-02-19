@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -20,12 +20,10 @@ import { buildOrgEntryCopyData } from "@/components/org/org-entry-copy-data";
 import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
 import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
 import {
-  applyOrgEditDataToForm,
-  resetOrgFormForClose,
+  type OrgPasswordFormSetters,
 } from "@/components/org/org-password-form-state";
 import { OrgTagsAndFolderSection } from "@/components/org/org-tags-and-folder-section";
 import type {
-  OrgPasswordFormEditData,
   OrgPasswordFormProps,
 } from "@/components/org/org-password-form-types";
 import {
@@ -51,6 +49,7 @@ import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgAttachments } from "@/hooks/use-org-attachments";
 import { useOrgEntrySpecificFieldsProps } from "@/hooks/use-org-entry-specific-fields-props";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
+import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
 
 export function OrgPasswordForm({
   orgId,
@@ -131,7 +130,7 @@ export function OrgPasswordForm({
 
   const isEdit = !!editData;
 
-  const formSettersRef = useRef({
+  const formSetters: OrgPasswordFormSetters = {
     setTitle,
     setUsername,
     setPassword,
@@ -172,29 +171,13 @@ export function OrgPasswordForm({
     setShowCredentialId,
     setAttachments,
     setSaving,
-  });
-
-  const applyEditDataToForm = (data: OrgPasswordFormEditData) =>
-    applyOrgEditDataToForm(data, formSettersRef.current);
-
-  const resetFormForClose = () =>
-    resetOrgFormForClose(formSettersRef.current);
-
-  // Sync form fields when editData changes (programmatic open)
-  useEffect(() => {
-    if (open && editData) {
-      applyOrgEditDataToForm(editData, formSettersRef.current);
-    }
-  }, [open, editData]);
-
-  const handleOpenChange = (v: boolean) => {
-    if (!v) {
-      resetFormForClose();
-    } else if (editData) {
-      applyEditDataToForm(editData);
-    }
-    onOpenChange(v);
   };
+  const { handleOpenChange } = useOrgPasswordFormLifecycle({
+    open,
+    editData,
+    onOpenChange,
+    setters: formSetters,
+  });
 
   const {
     cardValidation,

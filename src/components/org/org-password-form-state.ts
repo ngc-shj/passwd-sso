@@ -4,7 +4,7 @@ import type { OrgAttachmentMeta } from "@/components/org/org-attachment-section"
 import type { OrgTagData } from "@/components/org/org-tag-input";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 
-interface OrgPasswordFormSetters {
+export interface OrgPasswordFormSetters {
   setTitle: (value: string) => void;
   setUsername: (value: string) => void;
   setPassword: (value: string) => void;
