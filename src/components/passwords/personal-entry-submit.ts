@@ -3,11 +3,7 @@ import { savePersonalEntry } from "@/lib/personal-entry-save";
 import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
-
-interface RouterLike {
-  push: (href: string) => void;
-  refresh: () => void;
-}
+import type { PasswordSubmitRouter } from "@/hooks/password-form-router";
 
 interface ExecutePersonalEntrySubmitArgs {
   mode: "create" | "edit";
@@ -22,7 +18,7 @@ interface ExecutePersonalEntrySubmitArgs {
   folderId?: string | null;
   setSubmitting: (value: boolean) => void;
   t: PasswordFormTranslator;
-  router: RouterLike;
+  router: PasswordSubmitRouter;
   onSaved?: () => void;
 }
 

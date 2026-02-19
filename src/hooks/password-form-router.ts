@@ -5,3 +5,5 @@ export interface PasswordFormRouter {
   refresh: () => void;
   back: () => void;
 }
+
+export type PasswordSubmitRouter = Pick<PasswordFormRouter, "push" | "refresh">;

@@ -1,15 +1,11 @@
 import { toast } from "sonner";
-
-interface RouterLike {
-  push: (href: string) => void;
-  refresh: () => void;
-}
+import type { PasswordSubmitRouter } from "@/hooks/password-form-router";
 
 interface PersonalSaveFeedbackParams {
   res: Response;
   mode: "create" | "edit";
   t: (key: "saved" | "updated" | "failedToSave") => string;
-  router: RouterLike;
+  router: PasswordSubmitRouter;
   onSaved?: () => void;
 }
 
