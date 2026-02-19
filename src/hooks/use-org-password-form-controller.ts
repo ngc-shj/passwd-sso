@@ -22,6 +22,14 @@ import type {
 } from "@/lib/translation-types";
 
 type OrgFormState = OrgPasswordFormState;
+interface OrgPasswordFormTranslations {
+  t: PasswordFormTranslator;
+  ti: IdentityFormTranslator;
+  tn: SecureNoteFormTranslator;
+  tcc: CreditCardFormTranslator;
+  tpk: PasskeyFormTranslator;
+  tGen: PasswordGeneratorTranslator;
+}
 
 interface UseOrgPasswordFormControllerArgs {
   orgId: string;
@@ -30,12 +38,7 @@ interface UseOrgPasswordFormControllerArgs {
   editData?: OrgPasswordFormEditData | null;
   effectiveEntryType: EntryTypeValue;
   entryKindState: OrgEntryKindState;
-  t: PasswordFormTranslator;
-  ti: IdentityFormTranslator;
-  tn: SecureNoteFormTranslator;
-  tcc: CreditCardFormTranslator;
-  tpk: PasskeyFormTranslator;
-  tGen: PasswordGeneratorTranslator;
+  translations: OrgPasswordFormTranslations;
   formState: OrgFormState;
   handleOpenChange: (open: boolean) => void;
 }
@@ -47,15 +50,11 @@ export function useOrgPasswordFormController({
   editData,
   effectiveEntryType,
   entryKindState,
-  t,
-  ti,
-  tn,
-  tcc,
-  tpk,
-  tGen,
+  translations,
   formState,
   handleOpenChange,
 }: UseOrgPasswordFormControllerArgs) {
+  const { t, ti, tn, tcc, tpk, tGen } = translations;
   const { values, setters } = formState;
   const { entryKind, isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey } =
     entryKindState;

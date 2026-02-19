@@ -27,6 +27,7 @@ export function useOrgPasswordFormModel({
   editData,
 }: OrgPasswordFormModelInput) {
   const { t, tGen, tn, tcc, ti, tpk, tc } = useEntryFormTranslations();
+  const translations = { t, tGen, tn, tcc, ti, tpk } as const;
 
   const effectiveEntryType = editData?.entryType ?? entryTypeProp;
   const entryKindState = getOrgEntryKindState(effectiveEntryType);
@@ -54,12 +55,7 @@ export function useOrgPasswordFormModel({
       editData,
       effectiveEntryType,
       entryKindState,
-      t,
-      ti,
-      tn,
-      tcc,
-      tpk,
-      tGen,
+      translations,
       formState,
       handleOpenChange,
     });
