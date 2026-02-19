@@ -7,7 +7,7 @@ import type { GeneratorSettings } from "@/lib/generator-prefs";
 export type OrgEntrySpecificFieldsProps = ComponentProps<typeof OrgEntrySpecificFields>;
 export type OrgFieldTranslator = (key: string, values?: Record<string, string | number | Date>) => string;
 
-interface OrgEntrySpecificFieldsBuilderArgs {
+export interface OrgEntrySpecificFieldsBuilderArgs {
   entryKind: OrgEntrySpecificFieldsProps["entryKind"];
   entryCopy: {
     notesLabel: string;
