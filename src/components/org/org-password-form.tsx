@@ -19,7 +19,7 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { useOrgPasswordFormModel } from "@/hooks/use-org-password-form-model";
-import { useOrgFormSectionsProps } from "@/hooks/use-org-form-sections-props";
+import { buildOrgFormSectionsProps } from "@/hooks/org-form-sections-props";
 
 export function OrgPasswordForm({
   orgId,
@@ -57,7 +57,7 @@ export function OrgPasswordForm({
     setters: { setTitle },
   } = formState;
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
-  const { tagsAndFolderProps, customFieldsTotpProps, actionBarProps } = useOrgFormSectionsProps({
+  const { tagsAndFolderProps, customFieldsTotpProps, actionBarProps } = buildOrgFormSectionsProps({
     orgId,
     tagsTitle: entryCopy.tagsTitle,
     tagsHint: t("tagsHint"),

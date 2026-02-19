@@ -6,7 +6,7 @@ import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
 import { buildOrgEntryCopyData } from "@/components/org/org-entry-copy-data";
 import { handleOrgCardNumberChange } from "@/components/org/org-password-form-actions";
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
-import { useOrgEntrySpecificFieldsPropsFromState } from "@/hooks/use-org-entry-specific-fields-props";
+import { buildOrgEntrySpecificFieldsPropsFromState } from "@/hooks/org-entry-specific-fields-props";
 import {
   selectOrgEntryFieldValues,
   type OrgPasswordFormState,
@@ -69,7 +69,7 @@ export function useOrgPasswordFormPresenter({
     [isEdit, entryKind, t, tn, tcc, ti, tpk],
   );
 
-  const entrySpecificFieldsProps = useOrgEntrySpecificFieldsPropsFromState({
+  const entrySpecificFieldsProps = buildOrgEntrySpecificFieldsPropsFromState({
     entryKind,
     entryCopy,
     translations: { t, tn, tcc, ti, tpk },

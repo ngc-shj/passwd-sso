@@ -8,7 +8,7 @@ import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 
 const getOrgCardValidationStateMock = vi.fn();
 const handleOrgCardNumberChangeMock = vi.fn();
-const useOrgEntrySpecificFieldsPropsFromStateMock = vi.fn();
+const buildOrgEntrySpecificFieldsPropsFromStateMock = vi.fn();
 
 vi.mock("@/components/org/org-credit-card-validation", () => ({
   getOrgCardValidationState: (...args: unknown[]) => getOrgCardValidationStateMock(...args),
@@ -18,16 +18,16 @@ vi.mock("@/components/org/org-password-form-actions", () => ({
   handleOrgCardNumberChange: (...args: unknown[]) => handleOrgCardNumberChangeMock(...args),
 }));
 
-vi.mock("@/hooks/use-org-entry-specific-fields-props", () => ({
-  useOrgEntrySpecificFieldsPropsFromState: (...args: unknown[]) =>
-    useOrgEntrySpecificFieldsPropsFromStateMock(...args),
+vi.mock("@/hooks/org-entry-specific-fields-props", () => ({
+  buildOrgEntrySpecificFieldsPropsFromState: (...args: unknown[]) =>
+    buildOrgEntrySpecificFieldsPropsFromStateMock(...args),
 }));
 
 describe("useOrgPasswordFormPresenter", () => {
   beforeEach(() => {
     getOrgCardValidationStateMock.mockReset();
     handleOrgCardNumberChangeMock.mockReset();
-    useOrgEntrySpecificFieldsPropsFromStateMock.mockReset();
+    buildOrgEntrySpecificFieldsPropsFromStateMock.mockReset();
 
     getOrgCardValidationStateMock.mockReturnValue({
       cardValidation: { detectedBrand: "Visa", digits: "4242" },
@@ -38,7 +38,7 @@ describe("useOrgPasswordFormPresenter", () => {
       cardNumberValid: true,
       hasBrandHint: true,
     });
-    useOrgEntrySpecificFieldsPropsFromStateMock.mockReturnValue({ kind: "props" });
+    buildOrgEntrySpecificFieldsPropsFromStateMock.mockReturnValue({ kind: "props" });
   });
 
   it("returns presenter payload with entry-specific props", () => {
@@ -68,7 +68,7 @@ describe("useOrgPasswordFormPresenter", () => {
       }),
     );
 
-    const presenterArgs = useOrgEntrySpecificFieldsPropsFromStateMock.mock.calls[0]?.[0] as
+    const presenterArgs = buildOrgEntrySpecificFieldsPropsFromStateMock.mock.calls[0]?.[0] as
       | { onCardNumberChange?: (value: string) => void }
       | undefined;
     expect(presenterArgs?.onCardNumberChange).toBeTypeOf("function");

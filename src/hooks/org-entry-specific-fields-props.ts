@@ -178,7 +178,7 @@ export function buildOrgEntrySpecificFieldsProps({
   };
 }
 
-export type UseOrgEntrySpecificFieldsPropsFromStateArgs = Pick<
+export type BuildOrgEntrySpecificFieldsPropsFromStateArgs = Pick<
   OrgEntrySpecificFieldsBuilderArgs,
   | "entryKind"
   | "entryCopy"
@@ -212,7 +212,7 @@ export function buildOrgEntrySpecificFieldsBuilderArgsFromState({
   detectedBrand,
   hasBrandHint,
   lengthHint,
-}: Omit<UseOrgEntrySpecificFieldsPropsFromStateArgs, "setters"> & {
+}: Omit<BuildOrgEntrySpecificFieldsPropsFromStateArgs, "setters"> & {
   callbacks: OrgEntrySpecificCallbacks;
 }): OrgEntrySpecificFieldsBuilderArgs {
   return {
@@ -297,7 +297,7 @@ export function buildOrgEntrySpecificFieldsBuilderArgsFromState({
   };
 }
 
-export function useOrgEntrySpecificFieldsPropsFromState({
+export function buildOrgEntrySpecificFieldsPropsFromState({
   entryKind,
   entryCopy,
   translations,
@@ -311,7 +311,7 @@ export function useOrgEntrySpecificFieldsPropsFromState({
   detectedBrand,
   hasBrandHint,
   lengthHint,
-}: UseOrgEntrySpecificFieldsPropsFromStateArgs): OrgEntrySpecificFieldsProps {
+}: BuildOrgEntrySpecificFieldsPropsFromStateArgs): OrgEntrySpecificFieldsProps {
   const callbacks = buildOrgEntrySpecificCallbacks(values, setters);
   const builderArgs = buildOrgEntrySpecificFieldsBuilderArgsFromState({
     entryKind,

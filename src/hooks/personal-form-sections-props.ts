@@ -49,7 +49,7 @@ interface PersonalFormSectionsPropsResult {
   actionBarProps: EntryActionBarProps;
 }
 
-export function usePersonalFormSectionsProps({
+export function buildPersonalFormSectionsProps({
   tagsTitle,
   tagsHint,
   folders,

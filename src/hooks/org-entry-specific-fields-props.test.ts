@@ -1,18 +1,15 @@
-// @vitest-environment jsdom
-
-import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildOrgEntrySpecificFieldsBuilderArgsFromState,
-  useOrgEntrySpecificFieldsPropsFromState,
-} from "@/hooks/use-org-entry-specific-fields-props";
+  buildOrgEntrySpecificFieldsPropsFromState,
+} from "@/hooks/org-entry-specific-fields-props";
 import { buildOrgEntrySpecificCallbacks } from "@/hooks/org-entry-specific-fields-callbacks";
 import type {
   OrgPasswordFormValues,
   OrgPasswordFormSettersState,
 } from "@/hooks/use-org-password-form-state";
 
-describe("useOrgEntrySpecificFieldsPropsFromState", () => {
+describe("buildOrgEntrySpecificFieldsPropsFromState", () => {
   it("builds complete builder args from state and callbacks", () => {
     const { values, setters } = createState();
     values.title = "Entry";
@@ -52,102 +49,96 @@ describe("useOrgEntrySpecificFieldsPropsFromState", () => {
 
   it("sets brand and switches source to manual on brand change", () => {
     const { values, setters } = createState();
-    const { result } = renderHook(() =>
-      useOrgEntrySpecificFieldsPropsFromState({
-        entryKind: "creditCard",
-        entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
-        translations: {
-          t: (k) => k,
-          tn: (k) => k,
-          tcc: (k) => k,
-          ti: (k) => k,
-          tpk: (k) => k,
-        },
-        values,
-        setters,
-        generatorSummary: "summary",
-        onCardNumberChange: vi.fn(),
-        maxInputLength: 19,
-        showLengthError: false,
-        showLuhnError: false,
-        detectedBrand: undefined,
-        hasBrandHint: false,
-        lengthHint: "16",
-      }),
-    );
+    const result = buildOrgEntrySpecificFieldsPropsFromState({
+      entryKind: "creditCard",
+      entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
+      translations: {
+        t: (k) => k,
+        tn: (k) => k,
+        tcc: (k) => k,
+        ti: (k) => k,
+        tpk: (k) => k,
+      },
+      values,
+      setters,
+      generatorSummary: "summary",
+      onCardNumberChange: vi.fn(),
+      maxInputLength: 19,
+      showLengthError: false,
+      showLuhnError: false,
+      detectedBrand: undefined,
+      hasBrandHint: false,
+      lengthHint: "16",
+    });
 
-    result.current.onBrandChange("Visa");
+    result.onBrandChange("Visa");
     expect(setters.setBrand).toHaveBeenCalledWith("Visa");
     expect(setters.setBrandSource).toHaveBeenCalledWith("manual");
   });
 
   it("clears identity errors when date fields change", () => {
     const { values, setters } = createState();
-    const { result } = renderHook(() =>
-      useOrgEntrySpecificFieldsPropsFromState({
-        entryKind: "identity",
-        entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
-        translations: {
-          t: (k) => k,
-          tn: (k) => k,
-          tcc: (k) => k,
-          ti: (k) => k,
-          tpk: (k) => k,
-        },
-        values,
-        setters,
-        generatorSummary: "summary",
-        onCardNumberChange: vi.fn(),
-        maxInputLength: 19,
-        showLengthError: false,
-        showLuhnError: false,
-        detectedBrand: undefined,
-        hasBrandHint: false,
-        lengthHint: "16",
-      }),
-    );
+    const result = buildOrgEntrySpecificFieldsPropsFromState({
+      entryKind: "identity",
+      entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
+      translations: {
+        t: (k) => k,
+        tn: (k) => k,
+        tcc: (k) => k,
+        ti: (k) => k,
+        tpk: (k) => k,
+      },
+      values,
+      setters,
+      generatorSummary: "summary",
+      onCardNumberChange: vi.fn(),
+      maxInputLength: 19,
+      showLengthError: false,
+      showLuhnError: false,
+      detectedBrand: undefined,
+      hasBrandHint: false,
+      lengthHint: "16",
+    });
 
-    result.current.onDateOfBirthChange("2000-01-01");
+    result.onDateOfBirthChange("2000-01-01");
     expect(setters.setDateOfBirth).toHaveBeenCalledWith("2000-01-01");
     expect(setters.setDobError).toHaveBeenCalledWith(null);
 
-    result.current.onIssueDateChange("2020-01-01");
+    result.onIssueDateChange("2020-01-01");
     expect(setters.setIssueDate).toHaveBeenCalledWith("2020-01-01");
     expect(setters.setExpiryError).toHaveBeenCalledWith(null);
 
-    result.current.onExpiryDateChange("2030-01-01");
+    result.onExpiryDateChange("2030-01-01");
     expect(setters.setExpiryDate).toHaveBeenCalledWith("2030-01-01");
     expect(setters.setExpiryError).toHaveBeenCalledWith(null);
   });
 
   it("uses generator output to update password and generator settings", () => {
     const { values, setters } = createState();
-    const { result } = renderHook(() =>
-      useOrgEntrySpecificFieldsPropsFromState({
-        entryKind: "password",
-        entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
-        translations: {
-          t: (k) => k,
-          tn: (k) => k,
-          tcc: (k) => k,
-          ti: (k) => k,
-          tpk: (k) => k,
-        },
-        values,
-        setters,
-        generatorSummary: "summary",
-        onCardNumberChange: vi.fn(),
-        maxInputLength: 19,
-        showLengthError: false,
-        showLuhnError: false,
-        detectedBrand: undefined,
-        hasBrandHint: false,
-        lengthHint: "16",
-      }),
-    );
+    const result = buildOrgEntrySpecificFieldsPropsFromState({
+      entryKind: "password",
+      entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
+      translations: {
+        t: (k) => k,
+        tn: (k) => k,
+        tcc: (k) => k,
+        ti: (k) => k,
+        tpk: (k) => k,
+      },
+      values,
+      setters,
+      generatorSummary: "summary",
+      onCardNumberChange: vi.fn(),
+      maxInputLength: 19,
+      showLengthError: false,
+      showLuhnError: false,
+      detectedBrand: undefined,
+      hasBrandHint: false,
+      lengthHint: "16",
+    });
 
     const nextSettings = { length: 24 } as OrgPasswordFormValues["generatorSettings"];
-    result.current.onGeneratorUse("generated-password", nextSettings);
+    result.onGeneratorUse("generated-password", nextSettings);
     expect(setters.setPassword).toHaveBeenCalledWith("generated-password");
     expect(setters.setShowPassword).toHaveBeenCalledWith(true);
     expect(setters.setGeneratorSettings).toHaveBeenCalledWith(nextSettings);
@@ -161,35 +152,33 @@ describe("useOrgEntrySpecificFieldsPropsFromState", () => {
     values.showIdNumber = true;
     values.showCredentialId = true;
 
-    const { result } = renderHook(() =>
-      useOrgEntrySpecificFieldsPropsFromState({
-        entryKind: "passkey",
-        entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
-        translations: {
-          t: (k) => k,
-          tn: (k) => k,
-          tcc: (k) => k,
-          ti: (k) => k,
-          tpk: (k) => k,
-        },
-        values,
-        setters,
-        generatorSummary: "summary",
-        onCardNumberChange: vi.fn(),
-        maxInputLength: 19,
-        showLengthError: false,
-        showLuhnError: false,
-        detectedBrand: undefined,
-        hasBrandHint: false,
-        lengthHint: "16",
-      }),
-    );
+    const result = buildOrgEntrySpecificFieldsPropsFromState({
+      entryKind: "passkey",
+      entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
+      translations: {
+        t: (k) => k,
+        tn: (k) => k,
+        tcc: (k) => k,
+        ti: (k) => k,
+        tpk: (k) => k,
+      },
+      values,
+      setters,
+      generatorSummary: "summary",
+      onCardNumberChange: vi.fn(),
+      maxInputLength: 19,
+      showLengthError: false,
+      showLuhnError: false,
+      detectedBrand: undefined,
+      hasBrandHint: false,
+      lengthHint: "16",
+    });
 
-    result.current.onToggleShowPassword();
-    result.current.onToggleCardNumber();
-    result.current.onToggleCvv();
-    result.current.onToggleIdNumber();
-    result.current.onToggleCredentialId();
+    result.onToggleShowPassword();
+    result.onToggleCardNumber();
+    result.onToggleCvv();
+    result.onToggleIdNumber();
+    result.onToggleCredentialId();
     expect(setters.setShowPassword).toHaveBeenCalledWith(false);
     expect(setters.setShowCardNumber).toHaveBeenCalledWith(false);
     expect(setters.setShowCvv).toHaveBeenCalledWith(false);

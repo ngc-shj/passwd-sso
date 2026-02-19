@@ -43,7 +43,7 @@ interface OrgFormSectionsPropsResult {
   actionBarProps: EntryActionBarProps;
 }
 
-export function useOrgFormSectionsProps({
+export function buildOrgFormSectionsProps({
   orgId,
   tagsTitle,
   tagsHint,

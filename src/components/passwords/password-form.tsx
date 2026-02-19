@@ -13,7 +13,7 @@ import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fi
 import { preventIMESubmit } from "@/lib/ime-guard";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
 import { usePersonalPasswordFormModel } from "@/hooks/use-personal-password-form-model";
-import { usePersonalFormSectionsProps } from "@/hooks/use-personal-form-sections-props";
+import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
 
 export function PasswordForm({ mode, initialData, variant = "page", onSaved }: PasswordFormProps) {
   const {
@@ -39,7 +39,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     customFieldsTotpProps,
     repromptSectionProps,
     actionBarProps,
-  } = usePersonalFormSectionsProps({
+  } = buildPersonalFormSectionsProps({
     tagsTitle: t("tags"),
     tagsHint: t("tagsHint"),
     folders,
