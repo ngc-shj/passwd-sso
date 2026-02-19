@@ -7,7 +7,7 @@ import type { GeneratorSettings } from "@/lib/generator-prefs";
 export type OrgEntrySpecificFieldsProps = ComponentProps<typeof OrgEntrySpecificFields>;
 export type OrgFieldTranslator = (key: string, values?: Record<string, string | number | Date>) => string;
 
-interface BuildOrgEntrySpecificFieldsPropsArgs {
+interface OrgEntrySpecificFieldsBuilderArgs {
   entryKind: OrgEntrySpecificFieldsProps["entryKind"];
   entryCopy: {
     notesLabel: string;
@@ -178,7 +178,7 @@ export function buildOrgEntrySpecificFieldsProps({
   onCreationDateChange,
   deviceInfo,
   onDeviceInfoChange,
-}: BuildOrgEntrySpecificFieldsPropsArgs): OrgEntrySpecificFieldsProps {
+}: OrgEntrySpecificFieldsBuilderArgs): OrgEntrySpecificFieldsProps {
   return {
     entryKind,
     notesLabel: entryCopy.notesLabel,
