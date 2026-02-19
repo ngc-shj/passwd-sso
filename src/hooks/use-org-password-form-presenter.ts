@@ -4,9 +4,12 @@ import { useMemo } from "react";
 import { getOrgCardValidationState } from "@/components/org/org-credit-card-validation";
 import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
 import { buildOrgEntryCopyData } from "@/components/org/org-entry-copy-data";
-import { handleOrgCardNumberChange } from "@/components/org/org-password-form-actions";
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
 import { buildOrgEntrySpecificFieldsPropsFromState } from "@/hooks/org-entry-specific-fields-props";
+import {
+  buildOrgCardNumberChangeCallback,
+  buildOrgCardPresentationProps,
+} from "@/hooks/org-password-form-presenter-card";
 import {
   selectOrgEntryFieldValues,
   type OrgPasswordFormState,
@@ -40,15 +43,7 @@ export function useOrgPasswordFormPresenter({
     hasBrandHint,
   } = getOrgCardValidationState(values.cardNumber, values.brand);
 
-  const handleCardNumberChange = (value: string) => {
-    handleOrgCardNumberChange({
-      value,
-      brand: values.brand,
-      brandSource: values.brandSource,
-      setCardNumber: setters.setCardNumber,
-      setBrand: setters.setBrand,
-    });
-  };
+  const handleCardNumberChange = buildOrgCardNumberChangeCallback(values, setters);
 
   const generatorSummary = useMemo(
     () =>
@@ -69,6 +64,12 @@ export function useOrgPasswordFormPresenter({
     [isEdit, entryKind, t, tn, tcc, ti, tpk],
   );
 
+  const cardPresentation = buildOrgCardPresentationProps({
+    cardValidation,
+    hasBrandHint,
+    tcc,
+  });
+
   const entrySpecificFieldsProps = buildOrgEntrySpecificFieldsPropsFromState({
     entryKind,
     entryCopy,
@@ -80,10 +81,8 @@ export function useOrgPasswordFormPresenter({
     maxInputLength,
     showLengthError,
     showLuhnError,
-    detectedBrand: cardValidation.detectedBrand
-      ? tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })
-      : undefined,
-    hasBrandHint: hasBrandHint && cardValidation.digits.length > 0,
+    detectedBrand: cardPresentation.detectedBrand,
+    hasBrandHint: cardPresentation.hasBrandHint,
     lengthHint,
   });
 
