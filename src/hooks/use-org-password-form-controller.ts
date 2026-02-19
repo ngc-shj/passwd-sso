@@ -2,7 +2,7 @@
 
 import { submitOrgPasswordForm } from "@/components/org/org-password-form-actions";
 import type { OrgPasswordFormControllerArgs } from "@/hooks/org-password-form-controller-args";
-import { buildOrgPasswordSubmitArgs } from "@/hooks/org-password-form-submit-args";
+import type { SubmitOrgPasswordFormArgs } from "@/components/org/org-password-form-actions";
 import {
   useOrgPasswordFormDerived,
   type OrgPasswordFormDerivedArgs,
@@ -43,21 +43,26 @@ export function useOrgPasswordFormController({
   );
 
   const handleSubmit = async () => {
-    await submitOrgPasswordForm(
-      buildOrgPasswordSubmitArgs({
-        orgId,
-        isEdit,
-        editData,
-        effectiveEntryType,
-        cardNumberValid,
-        isIdentity,
-        translations,
-        onSaved,
-        handleOpenChange,
-        values: entryValues,
-        setters,
-      }),
-    );
+    const submitArgs: SubmitOrgPasswordFormArgs = {
+      orgId,
+      isEdit,
+      editData,
+      effectiveEntryType,
+      ...entryValues,
+      cardNumberValid,
+      isIdentity,
+      setDobError: setters.setDobError,
+      setExpiryError: setters.setExpiryError,
+      identityErrorCopy: {
+        dobFuture: translations.ti("dobFuture"),
+        expiryBeforeIssue: translations.ti("expiryBeforeIssue"),
+      },
+      t: translations.t,
+      setSaving: setters.setSaving,
+      handleOpenChange,
+      onSaved,
+    };
+    await submitOrgPasswordForm(submitArgs);
   };
 
   return {
