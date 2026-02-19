@@ -8,6 +8,7 @@ import {
   handleOrgCardNumberChange,
   submitOrgPasswordForm,
 } from "@/components/org/org-password-form-actions";
+import { buildOrgPasswordSubmitArgs } from "@/hooks/org-password-form-submit-args";
 import { useOrgEntrySpecificFieldsPropsFromState } from "@/hooks/use-org-entry-specific-fields-props";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
@@ -83,54 +84,21 @@ export function useOrgPasswordFormController({
   };
 
   const handleSubmit = async () => {
-    await submitOrgPasswordForm({
-      orgId,
-      isEdit,
-      editData,
-      effectiveEntryType,
-      title: values.title,
-      notes: values.notes,
-      selectedTags: values.selectedTags,
-      orgFolderId: values.orgFolderId,
-      username: values.username,
-      password: values.password,
-      url: values.url,
-      customFields: values.customFields,
-      totp: values.totp,
-      content: values.content,
-      cardholderName: values.cardholderName,
-      cardNumber: values.cardNumber,
-      brand: values.brand,
-      expiryMonth: values.expiryMonth,
-      expiryYear: values.expiryYear,
-      cvv: values.cvv,
-      fullName: values.fullName,
-      address: values.address,
-      phone: values.phone,
-      email: values.email,
-      dateOfBirth: values.dateOfBirth,
-      nationality: values.nationality,
-      idNumber: values.idNumber,
-      issueDate: values.issueDate,
-      expiryDate: values.expiryDate,
-      relyingPartyId: values.relyingPartyId,
-      relyingPartyName: values.relyingPartyName,
-      credentialId: values.credentialId,
-      creationDate: values.creationDate,
-      deviceInfo: values.deviceInfo,
-      cardNumberValid,
-      isIdentity,
-      setDobError: setters.setDobError,
-      setExpiryError: setters.setExpiryError,
-      identityErrorCopy: {
-        dobFuture: ti("dobFuture"),
-        expiryBeforeIssue: ti("expiryBeforeIssue"),
-      },
-      t,
-      setSaving: setters.setSaving,
-      handleOpenChange,
-      onSaved,
-    });
+    await submitOrgPasswordForm(
+      buildOrgPasswordSubmitArgs({
+        orgId,
+        isEdit,
+        editData,
+        effectiveEntryType,
+        cardNumberValid,
+        isIdentity,
+        t: (key) => t(key),
+        ti: (key) => ti(key),
+        onSaved,
+        handleOpenChange,
+        formState,
+      }),
+    );
   };
 
   const generatorSummary = useMemo(

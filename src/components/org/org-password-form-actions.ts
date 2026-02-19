@@ -34,7 +34,7 @@ export function handleOrgCardNumberChange({
   }
 }
 
-interface SubmitOrgPasswordFormArgs {
+export interface SubmitOrgPasswordFormArgs {
   orgId: string;
   isEdit: boolean;
   editData?: OrgPasswordFormEditData | null;
