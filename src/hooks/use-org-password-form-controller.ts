@@ -5,12 +5,14 @@ import type { SubmitOrgPasswordFormArgs } from "@/components/org/org-password-fo
 import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { OrgPasswordFormTranslations } from "@/hooks/org-password-form-translations";
+import {
+  useOrgPasswordFormPresenter,
+  type OrgPasswordFormTranslations,
+} from "@/hooks/use-org-password-form-presenter";
 import {
   useOrgPasswordFormDerived,
   type OrgPasswordFormDerivedArgs,
 } from "@/hooks/use-org-password-form-derived";
-import { useOrgPasswordFormPresenter } from "@/hooks/use-org-password-form-presenter";
 import { selectOrgEntryFieldValues, type OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 
 export interface OrgPasswordFormControllerArgs {

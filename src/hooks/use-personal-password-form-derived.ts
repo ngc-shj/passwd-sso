@@ -6,7 +6,7 @@ import {
   buildPersonalInitialSnapshot,
 } from "@/components/passwords/personal-password-form-snapshot";
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
-import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
+import type { PersonalPasswordFormTranslations } from "@/hooks/use-personal-password-form-controller";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
 
 export type PersonalPasswordFormDerivedArgs = {

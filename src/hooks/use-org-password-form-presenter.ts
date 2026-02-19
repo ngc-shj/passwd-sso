@@ -6,10 +6,26 @@ import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
 import { buildOrgEntryCopyData } from "@/components/org/org-entry-copy-data";
 import { handleOrgCardNumberChange } from "@/components/org/org-password-form-actions";
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
-import type { OrgPasswordFormTranslations } from "@/hooks/org-password-form-translations";
 import { useOrgEntrySpecificFieldsPropsFromState } from "@/hooks/use-org-entry-specific-fields-props";
 import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
+import type {
+  CreditCardFormTranslator,
+  IdentityFormTranslator,
+  PasswordFormTranslator,
+  PasswordGeneratorTranslator,
+  PasskeyFormTranslator,
+  SecureNoteFormTranslator,
+} from "@/lib/translation-types";
+
+export interface OrgPasswordFormTranslations {
+  t: PasswordFormTranslator;
+  ti: IdentityFormTranslator;
+  tn: SecureNoteFormTranslator;
+  tcc: CreditCardFormTranslator;
+  tpk: PasskeyFormTranslator;
+  tGen: PasswordGeneratorTranslator;
+}
 
 export type OrgPasswordFormPresenterArgs = OrgPasswordFormTranslations & {
   isEdit: boolean;

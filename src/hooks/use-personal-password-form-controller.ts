@@ -6,8 +6,18 @@ import {
   type SubmitPersonalPasswordFormArgs,
 } from "@/components/passwords/personal-password-submit";
 import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
-import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
+import type {
+  CommonTranslator,
+  PasswordFormTranslator,
+  PasswordGeneratorTranslator,
+} from "@/lib/translation-types";
+
+export interface PersonalPasswordFormTranslations {
+  t: PasswordFormTranslator;
+  tGen: PasswordGeneratorTranslator;
+  tc: CommonTranslator;
+}
 
 export interface PersonalPasswordFormControllerArgs {
   mode: Pick<PasswordFormProps, "mode">["mode"];

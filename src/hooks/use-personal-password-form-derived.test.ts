@@ -3,7 +3,7 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
-import type { PersonalPasswordFormTranslations } from "@/hooks/personal-password-form-translations";
+import type { PersonalPasswordFormTranslations } from "@/hooks/use-personal-password-form-controller";
 import { usePersonalPasswordFormDerived } from "@/hooks/use-personal-password-form-derived";
 
 describe("usePersonalPasswordFormDerived", () => {
