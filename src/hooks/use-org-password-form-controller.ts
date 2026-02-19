@@ -11,6 +11,7 @@ import {
 } from "@/hooks/use-org-password-form-state";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
+import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
 import type {
   CreditCardFormTranslator,
   IdentityFormTranslator,
@@ -28,12 +29,7 @@ interface UseOrgPasswordFormControllerArgs {
   isEdit: boolean;
   editData?: OrgPasswordFormEditData | null;
   effectiveEntryType: EntryTypeValue;
-  entryKind: "password" | "secureNote" | "creditCard" | "identity" | "passkey";
-  isLoginEntry: boolean;
-  isNote: boolean;
-  isCreditCard: boolean;
-  isIdentity: boolean;
-  isPasskey: boolean;
+  entryKindState: OrgEntryKindState;
   t: PasswordFormTranslator;
   ti: IdentityFormTranslator;
   tn: SecureNoteFormTranslator;
@@ -50,12 +46,7 @@ export function useOrgPasswordFormController({
   isEdit,
   editData,
   effectiveEntryType,
-  entryKind,
-  isLoginEntry,
-  isNote,
-  isCreditCard,
-  isIdentity,
-  isPasskey,
+  entryKindState,
   t,
   ti,
   tn,
@@ -66,6 +57,8 @@ export function useOrgPasswordFormController({
   handleOpenChange,
 }: UseOrgPasswordFormControllerArgs) {
   const { values, setters } = formState;
+  const { entryKind, isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey } =
+    entryKindState;
   const entryValues = selectOrgEntryFieldValues(values);
   const { cardNumberValid, entryCopy, entrySpecificFieldsProps } =
     useOrgPasswordFormPresenter({

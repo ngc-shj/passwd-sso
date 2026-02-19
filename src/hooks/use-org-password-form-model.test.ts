@@ -139,15 +139,17 @@ describe("useOrgPasswordFormModel", () => {
     const controllerArgs = useOrgPasswordFormControllerMock.mock.calls[0]?.[0] as
       | {
           effectiveEntryType?: string;
-          entryKind?: string;
-          isCreditCard?: boolean;
-          isLoginEntry?: boolean;
+          entryKindState?: {
+            entryKind?: string;
+            isCreditCard?: boolean;
+            isLoginEntry?: boolean;
+          };
         }
       | undefined;
 
     expect(controllerArgs?.effectiveEntryType).toBe(ENTRY_TYPE.CREDIT_CARD);
-    expect(controllerArgs?.entryKind).toBe("creditCard");
-    expect(controllerArgs?.isCreditCard).toBe(true);
-    expect(controllerArgs?.isLoginEntry).toBe(false);
+    expect(controllerArgs?.entryKindState?.entryKind).toBe("creditCard");
+    expect(controllerArgs?.entryKindState?.isCreditCard).toBe(true);
+    expect(controllerArgs?.entryKindState?.isLoginEntry).toBe(false);
   });
 });

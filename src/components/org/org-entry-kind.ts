@@ -2,7 +2,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { OrgEntryKind } from "@/components/org/org-password-form-types";
 
-interface OrgEntryKindState {
+export interface OrgEntryKindState {
   entryKind: OrgEntryKind;
   isNote: boolean;
   isCreditCard: boolean;
