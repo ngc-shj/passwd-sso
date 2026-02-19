@@ -181,6 +181,8 @@
     "titlePlaceholder": "e.g., API Key, License, Recovery Codes",
     "content": "Content *",
     "contentPlaceholder": "Enter your secure note...",
+    "notes": "Notes",
+    "notesPlaceholder": "Optional notes...",
     "tags": "Tags",
     "saved": "Secure note saved",
     "updated": "Secure note updated",
