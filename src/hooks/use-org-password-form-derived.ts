@@ -6,10 +6,7 @@ import type { OrgPasswordFormProps } from "@/components/org/org-password-form-ty
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
 import type { OrgEntryFieldValues } from "@/hooks/use-org-password-form-state";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { OrgTagData } from "@/components/org/org-tag-input";
-
-interface BuildBaselineSnapshotArgs {
+type OrgSnapshotBaselineArgs = {
   effectiveEntryType: EntryTypeValue;
   editData?: OrgPasswordFormProps["editData"];
   isLoginEntry: boolean;
@@ -17,46 +14,7 @@ interface BuildBaselineSnapshotArgs {
   isCreditCard: boolean;
   isIdentity: boolean;
   isPasskey: boolean;
-}
-
-interface BuildCurrentSnapshotArgs {
-  effectiveEntryType: EntryTypeValue;
-  title: string;
-  notes: string;
-  selectedTags: OrgTagData[];
-  orgFolderId: string | null;
-  isLoginEntry: boolean;
-  isNote: boolean;
-  isCreditCard: boolean;
-  isIdentity: boolean;
-  isPasskey: boolean;
-  username: string;
-  password: string;
-  url: string;
-  customFields: EntryCustomField[];
-  totp: EntryTotp | null;
-  content: string;
-  cardholderName: string;
-  cardNumber: string;
-  brand: string;
-  expiryMonth: string;
-  expiryYear: string;
-  cvv: string;
-  fullName: string;
-  address: string;
-  phone: string;
-  email: string;
-  dateOfBirth: string;
-  nationality: string;
-  idNumber: string;
-  issueDate: string;
-  expiryDate: string;
-  relyingPartyId: string;
-  relyingPartyName: string;
-  credentialId: string;
-  creationDate: string;
-  deviceInfo: string;
-}
+};
 
 export function buildBaselineSnapshot({
   effectiveEntryType,
@@ -66,7 +24,7 @@ export function buildBaselineSnapshot({
   isCreditCard,
   isIdentity,
   isPasskey,
-}: BuildBaselineSnapshotArgs): string {
+}: OrgSnapshotBaselineArgs): string {
   return JSON.stringify({
     entryType: effectiveEntryType,
     title: editData?.title ?? "",
@@ -206,6 +164,11 @@ export type OrgPasswordFormDerivedArgs = {
   OrgEntryFieldValues & {
     cardNumberValid: boolean;
   };
+
+type BuildCurrentSnapshotArgs = Omit<
+  OrgPasswordFormDerivedArgs,
+  "entryKind" | "editData" | "cardNumberValid"
+>;
 
 export function useOrgPasswordFormDerived({
   effectiveEntryType,

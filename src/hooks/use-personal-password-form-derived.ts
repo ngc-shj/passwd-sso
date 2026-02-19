@@ -1,43 +1,13 @@
 "use client";
 
 import { buildGeneratorSummary } from "@/lib/generator-summary";
-import {
-  type GeneratorSettings,
-  DEFAULT_GENERATOR_SETTINGS,
-} from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { TagData } from "@/components/tags/tag-input";
+import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
 import type { PersonalPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
 
-interface PersonalFormSnapshotInitialData {
-  title?: string;
-  username?: string;
-  password?: string;
-  url?: string;
-  notes?: string;
-  tags?: TagData[];
-  generatorSettings?: GeneratorSettings;
-  customFields?: EntryCustomField[];
-  totp?: EntryTotp | null;
-  requireReprompt?: boolean;
-  folderId?: string | null;
-}
-
-interface BuildPersonalCurrentSnapshotArgs {
-  title: string;
-  username: string;
-  password: string;
-  url: string;
-  notes: string;
-  tags: TagData[];
-  generatorSettings: GeneratorSettings;
-  customFields: EntryCustomField[];
-  totp: EntryTotp | null;
-  requireReprompt: boolean;
-  folderId: string | null;
-}
+type PersonalFormSnapshotInitialData = PersonalPasswordFormInitialData;
+type BuildPersonalCurrentSnapshotArgs = PersonalPasswordFormEntryValues;
 
 export function buildPersonalInitialSnapshot(
   initialData?: PersonalFormSnapshotInitialData,
@@ -63,7 +33,7 @@ export function buildPersonalCurrentSnapshot({
   password,
   url,
   notes,
-  tags,
+  selectedTags,
   generatorSettings,
   customFields,
   totp,
@@ -76,7 +46,7 @@ export function buildPersonalCurrentSnapshot({
     password,
     url,
     notes,
-    tags,
+    tags: selectedTags,
     generatorSettings,
     customFields,
     totp,
@@ -99,17 +69,7 @@ export function usePersonalPasswordFormDerived({
   const { tGen } = translations;
   const initialSnapshot = buildPersonalInitialSnapshot(initialData);
   const currentSnapshot = buildPersonalCurrentSnapshot({
-    title: values.title,
-    username: values.username,
-    password: values.password,
-    url: values.url,
-    notes: values.notes,
-    tags: values.selectedTags,
-    generatorSettings: values.generatorSettings,
-    customFields: values.customFields,
-    totp: values.totp,
-    requireReprompt: values.requireReprompt,
-    folderId: values.folderId,
+    ...values,
   });
   const hasChanges = currentSnapshot !== initialSnapshot;
 
