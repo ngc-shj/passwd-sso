@@ -30,8 +30,7 @@ export function usePersonalPasswordFormModel({
   const formState = usePersonalPasswordFormState(initialData);
   const folders = usePersonalFolders();
 
-  const { values, hasChanges, generatorSummary, loginMainFieldsProps } =
-    usePersonalPasswordFormPresenter({
+  const { values, hasChanges, loginMainFieldsProps } = usePersonalPasswordFormPresenter({
     initialData,
     formState,
     translations,
@@ -55,7 +54,6 @@ export function usePersonalPasswordFormModel({
     formState,
     folders,
     hasChanges,
-    generatorSummary,
     loginMainFieldsProps,
     handleSubmit,
     handleCancel,
