@@ -3,50 +3,10 @@ import {
   applyOrgEditDataToForm,
   resetOrgFormForClose,
 } from "@/hooks/org-password-form-lifecycle-state";
+import { createOrgPasswordFormLifecycleSettersMock } from "@/test-utils/org-password-form-setters";
 
 function createSetters() {
-  return {
-    setTitle: vi.fn(),
-    setUsername: vi.fn(),
-    setPassword: vi.fn(),
-    setContent: vi.fn(),
-    setUrl: vi.fn(),
-    setNotes: vi.fn(),
-    setSelectedTags: vi.fn(),
-    setCustomFields: vi.fn(),
-    setTotp: vi.fn(),
-    setShowTotpInput: vi.fn(),
-    setCardholderName: vi.fn(),
-    setCardNumber: vi.fn(),
-    setBrand: vi.fn(),
-    setBrandSource: vi.fn(),
-    setExpiryMonth: vi.fn(),
-    setExpiryYear: vi.fn(),
-    setCvv: vi.fn(),
-    setFullName: vi.fn(),
-    setAddress: vi.fn(),
-    setPhone: vi.fn(),
-    setEmail: vi.fn(),
-    setDateOfBirth: vi.fn(),
-    setNationality: vi.fn(),
-    setIdNumber: vi.fn(),
-    setIssueDate: vi.fn(),
-    setExpiryDate: vi.fn(),
-    setRelyingPartyId: vi.fn(),
-    setRelyingPartyName: vi.fn(),
-    setCredentialId: vi.fn(),
-    setCreationDate: vi.fn(),
-    setDeviceInfo: vi.fn(),
-    setOrgFolderId: vi.fn(),
-    setShowPassword: vi.fn(),
-    setShowGenerator: vi.fn(),
-    setShowCardNumber: vi.fn(),
-    setShowCvv: vi.fn(),
-    setShowIdNumber: vi.fn(),
-    setShowCredentialId: vi.fn(),
-    setAttachments: vi.fn(),
-    setSaving: vi.fn(),
-  };
+  return createOrgPasswordFormLifecycleSettersMock();
 }
 
 describe("org-password-form-state", () => {
