@@ -11,8 +11,10 @@ interface BuildOrgPasswordSubmitArgsInput {
   effectiveEntryType: EntryTypeValue;
   cardNumberValid: boolean;
   isIdentity: boolean;
-  t: PasswordFormTranslator;
-  ti: IdentityFormTranslator;
+  translations: {
+    t: PasswordFormTranslator;
+    ti: IdentityFormTranslator;
+  };
   onSaved: () => void;
   handleOpenChange: (open: boolean) => void;
   values: OrgEntryFieldValues;
@@ -30,13 +32,13 @@ export function buildOrgPasswordSubmitArgs({
   effectiveEntryType,
   cardNumberValid,
   isIdentity,
-  t,
-  ti,
+  translations,
   onSaved,
   handleOpenChange,
   values,
   setters,
 }: BuildOrgPasswordSubmitArgsInput): SubmitOrgPasswordFormArgs {
+  const { t, ti } = translations;
   return {
     orgId,
     isEdit,

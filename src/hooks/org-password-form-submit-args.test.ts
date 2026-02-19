@@ -17,8 +17,10 @@ describe("buildOrgPasswordSubmitArgs", () => {
       effectiveEntryType: ENTRY_TYPE.LOGIN,
       cardNumberValid: true,
       isIdentity: false,
-      t: (key) => key,
-      ti: (key) => key,
+      translations: {
+        t: (key) => key,
+        ti: (key) => key,
+      },
       onSaved,
       handleOpenChange,
       values: createValues(),
