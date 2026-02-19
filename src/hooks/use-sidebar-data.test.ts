@@ -138,6 +138,39 @@ describe("useSidebarData", () => {
     expect(result.current.orgs).toEqual([]);
     expect(result.current.orgTagGroups).toEqual([]);
     expect(result.current.orgFolderGroups).toEqual([]);
+    expect(result.current.lastError).toContain("/api/orgs");
+  });
+
+  it("stores fetch error and clears it after successful refresh", async () => {
+    let shouldFailTags = true;
+    fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/tags") {
+        if (shouldFailTags) {
+          return { ok: false, status: 500, json: async () => ({}) };
+        }
+        return { ok: true, json: async () => tags };
+      }
+      if (url === "/api/folders") return { ok: true, json: async () => folders };
+      if (url === "/api/orgs") return { ok: true, json: async () => [] };
+      return { ok: false, status: 404, json: async () => ({}) };
+    }) as Mock;
+    globalThis.fetch = fetchMock;
+
+    const { result } = renderHook(() => useSidebarData("/dashboard"));
+
+    await waitFor(() => {
+      expect(result.current.lastError).toContain("/api/tags");
+    });
+
+    shouldFailTags = false;
+    act(() => {
+      window.dispatchEvent(new CustomEvent("vault-data-changed"));
+    });
+
+    await waitFor(() => {
+      expect(result.current.lastError).toBeNull();
+      expect(result.current.tags).toHaveLength(1);
+    });
   });
 
   it("includes org folder group for admin even with zero folders", async () => {

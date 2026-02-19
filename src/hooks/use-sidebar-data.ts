@@ -45,13 +45,26 @@ export interface SidebarOrganizeTagItem {
   count: number;
 }
 
-async function fetchArray<T>(url: string): Promise<T[] | null> {
+async function fetchArray<T>(
+  url: string,
+  onError?: (message: string) => void,
+): Promise<T[] | null> {
   try {
     const res = await fetch(url);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      onError?.(`Failed to fetch ${url}: ${res.status}`);
+      return null;
+    }
     const data = await res.json();
-    return Array.isArray(data) ? (data as T[]) : null;
-  } catch {
+    if (!Array.isArray(data)) {
+      onError?.(`Invalid response from ${url}: expected array`);
+      return null;
+    }
+    return data as T[];
+  } catch (error) {
+    onError?.(
+      `Request error for ${url}: ${error instanceof Error ? error.message : "unknown error"}`,
+    );
     return null;
   }
 }
@@ -62,15 +75,20 @@ export function useSidebarData(pathname: string) {
   const [orgs, setOrgs] = useState<SidebarOrgItem[]>([]);
   const [orgTagGroups, setOrgTagGroups] = useState<SidebarOrgTagGroup[]>([]);
   const [orgFolderGroups, setOrgFolderGroups] = useState<SidebarOrgFolderGroup[]>([]);
+  const [lastError, setLastError] = useState<string | null>(null);
   const refreshSeqRef = useRef(0);
 
   const refreshData = useCallback(async () => {
     const seq = ++refreshSeqRef.current;
+    const errors: string[] = [];
+    const reportError = (message: string) => {
+      errors.push(message);
+    };
 
     const [nextTags, nextFolders, nextOrgs] = await Promise.all([
-      fetchArray<SidebarTagItem>(API_PATH.TAGS),
-      fetchArray<SidebarFolderItem>(API_PATH.FOLDERS),
-      fetchArray<SidebarOrgItem>(API_PATH.ORGS),
+      fetchArray<SidebarTagItem>(API_PATH.TAGS, reportError),
+      fetchArray<SidebarFolderItem>(API_PATH.FOLDERS, reportError),
+      fetchArray<SidebarOrgItem>(API_PATH.ORGS, reportError),
     ]);
 
     if (seq !== refreshSeqRef.current) return;
@@ -82,6 +100,7 @@ export function useSidebarData(pathname: string) {
       setOrgs([]);
       setOrgTagGroups([]);
       setOrgFolderGroups([]);
+      setLastError(errors[0] ?? `Failed to fetch ${API_PATH.ORGS}`);
       return;
     }
 
@@ -91,9 +110,10 @@ export function useSidebarData(pathname: string) {
       nextOrgs.map(async (org) => {
         const [orgTags, orgFolders] = await Promise.all([
           fetchArray<{ id: string; name: string; color: string | null; count: number }>(
-            apiPath.orgTags(org.id)
+            apiPath.orgTags(org.id),
+            reportError,
           ),
-          fetchArray<SidebarFolderItem>(apiPath.orgFolders(org.id)),
+          fetchArray<SidebarFolderItem>(apiPath.orgFolders(org.id), reportError),
         ]);
         return { org, orgTags, orgFolders };
       })
@@ -121,6 +141,7 @@ export function useSidebarData(pathname: string) {
     }
     setOrgTagGroups(tagGroups);
     setOrgFolderGroups(folderGroups);
+    setLastError(errors[0] ?? null);
   }, []);
 
   useEffect(() => {
@@ -149,6 +170,7 @@ export function useSidebarData(pathname: string) {
     orgs,
     orgTagGroups,
     orgFolderGroups,
+    lastError,
     refreshData,
     notifyDataChanged,
   };
