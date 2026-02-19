@@ -2,7 +2,7 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { buildOrgPasswordFormInitialValues } from "@/hooks/org-password-form-initial-values";
+import { buildOrgPasswordFormInitialValues } from "@/hooks/use-org-password-form-state";
 import { useOrgPasswordFormValueState } from "@/hooks/use-org-password-form-value-state";
 import { ENTRY_TYPE } from "@/lib/constants";
 

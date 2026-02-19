@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { buildOrgPasswordFormInitialValues } from "@/hooks/org-password-form-initial-values";
+import { buildOrgPasswordFormInitialValues } from "@/hooks/use-org-password-form-state";
 
 describe("buildOrgPasswordFormInitialValues", () => {
   it("returns safe defaults when edit data is absent", () => {

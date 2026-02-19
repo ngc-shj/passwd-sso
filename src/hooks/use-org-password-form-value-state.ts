@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { OrgTagData } from "@/components/org/org-tag-input";
-import type { OrgPasswordFormInitialValues } from "@/hooks/org-password-form-initial-values";
+import type { OrgPasswordFormInitialValues } from "@/hooks/use-org-password-form-state";
 
 export function useOrgPasswordFormValueState(initial: OrgPasswordFormInitialValues) {
   const [title, setTitle] = useState(initial.title);

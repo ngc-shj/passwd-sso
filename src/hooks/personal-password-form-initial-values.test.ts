@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPersonalPasswordFormInitialValues } from "@/hooks/personal-password-form-initial-values";
+import { buildPersonalPasswordFormInitialValues } from "@/hooks/use-personal-password-form-state";
 
 describe("buildPersonalPasswordFormInitialValues", () => {
   it("returns defaults when initial data is missing", () => {

@@ -2,7 +2,7 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { buildPersonalPasswordFormInitialValues } from "@/hooks/personal-password-form-initial-values";
+import { buildPersonalPasswordFormInitialValues } from "@/hooks/use-personal-password-form-state";
 import { usePersonalPasswordFormValueState } from "@/hooks/use-personal-password-form-value-state";
 
 describe("usePersonalPasswordFormValueState", () => {
