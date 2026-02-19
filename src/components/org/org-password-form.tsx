@@ -72,8 +72,6 @@ export function OrgPasswordForm({
         </DialogHeader>
 
         <form onSubmit={handleFormSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
-          <div className="space-y-5">
-          {/* Title */}
           <div className="space-y-2">
             <Label>{entryCopy.titleLabel}</Label>
             <Input
@@ -108,22 +106,19 @@ export function OrgPasswordForm({
               sectionCardClass={dialogSectionClass}
             />
           )}
-          </div>
 
-        {/* Actions */}
-        <EntryActionBar
-          hasChanges={hasChanges}
-          submitting={saving}
-          submitDisabled={submitDisabled}
-          saveLabel={isEdit ? tc("update") : tc("save")}
-          cancelLabel={tc("cancel")}
-          statusUnsavedLabel={t("statusUnsaved")}
-          statusSavedLabel={t("statusSaved")}
-          onCancel={() => handleOpenChange(false)}
-        />
+          <EntryActionBar
+            hasChanges={hasChanges}
+            submitting={saving}
+            submitDisabled={submitDisabled}
+            saveLabel={isEdit ? tc("update") : tc("save")}
+            cancelLabel={tc("cancel")}
+            statusUnsavedLabel={t("statusUnsaved")}
+            statusSavedLabel={t("statusSaved")}
+            onCancel={() => handleOpenChange(false)}
+          />
         </form>
 
-        {/* Attachments (edit mode only) */}
         {isEdit && editData && (
           <div className="border-t pt-4">
             <OrgAttachmentSection
