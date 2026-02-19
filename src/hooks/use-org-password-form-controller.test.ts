@@ -7,48 +7,33 @@ import { useOrgPasswordFormController } from "@/hooks/use-org-password-form-cont
 import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 
 const submitOrgPasswordFormMock = vi.fn();
-const useOrgEntrySpecificFieldsPropsFromStateMock = vi.fn();
 const useOrgPasswordFormDerivedMock = vi.fn();
-const getOrgCardValidationStateMock = vi.fn();
-const handleOrgCardNumberChangeMock = vi.fn();
+const useOrgPasswordFormPresenterMock = vi.fn();
 
 vi.mock("@/components/org/org-password-form-actions", () => ({
-  handleOrgCardNumberChange: (...args: unknown[]) => handleOrgCardNumberChangeMock(...args),
   submitOrgPasswordForm: (...args: unknown[]) => submitOrgPasswordFormMock(...args),
-}));
-
-vi.mock("@/hooks/use-org-entry-specific-fields-props", () => ({
-  useOrgEntrySpecificFieldsPropsFromState: (...args: unknown[]) =>
-    useOrgEntrySpecificFieldsPropsFromStateMock(...args),
 }));
 
 vi.mock("@/hooks/use-org-password-form-derived", () => ({
   useOrgPasswordFormDerived: (...args: unknown[]) => useOrgPasswordFormDerivedMock(...args),
 }));
 
-vi.mock("@/components/org/org-credit-card-validation", () => ({
-  getOrgCardValidationState: (...args: unknown[]) => getOrgCardValidationStateMock(...args),
+vi.mock("@/hooks/use-org-password-form-presenter", () => ({
+  useOrgPasswordFormPresenter: (...args: unknown[]) => useOrgPasswordFormPresenterMock(...args),
 }));
 
 describe("useOrgPasswordFormController", () => {
   beforeEach(() => {
     submitOrgPasswordFormMock.mockReset();
-    useOrgEntrySpecificFieldsPropsFromStateMock.mockReset();
     useOrgPasswordFormDerivedMock.mockReset();
-    getOrgCardValidationStateMock.mockReset();
-    handleOrgCardNumberChangeMock.mockReset();
+    useOrgPasswordFormPresenterMock.mockReset();
 
-    useOrgEntrySpecificFieldsPropsFromStateMock.mockReturnValue({ kind: "props" });
-    useOrgPasswordFormDerivedMock.mockReturnValue({ hasChanges: true, submitDisabled: false });
-    getOrgCardValidationStateMock.mockReturnValue({
-      cardValidation: { detectedBrand: "Visa", digits: "4242" },
-      lengthHint: "16",
-      maxInputLength: 19,
-      showLengthError: false,
-      showLuhnError: false,
+    useOrgPasswordFormPresenterMock.mockReturnValue({
       cardNumberValid: true,
-      hasBrandHint: true,
+      entryCopy: { dialogLabel: "dialog" },
+      entrySpecificFieldsProps: { kind: "props" },
     });
+    useOrgPasswordFormDerivedMock.mockReturnValue({ hasChanges: true, submitDisabled: false });
   });
 
   it("returns derived state and entry-specific props", () => {
@@ -120,7 +105,7 @@ describe("useOrgPasswordFormController", () => {
     });
   });
 
-  it("delegates card number change through entry-specific callback", () => {
+  it("uses presenter output for entry-specific props", () => {
     renderHook(() =>
       useOrgPasswordFormController({
         orgId: "org-1",
@@ -145,23 +130,7 @@ describe("useOrgPasswordFormController", () => {
       }),
     );
 
-    const propsArgs = useOrgEntrySpecificFieldsPropsFromStateMock.mock.calls[0]?.[0] as
-      | { onCardNumberChange?: (value: string) => void }
-      | undefined;
-    expect(propsArgs?.onCardNumberChange).toBeTypeOf("function");
-
-    propsArgs?.onCardNumberChange?.("4111 1111 1111 1111");
-
-    expect(handleOrgCardNumberChangeMock).toHaveBeenCalledTimes(1);
-    expect(handleOrgCardNumberChangeMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        value: "4111 1111 1111 1111",
-        brand: "visa",
-        brandSource: "manual",
-        setCardNumber: expect.any(Function),
-        setBrand: expect.any(Function),
-      }),
-    );
+    expect(useOrgPasswordFormPresenterMock).toHaveBeenCalledTimes(1);
   });
 });
 

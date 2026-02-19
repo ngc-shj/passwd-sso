@@ -1,17 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
-import { getOrgCardValidationState } from "@/components/org/org-credit-card-validation";
-import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
-import { buildOrgEntryCopyData } from "@/components/org/org-entry-copy-data";
-import {
-  handleOrgCardNumberChange,
-  submitOrgPasswordForm,
-} from "@/components/org/org-password-form-actions";
+import { submitOrgPasswordForm } from "@/components/org/org-password-form-actions";
 import { buildOrgPasswordSubmitArgs } from "@/hooks/org-password-form-submit-args";
-import { useOrgEntrySpecificFieldsPropsFromState } from "@/hooks/use-org-entry-specific-fields-props";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
-import { buildGeneratorSummary } from "@/lib/generator-summary";
+import { useOrgPasswordFormPresenter } from "@/hooks/use-org-password-form-presenter";
 import {
   selectOrgEntryFieldValues,
   type OrgPasswordFormState,
@@ -74,25 +66,30 @@ export function useOrgPasswordFormController({
 }: UseOrgPasswordFormControllerArgs) {
   const { values, setters } = formState;
   const entryValues = selectOrgEntryFieldValues(values);
-  const {
-    cardValidation,
-    lengthHint,
-    maxInputLength,
-    showLengthError,
-    showLuhnError,
-    cardNumberValid,
-    hasBrandHint,
-  } = getOrgCardValidationState(values.cardNumber, values.brand);
-
-  const handleCardNumberChange = (value: string) => {
-    handleOrgCardNumberChange({
-      value,
-      brand: values.brand,
-      brandSource: values.brandSource,
-      setCardNumber: setters.setCardNumber,
-      setBrand: setters.setBrand,
+  const { cardNumberValid, entryCopy, entrySpecificFieldsProps } =
+    useOrgPasswordFormPresenter({
+      isEdit,
+      entryKind,
+      t,
+      ti,
+      tn,
+      tcc,
+      tpk,
+      tGen,
+      formState,
     });
-  };
+
+  const { hasChanges, submitDisabled } = useOrgPasswordFormDerived({
+    effectiveEntryType,
+    editData,
+    isLoginEntry,
+    isNote,
+    isCreditCard,
+    isIdentity,
+    isPasskey,
+    ...entryValues,
+    cardNumberValid,
+  });
 
   const handleSubmit = async () => {
     await submitOrgPasswordForm(
@@ -112,59 +109,6 @@ export function useOrgPasswordFormController({
       }),
     );
   };
-
-  const generatorSummary = useMemo(
-    () =>
-      buildGeneratorSummary(values.generatorSettings, {
-        modePassphrase: tGen("modePassphrase"),
-        modePassword: tGen("modePassword"),
-      }),
-    [values.generatorSettings, tGen],
-  );
-
-  const entryCopy = useMemo(
-    () =>
-      buildOrgEntryCopy({
-        isEdit,
-        entryKind,
-        copyByKind: buildOrgEntryCopyData({ t, tn, tcc, ti, tpk }),
-      }),
-    [isEdit, entryKind, t, tn, tcc, ti, tpk],
-  );
-
-  const { hasChanges, submitDisabled } = useOrgPasswordFormDerived({
-    effectiveEntryType,
-    editData,
-    isLoginEntry,
-    isNote,
-    isCreditCard,
-    isIdentity,
-    isPasskey,
-    ...entryValues,
-    cardNumberValid,
-  });
-
-  const entrySpecificFieldsProps = useOrgEntrySpecificFieldsPropsFromState({
-    entryKind,
-    entryCopy,
-    t,
-    tn,
-    tcc,
-    ti,
-    tpk,
-    values,
-    setters,
-    generatorSummary,
-    onCardNumberChange: handleCardNumberChange,
-    maxInputLength,
-    showLengthError,
-    showLuhnError,
-    detectedBrand: cardValidation.detectedBrand
-      ? tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })
-      : undefined,
-    hasBrandHint: hasBrandHint && cardValidation.digits.length > 0,
-    lengthHint,
-  });
 
   return {
     entryCopy,
