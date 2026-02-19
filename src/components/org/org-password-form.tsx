@@ -19,6 +19,7 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { useOrgPasswordFormModel } from "@/hooks/use-org-password-form-model";
+import { useOrgFormSectionsProps } from "@/hooks/use-org-form-sections-props";
 
 export function OrgPasswordForm({
   orgId,
@@ -33,10 +34,7 @@ export function OrgPasswordForm({
     tc,
     isEdit,
     isLoginEntry,
-    formState: {
-      values: { saving, title, selectedTags, customFields, totp, showTotpInput, orgFolderId },
-      setters: { setTitle, setSelectedTags, setCustomFields, setTotp, setShowTotpInput, setOrgFolderId },
-    },
+    formState,
     attachments,
     setAttachments,
     orgFolders,
@@ -54,7 +52,29 @@ export function OrgPasswordForm({
     entryType,
     editData,
   });
+  const {
+    values: { saving, title },
+    setters: { setTitle },
+  } = formState;
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
+  const { tagsAndFolderProps, customFieldsTotpProps, actionBarProps } = useOrgFormSectionsProps({
+    orgId,
+    tagsTitle: entryCopy.tagsTitle,
+    tagsHint: t("tagsHint"),
+    folders: orgFolders,
+    sectionCardClass: dialogSectionClass,
+    isLoginEntry,
+    hasChanges,
+    saving,
+    submitDisabled,
+    saveLabel: isEdit ? tc("update") : tc("save"),
+    cancelLabel: tc("cancel"),
+    statusUnsavedLabel: t("statusUnsaved"),
+    statusSavedLabel: t("statusSaved"),
+    onCancel: () => handleOpenChange(false),
+    values: formState.values,
+    setters: formState.setters,
+  });
 
   const entrySpecificFields = <OrgEntrySpecificFields {...entrySpecificFieldsProps} />;
 
@@ -83,40 +103,13 @@ export function OrgPasswordForm({
 
           {entrySpecificFields}
 
-          <OrgTagsAndFolderSection
-            tagsTitle={entryCopy.tagsTitle}
-            tagsHint={t("tagsHint")}
-            orgId={orgId}
-            selectedTags={selectedTags}
-            onTagsChange={setSelectedTags}
-            folders={orgFolders}
-            folderId={orgFolderId}
-            onFolderChange={setOrgFolderId}
-            sectionCardClass={dialogSectionClass}
-          />
+          <OrgTagsAndFolderSection {...tagsAndFolderProps} />
 
-          {isLoginEntry && (
-            <EntryCustomFieldsTotpSection
-              customFields={customFields}
-              setCustomFields={setCustomFields}
-              totp={totp}
-              onTotpChange={setTotp}
-              showTotpInput={showTotpInput}
-              setShowTotpInput={setShowTotpInput}
-              sectionCardClass={dialogSectionClass}
-            />
+          {customFieldsTotpProps && (
+            <EntryCustomFieldsTotpSection {...customFieldsTotpProps} />
           )}
 
-          <EntryActionBar
-            hasChanges={hasChanges}
-            submitting={saving}
-            submitDisabled={submitDisabled}
-            saveLabel={isEdit ? tc("update") : tc("save")}
-            cancelLabel={tc("cancel")}
-            statusUnsavedLabel={t("statusUnsaved")}
-            statusSavedLabel={t("statusSaved")}
-            onCancel={() => handleOpenChange(false)}
-          />
+          <EntryActionBar {...actionBarProps} />
         </form>
 
         {isEdit && editData && (
