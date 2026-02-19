@@ -180,6 +180,60 @@ export function buildOrgEntrySpecificFieldsProps({
   onDeviceInfoChange,
 }: OrgEntrySpecificFieldsBuilderArgs): OrgEntrySpecificFieldsProps {
   const { t, tn, tcc, ti, tpk } = translations;
+  const closeGeneratorLabel = t("closeGenerator");
+  const openGeneratorLabel = t("openGenerator");
+  const urlLabel = t("url");
+  const contentLabel = tn("content");
+  const contentPlaceholder = tn("contentPlaceholder");
+
+  const cardholderNamePlaceholder = tcc("cardholderNamePlaceholder");
+  const brandPlaceholder = tcc("brandPlaceholder");
+  const cardNumberPlaceholder = tcc("cardNumberPlaceholder");
+  const lengthHintGenericLabel = tcc("cardNumberLengthHintGeneric");
+  const lengthHintLabel = tcc("cardNumberLengthHint", { lengths: lengthHint });
+  const invalidLengthLabel = tcc("cardNumberInvalidLength", { lengths: lengthHint });
+  const invalidLuhnLabel = tcc("cardNumberInvalidLuhn");
+  const expiryMonthPlaceholder = tcc("expiryMonth");
+  const expiryYearPlaceholder = tcc("expiryYear");
+  const cvvPlaceholder = tcc("cvvPlaceholder");
+  const creditCardLabels = {
+    cardholderName: tcc("cardholderName"),
+    brand: tcc("brand"),
+    cardNumber: tcc("cardNumber"),
+    expiry: tcc("expiry"),
+    cvv: tcc("cvv"),
+  };
+
+  const fullNamePlaceholder = ti("fullNamePlaceholder");
+  const addressPlaceholder = ti("addressPlaceholder");
+  const phonePlaceholder = ti("phonePlaceholder");
+  const emailPlaceholder = ti("emailPlaceholder");
+  const nationalityPlaceholder = ti("nationalityPlaceholder");
+  const idNumberPlaceholder = ti("idNumberPlaceholder");
+  const identityLabels = {
+    fullName: ti("fullName"),
+    address: ti("address"),
+    phone: ti("phone"),
+    email: ti("email"),
+    dateOfBirth: ti("dateOfBirth"),
+    nationality: ti("nationality"),
+    idNumber: ti("idNumber"),
+    issueDate: ti("issueDate"),
+    expiryDate: ti("expiryDate"),
+  };
+
+  const relyingPartyIdPlaceholder = tpk("relyingPartyIdPlaceholder");
+  const relyingPartyNamePlaceholder = tpk("relyingPartyNamePlaceholder");
+  const credentialIdPlaceholder = tpk("credentialIdPlaceholder");
+  const deviceInfoPlaceholder = tpk("deviceInfoPlaceholder");
+  const passkeyLabels = {
+    relyingPartyId: tpk("relyingPartyId"),
+    relyingPartyName: tpk("relyingPartyName"),
+    username: tpk("username"),
+    credentialId: tpk("credentialId"),
+    creationDate: tpk("creationDate"),
+    deviceInfo: tpk("deviceInfo"),
+  };
 
   return {
     entryKind,
@@ -189,8 +243,8 @@ export function buildOrgEntrySpecificFieldsProps({
     onNotesChange,
     content,
     onContentChange,
-    contentLabel: tn("content"),
-    contentPlaceholder: tn("contentPlaceholder"),
+    contentLabel,
+    contentPlaceholder,
     title,
     onTitleChange,
     titleLabel: t("title"),
@@ -208,22 +262,22 @@ export function buildOrgEntrySpecificFieldsProps({
     generatorSummary,
     showGenerator,
     onToggleGenerator,
-    closeGeneratorLabel: t("closeGenerator"),
-    openGeneratorLabel: t("openGenerator"),
+    closeGeneratorLabel,
+    openGeneratorLabel,
     generatorSettings,
     onGeneratorUse,
     url,
     onUrlChange,
-    urlLabel: t("url"),
+    urlLabel,
     cardholderName,
     onCardholderNameChange,
-    cardholderNamePlaceholder: tcc("cardholderNamePlaceholder"),
+    cardholderNamePlaceholder,
     brand,
     onBrandChange,
-    brandPlaceholder: tcc("brandPlaceholder"),
+    brandPlaceholder,
     cardNumber,
     onCardNumberChange,
-    cardNumberPlaceholder: tcc("cardNumberPlaceholder"),
+    cardNumberPlaceholder,
     showCardNumber,
     onToggleCardNumber,
     maxInputLength,
@@ -231,48 +285,42 @@ export function buildOrgEntrySpecificFieldsProps({
     showLuhnError,
     detectedBrand,
     hasBrandHint,
-    lengthHintGenericLabel: tcc("cardNumberLengthHintGeneric"),
-    lengthHintLabel: tcc("cardNumberLengthHint", { lengths: lengthHint }),
-    invalidLengthLabel: tcc("cardNumberInvalidLength", { lengths: lengthHint }),
-    invalidLuhnLabel: tcc("cardNumberInvalidLuhn"),
-    creditCardLabels: {
-      cardholderName: tcc("cardholderName"),
-      brand: tcc("brand"),
-      cardNumber: tcc("cardNumber"),
-      expiry: tcc("expiry"),
-      cvv: tcc("cvv"),
-    },
+    lengthHintGenericLabel,
+    lengthHintLabel,
+    invalidLengthLabel,
+    invalidLuhnLabel,
+    creditCardLabels,
     expiryMonth,
     onExpiryMonthChange,
     expiryYear,
     onExpiryYearChange,
-    expiryMonthPlaceholder: tcc("expiryMonth"),
-    expiryYearPlaceholder: tcc("expiryYear"),
+    expiryMonthPlaceholder,
+    expiryYearPlaceholder,
     cvv,
     onCvvChange,
-    cvvPlaceholder: tcc("cvvPlaceholder"),
+    cvvPlaceholder,
     showCvv,
     onToggleCvv,
     fullName,
     onFullNameChange,
-    fullNamePlaceholder: ti("fullNamePlaceholder"),
+    fullNamePlaceholder,
     address,
     onAddressChange,
-    addressPlaceholder: ti("addressPlaceholder"),
+    addressPlaceholder,
     phone,
     onPhoneChange,
-    phonePlaceholder: ti("phonePlaceholder"),
+    phonePlaceholder,
     email,
     onEmailChange,
-    emailPlaceholder: ti("emailPlaceholder"),
+    emailPlaceholder,
     dateOfBirth,
     onDateOfBirthChange,
     nationality,
     onNationalityChange,
-    nationalityPlaceholder: ti("nationalityPlaceholder"),
+    nationalityPlaceholder,
     idNumber,
     onIdNumberChange,
-    idNumberPlaceholder: ti("idNumberPlaceholder"),
+    idNumberPlaceholder,
     showIdNumber,
     onToggleIdNumber,
     issueDate,
@@ -281,41 +329,24 @@ export function buildOrgEntrySpecificFieldsProps({
     onExpiryDateChange,
     dobError,
     expiryError,
-    identityLabels: {
-      fullName: ti("fullName"),
-      address: ti("address"),
-      phone: ti("phone"),
-      email: ti("email"),
-      dateOfBirth: ti("dateOfBirth"),
-      nationality: ti("nationality"),
-      idNumber: ti("idNumber"),
-      issueDate: ti("issueDate"),
-      expiryDate: ti("expiryDate"),
-    },
+    identityLabels,
     relyingPartyId,
     onRelyingPartyIdChange,
-    relyingPartyIdPlaceholder: tpk("relyingPartyIdPlaceholder"),
+    relyingPartyIdPlaceholder,
     relyingPartyName,
     onRelyingPartyNameChange,
-    relyingPartyNamePlaceholder: tpk("relyingPartyNamePlaceholder"),
+    relyingPartyNamePlaceholder,
     credentialId,
     onCredentialIdChange,
-    credentialIdPlaceholder: tpk("credentialIdPlaceholder"),
+    credentialIdPlaceholder,
     showCredentialId,
     onToggleCredentialId,
     creationDate,
     onCreationDateChange,
     deviceInfo,
     onDeviceInfoChange,
-    deviceInfoPlaceholder: tpk("deviceInfoPlaceholder"),
-    passkeyLabels: {
-      relyingPartyId: tpk("relyingPartyId"),
-      relyingPartyName: tpk("relyingPartyName"),
-      username: tpk("username"),
-      credentialId: tpk("credentialId"),
-      creationDate: tpk("creationDate"),
-      deviceInfo: tpk("deviceInfo"),
-    },
+    deviceInfoPlaceholder,
+    passkeyLabels,
   };
 }
 
