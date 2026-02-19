@@ -40,10 +40,6 @@ export function useOrgPasswordFormModel({
   const isEdit = !!editData;
 
   const formState = useOrgPasswordFormState(editData);
-  const {
-    values: { saving, title, selectedTags, customFields, totp, showTotpInput, orgFolderId },
-    setters: { setTitle, setSelectedTags, setCustomFields, setTotp, setShowTotpInput, setOrgFolderId },
-  } = formState;
 
   const { attachments, setAttachments } = useOrgAttachments(open, orgId, editData?.id);
   const orgFolders = useOrgFolders(open, orgId);
@@ -85,19 +81,7 @@ export function useOrgPasswordFormModel({
     isEdit,
     isLoginEntry,
     editData,
-    saving,
-    title,
-    selectedTags,
-    customFields,
-    totp,
-    showTotpInput,
-    orgFolderId,
-    setTitle,
-    setSelectedTags,
-    setCustomFields,
-    setTotp,
-    setShowTotpInput,
-    setOrgFolderId,
+    formState,
     attachments,
     setAttachments,
     orgFolders,

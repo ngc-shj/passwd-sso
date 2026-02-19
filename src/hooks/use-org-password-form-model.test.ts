@@ -90,7 +90,7 @@ describe("useOrgPasswordFormModel", () => {
     expect(useOrgAttachmentsMock).toHaveBeenCalledWith(true, "org-1", undefined);
     expect(useOrgFoldersMock).toHaveBeenCalledWith(true, "org-1");
     expect(useOrgPasswordFormControllerMock).toHaveBeenCalledTimes(1);
-    expect(result.current.title).toBe("t");
+    expect(result.current.formState.values.title).toBe("t");
     expect(result.current.entryCopy.dialogLabel).toBe("x");
     expect(result.current.hasChanges).toBe(false);
   });
