@@ -37,7 +37,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
 import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgAttachments } from "@/hooks/use-org-attachments";
-import { useOrgEntrySpecificFieldsProps } from "@/hooks/use-org-entry-specific-fields-props";
+import { useOrgEntrySpecificFieldsPropsFromState } from "@/hooks/use-org-entry-specific-fields-props";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
 import { useOrgPasswordFormState } from "@/hooks/use-org-password-form-state";
@@ -65,12 +65,6 @@ export function OrgPasswordForm({
   const {
     values: {
       saving,
-      showPassword,
-      showGenerator,
-      showCardNumber,
-      showCvv,
-      showIdNumber,
-      showCredentialId,
       title,
       username,
       password,
@@ -98,8 +92,6 @@ export function OrgPasswordForm({
       idNumber,
       issueDate,
       expiryDate,
-      dobError,
-      expiryError,
       relyingPartyId,
       relyingPartyName,
       credentialId,
@@ -109,46 +101,15 @@ export function OrgPasswordForm({
     },
     setters: {
       setSaving,
-      setShowPassword,
-      setShowGenerator,
-      setShowCardNumber,
-      setShowCvv,
-      setShowIdNumber,
-      setShowCredentialId,
       setTitle,
-      setUsername,
-      setPassword,
-      setContent,
-      setUrl,
-      setNotes,
       setSelectedTags,
-      setGeneratorSettings,
       setCustomFields,
       setTotp,
       setShowTotpInput,
-      setCardholderName,
       setCardNumber,
       setBrand,
-      setBrandSource,
-      setExpiryMonth,
-      setExpiryYear,
-      setCvv,
-      setFullName,
-      setAddress,
-      setPhone,
-      setEmail,
-      setDateOfBirth,
-      setNationality,
-      setIdNumber,
-      setIssueDate,
-      setExpiryDate,
       setDobError,
       setExpiryError,
-      setRelyingPartyId,
-      setRelyingPartyName,
-      setCredentialId,
-      setCreationDate,
-      setDeviceInfo,
       setOrgFolderId,
     },
   } = formState;
@@ -289,7 +250,7 @@ export function OrgPasswordForm({
   });
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
-  const entrySpecificFieldsProps = useOrgEntrySpecificFieldsProps({
+  const entrySpecificFieldsProps = useOrgEntrySpecificFieldsPropsFromState({
     entryKind,
     entryCopy,
     t,
@@ -297,40 +258,10 @@ export function OrgPasswordForm({
     tcc,
     ti,
     tpk,
-    notes,
-    onNotesChange: setNotes,
-    title,
-    onTitleChange: setTitle,
-    username,
-    onUsernameChange: setUsername,
-    password,
-    onPasswordChange: setPassword,
-    showPassword,
-    onToggleShowPassword: () => setShowPassword((v) => !v),
+    values: formState.values,
+    setters: formState.setters,
     generatorSummary,
-    showGenerator,
-    onToggleGenerator: () => setShowGenerator((v) => !v),
-    generatorSettings,
-    onGeneratorUse: (pw, settings) => {
-      setPassword(pw);
-      setShowPassword(true);
-      setGeneratorSettings(settings);
-    },
-    url,
-    onUrlChange: setUrl,
-    content,
-    onContentChange: setContent,
-    cardholderName,
-    onCardholderNameChange: setCardholderName,
-    brand,
-    onBrandChange: (value) => {
-      setBrand(value);
-      setBrandSource("manual");
-    },
-    cardNumber,
     onCardNumberChange: handleCardNumberChange,
-    showCardNumber,
-    onToggleCardNumber: () => setShowCardNumber(!showCardNumber),
     maxInputLength,
     showLengthError,
     showLuhnError,
@@ -339,57 +270,6 @@ export function OrgPasswordForm({
       : undefined,
     hasBrandHint: hasBrandHint && cardValidation.digits.length > 0,
     lengthHint,
-    expiryMonth,
-    onExpiryMonthChange: setExpiryMonth,
-    expiryYear,
-    onExpiryYearChange: setExpiryYear,
-    cvv,
-    onCvvChange: setCvv,
-    showCvv,
-    onToggleCvv: () => setShowCvv(!showCvv),
-    fullName,
-    onFullNameChange: setFullName,
-    address,
-    onAddressChange: setAddress,
-    phone,
-    onPhoneChange: setPhone,
-    email,
-    onEmailChange: setEmail,
-    dateOfBirth,
-    onDateOfBirthChange: (value) => {
-      setDateOfBirth(value);
-      setDobError(null);
-    },
-    nationality,
-    onNationalityChange: setNationality,
-    idNumber,
-    onIdNumberChange: setIdNumber,
-    showIdNumber,
-    onToggleIdNumber: () => setShowIdNumber(!showIdNumber),
-    issueDate,
-    onIssueDateChange: (value) => {
-      setIssueDate(value);
-      setExpiryError(null);
-    },
-    expiryDate,
-    onExpiryDateChange: (value) => {
-      setExpiryDate(value);
-      setExpiryError(null);
-    },
-    dobError,
-    expiryError,
-    relyingPartyId,
-    onRelyingPartyIdChange: setRelyingPartyId,
-    relyingPartyName,
-    onRelyingPartyNameChange: setRelyingPartyName,
-    credentialId,
-    onCredentialIdChange: setCredentialId,
-    showCredentialId,
-    onToggleCredentialId: () => setShowCredentialId(!showCredentialId),
-    creationDate,
-    onCreationDateChange: setCreationDate,
-    deviceInfo,
-    onDeviceInfoChange: setDeviceInfo,
   });
 
   const entrySpecificFields = <OrgEntrySpecificFields {...entrySpecificFieldsProps} />;

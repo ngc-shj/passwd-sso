@@ -3,6 +3,7 @@
 import { useMemo, type ComponentProps } from "react";
 import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
+import type { useOrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 
 type OrgEntrySpecificFieldsProps = ComponentProps<typeof OrgEntrySpecificFields>;
 type TFn = (key: string, values?: Record<string, string | number | Date>) => string;
@@ -93,6 +94,32 @@ interface UseOrgEntrySpecificFieldsPropsArgs {
   onCreationDateChange: (value: string) => void;
   deviceInfo: string;
   onDeviceInfoChange: (value: string) => void;
+}
+
+type OrgFormValues = ReturnType<typeof useOrgPasswordFormState>["values"];
+type OrgFormSetters = ReturnType<typeof useOrgPasswordFormState>["setters"];
+
+interface UseOrgEntrySpecificFieldsPropsFromStateArgs {
+  entryKind: OrgEntrySpecificFieldsProps["entryKind"];
+  entryCopy: {
+    notesLabel: string;
+    notesPlaceholder: string;
+  };
+  t: TFn;
+  tn: TFn;
+  tcc: TFn;
+  ti: TFn;
+  tpk: TFn;
+  values: OrgFormValues;
+  setters: OrgFormSetters;
+  generatorSummary: string;
+  onCardNumberChange: (value: string) => void;
+  maxInputLength: number;
+  showLengthError: boolean;
+  showLuhnError: boolean;
+  detectedBrand?: string;
+  hasBrandHint: boolean;
+  lengthHint: string;
 }
 
 export function useOrgEntrySpecificFieldsProps({
@@ -402,4 +429,125 @@ export function useOrgEntrySpecificFieldsProps({
       onDeviceInfoChange,
     ],
   );
+}
+
+export function useOrgEntrySpecificFieldsPropsFromState({
+  entryKind,
+  entryCopy,
+  t,
+  tn,
+  tcc,
+  ti,
+  tpk,
+  values,
+  setters,
+  generatorSummary,
+  onCardNumberChange,
+  maxInputLength,
+  showLengthError,
+  showLuhnError,
+  detectedBrand,
+  hasBrandHint,
+  lengthHint,
+}: UseOrgEntrySpecificFieldsPropsFromStateArgs): OrgEntrySpecificFieldsProps {
+  return useOrgEntrySpecificFieldsProps({
+    entryKind,
+    entryCopy,
+    t,
+    tn,
+    tcc,
+    ti,
+    tpk,
+    notes: values.notes,
+    onNotesChange: setters.setNotes,
+    title: values.title,
+    onTitleChange: setters.setTitle,
+    username: values.username,
+    onUsernameChange: setters.setUsername,
+    password: values.password,
+    onPasswordChange: setters.setPassword,
+    showPassword: values.showPassword,
+    onToggleShowPassword: () => setters.setShowPassword(!values.showPassword),
+    generatorSummary,
+    showGenerator: values.showGenerator,
+    onToggleGenerator: () => setters.setShowGenerator(!values.showGenerator),
+    generatorSettings: values.generatorSettings as GeneratorSettings,
+    onGeneratorUse: (pw, settings) => {
+      setters.setPassword(pw);
+      setters.setShowPassword(true);
+      setters.setGeneratorSettings(settings);
+    },
+    url: values.url,
+    onUrlChange: setters.setUrl,
+    content: values.content,
+    onContentChange: setters.setContent,
+    cardholderName: values.cardholderName,
+    onCardholderNameChange: setters.setCardholderName,
+    brand: values.brand,
+    onBrandChange: (value) => {
+      setters.setBrand(value);
+      setters.setBrandSource("manual");
+    },
+    cardNumber: values.cardNumber,
+    onCardNumberChange,
+    showCardNumber: values.showCardNumber,
+    onToggleCardNumber: () => setters.setShowCardNumber(!values.showCardNumber),
+    maxInputLength,
+    showLengthError,
+    showLuhnError,
+    detectedBrand,
+    hasBrandHint,
+    lengthHint,
+    expiryMonth: values.expiryMonth,
+    onExpiryMonthChange: setters.setExpiryMonth,
+    expiryYear: values.expiryYear,
+    onExpiryYearChange: setters.setExpiryYear,
+    cvv: values.cvv,
+    onCvvChange: setters.setCvv,
+    showCvv: values.showCvv,
+    onToggleCvv: () => setters.setShowCvv(!values.showCvv),
+    fullName: values.fullName,
+    onFullNameChange: setters.setFullName,
+    address: values.address,
+    onAddressChange: setters.setAddress,
+    phone: values.phone,
+    onPhoneChange: setters.setPhone,
+    email: values.email,
+    onEmailChange: setters.setEmail,
+    dateOfBirth: values.dateOfBirth,
+    onDateOfBirthChange: (value) => {
+      setters.setDateOfBirth(value);
+      setters.setDobError(null);
+    },
+    nationality: values.nationality,
+    onNationalityChange: setters.setNationality,
+    idNumber: values.idNumber,
+    onIdNumberChange: setters.setIdNumber,
+    showIdNumber: values.showIdNumber,
+    onToggleIdNumber: () => setters.setShowIdNumber(!values.showIdNumber),
+    issueDate: values.issueDate,
+    onIssueDateChange: (value) => {
+      setters.setIssueDate(value);
+      setters.setExpiryError(null);
+    },
+    expiryDate: values.expiryDate,
+    onExpiryDateChange: (value) => {
+      setters.setExpiryDate(value);
+      setters.setExpiryError(null);
+    },
+    dobError: values.dobError,
+    expiryError: values.expiryError,
+    relyingPartyId: values.relyingPartyId,
+    onRelyingPartyIdChange: setters.setRelyingPartyId,
+    relyingPartyName: values.relyingPartyName,
+    onRelyingPartyNameChange: setters.setRelyingPartyName,
+    credentialId: values.credentialId,
+    onCredentialIdChange: setters.setCredentialId,
+    showCredentialId: values.showCredentialId,
+    onToggleCredentialId: () => setters.setShowCredentialId(!values.showCredentialId),
+    creationDate: values.creationDate,
+    onCreationDateChange: setters.setCreationDate,
+    deviceInfo: values.deviceInfo,
+    onDeviceInfoChange: setters.setDeviceInfo,
+  });
 }
