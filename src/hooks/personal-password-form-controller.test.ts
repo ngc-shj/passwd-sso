@@ -1,12 +1,9 @@
-// @vitest-environment jsdom
-
-import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { PersonalPasswordFormTranslations } from "@/hooks/use-entry-form-translations";
 import {
-  usePersonalPasswordFormController,
-} from "@/hooks/use-personal-password-form-controller";
+  buildPersonalPasswordFormController,
+} from "@/hooks/personal-password-form-controller";
 
 const submitPersonalPasswordFormMock = vi.fn();
 
@@ -14,7 +11,7 @@ vi.mock("@/components/passwords/personal-password-submit", () => ({
   submitPersonalPasswordForm: (...args: unknown[]) => submitPersonalPasswordFormMock(...args),
 }));
 
-describe("usePersonalPasswordFormController", () => {
+describe("buildPersonalPasswordFormController", () => {
   beforeEach(() => {
     submitPersonalPasswordFormMock.mockReset();
     submitPersonalPasswordFormMock.mockResolvedValue(undefined);
@@ -25,22 +22,18 @@ describe("usePersonalPasswordFormController", () => {
     const onSaved = vi.fn();
     const back = vi.fn();
 
-    const { result } = renderHook(() =>
-      usePersonalPasswordFormController({
-        mode: "create",
-        onSaved,
-        encryptionKey: {} as CryptoKey,
-        userId: "user-1",
-        values: buildValues(),
-        setSubmitting: vi.fn(),
-        translations: buildTranslations(),
-        router: { push: vi.fn(), refresh: vi.fn(), back },
-      }),
-    );
-
-    await act(async () => {
-      await result.current.handleSubmit({ preventDefault } as unknown as React.FormEvent);
+    const controller = buildPersonalPasswordFormController({
+      mode: "create",
+      onSaved,
+      encryptionKey: {} as CryptoKey,
+      userId: "user-1",
+      values: buildValues(),
+      setSubmitting: vi.fn(),
+      translations: buildTranslations(),
+      router: { push: vi.fn(), refresh: vi.fn(), back },
     });
+
+    await controller.handleSubmit({ preventDefault } as unknown as React.FormEvent);
 
     expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(submitPersonalPasswordFormMock).toHaveBeenCalledTimes(1);
@@ -50,34 +43,26 @@ describe("usePersonalPasswordFormController", () => {
       title: "title",
     });
 
-    act(() => {
-      result.current.handleCancel();
-    });
+    controller.handleCancel();
     expect(onSaved).toHaveBeenCalledTimes(1);
 
-    act(() => {
-      result.current.handleBack();
-    });
+    controller.handleBack();
     expect(back).toHaveBeenCalledTimes(1);
   });
 
   it("normalizes null userId to undefined in submit args", async () => {
-    const { result } = renderHook(() =>
-      usePersonalPasswordFormController({
-        mode: "create",
-        onSaved: vi.fn(),
-        encryptionKey: {} as CryptoKey,
-        userId: null,
-        values: buildValues(),
-        setSubmitting: vi.fn(),
-        translations: buildTranslations(),
-        router: { push: vi.fn(), refresh: vi.fn(), back: vi.fn() },
-      }),
-    );
-
-    await act(async () => {
-      await result.current.handleSubmit({ preventDefault: vi.fn() } as unknown as React.FormEvent);
+    const controller = buildPersonalPasswordFormController({
+      mode: "create",
+      onSaved: vi.fn(),
+      encryptionKey: {} as CryptoKey,
+      userId: null,
+      values: buildValues(),
+      setSubmitting: vi.fn(),
+      translations: buildTranslations(),
+      router: { push: vi.fn(), refresh: vi.fn(), back: vi.fn() },
     });
+
+    await controller.handleSubmit({ preventDefault: vi.fn() } as unknown as React.FormEvent);
 
     expect(submitPersonalPasswordFormMock).toHaveBeenCalledTimes(1);
     expect(submitPersonalPasswordFormMock.mock.calls[0]?.[0]?.userId).toBeUndefined();

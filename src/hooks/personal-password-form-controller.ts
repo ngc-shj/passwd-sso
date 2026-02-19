@@ -1,5 +1,3 @@
-"use client";
-
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
 import {
   submitPersonalPasswordForm,
@@ -22,7 +20,7 @@ export interface PersonalPasswordFormControllerArgs {
   router: PasswordFormRouter;
 }
 
-export function usePersonalPasswordFormController({
+export function buildPersonalPasswordFormController({
   mode,
   initialData,
   onSaved,

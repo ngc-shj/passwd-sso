@@ -5,8 +5,8 @@ import { useVault } from "@/lib/vault-context";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
 import {
-  usePersonalPasswordFormController,
-} from "@/hooks/use-personal-password-form-controller";
+  buildPersonalPasswordFormController,
+} from "@/hooks/personal-password-form-controller";
 import {
   buildPersonalPasswordFormPresenter,
 } from "@/hooks/personal-password-form-presenter";
@@ -35,7 +35,7 @@ export function usePersonalPasswordFormModel({
     formState,
     translations,
   });
-  const { handleSubmit, handleCancel, handleBack } = usePersonalPasswordFormController({
+  const { handleSubmit, handleCancel, handleBack } = buildPersonalPasswordFormController({
     mode,
     initialData,
     onSaved,
