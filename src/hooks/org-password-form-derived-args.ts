@@ -1,15 +1,16 @@
 import type { EntryTypeValue } from "@/lib/constants";
+import type { OrgPasswordFormControllerArgs } from "@/hooks/org-password-form-controller-args";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
 import type { OrgEntryFieldValues } from "@/hooks/use-org-password-form-state";
 
-interface BuildOrgPasswordDerivedArgsInput {
-  effectiveEntryType: EntryTypeValue;
-  editData?: OrgPasswordFormEditData | null;
-  entryKindState: OrgEntryKindState;
+type BuildOrgPasswordDerivedArgsInput = Pick<
+  OrgPasswordFormControllerArgs,
+  "effectiveEntryType" | "editData" | "entryKindState"
+> & {
   values: OrgEntryFieldValues;
   cardNumberValid: boolean;
-}
+};
 
 export interface OrgPasswordFormDerivedArgs extends OrgEntryKindState, OrgEntryFieldValues {
   effectiveEntryType: EntryTypeValue;
