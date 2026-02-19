@@ -107,54 +107,54 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
   );
 
   const formContent = (
-          <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
-            {isDialogVariant ? (
-              loginMainFields
-            ) : (
-              <EntrySectionCard className="space-y-4 bg-gradient-to-b from-muted/30 to-background hover:bg-transparent">
-                {loginMainFields}
-              </EntrySectionCard>
-            )}
+    <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
+      {isDialogVariant ? (
+        loginMainFields
+      ) : (
+        <EntrySectionCard className="space-y-4 bg-gradient-to-b from-muted/30 to-background hover:bg-transparent">
+          {loginMainFields}
+        </EntrySectionCard>
+      )}
 
-            <EntryTagsAndFolderSection
-              tagsTitle={t("tags")}
-              tagsHint={t("tagsHint")}
-              selectedTags={selectedTags}
-              onTagsChange={setSelectedTags}
-              folders={folders}
-              folderId={folderId}
-              onFolderChange={setFolderId}
-              sectionCardClass={dialogSectionClass}
-            />
+      <EntryTagsAndFolderSection
+        tagsTitle={t("tags")}
+        tagsHint={t("tagsHint")}
+        selectedTags={selectedTags}
+        onTagsChange={setSelectedTags}
+        folders={folders}
+        folderId={folderId}
+        onFolderChange={setFolderId}
+        sectionCardClass={dialogSectionClass}
+      />
 
-            <EntryCustomFieldsTotpSection
-              customFields={customFields}
-              setCustomFields={setCustomFields}
-              totp={totp}
-              onTotpChange={setTotp}
-              showTotpInput={showTotpInput}
-              setShowTotpInput={setShowTotpInput}
-              sectionCardClass={dialogSectionClass}
-            />
+      <EntryCustomFieldsTotpSection
+        customFields={customFields}
+        setCustomFields={setCustomFields}
+        totp={totp}
+        onTotpChange={setTotp}
+        showTotpInput={showTotpInput}
+        setShowTotpInput={setShowTotpInput}
+        sectionCardClass={dialogSectionClass}
+      />
 
-            <EntryRepromptSection
-              checked={requireReprompt}
-              onCheckedChange={setRequireReprompt}
-              title={t("requireReprompt")}
-              description={t("requireRepromptHelp")}
-              sectionCardClass={dialogSectionClass}
-            />
+      <EntryRepromptSection
+        checked={requireReprompt}
+        onCheckedChange={setRequireReprompt}
+        title={t("requireReprompt")}
+        description={t("requireRepromptHelp")}
+        sectionCardClass={dialogSectionClass}
+      />
 
-            <EntryActionBar
-              hasChanges={hasChanges}
-              submitting={submitting}
-              saveLabel={mode === "create" ? tc("save") : tc("update")}
-              cancelLabel={tc("cancel")}
-              statusUnsavedLabel={t("statusUnsaved")}
-              statusSavedLabel={t("statusSaved")}
-              onCancel={handleCancel}
-            />
-          </form>
+      <EntryActionBar
+        hasChanges={hasChanges}
+        submitting={submitting}
+        saveLabel={mode === "create" ? tc("save") : tc("update")}
+        cancelLabel={tc("cancel")}
+        statusUnsavedLabel={t("statusUnsaved")}
+        statusSavedLabel={t("statusSaved")}
+        onCancel={handleCancel}
+      />
+    </form>
   );
 
   if (variant === "dialog") {
