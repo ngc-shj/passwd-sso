@@ -27,6 +27,20 @@ export interface PersonalPasswordFormValues {
   folderId: string | null;
 }
 
+export interface PersonalPasswordFormEntryValues {
+  title: string;
+  username: string;
+  password: string;
+  url: string;
+  notes: string;
+  selectedTags: TagData[];
+  generatorSettings: GeneratorSettings;
+  customFields: EntryCustomField[];
+  totp: EntryTotp | null;
+  requireReprompt: boolean;
+  folderId: string | null;
+}
+
 export interface PersonalPasswordFormSetters {
   setShowPassword: (value: boolean) => void;
   setShowGenerator: (value: boolean) => void;
@@ -106,5 +120,23 @@ export function usePersonalPasswordFormState(
       setRequireReprompt,
       setFolderId,
     },
+  };
+}
+
+export function selectPersonalEntryValues(
+  values: PersonalPasswordFormValues,
+): PersonalPasswordFormEntryValues {
+  return {
+    title: values.title,
+    username: values.username,
+    password: values.password,
+    url: values.url,
+    notes: values.notes,
+    selectedTags: values.selectedTags,
+    generatorSettings: values.generatorSettings,
+    customFields: values.customFields,
+    totp: values.totp,
+    requireReprompt: values.requireReprompt,
+    folderId: values.folderId,
   };
 }

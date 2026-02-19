@@ -2,7 +2,10 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { usePersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
+import {
+  selectPersonalEntryValues,
+  usePersonalPasswordFormState,
+} from "@/hooks/use-personal-password-form-state";
 
 describe("usePersonalPasswordFormState", () => {
   it("initializes defaults without initial data", () => {
@@ -46,5 +49,31 @@ describe("usePersonalPasswordFormState", () => {
     expect(result.current.values.title).toBe("updated");
     expect(result.current.values.folderId).toBe("folder-2");
     expect(result.current.values.requireReprompt).toBe(false);
+  });
+
+  it("selects entry values for controller submit", () => {
+    const { result } = renderHook(() =>
+      usePersonalPasswordFormState({
+        id: "entry-1",
+        title: "title",
+        username: "user",
+        password: "pass",
+        url: "https://example.com",
+        notes: "memo",
+        tags: [],
+      }),
+    );
+
+    const selected = selectPersonalEntryValues(result.current.values);
+
+    expect(selected).toEqual(
+      expect.objectContaining({
+        title: "title",
+        username: "user",
+        password: "pass",
+        url: "https://example.com",
+        notes: "memo",
+      }),
+    );
   });
 });

@@ -7,23 +7,7 @@ import {
 } from "@/components/passwords/personal-password-form-snapshot";
 import { submitPersonalPasswordForm } from "@/components/passwords/personal-password-submit";
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
-import type { TagData } from "@/components/tags/tag-input";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-
-interface PersonalPasswordFormControllerValues {
-  title: string;
-  username: string;
-  password: string;
-  url: string;
-  notes: string;
-  selectedTags: TagData[];
-  generatorSettings: GeneratorSettings;
-  customFields: EntryCustomField[];
-  totp: EntryTotp | null;
-  requireReprompt: boolean;
-  folderId: string | null;
-}
+import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
 
 interface UsePersonalPasswordFormControllerArgs {
   mode: "create" | "edit";
@@ -31,7 +15,7 @@ interface UsePersonalPasswordFormControllerArgs {
   onSaved?: () => void;
   encryptionKey: CryptoKey | null;
   userId?: string;
-  values: PersonalPasswordFormControllerValues;
+  values: PersonalPasswordFormEntryValues;
   setSubmitting: (value: boolean) => void;
   t: (key: string) => string;
   tGen: (key: string) => string;
