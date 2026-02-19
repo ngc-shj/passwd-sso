@@ -28,7 +28,6 @@ import {
   Fingerprint,
   Plus,
   Link as LinkIcon,
-  Send,
   ScrollText,
   MoreHorizontal,
   Pencil,
@@ -267,7 +266,6 @@ interface VaultManagementSectionProps {
   isSelectedVaultArchive: boolean;
   isSelectedVaultTrash: boolean;
   isShareLinks: boolean;
-  isSend: boolean;
   isPersonalAuditLog: boolean;
   activeAuditOrgId: string | null;
   onNavigate: () => void;
@@ -279,7 +277,6 @@ export function VaultManagementSection({
   isSelectedVaultArchive,
   isSelectedVaultTrash,
   isShareLinks,
-  isSend,
   isPersonalAuditLog,
   activeAuditOrgId,
   onNavigate,
@@ -333,18 +330,6 @@ export function VaultManagementSection({
           {t("shareLinks")}
         </Link>
       </Button>
-      {!isOrg && (
-        <Button
-          variant={isSend ? "secondary" : "ghost"}
-          className="w-full justify-start gap-2"
-          asChild
-        >
-          <Link href="/dashboard/share-links?type=send" onClick={onNavigate}>
-            <Send className="h-4 w-4" />
-            {t("send")}
-          </Link>
-        </Button>
-      )}
       <Button
         variant={isAuditActive ? "secondary" : "ghost"}
         className="w-full justify-start gap-2"

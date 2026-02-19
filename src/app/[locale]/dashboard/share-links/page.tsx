@@ -77,7 +77,7 @@ export default function ShareLinksPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [typeFilter, setTypeFilter] = useState<string>(typeParam ?? "all");
+  const [typeFilter, setTypeFilter] = useState<string>(typeParam === "send" || typeParam === "entry" ? typeParam : "all");
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
@@ -86,6 +86,12 @@ export default function ShareLinksPage() {
   >([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [logNextCursor, setLogNextCursor] = useState<string | null>(null);
+
+  // Sync typeFilter when navigating via sidebar links (?type=send / ?type=entry)
+  useEffect(() => {
+    const next = typeParam === "send" || typeParam === "entry" ? typeParam : "all";
+    setTypeFilter(next);
+  }, [typeParam]);
 
   const fetchLinks = useCallback(
     async (cursor?: string) => {
@@ -229,10 +235,12 @@ export default function ShareLinksPage() {
               <p className="text-sm text-muted-foreground">{t("description")}</p>
             </div>
           </div>
-          <Button onClick={() => setSendDialogOpen(true)} className="shrink-0">
-            <Send className="h-4 w-4 mr-2" />
-            {t("newSend")}
-          </Button>
+          {!orgFilter && (
+            <Button onClick={() => setSendDialogOpen(true)} className="shrink-0">
+              <Send className="h-4 w-4 mr-2" />
+              {t("newSend")}
+            </Button>
+          )}
         </div>
       </Card>
 
@@ -260,7 +268,9 @@ export default function ShareLinksPage() {
               <SelectContent>
                 <SelectItem value="all">{t("allTypes")}</SelectItem>
                 <SelectItem value="entry">{t("entryShares")}</SelectItem>
-                <SelectItem value="send">{t("sends")}</SelectItem>
+                {!orgFilter && (
+                  <SelectItem value="send">{t("sends")}</SelectItem>
+                )}
               </SelectContent>
             </Select>
           </div>
