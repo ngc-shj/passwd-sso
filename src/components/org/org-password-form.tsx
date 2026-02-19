@@ -1,6 +1,4 @@
 "use client";
-
-import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -12,101 +10,59 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { OrgAttachmentSection } from "./org-attachment-section";
-import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
 import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
-import {
-  type OrgPasswordFormSetters,
-} from "@/components/org/org-password-form-state";
 import { OrgTagsAndFolderSection } from "@/components/org/org-tags-and-folder-section";
-import type {
-  OrgPasswordFormProps,
-} from "@/components/org/org-password-form-types";
+import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import { ENTRY_TYPE } from "@/lib/constants";
-import { useOrgFolders } from "@/hooks/use-org-folders";
-import { useOrgAttachments } from "@/hooks/use-org-attachments";
-import { useOrgPasswordFormController } from "@/hooks/use-org-password-form-controller";
-import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
-import { useOrgPasswordFormState } from "@/hooks/use-org-password-form-state";
+import { useOrgPasswordFormModel } from "@/hooks/use-org-password-form-model";
 
 export function OrgPasswordForm({
   orgId,
   open,
   onOpenChange,
   onSaved,
-  entryType: entryTypeProp = ENTRY_TYPE.LOGIN,
+  entryType,
   editData,
 }: OrgPasswordFormProps) {
-  const t = useTranslations("PasswordForm");
-  const tGen = useTranslations("PasswordGenerator");
-  const tn = useTranslations("SecureNoteForm");
-  const tcc = useTranslations("CreditCardForm");
-  const ti = useTranslations("IdentityForm");
-  const tpk = useTranslations("PasskeyForm");
-  const tc = useTranslations("Common");
-
-  const effectiveEntryType = editData?.entryType ?? entryTypeProp;
-  const { entryKind, isNote, isCreditCard, isIdentity, isPasskey, isLoginEntry } =
-    getOrgEntryKindState(effectiveEntryType);
-  const formState = useOrgPasswordFormState(editData);
   const {
-    values: {
-      saving,
-      title,
-      selectedTags,
-      customFields,
-      totp,
-      showTotpInput,
-      orgFolderId,
-    },
-    setters: {
-      setTitle,
-      setSelectedTags,
-      setCustomFields,
-      setTotp,
-      setShowTotpInput,
-      setOrgFolderId,
-    },
-  } = formState;
-  const { attachments, setAttachments } = useOrgAttachments(open, orgId, editData?.id);
-  const orgFolders = useOrgFolders(open, orgId);
-
-  const isEdit = !!editData;
-
-  const formSetters: OrgPasswordFormSetters = { ...formState.setters, setAttachments };
-  const { handleOpenChange } = useOrgPasswordFormLifecycle({
+    t,
+    tc,
+    isEdit,
+    isLoginEntry,
+    saving,
+    title,
+    selectedTags,
+    customFields,
+    totp,
+    showTotpInput,
+    orgFolderId,
+    setTitle,
+    setSelectedTags,
+    setCustomFields,
+    setTotp,
+    setShowTotpInput,
+    setOrgFolderId,
+    attachments,
+    setAttachments,
+    orgFolders,
+    handleOpenChange,
+    entryCopy,
+    entrySpecificFieldsProps,
+    handleSubmit,
+    hasChanges,
+    submitDisabled,
+  } = useOrgPasswordFormModel({
+    orgId,
     open,
-    editData,
     onOpenChange,
-    setters: formSetters,
+    onSaved,
+    entryType,
+    editData,
   });
-
-  const { entryCopy, entrySpecificFieldsProps, handleSubmit, hasChanges, submitDisabled } =
-    useOrgPasswordFormController({
-      orgId,
-      onSaved,
-      isEdit,
-      editData,
-      effectiveEntryType,
-      entryKind,
-      isLoginEntry,
-      isNote,
-      isCreditCard,
-      isIdentity,
-      isPasskey,
-      t,
-      ti,
-      tn,
-      tcc,
-      tpk,
-      tGen,
-      formState,
-      handleOpenChange,
-    });
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
   const entrySpecificFields = <OrgEntrySpecificFields {...entrySpecificFieldsProps} />;
