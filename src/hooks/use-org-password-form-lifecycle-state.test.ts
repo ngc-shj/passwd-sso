@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   applyOrgEditDataToForm,
   resetOrgFormForClose,
@@ -9,7 +9,7 @@ function createSetters() {
   return createOrgPasswordFormLifecycleSettersMock();
 }
 
-describe("org-password-form-state", () => {
+describe("use-org-password-form-lifecycle state helpers", () => {
   it("applyOrgEditDataToForm applies incoming edit values", () => {
     const setters = createSetters();
 
