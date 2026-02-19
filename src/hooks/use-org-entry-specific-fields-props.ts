@@ -1,6 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
 import {
   buildOrgEntrySpecificFieldsProps,
   type OrgEntrySpecificFieldsBuilderArgs,
@@ -11,8 +10,6 @@ import type {
   OrgPasswordFormValues,
   OrgPasswordFormSettersState,
 } from "@/hooks/use-org-password-form-state";
-
-type UseOrgEntrySpecificFieldsPropsArgs = OrgEntrySpecificFieldsBuilderArgs;
 
 type UseOrgEntrySpecificFieldsPropsFromStateArgs = Pick<
   OrgEntrySpecificFieldsBuilderArgs,
@@ -37,9 +34,9 @@ type UseOrgEntrySpecificFieldsPropsFromStateArgs = Pick<
 };
 
 export function useOrgEntrySpecificFieldsProps(
-  args: UseOrgEntrySpecificFieldsPropsArgs,
+  args: OrgEntrySpecificFieldsBuilderArgs,
 ): OrgEntrySpecificFieldsProps {
-  return useMemo(() => buildOrgEntrySpecificFieldsProps(args), [args]);
+  return buildOrgEntrySpecificFieldsProps(args);
 }
 
 export function useOrgEntrySpecificFieldsPropsFromState({
