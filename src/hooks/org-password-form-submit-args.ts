@@ -1,10 +1,49 @@
 import type { SubmitOrgPasswordFormArgs } from "@/components/org/org-password-form-actions";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
-import type { useOrgPasswordFormState } from "@/hooks/use-org-password-form-state";
-
-type OrgFormState = ReturnType<typeof useOrgPasswordFormState>;
+import type { OrgPasswordFormValues } from "@/hooks/use-org-password-form-state";
 type TFn = (key: string) => string;
+
+interface SubmitFormState {
+  values: Pick<
+    OrgPasswordFormValues,
+    | "title"
+    | "notes"
+    | "selectedTags"
+    | "orgFolderId"
+    | "username"
+    | "password"
+    | "url"
+    | "customFields"
+    | "totp"
+    | "content"
+    | "cardholderName"
+    | "cardNumber"
+    | "brand"
+    | "expiryMonth"
+    | "expiryYear"
+    | "cvv"
+    | "fullName"
+    | "address"
+    | "phone"
+    | "email"
+    | "dateOfBirth"
+    | "nationality"
+    | "idNumber"
+    | "issueDate"
+    | "expiryDate"
+    | "relyingPartyId"
+    | "relyingPartyName"
+    | "credentialId"
+    | "creationDate"
+    | "deviceInfo"
+  >;
+  setters: {
+    setDobError: (value: string | null) => void;
+    setExpiryError: (value: string | null) => void;
+    setSaving: (value: boolean) => void;
+  };
+}
 
 interface BuildOrgPasswordSubmitArgsInput {
   orgId: string;
@@ -17,7 +56,7 @@ interface BuildOrgPasswordSubmitArgsInput {
   ti: TFn;
   onSaved: () => void;
   handleOpenChange: (open: boolean) => void;
-  formState: OrgFormState;
+  formState: SubmitFormState;
 }
 
 export function buildOrgPasswordSubmitArgs({

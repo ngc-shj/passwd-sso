@@ -12,12 +12,12 @@ import { buildOrgPasswordSubmitArgs } from "@/hooks/org-password-form-submit-arg
 import { useOrgEntrySpecificFieldsPropsFromState } from "@/hooks/use-org-entry-specific-fields-props";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
-import type { useOrgPasswordFormState } from "@/hooks/use-org-password-form-state";
+import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
 
 type TFn = (key: string, values?: Record<string, string | number | Date>) => string;
-type OrgFormState = ReturnType<typeof useOrgPasswordFormState>;
+type OrgFormState = OrgPasswordFormState;
 
 interface UseOrgPasswordFormControllerArgs {
   orgId: string;

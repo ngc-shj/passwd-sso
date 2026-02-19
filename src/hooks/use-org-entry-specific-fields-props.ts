@@ -3,7 +3,10 @@
 import { useMemo, type ComponentProps } from "react";
 import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { useOrgPasswordFormState } from "@/hooks/use-org-password-form-state";
+import type {
+  OrgPasswordFormValues,
+  OrgPasswordFormSettersState,
+} from "@/hooks/use-org-password-form-state";
 
 type OrgEntrySpecificFieldsProps = ComponentProps<typeof OrgEntrySpecificFields>;
 type TFn = (key: string, values?: Record<string, string | number | Date>) => string;
@@ -96,8 +99,8 @@ interface UseOrgEntrySpecificFieldsPropsArgs {
   onDeviceInfoChange: (value: string) => void;
 }
 
-type OrgFormValues = ReturnType<typeof useOrgPasswordFormState>["values"];
-type OrgFormSetters = ReturnType<typeof useOrgPasswordFormState>["setters"];
+type OrgFormValues = OrgPasswordFormValues;
+type OrgFormSetters = OrgPasswordFormSettersState;
 
 interface UseOrgEntrySpecificFieldsPropsFromStateArgs {
   entryKind: OrgEntrySpecificFieldsProps["entryKind"];

@@ -154,3 +154,7 @@ export function useOrgPasswordFormState(editData?: OrgPasswordFormEditData | nul
 
   return { values, setters };
 }
+
+export type OrgPasswordFormState = ReturnType<typeof useOrgPasswordFormState>;
+export type OrgPasswordFormValues = OrgPasswordFormState["values"];
+export type OrgPasswordFormSettersState = OrgPasswordFormState["setters"];

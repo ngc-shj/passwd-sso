@@ -4,7 +4,7 @@ import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useOrgPasswordFormController } from "@/hooks/use-org-password-form-controller";
-import type { useOrgPasswordFormState } from "@/hooks/use-org-password-form-state";
+import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 
 const submitOrgPasswordFormMock = vi.fn();
 const useOrgEntrySpecificFieldsPropsFromStateMock = vi.fn();
@@ -120,8 +120,9 @@ describe("useOrgPasswordFormController", () => {
 });
 
 function buildFormState() {
-  return {
+  const state: OrgPasswordFormState = {
     values: {
+      saving: false,
       cardNumber: "4242 4242 4242 4242",
       brand: "visa",
       brandSource: "manual",
@@ -135,6 +136,7 @@ function buildFormState() {
       url: "https://example.com",
       customFields: [],
       totp: null,
+      showTotpInput: false,
       content: "",
       cardholderName: "",
       expiryMonth: "",
@@ -207,5 +209,6 @@ function buildFormState() {
       setDeviceInfo: vi.fn(),
       setOrgFolderId: vi.fn(),
     },
-  } as unknown as ReturnType<typeof useOrgPasswordFormState>;
+  };
+  return state;
 }

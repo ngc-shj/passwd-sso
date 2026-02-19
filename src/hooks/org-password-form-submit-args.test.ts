@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { buildOrgPasswordSubmitArgs } from "@/hooks/org-password-form-submit-args";
-import type { useOrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 
 describe("buildOrgPasswordSubmitArgs", () => {
   it("maps form state and callbacks into submit args", () => {
@@ -86,5 +85,5 @@ function createFormState({
       setExpiryError,
       setSaving,
     },
-  } as unknown as ReturnType<typeof useOrgPasswordFormState>;
+  };
 }
