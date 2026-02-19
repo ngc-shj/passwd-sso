@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -12,7 +11,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
-import type { OrgTagData } from "./org-tag-input";
 import { OrgAttachmentSection } from "./org-attachment-section";
 import { getOrgCardValidationState } from "@/components/org/org-credit-card-validation";
 import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
@@ -26,10 +24,6 @@ import { OrgTagsAndFolderSection } from "@/components/org/org-tags-and-folder-se
 import type {
   OrgPasswordFormProps,
 } from "@/components/org/org-password-form-types";
-import {
-  type GeneratorSettings,
-  DEFAULT_GENERATOR_SETTINGS,
-} from "@/lib/generator-prefs";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   EntryActionBar,
@@ -42,7 +36,6 @@ import {
 import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
 import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
 import { executeOrgEntrySubmit } from "@/components/org/org-entry-submit";
 import { useOrgFolders } from "@/hooks/use-org-folders";
@@ -50,6 +43,7 @@ import { useOrgAttachments } from "@/hooks/use-org-attachments";
 import { useOrgEntrySpecificFieldsProps } from "@/hooks/use-org-entry-specific-fields-props";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
+import { useOrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 
 export function OrgPasswordForm({
   orgId,
@@ -66,66 +60,97 @@ export function OrgPasswordForm({
   const ti = useTranslations("IdentityForm");
   const tpk = useTranslations("PasskeyForm");
   const tc = useTranslations("Common");
-  const [saving, setSaving] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
-  const [showCardNumber, setShowCardNumber] = useState(false);
-  const [showCvv, setShowCvv] = useState(false);
 
   const effectiveEntryType = editData?.entryType ?? entryTypeProp;
   const { entryKind, isNote, isCreditCard, isIdentity, isPasskey, isLoginEntry } =
     getOrgEntryKindState(effectiveEntryType);
-
-  const [title, setTitle] = useState(editData?.title ?? "");
-  const [username, setUsername] = useState(editData?.username ?? "");
-  const [password, setPassword] = useState(editData?.password ?? "");
-  const [content, setContent] = useState(editData?.content ?? "");
-  const [url, setUrl] = useState(editData?.url ?? "");
-  const [notes, setNotes] = useState(editData?.notes ?? "");
-  const [selectedTags, setSelectedTags] = useState<OrgTagData[]>(
-    editData?.tags ?? []
-  );
-  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(
-    { ...DEFAULT_GENERATOR_SETTINGS }
-  );
-  const [customFields, setCustomFields] = useState<EntryCustomField[]>(
-    editData?.customFields ?? []
-  );
-  const [totp, setTotp] = useState<EntryTotp | null>(
-    editData?.totp ?? null
-  );
-  const [showTotpInput, setShowTotpInput] = useState(!!editData?.totp);
-  const [cardholderName, setCardholderName] = useState(editData?.cardholderName ?? "");
-  const [cardNumber, setCardNumber] = useState(
-    formatCardNumber(editData?.cardNumber ?? "", editData?.brand ?? "")
-  );
-  const [brand, setBrand] = useState(editData?.brand ?? "");
-  const [brandSource, setBrandSource] = useState<"auto" | "manual">(
-    editData?.brand ? "manual" : "auto"
-  );
-  const [expiryMonth, setExpiryMonth] = useState(editData?.expiryMonth ?? "");
-  const [expiryYear, setExpiryYear] = useState(editData?.expiryYear ?? "");
-  const [cvv, setCvv] = useState(editData?.cvv ?? "");
-  const [fullName, setFullName] = useState(editData?.fullName ?? "");
-  const [address, setAddress] = useState(editData?.address ?? "");
-  const [phone, setPhone] = useState(editData?.phone ?? "");
-  const [email, setEmail] = useState(editData?.email ?? "");
-  const [dateOfBirth, setDateOfBirth] = useState(editData?.dateOfBirth ?? "");
-  const [nationality, setNationality] = useState(editData?.nationality ?? "");
-  const [idNumber, setIdNumber] = useState(editData?.idNumber ?? "");
-  const [issueDate, setIssueDate] = useState(editData?.issueDate ?? "");
-  const [expiryDate, setExpiryDate] = useState(editData?.expiryDate ?? "");
-  const [showIdNumber, setShowIdNumber] = useState(false);
-  const [dobError, setDobError] = useState<string | null>(null);
-  const [expiryError, setExpiryError] = useState<string | null>(null);
-  const [relyingPartyId, setRelyingPartyId] = useState(editData?.relyingPartyId ?? "");
-  const [relyingPartyName, setRelyingPartyName] = useState(editData?.relyingPartyName ?? "");
-  const [credentialId, setCredentialId] = useState(editData?.credentialId ?? "");
-  const [creationDate, setCreationDate] = useState(editData?.creationDate ?? "");
-  const [deviceInfo, setDeviceInfo] = useState(editData?.deviceInfo ?? "");
-  const [showCredentialId, setShowCredentialId] = useState(false);
+  const {
+    saving,
+    setSaving,
+    showPassword,
+    setShowPassword,
+    showGenerator,
+    setShowGenerator,
+    showCardNumber,
+    setShowCardNumber,
+    showCvv,
+    setShowCvv,
+    showIdNumber,
+    setShowIdNumber,
+    showCredentialId,
+    setShowCredentialId,
+    title,
+    setTitle,
+    username,
+    setUsername,
+    password,
+    setPassword,
+    content,
+    setContent,
+    url,
+    setUrl,
+    notes,
+    setNotes,
+    selectedTags,
+    setSelectedTags,
+    generatorSettings,
+    setGeneratorSettings,
+    customFields,
+    setCustomFields,
+    totp,
+    setTotp,
+    showTotpInput,
+    setShowTotpInput,
+    cardholderName,
+    setCardholderName,
+    cardNumber,
+    setCardNumber,
+    brand,
+    setBrand,
+    brandSource,
+    setBrandSource,
+    expiryMonth,
+    setExpiryMonth,
+    expiryYear,
+    setExpiryYear,
+    cvv,
+    setCvv,
+    fullName,
+    setFullName,
+    address,
+    setAddress,
+    phone,
+    setPhone,
+    email,
+    setEmail,
+    dateOfBirth,
+    setDateOfBirth,
+    nationality,
+    setNationality,
+    idNumber,
+    setIdNumber,
+    issueDate,
+    setIssueDate,
+    expiryDate,
+    setExpiryDate,
+    dobError,
+    setDobError,
+    expiryError,
+    setExpiryError,
+    relyingPartyId,
+    setRelyingPartyId,
+    relyingPartyName,
+    setRelyingPartyName,
+    credentialId,
+    setCredentialId,
+    creationDate,
+    setCreationDate,
+    deviceInfo,
+    setDeviceInfo,
+    orgFolderId,
+    setOrgFolderId,
+  } = useOrgPasswordFormState(editData);
   const { attachments, setAttachments } = useOrgAttachments(open, orgId, editData?.id);
-  const [orgFolderId, setOrgFolderId] = useState<string | null>(editData?.orgFolderId ?? null);
   const orgFolders = useOrgFolders(open, orgId);
 
   const isEdit = !!editData;
