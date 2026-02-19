@@ -53,15 +53,15 @@ export function useOrgPasswordFormController({
       }),
     );
 
-  const { hasChanges, submitDisabled } = useOrgPasswordFormDerived({
-    ...buildOrgPasswordDerivedArgs({
+  const { hasChanges, submitDisabled } = useOrgPasswordFormDerived(
+    buildOrgPasswordDerivedArgs({
       effectiveEntryType,
       editData,
       entryKindState,
       values: entryValues,
       cardNumberValid,
     }),
-  });
+  );
 
   const handleSubmit = async () => {
     await submitOrgPasswordForm(
