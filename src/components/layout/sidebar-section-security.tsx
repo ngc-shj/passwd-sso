@@ -97,9 +97,16 @@ export function UtilitiesSection({
       <CollapsibleContent>
         <div className="space-y-1">
           {selectedOrg &&
-            (selectedOrg.role === ORG_ROLE.OWNER || selectedOrg.role === ORG_ROLE.ADMIN) && (
+            (selectedOrg.role === ORG_ROLE.OWNER || selectedOrg.role === ORG_ROLE.ADMIN) ? (
             <Button variant="ghost" className="w-full justify-start gap-2" asChild>
               <Link href={`/dashboard/orgs/${selectedOrg.id}/settings`} onClick={onNavigate}>
+                <Settings className="h-4 w-4" />
+                {tOrg("orgSettings")}
+              </Link>
+            </Button>
+          ) : !selectedOrg && (
+            <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+              <Link href="/dashboard/orgs" onClick={onNavigate}>
                 <Settings className="h-4 w-4" />
                 {tOrg("orgSettings")}
               </Link>
