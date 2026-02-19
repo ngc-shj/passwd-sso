@@ -6,6 +6,7 @@ import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custo
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
+import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";
 
 type EntryTagsAndFolderSectionProps = ComponentProps<typeof EntryTagsAndFolderSection>;
 type EntryCustomFieldsTotpSectionProps = ComponentProps<typeof EntryCustomFieldsTotpSection>;
@@ -92,7 +93,7 @@ export function usePersonalFormSectionsProps({
       description: repromptDescription,
       sectionCardClass,
     },
-    actionBarProps: {
+    actionBarProps: buildEntryActionBarProps({
       hasChanges,
       submitting,
       saveLabel,
@@ -100,6 +101,6 @@ export function usePersonalFormSectionsProps({
       statusUnsavedLabel,
       statusSavedLabel,
       onCancel,
-    },
+    }),
   };
 }

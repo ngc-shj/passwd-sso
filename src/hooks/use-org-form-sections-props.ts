@@ -6,6 +6,7 @@ import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custo
 import { OrgTagsAndFolderSection } from "@/components/org/org-tags-and-folder-section";
 import type { OrgFolderItem } from "@/components/org/org-password-form-types";
 import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
+import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";
 
 type OrgTagsAndFolderSectionProps = ComponentProps<typeof OrgTagsAndFolderSection>;
 type EntryCustomFieldsTotpSectionProps = ComponentProps<typeof EntryCustomFieldsTotpSection>;
@@ -83,7 +84,7 @@ export function useOrgFormSectionsProps({
           sectionCardClass,
         }
       : null,
-    actionBarProps: {
+    actionBarProps: buildEntryActionBarProps({
       hasChanges,
       submitting: saving,
       submitDisabled,
@@ -92,6 +93,6 @@ export function useOrgFormSectionsProps({
       statusUnsavedLabel,
       statusSavedLabel,
       onCancel,
-    },
+    }),
   };
 }
