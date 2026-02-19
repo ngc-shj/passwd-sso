@@ -6,10 +6,10 @@ import {
   usePersonalPasswordFormState,
 } from "@/hooks/use-personal-password-form-state";
 import {
-  usePersonalPasswordFormPresenter,
-} from "@/hooks/use-personal-password-form-presenter";
+  buildPersonalPasswordFormPresenter,
+} from "@/hooks/personal-password-form-presenter";
 
-describe("usePersonalPasswordFormPresenter", () => {
+describe("buildPersonalPasswordFormPresenter", () => {
   it("exposes entry values, derived state and login field props", () => {
     const { result } = renderHook(() => {
       const formState = usePersonalPasswordFormState({
@@ -21,7 +21,7 @@ describe("usePersonalPasswordFormPresenter", () => {
         notes: "",
         tags: [],
       });
-      return usePersonalPasswordFormPresenter({
+      return buildPersonalPasswordFormPresenter({
         initialData: {
           id: "entry-1",
           title: "original",

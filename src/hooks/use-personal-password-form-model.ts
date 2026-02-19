@@ -8,8 +8,8 @@ import {
   usePersonalPasswordFormController,
 } from "@/hooks/use-personal-password-form-controller";
 import {
-  usePersonalPasswordFormPresenter,
-} from "@/hooks/use-personal-password-form-presenter";
+  buildPersonalPasswordFormPresenter,
+} from "@/hooks/personal-password-form-presenter";
 import {
   toPersonalPasswordFormTranslations,
   useEntryFormTranslations,
@@ -30,7 +30,7 @@ export function usePersonalPasswordFormModel({
   const formState = usePersonalPasswordFormState(initialData);
   const folders = usePersonalFolders();
 
-  const { values, hasChanges, loginMainFieldsProps } = usePersonalPasswordFormPresenter({
+  const { values, hasChanges, loginMainFieldsProps } = buildPersonalPasswordFormPresenter({
     initialData,
     formState,
     translations,

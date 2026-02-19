@@ -1,9 +1,7 @@
-"use client";
-
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
 import {
-  usePersonalPasswordFormDerived,
-} from "@/hooks/use-personal-password-form-derived";
+  buildPersonalPasswordFormDerived,
+} from "@/hooks/personal-password-form-derived";
 import {
   buildPersonalEntryLoginFieldsProps,
 } from "@/hooks/personal-entry-login-fields-props";
@@ -19,13 +17,13 @@ export interface PersonalPasswordFormPresenterArgs {
   translations: PersonalPasswordFormTranslations;
 }
 
-export function usePersonalPasswordFormPresenter({
+export function buildPersonalPasswordFormPresenter({
   initialData,
   formState,
   translations,
 }: PersonalPasswordFormPresenterArgs) {
   const values = selectPersonalEntryValues(formState.values);
-  const { hasChanges, generatorSummary } = usePersonalPasswordFormDerived({
+  const { hasChanges, generatorSummary } = buildPersonalPasswordFormDerived({
     initialData,
     values,
     translations,

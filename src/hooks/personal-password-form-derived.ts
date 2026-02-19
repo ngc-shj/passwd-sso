@@ -1,5 +1,3 @@
-"use client";
-
 import { buildGeneratorSummary } from "@/lib/generator-summary";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
@@ -61,7 +59,7 @@ export type PersonalPasswordFormDerivedArgs = {
   translations: PersonalPasswordFormTranslations;
 };
 
-export function usePersonalPasswordFormDerived({
+export function buildPersonalPasswordFormDerived({
   initialData,
   values,
   translations,
