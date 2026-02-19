@@ -90,7 +90,8 @@ export const createTagSchema = z.object({
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
     .optional()
-    .or(z.literal("")),
+    .or(z.literal(""))
+    .or(z.null().transform(() => undefined)),
 });
 
 export const updateTagSchema = z.object({
