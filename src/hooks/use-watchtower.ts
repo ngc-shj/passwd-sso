@@ -16,6 +16,7 @@ import {
 // ─── Constants ──────────────────────────────────────────────
 
 export const OLD_THRESHOLD_DAYS = 90;
+export const EXPIRING_THRESHOLD_DAYS = 30;
 export const WATCHTOWER_COOLDOWN_MS = 5 * 60 * 1000;
 
 // ─── Types ───────────────────────────────────────────────────
@@ -34,6 +35,12 @@ export interface ReusedGroup {
   entries: { id: string; title: string; username: string | null }[];
 }
 
+export interface DuplicateGroup {
+  hostname: string;
+  username: string;
+  entries: { id: string; title: string; username: string | null }[];
+}
+
 export interface WatchtowerReport {
   totalPasswords: number;
   overallScore: number;
@@ -42,6 +49,8 @@ export interface WatchtowerReport {
   reused: ReusedGroup[];
   old: PasswordIssue[];
   unsecured: PasswordIssue[];
+  duplicate: DuplicateGroup[];
+  expiring: PasswordIssue[];
   analyzedAt: Date;
 }
 
@@ -58,6 +67,7 @@ interface DecryptedEntry {
   password: string;
   url: string | null;
   updatedAt: string;
+  expiresAt: string | null;
 }
 
 // ─── Hook ────────────────────────────────────────────────────
@@ -146,6 +156,8 @@ export function useWatchtower() {
           reused: [],
           old: [],
           unsecured: [],
+          duplicate: [],
+          expiring: [],
           analyzedAt: new Date(),
         });
         return;
@@ -174,6 +186,7 @@ export function useWatchtower() {
             password: parsed.password,
             url: parsed.url ?? null,
             updatedAt: raw.updatedAt,
+            expiresAt: raw.expiresAt ?? null,
           });
         } catch {
           // Skip entries that fail to decrypt
@@ -260,6 +273,47 @@ export function useWatchtower() {
         }
       }
 
+      // Duplicate detection: same hostname + username
+      const duplicateMap = new Map<string, DecryptedEntry[]>();
+      for (const entry of entries) {
+        if (!entry.url || !entry.username) continue;
+        const hostname = normalizeHostname(entry.url);
+        if (!hostname) continue;
+        const key = `${hostname}\0${entry.username.toLowerCase()}`;
+        const group = duplicateMap.get(key) ?? [];
+        group.push(entry);
+        duplicateMap.set(key, group);
+      }
+
+      const duplicate: DuplicateGroup[] = [];
+      for (const [key, group] of duplicateMap) {
+        if (group.length < 2) continue;
+        const [hostname, username] = key.split("\0");
+        duplicate.push({
+          hostname, username,
+          entries: group.map((e) => ({ id: e.id, title: e.title, username: e.username })),
+        });
+      }
+
+      // Expiration detection
+      const expiring: PasswordIssue[] = [];
+      for (const entry of entries) {
+        if (!entry.expiresAt) continue;
+        const expiresAtMs = new Date(entry.expiresAt).getTime();
+        const daysUntilExpiry = Math.floor((expiresAtMs - now) / (24 * 60 * 60 * 1000));
+        if (daysUntilExpiry <= EXPIRING_THRESHOLD_DAYS) {
+          expiring.push({
+            id: entry.id,
+            title: entry.title,
+            username: entry.username,
+            severity: daysUntilExpiry < 0 ? "medium" : "low",
+            details: daysUntilExpiry < 0
+              ? `expired:${Math.abs(daysUntilExpiry)}`
+              : `expires:${entry.expiresAt.split("T")[0]}`,
+          });
+        }
+      }
+
       // Step 4: HIBP breach check (rate-limited)
       setProgress({ current: 3, total: 4, step: "hibp" });
       const breached: PasswordIssue[] = [];
@@ -305,6 +359,7 @@ export function useWatchtower() {
         weak.length,
         reused.reduce((sum, g) => sum + g.entries.length, 0),
         old.length,
+        duplicate.reduce((sum, g) => sum + g.entries.length, 0),
         unsecured.length
       );
 
@@ -316,6 +371,8 @@ export function useWatchtower() {
         reused,
         old,
         unsecured,
+        duplicate,
+        expiring,
         analyzedAt: new Date(),
       });
     } catch {
@@ -336,6 +393,17 @@ export function useWatchtower() {
   };
 }
 
+// ─── Helpers ────────────────────────────────────────────────
+
+function normalizeHostname(url: string): string | null {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname.startsWith("www.") ? hostname.slice(4) : hostname;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Score Calculation ───────────────────────────────────────
 
 function calculateScore(
@@ -344,18 +412,20 @@ function calculateScore(
   weakCount: number,
   reusedCount: number,
   oldCount: number,
+  duplicateCount: number,
   unsecuredCount: number
 ): number {
   if (total === 0) return 100;
 
-  // Weighted scoring: breach(40%), strength(25%), uniqueness(20%), freshness(10%), security(5%)
+  // Weighted scoring: breach(40%), strength(25%), uniqueness(20%), freshness(5%), duplicate(5%), security(5%)
   const breachScore = ((total - breachedCount) / total) * 40;
   const strengthScore = ((total - weakCount) / total) * 25;
   const uniqueScore = ((total - reusedCount) / total) * 20;
-  const freshnessScore = ((total - oldCount) / total) * 10;
+  const freshnessScore = ((total - oldCount) / total) * 5;
+  const duplicateScore = ((total - duplicateCount) / total) * 5;
   const securityScore = ((total - unsecuredCount) / total) * 5;
 
   return Math.round(
-    Math.max(0, Math.min(100, breachScore + strengthScore + uniqueScore + freshnessScore + securityScore))
+    Math.max(0, Math.min(100, breachScore + strengthScore + uniqueScore + freshnessScore + duplicateScore + securityScore))
   );
 }

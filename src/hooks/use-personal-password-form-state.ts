@@ -24,6 +24,7 @@ export interface PersonalPasswordFormValues {
   totp: EntryTotp | null;
   showTotpInput: boolean;
   requireReprompt: boolean;
+  expiresAt: string | null;
   folderId: string | null;
 }
 
@@ -38,6 +39,7 @@ export interface PersonalPasswordFormEntryValues {
   customFields: EntryCustomField[];
   totp: EntryTotp | null;
   requireReprompt: boolean;
+  expiresAt: string | null;
   folderId: string | null;
 }
 
@@ -56,6 +58,7 @@ export interface PersonalPasswordFormSetters {
   setTotp: (value: EntryTotp | null) => void;
   setShowTotpInput: (value: boolean) => void;
   setRequireReprompt: (value: boolean) => void;
+  setExpiresAt: (value: string | null) => void;
   setFolderId: (value: string | null) => void;
 }
 
@@ -97,6 +100,7 @@ export function selectPersonalEntryValues(
     customFields: values.customFields,
     totp: values.totp,
     requireReprompt: values.requireReprompt,
+    expiresAt: values.expiresAt,
     folderId: values.folderId,
   };
 }

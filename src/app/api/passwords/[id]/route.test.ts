@@ -49,6 +49,7 @@ const ownedEntry = {
   isFavorite: false,
   isArchived: false,
   requireReprompt: false,
+  expiresAt: null as Date | null,
   tags: [{ id: "t1" }],
   createdAt: now,
   updatedAt: now,
@@ -171,6 +172,29 @@ describe("GET /api/passwords/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.requireReprompt).toBe(true);
+  });
+
+  it("returns expiresAt in response", async () => {
+    const futureDate = new Date("2026-06-01T00:00:00Z");
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ ...ownedEntry, expiresAt: futureDate });
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.expiresAt).toBe(futureDate.toISOString());
+  });
+
+  it("returns null expiresAt when not set", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.expiresAt).toBeNull();
   });
 
   it("returns PASSKEY entryType", async () => {
@@ -313,6 +337,62 @@ describe("PUT /api/passwords/[id]", () => {
     expect(mockPrismaPasswordEntry.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ requireReprompt: true }),
+      }),
+    );
+  });
+
+  it("updates expiresAt with ISO string", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "overview-cipher",
+      overviewIv: "overview-iv",
+      overviewAuthTag: "overview-tag",
+      keyVersion: 1,
+      expiresAt: new Date("2026-06-01T00:00:00.000Z"),
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { expiresAt: "2026-06-01T00:00:00.000Z" },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrismaPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ expiresAt: new Date("2026-06-01T00:00:00.000Z") }),
+      }),
+    );
+  });
+
+  it("clears expiresAt with null", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ ...ownedEntry, expiresAt: new Date("2026-06-01") });
+    mockPrismaPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "overview-cipher",
+      overviewIv: "overview-iv",
+      overviewAuthTag: "overview-tag",
+      keyVersion: 1,
+      expiresAt: null,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { expiresAt: null },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrismaPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ expiresAt: null }),
       }),
     );
   });

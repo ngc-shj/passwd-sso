@@ -62,6 +62,7 @@ interface DisplayEntry {
   isFavorite: boolean;
   isArchived: boolean;
   requireReprompt: boolean;
+  expiresAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -171,6 +172,7 @@ export function PasswordList({
             isFavorite: entry.isFavorite ?? false,
             isArchived: entry.isArchived ?? false,
             requireReprompt: entry.requireReprompt ?? overview.requireReprompt ?? false,
+            expiresAt: entry.expiresAt ?? null,
             createdAt: entry.createdAt,
             updatedAt: entry.updatedAt,
           });
@@ -438,6 +440,7 @@ export function PasswordList({
               isFavorite={entry.isFavorite}
               isArchived={entry.isArchived}
               requireReprompt={entry.requireReprompt}
+              expiresAt={entry.expiresAt}
               expanded={expandedId === entry.id}
               onToggleFavorite={handleToggleFavorite}
               onToggleArchive={handleToggleArchive}

@@ -3,6 +3,7 @@
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { PasswordFormPageShell } from "@/components/passwords/password-form-page-shell";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import {
   EntryActionBar,
@@ -38,6 +39,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     tagsAndFolderProps,
     customFieldsTotpProps,
     repromptSectionProps,
+    expirationSectionProps,
     actionBarProps,
   } = buildPersonalFormSectionsProps({
     tagsTitle: t("tags"),
@@ -46,6 +48,8 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     sectionCardClass: dialogSectionClass,
     repromptTitle: t("requireReprompt"),
     repromptDescription: t("requireRepromptHelp"),
+    expirationTitle: t("expirationTitle"),
+    expirationDescription: t("expirationDescription"),
     hasChanges,
     submitting: values.submitting,
     saveLabel: mode === "create" ? tc("save") : tc("update"),
@@ -76,6 +80,8 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
       <EntryCustomFieldsTotpSection {...customFieldsTotpProps} />
 
       <EntryRepromptSection {...repromptSectionProps} />
+
+      <EntryExpirationSection {...expirationSectionProps} />
 
       <EntryActionBar {...actionBarProps} />
     </form>

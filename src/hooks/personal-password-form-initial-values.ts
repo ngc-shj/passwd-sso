@@ -18,6 +18,7 @@ export interface PersonalPasswordFormInitialValues {
   totp: EntryTotp | null;
   showTotpInput: boolean;
   requireReprompt: boolean;
+  expiresAt: string | null;
   folderId: string | null;
 }
 
@@ -36,6 +37,7 @@ export function buildPersonalPasswordFormInitialValues(
     totp: initialData?.totp ?? null,
     showTotpInput: Boolean(initialData?.totp),
     requireReprompt: initialData?.requireReprompt ?? false,
+    expiresAt: initialData?.expiresAt ?? null,
     folderId: initialData?.folderId ?? null,
   };
 }

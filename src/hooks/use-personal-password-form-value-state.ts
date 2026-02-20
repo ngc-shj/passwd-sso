@@ -16,6 +16,7 @@ export function usePersonalPasswordFormValueState(initial: PersonalPasswordFormI
   const [totp, setTotp] = useState<EntryTotp | null>(initial.totp);
   const [showTotpInput, setShowTotpInput] = useState(initial.showTotpInput);
   const [requireReprompt, setRequireReprompt] = useState(initial.requireReprompt);
+  const [expiresAt, setExpiresAt] = useState<string | null>(initial.expiresAt);
   const [folderId, setFolderId] = useState<string | null>(initial.folderId);
 
   return {
@@ -31,6 +32,7 @@ export function usePersonalPasswordFormValueState(initial: PersonalPasswordFormI
       totp,
       showTotpInput,
       requireReprompt,
+      expiresAt,
       folderId,
     },
     setters: {
@@ -45,6 +47,7 @@ export function usePersonalPasswordFormValueState(initial: PersonalPasswordFormI
       setTotp,
       setShowTotpInput,
       setRequireReprompt,
+      setExpiresAt,
       setFolderId,
     },
   };
