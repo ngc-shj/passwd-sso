@@ -41,7 +41,7 @@ export function EntryExpirationSection({
             min={today}
             onChange={(e) => {
               const v = e.target.value;
-              onChange(v ? `${v}T00:00:00.000Z` : null);
+              onChange(v ? `${v}T23:59:59.999Z` : null);
             }}
             className="w-auto"
           />

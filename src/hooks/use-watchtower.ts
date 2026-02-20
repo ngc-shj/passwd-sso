@@ -295,23 +295,29 @@ export function useWatchtower() {
         });
       }
 
-      // Expiration detection
+      // Expiration detection (date-only comparison to avoid timezone issues)
+      const todayDate = new Date(now);
+      const todayStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`;
+      const thresholdDate = new Date(now + EXPIRING_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
+      const thresholdStr = `${thresholdDate.getFullYear()}-${String(thresholdDate.getMonth() + 1).padStart(2, "0")}-${String(thresholdDate.getDate()).padStart(2, "0")}`;
       const expiring: PasswordIssue[] = [];
       for (const entry of entries) {
         if (!entry.expiresAt) continue;
-        const expiresAtMs = new Date(entry.expiresAt).getTime();
-        const daysUntilExpiry = Math.floor((expiresAtMs - now) / (24 * 60 * 60 * 1000));
-        if (daysUntilExpiry <= EXPIRING_THRESHOLD_DAYS) {
-          expiring.push({
-            id: entry.id,
-            title: entry.title,
-            username: entry.username,
-            severity: daysUntilExpiry < 0 ? "medium" : "low",
-            details: daysUntilExpiry < 0
-              ? `expired:${Math.abs(daysUntilExpiry)}`
-              : `expires:${entry.expiresAt.split("T")[0]}`,
-          });
-        }
+        const expiresDate = entry.expiresAt.split("T")[0];
+        if (expiresDate > thresholdStr) continue;
+        const isExpired = expiresDate < todayStr;
+        const expiresAtMs = new Date(expiresDate).getTime();
+        const todayMs = new Date(todayStr).getTime();
+        const daysDiff = Math.round(Math.abs(expiresAtMs - todayMs) / (24 * 60 * 60 * 1000));
+        expiring.push({
+          id: entry.id,
+          title: entry.title,
+          username: entry.username,
+          severity: isExpired ? "medium" : "low",
+          details: isExpired
+            ? `expired:${daysDiff}`
+            : `expires:${expiresDate}`,
+        });
       }
 
       // Step 4: HIBP breach check (rate-limited)

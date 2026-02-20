@@ -489,11 +489,13 @@ export function PasswordCard({
               )}
               {(() => {
                 if (!expiresAt) return null;
-                const expiresMs = new Date(expiresAt).getTime();
-                const nowMs = Date.now();
-                const thresholdMs = EXPIRING_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
-                if (expiresMs > nowMs + thresholdMs) return null;
-                const isExpired = expiresMs < nowMs;
+                const nowDate = new Date();
+                const todayStr = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, "0")}-${String(nowDate.getDate()).padStart(2, "0")}`;
+                const thresholdDate = new Date(Date.now() + EXPIRING_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
+                const thresholdStr = `${thresholdDate.getFullYear()}-${String(thresholdDate.getMonth() + 1).padStart(2, "0")}-${String(thresholdDate.getDate()).padStart(2, "0")}`;
+                const expiresDate = expiresAt.split("T")[0];
+                if (expiresDate > thresholdStr) return null;
+                const isExpired = expiresDate < todayStr;
                 return (
                   <span title={isExpired ? t("expiredBadge") : t("expiringBadge")}>
                     <CalendarClock
