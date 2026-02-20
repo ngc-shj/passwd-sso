@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
-import { useWatchtower, OLD_THRESHOLD_DAYS } from "@/hooks/use-watchtower";
+import { useWatchtower, OLD_THRESHOLD_DAYS, EXPIRING_THRESHOLD_DAYS } from "@/hooks/use-watchtower";
 import { ScoreGauge } from "@/components/watchtower/score-gauge";
 import {
   IssueSection,
   ReusedSection,
+  DuplicateSection,
 } from "@/components/watchtower/issue-section";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,11 @@ export default function WatchtowerPage() {
   const formatUnsecuredDetails = (details: string) => {
     const url = details.replace("url:", "");
     return url;
+  };
+
+  const formatExpiringDetails = (details: string) => {
+    if (details.startsWith("expired:")) return t("expiredDays", { days: details.replace("expired:", "") });
+    return t("expiresOn", { date: details.replace("expires:", "") });
   };
 
   useEffect(() => {
@@ -280,6 +286,19 @@ export default function WatchtowerPage() {
                   description={t("unsecuredDesc")}
                   issues={report.unsecured}
                   formatDetails={formatUnsecuredDetails}
+                />
+                <DuplicateSection
+                  title={t("duplicate")}
+                  description={t("duplicateDesc")}
+                  groups={report.duplicate}
+                  formatCount={(count, hostname) => t("duplicateCount", { count, hostname })}
+                />
+                <IssueSection
+                  type="expiring"
+                  title={t("expiring")}
+                  description={t("expiringDesc", { days: EXPIRING_THRESHOLD_DAYS })}
+                  issues={report.expiring}
+                  formatDetails={formatExpiringDetails}
                 />
               </div>
             )}

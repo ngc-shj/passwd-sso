@@ -15,6 +15,7 @@ interface ExecutePersonalEntrySubmitArgs {
   tagIds: string[];
   entryType?: EntryTypeValue;
   requireReprompt?: boolean;
+  expiresAt?: string | null;
   folderId?: string | null;
   setSubmitting: (value: boolean) => void;
   t: PasswordFormTranslator;
@@ -32,6 +33,7 @@ export async function executePersonalEntrySubmit({
   tagIds,
   entryType,
   requireReprompt,
+  expiresAt,
   folderId,
   setSubmitting,
   t,
@@ -51,6 +53,7 @@ export async function executePersonalEntrySubmit({
       tagIds,
       entryType,
       requireReprompt,
+      expiresAt,
       folderId,
     });
     handlePersonalSaveFeedback({ res, mode, t, router, onSaved });

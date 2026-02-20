@@ -181,6 +181,7 @@ model PasswordEntry {
   isFavorite        Boolean  @default(false) @map("is_favorite")
   isArchived        Boolean  @default(false) @map("is_archived")
   requireReprompt   Boolean  @default(false) @map("require_reprompt")
+  expiresAt         DateTime? @map("expires_at")
   deletedAt         DateTime? @map("deleted_at")
 
   userId            String   @map("user_id")
@@ -285,6 +286,7 @@ model OrgPasswordEntry {
 
   // Metadata (unencrypted)
   isArchived Boolean   @default(false) @map("is_archived")
+  expiresAt  DateTime? @map("expires_at")
   deletedAt  DateTime? @map("deleted_at")
 
   orgId       String  @map("org_id")

@@ -12,6 +12,8 @@ describe("buildPersonalFormSectionsProps", () => {
       sectionCardClass: "flat",
       repromptTitle: "reprompt",
       repromptDescription: "desc",
+      expirationTitle: "expiration",
+      expirationDescription: "expDesc",
       hasChanges: true,
       submitting: false,
       saveLabel: "save",
@@ -27,6 +29,9 @@ describe("buildPersonalFormSectionsProps", () => {
     expect(result.tagsAndFolderProps.onTagsChange).toBe(state.setters.setSelectedTags);
     expect(result.customFieldsTotpProps.setCustomFields).toBe(state.setters.setCustomFields);
     expect(result.repromptSectionProps.checked).toBe(false);
+    expect(result.expirationSectionProps.value).toBeNull();
+    expect(result.expirationSectionProps.onChange).toBe(state.setters.setExpiresAt);
+    expect(result.expirationSectionProps.title).toBe("expiration");
     expect(result.actionBarProps.hasChanges).toBe(true);
     expect(result.actionBarProps.submitting).toBe(false);
   });
@@ -41,6 +46,7 @@ function createState(): Pick<PersonalPasswordFormState, "values" | "setters"> {
       totp: null,
       showTotpInput: false,
       requireReprompt: false,
+      expiresAt: null,
     } as PersonalPasswordFormState["values"],
     setters: {
       setSelectedTags: vi.fn(),
@@ -49,6 +55,7 @@ function createState(): Pick<PersonalPasswordFormState, "values" | "setters"> {
       setTotp: vi.fn(),
       setShowTotpInput: vi.fn(),
       setRequireReprompt: vi.fn(),
+      setExpiresAt: vi.fn(),
     } as PersonalPasswordFormState["setters"],
   };
 }

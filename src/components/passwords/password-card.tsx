@@ -47,6 +47,7 @@ import {
   Fingerprint,
   Link as LinkIcon,
   ShieldCheck,
+  CalendarClock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useVault } from "@/lib/vault-context";
@@ -99,6 +100,8 @@ interface PasswordCardProps {
   orgId?: string;
   // Optional: reprompt indicator
   requireReprompt?: boolean;
+  // Optional: expiration date
+  expiresAt?: string | null;
 }
 
 interface VaultEntryFull {
@@ -186,6 +189,7 @@ export function PasswordCard({
   createdBy,
   orgId,
   requireReprompt = false,
+  expiresAt,
 }: PasswordCardProps) {
   const isOrgMode = !!getPasswordProp;
   const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
@@ -481,6 +485,15 @@ export function PasswordCard({
               {title}
               {requireReprompt && (
                 <ShieldCheck className="inline-block ml-1 h-3.5 w-3.5 text-muted-foreground align-text-bottom" />
+              )}
+              {expiresAt && new Date(expiresAt).getTime() <= Date.now() + 30 * 24 * 60 * 60 * 1000 && (
+                <span title={new Date(expiresAt).getTime() < Date.now() ? t("expiredBadge") : t("expiringBadge")}>
+                  <CalendarClock
+                    className={`inline-block ml-1 h-3.5 w-3.5 align-text-bottom ${
+                      new Date(expiresAt).getTime() < Date.now() ? "text-orange-500" : "text-amber-400"
+                    }`}
+                  />
+                </span>
               )}
             </span>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">

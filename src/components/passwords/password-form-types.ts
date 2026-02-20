@@ -15,6 +15,7 @@ export interface PersonalPasswordFormInitialData {
   customFields?: EntryCustomField[];
   totp?: EntryTotp;
   requireReprompt?: boolean;
+  expiresAt?: string | null;
   folderId?: string | null;
 }
 

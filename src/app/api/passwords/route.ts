@@ -84,6 +84,7 @@ async function handleGET(req: NextRequest) {
     isFavorite: entry.isFavorite,
     isArchived: entry.isArchived,
     requireReprompt: entry.requireReprompt,
+    expiresAt: entry.expiresAt,
     folderId: entry.folderId,
     tagIds: entry.tags.map((t) => t.id),
     createdAt: entry.createdAt,
@@ -116,7 +117,7 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, entryType, requireReprompt } = parsed.data;
+  const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, entryType, requireReprompt, expiresAt } = parsed.data;
 
   const entry = await prisma.passwordEntry.create({
     data: {
@@ -131,6 +132,7 @@ async function handlePOST(req: NextRequest) {
       aadVersion,
       entryType,
       ...(requireReprompt !== undefined ? { requireReprompt } : {}),
+      ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
       ...(folderId ? { folderId } : {}),
       userId: session.user.id,
       ...(tagIds?.length
@@ -182,6 +184,7 @@ async function handlePOST(req: NextRequest) {
       aadVersion: entry.aadVersion,
       entryType: entry.entryType,
       requireReprompt: entry.requireReprompt,
+      expiresAt: entry.expiresAt,
       tagIds: entry.tags.map((t) => t.id),
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
