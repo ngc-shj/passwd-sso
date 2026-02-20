@@ -59,6 +59,19 @@ export async function GET(req: NextRequest, { params }: Params) {
     return new NextResponse(null, { status: 404 });
   }
 
+  // Record access log (fire-and-forget)
+  const accessIp = ip === "unknown" ? null : ip;
+  const ua = req.headers.get("user-agent");
+  prisma.shareAccessLog
+    .create({
+      data: {
+        shareId: share.id,
+        ip: accessIp,
+        userAgent: ua?.slice(0, 512) ?? null,
+      },
+    })
+    .catch(() => {});
+
   // Decrypt file
   const decrypted = decryptShareBinary({
     ciphertext: Buffer.from(share.encryptedFile),

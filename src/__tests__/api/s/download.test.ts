@@ -2,14 +2,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createParams } from "../../helpers/request-builder";
 import { NextRequest } from "next/server";
 
-const { mockFindUnique, mockCheck } = vi.hoisted(() => ({
+const { mockFindUnique, mockCheck, mockAccessLogCreate } = vi.hoisted(() => ({
   mockFindUnique: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue(true),
+  mockAccessLogCreate: vi.fn().mockReturnValue({ catch: vi.fn() }),
 }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { findUnique: mockFindUnique },
+    shareAccessLog: { create: mockAccessLogCreate },
   },
 }));
 vi.mock("@/lib/crypto-server", () => ({
@@ -160,6 +162,17 @@ describe("GET /s/[token]/download", () => {
     expect(res.headers.get("Content-Disposition")).toContain(
       `filename*=UTF-8''${encodeURIComponent("テスト.pdf")}`
     );
+  });
+
+  it("returns 400 when shareType is ENTRY_SHARE", async () => {
+    mockFindUnique.mockResolvedValue(
+      makeFileShare({ shareType: "ENTRY_SHARE" })
+    );
+
+    const req = createDownloadRequest(VALID_TOKEN);
+    const res = await GET(req as never, createParams({ token: VALID_TOKEN }));
+
+    expect(res.status).toBe(400);
   });
 
   it("does not check viewCount (allows download after page view)", async () => {
