@@ -22,7 +22,7 @@ describe("EntryExpirationSection", () => {
   it("displays date input with current value", () => {
     render(
       <EntryExpirationSection
-        value="2026-06-01T00:00:00.000Z"
+        value="2026-06-01T23:59:59.999Z"
         onChange={vi.fn()}
         title="Expiration"
         description="desc"
@@ -46,14 +46,14 @@ describe("EntryExpirationSection", () => {
 
     const input = document.querySelector("input[type='date']") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "2026-07-15" } });
-    expect(onChange).toHaveBeenCalledWith("2026-07-15T00:00:00.000Z");
+    expect(onChange).toHaveBeenCalledWith("2026-07-15T23:59:59.999Z");
   });
 
   it("calls onChange with null when date is cleared via input", () => {
     const onChange = vi.fn();
     render(
       <EntryExpirationSection
-        value="2026-06-01T00:00:00.000Z"
+        value="2026-06-01T23:59:59.999Z"
         onChange={onChange}
         title="Expiration"
         description="desc"
@@ -69,7 +69,7 @@ describe("EntryExpirationSection", () => {
     const onChange = vi.fn();
     render(
       <EntryExpirationSection
-        value="2026-06-01T00:00:00.000Z"
+        value="2026-06-01T23:59:59.999Z"
         onChange={onChange}
         title="Expiration"
         description="desc"
