@@ -407,6 +407,7 @@ export const createOrgTagSchema = z.object({
   color: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
+    .nullable()
     .optional()
     .or(z.literal("")),
 });
@@ -418,10 +419,14 @@ export const SEND_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 export const SEND_MAX_ACTIVE_TOTAL_BYTES = 100 * 1024 * 1024; // ユーザーごと合計 100MB
 
 /**
- * Safe filename pattern: alphanumeric, CJK, Hangul, hyphens, underscores, dots, spaces.
- * Rejects path separators, CRLF, null bytes, control characters, and emoji.
+ * Safe filename pattern: alphanumeric, CJK, Hangul, minimal punctuation.
+ * Allows: letters, digits, underscore, CJK, Hangul, half/fullwidth spaces, dots,
+ *         hyphens, parentheses (browser duplicate downloads), apostrophes (possessives).
+ * Rejects: path separators (/\), CRLF, null bytes, control characters (tab, BOM, etc.),
+ *          emoji, and most special characters (#, &, <, >, |, etc.).
+ * Note: Uses explicit space chars instead of \s to exclude \t, \v, \f, \uFEFF.
  */
-const SAFE_FILENAME_RE = /^[\w\u3000-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\s.\-]+$/;
+const SAFE_FILENAME_RE = /^[\w\u3000-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF .\-()']+$/;
 
 /** Windows reserved device names (case-insensitive) */
 const WINDOWS_RESERVED_RE = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)/i;
@@ -431,6 +436,8 @@ const WINDOWS_RESERVED_RE = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)/i;
  */
 export function isValidSendFilename(name: string): boolean {
   if (!name || name.length === 0) return false;
+  // No leading/trailing whitespace or whitespace-only names
+  if (name !== name.trim()) return false;
   // UTF-8 byte length ≤ 255
   if (new TextEncoder().encode(name).length > 255) return false;
   // No leading/trailing dots
