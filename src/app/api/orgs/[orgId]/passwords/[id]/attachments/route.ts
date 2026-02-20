@@ -13,6 +13,7 @@ import {
   ALLOWED_CONTENT_TYPES,
   MAX_FILE_SIZE,
   MAX_ATTACHMENTS_PER_ENTRY,
+  isValidSendFilename,
 } from "@/lib/validations";
 
 type RouteContext = { params: Promise<{ orgId: string; id: string }> };
@@ -172,8 +173,14 @@ export async function POST(
     );
   }
 
-  // Sanitize filename
-  const sanitizedFilename = filename.replace(/[/\\]/g, "_").slice(0, 255);
+  // Validate filename (reject path traversal, CRLF, null bytes, Windows reserved names, etc.)
+  if (!isValidSendFilename(filename)) {
+    return NextResponse.json(
+      { error: API_ERROR.INVALID_FILENAME },
+      { status: 400 }
+    );
+  }
+  const sanitizedFilename = filename.slice(0, 255);
 
   // Read plaintext file and validate actual buffer size (defense in depth)
   const plainBuffer = Buffer.from(await file.arrayBuffer());
@@ -183,6 +190,19 @@ export async function POST(
       { status: 400 }
     );
   }
+
+  // Magic byte verification: detect actual file type and compare with declared content type
+  const { fileTypeFromBuffer } = await import("file-type");
+  const detected = await fileTypeFromBuffer(plainBuffer);
+  if (detected) {
+    if (contentType !== detected.mime && contentType !== "application/octet-stream") {
+      return NextResponse.json(
+        { error: API_ERROR.CONTENT_TYPE_NOT_ALLOWED },
+        { status: 400 }
+      );
+    }
+  }
+  // If detected is undefined (text files like .txt, .csv, .json), trust declared content type
 
   // Encrypt server-side
   const orgKey = unwrapOrgKey({
@@ -194,6 +214,7 @@ export async function POST(
   const attachmentId = crypto.randomUUID();
   const aad = Buffer.from(buildAttachmentAAD(id, attachmentId));
   const encrypted = encryptServerBinary(plainBuffer, orgKey, aad);
+  plainBuffer.fill(0); // Clear plaintext from memory
   const blobStore = getAttachmentBlobStore();
   const blobContext = { attachmentId, entryId: id, orgId };
   const storedBlob = await blobStore.putObject(encrypted.ciphertext, blobContext);
