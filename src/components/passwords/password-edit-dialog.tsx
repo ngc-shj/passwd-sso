@@ -98,6 +98,7 @@ interface FormData {
   creationDate?: string | null;
   deviceInfo?: string | null;
   requireReprompt?: boolean;
+  expiresAt?: string | null;
   folderId?: string | null;
 }
 
@@ -198,6 +199,7 @@ export function PasswordEditDialog({
           creationDate: entry.creationDate,
           deviceInfo: entry.deviceInfo,
           requireReprompt: raw.requireReprompt ?? false,
+          expiresAt: raw.expiresAt ?? null,
           folderId: raw.folderId ?? null,
         });
       } catch (e) {
