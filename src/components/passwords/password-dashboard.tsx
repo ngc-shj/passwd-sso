@@ -21,7 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint } from "lucide-react";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2 } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 
@@ -70,6 +70,24 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
         : entryType && ENTRY_TYPE_TITLES[entryType]
           ? ENTRY_TYPE_TITLES[entryType]
           : t("passwords");
+  const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
+    LOGIN: <KeyRound className="h-6 w-6" />,
+    SECURE_NOTE: <FileText className="h-6 w-6" />,
+    CREDIT_CARD: <CreditCard className="h-6 w-6" />,
+    IDENTITY: <IdCard className="h-6 w-6" />,
+    PASSKEY: <Fingerprint className="h-6 w-6" />,
+  };
+
+  const headerIcon = isTrash
+    ? <Trash2 className="h-6 w-6" />
+    : isFavorites
+      ? <Star className="h-6 w-6" />
+      : isArchive
+        ? <Archive className="h-6 w-6" />
+        : entryType && ENTRY_TYPE_ICONS[entryType]
+          ? ENTRY_TYPE_ICONS[entryType]
+          : <KeyRound className="h-6 w-6" />;
+
   const isPersonalAll = !isTrash && !isArchive && !isFavorites && !entryType && !tagId && !folderId;
   const isCategorySelected = !!(entryType && ENTRY_TYPE_TITLES[entryType]);
   const isFolderOrTagSelected = Boolean(tagId || folderId);
@@ -152,6 +170,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     <div className="flex-1 p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-4">
         <EntryListHeader
+          icon={headerIcon}
           title={isPrimaryScopeLabel ? subtitle : t("personalVault")}
           subtitle={subtitle}
           showSubtitle={!isPrimaryScopeLabel}
