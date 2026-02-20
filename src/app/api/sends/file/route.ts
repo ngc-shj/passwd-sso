@@ -134,6 +134,7 @@ export async function POST(req: NextRequest) {
 
   // Encrypt file binary with master key
   const encryptedFile = encryptShareBinary(fileBuffer);
+  fileBuffer.fill(0); // Clear plaintext from memory
 
   // Generate token
   const token = generateShareToken();

@@ -109,7 +109,7 @@ export function ShareSendView({
                 })}
               </span>
             </div>
-            {maxViews && (
+            {maxViews != null && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Eye className="h-3.5 w-3.5" />
                 <span>

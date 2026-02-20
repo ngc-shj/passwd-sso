@@ -176,6 +176,30 @@ describe("POST /api/sends/file", () => {
     expect(json.error).toBe("SEND_FILE_TOO_LARGE");
   });
 
+  it("accepts file when detected mime matches declared type", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFileTypeFromBuffer.mockResolvedValue({ mime: "image/png", ext: "png" });
+    mockCreate.mockResolvedValue({ id: "share-1", expiresAt: new Date() });
+
+    const fd = createFormData({ contentType: "image/png", filename: "test.png" });
+    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const res = await POST(req as never);
+
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts file when declared type is application/octet-stream even if detected type differs", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFileTypeFromBuffer.mockResolvedValue({ mime: "image/png", ext: "png" });
+    mockCreate.mockResolvedValue({ id: "share-1", expiresAt: new Date() });
+
+    const fd = createFormData({ contentType: "application/octet-stream", filename: "test.bin" });
+    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const res = await POST(req as never);
+
+    expect(res.status).toBe(200);
+  });
+
   it("returns 400 when magic byte does not match declared content type", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFileTypeFromBuffer.mockResolvedValue({ mime: "image/png", ext: "png" });
