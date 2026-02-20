@@ -79,8 +79,8 @@
     "folderMaxDepth": "Maximum folder depth ({max}) exceeded."
   },
   "ShareLinks": {
-    "title": "Share Links",
-    "description": "Manage all your shared links across entries.",
+    "title": "Sharing",
+    "description": "Manage all your shares.",
     "status": "Status",
     "allStatuses": "All statuses",
     "active": "Active",
