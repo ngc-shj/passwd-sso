@@ -992,6 +992,7 @@
     "attachmentNotFound": "Attachment not found.",
     "attachmentLimitExceeded": "Attachment limit reached.",
     "fileTooLarge": "File size exceeds the limit.",
+    "invalidFilename": "Invalid filename.",
     "extensionNotAllowed": "File extension not allowed.",
     "contentTypeNotAllowed": "Content type not allowed.",
     "invalidFormData": "Invalid form data.",
