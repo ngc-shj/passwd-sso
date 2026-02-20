@@ -66,5 +66,18 @@ describe("calculateTotalIssues", () => {
     };
     expect(calculateTotalIssues(report)).toBe(4); // 1 breached + 2 duplicate + 1 expiring
   });
+
+  it("includes reused entry counts in total", () => {
+    const report = {
+      breached: [],
+      weak: [],
+      reused: [{ entries: [{ id: "a" }, { id: "b" }] }],
+      old: [{ id: "o1" }],
+      unsecured: [],
+      duplicate: [],
+      expiring: [],
+    };
+    expect(calculateTotalIssues(report)).toBe(3); // 2 reused + 1 old
+  });
 });
 

@@ -95,4 +95,20 @@ describe("EntryExpirationSection", () => {
 
     expect(screen.queryByRole("button")).toBeNull();
   });
+
+  it("sets min attribute to today's local date", () => {
+    render(
+      <EntryExpirationSection
+        value={null}
+        onChange={vi.fn()}
+        title="Expiration"
+        description="desc"
+      />,
+    );
+
+    const input = document.querySelector("input[type='date']") as HTMLInputElement;
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    expect(input.min).toBe(today);
+  });
 });

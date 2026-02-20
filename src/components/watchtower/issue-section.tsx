@@ -218,7 +218,7 @@ export function DuplicateSection({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-medium">{title}</span>
-            <Badge variant={groups.length > 0 ? "secondary" : "secondary"}>
+            <Badge variant="secondary">
               {groups.length}
             </Badge>
           </div>

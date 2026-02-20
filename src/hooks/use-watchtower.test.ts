@@ -1197,42 +1197,56 @@ describe("useWatchtower", () => {
   });
 
   it("detects entry expiring exactly at threshold boundary (30 days)", async () => {
-    const boundaryDate = new Date(Date.now() + EXPIRING_THRESHOLD_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    const raw = makeRawEntry({ id: "exp-3", expiresAt: boundaryDate });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-01T12:00:00Z"));
+    try {
+      // Exactly 30 days from fixed now
+      const boundaryDate = new Date("2026-07-01T12:00:00Z").toISOString();
+      const raw = makeRawEntry({ id: "exp-3", expiresAt: boundaryDate });
 
-    fetchSpy
-      .mockResolvedValueOnce(jsonResponse({ ok: true }))
-      .mockResolvedValueOnce(jsonResponse([raw]));
+      fetchSpy
+        .mockResolvedValueOnce(jsonResponse({ ok: true }))
+        .mockResolvedValueOnce(jsonResponse([raw]));
 
-    mockDecryptData.mockResolvedValue(raw._plaintext);
+      mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+      const { result } = renderHook(() => useWatchtower());
 
-    await act(async () => {
-      await result.current.analyze();
-    });
+      await act(async () => {
+        await result.current.analyze();
+      });
 
-    expect(result.current.report!.expiring).toHaveLength(1);
-    expect(result.current.report!.expiring[0].severity).toBe("low");
+      expect(result.current.report!.expiring).toHaveLength(1);
+      expect(result.current.report!.expiring[0].severity).toBe("low");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not flag entry expiring beyond threshold (31 days)", async () => {
-    const beyondDate = new Date(Date.now() + (EXPIRING_THRESHOLD_DAYS + 1) * 24 * 60 * 60 * 1000).toISOString();
-    const raw = makeRawEntry({ id: "exp-4", expiresAt: beyondDate });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-01T12:00:00Z"));
+    try {
+      // 31 days from fixed now
+      const beyondDate = new Date("2026-07-02T12:00:00Z").toISOString();
+      const raw = makeRawEntry({ id: "exp-4", expiresAt: beyondDate });
 
-    fetchSpy
-      .mockResolvedValueOnce(jsonResponse({ ok: true }))
-      .mockResolvedValueOnce(jsonResponse([raw]));
+      fetchSpy
+        .mockResolvedValueOnce(jsonResponse({ ok: true }))
+        .mockResolvedValueOnce(jsonResponse([raw]));
 
-    mockDecryptData.mockResolvedValue(raw._plaintext);
+      mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+      const { result } = renderHook(() => useWatchtower());
 
-    await act(async () => {
-      await result.current.analyze();
-    });
+      await act(async () => {
+        await result.current.analyze();
+      });
 
-    expect(result.current.report!.expiring).toHaveLength(0);
+      expect(result.current.report!.expiring).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not flag entries with null expiresAt", async () => {
@@ -1272,6 +1286,30 @@ describe("useWatchtower", () => {
 
     expect(result.current.report!.expiring).toHaveLength(1);
     expect(result.current.report!.overallScore).toBe(100);
+  });
+
+  it("reduces score for duplicate entries (5% weight)", async () => {
+    // 2 entries, both duplicate (same hostname+username) but otherwise clean
+    const raw1 = makeRawEntry({ id: "ds1", url: "https://example.com", username: "alice" });
+    const raw2 = makeRawEntry({ id: "ds2", url: "https://example.com", username: "alice", password: "Other!Str0ng9" });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw1, raw2]));
+
+    mockDecryptData
+      .mockResolvedValueOnce(raw1._plaintext)
+      .mockResolvedValueOnce(raw2._plaintext);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    // total=2, duplicate=2 → breach:40, strength:25, unique:20, fresh:5, dup:0, sec:5 = 95
+    expect(result.current.report!.duplicate).toHaveLength(1);
+    expect(result.current.report!.overallScore).toBe(95);
   });
 
   // ─── loading flag lifecycle ──────────────────────────────
