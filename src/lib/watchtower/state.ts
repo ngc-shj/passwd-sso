@@ -27,13 +27,17 @@ export function calculateTotalIssues(report: {
   reused: { entries: unknown[] }[];
   old: { length: number };
   unsecured: { length: number };
+  duplicate: { entries: unknown[] }[];
+  expiring: { length: number };
 }): number {
   return (
     report.breached.length +
     report.weak.length +
     report.reused.reduce((sum, group) => sum + group.entries.length, 0) +
     report.old.length +
-    report.unsecured.length
+    report.unsecured.length +
+    report.duplicate.reduce((sum, group) => sum + group.entries.length, 0) +
+    report.expiring.length
   );
 }
 

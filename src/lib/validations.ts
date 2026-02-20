@@ -50,6 +50,7 @@ export const createE2EPasswordSchema = z.object({
   folderId: z.string().cuid().optional().nullable(),
   entryType: entryTypeSchema.optional().default(ENTRY_TYPE.LOGIN),
   requireReprompt: z.boolean().optional(),
+  expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
 }).refine(
   (d) => (d.aadVersion ?? 0) < 1 || !!d.id,
   { message: "id is required when aadVersion >= 1", path: ["id"] }
@@ -66,6 +67,7 @@ export const updateE2EPasswordSchema = z.object({
   isArchived: z.boolean().optional(),
   entryType: entryTypeSchema.optional(),
   requireReprompt: z.boolean().optional(),
+  expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
 });
 
 // ─── Folder Schemas ─────────────────────────────────────────

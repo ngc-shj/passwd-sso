@@ -13,6 +13,7 @@ interface SavePersonalEntryParams {
   tagIds: string[];
   entryType?: EntryTypeValue;
   requireReprompt?: boolean;
+  expiresAt?: string | null;
   folderId?: string | null;
 }
 
@@ -26,6 +27,7 @@ export async function savePersonalEntry({
   tagIds,
   entryType,
   requireReprompt,
+  expiresAt,
   folderId,
 }: SavePersonalEntryParams): Promise<Response> {
   if (mode === "edit" && !initialId) {
@@ -49,6 +51,7 @@ export async function savePersonalEntry({
 
   if (entryType !== undefined) body.entryType = entryType;
   if (requireReprompt !== undefined) body.requireReprompt = requireReprompt;
+  if (expiresAt !== undefined) body.expiresAt = expiresAt;
   if (folderId !== undefined) body.folderId = folderId;
 
   const endpoint = mode === "create" ? API_PATH.PASSWORDS : apiPath.passwordById(initialId!);

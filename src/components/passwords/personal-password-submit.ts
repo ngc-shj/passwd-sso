@@ -26,6 +26,7 @@ export interface SubmitPersonalPasswordFormArgs {
   customFields: EntryCustomField[];
   totp: EntryTotp | null;
   requireReprompt: boolean;
+  expiresAt: string | null;
   folderId: string | null;
   setSubmitting: (value: boolean) => void;
   t: PasswordFormTranslator;
@@ -48,6 +49,7 @@ export async function submitPersonalPasswordForm({
   customFields,
   totp,
   requireReprompt,
+  expiresAt,
   folderId,
   setSubmitting,
   t,
@@ -85,6 +87,7 @@ export async function submitPersonalPasswordForm({
     overviewBlob,
     tagIds: extractTagIds(selectedTags),
     requireReprompt,
+    expiresAt,
     folderId: folderId ?? null,
     setSubmitting,
     t,

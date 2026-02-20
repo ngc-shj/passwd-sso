@@ -34,6 +34,7 @@ export function makePasswordEntry(overrides: Record<string, unknown> = {}) {
     isFavorite: false,
     isArchived: false,
     deletedAt: null as Date | null,
+    expiresAt: null as Date | null,
     userId: "test-user-id",
     createdAt: new Date("2025-01-01"),
     updatedAt: new Date("2025-01-01"),

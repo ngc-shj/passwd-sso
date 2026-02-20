@@ -177,6 +177,8 @@
     "closeGenerator": "閉じる",
     "requireReprompt": "パスフレーズ再確認を要求",
     "requireRepromptHelp": "機密フィールドの表示・コピー時にパスフレーズの再入力を求めます。",
+    "expirationTitle": "有効期限",
+    "expirationDescription": "パスワード変更のリマインダー日付を設定",
     "folder": "フォルダ",
     "folderHint": "このエントリをフォルダに整理します。",
     "noFolder": "（なし）"
@@ -384,7 +386,9 @@
     "identity": "ID情報",
     "copyCredentialId": "クレデンシャルIDをコピー",
     "passkey": "パスキー",
-    "share": "リンクで共有"
+    "share": "リンクで共有",
+    "expiringBadge": "このパスワードはまもなく期限切れです",
+    "expiredBadge": "このパスワードは期限切れです"
   },
   "CopyButton": {
     "copied": "コピーしました！（30秒後にクリア）",
@@ -590,7 +594,14 @@
     "oldDesc": "{days}日以上変更されていないパスワード",
     "oldDays": "{days} 日間変更されていません",
     "unsecured": "安全でないサイト",
-    "unsecuredDesc": "HTTPS ではなく HTTP を使用しているエントリー"
+    "unsecuredDesc": "HTTPS ではなく HTTP を使用しているエントリー",
+    "duplicate": "重複エントリー",
+    "duplicateDesc": "同じサイトとユーザー名を持つ複数のエントリー",
+    "duplicateCount": "{hostname} に {count} 件のエントリー",
+    "expiring": "有効期限切れパスワード",
+    "expiringDesc": "有効期限が切れたか、{days}日以内に切れるエントリー",
+    "expiredDays": "{days} 日前に期限切れ",
+    "expiresOn": "{date} に期限切れ"
   },
   "TOTP": {
     "authenticator": "認証コード (TOTP)",
