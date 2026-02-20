@@ -249,6 +249,7 @@ describe("GET /api/share-links/mine", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           createdById: DEFAULT_SESSION.user.id,
+          orgPasswordEntryId: null,
         }),
       })
     );

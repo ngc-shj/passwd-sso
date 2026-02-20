@@ -50,7 +50,10 @@ export async function GET(req: NextRequest) {
     } else if (shareType === "send") {
       where.shareType = { in: ["TEXT", "FILE"] };
     }
-    // "all" or null: createdById only (no additional filter)
+    // "all" or null: personal entries + sends, exclude org shares (shown in org context)
+    if (!shareType || (shareType !== "entry" && shareType !== "send")) {
+      where.orgPasswordEntryId = null;
+    }
   }
 
   const now = new Date();
