@@ -31,6 +31,30 @@ describe("isValidSendFilename", () => {
     expect(isValidSendFilename("テスト\u3000文書.pdf")).toBe(true);
   });
 
+  it("accepts filename with parentheses (browser duplicate)", () => {
+    expect(isValidSendFilename("1password (1).csv")).toBe(true);
+  });
+
+  it("accepts filename with apostrophe", () => {
+    expect(isValidSendFilename("John's report.pdf")).toBe(true);
+  });
+
+  it("accepts filename with only parentheses in name", () => {
+    expect(isValidSendFilename("(1).txt")).toBe(true);
+  });
+
+  it("accepts filename with nested parentheses", () => {
+    expect(isValidSendFilename("file((2)).txt")).toBe(true);
+  });
+
+  it("accepts filename with unclosed parenthesis", () => {
+    expect(isValidSendFilename("file(1.txt")).toBe(true);
+  });
+
+  it("accepts filename with apostrophe only in name", () => {
+    expect(isValidSendFilename("it's.txt")).toBe(true);
+  });
+
   // ── Invalid filenames ──────────────────────────────────────
   it("rejects empty string", () => {
     expect(isValidSendFilename("")).toBe(false);
@@ -75,6 +99,26 @@ describe("isValidSendFilename", () => {
 
   it("rejects CRLF characters", () => {
     expect(isValidSendFilename("file\r\n.txt")).toBe(false);
+  });
+
+  it("rejects tab character", () => {
+    expect(isValidSendFilename("file\tname.txt")).toBe(false);
+  });
+
+  it("rejects BOM (U+FEFF)", () => {
+    expect(isValidSendFilename("\uFEFFfile.txt")).toBe(false);
+  });
+
+  it("rejects whitespace-only filename", () => {
+    expect(isValidSendFilename("   ")).toBe(false);
+  });
+
+  it("rejects leading space", () => {
+    expect(isValidSendFilename(" file.txt")).toBe(false);
+  });
+
+  it("rejects trailing space", () => {
+    expect(isValidSendFilename("file.txt ")).toBe(false);
   });
 
   // ── Windows reserved device names ─────────────────────────
