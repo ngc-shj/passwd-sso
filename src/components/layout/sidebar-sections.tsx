@@ -16,7 +16,6 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import type { SidebarOrganizeTagItem } from "@/hooks/use-sidebar-data";
 import { type VaultContext } from "@/hooks/use-vault-context";
 import {
-  FolderOpen,
   Tag,
   Star,
   Archive,
@@ -56,7 +55,7 @@ export function VaultSection({
     <div className="space-y-1">
       <Button variant={isSelectedVaultAll ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
         <Link href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}` : "/dashboard"} onClick={onNavigate}>
-          <FolderOpen className="h-4 w-4" />
+          <KeyRound className="h-4 w-4" />
           {t("passwords")}
         </Link>
       </Button>

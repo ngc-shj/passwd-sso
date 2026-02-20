@@ -7,6 +7,7 @@ import { Link } from "@/i18n/navigation";
 import { PasswordCard } from "@/components/passwords/password-card";
 import { EntryListHeader } from "@/components/passwords/entry-list-header";
 import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
+import { SearchBar } from "@/components/layout/search-bar";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { OrgPasswordForm } from "@/components/org/org-password-form";
 import { OrgArchivedList } from "@/components/org/org-archived-list";
@@ -14,14 +15,13 @@ import { OrgTrashList } from "@/components/org/org-trash-list";
 import { OrgRoleBadge } from "@/components/org/org-role-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, KeyRound, Search, FileText, CreditCard, IdCard, Fingerprint } from "lucide-react";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { ORG_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -190,6 +190,24 @@ export default function OrgDashboardPage({
       : isOrgFavorites
         ? t("favorites")
       : (activeCategoryLabel ?? t("passwords"));
+  const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
+    LOGIN: <KeyRound className="h-6 w-6" />,
+    SECURE_NOTE: <FileText className="h-6 w-6" />,
+    CREDIT_CARD: <CreditCard className="h-6 w-6" />,
+    IDENTITY: <IdCard className="h-6 w-6" />,
+    PASSKEY: <Fingerprint className="h-6 w-6" />,
+  };
+
+  const headerIcon = isOrgTrash
+    ? <Trash2 className="h-6 w-6" />
+    : isOrgArchive
+      ? <Archive className="h-6 w-6" />
+      : isOrgFavorites
+        ? <Star className="h-6 w-6" />
+        : activeEntryType && ENTRY_TYPE_ICONS[activeEntryType]
+          ? ENTRY_TYPE_ICONS[activeEntryType]
+          : <KeyRound className="h-6 w-6" />;
+
   const isOrgAll =
     !isOrgTrash &&
     !isOrgArchive &&
@@ -375,6 +393,7 @@ export default function OrgDashboardPage({
     <div className="flex-1 overflow-auto p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-6">
         <EntryListHeader
+          icon={headerIcon}
           title={isPrimaryScopeLabel ? subtitle : (org?.name ?? "...")}
           subtitle={subtitle}
           showSubtitle={!isPrimaryScopeLabel}
@@ -430,15 +449,9 @@ export default function OrgDashboardPage({
           }
         />
 
-        <Card className="flex items-center gap-2 rounded-xl border bg-card/80 p-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              placeholder={subtitle}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+        <div className="flex items-center gap-2 rounded-xl border bg-card/80 p-3">
+          <div className="flex-1">
+            <SearchBar value={searchQuery} onChange={setSearchQuery} />
           </div>
           <EntrySortMenu
             sortBy={sortBy}
@@ -449,7 +462,7 @@ export default function OrgDashboardPage({
               title: tDash("sortTitle"),
             }}
           />
-        </Card>
+        </div>
 
         {isOrgArchive ? (
           <OrgArchivedList

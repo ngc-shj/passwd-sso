@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Card } from "@/components/ui/card";
 
 interface EntryListHeaderProps {
+  icon?: ReactNode;
   title: string;
   subtitle?: string;
   showSubtitle?: boolean;
@@ -12,6 +13,7 @@ interface EntryListHeaderProps {
 }
 
 export function EntryListHeader({
+  icon,
   title,
   subtitle,
   showSubtitle = false,
@@ -23,6 +25,7 @@ export function EntryListHeader({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex min-w-0 items-center gap-3">
+            {icon}
             <h1 className="truncate text-2xl font-bold tracking-tight">{title}</h1>
             {titleExtra}
           </div>
