@@ -99,6 +99,7 @@ export const updateTagSchema = z.object({
   color: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
+    .nullable()
     .optional()
     .or(z.literal("")),
 });
