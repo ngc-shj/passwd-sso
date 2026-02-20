@@ -255,6 +255,45 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(json.error).toBe("CONTENT_TYPE_NOT_ALLOWED");
   });
 
+  it("returns 400 for filename with path traversal characters", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
+    mockAttachmentCount.mockResolvedValue(0);
+    const fields = validFormFields();
+    fields.filename = "../etc/passwd.pdf";
+    const req = createFormDataRequest(fields);
+    const res = await POST(req, createParams("e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("INVALID_FILENAME");
+  });
+
+  it("returns 400 for filename with CRLF characters", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
+    mockAttachmentCount.mockResolvedValue(0);
+    const fields = validFormFields();
+    fields.filename = "test\r\n.pdf";
+    const req = createFormDataRequest(fields);
+    const res = await POST(req, createParams("e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("INVALID_FILENAME");
+  });
+
+  it("returns 400 for Windows reserved device name", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
+    mockAttachmentCount.mockResolvedValue(0);
+    const fields = validFormFields();
+    fields.filename = "CON.pdf";
+    const req = createFormDataRequest(fields);
+    const res = await POST(req, createParams("e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("INVALID_FILENAME");
+  });
+
   it("uploads attachment successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });

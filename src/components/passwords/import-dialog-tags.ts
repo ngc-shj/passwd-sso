@@ -56,7 +56,7 @@ export async function resolveTagNameToIdForImport(
       const createRes = await fetcher(tagsPath, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, color }),
+        body: JSON.stringify({ name, ...(color ? { color } : {}) }),
       });
       if (createRes.ok) {
         const created = (await createRes.json()) as ExistingTag;

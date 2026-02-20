@@ -89,8 +89,10 @@ export async function GET(
   return new NextResponse(new Uint8Array(decrypted), {
     headers: {
       "Content-Type": attachment.contentType,
-      "Content-Disposition": `attachment; filename="${encodeURIComponent(attachment.filename)}"`,
+      "Content-Disposition": `attachment; filename="download"; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`,
       "Content-Length": attachment.sizeBytes.toString(),
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "private, no-cache, no-store, must-revalidate",
     },
   });
 }

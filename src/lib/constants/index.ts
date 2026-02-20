@@ -30,6 +30,8 @@ export { API_PATH, apiPath } from "./api-path";
 export { LOCAL_STORAGE_KEY } from "./storage-key";
 export { AUDIT_TARGET_TYPE } from "./audit-target";
 export type { AuditTargetType } from "./audit-target";
+export { SHARE_TYPE, SHARE_TYPE_VALUES, SEND_EXPIRY_MAP } from "./share-type";
+export type { ShareTypeValue } from "./share-type";
 export {
   AUDIT_SCOPE,
   AUDIT_ACTION,

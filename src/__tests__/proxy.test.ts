@@ -132,6 +132,26 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns 401 for /api/sends without session", async () => {
+    const res = await proxy(
+      createApiRequest("/api/sends", {
+        Cookie: "authjs.session-token=sess-sends",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 for /api/sends/file without session", async () => {
+    const res = await proxy(
+      createApiRequest("/api/sends/file", {
+        Cookie: "authjs.session-token=sess-sends-file",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("allows non-protected API routes without auth", async () => {
     const res = await proxy(
       createApiRequest("/api/auth/session"),

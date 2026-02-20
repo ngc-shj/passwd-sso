@@ -61,6 +61,7 @@ export const API_ERROR = {
   EXTENSION_NOT_ALLOWED: "EXTENSION_NOT_ALLOWED",
   CONTENT_TYPE_NOT_ALLOWED: "CONTENT_TYPE_NOT_ALLOWED",
   INVALID_FORM_DATA: "INVALID_FORM_DATA",
+  INVALID_FILENAME: "INVALID_FILENAME",
   INVALID_IV_FORMAT: "INVALID_IV_FORMAT",
   INVALID_AUTH_TAG_FORMAT: "INVALID_AUTH_TAG_FORMAT",
 
@@ -89,6 +90,12 @@ export const API_ERROR = {
 
   // ── Share Links ───────────────────────────────────────────
   ALREADY_REVOKED: "ALREADY_REVOKED",
+
+  // ── Send ────────────────────────────────────────────────
+  SEND_TEXT_TOO_LARGE: "SEND_TEXT_TOO_LARGE",
+  SEND_FILE_TOO_LARGE: "SEND_FILE_TOO_LARGE",
+  SEND_FILE_TYPE_NOT_ALLOWED: "SEND_FILE_TYPE_NOT_ALLOWED",
+  SEND_STORAGE_LIMIT_EXCEEDED: "SEND_STORAGE_LIMIT_EXCEEDED",
 
   // ── Watchtower ────────────────────────────────────────────
   INVALID_PREFIX: "INVALID_PREFIX",
@@ -154,6 +161,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   EXTENSION_NOT_ALLOWED: "extensionNotAllowed",
   CONTENT_TYPE_NOT_ALLOWED: "contentTypeNotAllowed",
   INVALID_FORM_DATA: "invalidFormData",
+  INVALID_FILENAME: "invalidFilename",
   INVALID_IV_FORMAT: "invalidRequest",
   INVALID_AUTH_TAG_FORMAT: "invalidRequest",
   SLUG_ALREADY_TAKEN: "slugAlreadyTaken",
@@ -176,6 +184,10 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   INVITATION_ALREADY_SENT: "invitationAlreadySent",
   INVITATION_NOT_FOUND: "invitationNotFound",
   ALREADY_REVOKED: "alreadyRevoked",
+  SEND_TEXT_TOO_LARGE: "sendTextTooLarge",
+  SEND_FILE_TOO_LARGE: "sendFileTooLarge",
+  SEND_FILE_TYPE_NOT_ALLOWED: "sendFileTypeNotAllowed",
+  SEND_STORAGE_LIMIT_EXCEEDED: "sendStorageLimitExceeded",
   INVALID_PREFIX: "invalidRequest",
   UPSTREAM_ERROR: "upstreamError",
   INVALID_CURSOR: "invalidRequest",

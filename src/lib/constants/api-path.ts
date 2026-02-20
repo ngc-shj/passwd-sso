@@ -20,6 +20,8 @@ export const API_PATH = {
   AUDIT_LOGS: "/api/audit-logs",
   SHARE_LINKS: "/api/share-links",
   SHARE_LINKS_MINE: "/api/share-links/mine",
+  SENDS: "/api/sends",
+  SENDS_FILE: "/api/sends/file",
   AUDIT_LOGS_IMPORT: "/api/audit-logs/import",
   AUDIT_LOGS_EXPORT: "/api/audit-logs/export",
   VAULT_STATUS: "/api/vault/status",
@@ -81,6 +83,7 @@ export const apiPath = {
     `${API_PATH.PASSWORDS}/${entryId}/attachments`,
   passwordAttachmentById: (entryId: string, attachmentId: string) =>
     `${API_PATH.PASSWORDS}/${entryId}/attachments/${attachmentId}`,
+  sendById: (sendId: string) => `${API_PATH.SENDS}/${sendId}`,
   shareLinkById: (shareId: string) => `${API_PATH.SHARE_LINKS}/${shareId}`,
   shareLinkAccessLogs: (shareId: string) =>
     `${API_PATH.SHARE_LINKS}/${shareId}/access-logs`,

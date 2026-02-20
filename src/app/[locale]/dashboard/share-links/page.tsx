@@ -28,14 +28,23 @@ import {
   User,
   ChevronDown,
   ChevronUp,
+  MessageSquare,
+  Paperclip,
+  Send,
 } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, apiPath, ENTRY_TYPE } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format-datetime";
+import { formatFileSize } from "@/lib/format-file-size";
+import { SendDialog } from "@/components/share/send-dialog";
 
 interface ShareLinkItem {
   id: string;
-  entryType: string;
+  entryType: string | null;
+  shareType: string;
+  sendName: string | null;
+  sendFilename: string | null;
+  sendSizeBytes: number | null;
   expiresAt: string;
   maxViews: number | null;
   viewCount: number;
@@ -63,11 +72,14 @@ export default function ShareLinksPage() {
   const locale = useLocale();
   const searchParams = useSearchParams();
   const orgFilter = searchParams.get("org");
+  const typeParam = searchParams.get("type");
   const [links, setLinks] = useState<ShareLinkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<string>(typeParam === "send" || typeParam === "entry" ? typeParam : "all");
+  const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [accessLogs, setAccessLogs] = useState<
@@ -76,10 +88,17 @@ export default function ShareLinksPage() {
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [logNextCursor, setLogNextCursor] = useState<string | null>(null);
 
+  // Sync typeFilter when navigating via sidebar links (?type=send / ?type=entry)
+  useEffect(() => {
+    const next = typeParam === "send" || typeParam === "entry" ? typeParam : "all";
+    setTypeFilter(next);
+  }, [typeParam]);
+
   const fetchLinks = useCallback(
     async (cursor?: string) => {
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.set("status", statusFilter);
+      if (typeFilter !== "all") params.set("shareType", typeFilter);
       if (orgFilter) params.set("org", orgFilter);
       if (cursor) params.set("cursor", cursor);
 
@@ -87,7 +106,7 @@ export default function ShareLinksPage() {
       if (!res.ok) return null;
       return res.json();
     },
-    [statusFilter, orgFilter]
+    [statusFilter, typeFilter, orgFilter]
   );
 
   useEffect(() => {
@@ -209,17 +228,53 @@ export default function ShareLinksPage() {
     <div className="flex-1 overflow-auto p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-6">
       <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
-        <div className="flex items-center gap-3">
-          <LinkIcon className="h-6 w-6" />
-          <div>
-            <h1 className="text-2xl font-bold">{t("title")}</h1>
-            <p className="text-sm text-muted-foreground">{t("description")}</p>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <LinkIcon className="h-6 w-6" />
+            <div>
+              <h1 className="text-2xl font-bold">{t("title")}</h1>
+              <p className="text-sm text-muted-foreground">{t("description")}</p>
+            </div>
           </div>
+          {!orgFilter && (
+            <Button onClick={() => setSendDialogOpen(true)} className="shrink-0">
+              <Send className="h-4 w-4 mr-2" />
+              {t("newSend")}
+            </Button>
+          )}
         </div>
       </Card>
 
+      <SendDialog
+        open={sendDialogOpen}
+        onOpenChange={setSendDialogOpen}
+        onCreated={() => {
+          fetchLinks().then((data) => {
+            if (data) {
+              setLinks(data.items);
+              setNextCursor(data.nextCursor);
+            }
+          });
+        }}
+      />
+
       <Card className="rounded-xl border bg-card/80 p-4">
         <div className="flex flex-wrap gap-3 items-end">
+          <div className="space-y-1">
+            <Label className="text-xs">{t("typeFilter")}</Label>
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("allTypes")}</SelectItem>
+                <SelectItem value="entry">{t("entryShares")}</SelectItem>
+                {!orgFilter && (
+                  <SelectItem value="send">{t("sends")}</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="space-y-1">
             <Label className="text-xs">{t("status")}</Label>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -263,10 +318,27 @@ export default function ShareLinksPage() {
                   <div className="flex-1 min-w-0 space-y-1.5">
                     <div className="flex items-center gap-2 flex-wrap">
                       {getStatusBadge(link)}
-                      <span className="text-xs text-muted-foreground flex items-center gap-1">
-                        {ENTRY_TYPE_ICONS[link.entryType]}
-                        {link.entryType}
-                      </span>
+                      {link.shareType === "TEXT" ? (
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <MessageSquare className="h-3.5 w-3.5" />
+                          {link.sendName ?? t("textSend")}
+                        </span>
+                      ) : link.shareType === "FILE" ? (
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Paperclip className="h-3.5 w-3.5" />
+                          {link.sendFilename ?? link.sendName ?? t("fileSend")}
+                          {link.sendSizeBytes != null && (
+                            <span className="ml-1">
+                              ({formatFileSize(link.sendSizeBytes)})
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          {link.entryType && ENTRY_TYPE_ICONS[link.entryType]}
+                          {link.entryType}
+                        </span>
+                      )}
                       {link.sharedBy && (
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
                           <User className="h-3 w-3" />
@@ -275,11 +347,11 @@ export default function ShareLinksPage() {
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                      {link.hasPersonalEntry ? (
+                      {link.shareType === "ENTRY_SHARE" && link.hasPersonalEntry ? (
                         <span className="text-muted-foreground italic">
                           {t("personalEntry")}
                         </span>
-                      ) : !link.orgPasswordEntryId ? (
+                      ) : link.shareType === "ENTRY_SHARE" && !link.orgPasswordEntryId ? (
                         <span className="text-muted-foreground italic">
                           {t("deletedEntry")}
                         </span>

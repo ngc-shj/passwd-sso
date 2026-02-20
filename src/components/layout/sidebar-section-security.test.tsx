@@ -78,6 +78,24 @@ describe("UtilitiesSection", () => {
     expect(screen.queryByRole("link", { name: "orgSettings" })).toBeNull();
   });
 
+  it("shows org settings link to /dashboard/orgs in personal context", () => {
+    render(
+      <UtilitiesSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        tOrg={(k) => k}
+        selectedOrg={null}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "orgSettings" })).toHaveAttribute(
+      "href",
+      "/dashboard/orgs"
+    );
+  });
+
   it("routes import/export to org pages when org is selected", () => {
     render(
       <UtilitiesSection
