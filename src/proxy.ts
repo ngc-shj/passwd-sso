@@ -102,6 +102,7 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.ORGS) ||
     pathname.startsWith(API_PATH.AUDIT_LOGS) ||
     pathname.startsWith(API_PATH.SHARE_LINKS) ||
+    pathname.startsWith(API_PATH.SENDS) ||
     pathname.startsWith(API_PATH.EMERGENCY_ACCESS) ||
     pathname.startsWith(`${API_PATH.API_ROOT}/extension`)
   ) {

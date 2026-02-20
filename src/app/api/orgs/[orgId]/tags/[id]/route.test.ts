@@ -122,6 +122,21 @@ describe("PUT /api/orgs/[orgId]/tags/[id]", () => {
     expect(res.status).toBe(200);
     expect(json.name).toBe("Updated");
   });
+
+  it("accepts color: null to clear the tag color", async () => {
+    mockPrismaOrgTag.findUnique.mockResolvedValue({ id: TAG_ID, orgId: ORG_ID });
+    mockPrismaOrgTag.update.mockResolvedValue({ id: TAG_ID, name: "Ops", color: null });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`, {
+        body: { name: "Ops", color: null },
+      }),
+      createParams({ orgId: ORG_ID, id: TAG_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.color).toBeNull();
+  });
 });
 
 describe("DELETE /api/orgs/[orgId]/tags/[id]", () => {

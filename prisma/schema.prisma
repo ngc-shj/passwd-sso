@@ -209,6 +209,12 @@ enum EntryType {
   PASSKEY
 }
 
+enum ShareType {
+  ENTRY_SHARE
+  TEXT
+  FILE
+}
+
 enum OrgRole {
   OWNER
   ADMIN
@@ -357,21 +363,32 @@ model OrgInvitation {
 // ─── Share Link Models ─────────────────────────────────────────
 
 model PasswordShare {
-  id              String    @id @default(cuid())
-  tokenHash       String    @unique @map("token_hash") @db.VarChar(64)
-  entryType       EntryType @map("entry_type")
-  encryptedData   String    @map("encrypted_data") @db.Text
-  dataIv          String    @map("data_iv") @db.VarChar(24)
-  dataAuthTag     String    @map("data_auth_tag") @db.VarChar(32)
-  expiresAt       DateTime  @map("expires_at")
-  maxViews        Int?      @map("max_views")
-  viewCount       Int       @default(0) @map("view_count")
-  revokedAt       DateTime? @map("revoked_at")
-  createdById     String    @map("created_by_id")
-  createdAt       DateTime  @default(now()) @map("created_at")
+  id              String     @id @default(cuid())
+  tokenHash       String     @unique @map("token_hash") @db.VarChar(64)
+  shareType       ShareType  @default(ENTRY_SHARE) @map("share_type")
+  entryType       EntryType? @map("entry_type")
+  encryptedData   String     @map("encrypted_data") @db.Text
+  dataIv          String     @map("data_iv") @db.VarChar(24)
+  dataAuthTag     String     @map("data_auth_tag") @db.VarChar(32)
+  expiresAt       DateTime   @map("expires_at")
+  maxViews        Int?       @map("max_views")
+  viewCount       Int        @default(0) @map("view_count")
+  revokedAt       DateTime?  @map("revoked_at")
+  createdById     String     @map("created_by_id")
+  createdAt       DateTime   @default(now()) @map("created_at")
 
+  // Entry share relations
   passwordEntryId    String?          @map("password_entry_id")
   orgPasswordEntryId String?          @map("org_password_entry_id")
+
+  // Send-specific fields
+  sendName        String?  @map("send_name") @db.VarChar(200)
+  sendFilename    String?  @map("send_filename") @db.VarChar(255)
+  sendContentType String?  @map("send_content_type") @db.VarChar(100)
+  sendSizeBytes   Int?     @map("send_size_bytes")
+  encryptedFile   Bytes?   @map("encrypted_file")
+  fileIv          String?  @map("file_iv") @db.VarChar(24)
+  fileAuthTag     String?  @map("file_auth_tag") @db.VarChar(32)
 
   createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
   passwordEntry    PasswordEntry?    @relation("personalShares", fields: [passwordEntryId], references: [id], onDelete: SetNull)
@@ -381,6 +398,8 @@ model PasswordShare {
   @@index([passwordEntryId])
   @@index([orgPasswordEntryId])
   @@index([expiresAt])
+  @@index([shareType])
+  @@index([createdById])
   @@map("password_shares")
 }
 
@@ -422,6 +441,8 @@ enum AuditAction {
   ORG_ROLE_UPDATE
   SHARE_CREATE
   SHARE_REVOKE
+  SEND_CREATE
+  SEND_REVOKE
   EMERGENCY_GRANT_CREATE
   EMERGENCY_GRANT_ACCEPT
   EMERGENCY_GRANT_REJECT

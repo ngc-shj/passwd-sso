@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/avatar";
 import { CopyButton } from "@/components/passwords/copy-button";
 import { Link } from "@/i18n/navigation";
-import { ArrowLeft, Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert } from "lucide-react";
+import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
@@ -293,23 +293,9 @@ export default function OrgSettingsPage({
       <div className="mx-auto max-w-4xl space-y-6">
         <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
           <div className="flex flex-col items-start gap-2 min-w-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-2 text-muted-foreground hover:text-foreground"
-              asChild
-            >
-              <Link href={`/dashboard/orgs/${orgId}`}>
-                <ArrowLeft className="h-4 w-4" />
-                {t("backToOrg", { name: org.name })}
-              </Link>
-            </Button>
             <h1 className="truncate text-2xl font-bold">
               {org.name} - {t("settings")}
             </h1>
-            <p className="text-sm text-muted-foreground">
-              {t("generalSettings")}
-            </p>
           </div>
         </Card>
 

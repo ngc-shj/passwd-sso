@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status"); // "active" | "expired" | "revoked" | null (all)
+  const shareType = searchParams.get("shareType"); // "entry" | "send" | null (all)
   const orgId = searchParams.get("org");
   const cursor = searchParams.get("cursor");
   const limit = 30;
@@ -32,15 +33,27 @@ export async function GET(req: NextRequest) {
       }
       throw e;
     }
+    // Send is personal-only — org context never returns Send items
+    if (shareType === "send") {
+      return NextResponse.json({ items: [], nextCursor: null });
+    }
     where.orgPasswordEntry = { orgId };
     // VIEWER can only see links they created. Higher roles can view org-wide links.
     if (membershipRole === ORG_ROLE.VIEWER) {
       where.createdById = session.user.id;
     }
   } else {
-    // Personal context: exclude organization share links.
+    // Personal context
     where.createdById = session.user.id;
-    where.passwordEntryId = { not: null };
+    if (shareType === "entry") {
+      where.passwordEntryId = { not: null };
+    } else if (shareType === "send") {
+      where.shareType = { in: ["TEXT", "FILE"] };
+    }
+    // "all" or null: personal entries + sends, exclude org shares (shown in org context)
+    if (!shareType || (shareType !== "entry" && shareType !== "send")) {
+      where.orgPasswordEntryId = null;
+    }
   }
 
   const now = new Date();
@@ -85,6 +98,10 @@ export async function GET(req: NextRequest) {
     items: items.map((s) => ({
       id: s.id,
       entryType: s.entryType,
+      shareType: s.shareType,
+      sendName: s.sendName,
+      sendFilename: s.sendFilename,
+      sendSizeBytes: s.sendSizeBytes,
       expiresAt: s.expiresAt,
       maxViews: s.maxViews,
       viewCount: s.viewCount,

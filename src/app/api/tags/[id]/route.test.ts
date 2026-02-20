@@ -85,6 +85,21 @@ describe("PUT /api/tags/[id]", () => {
     expect(res.status).toBe(200);
     expect(json).toEqual({ id: TAG_ID, name: "New", color: "#ff0000" });
   });
+
+  it("accepts color: null to clear the tag color", async () => {
+    mockPrismaTag.findUnique
+      .mockResolvedValueOnce({ id: TAG_ID, userId: "test-user-id", name: "Ops" })
+      .mockResolvedValueOnce(null); // no duplicate
+    mockPrismaTag.update.mockResolvedValue({ id: TAG_ID, name: "Ops", color: null });
+
+    const res = await PUT(
+      createRequest("PUT", "http://localhost:3000/api/tags/tag-123", { body: { name: "Ops", color: null } }),
+      createParams({ id: TAG_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.color).toBeNull();
+  });
 });
 
 describe("DELETE /api/tags/[id]", () => {

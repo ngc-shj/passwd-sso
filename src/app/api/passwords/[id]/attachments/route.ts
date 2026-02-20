@@ -7,6 +7,7 @@ import {
   ALLOWED_CONTENT_TYPES,
   MAX_FILE_SIZE,
   MAX_ATTACHMENTS_PER_ENTRY,
+  isValidSendFilename,
 } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
@@ -164,8 +165,14 @@ async function handlePOST(
     );
   }
 
-  // Sanitize filename (prevent path traversal)
-  const sanitizedFilename = filename.replace(/[/\\]/g, "_").slice(0, 255);
+  // Validate filename (reject path traversal, CRLF, null bytes, Windows reserved names, etc.)
+  if (!isValidSendFilename(filename)) {
+    return NextResponse.json(
+      { error: API_ERROR.INVALID_FILENAME },
+      { status: 400 }
+    );
+  }
+  const sanitizedFilename = filename.slice(0, 255);
 
   // Read encrypted blob and validate actual size
   const buffer = Buffer.from(await file.arrayBuffer());
