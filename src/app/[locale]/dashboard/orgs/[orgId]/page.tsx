@@ -381,15 +381,6 @@ export default function OrgDashboardPage({
           titleExtra={!isPrimaryScopeLabel && org ? <OrgRoleBadge role={org.role} /> : null}
           actions={
             <>
-              <EntrySortMenu
-                sortBy={sortBy}
-                onSortByChange={setSortBy}
-                labels={{
-                  updated: tDash("sortUpdated"),
-                  created: tDash("sortCreated"),
-                  title: tDash("sortTitle"),
-                }}
-              />
               {canCreate && !isOrgSpecialView && (
                 contextualEntryType ? (
                   <Button
@@ -439,8 +430,8 @@ export default function OrgDashboardPage({
           }
         />
 
-        <Card className="rounded-xl border bg-card/80 p-3">
-          <div className="relative">
+        <Card className="flex items-center gap-2 rounded-xl border bg-card/80 p-3">
+          <div className="relative flex-1">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               className="pl-9"
@@ -449,6 +440,15 @@ export default function OrgDashboardPage({
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+          <EntrySortMenu
+            sortBy={sortBy}
+            onSortByChange={setSortBy}
+            labels={{
+              updated: tDash("sortUpdated"),
+              created: tDash("sortCreated"),
+              title: tDash("sortTitle"),
+            }}
+          />
         </Card>
 
         {isOrgArchive ? (
