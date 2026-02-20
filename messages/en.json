@@ -177,6 +177,8 @@
     "closeGenerator": "Hide",
     "requireReprompt": "Require master password re-entry",
     "requireRepromptHelp": "Prompt for master passphrase when viewing or copying sensitive fields.",
+    "expirationTitle": "Expiration Date",
+    "expirationDescription": "Set a date to be reminded to change this password",
     "folder": "Folder",
     "folderHint": "Organize this entry into a folder.",
     "noFolder": "(None)"
@@ -384,7 +386,9 @@
     "identity": "Identity",
     "copyCredentialId": "Copy Credential ID",
     "passkey": "Passkey",
-    "share": "Share Link"
+    "share": "Share Link",
+    "expiringBadge": "This password is expiring soon",
+    "expiredBadge": "This password has expired"
   },
   "CopyButton": {
     "copied": "Copied! (clears in 30s)",
@@ -590,7 +594,14 @@
     "oldDesc": "These passwords haven't been changed in over {days} days",
     "oldDays": "Not changed for {days} days",
     "unsecured": "Unsecured Websites",
-    "unsecuredDesc": "These entries use HTTP instead of HTTPS"
+    "unsecuredDesc": "These entries use HTTP instead of HTTPS",
+    "duplicate": "Duplicate Entries",
+    "duplicateDesc": "Multiple entries with the same website and username",
+    "duplicateCount": "{count} entries for {hostname}",
+    "expiring": "Expiring Passwords",
+    "expiringDesc": "Entries that have expired or will expire within {days} days",
+    "expiredDays": "Expired {days} days ago",
+    "expiresOn": "Expires on {date}"
   },
   "TOTP": {
     "authenticator": "Authenticator (TOTP)",

@@ -47,6 +47,7 @@ import {
   Fingerprint,
   Link as LinkIcon,
   ShieldCheck,
+  CalendarClock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useVault } from "@/lib/vault-context";
@@ -54,6 +55,7 @@ import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { ShareDialog } from "@/components/share/share-dialog";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { EXPIRING_THRESHOLD_DAYS } from "@/hooks/use-watchtower";
 import type { EntryTypeValue } from "@/lib/constants";
 import type {
   EntryCustomField,
@@ -99,6 +101,8 @@ interface PasswordCardProps {
   orgId?: string;
   // Optional: reprompt indicator
   requireReprompt?: boolean;
+  // Optional: expiration date
+  expiresAt?: string | null;
 }
 
 interface VaultEntryFull {
@@ -186,6 +190,7 @@ export function PasswordCard({
   createdBy,
   orgId,
   requireReprompt = false,
+  expiresAt,
 }: PasswordCardProps) {
   const isOrgMode = !!getPasswordProp;
   const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
@@ -482,6 +487,25 @@ export function PasswordCard({
               {requireReprompt && (
                 <ShieldCheck className="inline-block ml-1 h-3.5 w-3.5 text-muted-foreground align-text-bottom" />
               )}
+              {(() => {
+                if (!expiresAt) return null;
+                const nowDate = new Date();
+                const todayStr = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, "0")}-${String(nowDate.getDate()).padStart(2, "0")}`;
+                const thresholdDate = new Date(Date.now() + EXPIRING_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
+                const thresholdStr = `${thresholdDate.getFullYear()}-${String(thresholdDate.getMonth() + 1).padStart(2, "0")}-${String(thresholdDate.getDate()).padStart(2, "0")}`;
+                const expiresDate = expiresAt.split("T")[0];
+                if (expiresDate > thresholdStr) return null;
+                const isExpired = expiresDate < todayStr;
+                return (
+                  <span title={isExpired ? t("expiredBadge") : t("expiringBadge")}>
+                    <CalendarClock
+                      className={`inline-block ml-1 h-3.5 w-3.5 align-text-bottom ${
+                        isExpired ? "text-orange-500" : "text-amber-400"
+                      }`}
+                    />
+                  </span>
+                );
+              })()}
             </span>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               {isPasskey ? (

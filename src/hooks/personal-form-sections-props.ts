@@ -4,6 +4,7 @@ import type { ComponentProps } from "react";
 import { EntryActionBar } from "@/components/passwords/entry-form-ui";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
 import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";
@@ -11,6 +12,7 @@ import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";
 type EntryTagsAndFolderSectionProps = ComponentProps<typeof EntryTagsAndFolderSection>;
 type EntryCustomFieldsTotpSectionProps = ComponentProps<typeof EntryCustomFieldsTotpSection>;
 type EntryRepromptSectionProps = ComponentProps<typeof EntryRepromptSection>;
+type EntryExpirationSectionProps = ComponentProps<typeof EntryExpirationSection>;
 type EntryActionBarProps = ComponentProps<typeof EntryActionBar>;
 
 interface UsePersonalFormSectionsPropsArgs {
@@ -20,6 +22,8 @@ interface UsePersonalFormSectionsPropsArgs {
   sectionCardClass: string;
   repromptTitle: string;
   repromptDescription: string;
+  expirationTitle: string;
+  expirationDescription: string;
   hasChanges: boolean;
   submitting: boolean;
   saveLabel: string;
@@ -29,7 +33,7 @@ interface UsePersonalFormSectionsPropsArgs {
   onCancel: () => void;
   values: Pick<
     PersonalPasswordFormState["values"],
-    "selectedTags" | "folderId" | "customFields" | "totp" | "showTotpInput" | "requireReprompt"
+    "selectedTags" | "folderId" | "customFields" | "totp" | "showTotpInput" | "requireReprompt" | "expiresAt"
   >;
   setters: Pick<
     PersonalPasswordFormState["setters"],
@@ -39,6 +43,7 @@ interface UsePersonalFormSectionsPropsArgs {
     | "setTotp"
     | "setShowTotpInput"
     | "setRequireReprompt"
+    | "setExpiresAt"
   >;
 }
 
@@ -46,6 +51,7 @@ interface PersonalFormSectionsPropsResult {
   tagsAndFolderProps: EntryTagsAndFolderSectionProps;
   customFieldsTotpProps: EntryCustomFieldsTotpSectionProps;
   repromptSectionProps: EntryRepromptSectionProps;
+  expirationSectionProps: EntryExpirationSectionProps;
   actionBarProps: EntryActionBarProps;
 }
 
@@ -56,6 +62,8 @@ export function buildPersonalFormSectionsProps({
   sectionCardClass,
   repromptTitle,
   repromptDescription,
+  expirationTitle,
+  expirationDescription,
   hasChanges,
   submitting,
   saveLabel,
@@ -91,6 +99,13 @@ export function buildPersonalFormSectionsProps({
       onCheckedChange: setters.setRequireReprompt,
       title: repromptTitle,
       description: repromptDescription,
+      sectionCardClass,
+    },
+    expirationSectionProps: {
+      value: values.expiresAt,
+      onChange: setters.setExpiresAt,
+      title: expirationTitle,
+      description: expirationDescription,
       sectionCardClass,
     },
     actionBarProps: buildEntryActionBarProps({

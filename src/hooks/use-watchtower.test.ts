@@ -69,6 +69,7 @@ vi.mock("@/lib/constants", () => ({
 import {
   useWatchtower,
   OLD_THRESHOLD_DAYS,
+  EXPIRING_THRESHOLD_DAYS,
   WATCHTOWER_COOLDOWN_MS,
 } from "./use-watchtower";
 
@@ -92,14 +93,17 @@ function makeRawEntry(overrides: {
   id?: string;
   password?: string;
   url?: string;
+  username?: string;
   updatedAt?: string;
   entryType?: string | null;
   encryptedBlob?: object | null;
   aadVersion?: number;
+  expiresAt?: string | null;
 } = {}) {
   const id = overrides.id ?? "entry-1";
   const password = overrides.password ?? "Str0ng!Pass#42";
   const url = overrides.url ?? "https://example.com";
+  const username = overrides.username ?? `user-${id}`;
   const updatedAt = overrides.updatedAt ?? new Date().toISOString();
 
   return {
@@ -108,9 +112,10 @@ function makeRawEntry(overrides: {
     encryptedBlob: "encryptedBlob" in overrides ? overrides.encryptedBlob : { ciphertext: "aaa", iv: "bbb", authTag: "ccc" },
     aadVersion: overrides.aadVersion ?? 1,
     updatedAt,
+    expiresAt: "expiresAt" in overrides ? overrides.expiresAt : null,
     _plaintext: JSON.stringify({
       title: `Site ${id}`,
-      username: `user-${id}`,
+      username,
       password,
       url,
     }),
@@ -796,11 +801,11 @@ describe("useWatchtower", () => {
   // ─── Score calculation ───────────────────────────────────
 
   it("calculates weighted score: all issues → low score", async () => {
-    // 2 entries, both breached, both weak, both reused, both old, both unsecured
+    // 2 entries, both breached, both weak, both reused, both old, both unsecured, both duplicate
     const oldDate = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
     const samePass = "weak";
-    const raw1 = makeRawEntry({ id: "e1", password: samePass, url: "http://bad.com", updatedAt: oldDate });
-    const raw2 = makeRawEntry({ id: "e2", password: samePass, url: "http://bad2.com", updatedAt: oldDate });
+    const raw1 = makeRawEntry({ id: "e1", password: samePass, url: "http://bad.com", updatedAt: oldDate, username: "victim" });
+    const raw2 = makeRawEntry({ id: "e2", password: samePass, url: "http://bad.com", updatedAt: oldDate, username: "victim" });
 
     fetchSpy
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
@@ -819,9 +824,8 @@ describe("useWatchtower", () => {
       await result.current.analyze();
     });
 
-    // total=2, breached=2, weak=2, reused=2, old=2, unsecured=2
-    // breach: (2-2)/2*40=0, strength: (2-2)/2*25=0, unique: (2-2)/2*20=0
-    // freshness: (2-2)/2*10=0, security: (2-2)/2*5=0 → total=0
+    // total=2, breached=2, weak=2, reused=2, old=2, duplicate=2, unsecured=2
+    // breach: 0, strength: 0, unique: 0, freshness: 0, duplicate: 0, security: 0 → total=0
     expect(result.current.report!.overallScore).toBe(0);
   });
 
@@ -857,7 +861,7 @@ describe("useWatchtower", () => {
       await result.current.analyze();
     });
 
-    // total=1, breached=1 → breach: 0, strength: 25, unique: 20, fresh: 10, sec: 5 = 60
+    // total=1, breached=1 → breach: 0, strength: 25, unique: 20, fresh: 5, dup: 5, sec: 5 = 60
     expect(result.current.report!.overallScore).toBe(60);
   });
 
@@ -876,7 +880,7 @@ describe("useWatchtower", () => {
       await result.current.analyze();
     });
 
-    // total=1, weak=1 → breach: 40, strength: 0, unique: 20, fresh: 10, sec: 5 = 75
+    // total=1, weak=1 → breach: 40, strength: 0, unique: 20, fresh: 5, dup: 5, sec: 5 = 75
     expect(result.current.report!.overallScore).toBe(75);
   });
 
@@ -966,6 +970,346 @@ describe("useWatchtower", () => {
     expect(report.old).toHaveLength(1); // e1
     expect(report.unsecured).toHaveLength(1); // e1
     expect(report.breached).toHaveLength(2); // e1 and e2 share breached password
+  });
+
+  // ─── Duplicate detection ────────────────────────────────
+
+  it("detects duplicate entries with same hostname + username", async () => {
+    const raw1 = makeRawEntry({ id: "d1", url: "https://example.com/login", username: "alice" });
+    const raw2 = makeRawEntry({ id: "d2", url: "https://example.com/auth", username: "alice", password: "DifferentPass!2" });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw1, raw2]));
+
+    mockDecryptData
+      .mockResolvedValueOnce(raw1._plaintext)
+      .mockResolvedValueOnce(raw2._plaintext);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report!.duplicate).toHaveLength(1);
+    expect(result.current.report!.duplicate[0].hostname).toBe("example.com");
+    expect(result.current.report!.duplicate[0].entries).toHaveLength(2);
+  });
+
+  it("normalizes www. prefix for duplicate detection", async () => {
+    const raw1 = makeRawEntry({ id: "d1", url: "https://www.example.com", username: "bob" });
+    const raw2 = makeRawEntry({ id: "d2", url: "https://example.com", username: "bob", password: "Other!Pass3" });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw1, raw2]));
+
+    mockDecryptData
+      .mockResolvedValueOnce(raw1._plaintext)
+      .mockResolvedValueOnce(raw2._plaintext);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report!.duplicate).toHaveLength(1);
+    expect(result.current.report!.duplicate[0].hostname).toBe("example.com");
+  });
+
+  it("treats different usernames on same hostname as separate (no duplicate)", async () => {
+    const raw1 = makeRawEntry({ id: "d1", url: "https://example.com", username: "alice" });
+    const raw2 = makeRawEntry({ id: "d2", url: "https://example.com", username: "bob", password: "Other!Pass4" });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw1, raw2]));
+
+    mockDecryptData
+      .mockResolvedValueOnce(raw1._plaintext)
+      .mockResolvedValueOnce(raw2._plaintext);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report!.duplicate).toHaveLength(0);
+  });
+
+  it("treats same username on different hostnames as separate (no duplicate)", async () => {
+    const raw1 = makeRawEntry({ id: "d1", url: "https://example.com", username: "alice" });
+    const raw2 = makeRawEntry({ id: "d2", url: "https://other.com", username: "alice", password: "Other!Pass5" });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw1, raw2]));
+
+    mockDecryptData
+      .mockResolvedValueOnce(raw1._plaintext)
+      .mockResolvedValueOnce(raw2._plaintext);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report!.duplicate).toHaveLength(0);
+  });
+
+  it("skips entries without url or username for duplicate detection", async () => {
+    const rawNoUrl = makeRawEntry({ id: "d1", url: "" });
+    const plainNoUrl = JSON.stringify({ title: "Site d1", username: "user-d1", password: "Str0ng!Pass#42", url: "" });
+    const rawNoUser = makeRawEntry({ id: "d2", username: "" });
+    const plainNoUser = JSON.stringify({ title: "Site d2", username: "", password: "Str0ng!Pass#42", url: "https://example.com" });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([rawNoUrl, rawNoUser]));
+
+    mockDecryptData
+      .mockResolvedValueOnce(plainNoUrl)
+      .mockResolvedValueOnce(plainNoUser);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report!.duplicate).toHaveLength(0);
+  });
+
+  it("handles invalid URLs gracefully in duplicate detection", async () => {
+    const raw = makeRawEntry({ id: "d1", url: "not-a-url" });
+    const plaintext = JSON.stringify({ title: "Site d1", username: "user", password: "Str0ng!Pass#42", url: "not-a-url" });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw]));
+
+    mockDecryptData.mockResolvedValue(plaintext);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report!.duplicate).toHaveLength(0);
+  });
+
+  it("performs case-insensitive username matching for duplicates", async () => {
+    const raw1 = makeRawEntry({ id: "d1", url: "https://example.com", username: "Alice" });
+    const raw2 = makeRawEntry({ id: "d2", url: "https://example.com", username: "alice", password: "Other!Pass6" });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw1, raw2]));
+
+    mockDecryptData
+      .mockResolvedValueOnce(raw1._plaintext)
+      .mockResolvedValueOnce(raw2._plaintext);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report!.duplicate).toHaveLength(1);
+  });
+
+  it("groups 3+ entries as a single duplicate group", async () => {
+    const raw1 = makeRawEntry({ id: "d1", url: "https://example.com", username: "alice" });
+    const raw2 = makeRawEntry({ id: "d2", url: "https://example.com", username: "alice", password: "Other!7" });
+    const raw3 = makeRawEntry({ id: "d3", url: "https://example.com", username: "alice", password: "Other!8" });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw1, raw2, raw3]));
+
+    mockDecryptData
+      .mockResolvedValueOnce(raw1._plaintext)
+      .mockResolvedValueOnce(raw2._plaintext)
+      .mockResolvedValueOnce(raw3._plaintext);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report!.duplicate).toHaveLength(1);
+    expect(result.current.report!.duplicate[0].entries).toHaveLength(3);
+  });
+
+  // ─── Expiration detection ─────────────────────────────────
+
+  it("exports EXPIRING_THRESHOLD_DAYS = 30", () => {
+    expect(EXPIRING_THRESHOLD_DAYS).toBe(30);
+  });
+
+  it("detects expired entries (past expiresAt) with medium severity", async () => {
+    const expiredDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+    const raw = makeRawEntry({ id: "exp-1", expiresAt: expiredDate });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw]));
+
+    mockDecryptData.mockResolvedValue(raw._plaintext);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report!.expiring).toHaveLength(1);
+    expect(result.current.report!.expiring[0].severity).toBe("medium");
+    expect(result.current.report!.expiring[0].details).toMatch(/^expired:\d+/);
+  });
+
+  it("detects entries expiring within 30 days with low severity", async () => {
+    const soonDate = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
+    const raw = makeRawEntry({ id: "exp-2", expiresAt: soonDate });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw]));
+
+    mockDecryptData.mockResolvedValue(raw._plaintext);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report!.expiring).toHaveLength(1);
+    expect(result.current.report!.expiring[0].severity).toBe("low");
+    expect(result.current.report!.expiring[0].details).toMatch(/^expires:/);
+  });
+
+  it("detects entry expiring exactly at threshold boundary (30 days)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-01T12:00:00Z"));
+    try {
+      // Exactly 30 days from fixed now
+      const boundaryDate = new Date("2026-07-01T12:00:00Z").toISOString();
+      const raw = makeRawEntry({ id: "exp-3", expiresAt: boundaryDate });
+
+      fetchSpy
+        .mockResolvedValueOnce(jsonResponse({ ok: true }))
+        .mockResolvedValueOnce(jsonResponse([raw]));
+
+      mockDecryptData.mockResolvedValue(raw._plaintext);
+
+      const { result } = renderHook(() => useWatchtower());
+
+      await act(async () => {
+        await result.current.analyze();
+      });
+
+      expect(result.current.report!.expiring).toHaveLength(1);
+      expect(result.current.report!.expiring[0].severity).toBe("low");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not flag entry expiring beyond threshold (31 days)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-01T12:00:00Z"));
+    try {
+      // 31 days from fixed now
+      const beyondDate = new Date("2026-07-02T12:00:00Z").toISOString();
+      const raw = makeRawEntry({ id: "exp-4", expiresAt: beyondDate });
+
+      fetchSpy
+        .mockResolvedValueOnce(jsonResponse({ ok: true }))
+        .mockResolvedValueOnce(jsonResponse([raw]));
+
+      mockDecryptData.mockResolvedValue(raw._plaintext);
+
+      const { result } = renderHook(() => useWatchtower());
+
+      await act(async () => {
+        await result.current.analyze();
+      });
+
+      expect(result.current.report!.expiring).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not flag entries with null expiresAt", async () => {
+    const raw = makeRawEntry({ id: "exp-5" }); // expiresAt defaults to null
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw]));
+
+    mockDecryptData.mockResolvedValue(raw._plaintext);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report!.expiring).toHaveLength(0);
+  });
+
+  it("does not include expiring entries in score calculation", async () => {
+    // 1 entry with expiration but no other issues → score should be 100
+    const soonDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+    const raw = makeRawEntry({ id: "exp-6", expiresAt: soonDate });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw]));
+
+    mockDecryptData.mockResolvedValue(raw._plaintext);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report!.expiring).toHaveLength(1);
+    expect(result.current.report!.overallScore).toBe(100);
+  });
+
+  it("reduces score for duplicate entries (5% weight)", async () => {
+    // 2 entries, both duplicate (same hostname+username) but otherwise clean
+    const raw1 = makeRawEntry({ id: "ds1", url: "https://example.com", username: "alice" });
+    const raw2 = makeRawEntry({ id: "ds2", url: "https://example.com", username: "alice", password: "Other!Str0ng9" });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw1, raw2]));
+
+    mockDecryptData
+      .mockResolvedValueOnce(raw1._plaintext)
+      .mockResolvedValueOnce(raw2._plaintext);
+
+    const { result } = renderHook(() => useWatchtower());
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    // total=2, duplicate=2 → breach:40, strength:25, unique:20, fresh:5, dup:0, sec:5 = 95
+    expect(result.current.report!.duplicate).toHaveLength(1);
+    expect(result.current.report!.overallScore).toBe(95);
   });
 
   // ─── loading flag lifecycle ──────────────────────────────

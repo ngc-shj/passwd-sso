@@ -10,15 +10,17 @@ import {
   Copy,
   Clock,
   Globe,
+  Files,
+  CalendarClock,
   ChevronDown,
   ChevronRight,
   ExternalLink,
 } from "lucide-react";
-import type { PasswordIssue, ReusedGroup } from "@/hooks/use-watchtower";
+import type { PasswordIssue, ReusedGroup, DuplicateGroup } from "@/hooks/use-watchtower";
 
 // ─── Issue Category Card ─────────────────────────────────────
 
-type IssueType = "breached" | "weak" | "reused" | "old" | "unsecured";
+type IssueType = "breached" | "weak" | "reused" | "old" | "unsecured" | "expiring";
 
 const issueConfig: Record<
   IssueType,
@@ -29,6 +31,7 @@ const issueConfig: Record<
   reused: { icon: Copy, color: "text-orange-500", badgeVariant: "secondary" },
   old: { icon: Clock, color: "text-blue-500", badgeVariant: "secondary" },
   unsecured: { icon: Globe, color: "text-orange-600", badgeVariant: "secondary" },
+  expiring: { icon: CalendarClock, color: "text-amber-500", badgeVariant: "secondary" },
 };
 
 interface IssueSectionProps {
@@ -154,6 +157,87 @@ export function ReusedSection({
             <div key={gi} className="px-4 py-3">
               <p className="text-xs text-muted-foreground mb-2">
                 {formatCount(group.entries.length)}
+              </p>
+              <div className="space-y-1">
+                {group.entries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="flex items-center gap-2"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium truncate block">
+                        {entry.title}
+                      </span>
+                      {entry.username && (
+                        <span className="text-xs text-muted-foreground truncate block">
+                          {entry.username}
+                        </span>
+                      )}
+                    </div>
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href={`/dashboard/${entry.id}`}>
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </Link>
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Duplicate Entry Section ────────────────────────────────
+
+interface DuplicateSectionProps {
+  title: string;
+  description: string;
+  groups: DuplicateGroup[];
+  formatCount: (count: number, hostname: string) => string;
+}
+
+export function DuplicateSection({
+  title,
+  description,
+  groups,
+  formatCount,
+}: DuplicateSectionProps) {
+  const [expanded, setExpanded] = useState(groups.length > 0);
+  const Icon = Files;
+
+  return (
+    <div className="rounded-xl border bg-card/80">
+      <button
+        className="w-full flex items-center gap-3 p-4 text-left hover:bg-accent transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <Icon className="h-5 w-5 shrink-0 text-purple-500" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">{title}</span>
+            <Badge variant="secondary">
+              {groups.length}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+        </div>
+        {groups.length > 0 &&
+          (expanded ? (
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          ))}
+      </button>
+
+      {expanded && groups.length > 0 && (
+        <div className="border-t divide-y">
+          {groups.map((group, gi) => (
+            <div key={gi} className="px-4 py-3">
+              <p className="text-xs text-muted-foreground mb-2">
+                {formatCount(group.entries.length, group.hostname)}
               </p>
               <div className="space-y-1">
                 {group.entries.map((entry) => (

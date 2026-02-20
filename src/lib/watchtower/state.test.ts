@@ -42,12 +42,42 @@ describe("watchtower visibility", () => {
       reused: [],
       old: [],
       unsecured: [],
+      duplicate: [],
+      expiring: [],
     };
     const totalIssues = calculateTotalIssues(report);
     const visibility = getWatchtowerVisibility(report, false, totalIssues);
     expect(totalIssues).toBe(0);
     expect(visibility.showIssueSections).toBe(true);
     expect(visibility.showNoIssuesCard).toBe(true);
+  });
+});
+
+describe("calculateTotalIssues", () => {
+  it("includes duplicate and expiring counts", () => {
+    const report = {
+      breached: [{ id: "1" }],
+      weak: [],
+      reused: [],
+      old: [],
+      unsecured: [],
+      duplicate: [{ entries: [{ id: "a" }, { id: "b" }] }],
+      expiring: [{ id: "x" }],
+    };
+    expect(calculateTotalIssues(report)).toBe(4); // 1 breached + 2 duplicate + 1 expiring
+  });
+
+  it("includes reused entry counts in total", () => {
+    const report = {
+      breached: [],
+      weak: [],
+      reused: [{ entries: [{ id: "a" }, { id: "b" }] }],
+      old: [{ id: "o1" }],
+      unsecured: [],
+      duplicate: [],
+      expiring: [],
+    };
+    expect(calculateTotalIssues(report)).toBe(3); // 2 reused + 1 old
   });
 });
 
