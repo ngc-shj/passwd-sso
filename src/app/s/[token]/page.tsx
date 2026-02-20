@@ -43,7 +43,6 @@ export default async function SharePage({ params }: Props) {
       dataAuthTag: true,
       sendName: true,
       sendFilename: true,
-      sendContentType: true,
       sendSizeBytes: true,
       expiresAt: true,
       maxViews: true,
@@ -124,7 +123,6 @@ export default async function SharePage({ params }: Props) {
         sendType="FILE"
         name={String(data.name ?? share.sendName ?? "")}
         filename={share.sendFilename}
-        contentType={share.sendContentType}
         sizeBytes={share.sendSizeBytes}
         token={token}
         expiresAt={share.expiresAt.toISOString()}

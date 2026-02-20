@@ -102,6 +102,60 @@ describe("POST /api/sends/file", () => {
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
   });
 
+  it("returns 400 when FormData parsing fails", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+
+    // Send non-FormData body that will cause req.formData() to throw
+    const req = new (await import("next/server")).NextRequest(
+      "http://localhost/api/sends/file",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "test" }),
+      } as ConstructorParameters<typeof import("next/server").NextRequest>[1]
+    );
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("INVALID_FORM_DATA");
+  });
+
+  it("returns 400 when file field is missing", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+
+    const fd = new FormData();
+    fd.append("name", "Test");
+    fd.append("expiresIn", "1d");
+    // No file field appended
+
+    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.details.file).toBeDefined();
+  });
+
+  it("accepts file at exactly 10MB", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockCreate.mockResolvedValue({ id: "share-1", expiresAt: new Date() });
+
+    const exactContent = new Uint8Array(10 * 1024 * 1024);
+    const exactFile = new File([exactContent], "exact.bin", {
+      type: "application/octet-stream",
+    });
+
+    const req = createMultipartRequest(
+      "http://localhost/api/sends/file",
+      createFormData({ file: exactFile })
+    );
+    const res = await POST(req as never);
+
+    expect(res.status).toBe(200);
+  });
+
   it("returns 400 when file size exceeds 10MB", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
 

@@ -35,6 +35,7 @@ import { toast } from "sonner";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
 import { SEND_MAX_FILE_SIZE, SEND_MAX_TEXT_LENGTH } from "@/lib/validations";
+import { formatFileSize } from "@/lib/format-file-size";
 
 interface SendDialogProps {
   open: boolean;
@@ -172,12 +173,6 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
       return;
     }
     setFile(selected);
-  };
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   const isValid =

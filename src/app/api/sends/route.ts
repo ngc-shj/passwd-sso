@@ -14,16 +14,10 @@ import {
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
   AUDIT_SCOPE,
+  SEND_EXPIRY_MAP,
 } from "@/lib/constants";
 
 const sendTextLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
-
-const EXPIRY_MAP: Record<string, number> = {
-  "1h": 60 * 60 * 1000,
-  "1d": 24 * 60 * 60 * 1000,
-  "7d": 7 * 24 * 60 * 60 * 1000,
-  "30d": 30 * 24 * 60 * 60 * 1000,
-};
 
 // POST /api/sends — Create a text Send
 export async function POST(req: NextRequest) {
@@ -63,7 +57,7 @@ export async function POST(req: NextRequest) {
   const token = generateShareToken();
   const tokenHash = hashToken(token);
 
-  const expiresAt = new Date(Date.now() + EXPIRY_MAP[expiresIn]);
+  const expiresAt = new Date(Date.now() + SEND_EXPIRY_MAP[expiresIn]);
 
   const share = await prisma.passwordShare.create({
     data: {
