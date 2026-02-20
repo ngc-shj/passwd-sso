@@ -28,6 +28,13 @@ import {
   getWatchtowerVisibility,
 } from "@/lib/watchtower/state";
 import { resolveNavigationTarget } from "@/lib/client-navigation";
+import {
+  formatBreachDetails,
+  formatWeakDetails,
+  formatOldDetails,
+  formatUnsecuredDetails,
+  formatExpiringDetails,
+} from "@/lib/watchtower/format-details";
 
 export default function WatchtowerPage() {
   const t = useTranslations("Watchtower");
@@ -44,31 +51,6 @@ export default function WatchtowerPage() {
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const allowLeaveRef = useRef(false);
-
-  const formatBreachDetails = (details: string) => {
-    const count = details.replace("count:", "");
-    return t("breachedCount", { count });
-  };
-
-  const formatWeakDetails = (details: string) => {
-    const entropy = details.replace("entropy:", "");
-    return t("weakEntropy", { entropy });
-  };
-
-  const formatOldDetails = (details: string) => {
-    const days = details.replace("days:", "");
-    return t("oldDays", { days });
-  };
-
-  const formatUnsecuredDetails = (details: string) => {
-    const url = details.replace("url:", "");
-    return url;
-  };
-
-  const formatExpiringDetails = (details: string) => {
-    if (details.startsWith("expired:")) return t("expiredDays", { days: details.replace("expired:", "") });
-    return t("expiresOn", { date: details.replace("expires:", "") });
-  };
 
   useEffect(() => {
     if (!loading) return;
@@ -258,14 +240,14 @@ export default function WatchtowerPage() {
                   title={t("breached")}
                   description={t("breachedDesc")}
                   issues={report.breached}
-                  formatDetails={formatBreachDetails}
+                  formatDetails={(d) => formatBreachDetails(d, t)}
                 />
                 <IssueSection
                   type="weak"
                   title={t("weak")}
                   description={t("weakDesc")}
                   issues={report.weak}
-                  formatDetails={formatWeakDetails}
+                  formatDetails={(d) => formatWeakDetails(d, t)}
                 />
                 <ReusedSection
                   title={t("reused")}
@@ -278,7 +260,7 @@ export default function WatchtowerPage() {
                   title={t("old")}
                   description={t("oldDesc", { days: OLD_THRESHOLD_DAYS })}
                   issues={report.old}
-                  formatDetails={formatOldDetails}
+                  formatDetails={(d) => formatOldDetails(d, t)}
                 />
                 <IssueSection
                   type="unsecured"
@@ -298,7 +280,7 @@ export default function WatchtowerPage() {
                   title={t("expiring")}
                   description={t("expiringDesc", { days: EXPIRING_THRESHOLD_DAYS })}
                   issues={report.expiring}
-                  formatDetails={formatExpiringDetails}
+                  formatDetails={(d) => formatExpiringDetails(d, locale, t)}
                 />
               </div>
             )}
