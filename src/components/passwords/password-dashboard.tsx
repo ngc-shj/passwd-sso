@@ -158,17 +158,6 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
           actions={
             <>
               {!isTrash && !isArchive && (
-                <EntrySortMenu
-                  sortBy={sortBy}
-                  onSortByChange={setSortBy}
-                  labels={{
-                    updated: t("sortUpdated"),
-                    created: t("sortCreated"),
-                    title: t("sortTitle"),
-                  }}
-                />
-              )}
-              {!isTrash && !isArchive && (
                 contextualEntryType ? (
                   <Button
                     onClick={() => {
@@ -216,8 +205,21 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
           }
         />
 
-        <div className="mb-4 rounded-xl border bg-card/80 p-3">
-          <SearchBar ref={searchRef} value={searchQuery} onChange={setSearchQuery} />
+        <div className="mb-4 flex items-center gap-2 rounded-xl border bg-card/80 p-3">
+          <div className="flex-1">
+            <SearchBar ref={searchRef} value={searchQuery} onChange={setSearchQuery} />
+          </div>
+          {!isTrash && !isArchive && (
+            <EntrySortMenu
+              sortBy={sortBy}
+              onSortByChange={setSortBy}
+              labels={{
+                updated: t("sortUpdated"),
+                created: t("sortCreated"),
+                title: t("sortTitle"),
+              }}
+            />
+          )}
         </div>
 
         <div className="space-y-4">
