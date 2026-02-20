@@ -35,6 +35,7 @@ import {
 import { toast } from "sonner";
 import { API_PATH, apiPath, ENTRY_TYPE } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format-datetime";
+import { formatFileSize } from "@/lib/format-file-size";
 import { SendDialog } from "@/components/share/send-dialog";
 
 interface ShareLinkItem {
@@ -328,7 +329,7 @@ export default function ShareLinksPage() {
                           {link.sendFilename ?? link.sendName ?? t("fileSend")}
                           {link.sendSizeBytes != null && (
                             <span className="ml-1">
-                              ({(link.sendSizeBytes / (1024 * 1024)).toFixed(1)} MB)
+                              ({formatFileSize(link.sendSizeBytes)})
                             </span>
                           )}
                         </span>

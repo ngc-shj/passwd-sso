@@ -228,6 +228,25 @@ describe("POST /api/sends", () => {
     );
   });
 
+  it("returns 400 when body is not valid JSON", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+
+    // Send non-JSON body
+    const req = new (await import("next/server")).NextRequest(
+      "http://localhost/api/sends",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "not-json{{{",
+      } as ConstructorParameters<typeof import("next/server").NextRequest>[1]
+    );
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("INVALID_JSON");
+  });
+
   it("returns 500 when prisma create fails", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockCreate.mockRejectedValue(new Error("DB error"));

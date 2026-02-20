@@ -359,6 +359,26 @@ describe("GET /api/share-links/mine", () => {
     );
   });
 
+  it("filters by shareType=entry for personal context", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest(
+      "GET",
+      "http://localhost/api/share-links/mine?shareType=entry"
+    );
+    await GET(req as never);
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdById: DEFAULT_SESSION.user.id,
+          passwordEntryId: { not: null },
+        }),
+      })
+    );
+  });
+
   it("filters by shareType=send for personal context", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindMany.mockResolvedValue([]);

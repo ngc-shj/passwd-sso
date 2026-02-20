@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashToken, decryptShareBinary } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { API_ERROR } from "@/lib/api-error-codes";
 
 const downloadLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     ? forwarded.split(",")[0].trim()
     : req.headers.get("x-real-ip") ?? "unknown";
   if (!(await downloadLimiter.check(`rl:send_download:${ip}`))) {
-    return NextResponse.json({ error: "RATE_LIMIT_EXCEEDED" }, { status: 429 });
+    return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
   }
 
   // Validate token format (must be 64 hex chars)

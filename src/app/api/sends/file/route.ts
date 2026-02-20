@@ -20,16 +20,10 @@ import {
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
   AUDIT_SCOPE,
+  SEND_EXPIRY_MAP,
 } from "@/lib/constants";
 
 const sendFileLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
-
-const EXPIRY_MAP: Record<string, number> = {
-  "1h": 60 * 60 * 1000,
-  "1d": 24 * 60 * 60 * 1000,
-  "7d": 7 * 24 * 60 * 60 * 1000,
-  "30d": 30 * 24 * 60 * 60 * 1000,
-};
 
 // POST /api/sends/file — Create a file Send
 export async function POST(req: NextRequest) {
@@ -120,7 +114,7 @@ export async function POST(req: NextRequest) {
   const activeTotal = await prisma.passwordShare.aggregate({
     where: {
       createdById: session.user.id,
-      shareType: { in: ["TEXT", "FILE"] },
+      shareType: "FILE",
       revokedAt: null,
       expiresAt: { gt: now },
       sendSizeBytes: { not: null },
@@ -145,7 +139,7 @@ export async function POST(req: NextRequest) {
   const token = generateShareToken();
   const tokenHash = hashToken(token);
 
-  const expiresAt = new Date(Date.now() + EXPIRY_MAP[meta.expiresIn]);
+  const expiresAt = new Date(Date.now() + SEND_EXPIRY_MAP[meta.expiresIn]);
   const contentType = detected?.mime ?? file.type ?? "application/octet-stream";
 
   const share = await prisma.passwordShare.create({

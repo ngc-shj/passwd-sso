@@ -6,24 +6,18 @@ import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/passwords/copy-button";
 import { Clock, Eye, MessageSquare, Paperclip, Download } from "lucide-react";
 import { formatDateTime } from "@/lib/format-datetime";
+import { formatFileSize } from "@/lib/format-file-size";
 
 interface ShareSendViewProps {
   sendType: "TEXT" | "FILE";
   name: string;
   text?: string;
   filename?: string | null;
-  contentType?: string | null;
   sizeBytes?: number | null;
   token: string;
   expiresAt: string;
   viewCount: number;
   maxViews: number | null;
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function ShareSendView({

@@ -417,10 +417,10 @@ export const SEND_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 export const SEND_MAX_ACTIVE_TOTAL_BYTES = 100 * 1024 * 1024; // ユーザーごと合計 100MB
 
 /**
- * Safe filename pattern: alphanumeric, CJK, hyphens, underscores, dots, spaces.
+ * Safe filename pattern: alphanumeric, CJK, Hangul, hyphens, underscores, dots, spaces.
  * Rejects path separators, CRLF, null bytes, control characters, and emoji.
  */
-const SAFE_FILENAME_RE = /^[\w\u3000-\u9FFF\uF900-\uFAFF\s.\-]+$/;
+const SAFE_FILENAME_RE = /^[\w\u3000-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\s.\-]+$/;
 
 /** Windows reserved device names (case-insensitive) */
 const WINDOWS_RESERVED_RE = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)/i;
@@ -434,8 +434,8 @@ export function isValidSendFilename(name: string): boolean {
   if (new TextEncoder().encode(name).length > 255) return false;
   // No leading/trailing dots
   if (name.startsWith(".") || name.endsWith(".")) return false;
-  // No path separators or null bytes
-  if (/[/\\]/.test(name) || name.includes("\0")) return false;
+  // No path separators, null bytes, or CRLF
+  if (/[/\\\r\n]/.test(name) || name.includes("\0")) return false;
   // No Windows reserved names
   if (WINDOWS_RESERVED_RE.test(name)) return false;
   // Must match safe character set
