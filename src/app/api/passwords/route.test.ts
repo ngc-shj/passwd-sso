@@ -858,6 +858,13 @@ describe("POST /api/passwords", () => {
     );
   });
 
+  it("returns 400 when expiresAt is invalid format", async () => {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: { ...validBody, expiresAt: "not-a-date" },
+    }));
+    expect(res.status).toBe(400);
+  });
+
   it("does not include expiresAt in create data when not provided", async () => {
     mockPrismaPasswordEntry.create.mockResolvedValue({
       id: "new-pw",

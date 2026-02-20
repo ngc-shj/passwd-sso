@@ -108,4 +108,59 @@ describe("DuplicateSection", () => {
     fireEvent.click(screen.getByText("Duplicates"));
     expect(screen.queryByText("Work Login")).toBeNull();
   });
+
+  it("displays correct badge count for multiple groups", () => {
+    const multiGroups: DuplicateGroup[] = [
+      {
+        hostname: "a.com",
+        username: "u1",
+        entries: [
+          { id: "1", title: "A1", username: "u1" },
+          { id: "2", title: "A2", username: "u1" },
+        ],
+      },
+      {
+        hostname: "b.com",
+        username: "u2",
+        entries: [
+          { id: "3", title: "B1", username: "u2" },
+          { id: "4", title: "B2", username: "u2" },
+        ],
+      },
+    ];
+    render(
+      <DuplicateSection
+        title="Duplicates"
+        description="desc"
+        groups={multiGroups}
+        formatCount={(count, hostname) => `${count} for ${hostname}`}
+      />,
+    );
+
+    expect(screen.getByText("2")).toBeTruthy();
+    expect(screen.getByText("A1")).toBeTruthy();
+    expect(screen.getByText("B1")).toBeTruthy();
+  });
+
+  it("does not render username when null", () => {
+    const groupWithNull: DuplicateGroup[] = [
+      {
+        hostname: "example.com",
+        username: "alice",
+        entries: [{ id: "e1", title: "No-User Login", username: null }],
+      },
+    ];
+    render(
+      <DuplicateSection
+        title="Duplicates"
+        description="desc"
+        groups={groupWithNull}
+        formatCount={(count, hostname) => `${count} for ${hostname}`}
+      />,
+    );
+
+    expect(screen.getByText("No-User Login")).toBeTruthy();
+    // username text "alice" should not appear as entry-level username
+    expect(screen.queryByText("alice")).toBeNull();
+  });
 });

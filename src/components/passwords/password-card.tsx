@@ -55,6 +55,7 @@ import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { ShareDialog } from "@/components/share/share-dialog";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { EXPIRING_THRESHOLD_DAYS } from "@/hooks/use-watchtower";
 import type { EntryTypeValue } from "@/lib/constants";
 import type {
   EntryCustomField,
@@ -486,15 +487,23 @@ export function PasswordCard({
               {requireReprompt && (
                 <ShieldCheck className="inline-block ml-1 h-3.5 w-3.5 text-muted-foreground align-text-bottom" />
               )}
-              {expiresAt && new Date(expiresAt).getTime() <= Date.now() + 30 * 24 * 60 * 60 * 1000 && (
-                <span title={new Date(expiresAt).getTime() < Date.now() ? t("expiredBadge") : t("expiringBadge")}>
-                  <CalendarClock
-                    className={`inline-block ml-1 h-3.5 w-3.5 align-text-bottom ${
-                      new Date(expiresAt).getTime() < Date.now() ? "text-orange-500" : "text-amber-400"
-                    }`}
-                  />
-                </span>
-              )}
+              {(() => {
+                if (!expiresAt) return null;
+                const expiresMs = new Date(expiresAt).getTime();
+                const nowMs = Date.now();
+                const thresholdMs = EXPIRING_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
+                if (expiresMs > nowMs + thresholdMs) return null;
+                const isExpired = expiresMs < nowMs;
+                return (
+                  <span title={isExpired ? t("expiredBadge") : t("expiringBadge")}>
+                    <CalendarClock
+                      className={`inline-block ml-1 h-3.5 w-3.5 align-text-bottom ${
+                        isExpired ? "text-orange-500" : "text-amber-400"
+                      }`}
+                    />
+                  </span>
+                );
+              })()}
             </span>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               {isPasskey ? (
