@@ -124,7 +124,8 @@ export default function WatchtowerPage() {
       <div className="mx-auto max-w-4xl space-y-6">
         <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
           <div className="flex items-center justify-between gap-3">
-            <div>
+            <div className="flex items-center gap-3">
+              <Shield className="h-6 w-6" />
               <h1 className="text-2xl font-bold">{t("title")}</h1>
             </div>
             <Button
