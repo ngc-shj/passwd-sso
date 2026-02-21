@@ -45,6 +45,8 @@ function installChromeMock() {
           messageHandlers.push(fn);
         },
       },
+      onInstalled: { addListener: vi.fn() },
+      onStartup: { addListener: vi.fn() },
     },
     alarms: {
       onAlarm: {
@@ -61,10 +63,17 @@ function installChromeMock() {
     tabs: {
       sendMessage: vi.fn().mockResolvedValue({}),
       query: vi.fn().mockResolvedValue([{ id: 1, url: "https://github.com" }]),
+      onActivated: { addListener: vi.fn() },
+      onUpdated: { addListener: vi.fn() },
     },
     action: {
       setBadgeText: vi.fn().mockResolvedValue(undefined),
       setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
+    },
+    contextMenus: {
+      create: vi.fn(),
+      removeAll: vi.fn((cb?: () => void) => cb?.()),
+      onClicked: { addListener: vi.fn() },
     },
     permissions: {
       contains: vi.fn().mockResolvedValue(true),
