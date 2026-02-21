@@ -160,6 +160,36 @@ export async function decryptData(
   return textDecode(decrypted);
 }
 
+// ─── Encryption ─────────────────────────────────────────────
+
+export async function encryptData(
+  plaintext: string,
+  key: CryptoKey,
+  aad?: Uint8Array
+): Promise<EncryptedData> {
+  const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+
+  const params: AesGcmParams = { name: "AES-GCM", iv: toArrayBuffer(iv) };
+  if (aad) params.additionalData = toArrayBuffer(aad);
+
+  const encrypted = await crypto.subtle.encrypt(
+    params,
+    key,
+    textEncode(plaintext)
+  );
+
+  // GCM appends 16-byte auth tag
+  const encBytes = new Uint8Array(encrypted);
+  const ciphertext = encBytes.slice(0, encBytes.length - 16);
+  const authTag = encBytes.slice(encBytes.length - 16);
+
+  return {
+    ciphertext: hexEncode(ciphertext),
+    iv: hexEncode(iv),
+    authTag: hexEncode(authTag),
+  };
+}
+
 // ─── AAD (Personal Vault) ───────────────────────────────────
 
 const AAD_VERSION = 1;

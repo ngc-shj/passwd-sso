@@ -1,0 +1,23 @@
+{
+  "extName": {
+    "message": "passwd-sso"
+  },
+  "extDescription": {
+    "message": "Browser extension for passwd-sso password manager"
+  },
+  "cmdOpenPopup": {
+    "message": "Open passwd-sso popup"
+  },
+  "cmdAutofill": {
+    "message": "Autofill current page"
+  },
+  "cmdCopyPassword": {
+    "message": "Copy password for current site"
+  },
+  "cmdCopyUsername": {
+    "message": "Copy username for current site"
+  },
+  "cmdLockVault": {
+    "message": "Lock vault"
+  }
+}

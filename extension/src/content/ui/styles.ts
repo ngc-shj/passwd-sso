@@ -90,4 +90,14 @@ export const DROPDOWN_STYLES = `
     justify-content: center;
     gap: 6px;
   }
+  .psso-disconnected {
+    padding: 12px;
+    text-align: center;
+    color: #6b7280;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
 `;
