@@ -4,8 +4,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock chrome API
+const messageListeners: Array<(message: unknown) => void> = [];
 vi.stubGlobal("chrome", {
-  runtime: { id: "test-id", sendMessage: vi.fn(), lastError: null },
+  runtime: {
+    id: "test-id",
+    sendMessage: vi.fn(),
+    lastError: null,
+    onMessage: {
+      addListener: vi.fn((fn: (message: unknown) => void) => {
+        messageListeners.push(fn);
+      }),
+      removeListener: vi.fn((fn: (message: unknown) => void) => {
+        const idx = messageListeners.indexOf(fn);
+        if (idx !== -1) messageListeners.splice(idx, 1);
+      }),
+    },
+  },
 });
 
 // Mock form-detector-lib exports
@@ -23,6 +37,7 @@ vi.mock("../content/ui/save-banner", () => ({
 import {
   shouldSkipForm,
   extractCredentials,
+  extractCredentialsFromPage,
   initLoginDetector,
 } from "../content/login-detector-lib";
 import { showSaveBanner, hideSaveBanner } from "../content/ui/save-banner";
@@ -71,6 +86,7 @@ function createTextInput(value = "alice", name = "username"): HTMLInputElement {
 describe("login-detector-lib", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    messageListeners.length = 0;
   });
 
   describe("shouldSkipForm", () => {
@@ -85,8 +101,23 @@ describe("login-detector-lib", () => {
       expect(shouldSkipForm(form)).toBe(true);
     });
 
-    it("skips forms with autocomplete='new-password'", () => {
+    it("does NOT skip forms with only autocomplete='new-password' (common misconfiguration)", () => {
       const form = createForm();
+      const pw = createPasswordInput();
+      pw.autocomplete = "new-password";
+      form.appendChild(pw);
+      mockFindPasswordInputs.mockReturnValue([pw]);
+
+      // new-password alone is not enough — many login forms set it incorrectly
+      expect(shouldSkipForm(form)).toBe(false);
+    });
+
+    it("skips forms with autocomplete='new-password' AND registration-like fields", () => {
+      const form = createForm({
+        inputs: [
+          { type: "text", name: "first_name" },
+        ],
+      });
       const pw = createPasswordInput();
       pw.autocomplete = "new-password";
       form.appendChild(pw);
@@ -210,6 +241,58 @@ describe("login-detector-lib", () => {
       mockFindPasswordInputs.mockReturnValue([pw1, pw2]);
 
       expect(extractCredentials(form)).toBeNull();
+    });
+  });
+
+  describe("extractCredentialsFromPage", () => {
+    beforeEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    it("extracts credentials from a filled password input on the page", () => {
+      const user = createTextInput("alice");
+      const pw = createPasswordInput("secret");
+      document.body.appendChild(user);
+      document.body.appendChild(pw);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+      mockFindUsernameInput.mockReturnValue(user);
+
+      const result = extractCredentialsFromPage();
+      expect(result).toEqual({ username: "alice", password: "secret" });
+    });
+
+    it("returns null when no filled password fields", () => {
+      const pw = createPasswordInput("");
+      document.body.appendChild(pw);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+
+      expect(extractCredentialsFromPage()).toBeNull();
+    });
+
+    it("returns null when more than 2 filled password fields", () => {
+      const pw1 = createPasswordInput("pw1");
+      const pw2 = createPasswordInput("pw2");
+      const pw3 = createPasswordInput("pw3");
+      document.body.appendChild(pw1);
+      document.body.appendChild(pw2);
+      document.body.appendChild(pw3);
+
+      mockFindPasswordInputs.mockReturnValue([pw1, pw2, pw3]);
+
+      expect(extractCredentialsFromPage()).toBeNull();
+    });
+
+    it("returns null when password is inside a registration form", () => {
+      const form = createForm({ action: "https://example.com/register" });
+      const pw = createPasswordInput("pw");
+      form.appendChild(pw);
+      document.body.appendChild(form);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+
+      expect(extractCredentialsFromPage()).toBeNull();
     });
   });
 
@@ -353,6 +436,208 @@ describe("login-detector-lib", () => {
       const cleanup = initLoginDetector();
       cleanup.destroy();
       expect(mockHideSaveBanner).toHaveBeenCalled();
+    });
+
+    it("registers onMessage listener for PSSO_SHOW_SAVE_BANNER", () => {
+      const cleanup = initLoginDetector();
+      expect(chrome.runtime.onMessage.addListener).toHaveBeenCalled();
+      cleanup.destroy();
+    });
+
+    it("removes onMessage listener on destroy()", () => {
+      const cleanup = initLoginDetector();
+      cleanup.destroy();
+      expect(chrome.runtime.onMessage.removeListener).toHaveBeenCalled();
+    });
+
+    it("shows save banner when PSSO_SHOW_SAVE_BANNER message received", () => {
+      const cleanup = initLoginDetector();
+
+      // Simulate background pushing save banner
+      for (const listener of messageListeners) {
+        listener({
+          type: "PSSO_SHOW_SAVE_BANNER",
+          host: "example.com",
+          username: "alice",
+          password: "secret123",
+          action: "save",
+        });
+      }
+
+      expect(mockShowSaveBanner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host: "example.com",
+          username: "alice",
+          action: "save",
+        }),
+      );
+
+      cleanup.destroy();
+    });
+
+    it("does not show banner for PSSO_SHOW_SAVE_BANNER with action=none", () => {
+      const cleanup = initLoginDetector();
+
+      for (const listener of messageListeners) {
+        listener({
+          type: "PSSO_SHOW_SAVE_BANNER",
+          host: "example.com",
+          username: "alice",
+          password: "secret123",
+          action: "none",
+        });
+      }
+
+      expect(mockShowSaveBanner).not.toHaveBeenCalled();
+
+      cleanup.destroy();
+    });
+
+    it("ignores unrelated messages", () => {
+      const cleanup = initLoginDetector();
+
+      for (const listener of messageListeners) {
+        listener({ type: "UNRELATED_MESSAGE" });
+      }
+
+      expect(mockShowSaveBanner).not.toHaveBeenCalled();
+
+      cleanup.destroy();
+    });
+
+    it("sends CHECK_PENDING_SAVE on init", () => {
+      const cleanup = initLoginDetector();
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        { type: "CHECK_PENDING_SAVE" },
+        expect.any(Function),
+      );
+
+      cleanup.destroy();
+    });
+
+    it("shows save banner when CHECK_PENDING_SAVE returns save action", () => {
+      mockSendMessage.mockImplementation((msg: unknown, callback?: (resp: unknown) => void) => {
+        const m = msg as { type: string };
+        if (m.type === "CHECK_PENDING_SAVE" && callback) {
+          callback({
+            type: "CHECK_PENDING_SAVE",
+            action: "save",
+            host: "example.com",
+            username: "pulled-user",
+            password: "pulled-pw",
+          });
+        }
+      });
+
+      const cleanup = initLoginDetector();
+
+      expect(mockShowSaveBanner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host: "example.com",
+          username: "pulled-user",
+          action: "save",
+        }),
+      );
+
+      cleanup.destroy();
+    });
+
+    it("does not show banner when CHECK_PENDING_SAVE returns none", () => {
+      mockSendMessage.mockImplementation((msg: unknown, callback?: (resp: unknown) => void) => {
+        const m = msg as { type: string };
+        if (m.type === "CHECK_PENDING_SAVE" && callback) {
+          callback({
+            type: "CHECK_PENDING_SAVE",
+            action: "none",
+          });
+        }
+      });
+
+      const cleanup = initLoginDetector();
+
+      expect(mockShowSaveBanner).not.toHaveBeenCalled();
+
+      cleanup.destroy();
+    });
+
+    it("sends LOGIN_DETECTED when a submit-like button is clicked near password fields", () => {
+      const pw = createPasswordInput("secret");
+      const user = createTextInput("bob");
+      const button = document.createElement("button");
+      button.id = "submit";
+      button.type = "submit";
+      button.textContent = "Log In";
+      document.body.appendChild(user);
+      document.body.appendChild(pw);
+      document.body.appendChild(button);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+      mockFindUsernameInput.mockReturnValue(user);
+
+      const cleanup = initLoginDetector();
+
+      button.click();
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "LOGIN_DETECTED",
+          username: "bob",
+          password: "secret",
+        }),
+        expect.any(Function),
+      );
+
+      cleanup.destroy();
+    });
+
+    it("does not send LOGIN_DETECTED for non-submit-like buttons", () => {
+      const pw = createPasswordInput("secret");
+      const user = createTextInput("bob");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Cancel";
+      document.body.appendChild(user);
+      document.body.appendChild(pw);
+      document.body.appendChild(button);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+      mockFindUsernameInput.mockReturnValue(user);
+
+      const cleanup = initLoginDetector();
+
+      button.click();
+
+      expect(mockSendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "LOGIN_DETECTED" }),
+        expect.any(Function),
+      );
+
+      cleanup.destroy();
+    });
+
+    it("removes click listener after destroy()", () => {
+      const pw = createPasswordInput("secret");
+      const user = createTextInput("bob");
+      const button = document.createElement("button");
+      button.type = "submit";
+      button.textContent = "Log In";
+      document.body.appendChild(user);
+      document.body.appendChild(pw);
+      document.body.appendChild(button);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+      mockFindUsernameInput.mockReturnValue(user);
+
+      const cleanup = initLoginDetector();
+      cleanup.destroy();
+
+      button.click();
+
+      expect(mockSendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "LOGIN_DETECTED" }),
+        expect.any(Function),
+      );
     });
   });
 });

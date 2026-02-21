@@ -62,6 +62,21 @@ const CLIPBOARD_CLEAR_DELAY_MS = 30_000; // 30 seconds
 
 let lastClipboardCopyTime = 0;
 
+// ── Pending save prompts (login detection → post-navigation banner) ──
+
+interface PendingSavePrompt {
+  host: string;
+  username: string;
+  password: string;
+  action: "save" | "update";
+  existingEntryId?: string;
+  existingTitle?: string;
+  timestamp: number;
+}
+
+const PENDING_SAVE_TTL_MS = 30_000; // 30 seconds
+const pendingSavePrompts = new Map<number, PendingSavePrompt>();
+
 // ── Entry cache (TTL-based) ─────────────────────────────────
 
 let cachedEntries: DecryptedEntry[] | null = null;
@@ -112,6 +127,7 @@ function clearVault(): void {
   currentVaultSecretKeyHex = null;
   invalidateCache();
   invalidateContextMenu();
+  pendingSavePrompts.clear();
   chrome.alarms.clear(ALARM_VAULT_LOCK);
   persistState();
   void updateBadge();
@@ -119,14 +135,18 @@ function clearVault(): void {
 
 async function updateBadge(): Promise<void> {
   if (!currentToken) {
-    await chrome.action.setBadgeText({ text: "" });
+    // Disconnected — gray badge with "×"
+    await chrome.action.setBadgeText({ text: "×" });
+    await chrome.action.setBadgeBackgroundColor({ color: "#9CA3AF" });
     return;
   }
   if (!encryptionKey) {
+    // Connected but vault locked — amber badge with "!"
     await chrome.action.setBadgeText({ text: "!" });
     await chrome.action.setBadgeBackgroundColor({ color: "#F59E0B" });
     return;
   }
+  // Connected and vault unlocked — no badge
   await chrome.action.setBadgeText({ text: "" });
 }
 
@@ -307,6 +327,7 @@ initContextMenu({
   getCachedEntries,
   isHostMatch,
   extractHost,
+  isConnected: () => currentToken !== null,
   isVaultUnlocked: () => encryptionKey !== null,
   performAutofill: async (entryId, tabId) => {
     await performAutofillForEntry(entryId, tabId);
@@ -341,6 +362,34 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete") {
     updateContextMenuForTab(tabId, tab.url);
+
+    // Push pending save prompt to the new page after navigation.
+    // Use a short delay to give content scripts (document_idle) time to load.
+    // Do NOT delete from the map before confirming delivery — the pull
+    // mechanism (CHECK_PENDING_SAVE) acts as a fallback if push fails.
+    const pending = pendingSavePrompts.get(tabId);
+    if (pending) {
+      if (Date.now() - pending.timestamp >= PENDING_SAVE_TTL_MS) {
+        pendingSavePrompts.delete(tabId);
+      } else {
+        setTimeout(() => {
+          chrome.tabs.sendMessage(tabId, {
+            type: "PSSO_SHOW_SAVE_BANNER",
+            host: pending.host,
+            username: pending.username,
+            password: pending.password,
+            action: pending.action,
+            existingEntryId: pending.existingEntryId,
+            existingTitle: pending.existingTitle,
+          }).then(() => {
+            // Delivered successfully — remove from pending
+            pendingSavePrompts.delete(tabId);
+          }).catch(() => {
+            // Content script not ready — leave in map for pull mechanism
+          });
+        }, 500);
+      }
+    }
   }
 });
 
@@ -1271,7 +1320,17 @@ async function handleMessage(
         });
         return;
       }
-      if (!encryptionKey || !currentUserId || !currentToken) {
+      if (!currentToken) {
+        sendResponse({
+          type: "GET_MATCHES_FOR_URL",
+          entries: [],
+          vaultLocked: false,
+          disconnected: true,
+          suppressInline: false,
+        });
+        return;
+      }
+      if (!encryptionKey || !currentUserId) {
         sendResponse({
           type: "GET_MATCHES_FOR_URL",
           entries: [],
@@ -1365,6 +1424,30 @@ async function handleMessage(
           message.username,
           message.password,
         );
+
+        // Store pending save for this tab. After form submit the page
+        // typically navigates, so the sendResponse callback on the content
+        // script side may never fire. The tabs.onUpdated handler will push
+        // the save banner to the new page.
+        const senderTabId = _sender.tab?.id;
+        if (senderTabId && result.action !== "none") {
+          let host: string;
+          try {
+            host = new URL(senderUrl).hostname;
+          } catch {
+            host = senderUrl;
+          }
+          pendingSavePrompts.set(senderTabId, {
+            host,
+            username: message.username,
+            password: message.password,
+            action: result.action,
+            existingEntryId: result.existingEntryId,
+            existingTitle: result.existingTitle,
+            timestamp: Date.now(),
+          });
+        }
+
         sendResponse({
           type: "LOGIN_DETECTED",
           action: result.action,
@@ -1378,6 +1461,8 @@ async function handleMessage(
     }
 
     case "SAVE_LOGIN": {
+      // Clear pending save — user acted on the banner (page didn't navigate)
+      if (_sender.tab?.id) pendingSavePrompts.delete(_sender.tab.id);
       try {
         // Use sender's tab URL for security — don't trust message.url
         const senderUrl = _sender.tab?.url ?? message.url;
@@ -1395,6 +1480,7 @@ async function handleMessage(
     }
 
     case "UPDATE_LOGIN": {
+      if (_sender.tab?.id) pendingSavePrompts.delete(_sender.tab.id);
       try {
         const result = await handleUpdateLogin(
           message.entryId,
@@ -1408,7 +1494,33 @@ async function handleMessage(
     }
 
     case "DISMISS_SAVE_PROMPT": {
+      if (_sender.tab?.id) pendingSavePrompts.delete(_sender.tab.id);
       sendResponse({ type: "DISMISS_SAVE_PROMPT", ok: true });
+      return;
+    }
+
+    case "CHECK_PENDING_SAVE": {
+      const tabId = _sender.tab?.id;
+      if (!tabId) {
+        sendResponse({ type: "CHECK_PENDING_SAVE", action: "none" });
+        return;
+      }
+      const pending = pendingSavePrompts.get(tabId);
+      if (pending && Date.now() - pending.timestamp < PENDING_SAVE_TTL_MS) {
+        pendingSavePrompts.delete(tabId);
+        sendResponse({
+          type: "CHECK_PENDING_SAVE",
+          action: pending.action,
+          host: pending.host,
+          username: pending.username,
+          password: pending.password,
+          existingEntryId: pending.existingEntryId,
+          existingTitle: pending.existingTitle,
+        });
+      } else {
+        if (pending) pendingSavePrompts.delete(tabId);
+        sendResponse({ type: "CHECK_PENDING_SAVE", action: "none" });
+      }
       return;
     }
   }
@@ -1433,7 +1545,7 @@ chrome.runtime.onMessage.addListener(
             sendResponse({ type: "GET_TOKEN", token: null } as ExtensionResponse);
             break;
           case "GET_MATCHES_FOR_URL":
-            sendResponse({ type: "GET_MATCHES_FOR_URL", entries: [], vaultLocked: true, suppressInline: false } as ExtensionResponse);
+            sendResponse({ type: "GET_MATCHES_FOR_URL", entries: [], vaultLocked: !currentToken, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
             break;
           case "FETCH_PASSWORDS":
             sendResponse({ type: "FETCH_PASSWORDS", entries: null, error: "INTERNAL_ERROR" } as ExtensionResponse);

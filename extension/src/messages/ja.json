@@ -46,12 +46,14 @@
   },
   "contentScript": {
     "vaultLocked": "保管庫がロックされています",
+    "disconnected": "サーバーに接続されていません",
     "noMatches": "一致するエントリがありません",
     "logins": "ログイン候補"
   },
   "contextMenu": {
     "title": "passwd-sso",
     "vaultLocked": "保管庫がロックされています",
+    "disconnected": "接続されていません",
     "noMatches": "一致するエントリがありません",
     "openPopup": "passwd-sso を開く"
   },

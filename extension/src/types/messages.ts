@@ -20,7 +20,8 @@ export type ExtensionMessage =
   | { type: "LOGIN_DETECTED"; url: string; username: string; password: string }
   | { type: "SAVE_LOGIN"; url: string; title: string; username: string; password: string }
   | { type: "UPDATE_LOGIN"; entryId: string; password: string }
-  | { type: "DISMISS_SAVE_PROMPT" };
+  | { type: "DISMISS_SAVE_PROMPT" }
+  | { type: "CHECK_PENDING_SAVE" };
 
 export interface DecryptedEntry {
   id: string;
@@ -44,6 +45,7 @@ export type ExtensionResponse =
       type: "GET_MATCHES_FOR_URL";
       entries: DecryptedEntry[];
       vaultLocked: boolean;
+      disconnected?: boolean;
       suppressInline?: boolean;
     }
   | { type: "COPY_TOTP"; code: string | null; error?: string }
@@ -51,7 +53,16 @@ export type ExtensionResponse =
   | { type: "LOGIN_DETECTED"; action: "save" | "update" | "none"; existingEntryId?: string; existingTitle?: string }
   | { type: "SAVE_LOGIN"; ok: boolean; error?: string }
   | { type: "UPDATE_LOGIN"; ok: boolean; error?: string }
-  | { type: "DISMISS_SAVE_PROMPT"; ok: true };
+  | { type: "DISMISS_SAVE_PROMPT"; ok: true }
+  | {
+      type: "CHECK_PENDING_SAVE";
+      action: "save" | "update" | "none";
+      host?: string;
+      username?: string;
+      password?: string;
+      existingEntryId?: string;
+      existingTitle?: string;
+    };
 
 export interface AutofillPayload {
   type: "AUTOFILL_FILL";

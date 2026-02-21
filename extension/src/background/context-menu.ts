@@ -16,6 +16,7 @@ export interface ContextMenuDeps {
   getCachedEntries: () => Promise<DecryptedEntry[]>;
   isHostMatch: (entryHost: string, tabHost: string) => boolean;
   extractHost: (url: string) => string | null;
+  isConnected: () => boolean;
   isVaultUnlocked: () => boolean;
   performAutofill: (entryId: string, tabId: number) => Promise<void>;
 }
@@ -75,6 +76,17 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
 
   await removeChildItems();
   lastMenuHost = host;
+
+  if (!deps.isConnected()) {
+    chrome.contextMenus.create({
+      id: `${ITEM_PREFIX}disconnected`,
+      parentId: PARENT_ID,
+      title: t("contextMenu.disconnected"),
+      contexts: ["editable"],
+      enabled: false,
+    });
+    return;
+  }
 
   if (!deps.isVaultUnlocked()) {
     chrome.contextMenus.create({
@@ -164,7 +176,7 @@ export function handleContextMenuClick(
 
   if (menuId.startsWith(ITEM_PREFIX)) {
     const entryId = menuId.slice(ITEM_PREFIX.length);
-    if (entryId && entryId !== "locked" && entryId !== "none" && entryId !== "sep") {
+    if (entryId && entryId !== "locked" && entryId !== "disconnected" && entryId !== "none" && entryId !== "sep") {
       deps.performAutofill(entryId, tab.id).catch(() => {});
     }
   }
