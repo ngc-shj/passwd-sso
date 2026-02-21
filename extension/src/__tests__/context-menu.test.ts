@@ -165,6 +165,17 @@ describe("context-menu", () => {
       expect(entryCalls).toHaveLength(5);
     });
 
+    it("removes child items when url is undefined", async () => {
+      updateContextMenuForTab(1, undefined);
+
+      await new Promise((r) => setTimeout(r, 300));
+
+      // removeAll should be called to clear child items
+      expect(chromeMock.contextMenus.removeAll).toHaveBeenCalled();
+      // getCachedEntries should NOT be called
+      expect(deps.getCachedEntries).not.toHaveBeenCalled();
+    });
+
     it("debounces rapid calls", async () => {
       updateContextMenuForTab(1, "https://github.com");
       updateContextMenuForTab(1, "https://gitlab.com");
@@ -174,6 +185,22 @@ describe("context-menu", () => {
 
       // getCachedEntries should only be called once (last debounced call)
       expect(deps.getCachedEntries).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("invalidateContextMenu", () => {
+    it("forces rebuild even for same host", async () => {
+      chromeMock.tabs.query.mockResolvedValue([{ id: 1, url: "https://github.com" }]);
+
+      updateContextMenuForTab(1, "https://github.com/login");
+      await new Promise((r) => setTimeout(r, 300));
+      const callsBefore = (deps.getCachedEntries as ReturnType<typeof vi.fn>).mock.calls.length;
+
+      // Calling invalidateContextMenu should reset lastMenuHost and rebuild
+      invalidateContextMenu();
+      await new Promise((r) => setTimeout(r, 300));
+
+      expect((deps.getCachedEntries as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(callsBefore);
     });
   });
 

@@ -271,6 +271,17 @@ describe("login-detector-lib", () => {
       expect(extractCredentialsFromPage()).toBeNull();
     });
 
+    it("returns null when exactly 2 filled password fields", () => {
+      const pw1 = createPasswordInput("pw1");
+      const pw2 = createPasswordInput("pw2");
+      document.body.appendChild(pw1);
+      document.body.appendChild(pw2);
+
+      mockFindPasswordInputs.mockReturnValue([pw1, pw2]);
+
+      expect(extractCredentialsFromPage()).toBeNull();
+    });
+
     it("returns null when more than 2 filled password fields", () => {
       const pw1 = createPasswordInput("pw1");
       const pw2 = createPasswordInput("pw2");
@@ -376,6 +387,43 @@ describe("login-detector-lib", () => {
       expect(mockShowSaveBanner).toHaveBeenCalledWith(
         expect.objectContaining({
           action: "save",
+          username: "bob",
+        }),
+      );
+
+      cleanup.destroy();
+    });
+
+    it("shows update banner when background responds with update action", () => {
+      const form = createForm();
+      const pw = createPasswordInput("secret");
+      const user = createTextInput("bob");
+      form.appendChild(user);
+      form.appendChild(pw);
+      document.body.appendChild(form);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+      mockFindUsernameInput.mockReturnValue(user);
+
+      mockSendMessage.mockImplementation((_msg: unknown, callback?: (resp: unknown) => void) => {
+        if (callback) {
+          callback({
+            type: "LOGIN_DETECTED",
+            action: "update",
+            existingEntryId: "e1",
+            existingTitle: "GitHub",
+          });
+        }
+      });
+
+      const cleanup = initLoginDetector();
+
+      form.dispatchEvent(new Event("submit", { bubbles: true }));
+
+      expect(mockShowSaveBanner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "update",
+          existingTitle: "GitHub",
           username: "bob",
         }),
       );
