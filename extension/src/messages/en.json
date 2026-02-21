@@ -49,6 +49,30 @@
     "noMatches": "No matches for this site",
     "logins": "Logins"
   },
+  "contextMenu": {
+    "title": "passwd-sso",
+    "vaultLocked": "Vault is locked",
+    "noMatches": "No matches",
+    "openPopup": "Open passwd-sso"
+  },
+  "saveBanner": {
+    "saveLogin": "Save login for {host}?",
+    "updateLogin": "Update password for \"{title}\"?",
+    "save": "Save",
+    "update": "Update",
+    "dismiss": "Dismiss",
+    "saved": "Login saved",
+    "updated": "Password updated",
+    "failed": "Failed to save"
+  },
+  "commands": {
+    "copyPassword": "Copy password",
+    "copyUsername": "Copy username",
+    "lockVault": "Lock vault",
+    "copied": "Copied to clipboard",
+    "noMatch": "No matching entry for this site",
+    "clipboardCleared": "Clipboard cleared"
+  },
   "errors": {
     "invalidPassphrase": "Passphrase is incorrect.",
     "vaultLocked": "Vault is locked.",

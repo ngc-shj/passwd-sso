@@ -25,11 +25,28 @@ import {
   ALARM_TOKEN_TTL,
   ALARM_VAULT_LOCK,
   ALARM_TOKEN_REFRESH,
+  ALARM_CLEAR_CLIPBOARD,
   TOKEN_BRIDGE_SCRIPT_ID,
   CMD_TRIGGER_AUTOFILL,
+  CMD_COPY_PASSWORD,
+  CMD_COPY_USERNAME,
+  CMD_LOCK_VAULT,
   EXT_ENTRY_TYPE,
 } from "../lib/constants";
 import { generateTOTPCode } from "../lib/totp";
+import {
+  initContextMenu,
+  setupContextMenu,
+  updateContextMenuForTab,
+  handleContextMenuClick,
+  invalidateContextMenu,
+} from "./context-menu";
+import {
+  initLoginSave,
+  handleLoginDetected,
+  handleSaveLogin,
+  handleUpdateLogin,
+} from "./login-save";
 
 // ── In-memory state (token/userId persisted to chrome.storage.session) ──
 
@@ -41,6 +58,9 @@ let currentVaultSecretKeyHex: string | null = null;
 
 const CACHE_TTL_MS = 60_000; // 1 minute
 const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
+const CLIPBOARD_CLEAR_DELAY_MS = 30_000; // 30 seconds
+
+let lastClipboardCopyTime = 0;
 
 // ── Entry cache (TTL-based) ─────────────────────────────────
 
@@ -91,6 +111,7 @@ function clearVault(): void {
   currentUserId = null;
   currentVaultSecretKeyHex = null;
   invalidateCache();
+  invalidateContextMenu();
   chrome.alarms.clear(ALARM_VAULT_LOCK);
   persistState();
   void updateBadge();
@@ -280,6 +301,51 @@ void configureSessionStorageAccess();
 // Hydrate on SW startup
 const hydrationPromise = hydrateFromSession().catch(() => {});
 
+// ── Context menu ─────────────────────────────────────────────
+
+initContextMenu({
+  getCachedEntries,
+  isHostMatch,
+  extractHost,
+  isVaultUnlocked: () => encryptionKey !== null,
+  performAutofill: async (entryId, tabId) => {
+    await performAutofillForEntry(entryId, tabId);
+  },
+});
+
+// ── Login save ──────────────────────────────────────────────
+
+initLoginSave({
+  getEncryptionKey: () => encryptionKey,
+  getCurrentUserId: () => currentUserId,
+  getCachedEntries,
+  isHostMatch,
+  extractHost,
+  swFetch,
+  invalidateCache,
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  setupContextMenu();
+});
+chrome.runtime.onStartup.addListener(() => {
+  setupContextMenu();
+});
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  chrome.tabs.get(activeInfo.tabId).then((tab) => {
+    updateContextMenuForTab(tab.id!, tab.url);
+  }).catch(() => {});
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === "complete") {
+    updateContextMenuForTab(tabId, tab.url);
+  }
+});
+
+chrome.contextMenus.onClicked.addListener(handleContextMenuClick);
+
 // ── Alarm: auto-clear on expiry ──────────────────────────────
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -291,6 +357,26 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name === ALARM_TOKEN_REFRESH) {
     attemptTokenRefresh().catch(() => {});
+  }
+  if (alarm.name === ALARM_CLEAR_CLIPBOARD) {
+    // Fallback clipboard clear: only clear if 30s+ since last copy
+    if (Date.now() - lastClipboardCopyTime >= CLIPBOARD_CLEAR_DELAY_MS) {
+      chrome.tabs
+        .query({ active: true, currentWindow: true })
+        .then(([tab]) => {
+          if (tab?.id) {
+            chrome.scripting
+              .executeScript({
+                target: { tabId: tab.id },
+                world: "ISOLATED",
+                func: () => navigator.clipboard.writeText(""),
+                args: [],
+              })
+              .catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }
   }
 });
 
@@ -344,30 +430,108 @@ getSettings()
   .catch(() => {});
 
 chrome.commands.onCommand.addListener(async (command) => {
-  if (command !== CMD_TRIGGER_AUTOFILL) return;
-  if (!currentToken || !encryptionKey || !currentUserId) return;
+  if (command === CMD_TRIGGER_AUTOFILL) {
+    if (!currentToken || !encryptionKey || !currentUserId) return;
 
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || !tab.url) return;
-  if (!extractHost(tab.url)) return;
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id || !tab.url) return;
+    if (!extractHost(tab.url)) return;
 
-  try {
-    await chrome.tabs.sendMessage(tab.id, { type: "PSSO_TRIGGER_INLINE_SUGGESTIONS" });
-  } catch {
-    // Ensure content script is present on already-open tabs, then retry.
     try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id, allFrames: true },
-        files: ["src/content/form-detector.js"],
-      });
       await chrome.tabs.sendMessage(tab.id, { type: "PSSO_TRIGGER_INLINE_SUGGESTIONS" });
     } catch {
-      // ignore on restricted pages
+      // Ensure content script is present on already-open tabs, then retry.
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id, allFrames: true },
+          files: ["src/content/form-detector.js"],
+        });
+        await chrome.tabs.sendMessage(tab.id, { type: "PSSO_TRIGGER_INLINE_SUGGESTIONS" });
+      } catch {
+        // ignore on restricted pages
+      }
+    }
+    return;
+  }
+
+  if (command === CMD_LOCK_VAULT) {
+    clearVault();
+    return;
+  }
+
+  if (command === CMD_COPY_PASSWORD || command === CMD_COPY_USERNAME) {
+    if (!currentToken || !encryptionKey || !currentUserId) return;
+
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id || !tab.url) return;
+
+    const tabHost = extractHost(tab.url);
+    if (!tabHost) return;
+
+    try {
+      const entries = await getCachedEntries();
+      const match = entries.find((e) => isHostMatch(e.urlHost, tabHost));
+      if (!match) return;
+
+      // Fetch full blob to get password/username
+      const res = await swFetch(extApiPath.passwordById(match.id));
+      if (!res.ok) return;
+
+      const data = (await res.json()) as {
+        encryptedBlob: { ciphertext: string; iv: string; authTag: string };
+        aadVersion?: number;
+        id: string;
+      };
+
+      const aad =
+        (data.aadVersion ?? 0) >= 1
+          ? buildPersonalEntryAAD(currentUserId!, data.id)
+          : undefined;
+      const plaintext = await decryptData(data.encryptedBlob, encryptionKey!, aad);
+      const blob = JSON.parse(plaintext) as {
+        password?: string | null;
+        username?: string | null;
+      };
+
+      const value =
+        command === CMD_COPY_PASSWORD
+          ? blob.password ?? null
+          : blob.username ?? null;
+      if (!value) return;
+
+      // Copy to clipboard via content script (SW has no DOM/clipboard access)
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: "ISOLATED",
+        func: (text: string) => navigator.clipboard.writeText(text),
+        args: [value],
+      });
+
+      // Schedule clipboard clear: setTimeout (30s) + alarm fallback (1min)
+      lastClipboardCopyTime = Date.now();
+      setTimeout(async () => {
+        try {
+          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (activeTab?.id) {
+            await chrome.scripting.executeScript({
+              target: { tabId: activeTab.id },
+              world: "ISOLATED",
+              func: () => navigator.clipboard.writeText(""),
+              args: [],
+            });
+          }
+        } catch {
+          // ignore — tab may have closed
+        }
+      }, CLIPBOARD_CLEAR_DELAY_MS);
+      chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, { delayInMinutes: 1 });
+    } catch {
+      // ignore errors silently for keyboard shortcuts
     }
   }
 });
 
-async function swFetch(path: string): Promise<Response> {
+async function swFetch(path: string, init?: RequestInit): Promise<Response> {
   if (!currentToken) {
     throw new Error("NO_TOKEN");
   }
@@ -385,9 +549,13 @@ async function swFetch(path: string): Promise<Response> {
     throw new Error("PERMISSION_DENIED");
   }
 
-  return fetch(`${origin}${path}`, {
-    headers: { Authorization: `Bearer ${currentToken}` },
-  });
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${currentToken}`);
+  if (!headers.has("Content-Type") && init?.body) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  return fetch(`${origin}${path}`, { ...init, headers });
 }
 
 type RawEntry = {
@@ -872,6 +1040,7 @@ async function handleMessage(
         }
 
         sendResponse({ type: "UNLOCK_VAULT", ok: true });
+        invalidateContextMenu();
         void updateBadge();
       } catch (err) {
         sendResponse({
@@ -1184,6 +1353,58 @@ async function handleMessage(
           error: err instanceof Error ? err.message : "AUTOFILL_FAILED",
         });
       }
+      return;
+    }
+
+    case "LOGIN_DETECTED": {
+      try {
+        const result = await handleLoginDetected(
+          message.url,
+          message.username,
+          message.password,
+        );
+        sendResponse({
+          type: "LOGIN_DETECTED",
+          action: result.action,
+          existingEntryId: result.existingEntryId,
+          existingTitle: result.existingTitle,
+        });
+      } catch {
+        sendResponse({ type: "LOGIN_DETECTED", action: "none" });
+      }
+      return;
+    }
+
+    case "SAVE_LOGIN": {
+      try {
+        const result = await handleSaveLogin(
+          message.url,
+          message.title,
+          message.username,
+          message.password,
+        );
+        sendResponse({ type: "SAVE_LOGIN", ok: result.ok, error: result.error });
+      } catch {
+        sendResponse({ type: "SAVE_LOGIN", ok: false, error: "SAVE_FAILED" });
+      }
+      return;
+    }
+
+    case "UPDATE_LOGIN": {
+      try {
+        const result = await handleUpdateLogin(
+          message.entryId,
+          message.password,
+        );
+        sendResponse({ type: "UPDATE_LOGIN", ok: result.ok, error: result.error });
+      } catch {
+        sendResponse({ type: "UPDATE_LOGIN", ok: false, error: "UPDATE_FAILED" });
+      }
+      return;
+    }
+
+    case "DISMISS_SAVE_PROMPT": {
+      sendResponse({ type: "DISMISS_SAVE_PROMPT", ok: true });
       return;
     }
   }
