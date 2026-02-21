@@ -168,7 +168,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Optionally revoke old-version shares (only if rotation succeeded or all already at target)
+  // Revoke old-version shares if requested.
+  // Skip only when ALL orgs failed (orgs.length > 0 && rotated === 0),
+  // since partial rotation means some data is still on the old key.
   let revokedShares = 0;
   if (revokeShares && (orgs.length === 0 || rotated > 0)) {
     const result = await prisma.passwordShare.updateMany({
@@ -182,9 +184,9 @@ export async function POST(req: NextRequest) {
     revokedShares = result.count;
   }
 
-  // Audit log (awaited for critical admin operation)
+  // Audit log (fire-and-forget; logAudit handles errors internally)
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
-  await logAudit({
+  logAudit({
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.MASTER_KEY_ROTATION,
     userId: operatorId,
