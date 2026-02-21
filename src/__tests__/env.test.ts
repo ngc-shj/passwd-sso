@@ -341,4 +341,42 @@ describe("env validation", () => {
     const { env } = await import("@/lib/env");
     expect(env.ORG_MASTER_KEY).toBeUndefined();
   });
+
+  // ─── V2+ key rotation scenarios ──────────────────────────
+
+  it("accepts CURRENT_VERSION=2 with V2 key", async () => {
+    setMinimalDevEnv();
+    process.env.ORG_MASTER_KEY_CURRENT_VERSION = "2";
+    process.env.ORG_MASTER_KEY_V2 = "c".repeat(64);
+    const { env } = await import("@/lib/env");
+    expect(env.ORG_MASTER_KEY_CURRENT_VERSION).toBe(2);
+  });
+
+  it("throws when CURRENT_VERSION=2 but V2 key is missing", async () => {
+    setMinimalDevEnv();
+    process.env.ORG_MASTER_KEY_CURRENT_VERSION = "2";
+    await expect(import("@/lib/env")).rejects.toThrow("ORG_MASTER_KEY_V2");
+  });
+
+  it("throws when CURRENT_VERSION=2 and V2 key is invalid hex", async () => {
+    setMinimalDevEnv();
+    process.env.ORG_MASTER_KEY_CURRENT_VERSION = "2";
+    process.env.ORG_MASTER_KEY_V2 = "not-hex-at-all";
+    await expect(import("@/lib/env")).rejects.toThrow("ORG_MASTER_KEY_V2");
+  });
+
+  it("defaults CURRENT_VERSION to 1 when not set", async () => {
+    setMinimalDevEnv();
+    delete process.env.ORG_MASTER_KEY_CURRENT_VERSION;
+    const { env } = await import("@/lib/env");
+    expect(env.ORG_MASTER_KEY_CURRENT_VERSION).toBe(1);
+  });
+
+  it("throws when CURRENT_VERSION exceeds max (101)", async () => {
+    setMinimalDevEnv();
+    process.env.ORG_MASTER_KEY_CURRENT_VERSION = "101";
+    await expect(import("@/lib/env")).rejects.toThrow(
+      "ORG_MASTER_KEY_CURRENT_VERSION"
+    );
+  });
 });

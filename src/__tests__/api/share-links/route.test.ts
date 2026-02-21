@@ -137,6 +137,15 @@ describe("POST /api/share-links", () => {
     expect(json.token).toBe("a".repeat(64));
     expect(json.url).toBe("/s/" + "a".repeat(64));
     expect(json.id).toBe("share-1");
+
+    // Verify masterKeyVersion is saved to DB
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          masterKeyVersion: 1,
+        }),
+      })
+    );
   });
 
   it("returns 429 when rate limited", async () => {

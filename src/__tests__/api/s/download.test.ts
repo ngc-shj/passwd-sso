@@ -2,10 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createParams } from "../../helpers/request-builder";
 import { NextRequest } from "next/server";
 
-const { mockFindUnique, mockCheck, mockAccessLogCreate } = vi.hoisted(() => ({
+const { mockFindUnique, mockCheck, mockAccessLogCreate, mockDecryptShareBinary } = vi.hoisted(() => ({
   mockFindUnique: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue(true),
   mockAccessLogCreate: vi.fn().mockReturnValue({ catch: vi.fn() }),
+  mockDecryptShareBinary: vi.fn().mockReturnValue(Buffer.from("decrypted-file-content")),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -16,7 +17,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/crypto-server", () => ({
   hashToken: (t: string) => `hashed_${t}`,
-  decryptShareBinary: () => Buffer.from("decrypted-file-content"),
+  decryptShareBinary: mockDecryptShareBinary,
 }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
@@ -149,6 +150,12 @@ describe("GET /s/[token]/download", () => {
     const body = await res.arrayBuffer();
     const text = new TextDecoder().decode(body);
     expect(text).toBe("decrypted-file-content");
+
+    // Verify masterKeyVersion was passed to decryptShareBinary
+    expect(mockDecryptShareBinary).toHaveBeenCalledWith(
+      expect.anything(),
+      1
+    );
   });
 
   it("encodes non-ASCII filename in Content-Disposition", async () => {

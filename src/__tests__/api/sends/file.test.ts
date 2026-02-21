@@ -333,6 +333,7 @@ describe("POST /api/sends/file", () => {
           sendName: "Test File",
           sendFilename: "test.txt",
           createdById: DEFAULT_SESSION.user.id,
+          masterKeyVersion: 1,
         }),
       })
     );

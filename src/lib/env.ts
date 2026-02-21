@@ -197,9 +197,10 @@ const envSchema = z
 
     if (currentVersion === 1) {
       // V1: ORG_MASTER_KEY_V1 or ORG_MASTER_KEY must exist
-      const v1Key =
+      const v1Raw =
         process.env.ORG_MASTER_KEY_V1 ?? process.env.ORG_MASTER_KEY;
-      if (!v1Key || !hex64Re.test(v1Key.trim())) {
+      const v1Key = v1Raw?.trim();
+      if (!v1Key || !hex64Re.test(v1Key)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["ORG_MASTER_KEY"],
@@ -209,8 +210,9 @@ const envSchema = z
       }
     } else {
       // V2+: ORG_MASTER_KEY_V{N} must exist
-      const vNKey = process.env[`ORG_MASTER_KEY_V${currentVersion}`];
-      if (!vNKey || !hex64Re.test(vNKey.trim())) {
+      const vNRaw = process.env[`ORG_MASTER_KEY_V${currentVersion}`];
+      const vNKey = vNRaw?.trim();
+      if (!vNKey || !hex64Re.test(vNKey)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["ORG_MASTER_KEY_CURRENT_VERSION"],
