@@ -1562,6 +1562,7 @@ describe("CHECK_PENDING_SAVE host validation", () => {
         action: "save",
         host: "nomatch.test",
         username: "alice",
+        password: "pw",
       }),
     );
   });
