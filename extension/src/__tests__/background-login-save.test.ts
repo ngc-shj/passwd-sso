@@ -8,9 +8,11 @@ import {
 
 // Must stub chrome before importing login-save
 vi.stubGlobal("chrome", { runtime: { id: "test-ext" } });
-// Must stub crypto.randomUUID
+// Must stub crypto.randomUUID — preserve subtle by reference
+const originalCrypto = globalThis.crypto;
 vi.stubGlobal("crypto", {
-  ...globalThis.crypto,
+  subtle: originalCrypto.subtle,
+  getRandomValues: originalCrypto.getRandomValues.bind(originalCrypto),
   randomUUID: vi.fn().mockReturnValue("new-uuid-1234"),
 });
 
@@ -30,9 +32,12 @@ async function makeTestKey(): Promise<CryptoKey> {
   );
 }
 
+const TEST_UUID_1 = "a0000000-0000-0000-0000-000000000001";
+const TEST_UUID_2 = "b0000000-0000-0000-0000-000000000002";
+
 const mockEntries: DecryptedEntry[] = [
-  { id: "e1", title: "GitHub", username: "alice", urlHost: "github.com", entryType: "LOGIN" },
-  { id: "e2", title: "GitLab", username: "bob", urlHost: "gitlab.com", entryType: "LOGIN" },
+  { id: TEST_UUID_1, title: "GitHub", username: "alice", urlHost: "github.com", entryType: "LOGIN" },
+  { id: TEST_UUID_2, title: "GitLab", username: "bob", urlHost: "gitlab.com", entryType: "LOGIN" },
 ];
 
 function createDeps(overrides?: Partial<LoginSaveDeps>): LoginSaveDeps {
@@ -88,7 +93,7 @@ describe("login-save", () => {
     });
 
     it("returns 'none' when password matches existing entry", async () => {
-      const aad = buildPersonalEntryAAD("user-1", "e1");
+      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
       const blob = JSON.stringify({ password: "same-password" });
       const encBlob = await encryptData(blob, testKey, aad);
 
@@ -96,7 +101,7 @@ describe("login-save", () => {
         getEncryptionKey: vi.fn().mockReturnValue(testKey),
         swFetch: vi.fn().mockResolvedValue(
           new Response(JSON.stringify({
-            id: "e1",
+            id: TEST_UUID_1,
             encryptedBlob: encBlob,
             aadVersion: 1,
           })),
@@ -109,7 +114,7 @@ describe("login-save", () => {
     });
 
     it("returns 'update' when password differs from existing entry", async () => {
-      const aad = buildPersonalEntryAAD("user-1", "e1");
+      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
       const blob = JSON.stringify({ password: "old-password" });
       const encBlob = await encryptData(blob, testKey, aad);
 
@@ -117,7 +122,7 @@ describe("login-save", () => {
         getEncryptionKey: vi.fn().mockReturnValue(testKey),
         swFetch: vi.fn().mockResolvedValue(
           new Response(JSON.stringify({
-            id: "e1",
+            id: TEST_UUID_1,
             encryptedBlob: encBlob,
             aadVersion: 1,
           })),
@@ -127,7 +132,7 @@ describe("login-save", () => {
 
       const result = await handleLoginDetected("https://github.com", "alice", "new-password");
       expect(result.action).toBe("update");
-      expect(result.existingEntryId).toBe("e1");
+      expect(result.existingEntryId).toBe(TEST_UUID_1);
       expect(result.existingTitle).toBe("GitHub");
     });
   });
@@ -163,6 +168,19 @@ describe("login-save", () => {
       expect(callBody.encryptedBlob).toBeDefined();
       expect(callBody.encryptedOverview).toBeDefined();
       expect(deps.invalidateCache).toHaveBeenCalled();
+
+      // Verify encrypted blobs decrypt to correct content
+      const aad = buildPersonalEntryAAD("user-1", "new-uuid-1234");
+      const fullPlain = JSON.parse(await decryptData(callBody.encryptedBlob, testKey, aad));
+      expect(fullPlain.username).toBe("alice");
+      expect(fullPlain.password).toBe("password123");
+      expect(fullPlain.title).toBe("example.com");
+      expect(fullPlain.url).toBe("https://example.com/login");
+
+      const overviewPlain = JSON.parse(await decryptData(callBody.encryptedOverview, testKey, aad));
+      expect(overviewPlain.title).toBe("example.com");
+      expect(overviewPlain.username).toBe("alice");
+      expect(overviewPlain.urlHost).toBe("example.com");
     });
 
     it("returns error when vault is locked", async () => {
@@ -190,7 +208,7 @@ describe("login-save", () => {
 
   describe("handleUpdateLogin", () => {
     it("updates password while preserving other fields", async () => {
-      const aad = buildPersonalEntryAAD("user-1", "e1");
+      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
       const originalBlob = {
         title: "GitHub",
         username: "alice",
@@ -206,7 +224,7 @@ describe("login-save", () => {
         .mockResolvedValueOnce(
           // GET entry
           new Response(JSON.stringify({
-            id: "e1",
+            id: TEST_UUID_1,
             encryptedBlob: encBlob,
             encryptedOverview: encOverview,
             aadVersion: 1,
@@ -223,7 +241,7 @@ describe("login-save", () => {
       });
       initLoginSave(deps);
 
-      const result = await handleUpdateLogin("e1", "new-password");
+      const result = await handleUpdateLogin(TEST_UUID_1, "new-password");
 
       expect(result.ok).toBe(true);
       expect(deps.invalidateCache).toHaveBeenCalled();
@@ -231,7 +249,7 @@ describe("login-save", () => {
       // Verify PUT was called
       expect(mockFetch).toHaveBeenCalledTimes(2);
       const putCall = mockFetch.mock.calls[1];
-      expect(putCall[0]).toBe("/api/passwords/e1");
+      expect(putCall[0]).toBe(`/api/passwords/${TEST_UUID_1}`);
       expect(JSON.parse(putCall[1].body).encryptedBlob).toBeDefined();
 
       // Verify the updated blob preserves all original fields except password
@@ -249,7 +267,7 @@ describe("login-save", () => {
       const deps = createDeps({ getEncryptionKey: vi.fn().mockReturnValue(null) });
       initLoginSave(deps);
 
-      const result = await handleUpdateLogin("e1", "new-pw");
+      const result = await handleUpdateLogin(TEST_UUID_1, "new-pw");
       expect(result.ok).toBe(false);
       expect(result.error).toBe("VAULT_LOCKED");
     });
@@ -263,7 +281,7 @@ describe("login-save", () => {
       });
       initLoginSave(deps);
 
-      const result = await handleUpdateLogin("e1", "new-pw");
+      const result = await handleUpdateLogin(TEST_UUID_1, "new-pw");
       expect(result.ok).toBe(false);
       expect(result.error).toBe("FETCH_FAILED");
     });

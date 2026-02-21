@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DecryptedEntry } from "../types/messages";
 
 // Mock chrome API before importing
-let onClickedHandler: ((info: unknown, tab: unknown) => void) | null = null;
+// Override navigator.language for consistent i18n
+Object.defineProperty(navigator, "language", { value: "en-US", configurable: true });
 
 const chromeMock = {
   contextMenus: {
