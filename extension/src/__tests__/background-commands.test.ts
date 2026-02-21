@@ -348,6 +348,49 @@ describe("X-4 keyboard shortcut commands", () => {
     expect(clipboardCalls).toHaveLength(0);
   });
 
+  it("copy-password does nothing when entry is not LOGIN type", async () => {
+    await unlockVault(chromeMock);
+
+    // Override fetch to return a non-LOGIN entry
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.PASSWORDS)) {
+          return {
+            ok: true,
+            json: async () => [
+              {
+                id: "note-1",
+                encryptedOverview: {
+                  ciphertext: "11",
+                  iv: "22",
+                  authTag: "33",
+                },
+                entryType: "SECURE_NOTE",
+                aadVersion: 1,
+              },
+            ],
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+
+    // Invalidate cache so new fetch mock is used
+    await sendMessage({ type: "GET_STATUS" });
+
+    const handler = commandHandlers[0];
+    await handler(CMD_COPY_PASSWORD);
+
+    const clipboardCalls = chromeMock.scripting.executeScript.mock.calls.filter(
+      (call: unknown[]) => {
+        const opts = call[0] as { world?: string };
+        return opts.world === "ISOLATED";
+      },
+    );
+    expect(clipboardCalls).toHaveLength(0);
+  });
+
   it("clipboard clear alarm handler clears clipboard after delay", async () => {
     await unlockVault(chromeMock);
 
