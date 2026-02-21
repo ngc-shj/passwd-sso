@@ -398,6 +398,39 @@ describe("login-save", () => {
     });
   });
 
+  describe("handleLoginDetected (multiple matches)", () => {
+    it("uses first matching entry when multiple entries match same host+username", async () => {
+      const multiMatchEntries: DecryptedEntry[] = [
+        { id: TEST_UUID_1, title: "GitHub (work)", username: "alice", urlHost: "github.com", entryType: "LOGIN" },
+        { id: TEST_UUID_2, title: "GitHub (personal)", username: "alice", urlHost: "github.com", entryType: "LOGIN" },
+      ];
+
+      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
+      const blob = JSON.stringify({ password: "old-password" });
+      const encBlob = await encryptData(blob, testKey, aad);
+
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        getCachedEntries: vi.fn().mockResolvedValue(multiMatchEntries),
+        isHostMatch: vi.fn().mockReturnValue(true),
+        swFetch: vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({
+            id: TEST_UUID_1,
+            encryptedBlob: encBlob,
+            aadVersion: 1,
+          })),
+        ),
+      });
+      initLoginSave(deps);
+
+      const result = await handleLoginDetected("https://github.com", "alice", "new-password");
+      expect(result.action).toBe("update");
+      // Should match the first entry (TEST_UUID_1)
+      expect(result.existingEntryId).toBe(TEST_UUID_1);
+      expect(result.existingTitle).toBe("GitHub (work)");
+    });
+  });
+
   describe("handleLoginDetected (error paths)", () => {
     it("returns 'none' when getCachedEntries throws", async () => {
       const deps = createDeps({

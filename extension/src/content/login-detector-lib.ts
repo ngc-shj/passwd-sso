@@ -88,7 +88,7 @@ export function extractCredentialsFromPage(): { username: string; password: stri
   const passwordInputs = findPasswordInputs(document);
   // Filter to visible, filled password fields
   const filled = passwordInputs.filter((p) => p.value);
-  if (filled.length === 0 || filled.length > 2) return null;
+  if (filled.length !== 1) return null;
 
   // Use the last filled password input (most likely the active one)
   const passwordInput = filled[filled.length - 1];

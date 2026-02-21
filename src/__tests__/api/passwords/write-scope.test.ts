@@ -207,6 +207,54 @@ describe("passwords:write scope", () => {
       expect(json.error).toBe("UNAUTHORIZED");
     });
 
+    it("allows extension token with passwords:write scope", async () => {
+      mockAuthOrToken.mockResolvedValue({
+        type: "token",
+        userId: "user-1",
+        scopes: ["passwords:read", "passwords:write"],
+      });
+      mockFindUnique.mockResolvedValue({
+        id: "p1",
+        userId: "user-1",
+        encryptedBlob: "old",
+        blobIv: "old",
+        blobAuthTag: "old",
+        keyVersion: 1,
+        aadVersion: 1,
+      });
+      mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
+        await fn({
+          passwordEntryHistory: {
+            create: mockHistoryCreate.mockResolvedValue({}),
+            findMany: mockHistoryFindMany.mockResolvedValue([]),
+            deleteMany: mockHistoryDeleteMany.mockResolvedValue({}),
+          },
+        });
+      });
+      mockUpdate.mockResolvedValue({
+        id: "p1",
+        encryptedOverview: "1122",
+        overviewIv: "3344",
+        overviewAuthTag: "5566",
+        keyVersion: 1,
+        aadVersion: 1,
+        entryType: "LOGIN",
+        requireReprompt: false,
+        expiresAt: null,
+        tags: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const req = createRequest("PUT", "http://localhost/api/passwords/p1", {
+        body: updateBody,
+        headers: { Authorization: "Bearer test-token" },
+      });
+      const res = await PUT(req, createParams({ id: "p1" }));
+      const { status } = await parseResponse(res);
+      expect(status).toBe(200);
+    });
+
     it("returns 403 when entry belongs to another user", async () => {
       mockAuthOrToken.mockResolvedValue({ type: "token", userId: "user-1", scopes: ["passwords:write"] });
       mockFindUnique.mockResolvedValue({
