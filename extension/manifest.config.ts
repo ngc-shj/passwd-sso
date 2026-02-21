@@ -8,10 +8,11 @@ import {
 
 export default defineManifest({
   manifest_version: 3,
-  name: "passwd-sso",
+  name: "__MSG_extName__",
   version: "0.1.0",
-  description: "Browser extension for passwd-sso password manager",
-  permissions: ["storage", "alarms", "activeTab", "scripting", "contextMenus"],
+  description: "__MSG_extDescription__",
+  default_locale: "en",
+  permissions: ["storage", "alarms", "activeTab", "scripting", "contextMenus", "clipboardWrite", "offscreen"],
   optional_host_permissions: ["https://*/*", "http://localhost/*"],
   background: {
     service_worker: "src/background/index.ts",
@@ -32,34 +33,34 @@ export default defineManifest({
   commands: {
     _execute_action: {
       suggested_key: {
-        default: "Ctrl+Shift+L",
-        mac: "Command+Shift+L",
+        default: "Ctrl+Shift+A",
+        mac: "Command+Shift+A",
       },
-      description: "Open passwd-sso popup",
+      description: "__MSG_cmdOpenPopup__",
+    },
+    [CMD_COPY_PASSWORD]: {
+      suggested_key: {
+        default: "Ctrl+Shift+P",
+        mac: "Command+Shift+P",
+      },
+      description: "__MSG_cmdCopyPassword__",
+    },
+    [CMD_COPY_USERNAME]: {
+      suggested_key: {
+        default: "Ctrl+Shift+I",
+        mac: "Command+Shift+I",
+      },
+      description: "__MSG_cmdCopyUsername__",
+    },
+    [CMD_LOCK_VAULT]: {
+      description: "__MSG_cmdLockVault__",
     },
     [CMD_TRIGGER_AUTOFILL]: {
       suggested_key: {
         default: "Ctrl+Shift+F",
         mac: "Command+Shift+F",
       },
-      description: "Autofill current page",
-    },
-    [CMD_COPY_PASSWORD]: {
-      suggested_key: {
-        default: "Ctrl+Shift+C",
-        mac: "Command+Shift+C",
-      },
-      description: "Copy password for current site",
-    },
-    [CMD_COPY_USERNAME]: {
-      suggested_key: {
-        default: "Ctrl+Shift+U",
-        mac: "Command+Shift+U",
-      },
-      description: "Copy username for current site",
-    },
-    [CMD_LOCK_VAULT]: {
-      description: "Lock vault",
+      description: "__MSG_cmdAutofill__",
     },
   },
   content_scripts: [

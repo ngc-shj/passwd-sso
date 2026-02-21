@@ -47,6 +47,7 @@ import {
   handleSaveLogin,
   handleUpdateLogin,
 } from "./login-save";
+import { copyToClipboard } from "./clipboard";
 
 // ── In-memory state (token/userId persisted to chrome.storage.session) ──
 
@@ -415,21 +416,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_CLEAR_CLIPBOARD) {
     // Fallback clipboard clear: only clear if 30s+ since last copy
     if (Date.now() - lastClipboardCopyTime >= CLIPBOARD_CLEAR_DELAY_MS) {
-      chrome.tabs
-        .query({ active: true, currentWindow: true })
-        .then(([tab]) => {
-          if (tab?.id) {
-            chrome.scripting
-              .executeScript({
-                target: { tabId: tab.id },
-                world: "ISOLATED",
-                func: () => navigator.clipboard.writeText(""),
-                args: [],
-              })
-              .catch(() => {});
-          }
-        })
-        .catch(() => {});
+      copyToClipboard("").catch(() => {});
     }
   }
 });
@@ -514,24 +501,34 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 
   if (command === CMD_COPY_PASSWORD || command === CMD_COPY_USERNAME) {
-    if (!currentToken || !encryptionKey || !currentUserId) return;
+    if (!currentToken || !encryptionKey || !currentUserId) {
+      return;
+    }
 
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id || !tab.url) return;
+    if (!tab?.url) {
+      return;
+    }
 
     const tabHost = extractHost(tab.url);
-    if (!tabHost) return;
+    if (!tabHost) {
+      return;
+    }
 
     try {
       const entries = await getCachedEntries();
       const match = entries.find(
         (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && isHostMatch(e.urlHost, tabHost),
       );
-      if (!match) return;
+      if (!match) {
+        return;
+      }
 
       // Fetch full blob to get password/username
       const res = await swFetch(extApiPath.passwordById(match.id));
-      if (!res.ok) return;
+      if (!res.ok) {
+        return;
+      }
 
       const data = (await res.json()) as {
         encryptedBlob: { ciphertext: string; iv: string; authTag: string };
@@ -555,35 +552,22 @@ chrome.commands.onCommand.addListener(async (command) => {
           : blob.username ?? null;
       if (!value) return;
 
-      // Copy to clipboard via content script (SW has no DOM/clipboard access)
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        world: "ISOLATED",
-        func: (text: string) => navigator.clipboard.writeText(text),
-        args: [value],
-      });
+      // Copy via offscreen document (no page DOM manipulation, no focus stealing)
+      await copyToClipboard(value);
 
       // Schedule clipboard clear: setTimeout (30s) + alarm fallback (1min)
       lastClipboardCopyTime = Date.now();
       await chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
       setTimeout(async () => {
         try {
-          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-          if (activeTab?.id) {
-            await chrome.scripting.executeScript({
-              target: { tabId: activeTab.id },
-              world: "ISOLATED",
-              func: () => navigator.clipboard.writeText(""),
-              args: [],
-            });
-          }
+          await copyToClipboard("");
         } catch {
-          // ignore — tab may have closed
+          // ignore — offscreen document may have been closed
         }
       }, CLIPBOARD_CLEAR_DELAY_MS);
       chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, { delayInMinutes: 1 });
-    } catch {
-      // ignore errors silently for keyboard shortcuts
+    } catch (err) {
+      console.warn("[psso] copy command failed:", err);
     }
   }
 });

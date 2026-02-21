@@ -1,0 +1,23 @@
+{
+  "extName": {
+    "message": "passwd-sso"
+  },
+  "extDescription": {
+    "message": "passwd-sso パスワードマネージャーのブラウザ拡張機能"
+  },
+  "cmdOpenPopup": {
+    "message": "passwd-sso ポップアップを開く"
+  },
+  "cmdAutofill": {
+    "message": "現在のページを自動入力"
+  },
+  "cmdCopyPassword": {
+    "message": "現在のサイトのパスワードをコピー"
+  },
+  "cmdCopyUsername": {
+    "message": "現在のサイトのユーザー名をコピー"
+  },
+  "cmdLockVault": {
+    "message": "ボールトをロック"
+  }
+}

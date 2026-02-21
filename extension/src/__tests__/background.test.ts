@@ -53,6 +53,12 @@ function installChromeMock() {
       },
       onInstalled: { addListener: vi.fn() },
       onStartup: { addListener: vi.fn() },
+      sendMessage: vi.fn().mockResolvedValue({ ok: true }),
+      getContexts: vi.fn().mockResolvedValue([]),
+    },
+    offscreen: {
+      createDocument: vi.fn().mockResolvedValue(undefined),
+      Reason: { CLIPBOARD: "CLIPBOARD" },
     },
     alarms: {
       onAlarm: {

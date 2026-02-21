@@ -18,8 +18,14 @@ if (!(window as unknown as Record<string, boolean>)[GUARD_KEY]) {
   // Self-destruct when extension context is invalidated (extension reload/update).
   // Orphaned content scripts can no longer communicate with the service worker,
   // so clean up all listeners and DOM to stop errors.
+  // The error message varies: "Extension context invalidated" (direct API call)
+  // or "Cannot read properties of undefined" (chrome.runtime becomes undefined).
   window.addEventListener("error", (event) => {
-    if (event.message?.includes("Extension context invalidated")) {
+    const msg = event.message ?? "";
+    if (
+      msg.includes("Extension context invalidated") ||
+      (msg.includes("Cannot read properties of undefined") && msg.includes("runtime"))
+    ) {
       event.preventDefault();
       destroy();
       destroyLoginDetector();

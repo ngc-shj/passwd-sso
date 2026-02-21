@@ -46,6 +46,12 @@ describe("App tab URL handling", () => {
       runtime: {
         openOptionsPage: mockOpenOptionsPage,
       },
+      storage: {
+        onChanged: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
     };
     vi.stubGlobal("chrome", chromeMock);
   });
