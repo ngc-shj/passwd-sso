@@ -524,7 +524,9 @@ chrome.commands.onCommand.addListener(async (command) => {
 
     try {
       const entries = await getCachedEntries();
-      const match = entries.find((e) => isHostMatch(e.urlHost, tabHost));
+      const match = entries.find(
+        (e) => e.entryType === "LOGIN" && isHostMatch(e.urlHost, tabHost),
+      );
       if (!match) return;
 
       // Fetch full blob to get password/username
