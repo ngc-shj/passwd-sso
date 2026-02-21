@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, createParams, parseResponse } from "../../helpers/request-builder";
 
 const { mockAuth, mockAuthOrToken, mockCreate, mockFindUnique, mockUpdate, mockTransaction, mockHistoryCreate, mockHistoryFindMany, mockHistoryDeleteMany } = vi.hoisted(() => ({

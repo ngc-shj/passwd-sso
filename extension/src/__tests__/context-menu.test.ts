@@ -179,12 +179,13 @@ describe("context-menu", () => {
 
   describe("handleContextMenuClick", () => {
     it("calls performAutofill for entry clicks", () => {
+      const entryUuid = "a0000000-0000-0000-0000-000000000001";
       handleContextMenuClick(
-        { menuItemId: "psso-login-e1" } as chrome.contextMenus.OnClickData,
+        { menuItemId: `psso-login-${entryUuid}` } as chrome.contextMenus.OnClickData,
         { id: 1 } as chrome.tabs.Tab,
       );
 
-      expect(deps.performAutofill).toHaveBeenCalledWith("e1", 1);
+      expect(deps.performAutofill).toHaveBeenCalledWith(entryUuid, 1);
     });
 
     it("opens popup for psso-open-popup click", () => {
