@@ -16,7 +16,11 @@ export type ExtensionMessage =
       type: "AUTOFILL_FROM_CONTENT";
       entryId: string;
       targetHint?: AutofillTargetHint;
-    };
+    }
+  | { type: "LOGIN_DETECTED"; url: string; username: string; password: string }
+  | { type: "SAVE_LOGIN"; url: string; title: string; username: string; password: string }
+  | { type: "UPDATE_LOGIN"; entryId: string; password: string }
+  | { type: "DISMISS_SAVE_PROMPT" };
 
 export interface DecryptedEntry {
   id: string;
@@ -43,7 +47,11 @@ export type ExtensionResponse =
       suppressInline?: boolean;
     }
   | { type: "COPY_TOTP"; code: string | null; error?: string }
-  | { type: "AUTOFILL_FROM_CONTENT"; ok: boolean; error?: string };
+  | { type: "AUTOFILL_FROM_CONTENT"; ok: boolean; error?: string }
+  | { type: "LOGIN_DETECTED"; action: "save" | "update" | "none"; existingEntryId?: string; existingTitle?: string }
+  | { type: "SAVE_LOGIN"; ok: boolean; error?: string }
+  | { type: "UPDATE_LOGIN"; ok: boolean; error?: string }
+  | { type: "DISMISS_SAVE_PROMPT"; ok: true };
 
 export interface AutofillPayload {
   type: "AUTOFILL_FILL";

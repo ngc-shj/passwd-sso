@@ -71,10 +71,17 @@ async function handlePUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE);
+  if (authResult?.type === "scope_insufficient") {
+    return NextResponse.json(
+      { error: API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT },
+      { status: 403 },
+    );
+  }
+  if (!authResult) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
+  const userId = authResult.userId;
 
   const { id } = await params;
 
@@ -86,7 +93,7 @@ async function handlePUT(
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  if (existing.userId !== session.user.id) {
+  if (existing.userId !== userId) {
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
@@ -164,7 +171,7 @@ async function handlePUT(
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.ENTRY_UPDATE,
-    userId: session.user.id,
+    userId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: id,
     ...extractRequestMeta(req),
