@@ -101,7 +101,9 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
 
   try {
     const entries = await deps.getCachedEntries();
-    const matches = entries.filter((e) => deps!.isHostMatch(e.urlHost, host));
+    const matches = entries.filter(
+      (e) => e.entryType === "LOGIN" && deps!.isHostMatch(e.urlHost, host),
+    );
 
     if (matches.length === 0) {
       chrome.contextMenus.create({
