@@ -84,6 +84,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
       encryptedOrgKey: "ek",
       orgKeyIv: "iv",
       orgKeyAuthTag: "tag",
+      masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {
@@ -123,6 +124,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
       encryptedOrgKey: "ek",
       orgKeyIv: "iv",
       orgKeyAuthTag: "tag",
+      masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
@@ -144,6 +146,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
       encryptedOrgKey: "ek",
       orgKeyIv: "iv",
       orgKeyAuthTag: "tag",
+      masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
@@ -181,6 +184,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
       encryptedOrgKey: "ek",
       orgKeyIv: "iv",
       orgKeyAuthTag: "tag",
+      masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {
@@ -230,7 +234,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
 
   it("filters by trash when trash=true", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
@@ -249,7 +253,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
 
   it("excludes deleted items by default", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
@@ -266,7 +270,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
 
   it("filters by archived when archived=true", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
@@ -285,7 +289,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
 
   it("excludes archived items by default", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
@@ -302,7 +306,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
 
   it("filters by favorites when favorites=true", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
@@ -323,7 +327,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
 
   it("filters by tag when tag param is provided", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
@@ -344,7 +348,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
 
   it("filters by folder when folder param is provided", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
@@ -365,7 +369,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
 
   it("does not filter by folder when folder param is absent", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
@@ -382,6 +386,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
       encryptedOrgKey: "ek",
       orgKeyIv: "iv",
       orgKeyAuthTag: "tag",
+      masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {
@@ -421,6 +426,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
       encryptedOrgKey: "ek",
       orgKeyIv: "iv",
       orgKeyAuthTag: "tag",
+      masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {
@@ -459,6 +465,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
       encryptedOrgKey: "ek",
       orgKeyIv: "iv",
       orgKeyAuthTag: "tag",
+      masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {
@@ -557,7 +564,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("returns 400 on invalid body", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: {} }),
@@ -569,7 +576,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
   it("creates entry with tags connected", async () => {
     const TAG_CUID = "cm1234567890abcdefghijkl0";
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.create.mockResolvedValue({
       id: "new-pw",
@@ -595,7 +602,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("creates org password entry with encryption (201)", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.create.mockResolvedValue({
       id: "new-pw",
@@ -616,7 +623,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("encrypts with AAD and stores aadVersion=1", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.create.mockResolvedValue({
       id: "new-pw",
@@ -651,7 +658,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("creates SECURE_NOTE entry (201)", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.create.mockResolvedValue({
       id: "new-note",
@@ -677,7 +684,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("returns 400 when SECURE_NOTE has no title", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
 
     const noteBody = {
@@ -694,7 +701,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("creates CREDIT_CARD entry (201)", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.create.mockResolvedValue({
       id: "new-card",
@@ -725,7 +732,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("returns 400 when CREDIT_CARD has no title", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
 
     const cardBody = {
@@ -742,7 +749,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("returns 400 when CREDIT_CARD has non-digit characters in cardNumber", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
 
     const cardBody = {
@@ -760,7 +767,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("returns 400 when CREDIT_CARD fails Luhn check", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
 
     const cardBody = {
@@ -778,7 +785,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("returns 400 when CREDIT_CARD length mismatches brand", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
 
     const cardBody = {
@@ -796,7 +803,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("creates IDENTITY entry (201)", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.create.mockResolvedValue({
       id: "new-identity",
@@ -825,7 +832,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("creates PASSKEY entry (201)", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.create.mockResolvedValue({
       id: "new-passkey",
@@ -856,7 +863,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("returns 400 when IDENTITY has no title", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
 
     const identityBody = {
@@ -873,7 +880,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("returns 400 when IDENTITY has invalid phone format", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
 
     const identityBody = {
@@ -890,7 +897,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("returns 400 when IDENTITY has invalid email format", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
 
     const identityBody = {
@@ -907,7 +914,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("returns 400 when IDENTITY expiryDate is before issueDate", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
 
     const identityBody = {
@@ -925,7 +932,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("returns 400 when IDENTITY expiryDate equals issueDate", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
 
     const identityBody = {
@@ -943,7 +950,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("returns 400 when IDENTITY has future dateOfBirth", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
 
     const identityBody = {
@@ -963,6 +970,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
       encryptedOrgKey: "ek",
       orgKeyIv: "iv",
       orgKeyAuthTag: "tag",
+      masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {
@@ -1001,6 +1009,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
       encryptedOrgKey: "ek",
       orgKeyIv: "iv",
       orgKeyAuthTag: "tag",
+      masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {
@@ -1037,7 +1046,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
   it("creates entry with orgFolderId when folder belongs to same org", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: ORG_ID });
     mockPrismaOrgPasswordEntry.create.mockResolvedValue({
@@ -1063,7 +1072,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
   it("returns 400 when orgFolderId belongs to a different org", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: "other-org-999" });
 
@@ -1081,7 +1090,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
   it("returns 400 when orgFolderId does not exist", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgFolder.findUnique.mockResolvedValue(null);
 
@@ -1098,7 +1107,7 @@ describe("POST /api/orgs/[orgId]/passwords", () => {
 
   it("creates entry without folder validation when orgFolderId is not provided", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
-      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag",
+      encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1,
     });
     mockPrismaOrgPasswordEntry.create.mockResolvedValue({
       id: "new-pw",

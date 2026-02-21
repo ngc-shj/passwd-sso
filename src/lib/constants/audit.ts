@@ -49,6 +49,7 @@ export const AUDIT_ACTION = {
   FOLDER_DELETE: "FOLDER_DELETE",
   ENTRY_HISTORY_RESTORE: "ENTRY_HISTORY_RESTORE",
   HISTORY_PURGE: "HISTORY_PURGE",
+  MASTER_KEY_ROTATION: "MASTER_KEY_ROTATION",
 } as const satisfies Record<AuditAction, AuditAction>;
 
 export type AuditScopeValue =
@@ -101,6 +102,7 @@ export const AUDIT_ACTION_VALUES = [
   AUDIT_ACTION.HISTORY_PURGE,
   AUDIT_ACTION.SEND_CREATE,
   AUDIT_ACTION.SEND_REVOKE,
+  AUDIT_ACTION.MASTER_KEY_ROTATION,
 ] as const;
 
 export const AUDIT_ACTION_GROUP = {
@@ -115,6 +117,7 @@ export const AUDIT_ACTION_GROUP = {
   SHARE: "group:share",
   SEND: "group:send",
   EMERGENCY: "group:emergency",
+  ADMIN: "group:admin",
 } as const;
 
 export const AUDIT_ACTION_GROUPS_PERSONAL: Record<string, AuditAction[]> = {
@@ -221,6 +224,9 @@ export const AUDIT_ACTION_GROUPS_ORG: Record<string, AuditAction[]> = {
   [AUDIT_ACTION_GROUP.SHARE]: [
     AUDIT_ACTION.SHARE_CREATE,
     AUDIT_ACTION.SHARE_REVOKE,
+  ],
+  [AUDIT_ACTION_GROUP.ADMIN]: [
+    AUDIT_ACTION.MASTER_KEY_ROTATION,
   ],
 };
 

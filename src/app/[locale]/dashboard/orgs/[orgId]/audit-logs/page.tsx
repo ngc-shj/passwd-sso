@@ -100,6 +100,7 @@ const ACTION_GROUPS = [
   { label: "groupAttachment", value: AUDIT_ACTION_GROUP.ATTACHMENT, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.ATTACHMENT] },
   { label: "groupOrg", value: AUDIT_ACTION_GROUP.ORG, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.ORG] },
   { label: "groupShare", value: AUDIT_ACTION_GROUP.SHARE, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.SHARE] },
+  { label: "groupAdmin", value: AUDIT_ACTION_GROUP.ADMIN, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.ADMIN] },
 ] as const;
 
 export default function OrgAuditLogsPage({

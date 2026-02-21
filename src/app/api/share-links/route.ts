@@ -91,6 +91,7 @@ export async function POST(req: NextRequest) {
             encryptedOrgKey: true,
             orgKeyIv: true,
             orgKeyAuthTag: true,
+            masterKeyVersion: true,
           },
         },
       },
@@ -117,7 +118,7 @@ export async function POST(req: NextRequest) {
       ciphertext: entry.org.encryptedOrgKey,
       iv: entry.org.orgKeyIv,
       authTag: entry.org.orgKeyAuthTag,
-    });
+    }, entry.org.masterKeyVersion);
     const blobAad = entry.aadVersion >= 1
       ? Buffer.from(buildOrgEntryAAD(entry.org.id, entry.id, "blob"))
       : undefined;
@@ -152,6 +153,7 @@ export async function POST(req: NextRequest) {
       encryptedData: encrypted.ciphertext,
       dataIv: encrypted.iv,
       dataAuthTag: encrypted.authTag,
+      masterKeyVersion: encrypted.masterKeyVersion,
       expiresAt,
       maxViews: maxViews ?? null,
       createdById: session.user.id,

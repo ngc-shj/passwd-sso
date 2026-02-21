@@ -30,6 +30,7 @@ vi.mock("@/lib/crypto-server", () => ({
     ciphertext: "encrypted",
     iv: "i".repeat(24),
     authTag: "t".repeat(32),
+    masterKeyVersion: 1,
   }),
   unwrapOrgKey: () => Buffer.alloc(32),
   decryptServerData: mockDecryptServerData,
@@ -171,6 +172,7 @@ describe("POST /api/share-links", () => {
           encryptedOrgKey: "ek",
           orgKeyIv: "oiv",
           orgKeyAuthTag: "otag",
+          masterKeyVersion: 1,
         },
       })
       .mockResolvedValueOnce({ orgId: "org-123" }); // audit log lookup
@@ -206,6 +208,7 @@ describe("POST /api/share-links", () => {
           encryptedOrgKey: "ek",
           orgKeyIv: "oiv",
           orgKeyAuthTag: "otag",
+          masterKeyVersion: 1,
         },
       })
       .mockResolvedValueOnce({ orgId: "org-123" });
@@ -270,6 +273,7 @@ describe("POST /api/share-links", () => {
         encryptedOrgKey: "ek",
         orgKeyIv: "oiv",
         orgKeyAuthTag: "otag",
+        masterKeyVersion: 1,
       },
     });
 

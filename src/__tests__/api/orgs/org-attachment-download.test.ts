@@ -91,6 +91,7 @@ const ORG_ENTRY = {
     encryptedOrgKey: "enc-key",
     orgKeyIv: "iv",
     orgKeyAuthTag: "tag",
+    masterKeyVersion: 1,
   },
 };
 

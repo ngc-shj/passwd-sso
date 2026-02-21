@@ -237,9 +237,10 @@ model Organization {
   description String?  @db.Text
 
   // Server-side encryption: per-org key wrapped by ORG_MASTER_KEY
-  encryptedOrgKey String @map("encrypted_org_key") @db.Text
-  orgKeyIv        String @map("org_key_iv") @db.VarChar(24)
-  orgKeyAuthTag   String @map("org_key_auth_tag") @db.VarChar(32)
+  encryptedOrgKey  String @map("encrypted_org_key") @db.Text
+  orgKeyIv         String @map("org_key_iv") @db.VarChar(24)
+  orgKeyAuthTag    String @map("org_key_auth_tag") @db.VarChar(32)
+  masterKeyVersion Int    @default(1) @map("master_key_version")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -392,6 +393,9 @@ model PasswordShare {
   fileIv          String?  @map("file_iv") @db.VarChar(24)
   fileAuthTag     String?  @map("file_auth_tag") @db.VarChar(32)
 
+  // Master key version used to encrypt this share's data
+  masterKeyVersion Int     @default(1) @map("master_key_version")
+
   createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
   passwordEntry    PasswordEntry?    @relation("personalShares", fields: [passwordEntryId], references: [id], onDelete: SetNull)
   orgPasswordEntry OrgPasswordEntry? @relation("orgShares", fields: [orgPasswordEntryId], references: [id], onDelete: SetNull)
@@ -464,6 +468,7 @@ enum AuditAction {
   FOLDER_DELETE
   ENTRY_HISTORY_RESTORE
   HISTORY_PURGE
+  MASTER_KEY_ROTATION
 }
 
 enum AuditScope {

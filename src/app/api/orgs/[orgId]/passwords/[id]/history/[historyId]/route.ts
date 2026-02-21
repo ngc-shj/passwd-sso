@@ -34,6 +34,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
           encryptedOrgKey: true,
           orgKeyIv: true,
           orgKeyAuthTag: true,
+          masterKeyVersion: true,
         },
       },
     },
@@ -55,7 +56,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     ciphertext: entry.org.encryptedOrgKey,
     iv: entry.org.orgKeyIv,
     authTag: entry.org.orgKeyAuthTag,
-  });
+  }, entry.org.masterKeyVersion);
 
   const aad = history.aadVersion >= 1
     ? Buffer.from(buildOrgEntryAAD(orgId, id, "blob"))
