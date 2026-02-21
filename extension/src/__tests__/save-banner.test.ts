@@ -145,6 +145,45 @@ describe("save-banner", () => {
     expect(mockRoot.querySelector("#psso-save-banner")).toBeNull();
   });
 
+  it("clears first auto-dismiss timer when called twice in succession", () => {
+    const onDismiss1 = vi.fn();
+    const onDismiss2 = vi.fn();
+
+    showSaveBanner({
+      host: "first.com",
+      username: "user1",
+      action: "save",
+      onSave: vi.fn(),
+      onUpdate: vi.fn(),
+      onDismiss: onDismiss1,
+    });
+
+    // Advance 10 seconds (not yet dismissed)
+    vi.advanceTimersByTime(10_000);
+    expect(onDismiss1).not.toHaveBeenCalled();
+
+    // Replace with second banner
+    showSaveBanner({
+      host: "second.com",
+      username: "user2",
+      action: "save",
+      onSave: vi.fn(),
+      onUpdate: vi.fn(),
+      onDismiss: onDismiss2,
+    });
+
+    // Advance another 5 seconds — first timer would have fired at 15s total,
+    // but it should have been cleared when second banner replaced it
+    vi.advanceTimersByTime(5_000);
+    expect(onDismiss1).not.toHaveBeenCalled();
+    expect(onDismiss2).not.toHaveBeenCalled();
+
+    // Advance to 15 seconds from second banner creation — second timer fires
+    vi.advanceTimersByTime(10_000);
+    expect(onDismiss1).not.toHaveBeenCalled();
+    expect(onDismiss2).toHaveBeenCalledTimes(1);
+  });
+
   it("replaces existing banner when called twice", () => {
     showSaveBanner({
       host: "first.com",

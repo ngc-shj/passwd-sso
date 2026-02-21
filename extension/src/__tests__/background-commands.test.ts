@@ -65,7 +65,7 @@ function installChromeMock() {
         },
       },
       create: vi.fn(),
-      clear: vi.fn(),
+      clear: vi.fn().mockResolvedValue(true),
     },
     scripting: {
       executeScript: vi.fn().mockResolvedValue([]),

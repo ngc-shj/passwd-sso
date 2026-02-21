@@ -558,6 +558,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 
       // Schedule clipboard clear: setTimeout (30s) + alarm fallback (1min)
       lastClipboardCopyTime = Date.now();
+      await chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
       setTimeout(async () => {
         try {
           const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -1418,7 +1419,11 @@ async function handleMessage(
     case "LOGIN_DETECTED": {
       try {
         // Use sender's tab URL for security — don't trust message.url
-        const senderUrl = _sender.tab?.url ?? message.url;
+        const senderUrl = _sender.tab?.url;
+        if (!senderUrl) {
+          sendResponse({ type: "LOGIN_DETECTED", action: "none" });
+          return;
+        }
         const result = await handleLoginDetected(
           senderUrl,
           message.username,
@@ -1465,7 +1470,11 @@ async function handleMessage(
       if (_sender.tab?.id) pendingSavePrompts.delete(_sender.tab.id);
       try {
         // Use sender's tab URL for security — don't trust message.url
-        const senderUrl = _sender.tab?.url ?? message.url;
+        const senderUrl = _sender.tab?.url;
+        if (!senderUrl) {
+          sendResponse({ type: "SAVE_LOGIN", ok: false, error: "NO_TAB" });
+          return;
+        }
         const result = await handleSaveLogin(
           senderUrl,
           message.title,
@@ -1545,7 +1554,7 @@ chrome.runtime.onMessage.addListener(
             sendResponse({ type: "GET_TOKEN", token: null } as ExtensionResponse);
             break;
           case "GET_MATCHES_FOR_URL":
-            sendResponse({ type: "GET_MATCHES_FOR_URL", entries: [], vaultLocked: !currentToken, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
+            sendResponse({ type: "GET_MATCHES_FOR_URL", entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
             break;
           case "FETCH_PASSWORDS":
             sendResponse({ type: "FETCH_PASSWORDS", entries: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
@@ -1555,6 +1564,18 @@ chrome.runtime.onMessage.addListener(
             break;
           case "COPY_TOTP":
             sendResponse({ type: "COPY_TOTP", code: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
+            break;
+          case "LOGIN_DETECTED":
+            sendResponse({ type: "LOGIN_DETECTED", action: "none" } as ExtensionResponse);
+            break;
+          case "SAVE_LOGIN":
+            sendResponse({ type: "SAVE_LOGIN", ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+            break;
+          case "UPDATE_LOGIN":
+            sendResponse({ type: "UPDATE_LOGIN", ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+            break;
+          case "CHECK_PENDING_SAVE":
+            sendResponse({ type: "CHECK_PENDING_SAVE", action: "none" } as ExtensionResponse);
             break;
           default:
             sendResponse({ type: message.type, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);

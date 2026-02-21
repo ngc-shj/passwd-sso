@@ -616,6 +616,38 @@ describe("login-detector-lib", () => {
       cleanup.destroy();
     });
 
+    it("debounces duplicate LOGIN_DETECTED within 2 seconds", () => {
+      const form = createForm();
+      const pw = createPasswordInput("secret");
+      const user = createTextInput("bob");
+      form.appendChild(user);
+      form.appendChild(pw);
+      document.body.appendChild(form);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+      mockFindUsernameInput.mockReturnValue(user);
+
+      const cleanup = initLoginDetector();
+
+      // First submit — should send
+      form.dispatchEvent(new Event("submit", { bubbles: true }));
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "LOGIN_DETECTED" }),
+        expect.any(Function),
+      );
+
+      vi.clearAllMocks();
+
+      // Second submit immediately after — should be debounced
+      form.dispatchEvent(new Event("submit", { bubbles: true }));
+      expect(mockSendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "LOGIN_DETECTED" }),
+        expect.any(Function),
+      );
+
+      cleanup.destroy();
+    });
+
     it("removes click listener after destroy()", () => {
       const pw = createPasswordInput("secret");
       const user = createTextInput("bob");

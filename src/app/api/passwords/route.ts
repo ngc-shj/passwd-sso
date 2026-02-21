@@ -122,6 +122,22 @@ async function handlePOST(req: NextRequest) {
 
   const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, entryType, requireReprompt, expiresAt } = parsed.data;
 
+  // Verify folder ownership
+  if (folderId) {
+    const folder = await prisma.folder.findFirst({ where: { id: folderId, userId } });
+    if (!folder) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid folderId" }, { status: 400 });
+    }
+  }
+
+  // Verify tag ownership
+  if (tagIds?.length) {
+    const ownedCount = await prisma.tag.count({ where: { id: { in: tagIds }, userId } });
+    if (ownedCount !== tagIds.length) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid tagIds" }, { status: 400 });
+    }
+  }
+
   const entry = await prisma.passwordEntry.create({
     data: {
       ...(clientId ? { id: clientId } : {}),
