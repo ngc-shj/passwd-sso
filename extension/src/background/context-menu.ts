@@ -1,4 +1,5 @@
 import type { DecryptedEntry } from "../types/messages";
+import { EXT_ENTRY_TYPE } from "../lib/constants";
 import { t } from "../lib/i18n";
 
 const PARENT_ID = "psso-parent";
@@ -102,7 +103,7 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
   try {
     const entries = await deps.getCachedEntries();
     const matches = entries.filter(
-      (e) => e.entryType === "LOGIN" && deps!.isHostMatch(e.urlHost, host),
+      (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && deps!.isHostMatch(e.urlHost, host),
     );
 
     if (matches.length === 0) {
