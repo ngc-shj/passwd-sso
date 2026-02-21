@@ -57,6 +57,12 @@ function installChromeMock() {
       },
       onInstalled: { addListener: vi.fn() },
       onStartup: { addListener: vi.fn() },
+      sendMessage: vi.fn().mockResolvedValue({ ok: true }),
+      getContexts: vi.fn().mockResolvedValue([]),
+    },
+    offscreen: {
+      createDocument: vi.fn().mockResolvedValue(undefined),
+      Reason: { CLIPBOARD: "CLIPBOARD" },
     },
     alarms: {
       onAlarm: {
@@ -247,34 +253,30 @@ describe("X-4 keyboard shortcut commands", () => {
     await import("../background/index");
   });
 
-  it("copy-password copies password to clipboard via executeScript", async () => {
+  it("copy-password copies password to clipboard via offscreen document", async () => {
     await unlockVault(chromeMock);
 
     const handler = commandHandlers[0];
     await handler(CMD_COPY_PASSWORD);
 
-    expect(chromeMock.scripting.executeScript).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target: { tabId: 1 },
-        world: "ISOLATED",
-        args: ["s3cret"],
-      }),
-    );
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({
+      target: "offscreen",
+      type: "clipboard-write",
+      text: "s3cret",
+    });
   });
 
-  it("copy-username copies username to clipboard via executeScript", async () => {
+  it("copy-username copies username to clipboard via offscreen document", async () => {
     await unlockVault(chromeMock);
 
     const handler = commandHandlers[0];
     await handler(CMD_COPY_USERNAME);
 
-    expect(chromeMock.scripting.executeScript).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target: { tabId: 1 },
-        world: "ISOLATED",
-        args: ["alice"],
-      }),
-    );
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({
+      target: "offscreen",
+      type: "clipboard-write",
+      text: "alice",
+    });
   });
 
   it("lock-vault clears vault state", async () => {
@@ -317,12 +319,10 @@ describe("X-4 keyboard shortcut commands", () => {
     const handler = commandHandlers[0];
     await handler(CMD_COPY_PASSWORD);
 
-    // executeScript should not be called for clipboard copy
-    // (it may be called for other purposes like content script injection)
-    const clipboardCalls = chromeMock.scripting.executeScript.mock.calls.filter(
+    const clipboardCalls = chromeMock.runtime.sendMessage.mock.calls.filter(
       (call: unknown[]) => {
-        const opts = call[0] as { world?: string };
-        return opts.world === "ISOLATED";
+        const msg = call[0] as { target?: string };
+        return msg.target === "offscreen";
       },
     );
     expect(clipboardCalls).toHaveLength(0);
@@ -339,10 +339,10 @@ describe("X-4 keyboard shortcut commands", () => {
     const handler = commandHandlers[0];
     await handler(CMD_COPY_PASSWORD);
 
-    const clipboardCalls = chromeMock.scripting.executeScript.mock.calls.filter(
+    const clipboardCalls = chromeMock.runtime.sendMessage.mock.calls.filter(
       (call: unknown[]) => {
-        const opts = call[0] as { world?: string };
-        return opts.world === "ISOLATED";
+        const msg = call[0] as { target?: string };
+        return msg.target === "offscreen";
       },
     );
     expect(clipboardCalls).toHaveLength(0);
@@ -382,10 +382,10 @@ describe("X-4 keyboard shortcut commands", () => {
     const handler = commandHandlers[0];
     await handler(CMD_COPY_PASSWORD);
 
-    const clipboardCalls = chromeMock.scripting.executeScript.mock.calls.filter(
+    const clipboardCalls = chromeMock.runtime.sendMessage.mock.calls.filter(
       (call: unknown[]) => {
-        const opts = call[0] as { world?: string };
-        return opts.world === "ISOLATED";
+        const msg = call[0] as { target?: string };
+        return msg.target === "offscreen";
       },
     );
     expect(clipboardCalls).toHaveLength(0);
@@ -398,8 +398,8 @@ describe("X-4 keyboard shortcut commands", () => {
     const handler = commandHandlers[0];
     await handler(CMD_COPY_PASSWORD);
 
-    // Record executeScript calls before alarm
-    const callsBefore = chromeMock.scripting.executeScript.mock.calls.length;
+    // Record sendMessage calls before alarm
+    const callsBefore = chromeMock.runtime.sendMessage.mock.calls.length;
 
     // Advance time past 30s
     const now = Date.now();
@@ -409,13 +409,13 @@ describe("X-4 keyboard shortcut commands", () => {
     const alarmHandler = alarmHandlers[0];
     alarmHandler({ name: ALARM_CLEAR_CLIPBOARD });
 
-    // Wait for async chain (tabs.query + executeScript are async)
+    // Wait for async chain (offscreen createDocument + sendMessage)
     await vi.waitFor(() => {
-      const clearCalls = chromeMock.scripting.executeScript.mock.calls
+      const clearCalls = chromeMock.runtime.sendMessage.mock.calls
         .slice(callsBefore)
         .filter((call: unknown[]) => {
-          const opts = call[0] as { world?: string; args?: unknown[] };
-          return opts.world === "ISOLATED" && opts.args?.length === 0;
+          const msg = call[0] as { target?: string; text?: string };
+          return msg.target === "offscreen" && msg.text === "";
         });
       expect(clearCalls).toHaveLength(1);
     });
