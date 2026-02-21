@@ -65,6 +65,7 @@ function installChromeMock() {
       query: vi.fn().mockResolvedValue([{ id: 1, url: "https://github.com" }]),
       onActivated: { addListener: vi.fn() },
       onUpdated: { addListener: vi.fn() },
+      onRemoved: { addListener: vi.fn() },
     },
     action: {
       setBadgeText: vi.fn().mockResolvedValue(undefined),

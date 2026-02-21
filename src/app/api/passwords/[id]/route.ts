@@ -113,6 +113,23 @@ async function handlePUT(
   }
 
   const { encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, isFavorite, isArchived, entryType, requireReprompt, expiresAt } = parsed.data;
+
+  // Verify folder ownership
+  if (folderId) {
+    const folder = await prisma.folder.findFirst({ where: { id: folderId, userId } });
+    if (!folder) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid folderId" }, { status: 400 });
+    }
+  }
+
+  // Verify tag ownership
+  if (tagIds?.length) {
+    const ownedCount = await prisma.tag.count({ where: { id: { in: tagIds }, userId } });
+    if (ownedCount !== tagIds.length) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid tagIds" }, { status: 400 });
+    }
+  }
+
   const updateData: Record<string, unknown> = {};
 
   // If encryptedBlob is changing, snapshot the current version to history

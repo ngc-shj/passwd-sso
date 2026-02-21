@@ -16,6 +16,9 @@ const chromeMock = {
   action: {
     openPopup: vi.fn().mockResolvedValue(undefined),
   },
+  tabs: {
+    query: vi.fn().mockResolvedValue([]),
+  },
 };
 
 vi.stubGlobal("chrome", chromeMock);
@@ -208,6 +211,15 @@ describe("context-menu", () => {
       handleContextMenuClick(
         { menuItemId: "psso-login-e1" } as chrome.contextMenus.OnClickData,
         undefined,
+      );
+
+      expect(deps.performAutofill).not.toHaveBeenCalled();
+    });
+
+    it("ignores clicks when tab has no id", () => {
+      handleContextMenuClick(
+        { menuItemId: "psso-login-e1" } as chrome.contextMenus.OnClickData,
+        {} as chrome.tabs.Tab,
       );
 
       expect(deps.performAutofill).not.toHaveBeenCalled();

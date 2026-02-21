@@ -185,4 +185,10 @@ export function handleContextMenuClick(
 /** Force menu rebuild (e.g., after vault unlock/lock). */
 export function invalidateContextMenu(): void {
   lastMenuHost = null;
+  // Immediately rebuild menu for the active tab
+  chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+    if (tab?.id) {
+      updateContextMenuForTab(tab.id, tab.url);
+    }
+  }).catch(() => {});
 }

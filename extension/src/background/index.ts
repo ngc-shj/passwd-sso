@@ -75,6 +75,7 @@ interface PendingSavePrompt {
 }
 
 const PENDING_SAVE_TTL_MS = 30_000; // 30 seconds
+const MAX_PENDING_SAVES = 50;
 const pendingSavePrompts = new Map<number, PendingSavePrompt>();
 
 // ── Entry cache (TTL-based) ─────────────────────────────────
@@ -391,6 +392,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       }
     }
   }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  pendingSavePrompts.delete(tabId);
 });
 
 chrome.contextMenus.onClicked.addListener(handleContextMenuClick);
@@ -1441,6 +1446,11 @@ async function handleMessage(
             host = new URL(senderUrl).hostname;
           } catch {
             host = senderUrl;
+          }
+          // Evict oldest entry if at capacity
+          if (pendingSavePrompts.size >= MAX_PENDING_SAVES && !pendingSavePrompts.has(senderTabId)) {
+            const oldestKey = pendingSavePrompts.keys().next().value;
+            if (oldestKey !== undefined) pendingSavePrompts.delete(oldestKey);
           }
           pendingSavePrompts.set(senderTabId, {
             host,
