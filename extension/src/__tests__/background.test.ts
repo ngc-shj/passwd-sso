@@ -51,6 +51,14 @@ function installChromeMock() {
           messageHandlers.push(fn);
         },
       },
+      onInstalled: { addListener: vi.fn() },
+      onStartup: { addListener: vi.fn() },
+      sendMessage: vi.fn().mockResolvedValue({ ok: true }),
+      getContexts: vi.fn().mockResolvedValue([]),
+    },
+    offscreen: {
+      createDocument: vi.fn().mockResolvedValue(undefined),
+      Reason: { CLIPBOARD: "CLIPBOARD" },
     },
     alarms: {
       onAlarm: {
@@ -69,10 +77,18 @@ function installChromeMock() {
     tabs: {
       sendMessage: vi.fn().mockResolvedValue({}),
       query: vi.fn().mockResolvedValue([{ id: 1, url: "https://github.com" }]),
+      onActivated: { addListener: vi.fn() },
+      onUpdated: { addListener: vi.fn() },
+      onRemoved: { addListener: vi.fn() },
     },
     action: {
       setBadgeText: vi.fn().mockResolvedValue(undefined),
       setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
+    },
+    contextMenus: {
+      create: vi.fn(),
+      removeAll: vi.fn((cb?: () => void) => cb?.()),
+      onClicked: { addListener: vi.fn() },
     },
     permissions: {
       contains: vi.fn().mockResolvedValue(true),
@@ -116,6 +132,13 @@ function sendMessage(message: unknown): Promise<unknown> {
   return new Promise((resolve) => {
     const handler = messageHandlers[0];
     handler(message, {}, (resp) => resolve(resp));
+  });
+}
+
+function sendMessageWithSender(message: unknown, sender: unknown): Promise<unknown> {
+  return new Promise((resolve) => {
+    const handler = messageHandlers[0];
+    handler(message, sender, (resp) => resolve(resp));
   });
 }
 
@@ -1449,6 +1472,145 @@ describe("failsafe responses", () => {
         type: "FETCH_PASSWORDS",
         entries: null,
         error: expect.any(String),
+      }),
+    );
+  });
+});
+
+describe("CHECK_PENDING_SAVE host validation", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+          return {
+            ok: true,
+            json: async () => ({
+              token: "refreshed-tok",
+              expiresAt: new Date(Date.now() + 900_000).toISOString(),
+              scope: ["passwords:read", "vault:unlock-data"],
+            }),
+          };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        if (url.includes(EXT_API_PATH.PASSWORDS)) {
+          return {
+            ok: true,
+            json: async () => [
+              {
+                id: "pw-1",
+                encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" },
+                entryType: EXT_ENTRY_TYPE.LOGIN,
+                aadVersion: 1,
+              },
+            ],
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+
+    await loadBackground();
+
+    // Unlock vault
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+  });
+
+  async function createPendingSave(tabId: number, host: string): Promise<void> {
+    // Send LOGIN_DETECTED from a URL that won't match cached entries
+    // (cached entries have urlHost: "example.com" from decryptData mock).
+    // Use a unique host so handleLoginDetected returns action: "save".
+    const sender = { tab: { id: tabId, url: `https://${host}/login` } };
+    await sendMessageWithSender(
+      { type: "LOGIN_DETECTED", url: `https://${host}/login`, username: "alice", password: "pw" },
+      sender,
+    );
+  }
+
+  it("returns pending data when sender host matches", async () => {
+    await createPendingSave(42, "nomatch.test");
+
+    const res = await sendMessageWithSender(
+      { type: "CHECK_PENDING_SAVE" },
+      { tab: { id: 42, url: "https://nomatch.test/dashboard" } },
+    );
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "CHECK_PENDING_SAVE",
+        action: "save",
+        host: "nomatch.test",
+        username: "alice",
+        password: "pw",
+      }),
+    );
+  });
+
+  it("returns 'none' when sender host does not match", async () => {
+    await createPendingSave(42, "nomatch.test");
+
+    const res = await sendMessageWithSender(
+      { type: "CHECK_PENDING_SAVE" },
+      { tab: { id: 42, url: "https://evil.com/phishing" } },
+    );
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "CHECK_PENDING_SAVE",
+        action: "none",
+      }),
+    );
+  });
+
+  it("returns 'none' when sender has no tab URL", async () => {
+    await createPendingSave(42, "nomatch.test");
+
+    const res = await sendMessageWithSender(
+      { type: "CHECK_PENDING_SAVE" },
+      { tab: { id: 42 } },
+    );
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "CHECK_PENDING_SAVE",
+        action: "none",
+      }),
+    );
+  });
+
+  it("returns 'none' when sender has no tab", async () => {
+    await createPendingSave(42, "nomatch.test");
+
+    const res = await sendMessageWithSender(
+      { type: "CHECK_PENDING_SAVE" },
+      {},
+    );
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "CHECK_PENDING_SAVE",
+        action: "none",
       }),
     );
   });

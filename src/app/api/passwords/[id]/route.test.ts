@@ -223,7 +223,7 @@ describe("PUT /api/passwords/[id]", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
     mockAuditCreate.mockResolvedValue({});
     mockPrismaTransaction.mockImplementation(async (fn: (tx: typeof txMock) => Promise<unknown>) => fn(txMock));
   });
@@ -235,7 +235,7 @@ describe("PUT /api/passwords/[id]", () => {
   };
 
   it("returns 401 when unauthenticated", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuthOrToken.mockResolvedValue(null);
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),
       createParams({ id: PW_ID }),

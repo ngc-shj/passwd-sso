@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { sendMessage } from "../lib/messaging";
+import { SESSION_KEY } from "../lib/constants";
 import { t } from "../lib/i18n";
 import { LoginPrompt } from "./components/LoginPrompt";
 import { VaultUnlock } from "./components/VaultUnlock";
@@ -45,6 +46,18 @@ export function App() {
   const containerMinHeight =
     state === "vault_unlocked" ? "min-h-[480px]" : "min-h-[260px]";
 
+  const refreshStatus = useCallback(() => {
+    sendMessage({ type: "GET_STATUS" }).then((res) => {
+      if (!res.hasToken) {
+        setState("not_logged_in");
+      } else if (res.vaultUnlocked) {
+        setState("vault_unlocked");
+      } else {
+        setState("logged_in");
+      }
+    });
+  }, []);
+
   useEffect(() => {
     chrome.tabs
       .query({ active: true, currentWindow: true })
@@ -68,16 +81,22 @@ export function App() {
       .catch(() => {
         setTabUrl(null);
       });
-    sendMessage({ type: "GET_STATUS" }).then((res) => {
-      if (!res.hasToken) {
-        setState("not_logged_in");
-      } else if (res.vaultUnlocked) {
-        setState("vault_unlocked");
-      } else {
-        setState("logged_in");
+    refreshStatus();
+  }, [refreshStatus]);
+
+  // Re-check status when vault state changes externally (e.g. keyboard shortcut lock)
+  useEffect(() => {
+    const listener = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      areaName: string,
+    ) => {
+      if (areaName === "session" && SESSION_KEY in changes) {
+        refreshStatus();
       }
-    });
-  }, []);
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
+  }, [refreshStatus]);
 
   const handleDisconnect = async () => {
     await sendMessage({ type: "CLEAR_TOKEN" });

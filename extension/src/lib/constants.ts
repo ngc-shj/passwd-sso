@@ -15,6 +15,12 @@ export const TOKEN_BRIDGE_SCRIPT_ID = "token-bridge";
 
 // ── Commands ──
 export const CMD_TRIGGER_AUTOFILL = "trigger-autofill";
+export const CMD_COPY_PASSWORD = "copy-password";
+export const CMD_COPY_USERNAME = "copy-username";
+export const CMD_LOCK_VAULT = "lock-vault";
+
+// ── Alarms (clipboard) ──
+export const ALARM_CLEAR_CLIPBOARD = "clear-clipboard";
 
 // ── URL params ──
 export const EXT_CONNECT_PARAM = "ext_connect";

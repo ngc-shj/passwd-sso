@@ -4,15 +4,17 @@
 import type { DecryptedEntry } from "../../types/messages";
 import { getShadowHost } from "./shadow-host";
 import { DROPDOWN_STYLES } from "./styles";
-import { KEY_ICON, LOCK_ICON, USER_ICON } from "./icons";
+import { KEY_ICON, LOCK_ICON, USER_ICON, DISCONNECT_ICON } from "./icons";
 
 export interface DropdownOptions {
   anchorRect: DOMRect;
   entries: DecryptedEntry[];
   vaultLocked: boolean;
+  disconnected?: boolean;
   onSelect: (entryId: string) => void;
   onDismiss: () => void;
   lockedMessage: string;
+  disconnectedMessage?: string;
   noMatchesMessage: string;
   headerLabel: string;
 }
@@ -46,7 +48,12 @@ export function showDropdown(opts: DropdownOptions): void {
   dropdown.style.pointerEvents = "auto";
   dropdown.setAttribute("role", "listbox");
 
-  if (opts.vaultLocked) {
+  if (opts.disconnected) {
+    const disconnected = document.createElement("div");
+    disconnected.className = "psso-disconnected";
+    disconnected.innerHTML = `${DISCONNECT_ICON}<span>${escapeHtml(opts.disconnectedMessage || opts.lockedMessage)}</span>`;
+    dropdown.appendChild(disconnected);
+  } else if (opts.vaultLocked) {
     const locked = document.createElement("div");
     locked.className = "psso-locked";
     locked.innerHTML = `${LOCK_ICON}<span>${escapeHtml(opts.lockedMessage)}</span>`;

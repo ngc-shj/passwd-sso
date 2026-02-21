@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
@@ -97,10 +96,14 @@ async function handleGET(req: NextRequest) {
 
 // POST /api/passwords - Create new password entry (E2E encrypted)
 async function handlePOST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE);
+  if (authResult?.type === "scope_insufficient") {
+    return NextResponse.json({ error: API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT }, { status: 403 });
+  }
+  if (!authResult) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
+  const userId = authResult.userId;
 
   let body: unknown;
   try {
@@ -119,6 +122,22 @@ async function handlePOST(req: NextRequest) {
 
   const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, entryType, requireReprompt, expiresAt } = parsed.data;
 
+  // Verify folder ownership
+  if (folderId) {
+    const folder = await prisma.folder.findFirst({ where: { id: folderId, userId } });
+    if (!folder) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid folderId" }, { status: 400 });
+    }
+  }
+
+  // Verify tag ownership
+  if (tagIds?.length) {
+    const ownedCount = await prisma.tag.count({ where: { id: { in: tagIds }, userId } });
+    if (ownedCount !== tagIds.length) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid tagIds" }, { status: 400 });
+    }
+  }
+
   const entry = await prisma.passwordEntry.create({
     data: {
       ...(clientId ? { id: clientId } : {}),
@@ -134,7 +153,7 @@ async function handlePOST(req: NextRequest) {
       ...(requireReprompt !== undefined ? { requireReprompt } : {}),
       ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
       ...(folderId ? { folderId } : {}),
-      userId: session.user.id,
+      userId,
       ...(tagIds?.length
         ? { tags: { connect: tagIds.map((id) => ({ id })) } }
         : {}),
@@ -145,7 +164,7 @@ async function handlePOST(req: NextRequest) {
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.ENTRY_CREATE,
-    userId: session.user.id,
+    userId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: entry.id,
     metadata: (() => {

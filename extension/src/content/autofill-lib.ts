@@ -260,7 +260,14 @@ export function performAutofill(payload: AutofillPayload) {
   }
 }
 
-if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+// Guard against double-registration when autofill.js is also injected.
+const AUTOFILL_GUARD = "__pssoAutofillHandler";
+if (
+  typeof chrome !== "undefined" &&
+  chrome.runtime?.onMessage &&
+  !(window as unknown as Record<string, boolean>)[AUTOFILL_GUARD]
+) {
+  (window as unknown as Record<string, boolean>)[AUTOFILL_GUARD] = true;
   chrome.runtime.onMessage.addListener((message: AutofillPayload) => {
     if (message?.type === "AUTOFILL_FILL") {
       performAutofill(message);
