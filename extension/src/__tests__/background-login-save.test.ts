@@ -113,6 +113,50 @@ describe("login-save", () => {
       expect(result.action).toBe("none");
     });
 
+    it("returns 'update' when existing entry has null password", async () => {
+      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
+      const blob = JSON.stringify({ password: null });
+      const encBlob = await encryptData(blob, testKey, aad);
+
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch: vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({
+            id: TEST_UUID_1,
+            encryptedBlob: encBlob,
+            aadVersion: 1,
+          })),
+        ),
+      });
+      initLoginSave(deps);
+
+      const result = await handleLoginDetected("https://github.com", "alice", "new-password");
+      expect(result.action).toBe("update");
+      expect(result.existingEntryId).toBe(TEST_UUID_1);
+    });
+
+    it("returns 'update' when existing entry has undefined password", async () => {
+      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
+      const blob = JSON.stringify({ username: "alice" }); // no password field
+      const encBlob = await encryptData(blob, testKey, aad);
+
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch: vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({
+            id: TEST_UUID_1,
+            encryptedBlob: encBlob,
+            aadVersion: 1,
+          })),
+        ),
+      });
+      initLoginSave(deps);
+
+      const result = await handleLoginDetected("https://github.com", "alice", "new-password");
+      expect(result.action).toBe("update");
+      expect(result.existingEntryId).toBe(TEST_UUID_1);
+    });
+
     it("returns 'update' when password differs from existing entry", async () => {
       const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
       const blob = JSON.stringify({ password: "old-password" });
@@ -203,6 +247,31 @@ describe("login-save", () => {
 
       const result = await handleSaveLogin("https://example.com", "example.com", "alice", "pw");
       expect(result.ok).toBe(false);
+    });
+
+    it("returns error with INVALID_URL for malformed URL", async () => {
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+      });
+      initLoginSave(deps);
+
+      const result = await handleSaveLogin("not-a-valid-url", "example.com", "alice", "pw");
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe("INVALID_URL");
+    });
+
+    it("handles non-JSON error response from server", async () => {
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch: vi.fn().mockResolvedValue(
+          new Response("Internal Server Error", { status: 500, headers: { "Content-Type": "text/plain" } }),
+        ),
+      });
+      initLoginSave(deps);
+
+      const result = await handleSaveLogin("https://example.com", "example.com", "alice", "pw");
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe("SAVE_FAILED");
     });
   });
 
