@@ -23,7 +23,9 @@ vi.mock("../content/ui/save-banner", () => ({
 import {
   shouldSkipForm,
   extractCredentials,
+  initLoginDetector,
 } from "../content/login-detector-lib";
+import { showSaveBanner, hideSaveBanner } from "../content/ui/save-banner";
 import { findPasswordInputs, findUsernameInput } from "../content/form-detector-lib";
 
 const mockFindPasswordInputs = vi.mocked(findPasswordInputs);
@@ -208,6 +210,149 @@ describe("login-detector-lib", () => {
       mockFindPasswordInputs.mockReturnValue([pw1, pw2]);
 
       expect(extractCredentials(form)).toBeNull();
+    });
+  });
+
+  describe("initLoginDetector", () => {
+    const mockSendMessage = vi.mocked(chrome.runtime.sendMessage);
+    const mockShowSaveBanner = vi.mocked(showSaveBanner);
+
+    beforeEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    it("sends LOGIN_DETECTED on form submit with credentials", () => {
+      const form = createForm();
+      const pw = createPasswordInput("secret");
+      const user = createTextInput("bob");
+      form.appendChild(user);
+      form.appendChild(pw);
+      document.body.appendChild(form);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+      mockFindUsernameInput.mockReturnValue(user);
+
+      const cleanup = initLoginDetector();
+
+      form.dispatchEvent(new Event("submit", { bubbles: true }));
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "LOGIN_DETECTED",
+          username: "bob",
+          password: "secret",
+        }),
+        expect.any(Function),
+      );
+
+      cleanup.destroy();
+    });
+
+    it("does not send message for forms without credentials", () => {
+      const form = createForm();
+      const pw = createPasswordInput("");
+      form.appendChild(pw);
+      document.body.appendChild(form);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+
+      const cleanup = initLoginDetector();
+
+      form.dispatchEvent(new Event("submit", { bubbles: true }));
+
+      expect(mockSendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "LOGIN_DETECTED" }),
+        expect.any(Function),
+      );
+
+      cleanup.destroy();
+    });
+
+    it("shows save banner when background responds with save action", () => {
+      const form = createForm();
+      const pw = createPasswordInput("secret");
+      const user = createTextInput("bob");
+      form.appendChild(user);
+      form.appendChild(pw);
+      document.body.appendChild(form);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+      mockFindUsernameInput.mockReturnValue(user);
+
+      // Mock sendMessage to invoke callback with "save" action
+      mockSendMessage.mockImplementation((_msg: unknown, callback?: (resp: unknown) => void) => {
+        if (callback) {
+          callback({ type: "LOGIN_DETECTED", action: "save" });
+        }
+      });
+
+      const cleanup = initLoginDetector();
+
+      form.dispatchEvent(new Event("submit", { bubbles: true }));
+
+      expect(mockShowSaveBanner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "save",
+          username: "bob",
+        }),
+      );
+
+      cleanup.destroy();
+    });
+
+    it("does not show banner when background responds with none action", () => {
+      const form = createForm();
+      const pw = createPasswordInput("secret");
+      const user = createTextInput("bob");
+      form.appendChild(user);
+      form.appendChild(pw);
+      document.body.appendChild(form);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+      mockFindUsernameInput.mockReturnValue(user);
+
+      mockSendMessage.mockImplementation((_msg: unknown, callback?: (resp: unknown) => void) => {
+        if (callback) {
+          callback({ type: "LOGIN_DETECTED", action: "none" });
+        }
+      });
+
+      const cleanup = initLoginDetector();
+
+      form.dispatchEvent(new Event("submit", { bubbles: true }));
+
+      expect(mockShowSaveBanner).not.toHaveBeenCalled();
+
+      cleanup.destroy();
+    });
+
+    it("stops listening after destroy()", () => {
+      const form = createForm();
+      const pw = createPasswordInput("secret");
+      const user = createTextInput("bob");
+      form.appendChild(user);
+      form.appendChild(pw);
+      document.body.appendChild(form);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+      mockFindUsernameInput.mockReturnValue(user);
+
+      const cleanup = initLoginDetector();
+      cleanup.destroy();
+
+      form.dispatchEvent(new Event("submit", { bubbles: true }));
+
+      expect(mockSendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "LOGIN_DETECTED" }),
+        expect.any(Function),
+      );
+    });
+
+    it("calls hideSaveBanner on destroy()", () => {
+      const mockHideSaveBanner = vi.mocked(hideSaveBanner);
+      const cleanup = initLoginDetector();
+      cleanup.destroy();
+      expect(mockHideSaveBanner).toHaveBeenCalled();
     });
   });
 });

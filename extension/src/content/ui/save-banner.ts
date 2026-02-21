@@ -5,6 +5,7 @@ import { getShadowHost } from "./shadow-host";
 import { t } from "../../lib/i18n";
 
 const BANNER_ID = "psso-save-banner";
+const STYLE_ID = "psso-save-banner-style";
 const AUTO_DISMISS_MS = 15_000;
 
 export interface SaveBannerOptions {
@@ -26,6 +27,7 @@ export function showSaveBanner(options: SaveBannerOptions): void {
   const { root } = getShadowHost();
 
   const style = document.createElement("style");
+  style.id = STYLE_ID;
   style.textContent = BANNER_STYLES;
   root.appendChild(style);
 
@@ -90,13 +92,10 @@ export function hideSaveBanner(): void {
   }
   try {
     const { root } = getShadowHost();
-    const banner = root.getElementById(BANNER_ID);
-    if (banner) {
-      // Also remove the style element we added
-      const prev = banner.previousElementSibling;
-      if (prev?.tagName === "STYLE") prev.remove();
-      banner.remove();
-    }
+    const banner = root.querySelector(`#${BANNER_ID}`);
+    if (banner) banner.remove();
+    const style = root.querySelector(`#${STYLE_ID}`);
+    if (style) style.remove();
   } catch {
     // Shadow host may not exist
   }

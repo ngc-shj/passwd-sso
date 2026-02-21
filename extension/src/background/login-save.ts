@@ -10,6 +10,8 @@ import {
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import type { DecryptedEntry } from "../types/messages";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // ── Dependencies injected from background/index.ts ──────────
 
 export interface LoginSaveDeps {
@@ -177,6 +179,10 @@ export async function handleUpdateLogin(
   newPassword: string,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!deps) return { ok: false, error: "NOT_INITIALIZED" };
+
+  if (!UUID_RE.test(entryId)) {
+    return { ok: false, error: "INVALID_ENTRY_ID" };
+  }
 
   const encKey = deps.getEncryptionKey();
   const userId = deps.getCurrentUserId();

@@ -1,4 +1,5 @@
 import type { DecryptedEntry } from "../types/messages";
+import { t } from "../lib/i18n";
 
 const PARENT_ID = "psso-parent";
 const ITEM_PREFIX = "psso-login-";
@@ -33,7 +34,7 @@ export function setupContextMenu(): void {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: PARENT_ID,
-      title: "passwd-sso",
+      title: t("contextMenu.title"),
       contexts: ["editable"],
     });
   });
@@ -56,29 +57,30 @@ export function updateContextMenuForTab(
 async function doUpdateMenu(url: string | undefined): Promise<void> {
   if (!deps) return;
 
-  // Remove all children first
-  await removeChildItems();
-
   if (!url) {
+    await removeChildItems();
     lastMenuHost = null;
     return;
   }
 
   const host = deps.extractHost(url);
   if (!host) {
+    await removeChildItems();
     lastMenuHost = null;
     return;
   }
 
   // Skip rebuild if same host
   if (host === lastMenuHost) return;
+
+  await removeChildItems();
   lastMenuHost = host;
 
   if (!deps.isVaultUnlocked()) {
     chrome.contextMenus.create({
       id: `${ITEM_PREFIX}locked`,
       parentId: PARENT_ID,
-      title: "Vault is locked",
+      title: t("contextMenu.vaultLocked"),
       contexts: ["editable"],
       enabled: false,
     });
@@ -93,7 +95,7 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
       chrome.contextMenus.create({
         id: `${ITEM_PREFIX}none`,
         parentId: PARENT_ID,
-        title: "No matches",
+        title: t("contextMenu.noMatches"),
         contexts: ["editable"],
         enabled: false,
       });
@@ -122,7 +124,7 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
     chrome.contextMenus.create({
       id: OPEN_POPUP_ID,
       parentId: PARENT_ID,
-      title: "Open passwd-sso",
+      title: t("contextMenu.openPopup"),
       contexts: ["editable"],
     });
   } catch {
@@ -131,13 +133,12 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
 }
 
 function removeChildItems(): Promise<void> {
-  lastMenuHost = null;
   return new Promise((resolve) => {
     // Remove all and recreate parent to clear children
     chrome.contextMenus.removeAll(() => {
       chrome.contextMenus.create({
         id: PARENT_ID,
-        title: "passwd-sso",
+        title: t("contextMenu.title"),
         contexts: ["editable"],
       });
       resolve();

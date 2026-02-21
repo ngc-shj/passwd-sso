@@ -1358,8 +1358,10 @@ async function handleMessage(
 
     case "LOGIN_DETECTED": {
       try {
+        // Use sender's tab URL for security — don't trust message.url
+        const senderUrl = _sender.tab?.url ?? message.url;
         const result = await handleLoginDetected(
-          message.url,
+          senderUrl,
           message.username,
           message.password,
         );
@@ -1377,8 +1379,10 @@ async function handleMessage(
 
     case "SAVE_LOGIN": {
       try {
+        // Use sender's tab URL for security — don't trust message.url
+        const senderUrl = _sender.tab?.url ?? message.url;
         const result = await handleSaveLogin(
-          message.url,
+          senderUrl,
           message.title,
           message.username,
           message.password,

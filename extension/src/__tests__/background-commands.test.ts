@@ -55,6 +55,8 @@ function installChromeMock() {
           messageHandlers.push(fn);
         },
       },
+      onInstalled: { addListener: vi.fn() },
+      onStartup: { addListener: vi.fn() },
     },
     alarms: {
       onAlarm: {
@@ -75,10 +77,17 @@ function installChromeMock() {
       query: vi
         .fn()
         .mockResolvedValue([{ id: 1, url: "https://example.com" }]),
+      onActivated: { addListener: vi.fn() },
+      onUpdated: { addListener: vi.fn() },
     },
     action: {
       setBadgeText: vi.fn().mockResolvedValue(undefined),
       setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
+    },
+    contextMenus: {
+      create: vi.fn(),
+      removeAll: vi.fn((cb?: () => void) => cb?.()),
+      onClicked: { addListener: vi.fn() },
     },
     permissions: {
       contains: vi.fn().mockResolvedValue(true),
@@ -345,6 +354,9 @@ describe("X-4 keyboard shortcut commands", () => {
     const handler = commandHandlers[0];
     await handler(CMD_COPY_PASSWORD);
 
+    // Record executeScript calls before alarm
+    const callsBefore = chromeMock.scripting.executeScript.mock.calls.length;
+
     // Advance time past 30s
     const now = Date.now();
     vi.spyOn(Date, "now").mockReturnValue(now + 31_000);
@@ -353,17 +365,16 @@ describe("X-4 keyboard shortcut commands", () => {
     const alarmHandler = alarmHandlers[0];
     alarmHandler({ name: ALARM_CLEAR_CLIPBOARD });
 
-    // Wait for async chain
-    await new Promise((r) => setTimeout(r, 50));
-
-    // Should have called executeScript to clear clipboard (empty string)
-    const clearCalls = chromeMock.scripting.executeScript.mock.calls.filter(
-      (call: unknown[]) => {
-        const opts = call[0] as { world?: string; args?: unknown[] };
-        return opts.world === "ISOLATED" && opts.args?.length === 0;
-      },
-    );
-    expect(clearCalls.length).toBeGreaterThanOrEqual(1);
+    // Wait for async chain (tabs.query + executeScript are async)
+    await vi.waitFor(() => {
+      const clearCalls = chromeMock.scripting.executeScript.mock.calls
+        .slice(callsBefore)
+        .filter((call: unknown[]) => {
+          const opts = call[0] as { world?: string; args?: unknown[] };
+          return opts.world === "ISOLATED" && opts.args?.length === 0;
+        });
+      expect(clearCalls).toHaveLength(1);
+    });
 
     vi.restoreAllMocks();
   });
