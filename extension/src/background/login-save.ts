@@ -8,6 +8,7 @@ import {
   buildPersonalEntryAAD,
 } from "../lib/crypto";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
+import { EXT_ENTRY_TYPE } from "../lib/constants";
 import type { DecryptedEntry } from "../types/messages";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -59,7 +60,7 @@ export async function handleLoginDetected(
     const entries = await deps.getCachedEntries();
     // Find entries matching host + username
     const hostMatches = entries.filter(
-      (e) => e.entryType === "LOGIN" && deps!.isHostMatch(e.urlHost, host),
+      (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && deps!.isHostMatch(e.urlHost, host),
     );
 
     // Find entry with matching username (first match)
@@ -156,7 +157,7 @@ export async function handleSaveLogin(
         encryptedOverview,
         aadVersion: 1,
         keyVersion: 1,
-        entryType: "LOGIN",
+        entryType: EXT_ENTRY_TYPE.LOGIN,
       }),
     });
 
