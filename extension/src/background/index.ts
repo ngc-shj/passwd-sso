@@ -378,7 +378,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         // Prevents sending plain-text password to unrelated domains after
         // cross-origin redirects (e.g., OAuth flows).
         const tabHost = tab.url ? extractHost(tab.url) : null;
-        if (tabHost && !isHostMatch(pending.host, tabHost)) {
+        if (!tabHost || !isHostMatch(pending.host, tabHost)) {
           pendingSavePrompts.delete(tabId);
           return;
         }
@@ -1525,6 +1525,14 @@ async function handleMessage(
       }
       const pending = pendingSavePrompts.get(tabId);
       if (pending && Date.now() - pending.timestamp < PENDING_SAVE_TTL_MS) {
+        // Security: verify the requesting page is on the same host as the
+        // original login, mirroring the push-path check in tabs.onUpdated.
+        const senderHost = _sender.tab?.url ? extractHost(_sender.tab.url) : null;
+        if (!senderHost || !isHostMatch(pending.host, senderHost)) {
+          pendingSavePrompts.delete(tabId);
+          sendResponse({ type: "CHECK_PENDING_SAVE", action: "none" });
+          return;
+        }
         pendingSavePrompts.delete(tabId);
         sendResponse({
           type: "CHECK_PENDING_SAVE",

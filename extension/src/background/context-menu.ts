@@ -179,7 +179,8 @@ export function handleContextMenuClick(
 
   if (menuId.startsWith(ITEM_PREFIX)) {
     const entryId = menuId.slice(ITEM_PREFIX.length);
-    if (entryId && entryId !== "locked" && entryId !== "disconnected" && entryId !== "none" && entryId !== "sep") {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (entryId && UUID_RE.test(entryId)) {
       deps.performAutofill(entryId, tab.id).catch(() => {});
     }
   }

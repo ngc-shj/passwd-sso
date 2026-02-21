@@ -26,8 +26,11 @@ async function ensureOffscreen(): Promise<void> {
     reasons: [chrome.offscreen.Reason.CLIPBOARD],
     justification: "Copy to clipboard",
   });
-  await creating;
-  creating = null;
+  try {
+    await creating;
+  } finally {
+    creating = null;
+  }
 }
 
 export async function copyToClipboard(text: string): Promise<void> {
