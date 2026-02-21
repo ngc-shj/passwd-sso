@@ -47,8 +47,8 @@ export default defineManifest({
     },
     [CMD_COPY_USERNAME]: {
       suggested_key: {
-        default: "Ctrl+Shift+I",
-        mac: "Command+Shift+I",
+        default: "Ctrl+Shift+U",
+        mac: "Command+Shift+U",
       },
       description: "__MSG_cmdCopyUsername__",
     },
