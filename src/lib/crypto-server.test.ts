@@ -246,6 +246,28 @@ describe("crypto-server", () => {
       expect(getCurrentMasterKeyVersion()).toBe(2);
     });
 
+    it("getCurrentMasterKeyVersion throws for invalid value", () => {
+      process.env.ORG_MASTER_KEY_CURRENT_VERSION = "abc";
+      expect(() => getCurrentMasterKeyVersion()).toThrow("positive integer");
+    });
+
+    it("getCurrentMasterKeyVersion throws for zero", () => {
+      process.env.ORG_MASTER_KEY_CURRENT_VERSION = "0";
+      expect(() => getCurrentMasterKeyVersion()).toThrow("positive integer");
+    });
+
+    it("getMasterKeyByVersion throws for version 0", () => {
+      expect(() => getMasterKeyByVersion(0)).toThrow("Invalid master key version");
+    });
+
+    it("getMasterKeyByVersion throws for version > 100", () => {
+      expect(() => getMasterKeyByVersion(101)).toThrow("Invalid master key version");
+    });
+
+    it("getMasterKeyByVersion throws for non-integer", () => {
+      expect(() => getMasterKeyByVersion(1.5)).toThrow("Invalid master key version");
+    });
+
     it("getMasterKeyByVersion V1 falls back to ORG_MASTER_KEY", () => {
       delete process.env.ORG_MASTER_KEY_V1;
       process.env.ORG_MASTER_KEY = V1_KEY;

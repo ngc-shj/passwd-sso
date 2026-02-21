@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 import { randomBytes } from "node:crypto";
 
@@ -251,5 +251,128 @@ describe("POST /api/admin/rotate-master-key", () => {
         }),
       })
     );
+  });
+
+  it("does not call shareUpdateMany when revokeShares is false", async () => {
+    mockUserFindUnique.mockResolvedValue({ id: "user-1" });
+    mockFindMany.mockResolvedValue([]);
+
+    const req = createRequest(
+      { targetVersion: 2, operatorId: "user-1", revokeShares: false },
+      ADMIN_TOKEN
+    );
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    expect(mockShareUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 with non-hex token", async () => {
+    const req = createRequest(
+      { targetVersion: 2, operatorId: "user-1" },
+      "not-a-hex-token-at-all-should-fail-immediately!!"
+    );
+    const res = await POST(req);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 when ADMIN_API_TOKEN is not set", async () => {
+    setEnv({ ADMIN_API_TOKEN: undefined });
+    const req = createRequest(
+      { targetVersion: 2, operatorId: "user-1" },
+      ADMIN_TOKEN
+    );
+    const res = await POST(req);
+    expect(res.status).toBe(401);
+  });
+
+  it("reports partial failure in errors array", async () => {
+    mockUserFindUnique.mockResolvedValue({ id: "user-1" });
+
+    const { generateOrgKey, wrapOrgKey } = await import(
+      "@/lib/crypto-server"
+    );
+
+    // Create two V1-wrapped orgs
+    setEnv({ ORG_MASTER_KEY_CURRENT_VERSION: "1" });
+    const orgKey1 = generateOrgKey();
+    const wrapped1 = wrapOrgKey(orgKey1);
+    const orgKey2 = generateOrgKey();
+    const wrapped2 = wrapOrgKey(orgKey2);
+    setEnv({ ORG_MASTER_KEY_CURRENT_VERSION: "2" });
+
+    mockFindMany.mockResolvedValue([
+      {
+        id: "org-ok",
+        encryptedOrgKey: wrapped1.ciphertext,
+        orgKeyIv: wrapped1.iv,
+        orgKeyAuthTag: wrapped1.authTag,
+        masterKeyVersion: 1,
+      },
+      {
+        id: "org-corrupt",
+        encryptedOrgKey: "invalid-ciphertext",
+        orgKeyIv: wrapped2.iv,
+        orgKeyAuthTag: wrapped2.authTag,
+        masterKeyVersion: 1,
+      },
+    ]);
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    const req = createRequest(
+      { targetVersion: 2, operatorId: "user-1" },
+      ADMIN_TOKEN
+    );
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.total).toBe(2);
+    expect(body.rotated).toBe(1);
+    expect(body.errors).toHaveLength(1);
+    expect(body.errors[0].orgId).toBe("org-corrupt");
+  });
+
+  it("does not revoke shares when all orgs fail rotation", async () => {
+    mockUserFindUnique.mockResolvedValue({ id: "user-1" });
+    mockFindMany.mockResolvedValue([
+      {
+        id: "org-fail",
+        encryptedOrgKey: "bad-data",
+        orgKeyIv: "bad-iv",
+        orgKeyAuthTag: "bad-tag",
+        masterKeyVersion: 1,
+      },
+    ]);
+
+    const req = createRequest(
+      { targetVersion: 2, operatorId: "user-1", revokeShares: true },
+      ADMIN_TOKEN
+    );
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.errors).toHaveLength(1);
+    expect(body.revokedShares).toBe(0);
+    expect(mockShareUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("checks rate limit after auth (429 only for authenticated requests)", async () => {
+    mockCheck.mockResolvedValue(false);
+    // Unauthenticated request should get 401, not 429
+    const unauthReq = createRequest(
+      { targetVersion: 2, operatorId: "user-1" }
+    );
+    const unauthRes = await POST(unauthReq);
+    expect(unauthRes.status).toBe(401);
+
+    // Authenticated request should get 429
+    const authReq = createRequest(
+      { targetVersion: 2, operatorId: "user-1" },
+      ADMIN_TOKEN
+    );
+    const authRes = await POST(authReq);
+    expect(authRes.status).toBe(429);
   });
 });

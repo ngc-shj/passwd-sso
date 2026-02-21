@@ -59,6 +59,10 @@ export function getCurrentMasterKeyVersion(): number {
  * For V2+: requires ORG_MASTER_KEY_V{version}.
  */
 export function getMasterKeyByVersion(version: number): Buffer {
+  if (!Number.isInteger(version) || version < 1 || version > 100) {
+    throw new Error(`Invalid master key version: ${version} (must be integer 1-100)`);
+  }
+
   let hex: string | undefined;
 
   if (version === 1) {

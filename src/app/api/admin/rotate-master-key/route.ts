@@ -18,8 +18,9 @@ import {
 } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAudit } from "@/lib/audit";
-import { AUDIT_SCOPE } from "@/lib/constants/audit";
-import { AUDIT_ACTION } from "@/lib/constants/audit";
+import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
+
+const HEX64_RE = /^[0-9a-fA-F]{64}$/;
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
 
@@ -31,13 +32,13 @@ const bodySchema = z.object({
 
 function verifyAdminToken(req: NextRequest): boolean {
   const expectedHex = process.env.ADMIN_API_TOKEN;
-  if (!expectedHex) return false;
+  if (!expectedHex || !HEX64_RE.test(expectedHex)) return false;
 
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) return false;
 
   const provided = authHeader.slice(7);
-  if (!provided) return false;
+  if (!provided || !HEX64_RE.test(provided)) return false;
 
   // SHA-256 hash comparison with timingSafeEqual to prevent timing attacks
   const expectedHash = createHash("sha256")
@@ -47,22 +48,21 @@ function verifyAdminToken(req: NextRequest): boolean {
     .update(Buffer.from(provided, "hex"))
     .digest();
 
-  if (expectedHash.length !== providedHash.length) return false;
   return timingSafeEqual(expectedHash, providedHash);
 }
 
 export async function POST(req: NextRequest) {
-  // Rate limit (global fixed key)
+  // Bearer token auth (checked before rate limit to prevent unauthenticated DoS)
+  if (!verifyAdminToken(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Rate limit (global fixed key, applied after auth)
   if (!(await rateLimiter.check("rl:admin:rotate"))) {
     return NextResponse.json(
       { error: "Rate limit exceeded. Try again later." },
       { status: 429 }
     );
-  }
-
-  // Bearer token auth
-  if (!verifyAdminToken(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   // Parse body
@@ -168,9 +168,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Optionally revoke old-version shares
+  // Optionally revoke old-version shares (only if rotation succeeded or all already at target)
   let revokedShares = 0;
-  if (revokeShares) {
+  if (revokeShares && (orgs.length === 0 || rotated > 0)) {
     const result = await prisma.passwordShare.updateMany({
       where: {
         masterKeyVersion: { lt: targetVersion },
@@ -182,9 +182,9 @@ export async function POST(req: NextRequest) {
     revokedShares = result.count;
   }
 
-  // Audit log
+  // Audit log (awaited for critical admin operation)
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
-  logAudit({
+  await logAudit({
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.MASTER_KEY_ROTATION,
     userId: operatorId,

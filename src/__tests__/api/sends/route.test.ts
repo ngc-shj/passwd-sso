@@ -195,6 +195,7 @@ describe("POST /api/sends", () => {
           entryType: null,
           sendName: "Test Send",
           createdById: DEFAULT_SESSION.user.id,
+          masterKeyVersion: 1,
         }),
       })
     );
