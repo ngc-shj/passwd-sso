@@ -354,5 +354,60 @@ describe("login-save", () => {
       expect(result.ok).toBe(false);
       expect(result.error).toBe("FETCH_FAILED");
     });
+
+    it("returns error for invalid entryId format", async () => {
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+      });
+      initLoginSave(deps);
+
+      const result = await handleUpdateLogin("not-a-uuid", "new-pw");
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe("INVALID_ENTRY_ID");
+    });
+
+    it("handles non-JSON error response from PUT", async () => {
+      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
+      const blob = JSON.stringify({ password: "old" });
+      const encBlob = await encryptData(blob, testKey, aad);
+      const overviewBlob = JSON.stringify({ title: "GitHub", username: "alice", urlHost: "github.com" });
+      const encOverview = await encryptData(overviewBlob, testKey, aad);
+
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({
+            id: TEST_UUID_1,
+            encryptedBlob: encBlob,
+            encryptedOverview: encOverview,
+            aadVersion: 1,
+          })),
+        )
+        .mockResolvedValueOnce(
+          new Response("Bad Gateway", { status: 502, headers: { "Content-Type": "text/plain" } }),
+        );
+
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch: mockFetch,
+      });
+      initLoginSave(deps);
+
+      const result = await handleUpdateLogin(TEST_UUID_1, "new-pw");
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe("UPDATE_FAILED");
+    });
+  });
+
+  describe("handleLoginDetected (error paths)", () => {
+    it("returns 'none' when getCachedEntries throws", async () => {
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        getCachedEntries: vi.fn().mockRejectedValue(new Error("network error")),
+      });
+      initLoginSave(deps);
+
+      const result = await handleLoginDetected("https://github.com", "alice", "pw");
+      expect(result.action).toBe("none");
+    });
   });
 });

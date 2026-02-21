@@ -648,6 +648,44 @@ describe("login-detector-lib", () => {
       cleanup.destroy();
     });
 
+    it("allows LOGIN_DETECTED after debounce period expires", () => {
+      vi.useFakeTimers();
+
+      const form = createForm();
+      const pw = createPasswordInput("secret");
+      const user = createTextInput("bob");
+      form.appendChild(user);
+      form.appendChild(pw);
+      document.body.appendChild(form);
+
+      mockFindPasswordInputs.mockReturnValue([pw]);
+      mockFindUsernameInput.mockReturnValue(user);
+
+      const cleanup = initLoginDetector();
+
+      // First submit — should send (CHECK_PENDING_SAVE + LOGIN_DETECTED)
+      form.dispatchEvent(new Event("submit", { bubbles: true }));
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "LOGIN_DETECTED" }),
+        expect.any(Function),
+      );
+
+      vi.clearAllMocks();
+
+      // Advance past debounce period (2 seconds)
+      vi.advanceTimersByTime(2_001);
+
+      // Submit again — should send (debounce expired)
+      form.dispatchEvent(new Event("submit", { bubbles: true }));
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "LOGIN_DETECTED" }),
+        expect.any(Function),
+      );
+
+      cleanup.destroy();
+      vi.useRealTimers();
+    });
+
     it("removes click listener after destroy()", () => {
       const pw = createPasswordInput("secret");
       const user = createTextInput("bob");
