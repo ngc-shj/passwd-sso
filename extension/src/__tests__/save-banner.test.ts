@@ -62,7 +62,7 @@ describe("save-banner", () => {
     expect(banner!.textContent).toContain("GitHub");
   });
 
-  it("calls onSave when save button clicked", () => {
+  it("calls onSave when save button clicked and hides banner", () => {
     const onSave = vi.fn();
     showSaveBanner({
       host: "example.com",
@@ -77,9 +77,11 @@ describe("save-banner", () => {
     expect(saveBtn).toBeTruthy();
     saveBtn.click();
     expect(onSave).toHaveBeenCalledTimes(1);
+    // Banner should be hidden after save
+    expect(mockRoot.querySelector("#psso-save-banner")).toBeNull();
   });
 
-  it("calls onUpdate when update button clicked", () => {
+  it("calls onUpdate when update button clicked and hides banner", () => {
     const onUpdate = vi.fn();
     showSaveBanner({
       host: "github.com",
@@ -95,6 +97,8 @@ describe("save-banner", () => {
     expect(updateBtn).toBeTruthy();
     updateBtn.click();
     expect(onUpdate).toHaveBeenCalledTimes(1);
+    // Banner should be hidden after update
+    expect(mockRoot.querySelector("#psso-save-banner")).toBeNull();
   });
 
   it("calls onDismiss when dismiss button clicked", () => {

@@ -9,15 +9,17 @@
 let creating: Promise<void> | null = null;
 
 async function ensureOffscreen(): Promise<void> {
-  const contexts = await chrome.runtime.getContexts({
-    contextTypes: ["OFFSCREEN_DOCUMENT" as chrome.runtime.ContextType],
-  });
-  if (contexts.length > 0) return;
-
+  // Check the in-flight guard first to avoid a race where two callers both
+  // see getContexts().length === 0 before either sets `creating`.
   if (creating) {
     await creating;
     return;
   }
+
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ["OFFSCREEN_DOCUMENT" as chrome.runtime.ContextType],
+  });
+  if (contexts.length > 0) return;
 
   creating = chrome.offscreen.createDocument({
     url: "offscreen.html",

@@ -376,7 +376,7 @@ describe("X-4 keyboard shortcut commands", () => {
       }),
     );
 
-    // Invalidate cache so new fetch mock is used
+    // Force cache refresh by querying status (triggers re-fetch on next command)
     await sendMessage({ type: "GET_STATUS" });
 
     const handler = commandHandlers[0];

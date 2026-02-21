@@ -76,7 +76,7 @@ interface PendingSavePrompt {
 }
 
 const PENDING_SAVE_TTL_MS = 30_000; // 30 seconds
-const MAX_PENDING_SAVES = 50;
+const MAX_PENDING_SAVES = 5;
 const pendingSavePrompts = new Map<number, PendingSavePrompt>();
 
 // ── Entry cache (TTL-based) ─────────────────────────────────
@@ -374,6 +374,14 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       if (Date.now() - pending.timestamp >= PENDING_SAVE_TTL_MS) {
         pendingSavePrompts.delete(tabId);
       } else {
+        // Security: only push to pages on the same host as the original login.
+        // Prevents sending plain-text password to unrelated domains after
+        // cross-origin redirects (e.g., OAuth flows).
+        const tabHost = tab.url ? extractHost(tab.url) : null;
+        if (tabHost && !isHostMatch(pending.host, tabHost)) {
+          pendingSavePrompts.delete(tabId);
+          return;
+        }
         setTimeout(() => {
           chrome.tabs.sendMessage(tabId, {
             type: "PSSO_SHOW_SAVE_BANNER",
@@ -1471,9 +1479,14 @@ async function handleMessage(
           sendResponse({ type: "SAVE_LOGIN", ok: false, error: "NO_TAB" });
           return;
         }
+        // Derive title from trusted sender URL instead of message.title
+        // to prevent content-script spoofing.
+        const title = (() => {
+          try { return new URL(senderUrl).hostname; } catch { return senderUrl; }
+        })();
         const result = await handleSaveLogin(
           senderUrl,
-          message.title,
+          title,
           message.username,
           message.password,
         );
