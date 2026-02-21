@@ -259,9 +259,14 @@ interface DropdownContext {
 let currentContext: DropdownContext | null = null;
 let noticeTimer: number | null = null;
 
-function getMessages(): { locked: string; noMatches: string; header: string } {
+// After autofill completes, suppress the dropdown briefly so that the
+// focus events fired by setInputValue() don't re-open it.
+let autofillSuppressUntil = 0;
+
+function getMessages(): { locked: string; disconnected: string; noMatches: string; header: string } {
   return {
     locked: t("contentScript.vaultLocked"),
+    disconnected: t("contentScript.disconnected"),
     noMatches: t("contentScript.noMatches"),
     header: t("contentScript.logins"),
   };
@@ -272,6 +277,7 @@ function showForInput(
   entries: DecryptedEntry[],
   vaultLocked: boolean,
   suppressInline: boolean,
+  disconnected?: boolean,
 ): void {
   // Suppress inline UI on passwd-sso application pages.
   if (suppressInline) {
@@ -289,8 +295,11 @@ function showForInput(
     anchorRect: rect,
     entries,
     vaultLocked,
+    disconnected,
     onSelect: (entryId) => {
       if (isContextValid()) {
+        // Suppress dropdown re-opening from focus events triggered by autofill
+        autofillSuppressUntil = Date.now() + 1500;
         const targetHint: AutofillTargetHint = {
           id: input.id || undefined,
           name: input.name || undefined,
@@ -324,6 +333,7 @@ function showForInput(
       currentContext = null;
     },
     lockedMessage: msgs.locked,
+    disconnectedMessage: msgs.disconnected,
     noMatchesMessage: msgs.noMatches,
     headerLabel: msgs.header,
   });
@@ -403,6 +413,7 @@ export function initFormDetector(): FormDetectorCleanup {
 
   const focusHandler = (e: FocusEvent) => {
     if (destroyed) return;
+    if (Date.now() < autofillSuppressUntil) return;
     const input = e.target;
     if (!(input instanceof HTMLInputElement)) return;
     if (!isUsableInput(input)) return;
@@ -505,6 +516,7 @@ export function initFormDetector(): FormDetectorCleanup {
             response.entries ?? [],
             response.vaultLocked ?? false,
             response.suppressInline ?? false,
+            response.disconnected ?? false,
           );
         },
       );
@@ -532,7 +544,11 @@ export function initFormDetector(): FormDetectorCleanup {
       }
     }
   };
-  chrome.runtime.onMessage.addListener(runtimeMessageHandler);
+  try {
+    chrome.runtime.onMessage?.addListener(runtimeMessageHandler);
+  } catch {
+    // Extension context invalidated — skip message listener registration
+  }
 
   // Start
   document.addEventListener("focusin", focusHandler, true);
@@ -551,7 +567,11 @@ export function initFormDetector(): FormDetectorCleanup {
   function destroy(): void {
     if (destroyed) return;
     destroyed = true;
-    chrome.runtime.onMessage.removeListener(runtimeMessageHandler);
+    try {
+      chrome.runtime.onMessage?.removeListener(runtimeMessageHandler);
+    } catch {
+      // Extension context invalidated
+    }
     document.removeEventListener("focusin", focusHandler, true);
     document.removeEventListener("focusout", blurHandler, true);
     document.removeEventListener("keydown", keydownHandler, true);

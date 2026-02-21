@@ -46,12 +46,14 @@
   },
   "contentScript": {
     "vaultLocked": "Vault is locked",
+    "disconnected": "Not connected to server",
     "noMatches": "No matches for this site",
     "logins": "Logins"
   },
   "contextMenu": {
     "title": "passwd-sso",
     "vaultLocked": "Vault is locked",
+    "disconnected": "Not connected",
     "noMatches": "No matches",
     "openPopup": "Open passwd-sso"
   },

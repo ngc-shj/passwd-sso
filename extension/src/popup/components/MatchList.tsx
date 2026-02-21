@@ -200,12 +200,12 @@ export function MatchList({ tabUrl, onLock }: Props) {
                   key={e.id}
                   className="rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors px-3 py-2"
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-medium text-gray-900">
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <div className="text-sm font-medium text-gray-900 truncate min-w-0">
                       {e.title || "(Untitled)"}
                     </div>
                     {e.entryType === EXT_ENTRY_TYPE.LOGIN && (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         <button
                           onClick={() => handleFill(e.id)}
                           disabled={filling}
@@ -250,12 +250,12 @@ export function MatchList({ tabUrl, onLock }: Props) {
                   key={e.id}
                   className="rounded-md border border-gray-200 px-3 py-2"
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-medium text-gray-900">
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <div className="text-sm font-medium text-gray-900 truncate min-w-0">
                       {e.title || "(Untitled)"}
                     </div>
                     {e.entryType === EXT_ENTRY_TYPE.LOGIN && (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         <button
                           onClick={() => handleFill(e.id)}
                           disabled={filling}

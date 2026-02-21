@@ -41,6 +41,7 @@ function createDeps(overrides?: Partial<ContextMenuDeps>): ContextMenuDeps {
     extractHost: vi.fn((url: string) => {
       try { return new URL(url).hostname; } catch { return null; }
     }),
+    isConnected: vi.fn().mockReturnValue(true),
     isVaultUnlocked: vi.fn().mockReturnValue(true),
     performAutofill: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -87,6 +88,22 @@ describe("context-menu", () => {
       );
       expect(entryCall).toBeTruthy();
       expect((entryCall![0] as { title: string }).title).toBe("GitHub (alice)");
+    });
+
+    it("shows 'Not connected' when disconnected", async () => {
+      deps = createDeps({ isConnected: vi.fn().mockReturnValue(false) });
+      initContextMenu(deps);
+
+      updateContextMenuForTab(1, "https://github.com");
+
+      await new Promise((r) => setTimeout(r, 300));
+
+      const createCalls = chromeMock.contextMenus.create.mock.calls;
+      const disconnectedCall = createCalls.find(
+        (c: unknown[]) => (c[0] as { id: string }).id === "psso-login-disconnected",
+      );
+      expect(disconnectedCall).toBeTruthy();
+      expect((disconnectedCall![0] as { enabled: boolean }).enabled).toBe(false);
     });
 
     it("shows 'Vault is locked' when vault is locked", async () => {
@@ -176,11 +193,13 @@ describe("context-menu", () => {
       expect(chromeMock.action.openPopup).toHaveBeenCalled();
     });
 
-    it("ignores disabled items (locked, none, sep)", () => {
-      handleContextMenuClick(
-        { menuItemId: "psso-login-locked" } as chrome.contextMenus.OnClickData,
-        { id: 1 } as chrome.tabs.Tab,
-      );
+    it("ignores disabled items (locked, disconnected, none, sep)", () => {
+      for (const id of ["psso-login-locked", "psso-login-disconnected", "psso-login-none", "psso-login-sep"]) {
+        handleContextMenuClick(
+          { menuItemId: id } as chrome.contextMenus.OnClickData,
+          { id: 1 } as chrome.tabs.Tab,
+        );
+      }
 
       expect(deps.performAutofill).not.toHaveBeenCalled();
     });
