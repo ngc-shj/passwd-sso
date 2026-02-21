@@ -310,16 +310,35 @@ describe("env validation", () => {
   // ─── Error aggregation ─────────────────────────────────
 
   it("reports all errors at once", async () => {
-    // Missing both critical vars
+    // Missing critical var
     delete process.env.DATABASE_URL;
-    delete process.env.ORG_MASTER_KEY;
     try {
       await import("@/lib/env");
       expect.fail("Should have thrown");
     } catch (error) {
       const message = (error as Error).message;
       expect(message).toContain("DATABASE_URL");
+    }
+  });
+
+  it("requires ORG_MASTER_KEY or ORG_MASTER_KEY_V1 for V1", async () => {
+    setMinimalDevEnv();
+    delete process.env.ORG_MASTER_KEY;
+    delete process.env.ORG_MASTER_KEY_V1;
+    try {
+      await import("@/lib/env");
+      expect.fail("Should have thrown");
+    } catch (error) {
+      const message = (error as Error).message;
       expect(message).toContain("ORG_MASTER_KEY");
     }
+  });
+
+  it("accepts ORG_MASTER_KEY_V1 without ORG_MASTER_KEY", async () => {
+    setMinimalDevEnv();
+    delete process.env.ORG_MASTER_KEY;
+    process.env.ORG_MASTER_KEY_V1 = "b".repeat(64);
+    const { env } = await import("@/lib/env");
+    expect(env.ORG_MASTER_KEY).toBeUndefined();
   });
 });

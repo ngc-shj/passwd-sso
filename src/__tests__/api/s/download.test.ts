@@ -41,6 +41,7 @@ function makeFileShare(overrides: Record<string, unknown> = {}) {
     encryptedFile: Buffer.from("encrypted"),
     fileIv: "i".repeat(24),
     fileAuthTag: "t".repeat(32),
+    masterKeyVersion: 1,
     expiresAt: new Date(Date.now() + 86400_000), // +1 day
     revokedAt: null,
     ...overrides,

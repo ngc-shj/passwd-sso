@@ -45,6 +45,7 @@ export async function GET() {
           encryptedOrgKey: true,
           orgKeyIv: true,
           orgKeyAuthTag: true,
+          masterKeyVersion: true,
         },
       },
       tags: { select: { id: true, name: true, color: true } },
@@ -62,7 +63,7 @@ export async function GET() {
       ciphertext: entry.org.encryptedOrgKey,
       iv: entry.org.orgKeyIv,
       authTag: entry.org.orgKeyAuthTag,
-    });
+    }, entry.org.masterKeyVersion);
 
     const aad = entry.aadVersion >= 1
       ? Buffer.from(buildOrgEntryAAD(entry.orgId, entry.id, "overview"))

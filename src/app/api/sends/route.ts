@@ -68,6 +68,7 @@ export async function POST(req: NextRequest) {
       encryptedData: encrypted.ciphertext,
       dataIv: encrypted.iv,
       dataAuthTag: encrypted.authTag,
+      masterKeyVersion: encrypted.masterKeyVersion,
       expiresAt,
       maxViews: maxViews ?? null,
       createdById: session.user.id,

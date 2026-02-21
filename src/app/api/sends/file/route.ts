@@ -158,6 +158,7 @@ export async function POST(req: NextRequest) {
       encryptedFile: new Uint8Array(encryptedFile.ciphertext),
       fileIv: encryptedFile.iv,
       fileAuthTag: encryptedFile.authTag,
+      masterKeyVersion: encryptedMeta.masterKeyVersion,
       expiresAt,
       maxViews: meta.maxViews ?? null,
       createdById: session.user.id,

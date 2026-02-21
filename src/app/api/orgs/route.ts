@@ -84,6 +84,7 @@ export async function POST(req: NextRequest) {
       encryptedOrgKey: wrappedKey.ciphertext,
       orgKeyIv: wrappedKey.iv,
       orgKeyAuthTag: wrappedKey.authTag,
+      masterKeyVersion: wrappedKey.masterKeyVersion,
       members: {
         create: {
           userId: session.user.id,
