@@ -1,0 +1,20 @@
+{
+  "title": "共有",
+  "description": "すべての共有を管理します。",
+  "status": "ステータス",
+  "allStatuses": "すべてのステータス",
+  "active": "有効",
+  "maxViewsReached": "閲覧上限到達",
+  "noLinks": "共有リンクはまだありません。",
+  "loadMore": "もっと読み込む",
+  "sharedBy": "共有者: {name}",
+  "personalEntry": "個人エントリー",
+  "deletedEntry": "削除済みエントリー",
+  "typeFilter": "タイプ",
+  "allTypes": "すべて",
+  "entryShares": "エントリ共有",
+  "sends": "Send",
+  "newSend": "新規Send",
+  "textSend": "テキスト",
+  "fileSend": "ファイル"
+}

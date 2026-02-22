@@ -11,7 +11,7 @@ import {
   parseJson,
   type CsvFormat,
   type ParsedEntry,
-} from "@/components/passwords/import-dialog-utils";
+} from "@/components/passwords/password-import-utils";
 
 interface UseImportFileFlowResult {
   fileRef: React.RefObject<HTMLInputElement | null>;

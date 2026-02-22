@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { ImportPagePanel } from "@/components/passwords/import-dialog";
+import { ImportPagePanel } from "@/components/passwords/password-import";
 
 export default function ImportPage() {
   const router = useRouter();

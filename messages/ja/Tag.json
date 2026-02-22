@@ -1,0 +1,7 @@
+{
+  "addTag": "タグを追加",
+  "searchOrCreate": "タグを検索または作成...",
+  "createTag": "「{name}」を作成",
+  "noTags": "タグが見つかりません",
+  "createFailed": "タグの作成に失敗しました"
+}

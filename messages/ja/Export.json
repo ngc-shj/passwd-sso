@@ -1,0 +1,23 @@
+{
+  "title": "パスワードのエクスポート",
+  "description": "パスワードデータを CSV / JSON でダウンロードします。パスワード保護を有効にすると暗号化して保存できます。",
+  "profileLabel": "エクスポートプロファイル",
+  "profileCompatible": "互換（Bitwarden形式）",
+  "profilePasswdSso": "passwd-sso（完全復元向け）",
+  "profileCompatibleDesc": "他アプリへの取り込み向け。passwd-sso 固有項目は一部省略されます。",
+  "profilePasswdSsoDesc": "passwd-sso 固有項目を含めて、passwd-sso でロスなく復元できます。",
+  "warning": "パスワード保護をオフにすると、エクスポートファイルには平文でデータが含まれます。安全に保管し、不要になったら削除してください。",
+  "exportCsv": "CSV でエクスポート",
+  "exportJson": "JSON でエクスポート",
+  "passwordProtect": "パスワード保護",
+  "passwordProtectDesc": "有効にすると、エクスポートファイルをパスワードで暗号化します",
+  "exportPassword": "エクスポート用パスワード",
+  "confirmPassword": "パスワードの確認",
+  "passwordMismatch": "パスワードが一致しません",
+  "passwordTooShort": "パスワードは8文字以上で入力してください",
+  "encryptedWarning": "エクスポートファイルは暗号化されます。パスワードを忘れるとデータを復元できません。",
+  "includeOrgs": "組織のエントリーを含める",
+  "includeOrgsDesc": "所属する組織のパスワードもエクスポートします",
+  "exportSkipped": "{count} 件のエントリをエクスポートできませんでした（スキップ）。",
+  "exportFailed": "エクスポートに失敗しました。もう一度お試しください。"
+}
