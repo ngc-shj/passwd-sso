@@ -39,6 +39,7 @@ export const API_PATH = {
   WATCHTOWER_START: "/api/watchtower/start",
   WATCHTOWER_HIBP: "/api/watchtower/hibp",
   CSP_REPORT: "/api/csp-report",
+  SESSIONS: "/api/sessions",
   HEALTH_LIVE: "/api/health/live",
   HEALTH_READY: "/api/health/ready",
 } as const;
@@ -101,4 +102,5 @@ export const apiPath = {
     `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/history/${historyId}`,
   orgPasswordHistoryRestore: (orgId: string, entryId: string, historyId: string) =>
     `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/history/${historyId}/restore`,
+  sessionById: (sessionId: string) => `${API_PATH.SESSIONS}/${sessionId}`,
 } as const;

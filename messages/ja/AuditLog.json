@@ -59,6 +59,8 @@
   "ENTRY_HISTORY_RESTORE": "履歴版から復元",
   "HISTORY_PURGE": "履歴の期限削除",
   "MASTER_KEY_ROTATION": "マスターキーローテーション",
+  "SESSION_REVOKE": "セッションを取り消し",
+  "SESSION_REVOKE_ALL": "他のすべてのセッションを取り消し",
   "orgAuditLog": "監査ログ — {orgName}",
   "orgAuditLogDesc": "{orgName} のアクティビティを表示",
   "deletedEntry": "削除済みエントリー",

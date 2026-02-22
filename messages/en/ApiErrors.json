@@ -59,5 +59,7 @@
   "sendTextTooLarge": "Text content is too large.",
   "sendFileTooLarge": "File is too large (max 10 MB).",
   "sendFileTypeNotAllowed": "File type is not allowed.",
-  "sendStorageLimitExceeded": "Storage limit exceeded."
+  "sendStorageLimitExceeded": "Storage limit exceeded.",
+  "sessionNotFound": "Session not found.",
+  "cannotRevokeCurrentSession": "Cannot revoke the current session."
 }

@@ -1,0 +1,20 @@
+{
+  "title": "セッション",
+  "description": "アクティブなセッションを管理できます。不要なセッションを取り消すことができます。",
+  "current": "現在",
+  "lastActive": "最終アクティブ",
+  "revoke": "取り消し",
+  "revokeAll": "他のすべてのセッションを取り消し",
+  "revokeConfirmTitle": "セッションの取り消し",
+  "revokeConfirm": "このセッションを取り消しますか？",
+  "revokeAllConfirmTitle": "他のすべてのセッションを取り消し",
+  "revokeAllConfirm": "他のすべてのセッションを取り消しますか？",
+  "cancel": "キャンセル",
+  "confirm": "確認",
+  "revokeSuccess": "セッションを取り消しました。",
+  "revokeAllSuccess": "他のすべてのセッションを取り消しました。",
+  "noOtherSessions": "他のアクティブなセッションはありません。",
+  "unknownDevice": "不明なデバイス",
+  "unknownBrowser": "不明なブラウザ",
+  "loading": "セッションを読み込み中..."
+}

@@ -33,9 +33,14 @@ model Session {
   sessionToken String   @unique @map("session_token")
   userId       String   @map("user_id")
   expires      DateTime
+  createdAt    DateTime @default(now()) @map("created_at")
+  lastActiveAt DateTime @default(now()) @map("last_active_at")
+  ipAddress    String?  @map("ip_address") @db.VarChar(45)
+  userAgent    String?  @map("user_agent") @db.VarChar(512)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("sessions")
 }
 
@@ -469,6 +474,8 @@ enum AuditAction {
   ENTRY_HISTORY_RESTORE
   HISTORY_PURGE
   MASTER_KEY_ROTATION
+  SESSION_REVOKE
+  SESSION_REVOKE_ALL
 }
 
 enum AuditScope {
