@@ -4,18 +4,21 @@ import { join } from "node:path";
 
 type JsonRecord = Record<string, unknown>;
 
-function readMessages(localeFile: string): JsonRecord {
+function readNamespace(locale: string, namespace: string): JsonRecord {
   return JSON.parse(
-    readFileSync(join(process.cwd(), "messages", localeFile), "utf8")
+    readFileSync(
+      join(process.cwd(), "messages", locale, `${namespace}.json`),
+      "utf8",
+    ),
   ) as JsonRecord;
 }
 
 function expectNamespaceKeys(
-  locale: JsonRecord,
+  locale: string,
   namespace: string,
   keys: string[],
 ): void {
-  const dict = (locale[namespace] ?? {}) as JsonRecord;
+  const dict = readNamespace(locale, namespace);
   for (const key of keys) {
     expect(dict[key]).toBeTypeOf("string");
   }
@@ -23,8 +26,6 @@ function expectNamespaceKeys(
 
 describe("entry form i18n keys", () => {
   it("has required translation keys in ja/en", () => {
-    const ja = readMessages("ja.json");
-    const en = readMessages("en.json");
 
     const required: Record<string, string[]> = {
       Common: ["save", "update", "cancel", "back"],
@@ -55,8 +56,8 @@ describe("entry form i18n keys", () => {
     };
 
     for (const [namespace, keys] of Object.entries(required)) {
-      expectNamespaceKeys(ja, namespace, keys);
-      expectNamespaceKeys(en, namespace, keys);
+      expectNamespaceKeys("ja", namespace, keys);
+      expectNamespaceKeys("en", namespace, keys);
     }
   });
 });

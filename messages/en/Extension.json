@@ -1,0 +1,15 @@
+{
+  "connect": "Connect Extension",
+  "connecting": "Connecting...",
+  "connected": "Connected!",
+  "failed": "Connection failed",
+  "autoConnected": "Extension connected",
+  "autoConnectFailed": "Extension connection failed",
+  "connectedTitle": "Connection complete",
+  "connectedDescription": "The browser extension is now connected. You can safely close this tab.",
+  "connectFailedTitle": "Connection failed",
+  "connectFailedDescription": "Failed to connect to the extension. Please try again.",
+  "closeTab": "Close tab",
+  "goToDashboard": "Go to dashboard",
+  "retry": "Retry"
+}

@@ -1,0 +1,4 @@
+{
+  "authenticator": "認証コード (TOTP)",
+  "inputPlaceholder": "Base32 シークレットまたは otpauth:// URI"
+}

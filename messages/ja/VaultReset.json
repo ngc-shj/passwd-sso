@@ -1,0 +1,10 @@
+{
+  "title": "保管庫のリセット",
+  "warning": "すべてのパスワード、添付ファイル、共有リンクが完全に削除されます。この操作は取り消せません。",
+  "confirmationLabel": "続行するには以下の確認テキストを入力してください",
+  "confirmationPlaceholder": "DELETE MY VAULT",
+  "confirmationText": "DELETE MY VAULT",
+  "resetButton": "保管庫をリセット",
+  "resetting": "リセット中...",
+  "success": "保管庫がリセットされました。セットアップにリダイレクトします..."
+}

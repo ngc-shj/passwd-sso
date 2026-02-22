@@ -1,0 +1,17 @@
+{
+  "title": "Trash",
+  "description": "Items are automatically deleted after 30 days.",
+  "restore": "Restore",
+  "deletePermanently": "Delete Permanently",
+  "deleteConfirm": "Permanently delete \"{title}\"? This cannot be undone.",
+  "restored": "Restored",
+  "restoreSelected": "Restore selected",
+  "bulkRestored": "{count} entries restored",
+  "bulkRestoreFailed": "Failed to restore selected entries",
+  "deletedPermanently": "Permanently deleted",
+  "emptyTrash": "Empty Trash",
+  "emptyTrashConfirm": "Permanently delete all items in trash? This cannot be undone.",
+  "emptyTrashSuccess": "Trash emptied",
+  "failedAction": "Operation failed",
+  "networkError": "Network error"
+}

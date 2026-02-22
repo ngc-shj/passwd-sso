@@ -1,0 +1,10 @@
+{
+  "title": "Reset Vault",
+  "warning": "This will permanently delete all your passwords, attachments, and shared links. This action cannot be undone.",
+  "confirmationLabel": "Type the confirmation text below to proceed",
+  "confirmationPlaceholder": "DELETE MY VAULT",
+  "confirmationText": "DELETE MY VAULT",
+  "resetButton": "Reset Vault",
+  "resetting": "Resetting...",
+  "success": "Vault has been reset. Redirecting to setup..."
+}

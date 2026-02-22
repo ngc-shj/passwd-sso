@@ -1,0 +1,7 @@
+{
+  "addTag": "Add tag",
+  "searchOrCreate": "Search or create tag...",
+  "createTag": "Create \"{name}\"",
+  "noTags": "No tags found",
+  "createFailed": "Failed to create tag"
+}
