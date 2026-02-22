@@ -1,19 +1,25 @@
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, afterAll, vi, beforeEach, afterEach } from "vitest";
 import {
   generateOrgKey,
   wrapOrgKey,
   unwrapOrgKey,
+  rewrapOrgKey,
   encryptServerData,
   decryptServerData,
   encryptServerBinary,
   decryptServerBinary,
+  encryptShareBinary,
+  decryptShareBinary,
   generateShareToken,
   hashToken,
   encryptShareData,
   decryptShareData,
+  getCurrentMasterKeyVersion,
+  getMasterKeyByVersion,
   hmacVerifier,
   verifyPassphraseVerifier,
 } from "./crypto-server";
+import { randomBytes } from "node:crypto";
 
 describe("crypto-server", () => {
   const originalMasterKey = process.env.ORG_MASTER_KEY;
@@ -41,17 +47,18 @@ describe("crypto-server", () => {
     it("roundtrips correctly", () => {
       const orgKey = generateOrgKey();
       const wrapped = wrapOrgKey(orgKey);
-      const unwrapped = unwrapOrgKey(wrapped);
+      const unwrapped = unwrapOrgKey(wrapped, wrapped.masterKeyVersion);
       expect(unwrapped.equals(orgKey)).toBe(true);
     });
 
-    it("returns valid encrypted data structure", () => {
+    it("returns valid encrypted data structure with masterKeyVersion", () => {
       const orgKey = generateOrgKey();
       const wrapped = wrapOrgKey(orgKey);
 
       expect(typeof wrapped.ciphertext).toBe("string");
       expect(wrapped.iv).toHaveLength(24); // 12 bytes hex
       expect(wrapped.authTag).toHaveLength(32); // 16 bytes hex
+      expect(wrapped.masterKeyVersion).toBe(getCurrentMasterKeyVersion());
     });
 
     it("fails with tampered ciphertext", () => {
@@ -61,7 +68,7 @@ describe("crypto-server", () => {
       const byte = parseInt(wrapped.ciphertext.slice(0, 2), 16);
       const flipped = ((byte ^ 0x01) & 0xff).toString(16).padStart(2, "0");
       wrapped.ciphertext = flipped + wrapped.ciphertext.slice(2);
-      expect(() => unwrapOrgKey(wrapped)).toThrow();
+      expect(() => unwrapOrgKey(wrapped, wrapped.masterKeyVersion)).toThrow();
     });
 
     it("fails with tampered authTag", () => {
@@ -69,7 +76,7 @@ describe("crypto-server", () => {
       const wrapped = wrapOrgKey(orgKey);
 
       wrapped.authTag = "00".repeat(16);
-      expect(() => unwrapOrgKey(wrapped)).toThrow();
+      expect(() => unwrapOrgKey(wrapped, wrapped.masterKeyVersion)).toThrow();
     });
   });
 
@@ -204,27 +211,163 @@ describe("crypto-server", () => {
     });
   });
 
-  describe("getMasterKey validation", () => {
-    it("throws when ORG_MASTER_KEY is missing", () => {
-      const saved = process.env.ORG_MASTER_KEY;
-      delete process.env.ORG_MASTER_KEY;
+  describe("versioned master key", () => {
+    const V1_KEY = randomBytes(32).toString("hex");
+    const V2_KEY = randomBytes(32).toString("hex");
 
-      expect(() => wrapOrgKey(generateOrgKey())).toThrow(
-        "ORG_MASTER_KEY must be a 64-char hex string"
-      );
+    let savedEnv: Record<string, string | undefined>;
 
-      process.env.ORG_MASTER_KEY = saved;
+    beforeEach(() => {
+      savedEnv = {
+        ORG_MASTER_KEY: process.env.ORG_MASTER_KEY,
+        ORG_MASTER_KEY_V1: process.env.ORG_MASTER_KEY_V1,
+        ORG_MASTER_KEY_V2: process.env.ORG_MASTER_KEY_V2,
+        ORG_MASTER_KEY_CURRENT_VERSION: process.env.ORG_MASTER_KEY_CURRENT_VERSION,
+      };
     });
 
-    it("throws when ORG_MASTER_KEY is wrong length", () => {
-      const saved = process.env.ORG_MASTER_KEY;
-      process.env.ORG_MASTER_KEY = "abcd";
+    afterEach(() => {
+      for (const [key, value] of Object.entries(savedEnv)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    });
 
-      expect(() => wrapOrgKey(generateOrgKey())).toThrow(
-        "ORG_MASTER_KEY must be a 64-char hex string"
+    it("getCurrentMasterKeyVersion defaults to 1", () => {
+      delete process.env.ORG_MASTER_KEY_CURRENT_VERSION;
+      expect(getCurrentMasterKeyVersion()).toBe(1);
+    });
+
+    it("getCurrentMasterKeyVersion reads env", () => {
+      process.env.ORG_MASTER_KEY_CURRENT_VERSION = "2";
+      expect(getCurrentMasterKeyVersion()).toBe(2);
+    });
+
+    it("getCurrentMasterKeyVersion throws for invalid value", () => {
+      process.env.ORG_MASTER_KEY_CURRENT_VERSION = "abc";
+      expect(() => getCurrentMasterKeyVersion()).toThrow("positive integer");
+    });
+
+    it("getCurrentMasterKeyVersion throws for zero", () => {
+      process.env.ORG_MASTER_KEY_CURRENT_VERSION = "0";
+      expect(() => getCurrentMasterKeyVersion()).toThrow("positive integer");
+    });
+
+    it("getMasterKeyByVersion throws for version 0", () => {
+      expect(() => getMasterKeyByVersion(0)).toThrow("Invalid master key version");
+    });
+
+    it("getMasterKeyByVersion throws for version > 100", () => {
+      expect(() => getMasterKeyByVersion(101)).toThrow("Invalid master key version");
+    });
+
+    it("getMasterKeyByVersion throws for non-integer", () => {
+      expect(() => getMasterKeyByVersion(1.5)).toThrow("Invalid master key version");
+    });
+
+    it("getMasterKeyByVersion V1 falls back to ORG_MASTER_KEY", () => {
+      delete process.env.ORG_MASTER_KEY_V1;
+      process.env.ORG_MASTER_KEY = V1_KEY;
+      const key = getMasterKeyByVersion(1);
+      expect(key.toString("hex")).toBe(V1_KEY);
+    });
+
+    it("getMasterKeyByVersion V1 prefers ORG_MASTER_KEY_V1", () => {
+      process.env.ORG_MASTER_KEY = V1_KEY;
+      process.env.ORG_MASTER_KEY_V1 = V2_KEY; // different key
+      const key = getMasterKeyByVersion(1);
+      expect(key.toString("hex")).toBe(V2_KEY);
+    });
+
+    it("getMasterKeyByVersion V2 reads ORG_MASTER_KEY_V2", () => {
+      process.env.ORG_MASTER_KEY_V2 = V2_KEY;
+      const key = getMasterKeyByVersion(2);
+      expect(key.toString("hex")).toBe(V2_KEY);
+    });
+
+    it("getMasterKeyByVersion throws for missing version", () => {
+      delete process.env.ORG_MASTER_KEY_V1;
+      delete process.env.ORG_MASTER_KEY;
+      expect(() => getMasterKeyByVersion(1)).toThrow(
+        "Master key for version 1 not found or invalid"
       );
+    });
 
-      process.env.ORG_MASTER_KEY = saved;
+    it("getMasterKeyByVersion throws for invalid hex", () => {
+      process.env.ORG_MASTER_KEY = "abcd";
+      delete process.env.ORG_MASTER_KEY_V1;
+      expect(() => getMasterKeyByVersion(1)).toThrow(
+        "Master key for version 1 not found or invalid"
+      );
+    });
+
+    it("wrapOrgKey uses current version", () => {
+      process.env.ORG_MASTER_KEY_V2 = V2_KEY;
+      process.env.ORG_MASTER_KEY_CURRENT_VERSION = "2";
+      const wrapped = wrapOrgKey(generateOrgKey());
+      expect(wrapped.masterKeyVersion).toBe(2);
+    });
+
+    it("unwrapOrgKey with wrong version fails", () => {
+      process.env.ORG_MASTER_KEY = V1_KEY;
+      process.env.ORG_MASTER_KEY_V2 = V2_KEY;
+      delete process.env.ORG_MASTER_KEY_CURRENT_VERSION;
+      // Wrap with V1
+      const orgKey = generateOrgKey();
+      const wrapped = wrapOrgKey(orgKey);
+      // Try to unwrap with V2
+      expect(() => unwrapOrgKey(wrapped, 2)).toThrow();
+    });
+
+    it("rewrapOrgKey roundtrips V1 -> V2", () => {
+      process.env.ORG_MASTER_KEY = V1_KEY;
+      process.env.ORG_MASTER_KEY_V2 = V2_KEY;
+      delete process.env.ORG_MASTER_KEY_CURRENT_VERSION;
+
+      const orgKey = generateOrgKey();
+      const wrappedV1 = wrapOrgKey(orgKey);
+      expect(wrappedV1.masterKeyVersion).toBe(1);
+
+      const wrappedV2 = rewrapOrgKey(wrappedV1, 1, 2);
+      expect(wrappedV2.masterKeyVersion).toBe(2);
+
+      // Unwrap V2 and verify original key is preserved
+      const unwrapped = unwrapOrgKey(wrappedV2, 2);
+      expect(unwrapped.equals(orgKey)).toBe(true);
+    });
+
+    it("encryptShareData returns masterKeyVersion matching current", () => {
+      process.env.ORG_MASTER_KEY_V2 = V2_KEY;
+      process.env.ORG_MASTER_KEY_CURRENT_VERSION = "2";
+      const encrypted = encryptShareData("test");
+      expect(encrypted.masterKeyVersion).toBe(2);
+    });
+
+    it("encryptShareData / decryptShareData roundtrip with version", () => {
+      const encrypted = encryptShareData("test data");
+      const decrypted = decryptShareData(encrypted, encrypted.masterKeyVersion);
+      expect(decrypted).toBe("test data");
+    });
+
+    it("encryptShareBinary / decryptShareBinary roundtrip with version", () => {
+      const data = Buffer.from("binary share data");
+      const encrypted = encryptShareBinary(data);
+      const decrypted = decryptShareBinary(encrypted, encrypted.masterKeyVersion);
+      expect(decrypted.equals(data)).toBe(true);
+    });
+
+    it("getVerifierPepper fallback works with ORG_MASTER_KEY_V1 (no ORG_MASTER_KEY)", () => {
+      delete process.env.ORG_MASTER_KEY;
+      delete process.env.VERIFIER_PEPPER_KEY;
+      process.env.ORG_MASTER_KEY_V1 = V1_KEY;
+      delete process.env.ORG_MASTER_KEY_CURRENT_VERSION;
+
+      // Should not throw — pepper fallback uses getMasterKeyByVersion(1)
+      const result = hmacVerifier("a".repeat(64));
+      expect(result).toHaveLength(64);
     });
   });
 
@@ -266,14 +409,14 @@ describe("crypto-server", () => {
     it("roundtrips correctly", () => {
       const plaintext = JSON.stringify({ title: "Shared", password: "abc" });
       const encrypted = encryptShareData(plaintext);
-      const decrypted = decryptShareData(encrypted);
+      const decrypted = decryptShareData(encrypted, encrypted.masterKeyVersion);
       expect(decrypted).toBe(plaintext);
     });
 
     it("handles unicode content", () => {
       const plaintext = "共有データ 🔗";
       const encrypted = encryptShareData(plaintext);
-      const decrypted = decryptShareData(encrypted);
+      const decrypted = decryptShareData(encrypted, encrypted.masterKeyVersion);
       expect(decrypted).toBe(plaintext);
     });
 

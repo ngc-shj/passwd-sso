@@ -97,6 +97,7 @@ export async function POST(
           encryptedOrgKey: true,
           orgKeyIv: true,
           orgKeyAuthTag: true,
+          masterKeyVersion: true,
         },
       },
     },
@@ -209,7 +210,7 @@ export async function POST(
     ciphertext: entry.org.encryptedOrgKey,
     iv: entry.org.orgKeyIv,
     authTag: entry.org.orgKeyAuthTag,
-  });
+  }, entry.org.masterKeyVersion);
   // Pre-generate attachment ID for AAD binding
   const attachmentId = crypto.randomUUID();
   const aad = Buffer.from(buildAttachmentAAD(id, attachmentId));

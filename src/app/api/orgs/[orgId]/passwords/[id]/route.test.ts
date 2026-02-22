@@ -63,7 +63,7 @@ const ORG_ID = "org-123";
 const PW_ID = "pw-456";
 const now = new Date("2025-01-01T00:00:00Z");
 
-const orgKeyData = { encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag" };
+const orgKeyData = { encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1 };
 
 describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
   beforeEach(() => {

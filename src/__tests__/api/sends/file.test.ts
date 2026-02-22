@@ -25,11 +25,13 @@ vi.mock("@/lib/crypto-server", () => ({
     ciphertext: "encrypted",
     iv: "i".repeat(24),
     authTag: "t".repeat(32),
+    masterKeyVersion: 1,
   }),
   encryptShareBinary: () => ({
     ciphertext: Buffer.from("encrypted-file"),
     iv: "f".repeat(24),
     authTag: "g".repeat(32),
+    masterKeyVersion: 1,
   }),
 }));
 vi.mock("@/lib/rate-limit", () => ({
@@ -331,6 +333,7 @@ describe("POST /api/sends/file", () => {
           sendName: "Test File",
           sendFilename: "test.txt",
           createdById: DEFAULT_SESSION.user.id,
+          masterKeyVersion: 1,
         }),
       })
     );

@@ -53,7 +53,7 @@ import { GET } from "./route";
 const ORG_ID = "org-123";
 const ENTRY_ID = "entry-456";
 const HISTORY_ID = "hist-789";
-const orgKeyData = { encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag" };
+const orgKeyData = { encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1 };
 
 function makeUrl() {
   return `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${ENTRY_ID}/history/${HISTORY_ID}`;
