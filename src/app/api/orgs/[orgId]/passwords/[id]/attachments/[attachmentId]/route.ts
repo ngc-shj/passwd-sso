@@ -43,6 +43,7 @@ export async function GET(
           encryptedOrgKey: true,
           orgKeyIv: true,
           orgKeyAuthTag: true,
+          masterKeyVersion: true,
         },
       },
     },
@@ -65,7 +66,7 @@ export async function GET(
     ciphertext: entry.org.encryptedOrgKey,
     iv: entry.org.orgKeyIv,
     authTag: entry.org.orgKeyAuthTag,
-  });
+  }, entry.org.masterKeyVersion);
 
   const aad = attachment.aadVersion >= 1
     ? Buffer.from(buildAttachmentAAD(id, attachmentId))

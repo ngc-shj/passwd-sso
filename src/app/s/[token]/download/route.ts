@@ -38,6 +38,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       encryptedFile: true,
       fileIv: true,
       fileAuthTag: true,
+      masterKeyVersion: true,
       expiresAt: true,
       revokedAt: true,
     },
@@ -77,7 +78,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     ciphertext: Buffer.from(share.encryptedFile),
     iv: share.fileIv,
     authTag: share.fileAuthTag,
-  });
+  }, share.masterKeyVersion);
 
   // Sanitize filename for Content-Disposition
   const filename = share.sendFilename ?? "download";

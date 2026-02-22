@@ -113,6 +113,7 @@ export async function GET(req: NextRequest, { params }: Params) {
           encryptedOrgKey: true,
           orgKeyIv: true,
           orgKeyAuthTag: true,
+          masterKeyVersion: true,
         },
       });
 
@@ -121,7 +122,7 @@ export async function GET(req: NextRequest, { params }: Params) {
           ciphertext: org.encryptedOrgKey,
           iv: org.orgKeyIv,
           authTag: org.orgKeyAuthTag,
-        });
+        }, org.masterKeyVersion);
 
         const entries = await prisma.orgPasswordEntry.findMany({
           where: { id: { in: entryIds } },

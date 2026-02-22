@@ -30,12 +30,13 @@ function getOrgKey(org: {
   encryptedOrgKey: string;
   orgKeyIv: string;
   orgKeyAuthTag: string;
+  masterKeyVersion: number;
 }) {
   return unwrapOrgKey({
     ciphertext: org.encryptedOrgKey,
     iv: org.orgKeyIv,
     authTag: org.orgKeyAuthTag,
-  });
+  }, org.masterKeyVersion);
 }
 
 // GET /api/orgs/[orgId]/passwords/[id] — Get password detail (server decrypts)
@@ -64,6 +65,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
           encryptedOrgKey: true,
           orgKeyIv: true,
           orgKeyAuthTag: true,
+          masterKeyVersion: true,
         },
       },
       tags: { select: { id: true, name: true, color: true } },
@@ -206,6 +208,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
           encryptedOrgKey: true,
           orgKeyIv: true,
           orgKeyAuthTag: true,
+          masterKeyVersion: true,
         },
       },
     },

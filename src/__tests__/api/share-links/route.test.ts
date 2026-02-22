@@ -30,6 +30,7 @@ vi.mock("@/lib/crypto-server", () => ({
     ciphertext: "encrypted",
     iv: "i".repeat(24),
     authTag: "t".repeat(32),
+    masterKeyVersion: 1,
   }),
   unwrapOrgKey: () => Buffer.alloc(32),
   decryptServerData: mockDecryptServerData,
@@ -136,6 +137,15 @@ describe("POST /api/share-links", () => {
     expect(json.token).toBe("a".repeat(64));
     expect(json.url).toBe("/s/" + "a".repeat(64));
     expect(json.id).toBe("share-1");
+
+    // Verify masterKeyVersion is saved to DB
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          masterKeyVersion: 1,
+        }),
+      })
+    );
   });
 
   it("returns 429 when rate limited", async () => {
@@ -171,6 +181,7 @@ describe("POST /api/share-links", () => {
           encryptedOrgKey: "ek",
           orgKeyIv: "oiv",
           orgKeyAuthTag: "otag",
+          masterKeyVersion: 1,
         },
       })
       .mockResolvedValueOnce({ orgId: "org-123" }); // audit log lookup
@@ -206,6 +217,7 @@ describe("POST /api/share-links", () => {
           encryptedOrgKey: "ek",
           orgKeyIv: "oiv",
           orgKeyAuthTag: "otag",
+          masterKeyVersion: 1,
         },
       })
       .mockResolvedValueOnce({ orgId: "org-123" });
@@ -270,6 +282,7 @@ describe("POST /api/share-links", () => {
         encryptedOrgKey: "ek",
         orgKeyIv: "oiv",
         orgKeyAuthTag: "otag",
+        masterKeyVersion: 1,
       },
     });
 

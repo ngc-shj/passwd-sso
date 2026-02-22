@@ -397,6 +397,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       encryptedOrgKey: "enc",
       orgKeyIv: "iv",
       orgKeyAuthTag: "tag",
+      masterKeyVersion: 1,
     });
     mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
     mockOrgEntryFindMany.mockResolvedValue([
@@ -444,6 +445,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
       encryptedOrgKey: "enc",
       orgKeyIv: "iv",
       orgKeyAuthTag: "tag",
+      masterKeyVersion: 1,
     });
     mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
     mockOrgEntryFindMany.mockResolvedValue([

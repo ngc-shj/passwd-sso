@@ -65,7 +65,7 @@ describe("GET /api/orgs/favorites", () => {
           encryptedOverview: "cipher",
           overviewIv: "iv",
           overviewAuthTag: "tag",
-          org: { id: "org-1", name: "My Org", encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag" },
+          org: { id: "org-1", name: "My Org", encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1 },
           tags: [],
           createdBy: { id: "u1", name: "User", image: null },
           updatedBy: { id: "u1", name: "User" },

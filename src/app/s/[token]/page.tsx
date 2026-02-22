@@ -44,6 +44,7 @@ export default async function SharePage({ params }: Props) {
       sendName: true,
       sendFilename: true,
       sendSizeBytes: true,
+      masterKeyVersion: true,
       expiresAt: true,
       maxViews: true,
       viewCount: true,
@@ -96,7 +97,7 @@ export default async function SharePage({ params }: Props) {
         ciphertext: share.encryptedData,
         iv: share.dataIv,
         authTag: share.dataAuthTag,
-      })
+      }, share.masterKeyVersion)
     );
   } catch {
     return <ShareError reason="notFound" />;
