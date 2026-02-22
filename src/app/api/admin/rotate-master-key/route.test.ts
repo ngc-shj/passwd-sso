@@ -34,6 +34,7 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
+  extractRequestMeta: () => ({ ip: "10.0.0.1", userAgent: "Test" }),
 }));
 
 // Set up env before importing route
