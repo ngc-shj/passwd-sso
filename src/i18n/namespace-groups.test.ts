@@ -57,4 +57,40 @@ describe("namespace-groups", () => {
     }
     expect(NS_VAULT_RESET).toContain("VaultReset");
   });
+
+  it("every entry in NS_GLOBAL belongs to NAMESPACES", () => {
+    for (const ns of NS_GLOBAL) {
+      expect(NAMESPACES).toContain(ns);
+    }
+  });
+
+  it("every entry in NS_VAULT belongs to NAMESPACES", () => {
+    for (const ns of NS_VAULT) {
+      expect(NAMESPACES).toContain(ns);
+    }
+  });
+
+  it("every entry in NS_RECOVERY belongs to NAMESPACES", () => {
+    for (const ns of NS_RECOVERY) {
+      expect(NAMESPACES).toContain(ns);
+    }
+  });
+
+  it("every entry in NS_VAULT_RESET belongs to NAMESPACES", () => {
+    for (const ns of NS_VAULT_RESET) {
+      expect(NAMESPACES).toContain(ns);
+    }
+  });
+
+  it("NS_DASHBOARD_ALL has no duplicate entries", () => {
+    expect(NS_DASHBOARD_ALL.length).toBe(new Set(NS_DASHBOARD_ALL).size);
+  });
+
+  it("NS_RECOVERY has no duplicate entries", () => {
+    expect(NS_RECOVERY.length).toBe(new Set(NS_RECOVERY).size);
+  });
+
+  it("NS_VAULT_RESET has no duplicate entries", () => {
+    expect(NS_VAULT_RESET.length).toBe(new Set(NS_VAULT_RESET).size);
+  });
 });

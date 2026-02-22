@@ -60,11 +60,17 @@ describe("messages consistency", () => {
     }
   });
 
-  it("keeps key sets aligned between locales", () => {
-    const [base, ...rest] = routing.locales.map(loadLocale);
-    const baseKeys = flattenKeys(base).sort();
-    for (const other of rest) {
-      expect(flattenKeys(other).sort()).toEqual(baseKeys);
+  it("keeps key sets aligned between locales per namespace", () => {
+    const locales = routing.locales.map(loadLocale);
+    const [base, ...rest] = locales;
+    for (const ns of NAMESPACES) {
+      const baseKeys = flattenKeys(base[ns]).sort();
+      for (const other of rest) {
+        expect(
+          flattenKeys(other[ns]).sort(),
+          `Mismatch in namespace: ${ns}`,
+        ).toEqual(baseKeys);
+      }
     }
   });
 });
