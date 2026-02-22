@@ -2,17 +2,19 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-function readAuditLog(localeFile: string): Record<string, unknown> {
-  const json = JSON.parse(
-    readFileSync(join(process.cwd(), "messages", localeFile), "utf8")
+function readAuditLog(locale: string): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(
+      join(process.cwd(), "messages", locale, "AuditLog.json"),
+      "utf8",
+    ),
   ) as Record<string, unknown>;
-  return (json.AuditLog ?? {}) as Record<string, unknown>;
 }
 
 describe("audit log i18n keys", () => {
   it("has required keys in ja/en", () => {
-    const ja = readAuditLog("ja.json");
-    const en = readAuditLog("en.json");
+    const ja = readAuditLog("ja");
+    const en = readAuditLog("en");
     const required = [
       "ENTRY_IMPORT",
       "ENTRY_EXPORT",

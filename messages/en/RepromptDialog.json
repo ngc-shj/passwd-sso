@@ -1,0 +1,8 @@
+{
+  "title": "Verify Master Passphrase",
+  "description": "Re-enter your master passphrase to access this item.",
+  "label": "Master Passphrase",
+  "verify": "Verify",
+  "cancel": "Cancel",
+  "incorrect": "Incorrect passphrase"
+}

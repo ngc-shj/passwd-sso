@@ -1,0 +1,20 @@
+{
+  "title": "Sharing",
+  "description": "Manage all your shares.",
+  "status": "Status",
+  "allStatuses": "All statuses",
+  "active": "Active",
+  "maxViewsReached": "View limit reached",
+  "noLinks": "No share links yet.",
+  "loadMore": "Load more",
+  "sharedBy": "Shared by {name}",
+  "personalEntry": "Personal entry",
+  "deletedEntry": "Deleted entry",
+  "typeFilter": "Type",
+  "allTypes": "All types",
+  "entryShares": "Entry shares",
+  "sends": "Sends",
+  "newSend": "New Send",
+  "textSend": "Text",
+  "fileSend": "File"
+}

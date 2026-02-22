@@ -1,0 +1,17 @@
+{
+  "title": "ゴミ箱",
+  "description": "30日後にアイテムは自動的に完全削除されます。",
+  "restore": "復元",
+  "deletePermanently": "完全に削除",
+  "deleteConfirm": "「{title}」を完全に削除しますか？この操作は取り消せません。",
+  "restored": "復元しました",
+  "restoreSelected": "選択項目を復元",
+  "bulkRestored": "{count} 件を復元しました",
+  "bulkRestoreFailed": "選択項目の復元に失敗しました",
+  "deletedPermanently": "完全に削除しました",
+  "emptyTrash": "ゴミ箱を空にする",
+  "emptyTrashConfirm": "ゴミ箱のすべてのアイテムを完全に削除しますか？この操作は取り消せません。",
+  "emptyTrashSuccess": "ゴミ箱を空にしました",
+  "failedAction": "操作に失敗しました",
+  "networkError": "ネットワークエラー"
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { detectFormat, parseCsv, parseJson } from "@/components/passwords/import-dialog-utils";
+import { detectFormat, parseCsv, parseJson } from "@/components/passwords/password-import-utils";
 import {
   type ExportEntry,
   formatExportCsv,
