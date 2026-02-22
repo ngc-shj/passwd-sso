@@ -59,6 +59,8 @@
   "ENTRY_HISTORY_RESTORE": "Restored from history",
   "HISTORY_PURGE": "Purged history",
   "MASTER_KEY_ROTATION": "Master key rotation",
+  "SESSION_REVOKE": "Revoked session",
+  "SESSION_REVOKE_ALL": "Revoked all other sessions",
   "orgAuditLog": "Audit Log — {orgName}",
   "orgAuditLogDesc": "View activity for {orgName}",
   "deletedEntry": "Deleted entry",

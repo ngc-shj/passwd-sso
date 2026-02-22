@@ -50,5 +50,6 @@
   "noParent": "（ルート）",
   "folderDeleteConfirm": "フォルダ「{name}」を削除しますか？サブフォルダは親に昇格し、エントリは未所属になります。",
   "tagDeleteConfirm": "タグ「{name}」を削除しますか？この操作は元に戻せません。",
-  "folderMaxDepth": "フォルダの最大階層数（{max}）を超えています。"
+  "folderMaxDepth": "フォルダの最大階層数（{max}）を超えています。",
+  "settings": "設定"
 }

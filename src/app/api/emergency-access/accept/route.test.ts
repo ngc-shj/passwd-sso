@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant, mockPrismaKeyPair, mockTransaction } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockPrismaKeyPair, mockPrismaUser, mockTransaction, mockSendEmail } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
@@ -10,7 +10,9 @@ const { mockAuth, mockPrismaGrant, mockPrismaKeyPair, mockTransaction } = vi.hoi
   mockPrismaKeyPair: {
     create: vi.fn(),
   },
+  mockPrismaUser: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
+  mockSendEmail: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -18,9 +20,11 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     emergencyAccessGrant: mockPrismaGrant,
     emergencyAccessKeyPair: mockPrismaKeyPair,
+    user: mockPrismaUser,
     $transaction: mockTransaction,
   },
 }));
+vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
 vi.mock("@/lib/crypto-server", () => ({
   hashToken: (t: string) => `hashed-${t}`,
 }));
@@ -59,6 +63,7 @@ describe("POST /api/emergency-access/accept", () => {
     mockAuth.mockResolvedValue({ user: { id: "grantee-1", email: "grantee@test.com" } });
     mockPrismaGrant.findUnique.mockResolvedValue(validGrant);
     mockTransaction.mockResolvedValue([{}, {}]);
+    mockPrismaUser.findUnique.mockResolvedValue({ email: "owner@test.com", name: "Owner Name" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -129,5 +134,9 @@ describe("POST /api/emergency-access/accept", () => {
     expect(res.status).toBe(200);
     expect(json.status).toBe(EA_STATUS.ACCEPTED);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+    // Sends accepted email to owner
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "owner@test.com" })
+    );
   });
 });

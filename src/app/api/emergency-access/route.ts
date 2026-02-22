@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { createEmergencyGrantSchema } from "@/lib/validations";
 import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { sendEmail } from "@/lib/email";
+import { emergencyInviteEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -81,6 +83,10 @@ export async function POST(req: NextRequest) {
     metadata: { granteeEmail, waitDays },
     ...extractRequestMeta(req),
   });
+
+  const ownerName = session.user.name ?? session.user.email ?? "";
+  const { subject, html, text } = emergencyInviteEmail("ja", ownerName);
+  sendEmail({ to: granteeEmail, subject, html, text });
 
   // Return plaintext token only at creation time; DB stores only the hash
   return NextResponse.json({

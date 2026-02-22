@@ -59,5 +59,7 @@
   "sendTextTooLarge": "テキストが大きすぎます。",
   "sendFileTooLarge": "ファイルが大きすぎます（最大 10 MB）。",
   "sendFileTypeNotAllowed": "許可されていないファイル形式です。",
-  "sendStorageLimitExceeded": "ストレージ制限を超えています。"
+  "sendStorageLimitExceeded": "ストレージ制限を超えています。",
+  "sessionNotFound": "セッションが見つかりません。",
+  "cannotRevokeCurrentSession": "現在のセッションは取り消しできません。"
 }

@@ -1,15 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockPrismaUser, mockSendEmail } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: { findUnique: vi.fn(), update: vi.fn() },
+  mockPrismaUser: { findUnique: vi.fn() },
+  mockSendEmail: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { emergencyAccessGrant: mockPrismaGrant },
+  prisma: { emergencyAccessGrant: mockPrismaGrant, user: mockPrismaUser },
 }));
+vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
 vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(),
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
@@ -31,6 +34,7 @@ describe("POST /api/emergency-access/[id]/decline", () => {
     mockAuth.mockResolvedValue({ user: { id: "grantee-1", email: "grantee@example.com" } });
     mockPrismaGrant.findUnique.mockResolvedValue(pendingGrant);
     mockPrismaGrant.update.mockResolvedValue({});
+    mockPrismaUser.findUnique.mockResolvedValue({ email: "owner@test.com", name: "Owner Name" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -93,6 +97,10 @@ describe("POST /api/emergency-access/[id]/decline", () => {
         where: { id: "grant-1" },
         data: { status: EA_STATUS.REJECTED },
       })
+    );
+    // Sends declined email to owner
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "owner@test.com" })
     );
   });
 });

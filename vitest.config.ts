@@ -18,6 +18,8 @@ export default defineConfig({
         "src/lib/org-auth.ts",
         "src/lib/crypto-server.ts",
         "src/lib/password-generator.ts",
+        "src/lib/email/**/*.ts",
+        "src/lib/auth-adapter.ts",
       ],
       exclude: ["src/app/api/auth/**"],
     },

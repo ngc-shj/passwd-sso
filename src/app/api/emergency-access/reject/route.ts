@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { rejectEmergencyGrantSchema } from "@/lib/validations";
 import { hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { sendEmail } from "@/lib/email";
+import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
@@ -63,6 +65,16 @@ export async function POST(req: NextRequest) {
     metadata: { ownerId: grant.ownerId },
     ...extractRequestMeta(req),
   });
+
+  const owner = await prisma.user.findUnique({
+    where: { id: grant.ownerId },
+    select: { email: true, name: true },
+  });
+  if (owner?.email) {
+    const granteeName = session.user.name ?? session.user.email ?? "";
+    const { subject, html, text } = emergencyGrantDeclinedEmail("ja", granteeName);
+    sendEmail({ to: owner.email, subject, html, text });
+  }
 
   return NextResponse.json({ status: EA_STATUS.REJECTED });
 }
