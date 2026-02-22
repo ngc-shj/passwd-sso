@@ -9,7 +9,7 @@ const { mockParseCsv, mockParseJson, mockIsEncryptedExport, mockDecryptExport } 
   mockDecryptExport: vi.fn(),
 }));
 
-vi.mock("@/components/passwords/import-dialog-utils", () => ({
+vi.mock("@/components/passwords/password-import-utils", () => ({
   parseCsv: mockParseCsv,
   parseJson: mockParseJson,
 }));

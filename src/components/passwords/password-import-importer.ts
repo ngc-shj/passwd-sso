@@ -6,7 +6,7 @@ import {
   resolveEntryTagIds,
   resolveTagNameToIdForImport,
   type ParsedEntry,
-} from "@/components/passwords/import-dialog-utils";
+} from "@/components/passwords/password-import-utils";
 
 interface RunImportParams {
   entries: ParsedEntry[];

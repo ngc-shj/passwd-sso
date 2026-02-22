@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import type { ParsedEntry } from "@/components/passwords/import-dialog-types";
+import type { ParsedEntry } from "@/components/passwords/password-import-types";
 import { ENTRY_TYPE } from "@/lib/constants";
 
 const { mockRunImportEntries, mockFireImportAudit, mockToastSuccess } = vi.hoisted(() => ({
@@ -10,11 +10,11 @@ const { mockRunImportEntries, mockFireImportAudit, mockToastSuccess } = vi.hoist
   mockToastSuccess: vi.fn(),
 }));
 
-vi.mock("@/components/passwords/import-dialog-importer", () => ({
+vi.mock("@/components/passwords/password-import-importer", () => ({
   runImportEntries: mockRunImportEntries,
 }));
 
-vi.mock("@/components/passwords/import-dialog-steps", () => ({
+vi.mock("@/components/passwords/password-import-steps", () => ({
   fireImportAudit: mockFireImportAudit,
 }));
 

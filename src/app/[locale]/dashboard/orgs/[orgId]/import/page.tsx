@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { OrgImportPagePanel } from "@/components/passwords/import-dialog";
+import { OrgImportPagePanel } from "@/components/passwords/password-import";
 
 export default function OrgImportPage() {
   const params = useParams<{ orgId: string }>();

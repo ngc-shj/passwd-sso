@@ -7,7 +7,7 @@ import {
   parseCsv,
   parseJson,
   formatLabels,
-} from "./import-dialog-parsers";
+} from "./password-import-parsers";
 
 // ─── parsePasswdSsoPayload ───────────────────────────────────
 

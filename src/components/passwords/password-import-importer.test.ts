@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { ParsedEntry } from "@/components/passwords/import-dialog-types";
+import type { ParsedEntry } from "@/components/passwords/password-import-types";
 
 const { mockEncryptData } = vi.hoisted(() => ({
   mockEncryptData: vi.fn(),
@@ -10,7 +10,7 @@ vi.mock("@/lib/crypto-client", () => ({
   encryptData: mockEncryptData,
 }));
 
-import { runImportEntries } from "@/components/passwords/import-dialog-importer";
+import { runImportEntries } from "@/components/passwords/password-import-importer";
 
 function response(ok: boolean): Response {
   return {
