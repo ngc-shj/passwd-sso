@@ -1,5 +1,5 @@
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { ParsedEntry } from "@/components/passwords/import-dialog-types";
+import type { ParsedEntry } from "@/components/passwords/password-import-types";
 
 export function buildOrgImportPayload(entry: ParsedEntry, tagIds: string[]): Record<string, unknown> {
   if (entry.entryType === ENTRY_TYPE.SECURE_NOTE) {

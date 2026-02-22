@@ -1,4 +1,4 @@
-import type { ParsedEntry } from "@/components/passwords/import-dialog-types";
+import type { ParsedEntry } from "@/components/passwords/password-import-types";
 
 interface ExistingTag {
   id: string;

@@ -1,4 +1,4 @@
-import { OrgExportPagePanel } from "@/components/org/org-export-dialog";
+import { OrgExportPagePanel } from "@/components/org/org-export";
 
 export default async function OrgExportPage({
   params,

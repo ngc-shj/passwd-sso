@@ -13,7 +13,7 @@ import {
   ImportDoneStep,
   ImportFileSelectStep,
   ImportPreviewStep,
-} from "@/components/passwords/import-dialog-steps";
+} from "@/components/passwords/password-import-steps";
 import { useImportFileFlow } from "@/components/passwords/use-import-file-flow";
 import { useImportExecution } from "@/components/passwords/use-import-execution";
 
