@@ -1,0 +1,23 @@
+{
+  "title": "Export Passwords",
+  "description": "Download your password data as CSV or JSON. Enable password protection to export an encrypted file.",
+  "profileLabel": "Export profile",
+  "profileCompatible": "Compatible (Bitwarden-style)",
+  "profilePasswdSso": "passwd-sso (full fidelity)",
+  "profileCompatibleDesc": "Best for importing into other apps. Some passwd-sso specific fields are omitted.",
+  "profilePasswdSsoDesc": "Includes passwd-sso specific fields for lossless restore in passwd-sso.",
+  "warning": "If password protection is off, the exported file contains plain-text data. Store it securely and delete it when no longer needed.",
+  "exportCsv": "Export CSV",
+  "exportJson": "Export JSON",
+  "passwordProtect": "Password protect",
+  "passwordProtectDesc": "When enabled, the exported file is encrypted with a password",
+  "exportPassword": "Export password",
+  "confirmPassword": "Confirm password",
+  "passwordMismatch": "Passwords do not match",
+  "passwordTooShort": "Password must be at least 8 characters",
+  "encryptedWarning": "The exported file will be encrypted. If you forget the password, the data cannot be recovered.",
+  "includeOrgs": "Include organization entries",
+  "includeOrgsDesc": "Also export passwords from organizations you belong to",
+  "exportSkipped": "{count} entries could not be exported and were skipped.",
+  "exportFailed": "Export failed. Please try again."
+}

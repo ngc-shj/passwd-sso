@@ -1,0 +1,15 @@
+{
+  "newNote": "新規セキュアノート",
+  "editNote": "セキュアノートを編集",
+  "title": "タイトル *",
+  "titlePlaceholder": "例: APIキー, ライセンスキー, リカバリコード",
+  "content": "内容 *",
+  "contentPlaceholder": "セキュアノートを入力...",
+  "notes": "メモ",
+  "notesPlaceholder": "任意のメモ...",
+  "tags": "タグ",
+  "saved": "セキュアノートを保存しました",
+  "updated": "セキュアノートを更新しました",
+  "failedToSave": "保存に失敗しました",
+  "networkError": "ネットワークエラー"
+}

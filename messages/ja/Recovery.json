@@ -1,0 +1,18 @@
+{
+  "title": "保管庫の復旧",
+  "description": "回復キーを入力してパスフレーズをリセットします。",
+  "recoveryKeyLabel": "回復キー",
+  "recoveryKeyPlaceholder": "XXXX-XXXX-XXXX-...",
+  "verifying": "検証中...",
+  "verified": "回復キーが確認されました。",
+  "newPassphrase": "新しいパスフレーズ",
+  "newPassphrasePlaceholder": "新しいパスフレーズを入力 (10文字以上)",
+  "confirmNewPassphrase": "新しいパスフレーズの確認",
+  "confirmNewPassphrasePlaceholder": "新しいパスフレーズを再入力",
+  "resetPassphrase": "パスフレーズをリセット",
+  "resetting": "リセット中...",
+  "success": "パスフレーズがリセットされました。リダイレクトします...",
+  "invalidRecoveryKey": "無効な回復キーです。",
+  "invalidChecksum": "無効な回復キーです (チェックサム不一致)。入力を確認してください。",
+  "recoveryKeyNotSet": "このアカウントには回復キーが設定されていません。"
+}

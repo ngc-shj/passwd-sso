@@ -1,8 +1,11 @@
 import { redirect } from "@/i18n/navigation";
+import { NextIntlClientProvider } from "next-intl";
+import { getMessages, setRequestLocale } from "next-intl/server";
 import { auth } from "@/auth";
-import { setRequestLocale } from "next-intl/server";
 import { VaultGate } from "@/components/vault/vault-gate";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
+import { pickMessages } from "@/i18n/pick-messages";
+import { NS_DASHBOARD_ALL } from "@/i18n/namespace-groups";
 
 export default async function DashboardLayout({
   children,
@@ -20,9 +23,13 @@ export default async function DashboardLayout({
     redirect({ href: "/auth/signin", locale });
   }
 
+  const messages = await getMessages();
+
   return (
-    <VaultGate>
-      <DashboardShell>{children}</DashboardShell>
-    </VaultGate>
+    <NextIntlClientProvider messages={pickMessages(messages, NS_DASHBOARD_ALL)}>
+      <VaultGate>
+        <DashboardShell>{children}</DashboardShell>
+      </VaultGate>
+    </NextIntlClientProvider>
   );
 }

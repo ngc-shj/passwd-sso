@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
 import { NextIntlClientProvider, hasLocale } from "next-intl";
-import { getTranslations, setRequestLocale } from "next-intl/server";
+import {
+  getMessages,
+  getTranslations,
+  setRequestLocale,
+} from "next-intl/server";
 import { notFound } from "next/navigation";
 import { SessionProvider } from "@/components/providers/session-provider";
 import { VaultProvider } from "@/lib/vault-context";
 import { Toaster } from "@/components/ui/sonner";
 import { routing } from "@/i18n/routing";
+import { pickMessages } from "@/i18n/pick-messages";
+import { NS_GLOBAL } from "@/i18n/namespace-groups";
 
 type Props = {
   children: React.ReactNode;
@@ -34,8 +40,10 @@ export default async function LocaleLayout({ children, params }: Props) {
 
   setRequestLocale(locale);
 
+  const messages = await getMessages();
+
   return (
-    <NextIntlClientProvider>
+    <NextIntlClientProvider messages={pickMessages(messages, NS_GLOBAL)}>
       <SessionProvider>
         <VaultProvider>
           {children}
