@@ -66,9 +66,9 @@ export function getMasterKeyByVersion(version: number): Buffer {
   let hex: string | undefined;
 
   if (version === 1) {
-    hex = process.env.ORG_MASTER_KEY_V1 ?? process.env.ORG_MASTER_KEY;
+    hex = (process.env.ORG_MASTER_KEY_V1 ?? process.env.ORG_MASTER_KEY)?.trim();
   } else {
-    hex = process.env[`ORG_MASTER_KEY_V${version}`];
+    hex = process.env[`ORG_MASTER_KEY_V${version}`]?.trim();
   }
 
   if (!hex || !HEX64_RE.test(hex)) {

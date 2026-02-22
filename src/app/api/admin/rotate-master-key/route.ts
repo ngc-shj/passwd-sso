@@ -17,7 +17,7 @@ import {
   rewrapOrgKey,
 } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAudit } from "@/lib/audit";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 
 const HEX64_RE = /^[0-9a-fA-F]{64}$/;
@@ -185,7 +185,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Audit log (fire-and-forget; logAudit handles errors internally)
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+  const { ip } = extractRequestMeta(req);
   logAudit({
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.MASTER_KEY_ROTATION,
