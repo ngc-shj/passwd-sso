@@ -8,6 +8,7 @@ import { CollapsibleSectionHeader } from "@/components/layout/sidebar-shared";
 import {
   Download,
   HeartPulse,
+  Monitor,
   Settings,
   Shield,
   Upload,
@@ -105,12 +106,20 @@ export function UtilitiesSection({
               </Link>
             </Button>
           ) : !selectedOrg && (
-            <Button variant="ghost" className="w-full justify-start gap-2" asChild>
-              <Link href="/dashboard/orgs" onClick={onNavigate}>
-                <Settings className="h-4 w-4" />
-                {tOrg("orgSettings")}
-              </Link>
-            </Button>
+            <>
+              <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+                <Link href="/dashboard/settings" onClick={onNavigate}>
+                  <Monitor className="h-4 w-4" />
+                  {t("settings")}
+                </Link>
+              </Button>
+              <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+                <Link href="/dashboard/orgs" onClick={onNavigate}>
+                  <Settings className="h-4 w-4" />
+                  {tOrg("orgSettings")}
+                </Link>
+              </Button>
+            </>
           )}
           <Button variant="ghost" className="w-full justify-start gap-2" asChild>
             <Link href={exportHref} onClick={onNavigate}>

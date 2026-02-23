@@ -117,6 +117,10 @@ export const API_ERROR = {
   KEY_ESCROW_NOT_COMPLETED: "KEY_ESCROW_NOT_COMPLETED",
   INCOMPATIBLE_KEY_ALGORITHM: "INCOMPATIBLE_KEY_ALGORITHM",
 
+  // ── Sessions ───────────────────────────────────────────
+  SESSION_NOT_FOUND: "SESSION_NOT_FOUND",
+  CANNOT_REVOKE_CURRENT_SESSION: "CANNOT_REVOKE_CURRENT_SESSION",
+
   // ── Extension Token ─────────────────────────────────────
   EXTENSION_TOKEN_EXPIRED: "EXTENSION_TOKEN_EXPIRED",
   EXTENSION_TOKEN_REVOKED: "EXTENSION_TOKEN_REVOKED",
@@ -201,6 +205,8 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   NOT_ACTIVATED: "unknownError",
   KEY_ESCROW_NOT_COMPLETED: "unknownError",
   INCOMPATIBLE_KEY_ALGORITHM: "unknownError",
+  SESSION_NOT_FOUND: "sessionNotFound",
+  CANNOT_REVOKE_CURRENT_SESSION: "cannotRevokeCurrentSession",
   EXTENSION_TOKEN_EXPIRED: "extensionTokenExpired",
   EXTENSION_TOKEN_REVOKED: "extensionTokenRevoked",
   EXTENSION_TOKEN_INVALID: "extensionTokenInvalid",
