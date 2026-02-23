@@ -4,10 +4,8 @@ import {
   createE2EPasswordSchema,
   updateE2EPasswordSchema,
   createShareLinkSchema,
-  customFieldSchema,
-  totpSchema,
 } from "./validations";
-import { ENTRY_TYPE, TOTP_ALGORITHM, CUSTOM_FIELD_TYPE } from "@/lib/constants";
+import { ENTRY_TYPE } from "@/lib/constants";
 
 describe("entryTypeSchema", () => {
   it.each([
@@ -147,40 +145,6 @@ describe("updateE2EPasswordSchema", () => {
   it("rejects aadVersion=2 in update", () => {
     expect(() =>
       updateE2EPasswordSchema.parse({ aadVersion: 2 }),
-    ).toThrow();
-  });
-});
-
-describe("customFieldSchema", () => {
-  it.each([
-    CUSTOM_FIELD_TYPE.TEXT,
-    CUSTOM_FIELD_TYPE.HIDDEN,
-    CUSTOM_FIELD_TYPE.URL,
-  ])("accepts %s", (type) => {
-    const result = customFieldSchema.parse({ label: "Label", value: "Value", type });
-    expect(result.type).toBe(type);
-  });
-
-  it("rejects invalid custom field type", () => {
-    expect(() =>
-      customFieldSchema.parse({ label: "Label", value: "Value", type: "bad" }),
-    ).toThrow();
-  });
-});
-
-describe("totpSchema", () => {
-  it.each([
-    TOTP_ALGORITHM.SHA1,
-    TOTP_ALGORITHM.SHA256,
-    TOTP_ALGORITHM.SHA512,
-  ])("accepts %s algorithm", (algorithm) => {
-    const result = totpSchema.parse({ secret: "JBSWY3DPEHPK3PXP", algorithm });
-    expect(result.algorithm).toBe(algorithm);
-  });
-
-  it("rejects invalid algorithm", () => {
-    expect(() =>
-      totpSchema.parse({ secret: "JBSWY3DPEHPK3PXP", algorithm: "MD5" }),
     ).toThrow();
   });
 });

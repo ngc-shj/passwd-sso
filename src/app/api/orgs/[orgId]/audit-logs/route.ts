@@ -3,8 +3,6 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { unwrapOrgKey, decryptServerData } from "@/lib/crypto-server";
-import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 import {
   ORG_PERMISSION,
   AUDIT_SCOPE,
@@ -94,7 +92,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const items = hasMore ? logs.slice(0, limit) : logs;
   const nextCursor = hasMore ? items[items.length - 1].id : null;
 
-  // Resolve entry names for OrgPasswordEntry targets
+  // Collect encrypted overviews for entry targets (client decrypts to get titles)
   const entryIds = [
     ...new Set(
       items
@@ -103,63 +101,35 @@ export async function GET(req: NextRequest, { params }: Params) {
     ),
   ];
 
-  const entryNames: Record<string, string> = {};
+  const entryOverviews: Record<string, {
+    encryptedOverview: string;
+    overviewIv: string;
+    overviewAuthTag: string;
+    aadVersion: number;
+    orgKeyVersion: number;
+  }> = {};
 
   if (entryIds.length > 0) {
-    try {
-      const org = await prisma.organization.findUnique({
-        where: { id: orgId },
-        select: {
-          encryptedOrgKey: true,
-          orgKeyIv: true,
-          orgKeyAuthTag: true,
-          masterKeyVersion: true,
-        },
-      });
+    const entries = await prisma.orgPasswordEntry.findMany({
+      where: { id: { in: entryIds } },
+      select: {
+        id: true,
+        encryptedOverview: true,
+        overviewIv: true,
+        overviewAuthTag: true,
+        aadVersion: true,
+        orgKeyVersion: true,
+      },
+    });
 
-      if (org) {
-        const orgKey = unwrapOrgKey({
-          ciphertext: org.encryptedOrgKey,
-          iv: org.orgKeyIv,
-          authTag: org.orgKeyAuthTag,
-        }, org.masterKeyVersion);
-
-        const entries = await prisma.orgPasswordEntry.findMany({
-          where: { id: { in: entryIds } },
-          select: {
-            id: true,
-            encryptedOverview: true,
-            overviewIv: true,
-            overviewAuthTag: true,
-            aadVersion: true,
-          },
-        });
-
-        for (const e of entries) {
-          try {
-            const aad =
-              e.aadVersion >= 1
-                ? Buffer.from(buildOrgEntryAAD(orgId, e.id, "overview"))
-                : undefined;
-            const overview = JSON.parse(
-              decryptServerData(
-                {
-                  ciphertext: e.encryptedOverview,
-                  iv: e.overviewIv,
-                  authTag: e.overviewAuthTag,
-                },
-                orgKey,
-                aad
-              )
-            );
-            entryNames[e.id] = overview.title ?? e.id;
-          } catch {
-            // Decryption failed — skip this entry
-          }
-        }
-      }
-    } catch {
-      // Non-critical: continue without entry names
+    for (const e of entries) {
+      entryOverviews[e.id] = {
+        encryptedOverview: e.encryptedOverview,
+        overviewIv: e.overviewIv,
+        overviewAuthTag: e.overviewAuthTag,
+        aadVersion: e.aadVersion,
+        orgKeyVersion: e.orgKeyVersion,
+      };
     }
   }
 
@@ -176,6 +146,6 @@ export async function GET(req: NextRequest, { params }: Params) {
       user: log.user,
     })),
     nextCursor,
-    entryNames,
+    entryOverviews,
   });
 }

@@ -26,6 +26,11 @@ const setupSchema = z.object({
     iv: z.string().regex(/^[0-9a-f]{24}$/),
     authTag: z.string().regex(/^[0-9a-f]{32}$/),
   }),
+  // ECDH key pair for org E2E encryption
+  ecdhPublicKey: z.string().min(1),
+  encryptedEcdhPrivateKey: z.string().min(1),
+  ecdhPrivateKeyIv: z.string().regex(/^[0-9a-f]{24}$/),
+  ecdhPrivateKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/),
 });
 
 /**
@@ -96,6 +101,11 @@ async function handlePOST(request: Request) {
         keyVersion: 1,
         passphraseVerifierHmac: hmacVerifier(data.verifierHash),
         passphraseVerifierVersion: VERIFIER_VERSION,
+        // ECDH key pair for org E2E encryption
+        ecdhPublicKey: data.ecdhPublicKey,
+        encryptedEcdhPrivateKey: data.encryptedEcdhPrivateKey,
+        ecdhPrivateKeyIv: data.ecdhPrivateKeyIv,
+        ecdhPrivateKeyAuthTag: data.ecdhPrivateKeyAuthTag,
       },
     }),
     prisma.vaultKey.create({

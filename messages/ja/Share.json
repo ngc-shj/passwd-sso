@@ -76,5 +76,10 @@
   "sendCreateSuccess": "Sendを作成しました",
   "newSend": "新規Send",
   "newSendDesc": "テキストまたはファイルを一時リンクで安全に送信します。",
-  "remove": "削除"
+  "remove": "削除",
+  "e2eDecrypting": "復号中...",
+  "error_missingKey_title": "復号キーが見つかりません",
+  "error_missingKey_desc": "リンクに復号キーが含まれていません。完全なURLを使用してください。",
+  "error_decryptFailed_title": "復号に失敗しました",
+  "error_decryptFailed_desc": "共有データを復号できませんでした。リンクが破損している可能性があります。"
 }

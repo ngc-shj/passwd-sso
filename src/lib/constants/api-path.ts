@@ -17,6 +17,7 @@ export const API_PATH = {
   ORGS_FAVORITES: "/api/orgs/favorites",
   ORGS_TRASH: "/api/orgs/trash",
   ORGS_INVITATIONS_ACCEPT: "/api/orgs/invitations/accept",
+  ORGS_PENDING_KEY_DISTRIBUTIONS: "/api/orgs/pending-key-distributions",
   AUDIT_LOGS: "/api/audit-logs",
   SHARE_LINKS: "/api/share-links",
   SHARE_LINKS_MINE: "/api/share-links/mine",
@@ -71,6 +72,9 @@ export const apiPath = {
     `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/attachments`,
   orgPasswordAttachmentById: (orgId: string, entryId: string, attachmentId: string) =>
     `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/attachments/${attachmentId}`,
+  orgMemberKey: (orgId: string) => `${API_PATH.ORGS}/${orgId}/member-key`,
+  orgMemberConfirmKey: (orgId: string, memberId: string) =>
+    `${API_PATH.ORGS}/${orgId}/members/${memberId}/confirm-key`,
   orgTags: (orgId: string) => `${API_PATH.ORGS}/${orgId}/tags`,
   orgAuditLogs: (orgId: string) => `${API_PATH.ORGS}/${orgId}/audit-logs`,
   passwordById: (entryId: string) => `${API_PATH.PASSWORDS}/${entryId}`,

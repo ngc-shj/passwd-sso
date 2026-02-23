@@ -8,8 +8,6 @@ const {
   mockEntryFindUnique,
   mockAttachmentFindUnique,
   mockAttachmentDelete,
-  mockUnwrapOrgKey,
-  mockDecryptServerBinary,
   mockGetObject,
   mockDeleteObject,
 } = vi.hoisted(() => ({
@@ -18,8 +16,6 @@ const {
   mockEntryFindUnique: vi.fn(),
   mockAttachmentFindUnique: vi.fn(),
   mockAttachmentDelete: vi.fn(),
-  mockUnwrapOrgKey: vi.fn(),
-  mockDecryptServerBinary: vi.fn(),
   mockGetObject: vi.fn(),
   mockDeleteObject: vi.fn(),
 }));
@@ -47,14 +43,6 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
-}));
-vi.mock("@/lib/crypto-server", () => ({
-  unwrapOrgKey: mockUnwrapOrgKey,
-  decryptServerBinary: mockDecryptServerBinary,
-}));
-vi.mock("@/lib/crypto-aad", () => ({
-  buildAttachmentAAD: () => "test-aad",
-  AAD_VERSION: 1,
 }));
 vi.mock("@/lib/blob-store", () => ({
   getAttachmentBlobStore: () => ({
@@ -85,15 +73,7 @@ function createDeleteRequest() {
   );
 }
 
-const ORG_ENTRY = {
-  orgId: "o1",
-  org: {
-    encryptedOrgKey: "enc-key",
-    orgKeyIv: "iv",
-    orgKeyAuthTag: "tag",
-    masterKeyVersion: 1,
-  },
-};
+const ORG_ENTRY = { orgId: "o1" };
 
 const ATTACHMENT = {
   id: "a1",
@@ -102,7 +82,8 @@ const ATTACHMENT = {
   sizeBytes: 100,
   iv: "a".repeat(24),
   authTag: "b".repeat(32),
-  encryptedData: "blob-key",
+  encryptedData: Buffer.from("encrypted-data"),
+  keyVersion: 1,
   aadVersion: 1,
 };
 
@@ -133,7 +114,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () =
   it("returns 404 when entry belongs to different org", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ orgId: "other-org", org: ORG_ENTRY.org });
+    mockEntryFindUnique.mockResolvedValue({ orgId: "other-org" });
     const res = await GET(createGetRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(404);
   });
@@ -147,55 +128,26 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () =
     expect(res.status).toBe(404);
   });
 
-  it("returns decrypted file with RFC 5987 Content-Disposition", async () => {
+  it("returns encrypted data as JSON for client-side decryption", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
     mockAttachmentFindUnique.mockResolvedValue(ATTACHMENT);
-    mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
     mockGetObject.mockResolvedValue(Buffer.from("encrypted-data"));
-    mockDecryptServerBinary.mockReturnValue(Buffer.from("decrypted-data"));
 
     const res = await GET(createGetRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(200);
 
-    const disposition = res.headers.get("Content-Disposition");
-    // ASCII fallback
-    expect(disposition).toContain('filename="download"');
-    // RFC 5987 UTF-8 encoded filename
-    expect(disposition).toContain("filename*=UTF-8''test.pdf");
-    // Content-Type and Content-Length
-    expect(res.headers.get("Content-Type")).toBe("application/pdf");
-    expect(res.headers.get("Content-Length")).toBe("100");
-    // Security headers
-    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
-    expect(res.headers.get("Cache-Control")).toBe(
-      "private, no-cache, no-store, must-revalidate",
-    );
-  });
-
-  it("encodes non-ASCII filename in Content-Disposition", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
-    mockAttachmentFindUnique.mockResolvedValue({
-      ...ATTACHMENT,
-      filename: "テスト文書.pdf",
-    });
-    mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
-    mockGetObject.mockResolvedValue(Buffer.from("encrypted-data"));
-    mockDecryptServerBinary.mockReturnValue(Buffer.from("decrypted-data"));
-
-    const res = await GET(createGetRequest(), makeParams("o1", "e1", "a1"));
-    expect(res.status).toBe(200);
-
-    const disposition = res.headers.get("Content-Disposition");
-    // ASCII fallback for non-ASCII filenames
-    expect(disposition).toContain('filename="download"');
-    // RFC 5987 UTF-8 percent-encoded
-    expect(disposition).toContain(
-      `filename*=UTF-8''${encodeURIComponent("テスト文書.pdf")}`,
-    );
+    const json = await res.json();
+    expect(json.id).toBe("a1");
+    expect(json.filename).toBe("test.pdf");
+    expect(json.contentType).toBe("application/pdf");
+    expect(json.sizeBytes).toBe(100);
+    expect(json.encryptedData).toBe(Buffer.from("encrypted-data").toString("base64"));
+    expect(json.iv).toBe("a".repeat(24));
+    expect(json.authTag).toBe("b".repeat(32));
+    expect(json.keyVersion).toBe(1);
+    expect(json.aadVersion).toBe(1);
   });
 });
 
@@ -247,7 +199,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", (
     mockAttachmentFindUnique.mockResolvedValue({
       id: "a1",
       filename: "test.pdf",
-      encryptedData: "blob-key",
+      encryptedData: Buffer.from("blob-key"),
     });
     mockDeleteObject.mockResolvedValue(undefined);
     mockAttachmentDelete.mockResolvedValue({});
@@ -256,11 +208,6 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", (
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
-    expect(mockDeleteObject).toHaveBeenCalledWith("blob-key", {
-      attachmentId: "a1",
-      entryId: "e1",
-      orgId: "o1",
-    });
     expect(mockAttachmentDelete).toHaveBeenCalledWith({ where: { id: "a1" } });
   });
 });

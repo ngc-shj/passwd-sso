@@ -2,13 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import {
-  updateOrgPasswordSchema,
-  updateOrgSecureNoteSchema,
-  updateOrgCreditCardSchema,
-  updateOrgIdentitySchema,
-  updateOrgPasskeySchema,
-} from "@/lib/validations";
+import { updateOrgE2EPasswordSchema } from "@/lib/validations";
 import {
   requireOrgPermission,
   requireOrgMember,
@@ -16,30 +10,11 @@ import {
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION, ORG_ROLE, ENTRY_TYPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import {
-  unwrapOrgKey,
-  encryptServerData,
-  decryptServerData,
-} from "@/lib/crypto-server";
-import { buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
+import { ORG_PERMISSION, ORG_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string; id: string }> };
 
-function getOrgKey(org: {
-  encryptedOrgKey: string;
-  orgKeyIv: string;
-  orgKeyAuthTag: string;
-  masterKeyVersion: number;
-}) {
-  return unwrapOrgKey({
-    ciphertext: org.encryptedOrgKey,
-    iv: org.orgKeyIv,
-    authTag: org.orgKeyAuthTag,
-  }, org.masterKeyVersion);
-}
-
-// GET /api/orgs/[orgId]/passwords/[id] — Get password detail (server decrypts)
+// GET /api/orgs/[orgId]/passwords/[id] — Get password detail (encrypted blob, client decrypts)
 export async function GET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -60,14 +35,6 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const entry = await prisma.orgPasswordEntry.findUnique({
     where: { id },
     include: {
-      org: {
-        select: {
-          encryptedOrgKey: true,
-          orgKeyIv: true,
-          orgKeyAuthTag: true,
-          masterKeyVersion: true,
-        },
-      },
       tags: { select: { id: true, name: true, color: true } },
       createdBy: { select: { id: true, name: true, image: true } },
       updatedBy: { select: { id: true, name: true } },
@@ -82,35 +49,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const orgKey = getOrgKey(entry.org);
-  const blobAad = entry.aadVersion >= 1
-    ? Buffer.from(buildOrgEntryAAD(orgId, entry.id, "blob"))
-    : undefined;
-
-  let blob: Record<string, unknown>;
-  try {
-    blob = JSON.parse(
-      decryptServerData(
-        {
-          ciphertext: entry.encryptedBlob,
-          iv: entry.blobIv,
-          authTag: entry.blobAuthTag,
-        },
-        orgKey,
-        blobAad
-      )
-    );
-  } catch {
-    return NextResponse.json(
-      { error: API_ERROR.DECRYPT_FAILED },
-      { status: 500 }
-    );
-  }
-
-  const common = {
+  return NextResponse.json({
     id: entry.id,
     entryType: entry.entryType,
-    title: blob.title,
     isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,
     orgFolderId: entry.orgFolderId,
@@ -119,69 +60,18 @@ export async function GET(_req: NextRequest, { params }: Params) {
     updatedBy: entry.updatedBy,
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
-  };
-
-  if (entry.entryType === ENTRY_TYPE.SECURE_NOTE) {
-    return NextResponse.json({
-      ...common,
-      content: blob.content,
-    });
-  }
-
-  if (entry.entryType === ENTRY_TYPE.CREDIT_CARD) {
-    return NextResponse.json({
-      ...common,
-      cardholderName: blob.cardholderName ?? null,
-      cardNumber: blob.cardNumber ?? null,
-      brand: blob.brand ?? null,
-      expiryMonth: blob.expiryMonth ?? null,
-      expiryYear: blob.expiryYear ?? null,
-      cvv: blob.cvv ?? null,
-      notes: blob.notes ?? null,
-    });
-  }
-
-  if (entry.entryType === ENTRY_TYPE.IDENTITY) {
-    return NextResponse.json({
-      ...common,
-      fullName: blob.fullName ?? null,
-      address: blob.address ?? null,
-      phone: blob.phone ?? null,
-      email: blob.email ?? null,
-      dateOfBirth: blob.dateOfBirth ?? null,
-      nationality: blob.nationality ?? null,
-      idNumber: blob.idNumber ?? null,
-      issueDate: blob.issueDate ?? null,
-      expiryDate: blob.expiryDate ?? null,
-      notes: blob.notes ?? null,
-    });
-  }
-
-  if (entry.entryType === ENTRY_TYPE.PASSKEY) {
-    return NextResponse.json({
-      ...common,
-      relyingPartyId: blob.relyingPartyId ?? null,
-      relyingPartyName: blob.relyingPartyName ?? null,
-      username: blob.username ?? null,
-      credentialId: blob.credentialId ?? null,
-      creationDate: blob.creationDate ?? null,
-      deviceInfo: blob.deviceInfo ?? null,
-      notes: blob.notes ?? null,
-    });
-  }
-
-  return NextResponse.json({
-    ...common,
-    username: blob.username,
-    password: blob.password,
-    url: blob.url,
-    notes: blob.notes,
-    customFields: blob.customFields ?? [],
-    totp: blob.totp ?? null,
+    encryptedBlob: entry.encryptedBlob,
+    blobIv: entry.blobIv,
+    blobAuthTag: entry.blobAuthTag,
+    encryptedOverview: entry.encryptedOverview,
+    overviewIv: entry.overviewIv,
+    overviewAuthTag: entry.overviewAuthTag,
+    aadVersion: entry.aadVersion,
+    orgKeyVersion: entry.orgKeyVersion,
   });
 }
 
-// PUT /api/orgs/[orgId]/passwords/[id] — Update password
+// PUT /api/orgs/[orgId]/passwords/[id] — Update password (E2E: full blob replacement)
 export async function PUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -202,15 +92,14 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   const entry = await prisma.orgPasswordEntry.findUnique({
     where: { id },
-    include: {
-      org: {
-        select: {
-          encryptedOrgKey: true,
-          orgKeyIv: true,
-          orgKeyAuthTag: true,
-          masterKeyVersion: true,
-        },
-      },
+    select: {
+      orgId: true,
+      createdById: true,
+      encryptedBlob: true,
+      blobIv: true,
+      blobAuthTag: true,
+      aadVersion: true,
+      orgKeyVersion: true,
     },
   });
 
@@ -239,284 +128,15 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
-  const orgKey = getOrgKey(entry.org);
-
-  // Decrypt current blob (with AAD if entry was encrypted with it)
-  const currentBlobAad = entry.aadVersion >= 1
-    ? Buffer.from(buildOrgEntryAAD(orgId, id, "blob"))
-    : undefined;
-
-  let currentBlob: Record<string, unknown>;
-  try {
-    currentBlob = JSON.parse(
-      decryptServerData(
-        {
-          ciphertext: entry.encryptedBlob,
-          iv: entry.blobIv,
-          authTag: entry.blobAuthTag,
-        },
-        orgKey,
-        currentBlobAad
-      )
-    );
-  } catch {
+  const parsed = updateOrgE2EPasswordSchema.safeParse(body);
+  if (!parsed.success) {
     return NextResponse.json(
-      { error: API_ERROR.DECRYPT_FAILED },
-      { status: 500 }
+      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
+      { status: 400 }
     );
   }
 
-  let updatedBlobStr: string;
-  let overviewBlobStr: string;
-  let tagIds: string[] | undefined;
-  let orgFolderId: string | null | undefined;
-  let isArchived: boolean | undefined;
-  let responseTitle: string;
-
-  if (entry.entryType === ENTRY_TYPE.SECURE_NOTE) {
-    const parsed = updateOrgSecureNoteSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    tagIds = parsed.data.tagIds;
-    orgFolderId = parsed.data.orgFolderId;
-    isArchived = parsed.data.isArchived;
-
-    const updatedBlob = {
-      title: (parsed.data.title ?? currentBlob.title) as string,
-      content: (parsed.data.content ?? currentBlob.content) as string,
-    };
-    responseTitle = updatedBlob.title;
-
-    const snippet = updatedBlob.content.slice(0, 100);
-    updatedBlobStr = JSON.stringify(updatedBlob);
-    overviewBlobStr = JSON.stringify({ title: updatedBlob.title, snippet });
-  } else if (entry.entryType === ENTRY_TYPE.CREDIT_CARD) {
-    const parsed = updateOrgCreditCardSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    tagIds = parsed.data.tagIds;
-    orgFolderId = parsed.data.orgFolderId;
-    isArchived = parsed.data.isArchived;
-
-    const updatedBlob = {
-      title: (parsed.data.title ?? currentBlob.title) as string,
-      cardholderName:
-        parsed.data.cardholderName !== undefined
-          ? parsed.data.cardholderName || null
-          : currentBlob.cardholderName,
-      cardNumber:
-        parsed.data.cardNumber !== undefined
-          ? parsed.data.cardNumber || null
-          : currentBlob.cardNumber,
-      brand:
-        parsed.data.brand !== undefined
-          ? parsed.data.brand || null
-          : currentBlob.brand,
-      expiryMonth:
-        parsed.data.expiryMonth !== undefined
-          ? parsed.data.expiryMonth || null
-          : currentBlob.expiryMonth,
-      expiryYear:
-        parsed.data.expiryYear !== undefined
-          ? parsed.data.expiryYear || null
-          : currentBlob.expiryYear,
-      cvv:
-        parsed.data.cvv !== undefined
-          ? parsed.data.cvv || null
-          : currentBlob.cvv,
-      notes:
-        parsed.data.notes !== undefined
-          ? parsed.data.notes || null
-          : currentBlob.notes,
-    };
-    responseTitle = updatedBlob.title;
-
-    const lastFour = updatedBlob.cardNumber
-      ? (updatedBlob.cardNumber as string).slice(-4)
-      : null;
-    updatedBlobStr = JSON.stringify(updatedBlob);
-    overviewBlobStr = JSON.stringify({
-      title: updatedBlob.title,
-      cardholderName: updatedBlob.cardholderName,
-      brand: updatedBlob.brand,
-      lastFour,
-    });
-  } else if (entry.entryType === ENTRY_TYPE.IDENTITY) {
-    const parsed = updateOrgIdentitySchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    tagIds = parsed.data.tagIds;
-    orgFolderId = parsed.data.orgFolderId;
-    isArchived = parsed.data.isArchived;
-
-    const mergeField = (field: string) =>
-      (parsed.data as Record<string, unknown>)[field] !== undefined
-        ? (parsed.data as Record<string, unknown>)[field] || null
-        : currentBlob[field];
-
-    const updatedBlob = {
-      title: (parsed.data.title ?? currentBlob.title) as string,
-      fullName: mergeField("fullName"),
-      address: mergeField("address"),
-      phone: mergeField("phone"),
-      email: mergeField("email"),
-      dateOfBirth: mergeField("dateOfBirth"),
-      nationality: mergeField("nationality"),
-      idNumber: mergeField("idNumber"),
-      issueDate: mergeField("issueDate"),
-      expiryDate: mergeField("expiryDate"),
-      notes: mergeField("notes"),
-    };
-    responseTitle = updatedBlob.title;
-
-    if (
-      updatedBlob.issueDate &&
-      updatedBlob.expiryDate &&
-      (updatedBlob.issueDate as string) >= (updatedBlob.expiryDate as string)
-    ) {
-      return NextResponse.json(
-        { error: API_ERROR.INVALID_DATE_RANGE },
-        { status: 400 }
-      );
-    }
-
-    const idNumberLast4 = updatedBlob.idNumber
-      ? (updatedBlob.idNumber as string).slice(-4)
-      : null;
-    updatedBlobStr = JSON.stringify(updatedBlob);
-    overviewBlobStr = JSON.stringify({
-      title: updatedBlob.title,
-      fullName: updatedBlob.fullName,
-      idNumberLast4,
-    });
-  } else if (entry.entryType === ENTRY_TYPE.PASSKEY) {
-    const parsed = updateOrgPasskeySchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    tagIds = parsed.data.tagIds;
-    orgFolderId = parsed.data.orgFolderId;
-    isArchived = parsed.data.isArchived;
-
-    const updatedBlob = {
-      title: (parsed.data.title ?? currentBlob.title) as string,
-      relyingPartyId:
-        parsed.data.relyingPartyId !== undefined
-          ? parsed.data.relyingPartyId || null
-          : currentBlob.relyingPartyId,
-      relyingPartyName:
-        parsed.data.relyingPartyName !== undefined
-          ? parsed.data.relyingPartyName || null
-          : currentBlob.relyingPartyName,
-      username:
-        parsed.data.username !== undefined
-          ? parsed.data.username || null
-          : currentBlob.username,
-      credentialId:
-        parsed.data.credentialId !== undefined
-          ? parsed.data.credentialId || null
-          : currentBlob.credentialId,
-      creationDate:
-        parsed.data.creationDate !== undefined
-          ? parsed.data.creationDate || null
-          : currentBlob.creationDate,
-      deviceInfo:
-        parsed.data.deviceInfo !== undefined
-          ? parsed.data.deviceInfo || null
-          : currentBlob.deviceInfo,
-      notes:
-        parsed.data.notes !== undefined
-          ? parsed.data.notes || null
-          : currentBlob.notes,
-    };
-    responseTitle = updatedBlob.title;
-
-    updatedBlobStr = JSON.stringify(updatedBlob);
-    overviewBlobStr = JSON.stringify({
-      title: updatedBlob.title,
-      relyingPartyId: updatedBlob.relyingPartyId,
-      username: updatedBlob.username,
-    });
-  } else {
-    const parsed = updateOrgPasswordSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    const { customFields, totp, ...fieldUpdates } = parsed.data;
-    tagIds = parsed.data.tagIds;
-    orgFolderId = parsed.data.orgFolderId;
-    isArchived = parsed.data.isArchived;
-
-    const updatedBlob: Record<string, unknown> = {
-      title: fieldUpdates.title ?? currentBlob.title,
-      username:
-        fieldUpdates.username !== undefined
-          ? fieldUpdates.username || null
-          : currentBlob.username,
-      password: fieldUpdates.password ?? currentBlob.password,
-      url:
-        fieldUpdates.url !== undefined
-          ? fieldUpdates.url || null
-          : currentBlob.url,
-      notes:
-        fieldUpdates.notes !== undefined
-          ? fieldUpdates.notes || null
-          : currentBlob.notes,
-    };
-
-    if (customFields !== undefined) {
-      updatedBlob.customFields = customFields?.length ? customFields : undefined;
-    } else if (currentBlob.customFields) {
-      updatedBlob.customFields = currentBlob.customFields;
-    }
-
-    if (totp !== undefined) {
-      updatedBlob.totp = totp ?? undefined;
-    } else if (currentBlob.totp) {
-      updatedBlob.totp = currentBlob.totp;
-    }
-
-    responseTitle = updatedBlob.title as string;
-
-    let urlHost: string | null = null;
-    if (updatedBlob.url) {
-      try {
-        urlHost = new URL(updatedBlob.url as string).hostname;
-      } catch {
-        /* invalid url */
-      }
-    }
-
-    updatedBlobStr = JSON.stringify(updatedBlob);
-    overviewBlobStr = JSON.stringify({
-      title: updatedBlob.title,
-      username: updatedBlob.username,
-      urlHost,
-    });
-  }
+  const { encryptedBlob, encryptedOverview, aadVersion, orgKeyVersion, tagIds, orgFolderId, isArchived } = parsed.data;
 
   // Validate orgFolderId belongs to this org
   if (orgFolderId) {
@@ -529,13 +149,6 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
   }
 
-  // Always re-encrypt with AAD (save-time migration for legacy entries)
-  const blobAad = Buffer.from(buildOrgEntryAAD(orgId, id, "blob"));
-  const overviewAad = Buffer.from(buildOrgEntryAAD(orgId, id, "overview"));
-
-  const encryptedBlob = encryptServerData(updatedBlobStr, orgKey, blobAad);
-  const encryptedOverview = encryptServerData(overviewBlobStr, orgKey, overviewAad);
-
   const updateData: Record<string, unknown> = {
     encryptedBlob: encryptedBlob.ciphertext,
     blobIv: encryptedBlob.iv,
@@ -543,7 +156,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
     encryptedOverview: encryptedOverview.ciphertext,
     overviewIv: encryptedOverview.iv,
     overviewAuthTag: encryptedOverview.authTag,
-    aadVersion: AAD_VERSION,
+    aadVersion,
+    orgKeyVersion,
     updatedById: session.user.id,
   };
 
@@ -562,10 +176,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
         blobIv: entry.blobIv,
         blobAuthTag: entry.blobAuthTag,
         aadVersion: entry.aadVersion,
+        orgKeyVersion: entry.orgKeyVersion,
         changedById: session.user.id,
       },
     });
-    // Trim to max 20 entries (stable sort: changedAt asc, id asc)
     const all = await tx.orgPasswordEntryHistory.findMany({
       where: { entryId: id },
       orderBy: [{ changedAt: "asc" }, { id: "asc" }],
@@ -599,7 +213,6 @@ export async function PUT(req: NextRequest, { params }: Params) {
   return NextResponse.json({
     id: updated.id,
     entryType: updated.entryType,
-    title: responseTitle,
     tags: updated.tags,
     updatedAt: updated.updatedAt,
   });

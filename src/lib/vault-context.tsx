@@ -22,8 +22,16 @@ import {
   computePassphraseVerifier,
   createVerificationArtifact,
   verifyKey,
+  encryptBinary,
+  decryptBinary,
 } from "./crypto-client";
 import { createKeyEscrow } from "./crypto-emergency";
+import {
+  generateECDHKeyPair,
+  exportPublicKey,
+  exportPrivateKey,
+  deriveEcdhWrappingKey,
+} from "./crypto-org";
 import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 
@@ -75,6 +83,8 @@ interface VaultContextValue {
   getSecretKey: () => Uint8Array | null;
   getAccountSalt: () => Uint8Array | null;
   setHasRecoveryKey: (value: boolean) => void;
+  getEcdhPrivateKeyBytes: () => Uint8Array | null;
+  getEcdhPublicKeyJwk: () => string | null;
 }
 
 const VaultContext = createContext<VaultContextValue | null>(null);
@@ -146,6 +156,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const wrappedKeyRef = useRef<{ ciphertext: string; iv: string; authTag: string } | null>(null);
   const lastActivityRef = useRef(Date.now());
   const hiddenAtRef = useRef<number | null>(null);
+  // ECDH key pair for org E2E encryption
+  const ecdhPrivateKeyBytesRef = useRef<Uint8Array | null>(null);
+  const ecdhPublicKeyJwkRef = useRef<string | null>(null);
 
   // ─── Fetch vault status on session load ───────────────────────
 
@@ -188,6 +201,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       secretKeyRef.current.fill(0);
       secretKeyRef.current = null;
     }
+    if (ecdhPrivateKeyBytesRef.current) {
+      ecdhPrivateKeyBytesRef.current.fill(0);
+      ecdhPrivateKeyBytesRef.current = null;
+    }
+    ecdhPublicKeyJwkRef.current = null;
     wrappedKeyRef.current = null;
     setEncryptionKey(null);
     setVaultStatus((prev) =>
@@ -326,16 +344,20 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // ─── SecretKey cleanup on unmount / page unload ─────────────
 
   useEffect(() => {
-    const zeroSecretKey = () => {
+    const zeroSensitiveKeys = () => {
       if (secretKeyRef.current) {
         secretKeyRef.current.fill(0);
         secretKeyRef.current = null;
       }
+      if (ecdhPrivateKeyBytesRef.current) {
+        ecdhPrivateKeyBytesRef.current.fill(0);
+        ecdhPrivateKeyBytesRef.current = null;
+      }
     };
-    window.addEventListener("pagehide", zeroSecretKey);
+    window.addEventListener("pagehide", zeroSensitiveKeys);
     return () => {
-      window.removeEventListener("pagehide", zeroSecretKey);
-      zeroSecretKey(); // also zero on unmount
+      window.removeEventListener("pagehide", zeroSensitiveKeys);
+      zeroSensitiveKeys(); // also zero on unmount
     };
   }, []);
 
@@ -365,7 +387,20 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     // 7. Compute passphrase verifier for server-side identity confirmation
     const verifierHash = await computePassphraseVerifier(passphrase, accountSalt);
 
-    // 8. Send to server
+    // 8. Generate ECDH key pair and encrypt private key with domain-separated ecdhWrappingKey
+    const ecdhKeyPair = await generateECDHKeyPair();
+    const ecdhPubJwk = await exportPublicKey(ecdhKeyPair.publicKey);
+    const ecdhPrivBytes = await exportPrivateKey(ecdhKeyPair.privateKey);
+    const ecdhWrapKey = await deriveEcdhWrappingKey(secretKey);
+    const ecdhEncrypted = await encryptBinary(
+      ecdhPrivBytes.buffer.slice(
+        ecdhPrivBytes.byteOffset,
+        ecdhPrivBytes.byteOffset + ecdhPrivBytes.byteLength,
+      ) as ArrayBuffer,
+      ecdhWrapKey,
+    );
+
+    // 9. Send to server
     const res = await fetch(API_PATH.VAULT_SETUP, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -377,19 +412,27 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         authHash,
         verifierHash,
         verificationArtifact: artifact,
+        ecdhPublicKey: ecdhPubJwk,
+        encryptedEcdhPrivateKey: hexEncode(ecdhEncrypted.ciphertext),
+        ecdhPrivateKeyIv: ecdhEncrypted.iv,
+        ecdhPrivateKeyAuthTag: ecdhEncrypted.authTag,
       }),
     });
 
     if (!res.ok) {
+      ecdhPrivBytes.fill(0);
       const err = await res.json();
       throw new Error(err.error || "Setup failed");
     }
 
-    // 9. Store secretKey, keyVersion, accountSalt, wrappedKey, and encryption key in memory
+    // 10. Store secretKey, keyVersion, accountSalt, wrappedKey, ECDH keys, and encryption key in memory
     secretKeyRef.current = new Uint8Array(secretKey);
     keyVersionRef.current = 1;
     accountSaltRef.current = accountSalt;
     wrappedKeyRef.current = { ciphertext: wrappedKey.ciphertext, iv: wrappedKey.iv, authTag: wrappedKey.authTag };
+    ecdhPrivateKeyBytesRef.current = new Uint8Array(ecdhPrivBytes);
+    ecdhPublicKeyJwkRef.current = ecdhPubJwk;
+    ecdhPrivBytes.fill(0);
     secretKey.fill(0);
     setEncryptionKey(encKey);
     setVaultStatus(VAULT_STATUS.UNLOCKED);
@@ -476,6 +519,26 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         iv: vaultData.secretKeyIv,
         authTag: vaultData.secretKeyAuthTag,
       };
+
+      // 6b. Restore ECDH private key if available (org E2E)
+      if (vaultData.encryptedEcdhPrivateKey && vaultData.ecdhPrivateKeyIv && vaultData.ecdhPrivateKeyAuthTag) {
+        try {
+          const ecdhWrapKey = await deriveEcdhWrappingKey(secretKey);
+          const ecdhPrivDecrypted = await decryptBinary(
+            {
+              ciphertext: hexDecode(vaultData.encryptedEcdhPrivateKey),
+              iv: vaultData.ecdhPrivateKeyIv,
+              authTag: vaultData.ecdhPrivateKeyAuthTag,
+            },
+            ecdhWrapKey,
+          );
+          ecdhPrivateKeyBytesRef.current = new Uint8Array(ecdhPrivDecrypted);
+          ecdhPublicKeyJwkRef.current = vaultData.ecdhPublicKey ?? null;
+        } catch {
+          // ECDH restoration failure is non-fatal — org features will be unavailable
+        }
+      }
+
       secretKey.fill(0);
 
       // 7. Auto-confirm pending emergency access grants (fire-and-forget)
@@ -575,6 +638,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     return accountSaltRef.current ? new Uint8Array(accountSaltRef.current) : null;
   }, []);
 
+  const getEcdhPrivateKeyBytes = useCallback(() => {
+    return ecdhPrivateKeyBytesRef.current ? new Uint8Array(ecdhPrivateKeyBytesRef.current) : null;
+  }, []);
+
+  const getEcdhPublicKeyJwk = useCallback(() => {
+    return ecdhPublicKeyJwkRef.current;
+  }, []);
+
   return (
     <VaultContext.Provider
       value={{
@@ -590,6 +661,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         getSecretKey,
         getAccountSalt,
         setHasRecoveryKey,
+        getEcdhPrivateKeyBytes,
+        getEcdhPublicKeyJwk,
       }}
     >
       {children}

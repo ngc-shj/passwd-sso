@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { unwrapOrgKey, decryptServerData } from "@/lib/crypto-server";
-import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 import { hasOrgPermission } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { ORG_PERMISSION } from "@/lib/constants";
@@ -43,10 +41,6 @@ export async function GET() {
         select: {
           id: true,
           name: true,
-          encryptedOrgKey: true,
-          orgKeyIv: true,
-          orgKeyAuthTag: true,
-          masterKeyVersion: true,
         },
       },
       tags: { select: { id: true, name: true, color: true } },
@@ -59,52 +53,25 @@ export async function GET() {
     },
   });
 
-  const entries = archivedEntries.map((entry) => {
-    const orgKey = unwrapOrgKey({
-      ciphertext: entry.org.encryptedOrgKey,
-      iv: entry.org.orgKeyIv,
-      authTag: entry.org.orgKeyAuthTag,
-    }, entry.org.masterKeyVersion);
-
-    const aad = entry.aadVersion >= 1
-      ? Buffer.from(buildOrgEntryAAD(entry.orgId, entry.id, "overview"))
-      : undefined;
-    const overview = JSON.parse(
-      decryptServerData(
-        {
-          ciphertext: entry.encryptedOverview,
-          iv: entry.overviewIv,
-          authTag: entry.overviewAuthTag,
-        },
-        orgKey,
-        aad
-      )
-    );
-
-    return {
-      id: entry.id,
-      entryType: entry.entryType,
-      orgId: entry.org.id,
-      orgName: entry.org.name,
-      role: roleMap.get(entry.orgId),
-      title: overview.title,
-      username: overview.username ?? null,
-      urlHost: overview.urlHost ?? null,
-      snippet: overview.snippet ?? null,
-      brand: overview.brand ?? null,
-      lastFour: overview.lastFour ?? null,
-      cardholderName: overview.cardholderName ?? null,
-      fullName: overview.fullName ?? null,
-      idNumberLast4: overview.idNumberLast4 ?? null,
-      isFavorite: entry.favorites.length > 0,
-      isArchived: entry.isArchived,
-      tags: entry.tags,
-      createdBy: entry.createdBy,
-      updatedBy: entry.updatedBy,
-      createdAt: entry.createdAt,
-      updatedAt: entry.updatedAt,
-    };
-  });
+  const entries = archivedEntries.map((entry) => ({
+    id: entry.id,
+    entryType: entry.entryType,
+    orgId: entry.org.id,
+    orgName: entry.org.name,
+    role: roleMap.get(entry.orgId),
+    isFavorite: entry.favorites.length > 0,
+    isArchived: entry.isArchived,
+    tags: entry.tags,
+    createdBy: entry.createdBy,
+    updatedBy: entry.updatedBy,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+    encryptedOverview: entry.encryptedOverview,
+    overviewIv: entry.overviewIv,
+    overviewAuthTag: entry.overviewAuthTag,
+    aadVersion: entry.aadVersion,
+    orgKeyVersion: entry.orgKeyVersion,
+  }));
 
   // Sort by updatedAt desc
   entries.sort(

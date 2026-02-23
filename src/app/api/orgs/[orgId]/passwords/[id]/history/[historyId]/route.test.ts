@@ -6,8 +6,6 @@ const {
   mockPrismaOrgPasswordEntry,
   mockPrismaOrgPasswordEntryHistory,
   mockRequireOrgMember,
-  mockUnwrapOrgKey,
-  mockDecryptServerData,
   OrgAuthError,
 } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
@@ -23,8 +21,6 @@ const {
     mockPrismaOrgPasswordEntry: { findUnique: vi.fn() },
     mockPrismaOrgPasswordEntryHistory: { findUnique: vi.fn() },
     mockRequireOrgMember: vi.fn(),
-    mockUnwrapOrgKey: vi.fn(),
-    mockDecryptServerData: vi.fn(),
     OrgAuthError: _OrgAuthError,
   };
 });
@@ -40,20 +36,12 @@ vi.mock("@/lib/org-auth", () => ({
   requireOrgMember: mockRequireOrgMember,
   OrgAuthError,
 }));
-vi.mock("@/lib/crypto-server", () => ({
-  unwrapOrgKey: mockUnwrapOrgKey,
-  decryptServerData: mockDecryptServerData,
-}));
-vi.mock("@/lib/crypto-aad", () => ({
-  buildOrgEntryAAD: vi.fn().mockReturnValue("test-aad"),
-}));
 
 import { GET } from "./route";
 
 const ORG_ID = "org-123";
 const ENTRY_ID = "entry-456";
 const HISTORY_ID = "hist-789";
-const orgKeyData = { encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1 };
 
 function makeUrl() {
   return `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${ENTRY_ID}/history/${HISTORY_ID}`;
@@ -65,10 +53,9 @@ function makeParams() {
 
 describe("GET /api/orgs/[orgId]/passwords/[id]/history/[historyId]", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireOrgMember.mockResolvedValue({ id: "member-1" });
-    mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -100,9 +87,8 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/history/[historyId]", () => {
 
   it("returns 404 when entry orgId does not match", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
-      id: ENTRY_ID,
       orgId: "other-org",
-      org: orgKeyData,
+      entryType: "LOGIN",
     });
     const res = await GET(createRequest("GET", makeUrl()), makeParams());
     expect(res.status).toBe(404);
@@ -110,9 +96,8 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/history/[historyId]", () => {
 
   it("returns 404 when history not found", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
-      id: ENTRY_ID,
       orgId: ORG_ID,
-      org: orgKeyData,
+      entryType: "LOGIN",
     });
     mockPrismaOrgPasswordEntryHistory.findUnique.mockResolvedValue(null);
     const res = await GET(createRequest("GET", makeUrl()), makeParams());
@@ -121,9 +106,8 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/history/[historyId]", () => {
 
   it("returns 404 when history entryId does not match", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
-      id: ENTRY_ID,
       orgId: ORG_ID,
-      org: orgKeyData,
+      entryType: "LOGIN",
     });
     mockPrismaOrgPasswordEntryHistory.findUnique.mockResolvedValue({
       id: HISTORY_ID,
@@ -133,56 +117,22 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/history/[historyId]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 500 when decryption fails", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
-      id: ENTRY_ID,
-      orgId: ORG_ID,
-      entryType: "LOGIN",
-      org: orgKeyData,
-    });
-    mockPrismaOrgPasswordEntryHistory.findUnique.mockResolvedValue({
-      id: HISTORY_ID,
-      entryId: ENTRY_ID,
-      encryptedBlob: "blob",
-      blobIv: "iv",
-      blobAuthTag: "tag",
-      aadVersion: 1,
-      changedAt: new Date("2025-01-01"),
-    });
-    mockDecryptServerData.mockImplementation(() => {
-      throw new Error("decrypt failed");
-    });
-
-    const res = await GET(createRequest("GET", makeUrl()), makeParams());
-    expect(res.status).toBe(500);
-    const json = await res.json();
-    expect(json.error).toBe("DECRYPT_FAILED");
-  });
-
-  it("returns decrypted history with AAD for aadVersion >= 1", async () => {
+  it("returns encrypted history blob as-is (E2E mode)", async () => {
     const changedAt = new Date("2025-01-01");
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
-      id: ENTRY_ID,
       orgId: ORG_ID,
       entryType: "LOGIN",
-      org: orgKeyData,
     });
     mockPrismaOrgPasswordEntryHistory.findUnique.mockResolvedValue({
       id: HISTORY_ID,
       entryId: ENTRY_ID,
-      encryptedBlob: "blob",
-      blobIv: "iv",
-      blobAuthTag: "tag",
+      encryptedBlob: "encrypted-blob-data",
+      blobIv: "aabbccddee001122",
+      blobAuthTag: "aabbccddee0011223344556677889900",
       aadVersion: 1,
+      orgKeyVersion: 1,
       changedAt,
     });
-    mockDecryptServerData.mockReturnValue(
-      JSON.stringify({
-        title: "Old Title",
-        username: "user",
-        password: "oldpass",
-      }),
-    );
 
     const res = await GET(createRequest("GET", makeUrl()), makeParams());
     const json = await res.json();
@@ -190,38 +140,13 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/history/[historyId]", () => {
     expect(json.id).toBe(HISTORY_ID);
     expect(json.entryId).toBe(ENTRY_ID);
     expect(json.entryType).toBe("LOGIN");
-    expect(json.title).toBe("Old Title");
-    expect(json.password).toBe("oldpass");
-
-    // Verify AAD was passed to decryptServerData
-    const decryptCall = mockDecryptServerData.mock.calls[0];
-    expect(decryptCall[2]).toBeInstanceOf(Buffer);
-  });
-
-  it("passes undefined AAD for legacy entries (aadVersion=0)", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
-      id: ENTRY_ID,
-      orgId: ORG_ID,
-      entryType: "LOGIN",
-      org: orgKeyData,
-    });
-    mockPrismaOrgPasswordEntryHistory.findUnique.mockResolvedValue({
-      id: HISTORY_ID,
-      entryId: ENTRY_ID,
-      encryptedBlob: "blob",
-      blobIv: "iv",
-      blobAuthTag: "tag",
-      aadVersion: 0,
-      changedAt: new Date("2025-01-01"),
-    });
-    mockDecryptServerData.mockReturnValue(
-      JSON.stringify({ title: "Legacy", username: "u", password: "p" }),
-    );
-
-    const res = await GET(createRequest("GET", makeUrl()), makeParams());
-    expect(res.status).toBe(200);
-
-    const decryptCall = mockDecryptServerData.mock.calls[0];
-    expect(decryptCall[2]).toBeUndefined();
+    expect(json.encryptedBlob).toBe("encrypted-blob-data");
+    expect(json.blobIv).toBe("aabbccddee001122");
+    expect(json.blobAuthTag).toBe("aabbccddee0011223344556677889900");
+    expect(json.aadVersion).toBe(1);
+    expect(json.orgKeyVersion).toBe(1);
+    // Should NOT contain decrypted fields
+    expect(json.title).toBeUndefined();
+    expect(json.password).toBeUndefined();
   });
 });

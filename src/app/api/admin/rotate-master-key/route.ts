@@ -116,9 +116,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Find all organizations needing rotation
+  // Find all organizations needing rotation (skip E2E orgs — they don't use server-side keys)
   const orgs = await prisma.organization.findMany({
-    where: { masterKeyVersion: { lt: targetVersion } },
+    where: {
+      masterKeyVersion: { lt: targetVersion },
+      e2eEnabled: false,
+    },
     select: {
       id: true,
       encryptedOrgKey: true,
@@ -135,9 +138,9 @@ export async function POST(req: NextRequest) {
     try {
       const rewrapped = rewrapOrgKey(
         {
-          ciphertext: org.encryptedOrgKey,
-          iv: org.orgKeyIv,
-          authTag: org.orgKeyAuthTag,
+          ciphertext: org.encryptedOrgKey!,
+          iv: org.orgKeyIv!,
+          authTag: org.orgKeyAuthTag!,
         },
         org.masterKeyVersion,
         targetVersion
