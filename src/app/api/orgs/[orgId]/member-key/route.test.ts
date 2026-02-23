@@ -121,6 +121,18 @@ describe("GET /api/orgs/[orgId]/member-key", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 400 when keyVersion=0 (boundary)", async () => {
+    mockPrismaOrgMember.findUnique
+      .mockResolvedValueOnce({ role: "MEMBER" })
+      .mockResolvedValueOnce({ keyDistributed: true });
+
+    const res = await GET(
+      createRequest("GET", `${URL}?keyVersion=0`),
+      { params: Promise.resolve({ orgId: "org-1" }) },
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("returns 404 when member key not found", async () => {
     mockPrismaOrgMember.findUnique
       .mockResolvedValueOnce({ role: "MEMBER" })

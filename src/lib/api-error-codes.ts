@@ -79,6 +79,7 @@ export const API_ERROR = {
   KEY_ALREADY_DISTRIBUTED: "KEY_ALREADY_DISTRIBUTED",
   MEMBER_KEY_NOT_FOUND: "MEMBER_KEY_NOT_FOUND",
   VAULT_NOT_READY: "VAULT_NOT_READY",
+  ORG_KEY_VERSION_MISMATCH: "ORG_KEY_VERSION_MISMATCH",
   ONLY_OWN_ENTRIES: "ONLY_OWN_ENTRIES",
   INVALID_DATE_RANGE: "INVALID_DATE_RANGE",
   // ── Org Invitations ───────────────────────────────────────
@@ -183,6 +184,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   KEY_ALREADY_DISTRIBUTED: "keyAlreadyDistributed",
   MEMBER_KEY_NOT_FOUND: "memberKeyNotFound",
   VAULT_NOT_READY: "vaultNotReady",
+  ORG_KEY_VERSION_MISMATCH: "orgKeyVersionMismatch",
   ONLY_OWN_ENTRIES: "onlyOwnEntries",
   INVALID_DATE_RANGE: "invalidDateRange",
   TOKEN_REQUIRED: "invalidRequest",

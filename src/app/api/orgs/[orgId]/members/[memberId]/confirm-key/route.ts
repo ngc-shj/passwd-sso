@@ -83,9 +83,15 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const data = parsed.data;
 
-  // Upsert to prevent race conditions (@@unique [orgId, userId, keyVersion])
-  await prisma.$transaction([
-    prisma.orgMemberKey.upsert({
+  // Atomic check-and-set: re-verify keyDistributed inside transaction (S-12 TOCTOU fix)
+  const distributed = await prisma.$transaction(async (tx) => {
+    const member = await tx.orgMember.findUnique({
+      where: { id: memberId },
+      select: { keyDistributed: true },
+    });
+    if (member?.keyDistributed) return false;
+
+    await tx.orgMemberKey.upsert({
       where: {
         orgId_userId_keyVersion: {
           orgId,
@@ -110,12 +116,22 @@ export async function POST(req: NextRequest, { params }: Params) {
         ephemeralPublicKey: data.ephemeralPublicKey,
         hkdfSalt: data.hkdfSalt,
       },
-    }),
-    prisma.orgMember.update({
+    });
+
+    await tx.orgMember.update({
       where: { id: memberId },
       data: { keyDistributed: true },
-    }),
-  ]);
+    });
+
+    return true;
+  });
+
+  if (!distributed) {
+    return NextResponse.json(
+      { error: API_ERROR.KEY_ALREADY_DISTRIBUTED },
+      { status: 409 }
+    );
+  }
 
   return NextResponse.json({ success: true });
 }

@@ -131,6 +131,49 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
     expect(json.details.missingKeyFor).toBe("user-2");
   });
 
+  it("returns 404 when org not found", async () => {
+    mockOrgFindUnique.mockResolvedValue(null);
+    const res = await POST(
+      createRequest({
+        newOrgKeyVersion: 2,
+        entries: [validEntry("e1")],
+        memberKeys: [validMemberKey("user-1")],
+      }),
+      createParams("org-1"),
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe("ORG_NOT_FOUND");
+  });
+
+  it("returns 403 when user lacks permission", async () => {
+    mockRequireOrgPermission.mockRejectedValue(
+      new MockOrgAuthError("FORBIDDEN", 403),
+    );
+    const res = await POST(
+      createRequest({
+        newOrgKeyVersion: 2,
+        entries: [validEntry("e1")],
+        memberKeys: [validMemberKey("user-1")],
+      }),
+      createParams("org-1"),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 400 when entries exceed max limit", async () => {
+    const tooManyEntries = Array.from({ length: 1001 }, (_, i) => validEntry(`e${i}`));
+    const res = await POST(
+      createRequest({
+        newOrgKeyVersion: 2,
+        entries: tooManyEntries,
+        memberKeys: [validMemberKey("user-1")],
+      }),
+      createParams("org-1"),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("rotates key successfully", async () => {
     const res = await POST(
       createRequest({

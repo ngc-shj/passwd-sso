@@ -42,6 +42,7 @@
   "keyAlreadyDistributed": "このメンバーには既に暗号化キーが配布されています。",
   "memberKeyNotFound": "メンバー暗号化キーが見つかりません。",
   "vaultNotReady": "メンバーの保管庫がまだ設定されていません。",
+  "orgKeyVersionMismatch": "暗号化キーのバージョンが古くなっています。画面を更新して再度お試しください。",
   "onlyOwnEntries": "自分のエントリのみ変更できます。",
   "invalidDateRange": "有効期限は発行日より後の日付にしてください。",
   "alreadyRevoked": "既に取り消し済みです。",

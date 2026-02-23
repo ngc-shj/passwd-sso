@@ -25,7 +25,7 @@ const rotateKeySchema = z.object({
       encryptedOverview: encryptedFieldSchema,
       aadVersion: z.number().int().min(1),
     })
-  ),
+  ).max(1000),
   memberKeys: z.array(
     z.object({
       userId: z.string().min(1),

@@ -135,7 +135,8 @@ export function ShareE2EEntryView({
 
     decryptShareE2E(encryptedData, dataIv, dataAuthTag, keyBytes)
       .then((data) => setState({ status: "ok", data }))
-      .catch(() => setState({ status: "error", reason: "decryptFailed" }));
+      .catch(() => setState({ status: "error", reason: "decryptFailed" }))
+      .finally(() => keyBytes.fill(0));
   }, [encryptedData, dataIv, dataAuthTag]);
 
   if (state.status === "loading") {

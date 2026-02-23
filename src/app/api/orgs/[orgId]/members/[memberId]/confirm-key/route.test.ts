@@ -12,6 +12,13 @@ const { mockAuth, mockPrismaOrgMember, mockPrismaUser,
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+
+// Build a tx proxy that delegates to the same mocks
+const txProxy = {
+  orgMember: mockPrismaOrgMember,
+  orgMemberKey: mockPrismaOrgMemberKey,
+};
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: mockPrismaOrgMember,
@@ -38,7 +45,8 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "admin-user" } });
-    mockTransaction.mockResolvedValue([{}, {}]);
+    // Interactive transaction: call the callback with tx proxy
+    mockTransaction.mockImplementation(async (fn: (tx: typeof txProxy) => unknown) => fn(txProxy));
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -101,8 +109,9 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
 
   it("distributes key successfully", async () => {
     mockPrismaOrgMember.findUnique
-      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" })
-      .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: false });
+      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }) // requireOrgPermission
+      .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: false }) // target check
+      .mockResolvedValueOnce({ keyDistributed: false }); // re-check inside tx
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
     const res = await POST(
@@ -113,5 +122,21 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 409 when key already distributed (TOCTOU race)", async () => {
+    mockPrismaOrgMember.findUnique
+      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }) // requireOrgPermission
+      .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: false }) // target check (passes)
+      .mockResolvedValueOnce({ keyDistributed: true }); // re-check inside tx (race: another admin distributed first)
+    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
+
+    const res = await POST(
+      createRequest("POST", URL, { body: validBody }),
+      { params: Promise.resolve({ orgId: "org-1", memberId: "member-1" }) },
+    );
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("KEY_ALREADY_DISTRIBUTED");
   });
 });

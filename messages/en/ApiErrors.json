@@ -42,6 +42,7 @@
   "keyAlreadyDistributed": "Encryption key has already been distributed to this member.",
   "memberKeyNotFound": "Member encryption key not found.",
   "vaultNotReady": "Member's vault is not set up yet.",
+  "orgKeyVersionMismatch": "Encryption key version is outdated. Please refresh and try again.",
   "onlyOwnEntries": "You can only modify your own entries.",
   "invalidDateRange": "The expiry date must be after the issue date.",
   "alreadyRevoked": "Already revoked.",

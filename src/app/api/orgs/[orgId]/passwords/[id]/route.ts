@@ -171,9 +171,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
   }
 
-  // Snapshot current blob to history before updating (only for full updates)
-  if (isFullUpdate) {
-    await prisma.$transaction(async (tx) => {
+  // Snapshot + update in a single transaction for atomicity (F-9)
+  const updated = await prisma.$transaction(async (tx) => {
+    if (isFullUpdate) {
       await tx.orgPasswordEntryHistory.create({
         data: {
           entryId: id,
@@ -195,15 +195,15 @@ export async function PUT(req: NextRequest, { params }: Params) {
           where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
         });
       }
-    });
-  }
+    }
 
-  const updated = await prisma.orgPasswordEntry.update({
-    where: { id },
-    data: updateData,
-    include: {
-      tags: { select: { id: true, name: true, color: true } },
-    },
+    return tx.orgPasswordEntry.update({
+      where: { id },
+      data: updateData,
+      include: {
+        tags: { select: { id: true, name: true, color: true } },
+      },
+    });
   });
 
   logAudit({

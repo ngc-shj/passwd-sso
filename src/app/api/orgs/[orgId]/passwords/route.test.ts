@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockAuditLogCreate, mockRequireOrgPermission, OrgAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockPrismaOrganization, mockAuditLogCreate, mockRequireOrgPermission, OrgAuthError } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -18,6 +18,7 @@ const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockAuditLogC
       deleteMany: vi.fn(),
     },
     mockPrismaOrgFolder: { findUnique: vi.fn() },
+    mockPrismaOrganization: { findUnique: vi.fn() },
     mockAuditLogCreate: vi.fn(),
     mockRequireOrgPermission: vi.fn(),
     OrgAuthError: _OrgAuthError,
@@ -29,6 +30,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgPasswordEntry: mockPrismaOrgPasswordEntry,
     orgFolder: mockPrismaOrgFolder,
+    organization: mockPrismaOrganization,
     auditLog: { create: mockAuditLogCreate },
   },
 }));
@@ -279,6 +281,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.MEMBER });
     mockAuditLogCreate.mockResolvedValue({});
+    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
   });
 
   const validE2EBody = {
@@ -340,6 +343,20 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("returns 409 when orgKeyVersion does not match org's current version (S-15)", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+        body: { ...validE2EBody, orgKeyVersion: 1 }, // stale version
+      }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
   });
 
   it("creates E2E entry with pre-encrypted blobs (201)", async () => {
