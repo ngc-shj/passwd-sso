@@ -1,9 +1,9 @@
 # コードレビュー: feat/org-e2e-ecdh
-日時: 2026-02-24T02:00:00+09:00
-レビュー回数: 6回目
+日時: 2026-02-24T02:30:00+09:00
+レビュー回数: 7回目
 
 ## 前回からの変更
-5回目レビュー (S-19, F-15, F-16, S-1, S-2, S-3) の全指摘を修正済み。6回目レビューで新規指摘 (S-20~S-24, F-17~F-23) を対応。
+6回目レビュー (S-20~S-24, F-17~F-23) の全指摘を修正済み。7回目レビューで新規指摘 (S-25~S-30, F-24~F-29) を対応。
 
 ## セキュリティ観点の指摘
 
@@ -92,6 +92,29 @@
 - **対応:** `createShareLinkSchema` に refine を追加し、org entry で `data` が存在する場合にバリデーションエラーを返す。
 - 修正ファイル: `src/lib/validations.ts`
 
+### [MEDIUM] S-25: `encryptedFieldSchema.ciphertext` に最大長制約がない — 解決済み
+
+- **問題:** `ciphertext` フィールドに `.max()` がなく、巨大ペイロードが受け入れ可能。
+- **対応:** `.max(500_000)` を `encryptedFieldSchema` および `rotate-key` のローカルスキーマに追加。
+- 修正ファイル: `src/lib/validations.ts`, `src/app/api/orgs/[orgId]/rotate-key/route.ts`
+
+### [LOW] S-26: 組織作成時に `wrapVersion` が DB に保存されない — 解決済み
+
+- **問題:** `memberKeys.create` に `wrapVersion` フィールドが欠落し、DB デフォルト値に依存。
+- **対応:** `wrapVersion: orgMemberKey.wrapVersion` を明示的に保存。
+- 修正ファイル: `src/app/api/orgs/route.ts`
+
+### [INFO] S-28: `pending-key-distributions` の TOFU 問題 — 設計上の制限
+
+- **問題:** ECDH 公開鍵の真正性検証がなく、サーバーが鍵を差し替える中間者攻撃の理論的可能性。
+- **判断:** 標準的な TOFU (Trust on First Use) の制限。1Password/Bitwarden と同等の脅威モデル。将来的にフィンガープリント表示を検討。
+
+### [LOW] S-30: `member-key` の `keyVersion` クエリパラメータに上限なし — 解決済み
+
+- **問題:** 非常に大きな `keyVersion` 値での無駄な DB クエリが可能。
+- **対応:** `keyVersion > 10000` で 400 を返す上限チェックを追加。
+- 修正ファイル: `src/app/api/orgs/[orgId]/member-key/route.ts`
+
 ## 機能観点の指摘
 
 ### [MEDIUM] F-2: `rotate-key` の `entries` 配列にサイズ上限なし — 解決済み
@@ -143,6 +166,43 @@
 - 修正ファイル: `src/app/api/share-links/route.ts`
 
 ### [LOW] F-23: 添付ファイルアップロードに `orgKeyVersion` 検証なし — 解決済み (S-20 と同一)
+
+### [LOW] F-24: 組織作成時に `wrapVersion` 未保存 — 解決済み (S-26 と同一)
+
+### [LOW] F-25: `distributePendingKeys` で `wrapVersion` 未送信 — 解決済み
+
+- **問題:** `createOrgKeyEscrow` の結果を confirm-key に POST する際、`wrapVersion` が body に含まれない。
+- **対応:** `wrapVersion: escrow.wrapVersion` を body に追加。
+- 修正ファイル: `src/lib/org-vault-context.tsx`
+
+### [MEDIUM] F-26: `rotate-key` のメンバーリスト取得がトランザクション外 — 解決済み
+
+- **問題:** メンバーリストの取得がトランザクション外で行われ、TOCTOU のリスク。
+- **対応:** メンバー検証をインタラクティブトランザクション内に移動。`TxValidationError` クラスで詳細を保持。
+- 修正ファイル: `src/app/api/orgs/[orgId]/rotate-key/route.ts`
+
+### [LOW] F-27: `share-links` POST で org エントリの `entryType` が DB から取得されない — 解決済み
+
+- **問題:** クライアント提供の `entryType` をそのまま使用し、DB の実際の値と異なる可能性。
+- **対応:** `select` に `entryType: true` を追加し、DB の値を使用。
+- 修正ファイル: `src/app/api/share-links/route.ts`
+
+### [LOW] F-28: `passwords/[id]` PUT の update に `orgId` 制約なし — 解決済み
+
+- **問題:** `where: { id }` のみで `orgId` 制約がなく、一貫性に欠ける。
+- **対応:** `where: { id, orgId }` に変更。
+- 修正ファイル: `src/app/api/orgs/[orgId]/passwords/[id]/route.ts`
+
+### [HIGH] F-29: 履歴復元で古い `orgKeyVersion` が書き戻され `rotate-key` が壊れる — 解決済み
+
+- **問題:** 鍵ローテーション後に古い履歴を復元すると、エントリの `orgKeyVersion` が古くなり、`rotate-key` の `updateMany` where 句で一致しなくなる。
+- **対応:** `rotate-key` の `updateMany` where 句から `orgKeyVersion` を除去。ID セット検証 + 組織レベル楽観ロックで十分に保護。
+- 修正ファイル: `src/app/api/orgs/[orgId]/rotate-key/route.ts`
+
+### [LOW] F-30: permanent delete で blob store クリーンアップなし — 既知の制限
+
+- **問題:** permanent delete 時に blob store のゴーストデータが残存する。
+- **判断:** E2E 暗号化されているため機密性リスクは低い。ストレージクリーンアップは別 PR で対応予定。
 
 ## テスト観点の指摘
 
@@ -280,6 +340,26 @@
 - **対応:** `wrapVersion` のデフォルト値 (1)、受入値 (1)、拒否値 (2) を検証。
 - 修正ファイル: `src/lib/validations.test.ts`
 
+### org 作成 malformed JSON テスト — 解決済み
+
+- **対応:** `POST /api/orgs` に不正 JSON を送信して 400 (INVALID_JSON) を返すことを検証。
+- 修正ファイル: `src/app/api/orgs/route.test.ts`
+
+### S-26/F-24 テスト: org 作成 wrapVersion 保存テスト — 解決済み
+
+- **対応:** `wrapVersion: 1` が `Organization.create` の `memberKeys.create` に渡されることを検証。
+- 修正ファイル: `src/app/api/orgs/route.test.ts`
+
+### S-30 テスト: `member-key` の `keyVersion` 上限テスト — 解決済み
+
+- **対応:** `keyVersion=10001` で 400 を返すことを検証。
+- 修正ファイル: `src/app/api/orgs/[orgId]/member-key/route.test.ts`
+
+### F-29 テスト: `rotate-key` の混合 orgKeyVersion 成功テスト — 解決済み
+
+- **対応:** 履歴復元で古い orgKeyVersion を持つエントリがあっても鍵ローテーションが成功することを検証。
+- 修正ファイル: `src/app/api/orgs/[orgId]/rotate-key/route.test.ts`
+
 ### T-1/T-2/T-3/T-7: 新規テストファイル作成 — 保留
 
 - `org-vault-context.tsx`, `org-entry-save.ts`, `share-e2e-entry-view.tsx` のユニットテストは、複雑な React コンテキスト/Web Crypto API モック基盤が必要。別 PR で対応予定。
@@ -287,4 +367,4 @@
 
 ## 対応状況
 
-全 2353 テスト pass。
+全 2358 テスト pass。
