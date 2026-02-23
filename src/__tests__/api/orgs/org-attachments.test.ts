@@ -31,7 +31,7 @@ vi.mock("@/lib/org-auth", () => {
       this.status = status;
     }
   }
-  return { requireOrgPermission: mockRequireOrgPermission, OrgAuthError };
+  return { requireOrgPermission: mockRequireOrgPermission, isMigrationLocked: vi.fn().mockResolvedValue(false), OrgAuthError };
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
