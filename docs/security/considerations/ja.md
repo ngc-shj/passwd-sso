@@ -5,7 +5,7 @@
 ## 1. 脅威モデル（概要）
 
 - 個人保管庫はクライアント側 E2E 暗号化。サーバーは暗号文のみ保持。
-- 組織保管庫はサーバー側暗号化。組織鍵は `ORG_MASTER_KEY` でラップ。
+- 組織保管庫は E2E（クライアント側）暗号化。組織鍵配布は ECDH-P256 のメンバー鍵交換で行う。
 - ブラウザ拡張は利便性機能であり、保管庫の安全性を下げない設計が前提。
 
 ## 1.1 構成図（AA）
@@ -23,7 +23,7 @@
 │              Next.js App Server              │
 │  - Auth.js session                           │
 │  - API routes                                │
-│  - Org vault server-side crypto              │
+│  - Share links / sends server-side crypto    │
 └───────────┬───────────────────┬──────────────┘
             │ TLS               │ TLS
             ▼                   ▼
@@ -138,13 +138,12 @@ Client(valid時):
   - 鍵: `VERIFIER_PEPPER_KEY`（本番必須、64 hex）
   - 非本番のみ `ORG_MASTER_KEY` から導出フォールバック
 
-### 組織保管庫（Server Crypto / `src/lib/crypto-server.ts`）
+### 共有リンク / Send（Server Crypto / `src/lib/crypto-server.ts`）
 
 - アルゴリズム: `aes-256-gcm`（Node `crypto`）
 - `ORG_MASTER_KEY`: 64 hex（256-bit）
-- 組織鍵 `orgKey`: ランダム `32 bytes`
 - IV: `12 bytes`、AuthTag: `16 bytes`
-- `ORG_MASTER_KEY` で `orgKey` をラップし、組織データ暗号化に利用
+- サーバー暗号化される共有リンク / Send の暗号化に利用
 
 ### エクスポート暗号化（`src/lib/export-crypto.ts`）
 
@@ -270,10 +269,10 @@ Client(valid時):
 
 - 生成:
   - 個人: `secretKey` / `accountSalt` をクライアントで生成
-  - 組織: `orgKey` をサーバーで生成
+  - 組織: クライアント側 org key を ECDH-P256 でメンバー配布
 - 保存:
   - 個人: `secretKey` は `wrappingKey` でラップして保存
-  - 組織: `orgKey` は `ORG_MASTER_KEY` でラップして保存
+  - 組織: メンバーごとのラップ済み org key を `OrgMemberKey` に保存
 - 利用:
   - unlock 後に復号鍵をランタイムへ展開
 - ローテーション:
@@ -303,7 +302,7 @@ Client(valid時):
 ### 12.2 サーバー秘密情報漏えい疑い
 
 1. `AUTH_SECRET` / `ORG_MASTER_KEY` / `VERIFIER_PEPPER_KEY` をローテーション  
-2. 影響範囲（org vault 復号可否、共有リンク、セッション）を評価  
+2. 影響範囲（共有リンク/Send の復号可否、セッション）を評価  
 3. 必要時は鍵再発行・ユーザー再認証を実施
 
 ### 12.3 DB 漏えい疑い

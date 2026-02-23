@@ -15,16 +15,18 @@ SSO 認証とエンドツーエンド暗号化を備えたセルフホスト型�
 - **セキュリティ監査（Watchtower）** - 漏洩（HIBP）、弱い、再利用、古い、HTTP URL の検出とスコア表示
 - **インポート / エクスポート** - Bitwarden、1Password、Chrome CSV インポート; CSV/JSON エクスポート（互換 / passwd-sso 完全復元プロファイル）
 - **パスワード保護エクスポート** - AES-256-GCM + PBKDF2（600k）で暗号化
-- **ファイル添付** - 暗号化ファイル添付（個人: E2E、組織: サーバーサイド）
+- **ファイル添付** - 暗号化ファイル添付（個人/組織とも E2E）
 - **共有リンク** - 期限付きの読み取り専用共有 + アクセスログ
 - **監査ログ** - 個人/組織の監査ログ（フィルタ、エクスポートイベント記録）
 - **緊急アクセス** - 鍵交換による一時的な Vault アクセスの申請/承認
+- **セッション管理** - アクティブセッション一覧と個別/全体失効
+- **セキュリティ通知** - 緊急アクセスイベントのメール通知
 - **鍵ローテーション** - パスフレーズ検証による暗号化鍵の更新
 - **タグ & 整理** - 色付きタグ、お気に入り、アーカイブ、ゴミ箱（30 日自動削除）
 - **キーボードショートカット** - `/ or Cmd+K` 検索、`n` 新規、`?` ヘルプ、`Esc` クリア
 - **多言語対応** - 日本語・英語（next-intl）
 - **ダークモード** - ライト / ダーク / システム（next-themes）
-- **組織 Vault** - チームでのパスワード共有（サーバーサイド AES-256-GCM 暗号化、RBAC: Owner/Admin/Member/Viewer）
+- **組織 Vault** - チームでのパスワード共有（E2E 暗号化、RBAC: Owner/Admin/Member/Viewer）
 - **回復キー** - 256 ビット回復キー（HKDF + AES-256-GCM）、Base32 エンコード + チェックサム; パスフレーズなしで Vault を復旧
 - **Vault リセット** - 最終手段としての全データ削除（確認トークン "DELETE MY VAULT"）
 - **アカウントロックアウト** - 段階的ロックアウト（5 回→15 分、10 回→1 時間、15 回→24 時間）+ 監査ログ
@@ -44,18 +46,18 @@ SSO 認証とエンドツーエンド暗号化を備えたセルフホスト型�
 | 認証 | Auth.js v5（データベースセッション） |
 | SAML ブリッジ | BoxyHQ SAML Jackson（Docker） |
 | UI | Tailwind CSS 4 + shadcn/ui + Radix UI |
-| 暗号化 | Web Crypto API（クライアントサイド）+ AES-256-GCM（サーバーサイド: 組織 Vault） |
+| 暗号化 | Web Crypto API（Vault E2E）+ AES-256-GCM（サーバーサイド: 共有リンク / Send） |
 | キャッシュ / レート制限 | Redis 7 |
 
 ## アーキテクチャ
 
 ```
 ブラウザ (Web Crypto API)
-  │  ← 個人 Vault: AES-256-GCM E2E 暗号化/復号
+  │  ← 個人/組織 Vault: AES-256-GCM E2E 暗号化/復号
   ▼
 Next.js アプリ (SSR / API Routes)
   │  ← Auth.js セッション、ルート保護、RBAC
-  │  ← 組織 Vault: サーバーサイド AES-256-GCM 暗号化/復号
+  │  ← 共有リンク / Send: サーバーサイド AES-256-GCM 暗号化
   ▼
 PostgreSQL ← Prisma 7          Redis ← レート制限
   │
@@ -65,7 +67,7 @@ SAML Jackson (Docker) ← SAML 2.0 IdP (HENNGE, Okta, Azure AD 等)
 
 **個人 Vault** — すべてのパスワードデータは**クライアントサイドで暗号化**されてからサーバーに送信されます。サーバーは暗号文のみを保存し、復号はユーザーのマスターパスフレーズから導出された鍵を使ってブラウザ内でのみ行われます。
 
-**組織 Vault** — 共有パスワードは**サーバーサイドで暗号化**されます（組織ごとの鍵を `ORG_MASTER_KEY` でラップ）。個別の鍵交換なしにチームメンバー間で即座にパスワードを共有できます。
+**組織 Vault** — 共有パスワードは**クライアントサイド E2E**で暗号化されます。組織鍵配布は ECDH-P256 によるメンバー鍵交換で行います。
 
 ## セットアップ
 
@@ -102,7 +104,7 @@ cp .env.example .env.local
 | `AUTH_JACKSON_ID` | Jackson OIDC クライアント ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC クライアントシークレット |
 | `SAML_PROVIDER_NAME` | サインインページの表示名（例: "HENNGE"） |
-| `ORG_MASTER_KEY` | 組織 Vault マスターキー — `openssl rand -hex 32` |
+| `ORG_MASTER_KEY` | サーバー暗号化される共有リンク / Send 用マスターキー（V1 互換エイリアス）— `openssl rand -hex 32` |
 | `VERIFIER_PEPPER_KEY` | パスフレーズ検証用 pepper キー — `openssl rand -hex 32`（**本番必須**） |
 | `REDIS_URL` | レート制限用 Redis URL（本番必須） |
 | `BLOB_BACKEND` | 添付ファイルの保存先バックエンド（`db` / `s3` / `azure` / `gcs`） |
@@ -203,16 +205,28 @@ npm run build
 |---|---|
 | `npm run dev` | 開発サーバー（Turbopack） |
 | `npm run build` | プロダクションビルド |
-| `npm run start` | プロダクションサーバー起動 |
 | `npm run lint` | ESLint |
-| `npm test` | テスト実行（Vitest） |
 | `npm run test:watch` | テスト（ウォッチモード） |
 | `npm run test:coverage` | テスト（カバレッジ付き） |
+| `npm run test:e2e` | Playwright E2E テスト実行 |
 | `npm run db:migrate` | Prisma マイグレーション（dev） |
 | `npm run db:push` | マイグレーションなしでスキーマ反映 |
 | `npm run db:seed` | シードデータ投入 |
 | `npm run db:studio` | Prisma Studio GUI |
 | `npm run generate:key` | 256 ビット hex キー生成 |
+| `npm run licenses:check` | アプリ依存のライセンスチェック（non-strict） |
+| `npm run licenses:check:strict` | アプリ依存のライセンスチェック（strict / CI用） |
+| `npm run licenses:check:ext` | 拡張依存のライセンスチェック（non-strict） |
+| `npm run licenses:check:ext:strict` | 拡張依存のライセンスチェック（strict / CI用） |
+| `npm run test:load:smoke` | 負荷テスト用シードのスモークチェック |
+| `npm run test:load:seed` | 負荷テスト用ユーザー/セッションをシード |
+| `npm run test:load` | k6 mixed-workload シナリオ実行 |
+| `npm run test:load:health` | k6 health シナリオ実行 |
+| `npm run test:load:cleanup` | 負荷テスト用ユーザー/セッションを削除 |
+
+ライフサイクルスクリプト（`available via npm run` には出ない）:
+- `npm test` - テスト一括実行（`vitest run`）
+- `npm start` - 本番サーバー起動（`next start`）
 
 ## プロジェクト構成
 
@@ -249,8 +263,9 @@ src/
 ├── lib/
 │   ├── crypto-client.ts      # クライアントサイド E2E 暗号化（個人 Vault）
 │   ├── crypto-recovery.ts    # 回復キー暗号モジュール（HKDF + AES-256-GCM ラップ）
-│   ├── crypto-server.ts      # サーバーサイド暗号化（組織 Vault）
+│   ├── crypto-server.ts      # 共有リンク / Send 用サーバー暗号 + verifier HMAC
 │   ├── crypto-aad.ts         # 暗号化の追加認証データ（AAD）
+│   ├── crypto-org.ts         # 組織 E2E 暗号（ECDH-P256 鍵交換）
 │   ├── crypto-emergency.ts   # 緊急アクセス鍵交換
 │   ├── export-crypto.ts      # パスワード保護エクスポート暗号化
 │   ├── org-auth.ts           # 組織 RBAC 認可ヘルパー
@@ -284,26 +299,27 @@ extension/
 - **セッションセキュリティ** - データベースセッション（JWT ではない）、8 時間タイムアウト + 1 時間延長
 - **自動ロック** - 15 分無操作または 5 分タブ非表示で Vault をロック
 - **クリップボードクリア** - コピーしたパスワードは 30 秒後に自動消去
-- **組織 Vault** - サーバーサイド AES-256-GCM（組織ごとの鍵を `ORG_MASTER_KEY` でラップ）
+- **組織 Vault** - E2E 暗号化（ECDH-P256）+ メンバーごとの鍵配布
 - **RBAC** - Owner / Admin / Member / Viewer のロールベースアクセス制御
 - **回復キー** - 256 ビットランダム → HKDF → AES-256-GCM で秘密鍵をラップ; サーバーは HMAC(pepper, verifierHash) のみ保存
 - **Vault リセット** - 最終手段としての全データ削除（固定確認トークン）
 - **アカウントロックアウト** - 段階的ロックアウト（5 回→15 分、10 回→1 時間、15 回→24 時間）、DB 永続 + 監査ログ
-- **レート制限** - Redis による Vault アンロック試行制限（15 分間に 5 回まで）
+- **レート制限** - Redis による機密操作 API の制限（Vault アンロックを含む）
 - **CSRF 防御** - JSON body + SameSite Cookie + CSP + Origin ヘッダー検証（破壊的エンドポイント）
 - **CSP** - nonce ベースの Content Security Policy と違反レポート
 
 ## デプロイガイド
 
-- [Docker Compose セットアップ（日本語）](docs/setup.docker.ja.md) / [English](docs/setup.docker.en.md)
-- [AWS デプロイ（日本語）](docs/setup.aws.ja.md) / [English](docs/setup.aws.en.md)
-- [Vercel デプロイ（日本語）](docs/setup.vercel.ja.md) / [English](docs/setup.vercel.en.md)
+- Setup ドキュメント方針: `docs/setup/README.md`（英語版のみ）
+- [Docker Compose セットアップ（English）](docs/setup/docker/en.md)
+- [AWS デプロイ（English）](docs/setup/aws/en.md)
+- [Vercel デプロイ（English）](docs/setup/vercel/en.md)
 - [Terraform (AWS)（日本語）](infra/terraform/README.ja.md) / [English](infra/terraform/README.md)
 
 ## セキュリティドキュメント
 
 - [Security Policy](SECURITY.md)
-- [セキュリティ考慮事項（日本語）](docs/security-considerations.ja.md) / [English](docs/security-considerations.en.md)
+- [セキュリティ考慮事項（日本語）](docs/security/considerations/ja.md) / [English](docs/security/considerations/en.md)
 
 ## ライセンス
 
