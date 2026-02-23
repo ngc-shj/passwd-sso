@@ -91,6 +91,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/history", () => {
         blobIv: "iv",
         blobAuthTag: "tag",
         aadVersion: 1,
+        orgKeyVersion: 2,
         changedAt,
         changedBy: { id: "u1", name: "Admin", email: "admin@test.com" },
       },
@@ -103,6 +104,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/history", () => {
     expect(status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].encryptedBlob).toEqual({ ciphertext: "cipher", iv: "iv", authTag: "tag" });
+    expect(json[0].orgKeyVersion).toBe(2);
     expect(json[0].changedBy.name).toBe("Admin");
   });
 });
