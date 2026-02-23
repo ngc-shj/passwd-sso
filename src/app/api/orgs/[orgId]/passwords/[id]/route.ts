@@ -139,6 +139,20 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { encryptedBlob, encryptedOverview, aadVersion, orgKeyVersion, tagIds, orgFolderId, isArchived } = parsed.data;
   const isFullUpdate = encryptedBlob !== undefined;
 
+  // Validate orgKeyVersion matches current org key version (F-13)
+  if (isFullUpdate) {
+    const org = await prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { orgKeyVersion: true },
+    });
+    if (!org || orgKeyVersion !== org.orgKeyVersion) {
+      return NextResponse.json(
+        { error: API_ERROR.ORG_KEY_VERSION_MISMATCH },
+        { status: 409 }
+      );
+    }
+  }
+
   // Validate orgFolderId belongs to this org
   if (orgFolderId) {
     const folder = await prisma.orgFolder.findUnique({
