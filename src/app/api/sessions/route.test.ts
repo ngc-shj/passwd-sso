@@ -113,6 +113,14 @@ describe("DELETE /api/sessions", () => {
     expect(res.status).toBe(429);
   });
 
+  it("returns 401 when session cookie is missing", async () => {
+    const res = await DELETE(
+      createRequest("DELETE", "http://localhost:3000/api/sessions"),
+    );
+    expect(res.status).toBe(401);
+    expect(mockPrismaSession.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("deletes all sessions except current and logs audit", async () => {
     mockPrismaSession.deleteMany.mockResolvedValue({ count: 3 });
 

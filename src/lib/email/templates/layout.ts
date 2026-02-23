@@ -1,4 +1,13 @@
-const appName = process.env.NEXT_PUBLIC_APP_NAME ?? "passwd-sso";
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+const appName = escapeHtml(process.env.NEXT_PUBLIC_APP_NAME ?? "passwd-sso");
 
 const FOOTER: Record<string, string> = {
   ja: "このメールはシステムにより自動送信されています。",
