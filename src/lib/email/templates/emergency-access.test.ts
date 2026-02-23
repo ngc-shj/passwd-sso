@@ -68,4 +68,19 @@ describe("emergency access email templates", () => {
       });
     });
   }
+
+  describe("HTML escaping", () => {
+    it("escapes HTML characters in names for html output", () => {
+      const malicious = '<script>alert("xss")</script>';
+      const result = emergencyInviteEmail("en", malicious);
+      expect(result.html).not.toContain("<script>");
+      expect(result.html).toContain("&lt;script&gt;");
+    });
+
+    it("preserves raw name in text output", () => {
+      const name = '<b>Test</b>';
+      const result = emergencyGrantAcceptedEmail("en", name);
+      expect(result.text).toContain("<b>Test</b>");
+    });
+  });
 });

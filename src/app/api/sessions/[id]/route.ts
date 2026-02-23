@@ -6,15 +6,9 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
+import { getSessionToken } from "../helpers";
 
 const revokeLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
-
-function getSessionToken(req: NextRequest): string | null {
-  const isProduction = process.env.NODE_ENV === "production";
-  return isProduction
-    ? req.cookies.get("__Secure-authjs.session-token")?.value ?? null
-    : req.cookies.get("authjs.session-token")?.value ?? null;
-}
 
 async function handleDELETE(
   request: NextRequest,

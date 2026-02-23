@@ -158,5 +158,29 @@ describe("createCustomAdapter", () => {
       expect(callData).not.toHaveProperty("expires");
       expect(callData).toHaveProperty("lastActiveAt");
     });
+
+    it("returns null when session not found (P2025)", async () => {
+      const { Prisma } = await import("@prisma/client");
+      const p2025 = new Prisma.PrismaClientKnownRequestError(
+        "Record not found",
+        { code: "P2025", clientVersion: "7.0.0" },
+      );
+      mockPrismaSession.update.mockRejectedValue(p2025);
+
+      const adapter = createCustomAdapter();
+      const result = await adapter.updateSession!({ sessionToken: "deleted-tok" });
+
+      expect(result).toBeNull();
+    });
+
+    it("re-throws non-P2025 Prisma errors", async () => {
+      const otherErr = new Error("connection lost");
+      mockPrismaSession.update.mockRejectedValue(otherErr);
+
+      const adapter = createCustomAdapter();
+      await expect(
+        adapter.updateSession!({ sessionToken: "tok-1" }),
+      ).rejects.toThrow("connection lost");
+    });
   });
 });

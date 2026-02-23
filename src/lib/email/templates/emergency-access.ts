@@ -1,4 +1,4 @@
-import { emailLayout } from "./layout";
+import { emailLayout, escapeHtml } from "./layout";
 
 interface TemplateResult {
   subject: string;
@@ -117,7 +117,7 @@ export function emergencyInviteEmail(
   const l = getLabels(locale);
   return {
     subject: l.invite.subject,
-    html: emailLayout(l.invite.body(ownerName), locale),
+    html: emailLayout(l.invite.body(escapeHtml(ownerName)), locale),
     text: l.invite.text(ownerName),
   };
 }
@@ -130,7 +130,7 @@ export function emergencyGrantAcceptedEmail(
   const l = getLabels(locale);
   return {
     subject: l.accepted.subject,
-    html: emailLayout(l.accepted.body(granteeName), locale),
+    html: emailLayout(l.accepted.body(escapeHtml(granteeName)), locale),
     text: l.accepted.text(granteeName),
   };
 }
@@ -143,7 +143,7 @@ export function emergencyGrantDeclinedEmail(
   const l = getLabels(locale);
   return {
     subject: l.declined.subject,
-    html: emailLayout(l.declined.body(granteeName), locale),
+    html: emailLayout(l.declined.body(escapeHtml(granteeName)), locale),
     text: l.declined.text(granteeName),
   };
 }
@@ -157,7 +157,7 @@ export function emergencyAccessRequestedEmail(
   const l = getLabels(locale);
   return {
     subject: l.requested.subject,
-    html: emailLayout(l.requested.body(granteeName, waitDays), locale),
+    html: emailLayout(l.requested.body(escapeHtml(granteeName), waitDays), locale),
     text: l.requested.text(granteeName, waitDays),
   };
 }
@@ -170,7 +170,7 @@ export function emergencyAccessApprovedEmail(
   const l = getLabels(locale);
   return {
     subject: l.approved.subject,
-    html: emailLayout(l.approved.body(ownerName), locale),
+    html: emailLayout(l.approved.body(escapeHtml(ownerName)), locale),
     text: l.approved.text(ownerName),
   };
 }
@@ -183,7 +183,7 @@ export function emergencyAccessRevokedEmail(
   const l = getLabels(locale);
   return {
     subject: l.revoked.subject,
-    html: emailLayout(l.revoked.body(ownerName), locale),
+    html: emailLayout(l.revoked.body(escapeHtml(ownerName)), locale),
     text: l.revoked.text(ownerName),
   };
 }

@@ -1,5 +1,6 @@
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { Adapter, AdapterSession } from "next-auth/adapters";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sessionMetaStorage } from "@/lib/session-meta";
 
@@ -39,19 +40,29 @@ export function createCustomAdapter(): Adapter {
     async updateSession(
       session: Partial<AdapterSession> & Pick<AdapterSession, "sessionToken">,
     ): Promise<AdapterSession | null | undefined> {
-      const updated = await prisma.session.update({
-        where: { sessionToken: session.sessionToken },
-        data: {
-          ...(session.expires ? { expires: session.expires } : {}),
-          lastActiveAt: new Date(),
-        },
-      });
+      try {
+        const updated = await prisma.session.update({
+          where: { sessionToken: session.sessionToken },
+          data: {
+            ...(session.expires ? { expires: session.expires } : {}),
+            lastActiveAt: new Date(),
+          },
+        });
 
-      return {
-        sessionToken: updated.sessionToken,
-        userId: updated.userId,
-        expires: updated.expires,
-      };
+        return {
+          sessionToken: updated.sessionToken,
+          userId: updated.userId,
+          expires: updated.expires,
+        };
+      } catch (err) {
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === "P2025"
+        ) {
+          return null;
+        }
+        throw err;
+      }
     },
   };
 }

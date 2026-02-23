@@ -6,15 +6,9 @@ import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
+import { getSessionToken } from "./helpers";
 
 const revokeAllLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
-
-function getSessionToken(req: NextRequest): string | null {
-  const isProduction = process.env.NODE_ENV === "production";
-  return isProduction
-    ? req.cookies.get("__Secure-authjs.session-token")?.value ?? null
-    : req.cookies.get("authjs.session-token")?.value ?? null;
-}
 
 async function handleGET(request: NextRequest) {
   const session = await auth();
@@ -74,11 +68,17 @@ async function handleDELETE(request: NextRequest) {
   }
 
   const currentToken = getSessionToken(request);
+  if (!currentToken) {
+    return NextResponse.json(
+      { error: API_ERROR.UNAUTHORIZED },
+      { status: 401 },
+    );
+  }
 
   const result = await prisma.session.deleteMany({
     where: {
       userId: session.user.id,
-      sessionToken: { not: currentToken ?? undefined },
+      sessionToken: { not: currentToken },
     },
   });
 
