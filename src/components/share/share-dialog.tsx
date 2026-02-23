@@ -162,7 +162,8 @@ export function ShareDialog({
       };
 
       // Strip TOTP before sharing (F-21)
-      const { totp: _totp, ...safeData } = (decryptedData ?? {}) as Record<string, unknown>;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { totp, ...safeData } = (decryptedData ?? {}) as Record<string, unknown>;
 
       if (passwordEntryId) {
         body.passwordEntryId = passwordEntryId;

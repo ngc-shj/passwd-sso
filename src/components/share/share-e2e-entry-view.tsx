@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -83,11 +83,39 @@ export function ShareE2EEntryView({
   maxViews,
 }: ShareE2EEntryViewProps) {
   const t = useTranslations("Share");
-  const [state, setState] = useState<
-    | { status: "loading" }
+
+  // Parse share key from URL fragment (pure computation, no setState).
+  const parsedKey = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const hash = window.location.hash;
+    const keyParam = hash
+      .slice(1)
+      .split("&")
+      .find((p) => p.startsWith("key="));
+    if (!keyParam) return null;
+    const keyB64 = keyParam.slice(4);
+    if (!keyB64) return null;
+    try {
+      const bytes = base64urlDecode(keyB64);
+      return bytes.length === 32 ? bytes : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Decrypt state — only set from async callbacks inside the effect.
+  const [decryptState, setDecryptState] = useState<
+    | { status: "pending" }
     | { status: "error"; reason: string }
     | { status: "ok"; data: Record<string, unknown> }
-  >({ status: "loading" });
+  >({ status: "pending" });
+
+  // Derive display state: missing key → error, pending → loading, otherwise decrypt result.
+  const state = !parsedKey
+    ? ({ status: "error", reason: "missingKey" } as const)
+    : decryptState.status === "pending"
+      ? ({ status: "loading" } as const)
+      : decryptState;
 
   // Prevent URL leakage via Referer header (S-06)
   useEffect(() => {
@@ -99,45 +127,16 @@ export function ShareE2EEntryView({
   }, []);
 
   useEffect(() => {
-    // Extract share key from URL fragment and immediately remove it (S-15)
-    const hash = window.location.hash;
-    const keyParam = hash
-      .slice(1) // remove '#'
-      .split("&")
-      .find((p) => p.startsWith("key="));
-
-    // Remove fragment from browser history immediately
+    // Remove fragment from browser history immediately (S-15)
     history.replaceState(null, "", location.pathname + location.search);
 
-    if (!keyParam) {
-      setState({ status: "error", reason: "missingKey" });
-      return;
-    }
+    if (!parsedKey) return;
 
-    const keyB64 = keyParam.slice(4); // remove 'key='
-    if (!keyB64) {
-      setState({ status: "error", reason: "missingKey" });
-      return;
-    }
-
-    let keyBytes: Uint8Array;
-    try {
-      keyBytes = base64urlDecode(keyB64);
-    } catch {
-      setState({ status: "error", reason: "missingKey" });
-      return;
-    }
-
-    if (keyBytes.length !== 32) {
-      setState({ status: "error", reason: "missingKey" });
-      return;
-    }
-
-    decryptShareE2E(encryptedData, dataIv, dataAuthTag, keyBytes)
-      .then((data) => setState({ status: "ok", data }))
-      .catch(() => setState({ status: "error", reason: "decryptFailed" }))
-      .finally(() => keyBytes.fill(0));
-  }, [encryptedData, dataIv, dataAuthTag]);
+    decryptShareE2E(encryptedData, dataIv, dataAuthTag, parsedKey)
+      .then((data) => setDecryptState({ status: "ok", data }))
+      .catch(() => setDecryptState({ status: "error", reason: "decryptFailed" }))
+      .finally(() => parsedKey.fill(0));
+  }, [parsedKey, encryptedData, dataIv, dataAuthTag]);
 
   if (state.status === "loading") {
     return (
