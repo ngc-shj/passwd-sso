@@ -25,7 +25,7 @@ const encryptedFieldSchema = z.object({
 });
 
 const rotateKeySchema = z.object({
-  newOrgKeyVersion: z.number().int().min(2),
+  newOrgKeyVersion: z.number().int().min(2).max(10_000),
   entries: z.array(
     z.object({
       id: z.string().min(1),
@@ -38,7 +38,7 @@ const rotateKeySchema = z.object({
     z.object({
       userId: z.string().min(1),
     }).merge(orgMemberKeySchema)
-  ).min(1),
+  ).min(1).max(1000),
 });
 
 // POST /api/orgs/[orgId]/rotate-key — Rotate org encryption key
@@ -197,7 +197,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         where: { id: orgId },
         data: { orgKeyVersion: newOrgKeyVersion },
       });
-    });
+    }, { timeout: 60_000 });
   } catch (e) {
     if (e instanceof Error && e.message === "ORG_KEY_VERSION_CONFLICT") {
       return NextResponse.json(
