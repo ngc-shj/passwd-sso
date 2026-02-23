@@ -114,7 +114,10 @@ describe("POST /api/emergency-access", () => {
     );
     // Sends invite email to grantee
     expect(mockSendEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "grantee@test.com" })
+      expect.objectContaining({
+        to: "grantee@test.com",
+        subject: expect.stringContaining("緊急アクセスの招待"),
+      })
     );
   });
 });

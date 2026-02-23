@@ -21,6 +21,16 @@ async function handleGET(request: NextRequest) {
 
   const currentToken = getSessionToken(request);
 
+  // Look up current session ID without loading all tokens into memory
+  let currentSessionId: string | null = null;
+  if (currentToken) {
+    const current = await prisma.session.findUnique({
+      where: { sessionToken: currentToken },
+      select: { id: true },
+    });
+    currentSessionId = current?.id ?? null;
+  }
+
   const sessions = await prisma.session.findMany({
     where: {
       userId: session.user.id,
@@ -32,7 +42,6 @@ async function handleGET(request: NextRequest) {
       lastActiveAt: true,
       ipAddress: true,
       userAgent: true,
-      sessionToken: true,
     },
     orderBy: { lastActiveAt: "desc" },
   });
@@ -43,7 +52,7 @@ async function handleGET(request: NextRequest) {
     lastActiveAt: s.lastActiveAt.toISOString(),
     ipAddress: s.ipAddress,
     userAgent: s.userAgent,
-    isCurrent: s.sessionToken === currentToken,
+    isCurrent: s.id === currentSessionId,
   }));
 
   return NextResponse.json(result);

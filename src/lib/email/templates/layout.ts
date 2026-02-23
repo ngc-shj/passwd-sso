@@ -9,6 +9,15 @@ export function escapeHtml(str: string): string {
 
 const appName = escapeHtml(process.env.NEXT_PUBLIC_APP_NAME ?? "passwd-sso");
 
+const SUPPORTED_LOCALES = ["ja", "en"] as const;
+const DEFAULT_LOCALE = "ja";
+
+function sanitizeLocale(locale: string): string {
+  return (SUPPORTED_LOCALES as readonly string[]).includes(locale)
+    ? locale
+    : DEFAULT_LOCALE;
+}
+
 const FOOTER: Record<string, string> = {
   ja: "このメールはシステムにより自動送信されています。",
   en: "This email was sent automatically by the system.",
@@ -16,11 +25,12 @@ const FOOTER: Record<string, string> = {
 
 export function emailLayout(
   body: string,
-  locale: string = "ja",
+  locale: string = DEFAULT_LOCALE,
 ): string {
-  const footer = FOOTER[locale] ?? FOOTER.en;
+  const safeLocale = sanitizeLocale(locale);
+  const footer = FOOTER[safeLocale] ?? FOOTER.en;
   return `<!DOCTYPE html>
-<html lang="${locale}">
+<html lang="${safeLocale}">
 <head><meta charset="utf-8" /></head>
 <body style="margin:0;padding:0;font-family:sans-serif;background:#f4f4f5;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:32px 0;">

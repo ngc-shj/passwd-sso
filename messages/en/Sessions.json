@@ -13,6 +13,8 @@
   "confirm": "Confirm",
   "revokeSuccess": "Session revoked.",
   "revokeAllSuccess": "All other sessions revoked.",
+  "fetchError": "Failed to load sessions.",
+  "revokeError": "Failed to revoke session.",
   "noOtherSessions": "No other active sessions.",
   "unknownDevice": "Unknown device",
   "unknownBrowser": "Unknown browser",

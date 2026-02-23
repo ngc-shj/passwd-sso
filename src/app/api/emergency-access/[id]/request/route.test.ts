@@ -95,7 +95,10 @@ describe("POST /api/emergency-access/[id]/request", () => {
     );
     // Sends requested email to owner
     expect(mockSendEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "owner@test.com" })
+      expect.objectContaining({
+        to: "owner@test.com",
+        subject: expect.stringContaining("リクエスト"),
+      })
     );
   });
 

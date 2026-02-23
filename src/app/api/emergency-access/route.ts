@@ -9,6 +9,7 @@ import { emergencyInviteEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { routing } from "@/i18n/routing";
 
 const createLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 5 });
 
@@ -85,8 +86,8 @@ export async function POST(req: NextRequest) {
   });
 
   const ownerName = session.user.name ?? session.user.email ?? "";
-  const { subject, html, text } = emergencyInviteEmail("ja", ownerName);
-  sendEmail({ to: granteeEmail, subject, html, text });
+  const { subject, html, text } = emergencyInviteEmail(routing.defaultLocale, ownerName);
+  void sendEmail({ to: granteeEmail, subject, html, text });
 
   // Return plaintext token only at creation time; DB stores only the hash
   return NextResponse.json({

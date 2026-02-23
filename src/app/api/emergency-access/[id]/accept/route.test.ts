@@ -170,7 +170,10 @@ describe("POST /api/emergency-access/[id]/accept", () => {
     expect(mockTransaction).toHaveBeenCalledTimes(1);
     // Sends accepted email to owner
     expect(mockSendEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "owner@test.com" })
+      expect.objectContaining({
+        to: "owner@test.com",
+        subject: expect.stringContaining("承諾"),
+      })
     );
   });
 });

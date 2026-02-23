@@ -104,6 +104,7 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.SHARE_LINKS) ||
     pathname.startsWith(API_PATH.SENDS) ||
     pathname.startsWith(API_PATH.EMERGENCY_ACCESS) ||
+    pathname.startsWith(API_PATH.SESSIONS) ||
     pathname.startsWith(`${API_PATH.API_ROOT}/extension`)
   ) {
     const hasSession = await hasValidSession(request);

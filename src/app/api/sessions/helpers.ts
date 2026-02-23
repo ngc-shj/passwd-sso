@@ -7,7 +7,7 @@ import type { NextRequest } from "next/server";
  * so it works correctly even in dev with AUTH_URL=https://localhost.
  */
 function isSecureCookie(): boolean {
-  const authUrl = process.env.AUTH_URL ?? process.env.NEXTAUTH_URL ?? "";
+  const authUrl = process.env.AUTH_URL || process.env.NEXTAUTH_URL || "";
   try {
     return new URL(authUrl).protocol === "https:";
   } catch {

@@ -104,7 +104,10 @@ describe("POST /api/emergency-access/[id]/approve", () => {
     });
     // Sends approved email to grantee
     expect(mockSendEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "grantee@test.com" })
+      expect.objectContaining({
+        to: "grantee@test.com",
+        subject: expect.stringContaining("承認"),
+      })
     );
   });
 });

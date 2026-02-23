@@ -13,6 +13,8 @@
   "confirm": "確認",
   "revokeSuccess": "セッションを取り消しました。",
   "revokeAllSuccess": "他のすべてのセッションを取り消しました。",
+  "fetchError": "セッションの読み込みに失敗しました。",
+  "revokeError": "セッションの取り消しに失敗しました。",
   "noOtherSessions": "他のアクティブなセッションはありません。",
   "unknownDevice": "不明なデバイス",
   "unknownBrowser": "不明なブラウザ",
