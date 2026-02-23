@@ -4,8 +4,11 @@ import { prisma } from "@/lib/prisma";
 import { revokeEmergencyGrantSchema } from "@/lib/validations";
 import { canTransition } from "@/lib/emergency-access-state";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { sendEmail } from "@/lib/email";
+import { emergencyAccessRevokedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { routing } from "@/i18n/routing";
 
 // POST /api/emergency-access/[id]/revoke — Owner revokes or rejects request
 export async function POST(
@@ -73,6 +76,18 @@ export async function POST(
       metadata: { granteeId: grant.granteeId, permanent: true },
       ...extractRequestMeta(req),
     });
+
+    if (grant.granteeId) {
+      const grantee = await prisma.user.findUnique({
+        where: { id: grant.granteeId },
+        select: { email: true, name: true },
+      });
+      if (grantee?.email) {
+        const ownerName = session.user.name ?? session.user.email ?? "";
+        const { subject, html, text } = emergencyAccessRevokedEmail(routing.defaultLocale, ownerName);
+        void sendEmail({ to: grantee.email, subject, html, text });
+      }
+    }
 
     return NextResponse.json({ status: EA_STATUS.REVOKED });
   } else {

@@ -1,18 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockPrismaUser, mockSendEmail } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
     update: vi.fn(),
   },
+  mockPrismaUser: { findUnique: vi.fn() },
+  mockSendEmail: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { emergencyAccessGrant: mockPrismaGrant },
+  prisma: { emergencyAccessGrant: mockPrismaGrant, user: mockPrismaUser },
 }));
+vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
 vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(),
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
@@ -36,6 +39,7 @@ describe("POST /api/emergency-access/[id]/approve", () => {
     mockAuth.mockResolvedValue({ user: { id: "owner-1" } });
     mockPrismaGrant.findUnique.mockResolvedValue(requestedGrant);
     mockPrismaGrant.update.mockResolvedValue({});
+    mockPrismaUser.findUnique.mockResolvedValue({ email: "grantee@test.com", name: "Grantee Name" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -98,5 +102,12 @@ describe("POST /api/emergency-access/[id]/approve", () => {
         activatedAt: expect.any(Date),
       },
     });
+    // Sends approved email to grantee
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "grantee@test.com",
+        subject: expect.stringContaining("承認"),
+      })
+    );
   });
 });

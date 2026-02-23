@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { sendEmail } from "@/lib/email";
+import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { routing } from "@/i18n/routing";
 
 // POST /api/emergency-access/[id]/decline — Decline a grant by ID (authenticated grantee)
 export async function POST(
@@ -47,6 +50,16 @@ export async function POST(
     metadata: { ownerId: grant.ownerId },
     ...extractRequestMeta(req),
   });
+
+  const owner = await prisma.user.findUnique({
+    where: { id: grant.ownerId },
+    select: { email: true, name: true },
+  });
+  if (owner?.email) {
+    const granteeName = session.user.name ?? session.user.email ?? "";
+    const { subject, html, text } = emergencyGrantDeclinedEmail(routing.defaultLocale, granteeName);
+    void sendEmail({ to: owner.email, subject, html, text });
+  }
 
   return NextResponse.json({ status: EA_STATUS.REJECTED });
 }

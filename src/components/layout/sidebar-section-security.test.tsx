@@ -78,7 +78,7 @@ describe("UtilitiesSection", () => {
     expect(screen.queryByRole("link", { name: "orgSettings" })).toBeNull();
   });
 
-  it("shows org settings link to /dashboard/orgs in personal context", () => {
+  it("shows settings and org settings links in personal context", () => {
     render(
       <UtilitiesSection
         isOpen
@@ -90,10 +90,29 @@ describe("UtilitiesSection", () => {
       />
     );
 
+    expect(screen.getByRole("link", { name: "settings" })).toHaveAttribute(
+      "href",
+      "/dashboard/settings"
+    );
     expect(screen.getByRole("link", { name: "orgSettings" })).toHaveAttribute(
       "href",
       "/dashboard/orgs"
     );
+  });
+
+  it("hides settings link when org is selected", () => {
+    render(
+      <UtilitiesSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        tOrg={(k) => k}
+        selectedOrg={{ id: "org-1", name: "Acme", role: "ADMIN" }}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.queryByRole("link", { name: "settings" })).toBeNull();
   });
 
   it("routes import/export to org pages when org is selected", () => {

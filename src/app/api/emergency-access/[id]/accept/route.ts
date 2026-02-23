@@ -3,9 +3,12 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { acceptEmergencyGrantByIdSchema } from "@/lib/validations";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { sendEmail } from "@/lib/email";
+import { emergencyGrantAcceptedEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { routing } from "@/i18n/routing";
 
 const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 
@@ -94,6 +97,16 @@ export async function POST(
     metadata: { ownerId: grant.ownerId },
     ...extractRequestMeta(req),
   });
+
+  const owner = await prisma.user.findUnique({
+    where: { id: grant.ownerId },
+    select: { email: true, name: true },
+  });
+  if (owner?.email) {
+    const granteeName = session.user.name ?? session.user.email ?? "";
+    const { subject, html, text } = emergencyGrantAcceptedEmail(routing.defaultLocale, granteeName);
+    void sendEmail({ to: owner.email, subject, html, text });
+  }
 
   return NextResponse.json({ status: EA_STATUS.ACCEPTED });
 }
