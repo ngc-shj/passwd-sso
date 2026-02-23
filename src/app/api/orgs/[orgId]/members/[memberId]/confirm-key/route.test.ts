@@ -2,12 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaOrgMember, mockPrismaUser,
-  mockPrismaOrgMemberKey, mockTransaction,
+  mockPrismaOrgMemberKey, mockPrismaOrganization, mockTransaction,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaOrgMember: { findUnique: vi.fn(), update: vi.fn() },
   mockPrismaUser: { findUnique: vi.fn() },
   mockPrismaOrgMemberKey: { upsert: vi.fn() },
+  mockPrismaOrganization: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
 }));
 
@@ -17,6 +18,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 const txProxy = {
   orgMember: mockPrismaOrgMember,
   orgMemberKey: mockPrismaOrgMemberKey,
+  organization: mockPrismaOrganization,
 };
 
 vi.mock("@/lib/prisma", () => ({
@@ -45,6 +47,7 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "admin-user" } });
+    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
     // Interactive transaction: call the callback with tx proxy
     mockTransaction.mockImplementation(async (fn: (tx: typeof txProxy) => unknown) => fn(txProxy));
   });
@@ -174,6 +177,23 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("INVALID_JSON");
+  });
+
+  it("returns 409 when keyVersion does not match org's current version (F-16)", async () => {
+    mockPrismaOrgMember.findUnique
+      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" })
+      .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: false })
+      .mockResolvedValueOnce({ keyDistributed: false }); // re-check passes
+    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
+    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 }); // org rotated to v2
+
+    const res = await POST(
+      createRequest("POST", URL, { body: validBody }), // keyVersion: 1 (stale)
+      { params: Promise.resolve({ orgId: "org-1", memberId: "member-1" }) },
+    );
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
   });
 
   it("returns 409 when key already distributed (TOCTOU race)", async () => {

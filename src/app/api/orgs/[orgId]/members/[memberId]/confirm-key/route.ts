@@ -83,13 +83,22 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const data = parsed.data;
 
-  // Atomic check-and-set: re-verify keyDistributed inside transaction (S-12 TOCTOU fix)
+  // Atomic check-and-set: re-verify keyDistributed + orgKeyVersion inside transaction (S-12/F-16)
   const distributed = await prisma.$transaction(async (tx) => {
     const member = await tx.orgMember.findUnique({
       where: { id: memberId },
       select: { keyDistributed: true },
     });
-    if (member?.keyDistributed) return false;
+    if (member?.keyDistributed) return "already_distributed" as const;
+
+    // Verify keyVersion matches current org key version (F-16)
+    const org = await tx.organization.findUnique({
+      where: { id: orgId },
+      select: { orgKeyVersion: true },
+    });
+    if (!org || data.keyVersion !== org.orgKeyVersion) {
+      return "version_mismatch" as const;
+    }
 
     await tx.orgMemberKey.upsert({
       where: {
@@ -123,12 +132,18 @@ export async function POST(req: NextRequest, { params }: Params) {
       data: { keyDistributed: true },
     });
 
-    return true;
+    return "success" as const;
   });
 
-  if (!distributed) {
+  if (distributed === "already_distributed") {
     return NextResponse.json(
       { error: API_ERROR.KEY_ALREADY_DISTRIBUTED },
+      { status: 409 }
+    );
+  }
+  if (distributed === "version_mismatch") {
+    return NextResponse.json(
+      { error: API_ERROR.ORG_KEY_VERSION_MISMATCH },
       { status: 409 }
     );
   }

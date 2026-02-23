@@ -155,11 +155,11 @@ export function ShareDialog({
 
   const handleCreate = async () => {
     setCreating(true);
+    let shareKeyForFragment: Uint8Array | undefined;
     try {
       const body: Record<string, unknown> = {
         expiresIn,
       };
-      let shareKeyForFragment: Uint8Array | undefined;
 
       if (passwordEntryId) {
         body.passwordEntryId = passwordEntryId;
