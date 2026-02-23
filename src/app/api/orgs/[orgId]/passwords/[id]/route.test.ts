@@ -45,7 +45,6 @@ vi.mock("@/lib/org-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,
   requireOrgMember: mockRequireOrgMember,
   hasOrgPermission: mockHasOrgPermission,
-  isMigrationLocked: vi.fn().mockResolvedValue(false),
   OrgAuthError,
 }));
 

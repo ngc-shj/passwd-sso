@@ -113,18 +113,6 @@ export async function requireOrgPermission(
   return membership;
 }
 
-/**
- * Check if the org is locked for migration.
- * Returns true if writes should be blocked.
- */
-export async function isMigrationLocked(orgId: string): Promise<boolean> {
-  const org = await prisma.organization.findUnique({
-    where: { id: orgId },
-    select: { migrationInProgress: true },
-  });
-  return org?.migrationInProgress ?? false;
-}
-
 // ─── Error Class ────────────────────────────────────────────────
 
 export class OrgAuthError extends Error {

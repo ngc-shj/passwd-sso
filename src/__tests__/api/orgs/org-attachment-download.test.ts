@@ -29,7 +29,7 @@ vi.mock("@/lib/org-auth", () => {
       this.status = status;
     }
   }
-  return { requireOrgPermission: mockRequireOrgPermission, isMigrationLocked: vi.fn().mockResolvedValue(false), OrgAuthError };
+  return { requireOrgPermission: mockRequireOrgPermission, OrgAuthError };
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {

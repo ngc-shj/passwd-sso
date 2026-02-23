@@ -257,7 +257,6 @@ model Organization {
   // E2E encryption (ECDH-P256)
   orgKeyVersion       Int     @default(0) @map("org_key_version")
   e2eEnabled          Boolean @default(false) @map("e2e_enabled")
-  migrationInProgress Boolean @default(false) @map("migration_in_progress")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

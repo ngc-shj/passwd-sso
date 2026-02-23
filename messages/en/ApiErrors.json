@@ -64,9 +64,5 @@
   "sendFileTypeNotAllowed": "File type is not allowed.",
   "sendStorageLimitExceeded": "Storage limit exceeded.",
   "sessionNotFound": "Session not found.",
-  "cannotRevokeCurrentSession": "Cannot revoke the current session.",
-  "migrationInProgress": "Organization is currently being migrated. Please wait.",
-  "migrationNotInProgress": "No migration is in progress.",
-  "alreadyE2eEnabled": "Organization already has E2E encryption enabled.",
-  "membersNotReady": "Some members have not set up their vault yet."
+  "cannotRevokeCurrentSession": "Cannot revoke the current session."
 }
