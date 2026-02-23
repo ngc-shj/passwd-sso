@@ -15,7 +15,7 @@ This guide describes a production-oriented Azure deployment.
 - `DATABASE_URL`
 - `AUTH_SECRET`
 - `AUTH_URL`
-- `ORG_MASTER_KEY`
+- `SHARE_MASTER_KEY`
 - `REDIS_URL`
 - `BLOB_BACKEND`
 

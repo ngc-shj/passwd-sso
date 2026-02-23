@@ -82,9 +82,9 @@ describe("POST /api/admin/rotate-master-key", () => {
     mockCheck.mockResolvedValue(true);
 
     setEnv({
-      ORG_MASTER_KEY: V1_KEY,
-      ORG_MASTER_KEY_V2: V2_KEY,
-      ORG_MASTER_KEY_CURRENT_VERSION: "2",
+      SHARE_MASTER_KEY: V1_KEY,
+      SHARE_MASTER_KEY_V2: V2_KEY,
+      SHARE_MASTER_KEY_CURRENT_VERSION: "2",
       ADMIN_API_TOKEN: ADMIN_TOKEN,
     });
   });

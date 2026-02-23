@@ -136,12 +136,12 @@ Client(valid時):
 - DB 保存時は `hmacVerifier(verifierHash)` を格納
   - HMAC: `SHA-256`
   - 鍵: `VERIFIER_PEPPER_KEY`（本番必須、64 hex）
-  - 非本番のみ `ORG_MASTER_KEY` から導出フォールバック
+  - 非本番のみ `SHARE_MASTER_KEY` から導出フォールバック
 
 ### 共有リンク / Send（Server Crypto / `src/lib/crypto-server.ts`）
 
 - アルゴリズム: `aes-256-gcm`（Node `crypto`）
-- `ORG_MASTER_KEY`: 64 hex（256-bit）
+- `SHARE_MASTER_KEY`: 64 hex（256-bit）
 - IV: `12 bytes`、AuthTag: `16 bytes`
 - サーバー暗号化される共有リンク / Send の暗号化に利用
 
@@ -183,7 +183,7 @@ Client(valid時):
 ## 2. 基本コントロール
 
 - 本番は常に HTTPS を使用する。
-- `AUTH_SECRET` / `ORG_MASTER_KEY` はシークレットマネージャで管理（Git 管理禁止）。
+- `AUTH_SECRET` / `SHARE_MASTER_KEY` はシークレットマネージャで管理（Git 管理禁止）。
 - DB / Redis / Blob は TLS 接続を強制する。
 - 本番は `REDIS_URL` を有効化し、アンロック試行制限を維持する。
 - CSP は有効のまま運用し、`unsafe-*` 緩和を安易に追加しない。
@@ -257,7 +257,7 @@ Client(valid時):
 
 - HTTPS/TLS が有効であること
 - ブラウザ実行環境が改ざんされていないこと
-- サーバー秘密情報（`AUTH_SECRET` / `ORG_MASTER_KEY` など）が適切に保護されること
+- サーバー秘密情報（`AUTH_SECRET` / `SHARE_MASTER_KEY` など）が適切に保護されること
 
 ### Non-Goals（非目標）
 
@@ -301,7 +301,7 @@ Client(valid時):
 
 ### 12.2 サーバー秘密情報漏えい疑い
 
-1. `AUTH_SECRET` / `ORG_MASTER_KEY` / `VERIFIER_PEPPER_KEY` をローテーション  
+1. `AUTH_SECRET` / `SHARE_MASTER_KEY` / `VERIFIER_PEPPER_KEY` をローテーション  
 2. 影響範囲（共有リンク/Send の復号可否、セッション）を評価  
 3. 必要時は鍵再発行・ユーザー再認証を実施
 
@@ -363,7 +363,7 @@ Client(valid時):
 
 - パスフレーズ平文
 - 復号後のエントリ平文
-- `AUTH_SECRET` / `ORG_MASTER_KEY` 等のサーバー秘密
+- `AUTH_SECRET` / `SHARE_MASTER_KEY` 等のサーバー秘密
 
 ### 14.4 設計判断メモ（なぜ許容するか）
 

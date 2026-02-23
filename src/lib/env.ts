@@ -37,10 +37,10 @@ const envSchema = z
   .object({
     // --- Critical (always required) ---
     DATABASE_URL: nonEmpty,
-    ORG_MASTER_KEY: hex64.optional(),
+    SHARE_MASTER_KEY: hex64.optional(),
 
     // --- Key rotation ---
-    ORG_MASTER_KEY_CURRENT_VERSION: z.coerce
+    SHARE_MASTER_KEY_CURRENT_VERSION: z.coerce
       .number()
       .int()
       .min(1)
@@ -192,31 +192,31 @@ const envSchema = z
     }
 
     // ── Key rotation: current version key must exist ───────
-    const currentVersion = data.ORG_MASTER_KEY_CURRENT_VERSION;
+    const currentVersion = data.SHARE_MASTER_KEY_CURRENT_VERSION;
     const hex64Re = /^[0-9a-fA-F]{64}$/;
 
     if (currentVersion === 1) {
-      // V1: ORG_MASTER_KEY_V1 or ORG_MASTER_KEY must exist
+      // V1: SHARE_MASTER_KEY_V1 or SHARE_MASTER_KEY must exist
       const v1Raw =
-        process.env.ORG_MASTER_KEY_V1 ?? process.env.ORG_MASTER_KEY;
+        process.env.SHARE_MASTER_KEY_V1 ?? process.env.SHARE_MASTER_KEY;
       const v1Key = v1Raw?.trim();
       if (!v1Key || !hex64Re.test(v1Key)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["ORG_MASTER_KEY"],
+          path: ["SHARE_MASTER_KEY"],
           message:
-            "ORG_MASTER_KEY or ORG_MASTER_KEY_V1 is required (64-char hex)",
+            "SHARE_MASTER_KEY or SHARE_MASTER_KEY_V1 is required (64-char hex)",
         });
       }
     } else {
-      // V2+: ORG_MASTER_KEY_V{N} must exist
-      const vNRaw = process.env[`ORG_MASTER_KEY_V${currentVersion}`];
+      // V2+: SHARE_MASTER_KEY_V{N} must exist
+      const vNRaw = process.env[`SHARE_MASTER_KEY_V${currentVersion}`];
       const vNKey = vNRaw?.trim();
       if (!vNKey || !hex64Re.test(vNKey)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["ORG_MASTER_KEY_CURRENT_VERSION"],
-          message: `ORG_MASTER_KEY_V${currentVersion} is required (64-char hex) when CURRENT_VERSION=${currentVersion}`,
+          path: ["SHARE_MASTER_KEY_CURRENT_VERSION"],
+          message: `SHARE_MASTER_KEY_V${currentVersion} is required (64-char hex) when CURRENT_VERSION=${currentVersion}`,
         });
       }
     }
@@ -227,7 +227,7 @@ const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ["ADMIN_API_TOKEN"],
         message:
-          "ADMIN_API_TOKEN is required in production when ORG_MASTER_KEY_CURRENT_VERSION >= 2",
+          "ADMIN_API_TOKEN is required in production when SHARE_MASTER_KEY_CURRENT_VERSION >= 2",
       });
     }
 

@@ -108,7 +108,7 @@ ECS タスク定義では `{secret_arn}:KEY::` 形式で個別のキーを参照
 | `AUTH_GOOGLE_SECRET` | Google OAuth Client Secret |
 | `AUTH_JACKSON_ID` | Jackson OIDC Client ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret |
-| `ORG_MASTER_KEY` | 組織暗号化マスターキー (256-bit hex) |
+| `SHARE_MASTER_KEY` | 組織暗号化マスターキー (256-bit hex) |
 | `REDIS_URL` | Redis 接続文字列 |
 
 ### Required Secrets (jackson)

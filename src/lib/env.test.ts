@@ -8,7 +8,7 @@ const VALID_HEX_64 = "a".repeat(64);
 function buildMinimalEnv(overrides: Record<string, string> = {}): Record<string, string> {
   return {
     DATABASE_URL: "postgresql://localhost:5432/test",
-    ORG_MASTER_KEY: VALID_HEX_64,
+    SHARE_MASTER_KEY: VALID_HEX_64,
     NODE_ENV: "development",
     ...overrides,
   };
@@ -33,17 +33,17 @@ describe("env validation", () => {
   });
 
   it("throws for missing DATABASE_URL", async () => {
-    process.env = { ORG_MASTER_KEY: VALID_HEX_64 };
+    process.env = { SHARE_MASTER_KEY: VALID_HEX_64 };
     await expect(import("./env")).rejects.toThrow("Invalid environment variables");
   });
 
-  it("throws for missing ORG_MASTER_KEY", async () => {
+  it("throws for missing SHARE_MASTER_KEY", async () => {
     process.env = { DATABASE_URL: "postgresql://localhost:5432/test" };
     await expect(import("./env")).rejects.toThrow("Invalid environment variables");
   });
 
-  it("throws for invalid ORG_MASTER_KEY (not 64 hex chars)", async () => {
-    process.env = buildMinimalEnv({ ORG_MASTER_KEY: "short" });
+  it("throws for invalid SHARE_MASTER_KEY (not 64 hex chars)", async () => {
+    process.env = buildMinimalEnv({ SHARE_MASTER_KEY: "short" });
     await expect(import("./env")).rejects.toThrow("Invalid environment variables");
   });
 

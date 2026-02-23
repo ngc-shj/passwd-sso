@@ -136,12 +136,12 @@ Client(on valid):
 - Stored value in DB: `hmacVerifier(verifierHash)`
   - HMAC: `SHA-256`
   - key: `VERIFIER_PEPPER_KEY` (required in production, 64 hex chars)
-  - non-production fallback derives from `ORG_MASTER_KEY`
+  - non-production fallback derives from `SHARE_MASTER_KEY`
 
 ### Share Links / Sends (Server Crypto / `src/lib/crypto-server.ts`)
 
 - Algorithm: `aes-256-gcm` (Node `crypto`)
-- `ORG_MASTER_KEY`: 64 hex chars (256-bit)
+- `SHARE_MASTER_KEY`: 64 hex chars (256-bit)
 - IV: `12 bytes`, AuthTag: `16 bytes`
 - Used for server-encrypted share links and sends
 
@@ -183,7 +183,7 @@ Client(on valid):
 ## 2. Core Security Controls
 
 - Use HTTPS everywhere in production.
-- Keep `AUTH_SECRET` and `ORG_MASTER_KEY` in a secret manager (never in Git).
+- Keep `AUTH_SECRET` and `SHARE_MASTER_KEY` in a secret manager (never in Git).
 - Enforce DB/Redis/blob TLS.
 - Enable Redis in production (`REDIS_URL`) to keep unlock rate limiting effective.
 - Keep CSP enabled; avoid adding unsafe script/style exceptions.
@@ -257,7 +257,7 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 
 - HTTPS/TLS is correctly enforced
 - Browser runtime is not compromised
-- Server secrets (`AUTH_SECRET`, `ORG_MASTER_KEY`, etc.) are properly protected
+- Server secrets (`AUTH_SECRET`, `SHARE_MASTER_KEY`, etc.) are properly protected
 
 ### Non-Goals
 
@@ -301,7 +301,7 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 
 ### 12.2 Suspected server secret leak
 
-1. Rotate `AUTH_SECRET` / `ORG_MASTER_KEY` / `VERIFIER_PEPPER_KEY`  
+1. Rotate `AUTH_SECRET` / `SHARE_MASTER_KEY` / `VERIFIER_PEPPER_KEY`  
 2. Assess blast radius (share links/sends decryptability, sessions)  
 3. Trigger key re-issuance and forced re-auth where required
 
@@ -363,7 +363,7 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 
 - Plaintext passphrase
 - Decrypted plaintext entries
-- Server secrets such as `AUTH_SECRET` / `ORG_MASTER_KEY`
+- Server secrets such as `AUTH_SECRET` / `SHARE_MASTER_KEY`
 
 ### 14.4 Why This Is Accepted
 

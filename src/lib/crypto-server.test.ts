@@ -18,11 +18,11 @@ import {
 import { randomBytes } from "node:crypto";
 
 describe("crypto-server", () => {
-  const originalMasterKey = process.env.ORG_MASTER_KEY;
+  const originalMasterKey = process.env.SHARE_MASTER_KEY;
 
   afterAll(() => {
     // Restore original env
-    process.env.ORG_MASTER_KEY = originalMasterKey;
+    process.env.SHARE_MASTER_KEY = originalMasterKey;
   });
 
   describe("encryptServerData / decryptServerData", () => {
@@ -164,10 +164,10 @@ describe("crypto-server", () => {
 
     beforeEach(() => {
       savedEnv = {
-        ORG_MASTER_KEY: process.env.ORG_MASTER_KEY,
-        ORG_MASTER_KEY_V1: process.env.ORG_MASTER_KEY_V1,
-        ORG_MASTER_KEY_V2: process.env.ORG_MASTER_KEY_V2,
-        ORG_MASTER_KEY_CURRENT_VERSION: process.env.ORG_MASTER_KEY_CURRENT_VERSION,
+        SHARE_MASTER_KEY: process.env.SHARE_MASTER_KEY,
+        SHARE_MASTER_KEY_V1: process.env.SHARE_MASTER_KEY_V1,
+        SHARE_MASTER_KEY_V2: process.env.SHARE_MASTER_KEY_V2,
+        SHARE_MASTER_KEY_CURRENT_VERSION: process.env.SHARE_MASTER_KEY_CURRENT_VERSION,
       };
     });
 
@@ -182,22 +182,22 @@ describe("crypto-server", () => {
     });
 
     it("getCurrentMasterKeyVersion defaults to 1", () => {
-      delete process.env.ORG_MASTER_KEY_CURRENT_VERSION;
+      delete process.env.SHARE_MASTER_KEY_CURRENT_VERSION;
       expect(getCurrentMasterKeyVersion()).toBe(1);
     });
 
     it("getCurrentMasterKeyVersion reads env", () => {
-      process.env.ORG_MASTER_KEY_CURRENT_VERSION = "2";
+      process.env.SHARE_MASTER_KEY_CURRENT_VERSION = "2";
       expect(getCurrentMasterKeyVersion()).toBe(2);
     });
 
     it("getCurrentMasterKeyVersion throws for invalid value", () => {
-      process.env.ORG_MASTER_KEY_CURRENT_VERSION = "abc";
+      process.env.SHARE_MASTER_KEY_CURRENT_VERSION = "abc";
       expect(() => getCurrentMasterKeyVersion()).toThrow("positive integer");
     });
 
     it("getCurrentMasterKeyVersion throws for zero", () => {
-      process.env.ORG_MASTER_KEY_CURRENT_VERSION = "0";
+      process.env.SHARE_MASTER_KEY_CURRENT_VERSION = "0";
       expect(() => getCurrentMasterKeyVersion()).toThrow("positive integer");
     });
 
@@ -213,45 +213,45 @@ describe("crypto-server", () => {
       expect(() => getMasterKeyByVersion(1.5)).toThrow("Invalid master key version");
     });
 
-    it("getMasterKeyByVersion V1 falls back to ORG_MASTER_KEY", () => {
-      delete process.env.ORG_MASTER_KEY_V1;
-      process.env.ORG_MASTER_KEY = V1_KEY;
+    it("getMasterKeyByVersion V1 falls back to SHARE_MASTER_KEY", () => {
+      delete process.env.SHARE_MASTER_KEY_V1;
+      process.env.SHARE_MASTER_KEY = V1_KEY;
       const key = getMasterKeyByVersion(1);
       expect(key.toString("hex")).toBe(V1_KEY);
     });
 
-    it("getMasterKeyByVersion V1 prefers ORG_MASTER_KEY_V1", () => {
-      process.env.ORG_MASTER_KEY = V1_KEY;
-      process.env.ORG_MASTER_KEY_V1 = V2_KEY; // different key
+    it("getMasterKeyByVersion V1 prefers SHARE_MASTER_KEY_V1", () => {
+      process.env.SHARE_MASTER_KEY = V1_KEY;
+      process.env.SHARE_MASTER_KEY_V1 = V2_KEY; // different key
       const key = getMasterKeyByVersion(1);
       expect(key.toString("hex")).toBe(V2_KEY);
     });
 
-    it("getMasterKeyByVersion V2 reads ORG_MASTER_KEY_V2", () => {
-      process.env.ORG_MASTER_KEY_V2 = V2_KEY;
+    it("getMasterKeyByVersion V2 reads SHARE_MASTER_KEY_V2", () => {
+      process.env.SHARE_MASTER_KEY_V2 = V2_KEY;
       const key = getMasterKeyByVersion(2);
       expect(key.toString("hex")).toBe(V2_KEY);
     });
 
     it("getMasterKeyByVersion throws for missing version", () => {
-      delete process.env.ORG_MASTER_KEY_V1;
-      delete process.env.ORG_MASTER_KEY;
+      delete process.env.SHARE_MASTER_KEY_V1;
+      delete process.env.SHARE_MASTER_KEY;
       expect(() => getMasterKeyByVersion(1)).toThrow(
         "Master key for version 1 not found or invalid"
       );
     });
 
     it("getMasterKeyByVersion throws for invalid hex", () => {
-      process.env.ORG_MASTER_KEY = "abcd";
-      delete process.env.ORG_MASTER_KEY_V1;
+      process.env.SHARE_MASTER_KEY = "abcd";
+      delete process.env.SHARE_MASTER_KEY_V1;
       expect(() => getMasterKeyByVersion(1)).toThrow(
         "Master key for version 1 not found or invalid"
       );
     });
 
     it("encryptShareData returns masterKeyVersion matching current", () => {
-      process.env.ORG_MASTER_KEY_V2 = V2_KEY;
-      process.env.ORG_MASTER_KEY_CURRENT_VERSION = "2";
+      process.env.SHARE_MASTER_KEY_V2 = V2_KEY;
+      process.env.SHARE_MASTER_KEY_CURRENT_VERSION = "2";
       const encrypted = encryptShareData("test");
       expect(encrypted.masterKeyVersion).toBe(2);
     });
@@ -269,11 +269,11 @@ describe("crypto-server", () => {
       expect(decrypted.equals(data)).toBe(true);
     });
 
-    it("getVerifierPepper fallback works with ORG_MASTER_KEY_V1 (no ORG_MASTER_KEY)", () => {
-      delete process.env.ORG_MASTER_KEY;
+    it("getVerifierPepper fallback works with SHARE_MASTER_KEY_V1 (no SHARE_MASTER_KEY)", () => {
+      delete process.env.SHARE_MASTER_KEY;
       delete process.env.VERIFIER_PEPPER_KEY;
-      process.env.ORG_MASTER_KEY_V1 = V1_KEY;
-      delete process.env.ORG_MASTER_KEY_CURRENT_VERSION;
+      process.env.SHARE_MASTER_KEY_V1 = V1_KEY;
+      delete process.env.SHARE_MASTER_KEY_CURRENT_VERSION;
 
       // Should not throw — pepper fallback uses getMasterKeyByVersion(1)
       const result = hmacVerifier("a".repeat(64));

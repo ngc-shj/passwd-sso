@@ -28,7 +28,7 @@ Set these in Vercel Project Settings → Environment Variables:
 - `DATABASE_URL` (PostgreSQL connection string)
 - `AUTH_URL` (production URL, e.g. `https://your-app.vercel.app`)
 - `AUTH_SECRET` (generate with `openssl rand -base64 32`)
-- `ORG_MASTER_KEY` (generate with `openssl rand -hex 32`)
+- `SHARE_MASTER_KEY` (generate with `openssl rand -hex 32`)
 - `REDIS_URL` (recommended in production)
 - `BLOB_BACKEND` (`db` / `s3` / `azure` / `gcs`)
 - SSO:
@@ -65,7 +65,7 @@ Recommended: enforce migrations in CI (e.g., GitHub Actions) before production d
 
 ## 6. Security Notes
 
-- Rotate `AUTH_SECRET` and `ORG_MASTER_KEY` with a defined policy
+- Rotate `AUTH_SECRET` and `SHARE_MASTER_KEY` with a defined policy
 - Enforce TLS for DB/Redis/blob connections
 - Separate Preview and Production environment variables
 - Treat `REDIS_URL` as required in production to keep rate limiting enabled

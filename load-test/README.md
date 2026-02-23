@@ -7,7 +7,7 @@ A load testing suite using k6. Measures API throughput, latency, and error rates
 - [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) installed
 - PostgreSQL + Redis running
 - App running at `http://localhost:3000`
-- `ORG_MASTER_KEY` (or `VERIFIER_PEPPER_KEY`) configured
+- `SHARE_MASTER_KEY` (or `VERIFIER_PEPPER_KEY`) configured
 
 ## Quick Start
 

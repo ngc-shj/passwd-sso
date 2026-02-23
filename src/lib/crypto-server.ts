@@ -5,7 +5,7 @@
  * Organization vault encryption is fully E2E (client-side) via crypto-org.ts.
  *
  * Key hierarchy for shares/sends:
- *   ORG_MASTER_KEY_V{N} (env, 256-bit hex, versioned)
+ *   SHARE_MASTER_KEY_V{N} (env, 256-bit hex, versioned)
  *     -> AES-256-GCM -> PasswordShare / Send encrypted data
  *
  * Uses node:crypto (NOT Web Crypto API — this runs server-side only).
@@ -35,11 +35,11 @@ export interface ServerEncryptedData {
 
 /** Get the current master key version from env. Defaults to 1. */
 export function getCurrentMasterKeyVersion(): number {
-  const raw = process.env.ORG_MASTER_KEY_CURRENT_VERSION;
+  const raw = process.env.SHARE_MASTER_KEY_CURRENT_VERSION;
   if (!raw) return 1;
   const version = parseInt(raw, 10);
   if (!Number.isFinite(version) || version < 1) {
-    throw new Error("ORG_MASTER_KEY_CURRENT_VERSION must be a positive integer");
+    throw new Error("SHARE_MASTER_KEY_CURRENT_VERSION must be a positive integer");
   }
   return version;
 }
@@ -47,8 +47,8 @@ export function getCurrentMasterKeyVersion(): number {
 /**
  * Get the master key for a specific version.
  *
- * For V1: prefers ORG_MASTER_KEY_V1, falls back to ORG_MASTER_KEY.
- * For V2+: requires ORG_MASTER_KEY_V{version}.
+ * For V1: prefers SHARE_MASTER_KEY_V1, falls back to SHARE_MASTER_KEY.
+ * For V2+: requires SHARE_MASTER_KEY_V{version}.
  */
 export function getMasterKeyByVersion(version: number): Buffer {
   if (!Number.isInteger(version) || version < 1 || version > 100) {
@@ -58,9 +58,9 @@ export function getMasterKeyByVersion(version: number): Buffer {
   let hex: string | undefined;
 
   if (version === 1) {
-    hex = (process.env.ORG_MASTER_KEY_V1 ?? process.env.ORG_MASTER_KEY)?.trim();
+    hex = (process.env.SHARE_MASTER_KEY_V1 ?? process.env.SHARE_MASTER_KEY)?.trim();
   } else {
-    hex = process.env[`ORG_MASTER_KEY_V${version}`]?.trim();
+    hex = process.env[`SHARE_MASTER_KEY_V${version}`]?.trim();
   }
 
   if (!hex || !HEX64_RE.test(hex)) {
@@ -218,7 +218,7 @@ const VERIFIER_HEX_RE = /^[0-9a-f]{64}$/;
  *
  * - Prefers VERIFIER_PEPPER_KEY env var (64-char hex = 256-bit).
  * - In production, VERIFIER_PEPPER_KEY is **required** (throws on missing).
- * - In dev/test, falls back to SHA-256("verifier-pepper:" || ORG_MASTER_KEY).
+ * - In dev/test, falls back to SHA-256("verifier-pepper:" || SHARE_MASTER_KEY).
  */
 function getVerifierPepper(): Buffer {
   const pepperHex = process.env.VERIFIER_PEPPER_KEY;
