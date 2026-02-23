@@ -117,6 +117,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         ephemeralPublicKey: data.ephemeralPublicKey,
         hkdfSalt: data.hkdfSalt,
         keyVersion: data.keyVersion,
+        wrapVersion: data.wrapVersion,
       },
       update: {
         encryptedOrgKey: data.encryptedOrgKey,
@@ -124,6 +125,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         orgKeyAuthTag: data.orgKeyAuthTag,
         ephemeralPublicKey: data.ephemeralPublicKey,
         hkdfSalt: data.hkdfSalt,
+        wrapVersion: data.wrapVersion,
       },
     });
 

@@ -107,6 +107,28 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("VALIDATION_ERROR");
   });
 
+  it("returns 400 when org share includes data field (S-24)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+
+    const req = createRequest("POST", "http://localhost/api/share-links", {
+      body: {
+        orgPasswordEntryId: VALID_ENTRY_ID,
+        data: { title: "Leaked", password: "oops" },
+        encryptedShareData: {
+          ciphertext: "c",
+          iv: "a".repeat(24),
+          authTag: "b".repeat(32),
+        },
+        entryType: ENTRY_TYPE.LOGIN,
+        expiresIn: "1d",
+      },
+    });
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
   it("creates a personal share link successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue({

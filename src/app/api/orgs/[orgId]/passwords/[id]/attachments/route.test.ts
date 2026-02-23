@@ -6,6 +6,7 @@ const {
   mockRequireOrgPermission,
   mockPrismaOrgPasswordEntry,
   mockPrismaAttachment,
+  mockPrismaOrganization,
   MockOrgAuthError,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -17,6 +18,9 @@ const {
     findMany: vi.fn(),
     count: vi.fn(),
     create: vi.fn(),
+  },
+  mockPrismaOrganization: {
+    findUnique: vi.fn(),
   },
   MockOrgAuthError: class MockOrgAuthError extends Error {
     status: number;
@@ -36,6 +40,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgPasswordEntry: mockPrismaOrgPasswordEntry,
     attachment: mockPrismaAttachment,
+    organization: mockPrismaOrganization,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
@@ -133,6 +138,7 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "org-1" });
     mockPrismaAttachment.count.mockResolvedValue(0);
+    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -367,5 +373,24 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
         }),
       }),
     );
+  });
+
+  it("returns 409 when orgKeyVersion does not match (S-20)", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 });
+    const res = await POST(
+      createFormDataRequest("http://localhost/api/orgs/org-1/passwords/pw-1/attachments", {
+        file: new Blob(["abc"]),
+        filename: "doc.pdf",
+        contentType: "application/pdf",
+        iv: VALID_IV,
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "3",
+        orgKeyVersion: "1",
+      }),
+      createParams("org-1", "pw-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
   });
 });

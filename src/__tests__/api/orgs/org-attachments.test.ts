@@ -9,6 +9,7 @@ const {
   mockAttachmentFindMany,
   mockAttachmentCount,
   mockAttachmentCreate,
+  mockOrgFindUnique,
   mockPutObject,
   mockDeleteObject,
 } = vi.hoisted(() => ({
@@ -18,6 +19,7 @@ const {
   mockAttachmentFindMany: vi.fn(),
   mockAttachmentCount: vi.fn(),
   mockAttachmentCreate: vi.fn(),
+  mockOrgFindUnique: vi.fn(),
   mockPutObject: vi.fn(),
   mockDeleteObject: vi.fn(),
 }));
@@ -41,6 +43,7 @@ vi.mock("@/lib/prisma", () => ({
       count: mockAttachmentCount,
       create: mockAttachmentCreate,
     },
+    organization: { findUnique: mockOrgFindUnique },
   },
 }));
 vi.mock("@/lib/audit", () => ({
@@ -316,6 +319,7 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
+    mockOrgFindUnique.mockResolvedValue({ orgKeyVersion: 1 });
     mockPutObject.mockResolvedValue(Buffer.from("stored"));
     const created = {
       id: "a1",

@@ -25,7 +25,7 @@ const {
 
 const txMock = {
   organization: { findUnique: vi.fn(), update: vi.fn() },
-  orgPasswordEntry: { update: vi.fn() },
+  orgPasswordEntry: { update: vi.fn(), count: vi.fn() },
   orgMemberKey: { create: vi.fn() },
 };
 
@@ -97,6 +97,7 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
     txMock.organization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
     txMock.organization.update.mockResolvedValue({});
     txMock.orgPasswordEntry.update.mockResolvedValue({});
+    txMock.orgPasswordEntry.count.mockResolvedValue(1); // default: 1 entry matches
     txMock.orgMemberKey.create.mockResolvedValue({});
     mockTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
   });
@@ -198,7 +199,7 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
     expect(json.error).toBe("INVALID_JSON");
   });
 
-  it("filters out non-member memberKeys silently (Q-5)", async () => {
+  it("returns 400 when memberKeys contain non-member userId (F-18/S-22)", async () => {
     mockMemberFindMany.mockResolvedValue([{ userId: "user-1" }]);
     const res = await POST(
       createRequest({
@@ -209,15 +210,8 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
       createParams("org-1"),
     );
     const json = await res.json();
-    expect(res.status).toBe(200);
-    expect(json.success).toBe(true);
-    // Only user-1's key should be created, non-member filtered out
-    expect(txMock.orgMemberKey.create).toHaveBeenCalledTimes(1);
-    expect(txMock.orgMemberKey.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ userId: "user-1" }),
-      }),
-    );
+    expect(res.status).toBe(400);
+    expect(json.details.unknownUserId).toBe("non-member-user");
   });
 
   it("returns 409 when orgKeyVersion changed concurrently (S-17 optimistic lock)", async () => {
@@ -260,6 +254,39 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
           entriesRotated: 1,
           membersUpdated: 1,
         }),
+      }),
+    );
+  });
+
+  it("returns 400 when entry count does not match org entries (F-17)", async () => {
+    // Org has 3 entries but client submits only 1
+    txMock.orgPasswordEntry.count.mockResolvedValue(3);
+    const res = await POST(
+      createRequest({
+        newOrgKeyVersion: 2,
+        entries: [validEntry("e1")],
+        memberKeys: [validMemberKey("user-1")],
+      }),
+      createParams("org-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.error).toBe("ENTRY_COUNT_MISMATCH");
+  });
+
+  it("passes wrapVersion to OrgMemberKey create (F-19)", async () => {
+    const res = await POST(
+      createRequest({
+        newOrgKeyVersion: 2,
+        entries: [validEntry("e1")],
+        memberKeys: [{ ...validMemberKey("user-1"), wrapVersion: 1 }],
+      }),
+      createParams("org-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(txMock.orgMemberKey.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ wrapVersion: 1 }),
       }),
     );
   });

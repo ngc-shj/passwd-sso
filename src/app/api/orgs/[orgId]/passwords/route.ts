@@ -67,10 +67,10 @@ export async function GET(req: NextRequest, { params }: Params) {
     orderBy: { updatedAt: "desc" },
   });
 
-  // Auto-purge items deleted more than 30 days ago
+  // Auto-purge items deleted more than 30 days ago (fire-and-forget, F-20)
   if (!trashOnly) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    await prisma.orgPasswordEntry.deleteMany({
+    prisma.orgPasswordEntry.deleteMany({
       where: {
         orgId,
         deletedAt: { lt: thirtyDaysAgo },
