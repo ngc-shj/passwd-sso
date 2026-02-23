@@ -51,6 +51,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         blobIv: entry.blobIv,
         blobAuthTag: entry.blobAuthTag,
         aadVersion: entry.aadVersion,
+        orgKeyVersion: entry.orgKeyVersion,
         changedById: session.user.id,
       },
     });
@@ -75,6 +76,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         blobIv: history.blobIv,
         blobAuthTag: history.blobAuthTag,
         aadVersion: history.aadVersion,
+        orgKeyVersion: history.orgKeyVersion,
         updatedById: session.user.id,
       },
     });

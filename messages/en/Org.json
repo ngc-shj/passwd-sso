@@ -90,5 +90,7 @@
   "organizationArchive": "Organization Archive",
   "organizationTrash": "Organization Trash",
   "backToOrg": "Back to {name}",
-  "tags": "Tags"
+  "tags": "Tags",
+  "keyPendingTitle": "Waiting for Key Distribution",
+  "keyPendingDesc": "An administrator needs to distribute the encryption key before you can access passwords. This happens automatically when an admin is online."
 }

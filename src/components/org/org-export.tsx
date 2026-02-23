@@ -18,6 +18,9 @@ import {
   formatExportContent as formatExportContentShared,
   formatExportDate,
 } from "@/lib/export-format-common";
+import { useOrgVault } from "@/lib/org-vault-context";
+import { decryptData } from "@/lib/crypto-client";
+import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
 interface OrgExportPanelContentProps {
   orgId: string;
@@ -25,6 +28,7 @@ interface OrgExportPanelContentProps {
 
 function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
   const t = useTranslations("Export");
+  const { getOrgEncryptionKey } = useOrgVault();
   const [exporting, setExporting] = useState(false);
   const [passwordProtect, setPasswordProtect] = useState(true);
   const [exportPassword, setExportPassword] = useState("");
@@ -64,7 +68,11 @@ function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
       if (!listRes.ok) throw new Error("Failed to fetch list");
       const list: { id: string; entryType: string }[] = await listRes.json();
 
-      // Fetch full details for each entry
+      // Get org encryption key for decryption
+      const orgKey = await getOrgEncryptionKey(orgId);
+      if (!orgKey) throw new Error("No org key");
+
+      // Fetch full details for each entry and decrypt
       const entries: ExportEntry[] = [];
       let skippedCount = 0;
       for (const item of list) {
@@ -74,10 +82,23 @@ function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
             skippedCount++;
             continue;
           }
-          const data = await res.json();
+          const raw = await res.json();
+
+          // Decrypt the blob
+          const aad = buildOrgEntryAAD(orgId, raw.id, "blob");
+          const json = await decryptData(
+            {
+              ciphertext: raw.encryptedBlob,
+              iv: raw.blobIv,
+              authTag: raw.blobAuthTag,
+            },
+            orgKey,
+            aad,
+          );
+          const data = JSON.parse(json);
 
           entries.push({
-            entryType: data.entryType ?? ENTRY_TYPE.LOGIN,
+            entryType: raw.entryType ?? ENTRY_TYPE.LOGIN,
             title: data.title ?? "",
             username: data.username ?? null,
             password: data.password ?? "",
@@ -100,7 +121,7 @@ function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
             idNumber: data.idNumber ?? null,
             issueDate: data.issueDate ?? null,
             expiryDate: data.expiryDate ?? null,
-            tags: Array.isArray(data.tags) ? data.tags : [],
+            tags: Array.isArray(raw.tags) ? raw.tags : [],
             customFields: Array.isArray(data.customFields) ? data.customFields : [],
             totpConfig: data.totp ?? null,
             generatorSettings: data.generatorSettings ?? null,

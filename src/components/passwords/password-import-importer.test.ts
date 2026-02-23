@@ -71,6 +71,12 @@ describe("runImportEntries", () => {
       .mockResolvedValueOnce(response(false)); // POST entry 2
     vi.stubGlobal("fetch", fetchMock);
 
+    mockEncryptData
+      .mockResolvedValueOnce({ ciphertext: "blob1", iv: "iv1", authTag: "tag1" })
+      .mockResolvedValueOnce({ ciphertext: "ov1", iv: "iv2", authTag: "tag2" })
+      .mockResolvedValueOnce({ ciphertext: "blob2", iv: "iv3", authTag: "tag3" })
+      .mockResolvedValueOnce({ ciphertext: "ov2", iv: "iv4", authTag: "tag4" });
+
     const progress = vi.fn();
     const result = await runImportEntries({
       entries: [makeEntry({ title: "a" }), makeEntry({ title: "b" })],
@@ -78,6 +84,9 @@ describe("runImportEntries", () => {
       tagsPath: "/api/org/tags",
       passwordsPath: "/api/org/passwords",
       sourceFilename: "org.csv",
+      orgEncryptionKey: {} as CryptoKey,
+      orgKeyVersion: 1,
+      orgId: "org-1",
       onProgress: progress,
     });
 
@@ -85,6 +94,8 @@ describe("runImportEntries", () => {
     expect(progress).toHaveBeenNthCalledWith(1, 1, 2);
     expect(progress).toHaveBeenNthCalledWith(2, 2, 2);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    // Org import now encrypts client-side (blob + overview per entry)
+    expect(mockEncryptData).toHaveBeenCalledTimes(4);
   });
 
   it("imports personal entry with encrypted payload", async () => {

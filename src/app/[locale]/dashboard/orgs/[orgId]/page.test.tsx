@@ -5,9 +5,10 @@ import { render, waitFor, act } from "@testing-library/react";
 import React from "react";
 
 /* ---------- hoisted mocks ---------- */
-const { mockSearchParams, mockFetch } = vi.hoisted(() => ({
+const { mockSearchParams, mockFetch, mockGetOrgEncryptionKey } = vi.hoisted(() => ({
   mockSearchParams: new URLSearchParams(),
   mockFetch: vi.fn(),
+  mockGetOrgEncryptionKey: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -135,6 +136,24 @@ vi.mock("@/components/passwords/entry-sort-menu", () => ({
 
 vi.mock("@/components/org/org-favorites-list", () => ({
   OrgFavoritesList: () => null,
+}));
+
+vi.mock("@/lib/org-vault-context", () => ({
+  useOrgVault: () => ({
+    getOrgEncryptionKey: mockGetOrgEncryptionKey,
+    getOrgKeyInfo: vi.fn().mockResolvedValue(null),
+    invalidateOrgKey: vi.fn(),
+    clearAll: vi.fn(),
+    distributePendingKeys: vi.fn(),
+  }),
+}));
+
+vi.mock("@/lib/crypto-client", () => ({
+  decryptData: vi.fn(),
+}));
+
+vi.mock("@/lib/crypto-aad", () => ({
+  buildOrgEntryAAD: vi.fn().mockReturnValue(new Uint8Array()),
 }));
 
 /* ---------- tests ---------- */

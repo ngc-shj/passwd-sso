@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  const { name, slug, description, orgMemberKey } = parsed.data;
+  const { id: clientId, name, slug, description, orgMemberKey } = parsed.data;
 
   // Check slug uniqueness
   const existing = await prisma.organization.findUnique({
@@ -72,6 +72,7 @@ export async function POST(req: NextRequest) {
 
   const org = await prisma.organization.create({
     data: {
+      ...(clientId ? { id: clientId } : {}),
       name,
       slug,
       description: description || null,

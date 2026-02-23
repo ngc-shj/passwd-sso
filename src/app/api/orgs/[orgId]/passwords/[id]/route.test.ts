@@ -294,11 +294,12 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     expect(json.error).toBe("INVALID_JSON");
   });
 
-  it("returns 400 when E2E body validation fails (missing required fields)", async () => {
+  it("returns 400 when E2E body has partial encryption fields", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    // encryptedBlob present but encryptedOverview missing → refine fails
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
-        body: { title: "New" },
+        body: { encryptedBlob: validE2EBody.encryptedBlob, aadVersion: 1, orgKeyVersion: 1 },
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );

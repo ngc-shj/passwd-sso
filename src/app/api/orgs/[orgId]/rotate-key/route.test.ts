@@ -83,7 +83,6 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockOrgFindUnique.mockResolvedValue({
-      e2eEnabled: true,
       orgKeyVersion: 1,
     });
     mockMemberFindMany.mockResolvedValue([{ userId: "user-1" }]);
@@ -101,22 +100,6 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
       createParams("org-1"),
     );
     expect(res.status).toBe(401);
-  });
-
-  it("returns 400 when E2E not enabled", async () => {
-    mockOrgFindUnique.mockResolvedValue({
-      e2eEnabled: false,
-      orgKeyVersion: 1,
-    });
-    const res = await POST(
-      createRequest({
-        newOrgKeyVersion: 2,
-        entries: [validEntry("e1")],
-        memberKeys: [validMemberKey("user-1")],
-      }),
-      createParams("org-1"),
-    );
-    expect(res.status).toBe(400);
   });
 
   it("returns 409 when version mismatch", async () => {

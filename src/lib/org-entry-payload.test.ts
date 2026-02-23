@@ -3,8 +3,8 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
 
 describe("buildOrgEntryPayload", () => {
-  it("builds login payload with totp null and non-empty custom fields only", () => {
-    const payload = buildOrgEntryPayload({
+  it("builds login blobs with totp null and non-empty custom fields only", () => {
+    const { fullBlob, overviewBlob } = buildOrgEntryPayload({
       entryType: ENTRY_TYPE.LOGIN,
       title: "  A  ",
       notes: "  ",
@@ -16,42 +16,44 @@ describe("buildOrgEntryPayload", () => {
         { label: "", value: "c", type: "TEXT" },
       ],
       totp: null,
-      tagIds: ["t1"],
-      orgFolderId: null,
+      tagNames: [{ name: "t1", color: "#f00" }],
     });
 
-    expect(payload).toMatchObject({
-      title: "A",
-      username: "user",
-      password: "pw",
-      url: "https://example.com",
-      tagIds: ["t1"],
-      orgFolderId: null,
-      totp: null,
-    });
-    expect(payload).toHaveProperty("customFields");
-    expect((payload.customFields as unknown[]).length).toBe(1);
+    const blob = JSON.parse(fullBlob);
+    expect(blob.title).toBe("A");
+    expect(blob.username).toBe("user");
+    expect(blob.password).toBe("pw");
+    expect(blob.url).toBe("https://example.com");
+    expect(blob.customFields).toHaveLength(1);
+    expect(blob.notes).toBeNull();
+
+    const overview = JSON.parse(overviewBlob);
+    expect(overview.title).toBe("A");
+    expect(overview.username).toBe("user");
+    expect(overview.urlHost).toBe("example.com");
+    expect(overview.tags).toHaveLength(1);
   });
 
-  it("builds secure note payload with entryType", () => {
-    const payload = buildOrgEntryPayload({
+  it("builds secure note blobs with entryType", () => {
+    const { fullBlob, overviewBlob } = buildOrgEntryPayload({
       entryType: ENTRY_TYPE.SECURE_NOTE,
       title: "Note",
       notes: "",
       content: "body",
-      tagIds: [],
-      orgFolderId: "f1",
+      tagNames: [],
     });
-    expect(payload).toMatchObject({
-      entryType: ENTRY_TYPE.SECURE_NOTE,
-      title: "Note",
-      content: "body",
-      orgFolderId: "f1",
-    });
+
+    const blob = JSON.parse(fullBlob);
+    expect(blob.entryType).toBe(ENTRY_TYPE.SECURE_NOTE);
+    expect(blob.title).toBe("Note");
+    expect(blob.content).toBe("body");
+
+    const overview = JSON.parse(overviewBlob);
+    expect(overview.title).toBe("Note");
   });
 
-  it("builds credit card payload with explicit entryType", () => {
-    const payload = buildOrgEntryPayload({
+  it("builds credit card blobs with explicit entryType", () => {
+    const { fullBlob } = buildOrgEntryPayload({
       entryType: ENTRY_TYPE.CREDIT_CARD,
       title: "Card",
       notes: "",
@@ -61,15 +63,13 @@ describe("buildOrgEntryPayload", () => {
       expiryMonth: "01",
       expiryYear: "2030",
       cvv: "123",
-      tagIds: [],
-      orgFolderId: null,
+      tagNames: [],
     });
-    expect(payload).toMatchObject({
-      entryType: ENTRY_TYPE.CREDIT_CARD,
-      cardholderName: "Jane",
-      cardNumber: "4111111111111111",
-      brand: "Visa",
-    });
+
+    const blob = JSON.parse(fullBlob);
+    expect(blob.entryType).toBe(ENTRY_TYPE.CREDIT_CARD);
+    expect(blob.cardholderName).toBe("Jane");
+    expect(blob.cardNumber).toBe("4111111111111111");
+    expect(blob.brand).toBe("Visa");
   });
 });
-

@@ -53,15 +53,11 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
-    select: { e2eEnabled: true, orgKeyVersion: true },
+    select: { orgKeyVersion: true },
   });
 
   if (!org) {
     return NextResponse.json({ error: API_ERROR.ORG_NOT_FOUND }, { status: 404 });
-  }
-
-  if (!org.e2eEnabled) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
   }
 
   let body: unknown;

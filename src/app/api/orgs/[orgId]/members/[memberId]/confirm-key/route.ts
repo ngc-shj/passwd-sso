@@ -32,19 +32,6 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  // Verify the org is E2E-enabled
-  const org = await prisma.organization.findUnique({
-    where: { id: orgId },
-    select: { e2eEnabled: true, orgKeyVersion: true },
-  });
-
-  if (!org?.e2eEnabled) {
-    return NextResponse.json(
-      { error: API_ERROR.FORBIDDEN },
-      { status: 403 }
-    );
-  }
-
   // Verify target member exists and belongs to this org
   const targetMember = await prisma.orgMember.findUnique({
     where: { id: memberId },

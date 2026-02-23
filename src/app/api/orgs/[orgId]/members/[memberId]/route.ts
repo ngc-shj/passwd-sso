@@ -199,7 +199,10 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     );
   }
 
-  await prisma.orgMember.delete({ where: { id: memberId } });
+  await prisma.$transaction([
+    prisma.orgMemberKey.deleteMany({ where: { orgId, userId: target.userId } }),
+    prisma.orgMember.delete({ where: { id: memberId } }),
+  ]);
 
   logAudit({
     scope: AUDIT_SCOPE.ORG,

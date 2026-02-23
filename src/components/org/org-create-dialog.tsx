@@ -18,6 +18,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Building2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH } from "@/lib/constants";
+import { useVault } from "@/lib/vault-context";
+import { generateOrgSymmetricKey, createOrgKeyEscrow } from "@/lib/crypto-org";
 
 interface OrgCreateDialogProps {
   trigger: React.ReactNode;
@@ -26,12 +28,15 @@ interface OrgCreateDialogProps {
 
 export function OrgCreateDialog({ trigger, onCreated }: OrgCreateDialogProps) {
   const t = useTranslations("Org");
+  const { status, userId, getEcdhPublicKeyJwk } = useVault();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [slugError, setSlugError] = useState("");
+
+  const vaultReady = status === "unlocked" && !!userId;
 
   const reset = () => {
     setName("");
@@ -53,18 +58,45 @@ export function OrgCreateDialog({ trigger, onCreated }: OrgCreateDialogProps) {
   };
 
   const handleSubmit = async () => {
-    if (!name.trim() || !slug.trim()) return;
+    if (!name.trim() || !slug.trim() || !vaultReady) return;
     setSaving(true);
     setSlugError("");
 
     try {
+      const ecdhPublicKeyJwk = getEcdhPublicKeyJwk();
+      if (!ecdhPublicKeyJwk) {
+        throw new Error("ECDH key not available");
+      }
+
+      // Generate org ID client-side (needed for AAD in key escrow)
+      const orgId = crypto.randomUUID();
+
+      // Generate org symmetric key and wrap it for the owner
+      const orgKey = generateOrgSymmetricKey();
+      const escrow = await createOrgKeyEscrow(
+        orgKey,
+        ecdhPublicKeyJwk,
+        orgId,
+        userId!,
+        1
+      );
+
       const res = await fetch(API_PATH.ORGS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          id: orgId,
           name: name.trim(),
           slug: slug.trim(),
           description: description.trim() || undefined,
+          orgMemberKey: {
+            encryptedOrgKey: escrow.encryptedOrgKey,
+            orgKeyIv: escrow.orgKeyIv,
+            orgKeyAuthTag: escrow.orgKeyAuthTag,
+            ephemeralPublicKey: escrow.ephemeralPublicKey,
+            hkdfSalt: escrow.hkdfSalt,
+            keyVersion: escrow.keyVersion,
+          },
         }),
       });
 
@@ -151,7 +183,7 @@ export function OrgCreateDialog({ trigger, onCreated }: OrgCreateDialogProps) {
         <DialogFooter className="border-t pt-4">
           <Button
             onClick={handleSubmit}
-            disabled={saving || !name.trim() || !slug.trim()}
+            disabled={saving || !name.trim() || !slug.trim() || !vaultReady}
           >
             {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             {t("createButton")}

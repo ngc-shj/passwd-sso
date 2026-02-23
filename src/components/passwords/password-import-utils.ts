@@ -12,6 +12,5 @@ export {
   resolveTagNameToIdForImport,
 } from "@/components/passwords/password-import-tags";
 export {
-  buildOrgImportPayload,
   buildPersonalImportBlobs,
 } from "@/components/passwords/password-import-payload";

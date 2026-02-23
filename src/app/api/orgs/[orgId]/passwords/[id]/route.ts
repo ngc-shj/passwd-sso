@@ -137,6 +137,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   const { encryptedBlob, encryptedOverview, aadVersion, orgKeyVersion, tagIds, orgFolderId, isArchived } = parsed.data;
+  const isFullUpdate = encryptedBlob !== undefined;
 
   // Validate orgFolderId belongs to this org
   if (orgFolderId) {
@@ -150,16 +151,19 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   const updateData: Record<string, unknown> = {
-    encryptedBlob: encryptedBlob.ciphertext,
-    blobIv: encryptedBlob.iv,
-    blobAuthTag: encryptedBlob.authTag,
-    encryptedOverview: encryptedOverview.ciphertext,
-    overviewIv: encryptedOverview.iv,
-    overviewAuthTag: encryptedOverview.authTag,
-    aadVersion,
-    orgKeyVersion,
     updatedById: session.user.id,
   };
+
+  if (isFullUpdate) {
+    updateData.encryptedBlob = encryptedBlob!.ciphertext;
+    updateData.blobIv = encryptedBlob!.iv;
+    updateData.blobAuthTag = encryptedBlob!.authTag;
+    updateData.encryptedOverview = encryptedOverview!.ciphertext;
+    updateData.overviewIv = encryptedOverview!.iv;
+    updateData.overviewAuthTag = encryptedOverview!.authTag;
+    updateData.aadVersion = aadVersion;
+    updateData.orgKeyVersion = orgKeyVersion;
+  }
 
   if (orgFolderId !== undefined) updateData.orgFolderId = orgFolderId;
   if (isArchived !== undefined) updateData.isArchived = isArchived;
@@ -167,30 +171,32 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
   }
 
-  // Snapshot current blob to history before updating
-  await prisma.$transaction(async (tx) => {
-    await tx.orgPasswordEntryHistory.create({
-      data: {
-        entryId: id,
-        encryptedBlob: entry.encryptedBlob,
-        blobIv: entry.blobIv,
-        blobAuthTag: entry.blobAuthTag,
-        aadVersion: entry.aadVersion,
-        orgKeyVersion: entry.orgKeyVersion,
-        changedById: session.user.id,
-      },
-    });
-    const all = await tx.orgPasswordEntryHistory.findMany({
-      where: { entryId: id },
-      orderBy: [{ changedAt: "asc" }, { id: "asc" }],
-      select: { id: true },
-    });
-    if (all.length > 20) {
-      await tx.orgPasswordEntryHistory.deleteMany({
-        where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+  // Snapshot current blob to history before updating (only for full updates)
+  if (isFullUpdate) {
+    await prisma.$transaction(async (tx) => {
+      await tx.orgPasswordEntryHistory.create({
+        data: {
+          entryId: id,
+          encryptedBlob: entry.encryptedBlob,
+          blobIv: entry.blobIv,
+          blobAuthTag: entry.blobAuthTag,
+          aadVersion: entry.aadVersion,
+          orgKeyVersion: entry.orgKeyVersion,
+          changedById: session.user.id,
+        },
       });
-    }
-  });
+      const all = await tx.orgPasswordEntryHistory.findMany({
+        where: { entryId: id },
+        orderBy: [{ changedAt: "asc" }, { id: "asc" }],
+        select: { id: true },
+      });
+      if (all.length > 20) {
+        await tx.orgPasswordEntryHistory.deleteMany({
+          where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+        });
+      }
+    });
+  }
 
   const updated = await prisma.orgPasswordEntry.update({
     where: { id },

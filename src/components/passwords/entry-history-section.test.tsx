@@ -9,11 +9,13 @@ const {
   mockRepromptDialog,
   mockEncryptionKey,
   mockDecryptData,
+  mockGetOrgEncryptionKey,
 } = vi.hoisted(() => ({
   mockRequireVerification: vi.fn(),
   mockRepromptDialog: null as React.ReactNode,
   mockEncryptionKey: {} as CryptoKey,
   mockDecryptData: vi.fn(),
+  mockGetOrgEncryptionKey: vi.fn().mockResolvedValue({} as CryptoKey),
 }));
 
 vi.mock("next-intl", () => ({
@@ -39,8 +41,15 @@ vi.mock("@/lib/crypto-client", () => ({
   decryptData: mockDecryptData,
 }));
 
+vi.mock("@/lib/org-vault-context", () => ({
+  useOrgVault: () => ({
+    getOrgEncryptionKey: mockGetOrgEncryptionKey,
+  }),
+}));
+
 vi.mock("@/lib/crypto-aad", () => ({
   buildPersonalEntryAAD: vi.fn().mockReturnValue("test-aad"),
+  buildOrgEntryAAD: vi.fn().mockReturnValue("test-org-aad"),
 }));
 
 vi.mock("sonner", () => ({
@@ -256,13 +265,23 @@ describe("EntryHistorySection", () => {
   });
 
   it("fetches from orgPasswordHistoryById for org entries on View", async () => {
+    mockDecryptData.mockResolvedValue(
+      JSON.stringify({ title: "Org PW", password: "secret" }),
+    );
+
     const fetchMock = vi.fn((url: string) => {
       return Promise.resolve({
         ok: true,
         json: () =>
           Promise.resolve(
             url.includes("/history/h1")
-              ? { title: "Org PW", password: "secret" }
+              ? {
+                  encryptedBlob: "encrypted-ct",
+                  blobIv: "encrypted-iv",
+                  blobAuthTag: "encrypted-tag",
+                  aadVersion: 1,
+                  orgKeyVersion: 1,
+                }
               : HISTORY_ITEMS,
           ),
       });
@@ -293,6 +312,8 @@ describe("EntryHistorySection", () => {
         (c: [string]) => c[0].includes("/orgs/org-1/passwords/entry-1/history/h1"),
       );
       expect(viewCall).toBeDefined();
+      // Verify client-side decryption was called
+      expect(mockDecryptData).toHaveBeenCalled();
     });
   });
 

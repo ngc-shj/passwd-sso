@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useCallback,
+  useEffect,
   useRef,
   type ReactNode,
 } from "react";
@@ -25,9 +26,16 @@ interface CachedOrgKey {
   cachedAt: number;
 }
 
+export interface OrgKeyInfo {
+  key: CryptoKey;
+  keyVersion: number;
+}
+
 export interface OrgVaultContextValue {
   /** Get the org encryption key, fetching and unwrapping if not cached. */
   getOrgEncryptionKey: (orgId: string) => Promise<CryptoKey | null>;
+  /** Get the org encryption key with its version number. */
+  getOrgKeyInfo: (orgId: string) => Promise<OrgKeyInfo | null>;
   /** Invalidate a cached org key (e.g. after key rotation). */
   invalidateOrgKey: (orgId: string) => void;
   /** Clear all cached org keys (e.g. on vault lock). */
@@ -56,6 +64,7 @@ export function useOrgVaultOptional(): OrgVaultContextValue | null {
 // ─── Constants ────────────────────────────────────────────────
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const KEY_DISTRIBUTE_INTERVAL_MS = 2 * 60 * 1000; // check pending distributions every 2 minutes
 
 // ─── Provider ─────────────────────────────────────────────────
 
@@ -63,12 +72,14 @@ interface OrgVaultProviderProps {
   children: ReactNode;
   getEcdhPrivateKeyBytes: () => Uint8Array | null;
   getUserId: () => string | null;
+  vaultUnlocked: boolean;
 }
 
 export function OrgVaultProvider({
   children,
   getEcdhPrivateKeyBytes,
   getUserId,
+  vaultUnlocked,
 }: OrgVaultProviderProps) {
   const cacheRef = useRef<Map<string, CachedOrgKey>>(new Map());
 
@@ -161,6 +172,17 @@ export function OrgVaultProvider({
       }
     },
     [getEcdhPrivateKeyBytes, getUserId]
+  );
+
+  const getOrgKeyInfo = useCallback(
+    async (orgId: string): Promise<OrgKeyInfo | null> => {
+      const key = await getOrgEncryptionKey(orgId);
+      if (!key) return null;
+      const cached = cacheRef.current.get(orgId);
+      if (!cached) return null;
+      return { key, keyVersion: cached.keyVersion };
+    },
+    [getOrgEncryptionKey]
   );
 
   const distributePendingKeys = useCallback(async () => {
@@ -277,8 +299,41 @@ export function OrgVaultProvider({
     }
   }, [getEcdhPrivateKeyBytes, getUserId]);
 
+  // ─── Periodic auto key distribution (same pattern as EA auto-confirm) ──
+  useEffect(() => {
+    if (!vaultUnlocked) return;
+
+    let inFlight = false;
+
+    const run = () => {
+      if (inFlight) return;
+      inFlight = true;
+      distributePendingKeys()
+        .catch(() => {})
+        .finally(() => { inFlight = false; });
+    };
+
+    // Run immediately on unlock
+    run();
+
+    const intervalId = setInterval(run, KEY_DISTRIBUTE_INTERVAL_MS);
+
+    // Re-check on tab focus and network reconnect
+    const handleVisible = () => { if (!document.hidden) run(); };
+    const handleOnline = () => run();
+    document.addEventListener("visibilitychange", handleVisible);
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisible);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [vaultUnlocked, distributePendingKeys]);
+
   const value: OrgVaultContextValue = {
     getOrgEncryptionKey,
+    getOrgKeyInfo,
     invalidateOrgKey,
     clearAll,
     distributePendingKeys,

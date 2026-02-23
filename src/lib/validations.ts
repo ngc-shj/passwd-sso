@@ -133,11 +133,13 @@ export const orgMemberKeySchema = z.object({
 });
 
 export const createOrgE2ESchema = createOrgSchema.extend({
+  id: z.string().uuid().optional(),
   orgMemberKey: orgMemberKeySchema,
 });
 
 /** Schema for E2E org password creation — client sends pre-encrypted blobs */
 export const createOrgE2EPasswordSchema = z.object({
+  id: z.string().uuid().optional(),
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
   aadVersion: z.number().int().min(1),
@@ -147,16 +149,27 @@ export const createOrgE2EPasswordSchema = z.object({
   orgFolderId: z.string().cuid().nullable().optional(),
 });
 
-/** Schema for E2E org password update — full blob replacement (no server merge) */
+/** Schema for E2E org password update — full blob replacement or metadata-only update */
 export const updateOrgE2EPasswordSchema = z.object({
-  encryptedBlob: encryptedFieldSchema,
-  encryptedOverview: encryptedFieldSchema,
-  aadVersion: z.number().int().min(1),
-  orgKeyVersion: z.number().int().min(1),
+  encryptedBlob: encryptedFieldSchema.optional(),
+  encryptedOverview: encryptedFieldSchema.optional(),
+  aadVersion: z.number().int().min(1).optional(),
+  orgKeyVersion: z.number().int().min(1).optional(),
   tagIds: z.array(z.string().cuid()).optional(),
   orgFolderId: z.string().cuid().nullable().optional(),
   isArchived: z.boolean().optional(),
-});
+}).refine(
+  (data) => {
+    const hasBlob = data.encryptedBlob !== undefined;
+    const hasOverview = data.encryptedOverview !== undefined;
+    const hasAad = data.aadVersion !== undefined;
+    const hasKeyVer = data.orgKeyVersion !== undefined;
+    const allPresent = hasBlob && hasOverview && hasAad && hasKeyVer;
+    const nonePresent = !hasBlob && !hasOverview && !hasAad && !hasKeyVer;
+    return allPresent || nonePresent;
+  },
+  { message: "Encrypted fields must be all present or all absent" },
+);
 
 export const updateOrgSchema = z.object({
   name: z.string().min(1).max(100).trim().optional(),

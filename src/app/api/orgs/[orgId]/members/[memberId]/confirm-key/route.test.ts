@@ -1,12 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgMember, mockPrismaOrganization, mockPrismaUser,
+const { mockAuth, mockPrismaOrgMember, mockPrismaUser,
   mockPrismaOrgMemberKey, mockTransaction,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaOrgMember: { findUnique: vi.fn(), update: vi.fn() },
-  mockPrismaOrganization: { findUnique: vi.fn() },
   mockPrismaUser: { findUnique: vi.fn() },
   mockPrismaOrgMemberKey: { upsert: vi.fn() },
   mockTransaction: vi.fn(),
@@ -16,7 +15,6 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: mockPrismaOrgMember,
-    organization: mockPrismaOrganization,
     user: mockPrismaUser,
     orgMemberKey: mockPrismaOrgMemberKey,
     $transaction: mockTransaction,
@@ -61,23 +59,10 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when org is not E2E-enabled", async () => {
-    mockPrismaOrgMember.findUnique
-      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }); // requireOrgPermission
-    mockPrismaOrganization.findUnique.mockResolvedValue({ e2eEnabled: false });
-
-    const res = await POST(
-      createRequest("POST", URL, { body: validBody }),
-      { params: Promise.resolve({ orgId: "org-1", memberId: "member-1" }) },
-    );
-    expect(res.status).toBe(403);
-  });
-
   it("returns 404 when target member not found", async () => {
     mockPrismaOrgMember.findUnique
       .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }) // admin
       .mockResolvedValueOnce(null); // target member
-    mockPrismaOrganization.findUnique.mockResolvedValue({ e2eEnabled: true, orgKeyVersion: 1 });
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
@@ -90,7 +75,6 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
     mockPrismaOrgMember.findUnique
       .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" })
       .mockResolvedValueOnce({ orgId: "org-1", userId: "target-user", keyDistributed: false });
-    mockPrismaOrganization.findUnique.mockResolvedValue({ e2eEnabled: true, orgKeyVersion: 1 });
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: null });
 
     const res = await POST(
@@ -106,7 +90,6 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
     mockPrismaOrgMember.findUnique
       .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" })
       .mockResolvedValueOnce({ orgId: "org-1", userId: "target-user", keyDistributed: false });
-    mockPrismaOrganization.findUnique.mockResolvedValue({ e2eEnabled: true, orgKeyVersion: 1 });
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
     const res = await POST(
@@ -120,7 +103,6 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
     mockPrismaOrgMember.findUnique
       .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" })
       .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: false });
-    mockPrismaOrganization.findUnique.mockResolvedValue({ e2eEnabled: true, orgKeyVersion: 1 });
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
     const res = await POST(
