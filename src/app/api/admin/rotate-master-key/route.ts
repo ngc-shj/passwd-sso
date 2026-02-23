@@ -1,7 +1,12 @@
 /**
  * POST /api/admin/rotate-master-key
  *
- * Re-wraps all Organization keys from an old master key version to a new one.
+ * Revokes share links encrypted with old master key versions.
+ *
+ * Note:
+ * - Organization vault encryption is E2E-only; server-side org key re-wrap is removed.
+ * - This endpoint now validates the target master key version and optionally
+ *   revokes old-version PasswordShare rows.
  * Authenticated via ADMIN_API_TOKEN bearer token (not session).
  *
  * Body: { targetVersion: number, operatorId: string, revokeShares?: boolean }
