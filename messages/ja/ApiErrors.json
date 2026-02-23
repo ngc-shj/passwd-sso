@@ -64,5 +64,9 @@
   "sendFileTypeNotAllowed": "許可されていないファイル形式です。",
   "sendStorageLimitExceeded": "ストレージ制限を超えています。",
   "sessionNotFound": "セッションが見つかりません。",
-  "cannotRevokeCurrentSession": "現在のセッションは取り消しできません。"
+  "cannotRevokeCurrentSession": "現在のセッションは取り消しできません。",
+  "migrationInProgress": "組織は現在移行中です。しばらくお待ちください。",
+  "migrationNotInProgress": "移行は実行されていません。",
+  "alreadyE2eEnabled": "この組織は既にE2E暗号化が有効です。",
+  "membersNotReady": "まだ保管庫を設定していないメンバーがいます。"
 }

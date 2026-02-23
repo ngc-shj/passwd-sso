@@ -30,6 +30,7 @@ const {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/org-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,
+  isMigrationLocked: vi.fn().mockResolvedValue(false),
   OrgAuthError: MockOrgAuthError,
 }));
 vi.mock("@/lib/prisma", () => ({

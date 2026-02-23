@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createOrgE2EPasswordSchema } from "@/lib/validations";
-import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
+import { requireOrgPermission, OrgAuthError, isMigrationLocked } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, ORG_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -121,6 +121,10 @@ export async function POST(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
+  }
+
+  if (await isMigrationLocked(orgId)) {
+    return NextResponse.json({ error: API_ERROR.MIGRATION_IN_PROGRESS }, { status: 423 });
   }
 
   let body: unknown;
