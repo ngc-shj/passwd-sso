@@ -161,7 +161,8 @@ export function OrgVaultProvider({
         });
 
         return encryptionKey;
-      } catch {
+      } catch (e) {
+        console.error("[getOrgEncryptionKey]", e instanceof Error ? e.message : "unknown");
         ecdhPrivateKeyBytes.fill(0);
         return null;
       }

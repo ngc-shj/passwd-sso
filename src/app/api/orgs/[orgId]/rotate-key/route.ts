@@ -150,6 +150,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       // updateMany + orgId scope prevents out-of-org updates.
       // orgKeyVersion is NOT in where: entries restored from history may have
       // a stale version, but the ID set verification above guarantees completeness (F-29).
+      // Note: Prisma interactive transaction auto-rolls back on any thrown error.
       await Promise.all(entries.map(async (entry) => {
         const result = await tx.orgPasswordEntry.updateMany({
           where: {
