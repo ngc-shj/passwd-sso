@@ -4,8 +4,6 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { unwrapOrgKey, encryptServerBinary } from "@/lib/crypto-server";
-import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { AUDIT_TARGET_TYPE, ORG_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import {
@@ -67,7 +65,7 @@ export async function GET(
   return NextResponse.json(attachments);
 }
 
-// POST /api/orgs/[orgId]/passwords/[id]/attachments - Upload attachment (server-side encrypted)
+// POST /api/orgs/[orgId]/passwords/[id]/attachments - Upload attachment (client-side encrypted)
 export async function POST(
   req: NextRequest,
   { params }: RouteContext
@@ -90,17 +88,7 @@ export async function POST(
 
   const entry = await prisma.orgPasswordEntry.findUnique({
     where: { id },
-    select: {
-      orgId: true,
-      org: {
-        select: {
-          encryptedOrgKey: true,
-          orgKeyIv: true,
-          orgKeyAuthTag: true,
-          masterKeyVersion: true,
-        },
-      },
-    },
+    select: { orgId: true },
   });
 
   if (!entry || entry.orgId !== orgId) {
@@ -139,18 +127,32 @@ export async function POST(
   }
 
   const file = formData.get("file") as File | null;
+  const iv = formData.get("iv") as string | null;
+  const authTag = formData.get("authTag") as string | null;
   const filename = formData.get("filename") as string | null;
   const contentType = formData.get("contentType") as string | null;
+  const sizeBytes = formData.get("sizeBytes") as string | null;
+  const orgKeyVersionStr = formData.get("orgKeyVersion") as string | null;
+  const aadVersionStr = formData.get("aadVersion") as string | null;
 
-  if (!file || !filename || !contentType) {
+  if (!file || !iv || !authTag || !filename || !contentType || !sizeBytes) {
     return NextResponse.json(
       { error: API_ERROR.MISSING_REQUIRED_FIELDS },
       { status: 400 }
     );
   }
 
-  // Validate size (File.size from Web API reflects actual parsed blob size)
-  if (file.size > MAX_FILE_SIZE) {
+  // Validate iv/authTag format (hex strings)
+  if (!/^[0-9a-f]{24}$/.test(iv)) {
+    return NextResponse.json({ error: API_ERROR.INVALID_IV_FORMAT }, { status: 400 });
+  }
+  if (!/^[0-9a-f]{32}$/.test(authTag)) {
+    return NextResponse.json({ error: API_ERROR.INVALID_AUTH_TAG_FORMAT }, { status: 400 });
+  }
+
+  // Validate original file size (before encryption)
+  const originalSize = parseInt(sizeBytes, 10);
+  if (isNaN(originalSize) || originalSize <= 0 || originalSize > MAX_FILE_SIZE) {
     return NextResponse.json(
       { error: API_ERROR.FILE_TOO_LARGE },
       { status: 400 }
@@ -183,42 +185,21 @@ export async function POST(
   }
   const sanitizedFilename = filename.slice(0, 255);
 
-  // Read plaintext file and validate actual buffer size (defense in depth)
-  const plainBuffer = Buffer.from(await file.arrayBuffer());
-  if (plainBuffer.length > MAX_FILE_SIZE) {
+  // Read encrypted blob and validate actual size
+  const buffer = Buffer.from(await file.arrayBuffer());
+  if (buffer.length > MAX_FILE_SIZE) {
     return NextResponse.json(
       { error: API_ERROR.FILE_TOO_LARGE },
       { status: 400 }
     );
   }
 
-  // Magic byte verification: detect actual file type and compare with declared content type
-  const { fileTypeFromBuffer } = await import("file-type");
-  const detected = await fileTypeFromBuffer(plainBuffer);
-  if (detected) {
-    if (contentType !== detected.mime && contentType !== "application/octet-stream") {
-      return NextResponse.json(
-        { error: API_ERROR.CONTENT_TYPE_NOT_ALLOWED },
-        { status: 400 }
-      );
-    }
-  }
-  // If detected is undefined (text files like .txt, .csv, .json), trust declared content type
-
-  // Encrypt server-side
-  const orgKey = unwrapOrgKey({
-    ciphertext: entry.org.encryptedOrgKey,
-    iv: entry.org.orgKeyIv,
-    authTag: entry.org.orgKeyAuthTag,
-  }, entry.org.masterKeyVersion);
-  // Pre-generate attachment ID for AAD binding
-  const attachmentId = crypto.randomUUID();
-  const aad = Buffer.from(buildAttachmentAAD(id, attachmentId));
-  const encrypted = encryptServerBinary(plainBuffer, orgKey, aad);
-  plainBuffer.fill(0); // Clear plaintext from memory
   const blobStore = getAttachmentBlobStore();
+  const attachmentId = crypto.randomUUID();
   const blobContext = { attachmentId, entryId: id, orgId };
-  const storedBlob = await blobStore.putObject(encrypted.ciphertext, blobContext);
+  const storedBlob = await blobStore.putObject(buffer, blobContext);
+  const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 1;
+  const orgKeyVersion = orgKeyVersionStr ? parseInt(orgKeyVersionStr, 10) : 1;
 
   let attachment;
   try {
@@ -227,11 +208,12 @@ export async function POST(
         id: attachmentId,
         filename: sanitizedFilename,
         contentType,
-        sizeBytes: file.size,
+        sizeBytes: originalSize,
         encryptedData: Buffer.from(storedBlob),
-        iv: encrypted.iv,
-        authTag: encrypted.authTag,
-        aadVersion: AAD_VERSION,
+        iv,
+        authTag,
+        aadVersion,
+        keyVersion: orgKeyVersion,
         orgPasswordEntryId: id,
         createdById: session.user.id,
       },
@@ -255,7 +237,7 @@ export async function POST(
     orgId,
     targetType: AUDIT_TARGET_TYPE.ATTACHMENT,
     targetId: attachment.id,
-    metadata: { filename: sanitizedFilename, sizeBytes: file.size, entryId: id },
+    metadata: { filename: sanitizedFilename, sizeBytes: originalSize, entryId: id },
     ...extractRequestMeta(req),
   });
 

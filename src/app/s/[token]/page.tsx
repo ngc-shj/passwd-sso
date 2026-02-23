@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { hashToken, decryptShareData } from "@/lib/crypto-server";
 import { ShareEntryView } from "@/components/share/share-entry-view";
+import { ShareE2EEntryView } from "@/components/share/share-e2e-entry-view";
 import { ShareSendView } from "@/components/share/share-send-view";
 import { ShareError } from "@/components/share/share-error";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -89,7 +90,22 @@ export default async function SharePage({ params }: Props) {
     })
     .catch(() => {});
 
-  // Decrypt share data
+  // E2E share (org entries): client-side decryption via URL fragment key
+  if (share.masterKeyVersion === 0) {
+    return (
+      <ShareE2EEntryView
+        encryptedData={share.encryptedData}
+        dataIv={share.dataIv}
+        dataAuthTag={share.dataAuthTag}
+        entryType={share.entryType!}
+        expiresAt={share.expiresAt.toISOString()}
+        viewCount={share.viewCount + 1}
+        maxViews={share.maxViews}
+      />
+    );
+  }
+
+  // Server-encrypted share: decrypt with master key
   let data: Record<string, unknown>;
   try {
     data = JSON.parse(

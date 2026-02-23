@@ -11,9 +11,6 @@ const {
   mockAttachmentCreate,
   mockPutObject,
   mockDeleteObject,
-  mockUnwrapOrgKey,
-  mockEncryptServerBinary,
-  mockFileTypeFromBuffer,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireOrgPermission: vi.fn(),
@@ -23,9 +20,6 @@ const {
   mockAttachmentCreate: vi.fn(),
   mockPutObject: vi.fn(),
   mockDeleteObject: vi.fn(),
-  mockUnwrapOrgKey: vi.fn(),
-  mockEncryptServerBinary: vi.fn(),
-  mockFileTypeFromBuffer: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -59,17 +53,6 @@ vi.mock("@/lib/blob-store", () => ({
     deleteObject: mockDeleteObject,
   }),
 }));
-vi.mock("@/lib/crypto-server", () => ({
-  unwrapOrgKey: mockUnwrapOrgKey,
-  encryptServerBinary: mockEncryptServerBinary,
-}));
-vi.mock("@/lib/crypto-aad", () => ({
-  buildAttachmentAAD: () => "test-aad",
-  AAD_VERSION: 1,
-}));
-vi.mock("file-type", () => ({
-  fileTypeFromBuffer: mockFileTypeFromBuffer,
-}));
 
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/orgs/[orgId]/passwords/[id]/attachments/route";
@@ -102,21 +85,16 @@ function createFormDataRequest(
 
 function validFormFields(): Record<string, string | Blob> {
   return {
-    file: new Blob(["hello"], { type: "application/octet-stream" }),
+    file: new Blob(["encrypted-data"], { type: "application/octet-stream" }),
     filename: "test.pdf",
     contentType: "application/pdf",
+    iv: "a".repeat(24),
+    authTag: "b".repeat(32),
+    sizeBytes: "5",
   };
 }
 
-const ORG_ENTRY = {
-  orgId: "o1",
-  org: {
-    encryptedOrgKey: "enc-key",
-    orgKeyIv: "iv",
-    orgKeyAuthTag: "tag",
-    masterKeyVersion: 1,
-  },
-};
+const ORG_ENTRY = { orgId: "o1" };
 
 describe("GET /api/orgs/[orgId]/passwords/[id]/attachments", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -265,45 +243,30 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
     expect(json.error).toBe("CONTENT_TYPE_NOT_ALLOWED");
   });
 
-  it("returns 400 when magic byte detection mismatches declared content type", async () => {
+  it("returns 400 for invalid iv format", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
-    mockFileTypeFromBuffer.mockResolvedValue({ ext: "png", mime: "image/png" });
-    const req = createFormDataRequest(validFormFields());
+    const fields = { ...validFormFields(), iv: "bad-iv" };
+    const req = createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
-    expect(json.error).toBe("CONTENT_TYPE_NOT_ALLOWED");
+    expect(json.error).toBe("INVALID_IV_FORMAT");
   });
 
-  it("allows upload when magic byte detection returns undefined (text files)", async () => {
+  it("returns 400 for invalid authTag format", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
-    mockFileTypeFromBuffer.mockResolvedValue(undefined);
-    mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
-    mockEncryptServerBinary.mockReturnValue({
-      ciphertext: Buffer.from("encrypted"),
-      iv: "a".repeat(24),
-      authTag: "b".repeat(32),
-    });
-    mockPutObject.mockResolvedValue(Buffer.from("stored"));
-    const created = {
-      id: "a1",
-      filename: "test.txt",
-      contentType: "text/plain",
-      sizeBytes: 5,
-      createdAt: new Date(),
-    };
-    mockAttachmentCreate.mockResolvedValue(created);
-    const fields = { ...validFormFields(), filename: "test.txt", contentType: "text/plain" };
+    const fields = { ...validFormFields(), authTag: "bad-tag" };
     const req = createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
-    const { status } = await parseResponse(res);
-    expect(status).toBe(201);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("INVALID_AUTH_TAG_FORMAT");
   });
 
   it("returns 400 for filename with path traversal characters", async () => {
@@ -348,18 +311,11 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
     expect(json.error).toBe("INVALID_FILENAME");
   });
 
-  it("uploads attachment successfully with server-side encryption", async () => {
+  it("uploads client-encrypted attachment successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
-    mockFileTypeFromBuffer.mockResolvedValue(undefined);
-    mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
-    mockEncryptServerBinary.mockReturnValue({
-      ciphertext: Buffer.from("encrypted"),
-      iv: "a".repeat(24),
-      authTag: "b".repeat(32),
-    });
     mockPutObject.mockResolvedValue(Buffer.from("stored"));
     const created = {
       id: "a1",
@@ -374,7 +330,14 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(201);
     expect(json.filename).toBe("test.pdf");
-    expect(mockUnwrapOrgKey).toHaveBeenCalled();
-    expect(mockEncryptServerBinary).toHaveBeenCalled();
+    expect(mockAttachmentCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          iv: "a".repeat(24),
+          authTag: "b".repeat(32),
+          sizeBytes: 5,
+        }),
+      }),
+    );
   });
 });

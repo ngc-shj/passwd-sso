@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgInvitation, mockPrismaOrgMember, mockTransaction } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaOrgInvitation, mockPrismaOrgMember, mockPrismaOrganization, mockPrismaUser, mockTransaction } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaOrgInvitation: {
     findUnique: vi.fn(),
@@ -11,6 +11,8 @@ const { mockAuth, mockPrismaOrgInvitation, mockPrismaOrgMember, mockTransaction 
     findUnique: vi.fn(),
     create: vi.fn(),
   },
+  mockPrismaOrganization: { findUnique: vi.fn() },
+  mockPrismaUser: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
 }));
 
@@ -19,6 +21,8 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgInvitation: mockPrismaOrgInvitation,
     orgMember: mockPrismaOrgMember,
+    organization: mockPrismaOrganization,
+    user: mockPrismaUser,
     $transaction: mockTransaction,
   },
 }));
@@ -115,6 +119,7 @@ describe("POST /api/orgs/invitations/accept", () => {
   it("accepts invitation and creates membership", async () => {
     mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
     mockPrismaOrgMember.findUnique.mockResolvedValue(null);
+    mockPrismaOrganization.findUnique.mockResolvedValue({ e2eEnabled: false });
 
     const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
       body: { token: "valid-token" },
@@ -125,5 +130,35 @@ describe("POST /api/orgs/invitations/accept", () => {
     expect(json.role).toBe(ORG_ROLE.MEMBER);
     expect(json.org.name).toBe("My Org");
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns needsKeyDistribution for E2E org accept", async () => {
+    mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaOrgMember.findUnique.mockResolvedValue(null);
+    mockPrismaOrganization.findUnique.mockResolvedValue({ e2eEnabled: true });
+    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key-jwk" });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+      body: { token: "valid-token" },
+    }));
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.needsKeyDistribution).toBe(true);
+    expect(json.vaultSetupRequired).toBe(false);
+  });
+
+  it("returns vaultSetupRequired when user lacks ECDH key in E2E org", async () => {
+    mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaOrgMember.findUnique.mockResolvedValue(null);
+    mockPrismaOrganization.findUnique.mockResolvedValue({ e2eEnabled: true });
+    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: null });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+      body: { token: "valid-token" },
+    }));
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.needsKeyDistribution).toBe(true);
+    expect(json.vaultSetupRequired).toBe(true);
   });
 });

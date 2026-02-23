@@ -1,11 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockAuth, mockPrismaOrgMember, mockPrismaOrgPasswordEntry, mockUnwrapOrgKey, mockDecryptServerData, mockHasOrgPermission } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaOrgMember, mockPrismaOrgPasswordEntry, mockHasOrgPermission } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaOrgMember: { findMany: vi.fn() },
   mockPrismaOrgPasswordEntry: { findMany: vi.fn() },
-  mockUnwrapOrgKey: vi.fn(),
-  mockDecryptServerData: vi.fn(),
   mockHasOrgPermission: vi.fn(),
 }));
 
@@ -16,10 +14,6 @@ vi.mock("@/lib/prisma", () => ({
     orgPasswordEntry: mockPrismaOrgPasswordEntry,
   },
 }));
-vi.mock("@/lib/crypto-server", () => ({
-  unwrapOrgKey: mockUnwrapOrgKey,
-  decryptServerData: mockDecryptServerData,
-}));
 vi.mock("@/lib/org-auth", () => ({
   hasOrgPermission: mockHasOrgPermission,
 }));
@@ -29,10 +23,9 @@ import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
 
 describe("GET /api/orgs/trash", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockHasOrgPermission.mockReturnValue(true);
-    mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -48,7 +41,7 @@ describe("GET /api/orgs/trash", () => {
     expect(json).toEqual([]);
   });
 
-  it("returns trashed entries with decrypted overviews and entryType", async () => {
+  it("returns trashed entries with encrypted overviews (E2E mode)", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
     const deletedAt = new Date("2025-01-02T00:00:00Z");
     mockPrismaOrgMember.findMany.mockResolvedValue([
@@ -61,10 +54,12 @@ describe("GET /api/orgs/trash", () => {
         entryType: ENTRY_TYPE.LOGIN,
         isArchived: false,
         deletedAt,
-        encryptedOverview: "cipher",
-        overviewIv: "iv",
-        overviewAuthTag: "tag",
-        org: { id: "org-1", name: "My Org", encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1 },
+        encryptedOverview: "encrypted-overview",
+        overviewIv: "aabbccddee001122",
+        overviewAuthTag: "aabbccddee0011223344556677889900",
+        aadVersion: 1,
+        orgKeyVersion: 1,
+        org: { id: "org-1", name: "My Org" },
         tags: [],
         createdBy: { id: "u1", name: "User", image: null },
         updatedBy: { id: "u1", name: "User" },
@@ -73,16 +68,16 @@ describe("GET /api/orgs/trash", () => {
         updatedAt: now,
       },
     ]);
-    mockDecryptServerData.mockReturnValue(
-      JSON.stringify({ title: "Trashed PW", username: "admin", urlHost: null })
-    );
 
     const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
-    expect(json[0].title).toBe("Trashed PW");
+    expect(json[0].encryptedOverview).toBe("encrypted-overview");
     expect(json[0].entryType).toBe(ENTRY_TYPE.LOGIN);
     expect(json[0].deletedAt).toBeDefined();
+    expect(json[0].orgKeyVersion).toBe(1);
+    // Should NOT contain decrypted fields
+    expect(json[0].title).toBeUndefined();
   });
 });

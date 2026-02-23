@@ -3,15 +3,12 @@ import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-const { mockAuth, mockCreate, mockFindMany, mockFindUnique, mockDecryptServerData } = vi.hoisted(
+const { mockAuth, mockCreate, mockFindMany, mockFindUnique } = vi.hoisted(
   () => ({
     mockAuth: vi.fn(),
     mockCreate: vi.fn(),
     mockFindMany: vi.fn(),
     mockFindUnique: vi.fn(),
-    mockDecryptServerData: vi.fn().mockReturnValue(
-      JSON.stringify({ title: "Test", username: "user", password: "pass" })
-    ),
   })
 );
 
@@ -32,8 +29,6 @@ vi.mock("@/lib/crypto-server", () => ({
     authTag: "t".repeat(32),
     masterKeyVersion: 1,
   }),
-  unwrapOrgKey: () => Buffer.alloc(32),
-  decryptServerData: mockDecryptServerData,
 }));
 vi.mock("@/lib/org-auth", () => ({
   requireOrgPermission: vi.fn(),
@@ -166,76 +161,43 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
   });
 
-  it("passes AAD to decryptServerData for org entry with aadVersion >= 1", async () => {
+  it("creates E2E org share link with client-encrypted data", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockFindUnique
-      .mockResolvedValueOnce({
-        id: "org-entry-1",
-        entryType: ENTRY_TYPE.LOGIN,
-        aadVersion: 1,
-        encryptedBlob: "blob",
-        blobIv: "iv",
-        blobAuthTag: "tag",
-        org: {
-          id: "org-123",
-          encryptedOrgKey: "ek",
-          orgKeyIv: "oiv",
-          orgKeyAuthTag: "otag",
-          masterKeyVersion: 1,
-        },
-      })
-      .mockResolvedValueOnce({ orgId: "org-123" }); // audit log lookup
+    mockFindUnique.mockResolvedValue({ orgId: "org-123" });
     mockCreate.mockResolvedValue({
-      id: "share-org",
+      id: "share-e2e",
       expiresAt: new Date(Date.now() + 86400000),
     });
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {
         orgPasswordEntryId: VALID_ENTRY_ID,
-        expiresIn: "1d",
-      },
-    });
-    await POST(req as never);
-
-    const decryptCall = mockDecryptServerData.mock.calls[0];
-    expect(decryptCall[2]).toBeInstanceOf(Buffer);
-  });
-
-  it("passes undefined AAD for org entry with aadVersion=0", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockFindUnique
-      .mockResolvedValueOnce({
-        id: "org-entry-legacy",
-        entryType: ENTRY_TYPE.LOGIN,
-        aadVersion: 0,
-        encryptedBlob: "blob",
-        blobIv: "iv",
-        blobAuthTag: "tag",
-        org: {
-          id: "org-123",
-          encryptedOrgKey: "ek",
-          orgKeyIv: "oiv",
-          orgKeyAuthTag: "otag",
-          masterKeyVersion: 1,
+        encryptedShareData: {
+          ciphertext: "client-encrypted",
+          iv: "c".repeat(24),
+          authTag: "d".repeat(32),
         },
-      })
-      .mockResolvedValueOnce({ orgId: "org-123" });
-    mockCreate.mockResolvedValue({
-      id: "share-legacy",
-      expiresAt: new Date(Date.now() + 86400000),
-    });
-
-    const req = createRequest("POST", "http://localhost/api/share-links", {
-      body: {
-        orgPasswordEntryId: VALID_ENTRY_ID,
+        entryType: ENTRY_TYPE.LOGIN,
         expiresIn: "1d",
       },
     });
-    await POST(req as never);
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
 
-    const decryptCall = mockDecryptServerData.mock.calls[0];
-    expect(decryptCall[2]).toBeUndefined();
+    expect(status).toBe(200);
+    expect(json.id).toBe("share-e2e");
+
+    // Verify E2E sentinel masterKeyVersion=0 is saved
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          masterKeyVersion: 0,
+          encryptedData: "client-encrypted",
+          dataIv: "c".repeat(24),
+          dataAuthTag: "d".repeat(32),
+        }),
+      })
+    );
   });
 
   it("returns 400 on malformed JSON", async () => {
@@ -259,6 +221,12 @@ describe("POST /api/share-links", () => {
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {
         orgPasswordEntryId: VALID_ENTRY_ID,
+        encryptedShareData: {
+          ciphertext: "c",
+          iv: "a".repeat(24),
+          authTag: "b".repeat(32),
+        },
+        entryType: ENTRY_TYPE.LOGIN,
         expiresIn: "1d",
       },
     });
@@ -270,21 +238,7 @@ describe("POST /api/share-links", () => {
 
   it("returns OrgAuthError status for org entry permission denied", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockFindUnique.mockResolvedValueOnce({
-      id: "org-entry-1",
-      entryType: ENTRY_TYPE.LOGIN,
-      aadVersion: 1,
-      encryptedBlob: "blob",
-      blobIv: "iv",
-      blobAuthTag: "tag",
-      org: {
-        id: "org-123",
-        encryptedOrgKey: "ek",
-        orgKeyIv: "oiv",
-        orgKeyAuthTag: "otag",
-        masterKeyVersion: 1,
-      },
-    });
+    mockFindUnique.mockResolvedValueOnce({ orgId: "org-123" });
 
     const { requireOrgPermission } = await import("@/lib/org-auth");
     const { OrgAuthError: RealOrgAuthError } = await import("@/lib/org-auth");
@@ -295,6 +249,12 @@ describe("POST /api/share-links", () => {
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {
         orgPasswordEntryId: VALID_ENTRY_ID,
+        encryptedShareData: {
+          ciphertext: "c",
+          iv: "a".repeat(24),
+          authTag: "b".repeat(32),
+        },
+        entryType: ENTRY_TYPE.LOGIN,
         expiresIn: "1d",
       },
     });
@@ -323,6 +283,21 @@ describe("POST /api/share-links", () => {
 
     expect(status).toBe(404);
     expect(json.error).toBe("NOT_FOUND");
+  });
+
+  it("returns 400 when org share omits encryptedShareData", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+
+    const req = createRequest("POST", "http://localhost/api/share-links", {
+      body: {
+        orgPasswordEntryId: VALID_ENTRY_ID,
+        expiresIn: "1d",
+      },
+    });
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 });
 

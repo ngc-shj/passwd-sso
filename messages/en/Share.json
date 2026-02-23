@@ -76,5 +76,10 @@
   "sendCreateSuccess": "Send created",
   "newSend": "New Send",
   "newSendDesc": "Send text or a file securely via a temporary link.",
-  "remove": "Remove"
+  "remove": "Remove",
+  "e2eDecrypting": "Decrypting...",
+  "error_missingKey_title": "Missing Decryption Key",
+  "error_missingKey_desc": "The decryption key was not found in the link. Make sure you are using the complete URL.",
+  "error_decryptFailed_title": "Decryption Failed",
+  "error_decryptFailed_desc": "Could not decrypt the shared data. The link may be corrupted or tampered with."
 }

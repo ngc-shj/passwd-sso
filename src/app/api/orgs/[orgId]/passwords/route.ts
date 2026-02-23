@@ -2,30 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import {
-  createOrgPasswordSchema,
-  createOrgSecureNoteSchema,
-  createOrgCreditCardSchema,
-  createOrgIdentitySchema,
-  createOrgPasskeySchema,
-} from "@/lib/validations";
+import { createOrgE2EPasswordSchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { EntryType } from "@prisma/client";
-import {
-  unwrapOrgKey,
-  encryptServerData,
-  decryptServerData,
-} from "@/lib/crypto-server";
-import { buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
-import { ENTRY_TYPE, ENTRY_TYPE_VALUES, ORG_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import type { EntryTypeValue } from "@/lib/constants";
+import { ENTRY_TYPE_VALUES, ORG_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string }> };
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
-// GET /api/orgs/[orgId]/passwords — List org passwords (server decrypts overviews)
+// GET /api/orgs/[orgId]/passwords — List org passwords (encrypted overviews, client decrypts)
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -51,26 +38,6 @@ export async function GET(req: NextRequest, { params }: Params) {
   const favoritesOnly = searchParams.get("favorites") === "true";
   const trashOnly = searchParams.get("trash") === "true";
   const archivedOnly = searchParams.get("archived") === "true";
-
-  const org = await prisma.organization.findUnique({
-    where: { id: orgId },
-    select: {
-      encryptedOrgKey: true,
-      orgKeyIv: true,
-      orgKeyAuthTag: true,
-      masterKeyVersion: true,
-    },
-  });
-
-  if (!org) {
-    return NextResponse.json({ error: API_ERROR.ORG_NOT_FOUND }, { status: 404 });
-  }
-
-  const orgKey = unwrapOrgKey({
-    ciphertext: org.encryptedOrgKey,
-    iv: org.orgKeyIv,
-    authTag: org.orgKeyAuthTag,
-  }, org.masterKeyVersion);
 
   const passwords = await prisma.orgPasswordEntry.findMany({
     where: {
@@ -111,72 +78,23 @@ export async function GET(req: NextRequest, { params }: Params) {
     }).catch(() => {});
   }
 
-  interface OrgPasswordListEntry {
-    id: string;
-    entryType: string;
-    title: string;
-    username: string | null;
-    urlHost: string | null;
-    snippet: string | null;
-    brand: string | null;
-    lastFour: string | null;
-    cardholderName: string | null;
-    fullName: string | null;
-    idNumberLast4: string | null;
-    isFavorite: boolean;
-    isArchived: boolean;
-    tags: { id: string; name: string; color: string | null }[];
-    createdBy: { id: string; name: string | null; image: string | null };
-    updatedBy: { id: string; name: string | null };
-    createdAt: Date;
-    updatedAt: Date;
-    deletedAt: Date | null;
-  }
-
-  const entries: OrgPasswordListEntry[] = [];
-  for (const entry of passwords) {
-    try {
-      const aad = entry.aadVersion >= 1
-        ? Buffer.from(buildOrgEntryAAD(orgId, entry.id, "overview"))
-        : undefined;
-      const overview = JSON.parse(
-        decryptServerData(
-          {
-            ciphertext: entry.encryptedOverview,
-            iv: entry.overviewIv,
-            authTag: entry.overviewAuthTag,
-          },
-          orgKey,
-          aad
-        )
-      );
-
-      entries.push({
-        id: entry.id,
-        entryType: entry.entryType,
-        title: overview.title,
-        username: overview.username ?? null,
-        urlHost: overview.urlHost ?? null,
-        snippet: overview.snippet ?? null,
-        brand: overview.brand ?? null,
-        lastFour: overview.lastFour ?? null,
-        cardholderName: overview.cardholderName ?? null,
-        fullName: overview.fullName ?? null,
-        idNumberLast4: overview.idNumberLast4 ?? null,
-        isFavorite: entry.favorites.length > 0,
-        isArchived: entry.isArchived,
-        tags: entry.tags,
-        createdBy: entry.createdBy,
-        updatedBy: entry.updatedBy,
-        createdAt: entry.createdAt,
-        updatedAt: entry.updatedAt,
-        deletedAt: entry.deletedAt,
-      });
-    } catch {
-      // Skip entries with corrupt encrypted data rather than failing the entire list
-      continue;
-    }
-  }
+  const entries = passwords.map((entry) => ({
+    id: entry.id,
+    entryType: entry.entryType,
+    encryptedOverview: entry.encryptedOverview,
+    overviewIv: entry.overviewIv,
+    overviewAuthTag: entry.overviewAuthTag,
+    aadVersion: entry.aadVersion,
+    orgKeyVersion: entry.orgKeyVersion,
+    isFavorite: entry.favorites.length > 0,
+    isArchived: entry.isArchived,
+    tags: entry.tags,
+    createdBy: entry.createdBy,
+    updatedBy: entry.updatedBy,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+    deletedAt: entry.deletedAt,
+  }));
 
   // Sort: favorites first, then by updatedAt desc
   entries.sort((a, b) => {
@@ -187,7 +105,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   return NextResponse.json(entries);
 }
 
-// POST /api/orgs/[orgId]/passwords — Create org password (plaintext in, server encrypts)
+// POST /api/orgs/[orgId]/passwords — Create org password (E2E: client encrypts)
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -212,207 +130,15 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
-  // Check entry type
-  const rawBody = body as Record<string, unknown>;
-  const isSecureNote = rawBody.entryType === ENTRY_TYPE.SECURE_NOTE;
-  const isCreditCard = rawBody.entryType === ENTRY_TYPE.CREDIT_CARD;
-  const isIdentity = rawBody.entryType === ENTRY_TYPE.IDENTITY;
-  const isPasskey = rawBody.entryType === ENTRY_TYPE.PASSKEY;
-
-  const org = await prisma.organization.findUnique({
-    where: { id: orgId },
-    select: {
-      encryptedOrgKey: true,
-      orgKeyIv: true,
-      orgKeyAuthTag: true,
-      masterKeyVersion: true,
-    },
-  });
-
-  if (!org) {
-    return NextResponse.json({ error: API_ERROR.ORG_NOT_FOUND }, { status: 404 });
+  const parsed = createOrgE2EPasswordSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
+      { status: 400 }
+    );
   }
 
-  const orgKey = unwrapOrgKey({
-    ciphertext: org.encryptedOrgKey,
-    iv: org.orgKeyIv,
-    authTag: org.orgKeyAuthTag,
-  }, org.masterKeyVersion);
-
-  let fullBlob: string;
-  let overviewBlob: string;
-  let entryType: EntryTypeValue = ENTRY_TYPE.LOGIN;
-  let tagIds: string[] | undefined;
-  let orgFolderId: string | null | undefined;
-  let responseTitle: string;
-  let responseUsername: string | null = null;
-  let responseUrlHost: string | null = null;
-
-  if (isSecureNote) {
-    const parsed = createOrgSecureNoteSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    const { title, content } = parsed.data;
-    tagIds = parsed.data.tagIds;
-    orgFolderId = parsed.data.orgFolderId;
-    entryType = ENTRY_TYPE.SECURE_NOTE;
-    responseTitle = title;
-
-    const snippet = content.slice(0, 100);
-    fullBlob = JSON.stringify({ title, content });
-    overviewBlob = JSON.stringify({ title, snippet });
-  } else if (isCreditCard) {
-    const parsed = createOrgCreditCardSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    const { title, cardholderName, cardNumber, brand, expiryMonth, expiryYear, cvv, notes } = parsed.data;
-    tagIds = parsed.data.tagIds;
-    orgFolderId = parsed.data.orgFolderId;
-    entryType = ENTRY_TYPE.CREDIT_CARD;
-    responseTitle = title;
-
-    const lastFour = cardNumber ? cardNumber.slice(-4) : null;
-    fullBlob = JSON.stringify({
-      title,
-      cardholderName: cardholderName || null,
-      cardNumber: cardNumber || null,
-      brand: brand || null,
-      expiryMonth: expiryMonth || null,
-      expiryYear: expiryYear || null,
-      cvv: cvv || null,
-      notes: notes || null,
-    });
-    overviewBlob = JSON.stringify({
-      title,
-      cardholderName: cardholderName || null,
-      brand: brand || null,
-      lastFour,
-    });
-  } else if (isIdentity) {
-    const parsed = createOrgIdentitySchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    const { title, fullName, address, phone, email, dateOfBirth, nationality, idNumber, issueDate, expiryDate, notes } = parsed.data;
-    tagIds = parsed.data.tagIds;
-    orgFolderId = parsed.data.orgFolderId;
-    entryType = ENTRY_TYPE.IDENTITY;
-    responseTitle = title;
-
-    const idNumberLast4 = idNumber ? idNumber.slice(-4) : null;
-    fullBlob = JSON.stringify({
-      title,
-      fullName: fullName || null,
-      address: address || null,
-      phone: phone || null,
-      email: email || null,
-      dateOfBirth: dateOfBirth || null,
-      nationality: nationality || null,
-      idNumber: idNumber || null,
-      issueDate: issueDate || null,
-      expiryDate: expiryDate || null,
-      notes: notes || null,
-    });
-    overviewBlob = JSON.stringify({
-      title,
-      fullName: fullName || null,
-      idNumberLast4,
-    });
-  } else if (isPasskey) {
-    const parsed = createOrgPasskeySchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    const {
-      title,
-      relyingPartyId,
-      relyingPartyName,
-      username,
-      credentialId,
-      creationDate,
-      deviceInfo,
-      notes,
-    } = parsed.data;
-    tagIds = parsed.data.tagIds;
-    orgFolderId = parsed.data.orgFolderId;
-    entryType = ENTRY_TYPE.PASSKEY;
-    responseTitle = title;
-    responseUsername = username || null;
-
-    fullBlob = JSON.stringify({
-      title,
-      relyingPartyId: relyingPartyId || null,
-      relyingPartyName: relyingPartyName || null,
-      username: username || null,
-      credentialId: credentialId || null,
-      creationDate: creationDate || null,
-      deviceInfo: deviceInfo || null,
-      notes: notes || null,
-    });
-    overviewBlob = JSON.stringify({
-      title,
-      relyingPartyId: relyingPartyId || null,
-      username: username || null,
-    });
-  } else {
-    const parsed = createOrgPasswordSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    const { title, username, password, url, notes, customFields, totp } = parsed.data;
-    tagIds = parsed.data.tagIds;
-    orgFolderId = parsed.data.orgFolderId;
-    responseTitle = title;
-    responseUsername = username || null;
-
-    let urlHost: string | null = null;
-    if (url) {
-      try {
-        urlHost = new URL(url).hostname;
-      } catch {
-        /* invalid url */
-      }
-    }
-    responseUrlHost = urlHost;
-
-    fullBlob = JSON.stringify({
-      title,
-      username: username || null,
-      password,
-      url: url || null,
-      notes: notes || null,
-      ...(customFields?.length ? { customFields } : {}),
-      ...(totp ? { totp } : {}),
-    });
-
-    overviewBlob = JSON.stringify({
-      title,
-      username: username || null,
-      urlHost,
-    });
-  }
+  const { encryptedBlob, encryptedOverview, aadVersion, orgKeyVersion, entryType, tagIds, orgFolderId } = parsed.data;
 
   // Validate orgFolderId belongs to this org
   if (orgFolderId) {
@@ -425,13 +151,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
   }
 
-  // Pre-generate entry ID for AAD binding
   const entryId = crypto.randomUUID();
-  const blobAad = Buffer.from(buildOrgEntryAAD(orgId, entryId, "blob"));
-  const overviewAad = Buffer.from(buildOrgEntryAAD(orgId, entryId, "overview"));
-
-  const encryptedBlob = encryptServerData(fullBlob, orgKey, blobAad);
-  const encryptedOverview = encryptServerData(overviewBlob, orgKey, overviewAad);
 
   const entry = await prisma.orgPasswordEntry.create({
     data: {
@@ -442,7 +162,8 @@ export async function POST(req: NextRequest, { params }: Params) {
       encryptedOverview: encryptedOverview.ciphertext,
       overviewIv: encryptedOverview.iv,
       overviewAuthTag: encryptedOverview.authTag,
-      aadVersion: AAD_VERSION,
+      aadVersion,
+      orgKeyVersion,
       entryType,
       orgId,
       createdById: session.user.id,
@@ -471,9 +192,6 @@ export async function POST(req: NextRequest, { params }: Params) {
     {
       id: entry.id,
       entryType: entry.entryType,
-      title: responseTitle,
-      username: responseUsername,
-      urlHost: responseUrlHost,
       tags: entry.tags,
       createdAt: entry.createdAt,
     },

@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockRateLimiter } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
   mockPrismaVaultKey: { create: vi.fn() },
   mockTransaction: vi.fn(),
+  mockRateLimiter: { check: vi.fn() },
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -14,6 +15,9 @@ vi.mock("@/lib/prisma", () => ({
     vaultKey: mockPrismaVaultKey,
     $transaction: mockTransaction,
   },
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: () => mockRateLimiter,
 }));
 vi.mock("@/lib/crypto-server", () => ({
   hmacVerifier: vi.fn().mockReturnValue("a".repeat(64)),
@@ -38,12 +42,18 @@ const validBody = {
     iv: "e".repeat(24),
     authTag: "f".repeat(32),
   },
+  // ECDH key pair for org E2E
+  ecdhPublicKey: '{"kty":"EC","crv":"P-256","x":"test","y":"test"}',
+  encryptedEcdhPrivateKey: "encrypted-ecdh-private-key-data",
+  ecdhPrivateKeyIv: "a".repeat(24),
+  ecdhPrivateKeyAuthTag: "b".repeat(32),
 };
 
 describe("POST /api/vault/setup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockRateLimiter.check.mockResolvedValue(true);
     mockTransaction.mockResolvedValue([{}, {}]);
   });
 
@@ -96,5 +106,39 @@ describe("POST /api/vault/setup", () => {
     const json = await res.json();
     expect(json.success).toBe(true);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores ECDH key pair fields in user update", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null });
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: validBody }));
+    expect(res.status).toBe(201);
+
+    // Verify user.update was called with ECDH fields
+    expect(mockPrismaUser.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          ecdhPublicKey: validBody.ecdhPublicKey,
+          encryptedEcdhPrivateKey: validBody.encryptedEcdhPrivateKey,
+          ecdhPrivateKeyIv: validBody.ecdhPrivateKeyIv,
+          ecdhPrivateKeyAuthTag: validBody.ecdhPrivateKeyAuthTag,
+        }),
+      }),
+    );
+  });
+
+  it("returns 400 when ECDH fields are missing", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null });
+    const { ecdhPublicKey, encryptedEcdhPrivateKey, ecdhPrivateKeyIv, ecdhPrivateKeyAuthTag, ...bodyWithoutEcdh } = validBody;
+    void ecdhPublicKey; void encryptedEcdhPrivateKey; void ecdhPrivateKeyIv; void ecdhPrivateKeyAuthTag;
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: bodyWithoutEcdh }));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when ecdhPrivateKeyIv has wrong format", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null });
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", {
+      body: { ...validBody, ecdhPrivateKeyIv: "short" },
+    }));
+    expect(res.status).toBe(400);
   });
 });

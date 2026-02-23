@@ -4,8 +4,6 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { unwrapOrgKey, decryptServerBinary } from "@/lib/crypto-server";
-import { buildAttachmentAAD } from "@/lib/crypto-aad";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { AUDIT_TARGET_TYPE, ORG_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
@@ -13,7 +11,7 @@ type RouteContext = {
   params: Promise<{ orgId: string; id: string; attachmentId: string }>;
 };
 
-// GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId] - Download attachment (decrypted)
+// GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId] - Download encrypted attachment
 export async function GET(
   _req: NextRequest,
   { params }: RouteContext
@@ -36,17 +34,7 @@ export async function GET(
 
   const entry = await prisma.orgPasswordEntry.findUnique({
     where: { id },
-    select: {
-      orgId: true,
-      org: {
-        select: {
-          encryptedOrgKey: true,
-          orgKeyIv: true,
-          orgKeyAuthTag: true,
-          masterKeyVersion: true,
-        },
-      },
-    },
+    select: { orgId: true },
   });
 
   if (!entry || entry.orgId !== orgId) {
@@ -61,40 +49,24 @@ export async function GET(
     return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
   }
 
-  // Decrypt server-side and return plaintext binary
-  const orgKey = unwrapOrgKey({
-    ciphertext: entry.org.encryptedOrgKey,
-    iv: entry.org.orgKeyIv,
-    authTag: entry.org.orgKeyAuthTag,
-  }, entry.org.masterKeyVersion);
-
-  const aad = attachment.aadVersion >= 1
-    ? Buffer.from(buildAttachmentAAD(id, attachmentId))
-    : undefined;
+  // Return encrypted data + crypto metadata for client-side decryption
   const blobStore = getAttachmentBlobStore();
   const encryptedBuffer = await blobStore.getObject(attachment.encryptedData, {
     attachmentId,
     entryId: id,
     orgId,
   });
-  const decrypted = decryptServerBinary(
-    {
-      ciphertext: encryptedBuffer,
-      iv: attachment.iv,
-      authTag: attachment.authTag,
-    },
-    orgKey,
-    aad
-  );
 
-  return new NextResponse(new Uint8Array(decrypted), {
-    headers: {
-      "Content-Type": attachment.contentType,
-      "Content-Disposition": `attachment; filename="download"; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`,
-      "Content-Length": attachment.sizeBytes.toString(),
-      "X-Content-Type-Options": "nosniff",
-      "Cache-Control": "private, no-cache, no-store, must-revalidate",
-    },
+  return NextResponse.json({
+    id: attachment.id,
+    filename: attachment.filename,
+    contentType: attachment.contentType,
+    sizeBytes: attachment.sizeBytes,
+    encryptedData: encryptedBuffer.toString("base64"),
+    iv: attachment.iv,
+    authTag: attachment.authTag,
+    keyVersion: attachment.keyVersion,
+    aadVersion: attachment.aadVersion,
   });
 }
 

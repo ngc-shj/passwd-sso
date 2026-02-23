@@ -107,6 +107,12 @@ model User {
   passwordShares       PasswordShare[]
   attachments          Attachment[]
 
+  // ECDH key pair for org E2E encryption
+  ecdhPublicKey           String? @map("ecdh_public_key") @db.Text
+  encryptedEcdhPrivateKey String? @map("encrypted_ecdh_private_key") @db.Text
+  ecdhPrivateKeyIv        String? @map("ecdh_private_key_iv") @db.VarChar(24)
+  ecdhPrivateKeyAuthTag   String? @map("ecdh_private_key_auth_tag") @db.VarChar(32)
+
   // Emergency Access relations
   emergencyGrantsAsOwner   EmergencyAccessGrant[] @relation("emergencyGrantsAsOwner")
   emergencyGrantsAsGrantee EmergencyAccessGrant[] @relation("emergencyGrantsAsGrantee")
@@ -117,6 +123,7 @@ model User {
   // Folder relations
   folders                Folder[]
   orgPasswordHistories   OrgPasswordEntryHistory[]
+  orgMemberKeys          OrgMemberKey[]
 
   @@map("users")
 }
@@ -241,11 +248,16 @@ model Organization {
   slug        String   @unique
   description String?  @db.Text
 
-  // Server-side encryption: per-org key wrapped by ORG_MASTER_KEY
-  encryptedOrgKey  String @map("encrypted_org_key") @db.Text
-  orgKeyIv         String @map("org_key_iv") @db.VarChar(24)
-  orgKeyAuthTag    String @map("org_key_auth_tag") @db.VarChar(32)
-  masterKeyVersion Int    @default(1) @map("master_key_version")
+  // Server-side encryption: per-org key wrapped by ORG_MASTER_KEY (nullable after E2E migration)
+  encryptedOrgKey  String? @map("encrypted_org_key") @db.Text
+  orgKeyIv         String? @map("org_key_iv") @db.VarChar(24)
+  orgKeyAuthTag    String? @map("org_key_auth_tag") @db.VarChar(32)
+  masterKeyVersion Int     @default(1) @map("master_key_version")
+
+  // E2E encryption (ECDH-P256)
+  orgKeyVersion       Int     @default(0) @map("org_key_version")
+  e2eEnabled          Boolean @default(false) @map("e2e_enabled")
+  migrationInProgress Boolean @default(false) @map("migration_in_progress")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -256,15 +268,17 @@ model Organization {
   folders     OrgFolder[]
   invitations OrgInvitation[]
   auditLogs   AuditLog[]
+  memberKeys  OrgMemberKey[]
 
   @@map("organizations")
 }
 
 model OrgMember {
-  id     String  @id @default(cuid())
-  orgId  String  @map("org_id")
-  userId String  @map("user_id")
-  role   OrgRole @default(MEMBER)
+  id             String  @id @default(cuid())
+  orgId          String  @map("org_id")
+  userId         String  @map("user_id")
+  role           OrgRole @default(MEMBER)
+  keyDistributed Boolean @default(false) @map("key_distributed")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -274,6 +288,28 @@ model OrgMember {
 
   @@unique([orgId, userId])
   @@map("org_members")
+}
+
+model OrgMemberKey {
+  id                 String   @id @default(cuid())
+  orgId              String   @map("org_id")
+  userId             String   @map("user_id")
+  encryptedOrgKey    String   @map("encrypted_org_key") @db.Text
+  orgKeyIv           String   @map("org_key_iv") @db.VarChar(24)
+  orgKeyAuthTag      String   @map("org_key_auth_tag") @db.VarChar(32)
+  ephemeralPublicKey String   @map("ephemeral_public_key") @db.Text
+  hkdfSalt           String   @map("hkdf_salt") @db.VarChar(64)
+  wrapVersion        Int      @default(1) @map("wrap_version")
+  keyVersion         Int      @default(1) @map("key_version")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId, keyVersion])
+  @@index([userId])
+  @@map("org_member_keys")
 }
 
 model OrgPasswordEntry {
@@ -288,6 +324,7 @@ model OrgPasswordEntry {
   overviewIv        String @map("overview_iv") @db.VarChar(24)
   overviewAuthTag   String @map("overview_auth_tag") @db.VarChar(32)
   aadVersion        Int    @default(0) @map("aad_version")
+  orgKeyVersion     Int    @default(0) @map("org_key_version")
   entryType         EntryType @default(LOGIN) @map("entry_type")
 
   // Metadata (unencrypted)
@@ -476,6 +513,9 @@ enum AuditAction {
   MASTER_KEY_ROTATION
   SESSION_REVOKE
   SESSION_REVOKE_ALL
+  ORG_E2E_MIGRATION
+  ORG_KEY_ROTATION
+  ORG_MEMBER_KEY_DISTRIBUTE
 }
 
 enum AuditScope {
@@ -655,6 +695,7 @@ model OrgPasswordEntryHistory {
   blobIv        String   @map("blob_iv") @db.VarChar(24)
   blobAuthTag   String   @map("blob_auth_tag") @db.VarChar(32)
   aadVersion    Int      @default(0) @map("aad_version")
+  orgKeyVersion Int      @default(0) @map("org_key_version")
   changedById   String   @map("changed_by_id")
   changedAt     DateTime @default(now()) @map("changed_at")
 
