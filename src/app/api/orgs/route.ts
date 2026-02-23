@@ -76,10 +76,6 @@ export async function POST(req: NextRequest) {
       name,
       slug,
       description: description || null,
-      encryptedOrgKey: null,
-      orgKeyIv: null,
-      orgKeyAuthTag: null,
-      e2eEnabled: true,
       orgKeyVersion: 1,
       members: {
         create: {
@@ -110,7 +106,6 @@ export async function POST(req: NextRequest) {
       description: org.description,
       role: ORG_ROLE.OWNER,
       createdAt: org.createdAt,
-      e2eEnabled: true,
     },
     { status: 201 }
   );

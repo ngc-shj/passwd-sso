@@ -248,15 +248,8 @@ model Organization {
   slug        String   @unique
   description String?  @db.Text
 
-  // Server-side encryption: per-org key wrapped by ORG_MASTER_KEY (nullable after E2E migration)
-  encryptedOrgKey  String? @map("encrypted_org_key") @db.Text
-  orgKeyIv         String? @map("org_key_iv") @db.VarChar(24)
-  orgKeyAuthTag    String? @map("org_key_auth_tag") @db.VarChar(32)
-  masterKeyVersion Int     @default(1) @map("master_key_version")
-
   // E2E encryption (ECDH-P256)
-  orgKeyVersion       Int     @default(0) @map("org_key_version")
-  e2eEnabled          Boolean @default(false) @map("e2e_enabled")
+  orgKeyVersion       Int     @default(1) @map("org_key_version")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

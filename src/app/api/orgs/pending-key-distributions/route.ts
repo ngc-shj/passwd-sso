@@ -18,7 +18,6 @@ export async function GET() {
     where: {
       userId: session.user.id,
       role: { in: [ORG_ROLE.OWNER, ORG_ROLE.ADMIN] },
-      org: { e2eEnabled: true },
     },
     select: { orgId: true },
   });

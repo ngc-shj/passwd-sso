@@ -126,16 +126,11 @@ describe("POST /api/orgs (E2E-only)", () => {
     const json = await res.json();
     expect(res.status).toBe(201);
     expect(json.id).toBe("e2e-org-id");
-    expect(json.e2eEnabled).toBe(true);
     expect(json.role).toBe(ORG_ROLE.OWNER);
     expect(mockPrismaOrganization.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          e2eEnabled: true,
           orgKeyVersion: 1,
-          encryptedOrgKey: null,
-          orgKeyIv: null,
-          orgKeyAuthTag: null,
           memberKeys: expect.objectContaining({
             create: expect.objectContaining({
               encryptedOrgKey: "encrypted-org-key-data",
