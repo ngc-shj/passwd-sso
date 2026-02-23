@@ -270,7 +270,7 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
     expect(json.error).toBe("ENTRY_COUNT_MISMATCH");
   });
 
-  it("returns 400 when submitted entry IDs do not exactly match active entries", async () => {
+  it("returns 400 when submitted entry IDs do not exactly match org entries", async () => {
     txMock.orgPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }]);
     const res = await POST(
       createRequest({
@@ -320,6 +320,29 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
         data: expect.objectContaining({ keyVersion: 2 }), // server forces correct version
       }),
     );
+  });
+
+  it("includes trashed entries in rotation (all-entries policy)", async () => {
+    // Org has 2 entries: one active (e1), one trashed (e-trash).
+    // rotate-key must cover ALL entries including trash.
+    txMock.orgPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e-trash" }]);
+    txMock.orgPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
+    txMock.orgMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
+    const res = await POST(
+      createRequest({
+        newOrgKeyVersion: 2,
+        entries: [validEntry("e1"), validEntry("e-trash")],
+        memberKeys: [validMemberKey("user-1")],
+      }),
+      createParams("org-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(txMock.orgPasswordEntry.updateMany).toHaveBeenCalledTimes(2);
+    // Verify findMany was called without deletedAt filter
+    expect(txMock.orgPasswordEntry.findMany).toHaveBeenCalledWith({
+      where: { orgId: "org-1" },
+      select: { id: true },
+    });
   });
 
   it("succeeds with entries having mixed orgKeyVersions after history restore (F-29)", async () => {

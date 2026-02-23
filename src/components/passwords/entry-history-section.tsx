@@ -186,7 +186,11 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
     setViewLoading(true);
     try {
       if (orgId) {
-        // Org entries: fetch encrypted blob, then decrypt client-side
+        // Org entries: fetch encrypted blob, then decrypt client-side.
+        // TODO: If h.orgKeyVersion !== current org version, fetch old key via
+        // GET /member-key?keyVersion=N for correct decryption.
+        // Currently uses latest key only — history from before key rotation
+        // will fail to decrypt until re-encryption is implemented.
         const res = await fetch(apiPath.orgPasswordHistoryById(orgId, entryId, h.id));
         if (!res.ok) return;
         const data = await res.json();
