@@ -152,6 +152,16 @@ describe("GET /api/orgs/[orgId]/member-key", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 400 when keyVersion exceeds upper bound (S-30)", async () => {
+    mockPrismaOrgMember.findUnique.mockResolvedValue({ keyDistributed: true });
+
+    const res = await GET(
+      createRequest("GET", `${URL}?keyVersion=10001`),
+      { params: Promise.resolve({ orgId: "org-1" }) },
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("returns 404 when member key not found", async () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue({ keyDistributed: true });
     mockPrismaOrgMemberKey.findFirst.mockResolvedValue(null);

@@ -142,6 +142,46 @@ describe("POST /api/orgs (E2E-only)", () => {
     );
   });
 
+  it("returns 400 on malformed JSON", async () => {
+    const { NextRequest } = await import("next/server");
+    const req = new NextRequest("http://localhost:3000/api/orgs", {
+      method: "POST",
+      body: "not-json",
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("INVALID_JSON");
+  });
+
+  it("saves wrapVersion to OrgMemberKey (S-26/F-24)", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue(null);
+    mockPrismaOrganization.create.mockResolvedValue({
+      id: "e2e-org-id",
+      name: "E2E Org",
+      slug: "e2e-org",
+      description: null,
+      createdAt: now,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs", {
+      body: { ...validE2EBody, orgMemberKey: { ...validE2EBody.orgMemberKey, wrapVersion: 1 } },
+    }));
+    expect(res.status).toBe(201);
+    expect(mockPrismaOrganization.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          memberKeys: expect.objectContaining({
+            create: expect.objectContaining({
+              wrapVersion: 1,
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it("returns 400 when E2E body has invalid orgKeyIv", async () => {
     const invalidBody = {
       name: "Bad Org",

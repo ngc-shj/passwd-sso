@@ -93,6 +93,7 @@ export async function POST(req: NextRequest) {
           ephemeralPublicKey: orgMemberKey.ephemeralPublicKey,
           hkdfSalt: orgMemberKey.hkdfSalt,
           keyVersion: orgMemberKey.keyVersion,
+          wrapVersion: orgMemberKey.wrapVersion,
         },
       },
     },

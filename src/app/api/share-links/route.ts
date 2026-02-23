@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
     // Org entry — E2E: client sends pre-encrypted share data
     const orgEntry = await prisma.orgPasswordEntry.findUnique({
       where: { id: orgPasswordEntryId! },
-      select: { orgId: true },
+      select: { orgId: true, entryType: true },
     });
     if (!orgEntry) {
       return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
     dataIv = encryptedShareData!.iv;
     dataAuthTag = encryptedShareData!.authTag;
     masterKeyVersion = 0;
-    entryType = parsed.data.entryType as EntryTypeValue;
+    entryType = orgEntry.entryType as EntryTypeValue;
     orgId = orgEntry.orgId;
   }
 

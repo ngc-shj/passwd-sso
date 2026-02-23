@@ -10,8 +10,16 @@ import { orgMemberKeySchema } from "@/lib/validations";
 
 type Params = { params: Promise<{ orgId: string }> };
 
+class TxValidationError extends Error {
+  details: Record<string, unknown>;
+  constructor(details: Record<string, unknown>) {
+    super("TX_VALIDATION_ERROR");
+    this.details = details;
+  }
+}
+
 const encryptedFieldSchema = z.object({
-  ciphertext: z.string().min(1),
+  ciphertext: z.string().min(1).max(500_000),
   iv: z.string().length(24),
   authTag: z.string().length(32),
 });
@@ -85,33 +93,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  // Verify all current members have a key in the payload
-  const members = await prisma.orgMember.findMany({
-    where: { orgId },
-    select: { userId: true },
-  });
-
-  const memberUserIds = new Set(members.map((m) => m.userId));
-  for (const userId of memberUserIds) {
-    if (!memberKeys.some((k) => k.userId === userId)) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { missingKeyFor: userId } },
-        { status: 400 }
-      );
-    }
-  }
-
-  // Reject extra memberKeys for non-members (F-18/S-22)
-  for (const k of memberKeys) {
-    if (!memberUserIds.has(k.userId)) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { unknownUserId: k.userId } },
-        { status: 400 }
-      );
-    }
-  }
-
   // Interactive transaction with optimistic lock on orgKeyVersion (S-17)
+  // Member list verification is inside transaction to prevent TOCTOU (F-26)
   try {
     await prisma.$transaction(async (tx) => {
       // Re-verify orgKeyVersion hasn't changed since pre-read
@@ -123,18 +106,56 @@ export async function POST(req: NextRequest, { params }: Params) {
         throw new Error("ORG_KEY_VERSION_CONFLICT");
       }
 
-      // Verify submitted entries cover ALL org entries (F-17)
-      const entryCount = await tx.orgPasswordEntry.count({
-        where: { orgId, deletedAt: null },
+      // Verify all current members have a key in the payload (F-26: inside tx)
+      const members = await tx.orgMember.findMany({
+        where: { orgId },
+        select: { userId: true },
       });
-      if (entries.length !== entryCount) {
-        throw new Error("ENTRY_COUNT_MISMATCH");
+      const memberUserIds = new Set(members.map((m) => m.userId));
+      for (const userId of memberUserIds) {
+        if (!memberKeys.some((k) => k.userId === userId)) {
+          throw new TxValidationError({ missingKeyFor: userId });
+        }
+      }
+      // Reject extra memberKeys for non-members (F-18/S-22)
+      for (const k of memberKeys) {
+        if (!memberUserIds.has(k.userId)) {
+          throw new TxValidationError({ unknownUserId: k.userId });
+        }
       }
 
-      // Re-encrypt all entries with new key
-      await Promise.all(entries.map((entry) =>
-        tx.orgPasswordEntry.update({
-          where: { id: entry.id, orgId },
+      // Verify submitted entries exactly match ALL org entries (including trash)
+      const allEntries = await tx.orgPasswordEntry.findMany({
+        where: { orgId },
+        select: { id: true },
+      });
+      if (entries.length !== allEntries.length) {
+        throw new Error("ENTRY_COUNT_MISMATCH");
+      }
+      const allEntryIdSet = new Set(allEntries.map((e) => e.id));
+      const submittedEntryIdSet = new Set(entries.map((e) => e.id));
+      if (
+        submittedEntryIdSet.size !== entries.length ||
+        submittedEntryIdSet.size !== allEntryIdSet.size
+      ) {
+        throw new Error("ENTRY_COUNT_MISMATCH");
+      }
+      for (const entryId of submittedEntryIdSet) {
+        if (!allEntryIdSet.has(entryId)) {
+          throw new Error("ENTRY_COUNT_MISMATCH");
+        }
+      }
+
+      // Re-encrypt all entries with new key.
+      // updateMany + orgId scope prevents out-of-org updates.
+      // orgKeyVersion is NOT in where: entries restored from history may have
+      // a stale version, but the ID set verification above guarantees completeness (F-29).
+      await Promise.all(entries.map(async (entry) => {
+        const result = await tx.orgPasswordEntry.updateMany({
+          where: {
+            id: entry.id,
+            orgId,
+          },
           data: {
             encryptedBlob: entry.encryptedBlob.ciphertext,
             blobIv: entry.encryptedBlob.iv,
@@ -145,14 +166,16 @@ export async function POST(req: NextRequest, { params }: Params) {
             aadVersion: entry.aadVersion,
             orgKeyVersion: newOrgKeyVersion,
           },
-        })
-      ));
+        });
+        if (result.count !== 1) {
+          throw new Error("ENTRY_COUNT_MISMATCH");
+        }
+      }));
 
       // Create new OrgMemberKey for each member (old keys kept for history)
+      // No filter needed: member validation above guarantees exact 1:1 match
       await Promise.all(
-        memberKeys
-          .filter((k) => memberUserIds.has(k.userId))
-          .map((k) =>
+        memberKeys.map((k) =>
             tx.orgMemberKey.create({
               data: {
                 orgId,
@@ -185,6 +208,12 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (e instanceof Error && e.message === "ENTRY_COUNT_MISMATCH") {
       return NextResponse.json(
         { error: API_ERROR.ENTRY_COUNT_MISMATCH },
+        { status: 400 }
+      );
+    }
+    if (e instanceof TxValidationError) {
+      return NextResponse.json(
+        { error: API_ERROR.VALIDATION_ERROR, details: e.details },
         { status: 400 }
       );
     }
