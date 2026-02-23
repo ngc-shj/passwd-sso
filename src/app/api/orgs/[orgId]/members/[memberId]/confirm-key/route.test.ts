@@ -124,6 +124,58 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
     expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
 
+  it("returns 404 when target member belongs to a different org (Q-1 IDOR)", async () => {
+    mockPrismaOrgMember.findUnique
+      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }) // admin
+      .mockResolvedValueOnce({ orgId: "org-OTHER", userId: "target-user", keyDistributed: false }); // target belongs to different org
+
+    const res = await POST(
+      createRequest("POST", URL, { body: validBody }),
+      { params: Promise.resolve({ orgId: "org-1", memberId: "member-1" }) },
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe("MEMBER_NOT_FOUND");
+  });
+
+  it("returns 409 when key already distributed (pre-check, Q-2)", async () => {
+    mockPrismaOrgMember.findUnique
+      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }) // admin
+      .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: true }); // already distributed
+    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
+
+    const res = await POST(
+      createRequest("POST", URL, { body: validBody }),
+      { params: Promise.resolve({ orgId: "org-1", memberId: "member-1" }) },
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("KEY_ALREADY_DISTRIBUTED");
+    // Transaction should NOT be called since pre-check caught it
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 on malformed JSON (Q-3)", async () => {
+    mockPrismaOrgMember.findUnique
+      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" })
+      .mockResolvedValueOnce({ orgId: "org-1", userId: "target-user", keyDistributed: false });
+    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
+
+    const { NextRequest } = await import("next/server");
+    const req = new NextRequest(URL, {
+      method: "POST",
+      body: "not-json",
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(
+      req,
+      { params: Promise.resolve({ orgId: "org-1", memberId: "member-1" }) },
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("INVALID_JSON");
+  });
+
   it("returns 409 when key already distributed (TOCTOU race)", async () => {
     mockPrismaOrgMember.findUnique
       .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }) // requireOrgPermission

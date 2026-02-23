@@ -359,6 +359,18 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
     expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
   });
 
+  it("returns 409 when org not found (Q-9)", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue(null);
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: validE2EBody }),
+      createParams({ orgId: ORG_ID }),
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
+  });
+
   it("creates E2E entry with pre-encrypted blobs (201)", async () => {
     mockPrismaOrgPasswordEntry.create.mockResolvedValue({
       id: "new-pw",

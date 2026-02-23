@@ -101,49 +101,70 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
   }
 
-  // Transaction: update all entries + create new OrgMemberKeys + bump orgKeyVersion
-  await prisma.$transaction([
-    // Re-encrypt all entries with new key
-    ...entries.map((entry) =>
-      prisma.orgPasswordEntry.update({
-        where: { id: entry.id, orgId },
-        data: {
-          encryptedBlob: entry.encryptedBlob.ciphertext,
-          blobIv: entry.encryptedBlob.iv,
-          blobAuthTag: entry.encryptedBlob.authTag,
-          encryptedOverview: entry.encryptedOverview.ciphertext,
-          overviewIv: entry.encryptedOverview.iv,
-          overviewAuthTag: entry.encryptedOverview.authTag,
-          aadVersion: entry.aadVersion,
-          orgKeyVersion: newOrgKeyVersion,
-        },
-      })
-    ),
+  // Interactive transaction with optimistic lock on orgKeyVersion (S-17)
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Re-verify orgKeyVersion hasn't changed since pre-read
+      const currentOrg = await tx.organization.findUnique({
+        where: { id: orgId },
+        select: { orgKeyVersion: true },
+      });
+      if (!currentOrg || currentOrg.orgKeyVersion !== org.orgKeyVersion) {
+        throw new Error("ORG_KEY_VERSION_CONFLICT");
+      }
 
-    // Create new OrgMemberKey for each member (old keys kept for history)
-    ...memberKeys
-      .filter((k) => memberUserIds.has(k.userId))
-      .map((k) =>
-        prisma.orgMemberKey.create({
+      // Re-encrypt all entries with new key
+      await Promise.all(entries.map((entry) =>
+        tx.orgPasswordEntry.update({
+          where: { id: entry.id, orgId },
           data: {
-            orgId,
-            userId: k.userId,
-            encryptedOrgKey: k.encryptedOrgKey,
-            orgKeyIv: k.orgKeyIv,
-            orgKeyAuthTag: k.orgKeyAuthTag,
-            ephemeralPublicKey: k.ephemeralPublicKey,
-            hkdfSalt: k.hkdfSalt,
-            keyVersion: newOrgKeyVersion,
+            encryptedBlob: entry.encryptedBlob.ciphertext,
+            blobIv: entry.encryptedBlob.iv,
+            blobAuthTag: entry.encryptedBlob.authTag,
+            encryptedOverview: entry.encryptedOverview.ciphertext,
+            overviewIv: entry.encryptedOverview.iv,
+            overviewAuthTag: entry.encryptedOverview.authTag,
+            aadVersion: entry.aadVersion,
+            orgKeyVersion: newOrgKeyVersion,
           },
         })
-      ),
+      ));
 
-    // Bump org key version
-    prisma.organization.update({
-      where: { id: orgId },
-      data: { orgKeyVersion: newOrgKeyVersion },
-    }),
-  ]);
+      // Create new OrgMemberKey for each member (old keys kept for history)
+      await Promise.all(
+        memberKeys
+          .filter((k) => memberUserIds.has(k.userId))
+          .map((k) =>
+            tx.orgMemberKey.create({
+              data: {
+                orgId,
+                userId: k.userId,
+                encryptedOrgKey: k.encryptedOrgKey,
+                orgKeyIv: k.orgKeyIv,
+                orgKeyAuthTag: k.orgKeyAuthTag,
+                ephemeralPublicKey: k.ephemeralPublicKey,
+                hkdfSalt: k.hkdfSalt,
+                keyVersion: newOrgKeyVersion,
+              },
+            })
+          )
+      );
+
+      // Bump org key version
+      await tx.organization.update({
+        where: { id: orgId },
+        data: { orgKeyVersion: newOrgKeyVersion },
+      });
+    });
+  } catch (e) {
+    if (e instanceof Error && e.message === "ORG_KEY_VERSION_CONFLICT") {
+      return NextResponse.json(
+        { error: API_ERROR.ORG_KEY_VERSION_MISMATCH },
+        { status: 409 }
+      );
+    }
+    throw e;
+  }
 
   logAudit({
     scope: AUDIT_SCOPE.ORG,

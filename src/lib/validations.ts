@@ -124,10 +124,10 @@ export const createOrgSchema = z.object({
 
 /** Schema for E2E org creation — includes client-encrypted OrgMemberKey for owner */
 export const orgMemberKeySchema = z.object({
-  encryptedOrgKey: z.string().min(1),
+  encryptedOrgKey: z.string().min(1).max(1000),
   orgKeyIv: z.string().regex(/^[0-9a-f]{24}$/),
   orgKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/),
-  ephemeralPublicKey: z.string().min(1),
+  ephemeralPublicKey: z.string().min(1).max(500),
   hkdfSalt: z.string().regex(/^[0-9a-f]{64}$/),
   keyVersion: z.number().int().min(1),
 });

@@ -23,6 +23,12 @@ const {
   },
 }));
 
+const txMock = {
+  organization: { findUnique: vi.fn(), update: vi.fn() },
+  orgPasswordEntry: { update: vi.fn() },
+  orgMemberKey: { create: vi.fn() },
+};
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/org-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,
@@ -86,7 +92,12 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
       orgKeyVersion: 1,
     });
     mockMemberFindMany.mockResolvedValue([{ userId: "user-1" }]);
-    mockTransaction.mockResolvedValue([]);
+    // Interactive transaction: call the callback with tx proxy
+    txMock.organization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
+    txMock.organization.update.mockResolvedValue({});
+    txMock.orgPasswordEntry.update.mockResolvedValue({});
+    txMock.orgMemberKey.create.mockResolvedValue({});
+    mockTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -172,6 +183,56 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
       createParams("org-1"),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("returns 400 on malformed JSON (Q-4)", async () => {
+    const req = new NextRequest("http://localhost/api/orgs/org-1/rotate-key", {
+      method: "POST",
+      body: "not-json",
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req, createParams("org-1"));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("INVALID_JSON");
+  });
+
+  it("filters out non-member memberKeys silently (Q-5)", async () => {
+    mockMemberFindMany.mockResolvedValue([{ userId: "user-1" }]);
+    const res = await POST(
+      createRequest({
+        newOrgKeyVersion: 2,
+        entries: [validEntry("e1")],
+        memberKeys: [validMemberKey("user-1"), validMemberKey("non-member-user")],
+      }),
+      createParams("org-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.success).toBe(true);
+    // Only user-1's key should be created, non-member filtered out
+    expect(txMock.orgMemberKey.create).toHaveBeenCalledTimes(1);
+    expect(txMock.orgMemberKey.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ userId: "user-1" }),
+      }),
+    );
+  });
+
+  it("returns 409 when orgKeyVersion changed concurrently (S-17 optimistic lock)", async () => {
+    // Pre-read returns version 1, but inside tx it's already been bumped to 2
+    txMock.organization.findUnique.mockResolvedValue({ orgKeyVersion: 2 });
+    const res = await POST(
+      createRequest({
+        newOrgKeyVersion: 2,
+        entries: [validEntry("e1")],
+        memberKeys: [validMemberKey("user-1")],
+      }),
+      createParams("org-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
   });
 
   it("rotates key successfully", async () => {
