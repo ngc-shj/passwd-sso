@@ -232,7 +232,7 @@ npm start
 - **IV**: Randomly generated per record (96-bit). Identical passwords produce different ciphertexts
 - **AuthTag**: GCM authentication tag (128-bit). Used for tamper detection
 - **Encrypted Fields**: `encryptedBlob`, `encryptedOverview` (each with its own IV/AuthTag)
-- **Organization vault**: Server-side encryption uses `SHARE_MASTER_KEY` to wrap per-organization keys. Store this value in a secret manager in production.
+- **Share links / Sends**: Server-side encryption uses `SHARE_MASTER_KEY`. Store this value in a secret manager in production.
 - **Rate limiting**: Use Redis (`REDIS_URL`) for shared limits in production.
 
 ### API Security
