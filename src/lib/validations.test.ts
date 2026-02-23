@@ -4,6 +4,7 @@ import {
   createE2EPasswordSchema,
   updateE2EPasswordSchema,
   createShareLinkSchema,
+  orgMemberKeySchema,
 } from "./validations";
 import { ENTRY_TYPE } from "@/lib/constants";
 
@@ -203,5 +204,68 @@ describe("createShareLinkSchema – passkey fields", () => {
         },
       }),
     ).toThrow();
+  });
+});
+
+describe("orgMemberKeySchema", () => {
+  const validKey = {
+    encryptedOrgKey: "enc-key-data",
+    orgKeyIv: "a".repeat(24),
+    orgKeyAuthTag: "b".repeat(32),
+    ephemeralPublicKey: '{"kty":"EC"}',
+    hkdfSalt: "c".repeat(64),
+    keyVersion: 1,
+  };
+
+  it("accepts valid org member key", () => {
+    expect(orgMemberKeySchema.safeParse(validKey).success).toBe(true);
+  });
+
+  it("rejects encryptedOrgKey exceeding max length (1000)", () => {
+    const result = orgMemberKeySchema.safeParse({
+      ...validKey,
+      encryptedOrgKey: "x".repeat(1001),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts encryptedOrgKey at max length (1000)", () => {
+    const result = orgMemberKeySchema.safeParse({
+      ...validKey,
+      encryptedOrgKey: "x".repeat(1000),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects ephemeralPublicKey exceeding max length (500)", () => {
+    const result = orgMemberKeySchema.safeParse({
+      ...validKey,
+      ephemeralPublicKey: "x".repeat(501),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts ephemeralPublicKey at max length (500)", () => {
+    const result = orgMemberKeySchema.safeParse({
+      ...validKey,
+      ephemeralPublicKey: "x".repeat(500),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects invalid orgKeyIv format", () => {
+    const result = orgMemberKeySchema.safeParse({
+      ...validKey,
+      orgKeyIv: "not-hex-24",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects invalid hkdfSalt format", () => {
+    const result = orgMemberKeySchema.safeParse({
+      ...validKey,
+      hkdfSalt: "not-hex-64",
+    });
+    expect(result.success).toBe(false);
   });
 });

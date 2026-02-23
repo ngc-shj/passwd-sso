@@ -1,9 +1,9 @@
 # コードレビュー: feat/org-e2e-ecdh
-日時: 2026-02-24T00:00:00+09:00
-レビュー回数: 3回目
+日時: 2026-02-24T00:15:00+09:00
+レビュー回数: 4回目
 
 ## 前回からの変更
-2回目レビュー (S-12〜S-16, F-2, F-9, T-4〜T-9) の全指摘を修正済み。3回目レビューで新規指摘 (S-17, S-18, Q-1〜Q-9) を対応。
+3回目レビュー (S-17, S-18, Q-1〜Q-9) の全指摘を修正済み。4回目レビューで新規指摘 (F-13, F-14, R-1, R-2) を対応。セキュリティ観点は全クリア (指摘なし)。
 
 ## セキュリティ観点の指摘
 
@@ -143,6 +143,27 @@
 - **対応:** org が null の場合に 409 (ORG_KEY_VERSION_MISMATCH) を返すことを検証。
 - 修正ファイル: `src/app/api/orgs/[orgId]/passwords/route.test.ts`
 
+### F-13: PUT の `isFullUpdate` 時に `orgKeyVersion` の検証なし — 解決済み
+
+- **問題:** POST にはバージョン検証があるが、PUT の全文更新時には欠如しており、旧バージョンで暗号化されたデータが保存される可能性。
+- **対応:** PUT の `isFullUpdate` ブランチ内で `org.orgKeyVersion` と照合し、不一致で 409 を返す。
+- 修正ファイル: `src/app/api/orgs/[orgId]/passwords/[id]/route.ts`
+
+### F-14: History restore で overview が更新されない — 設計上問題なし
+
+- **問題:** restore API は `encryptedBlob` のみ復元し、`encryptedOverview` は更新しない。
+- **判断:** 設計上、クライアントが restore 後に復号 → overview 再生成 → PUT で更新する想定。別 PR で対応不要。
+
+### R-1: DELETE の orgId 不一致 IDOR テスト — 解決済み
+
+- **対応:** GET (Q-6) / PUT (Q-7) と同等の IDOR 防止テストを DELETE にも追加。
+- 修正ファイル: `src/app/api/orgs/[orgId]/passwords/[id]/route.test.ts`
+
+### R-2: `orgMemberKeySchema` の境界テスト — 解決済み
+
+- **対応:** `encryptedOrgKey` の max(1000) 境界、`ephemeralPublicKey` の max(500) 境界、IV/Salt 形式検証テストを追加。
+- 修正ファイル: `src/lib/validations.test.ts`
+
 ### T-1/T-2/T-3/T-7: 新規テストファイル作成 — 保留
 
 - `org-vault-context.tsx`, `org-entry-save.ts`, `share-e2e-entry-view.tsx` のユニットテストは、複雑な React コンテキスト/Web Crypto API モック基盤が必要。別 PR で対応予定。
@@ -150,4 +171,4 @@
 
 ## 対応状況
 
-全 2334 テスト pass。
+全 2343 テスト pass。

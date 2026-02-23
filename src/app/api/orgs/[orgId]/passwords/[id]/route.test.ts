@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 const {
-  mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockAuditLogCreate,
+  mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockPrismaOrganization, mockAuditLogCreate,
   mockRequireOrgPermission,
   mockRequireOrgMember, mockHasOrgPermission, OrgAuthError,
   mockPrismaTransaction,
@@ -23,6 +23,7 @@ const {
       delete: vi.fn(),
     },
     mockPrismaOrgFolder: { findUnique: vi.fn() },
+    mockPrismaOrganization: { findUnique: vi.fn() },
     mockAuditLogCreate: vi.fn(),
     mockRequireOrgPermission: vi.fn(),
     mockRequireOrgMember: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgPasswordEntry: mockPrismaOrgPasswordEntry,
     orgFolder: mockPrismaOrgFolder,
+    organization: mockPrismaOrganization,
     auditLog: { create: mockAuditLogCreate },
     $transaction: mockPrismaTransaction,
   },
@@ -219,6 +221,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.ADMIN, userId: "test-user-id" });
     mockHasOrgPermission.mockReturnValue(true);
     mockAuditLogCreate.mockResolvedValue({});
+    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
     txMock.orgPasswordEntryHistory.create.mockResolvedValue({});
     txMock.orgPasswordEntryHistory.findMany.mockResolvedValue([]);
     txMock.orgPasswordEntryHistory.deleteMany.mockResolvedValue({ count: 0 });
@@ -301,6 +304,21 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(403);
+  });
+
+  it("returns 409 when orgKeyVersion does not match org's current version (F-13)", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 }); // org is at v2
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { ...validE2EBody, orgKeyVersion: 1 }, // stale version
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
   });
 
   it("returns 403 when MEMBER tries to update another's entry", async () => {
@@ -536,6 +554,17 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]", () => {
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(404);
+  });
+
+  it("returns 404 when entry belongs to a different org (R-1 IDOR)", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, orgId: "other-org-999" });
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe("NOT_FOUND");
   });
 
   it("soft deletes by default", async () => {
