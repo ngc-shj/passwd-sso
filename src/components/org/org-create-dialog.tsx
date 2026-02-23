@@ -73,13 +73,18 @@ export function OrgCreateDialog({ trigger, onCreated }: OrgCreateDialogProps) {
 
       // Generate org symmetric key and wrap it for the owner
       const orgKey = generateOrgSymmetricKey();
-      const escrow = await createOrgKeyEscrow(
-        orgKey,
-        ecdhPublicKeyJwk,
-        orgId,
-        userId!,
-        1
-      );
+      let escrow;
+      try {
+        escrow = await createOrgKeyEscrow(
+          orgKey,
+          ecdhPublicKeyJwk,
+          orgId,
+          userId!,
+          1
+        );
+      } finally {
+        orgKey.fill(0);
+      }
 
       const res = await fetch(API_PATH.ORGS, {
         method: "POST",

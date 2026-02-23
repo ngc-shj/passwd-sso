@@ -195,6 +195,9 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
       findMany: vi.fn().mockResolvedValue([]),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
+    orgPasswordEntry: {
+      update: vi.fn(),
+    },
   };
 
   beforeEach(() => {
@@ -206,6 +209,12 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     txMock.orgPasswordEntryHistory.create.mockResolvedValue({});
     txMock.orgPasswordEntryHistory.findMany.mockResolvedValue([]);
     txMock.orgPasswordEntryHistory.deleteMany.mockResolvedValue({ count: 0 });
+    txMock.orgPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      entryType: ENTRY_TYPE.LOGIN,
+      tags: [],
+      updatedAt: now,
+    });
     mockPrismaTransaction.mockImplementation(async (fn: (tx: typeof txMock) => Promise<unknown>) => fn(txMock));
   });
 
@@ -319,12 +328,6 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
 
   it("updates entry with full E2E blob replacement (200)", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
-    mockPrismaOrgPasswordEntry.update.mockResolvedValue({
-      id: PW_ID,
-      entryType: ENTRY_TYPE.LOGIN,
-      tags: [],
-      updatedAt: now,
-    });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
@@ -337,7 +340,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     expect(json.id).toBe(PW_ID);
     expect(json.entryType).toBe(ENTRY_TYPE.LOGIN);
 
-    // Verify old blob saved to history
+    // Verify old blob saved to history (inside transaction)
     expect(txMock.orgPasswordEntryHistory.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -351,8 +354,8 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
       }),
     );
 
-    // Verify new blob written
-    expect(mockPrismaOrgPasswordEntry.update).toHaveBeenCalledWith(
+    // Verify new blob written (inside same transaction)
+    expect(txMock.orgPasswordEntry.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           encryptedBlob: "new-blob-data",
@@ -372,12 +375,6 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: ORG_ID });
-    mockPrismaOrgPasswordEntry.update.mockResolvedValue({
-      id: PW_ID,
-      entryType: ENTRY_TYPE.LOGIN,
-      tags: [],
-      updatedAt: now,
-    });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
@@ -386,7 +383,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(200);
-    expect(mockPrismaOrgPasswordEntry.update).toHaveBeenCalledWith(
+    expect(txMock.orgPasswordEntry.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ orgFolderId: FOLDER_CUID }),
       }),
@@ -427,12 +424,6 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
 
   it("clears orgFolderId when set to null in PUT", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
-    mockPrismaOrgPasswordEntry.update.mockResolvedValue({
-      id: PW_ID,
-      entryType: ENTRY_TYPE.LOGIN,
-      tags: [],
-      updatedAt: now,
-    });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
@@ -442,7 +433,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     );
     expect(res.status).toBe(200);
     expect(mockPrismaOrgFolder.findUnique).not.toHaveBeenCalled();
-    expect(mockPrismaOrgPasswordEntry.update).toHaveBeenCalledWith(
+    expect(txMock.orgPasswordEntry.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ orgFolderId: null }),
       }),

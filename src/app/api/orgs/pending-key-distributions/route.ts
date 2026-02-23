@@ -44,8 +44,6 @@ export async function GET() {
       user: {
         select: {
           ecdhPublicKey: true,
-          name: true,
-          email: true,
         },
       },
       org: {
@@ -61,8 +59,6 @@ export async function GET() {
     orgId: m.orgId,
     userId: m.userId,
     ecdhPublicKey: m.user.ecdhPublicKey,
-    name: m.user.name,
-    email: m.user.email,
     orgKeyVersion: m.org.orgKeyVersion,
   }));
 

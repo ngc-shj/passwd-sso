@@ -72,4 +72,59 @@ describe("buildOrgEntryPayload", () => {
     expect(blob.cardNumber).toBe("4111111111111111");
     expect(blob.brand).toBe("Visa");
   });
+
+  it("builds identity blobs with trimmed fields", () => {
+    const { fullBlob, overviewBlob } = buildOrgEntryPayload({
+      entryType: ENTRY_TYPE.IDENTITY,
+      title: "My ID",
+      notes: "",
+      fullName: "  Jane Doe  ",
+      email: "jane@example.com",
+      phone: " +1-555-0123 ",
+      address: "123 Main St",
+      dateOfBirth: "1990-01-01",
+      nationality: "US",
+      idNumber: "A12345",
+      issueDate: "2020-01-01",
+      expiryDate: "2030-01-01",
+      tagNames: [],
+    });
+
+    const blob = JSON.parse(fullBlob);
+    expect(blob.entryType).toBe(ENTRY_TYPE.IDENTITY);
+    expect(blob.fullName).toBe("Jane Doe");
+    expect(blob.phone).toBe("+1-555-0123");
+    expect(blob.email).toBe("jane@example.com");
+    expect(blob.idNumber).toBe("A12345");
+
+    const overview = JSON.parse(overviewBlob);
+    expect(overview.title).toBe("My ID");
+  });
+
+  it("builds passkey blobs with all fields", () => {
+    const { fullBlob, overviewBlob } = buildOrgEntryPayload({
+      entryType: ENTRY_TYPE.PASSKEY,
+      title: "GitHub Passkey",
+      notes: "",
+      username: " user@gh ",
+      relyingPartyId: "github.com",
+      relyingPartyName: "GitHub",
+      credentialId: "cred-abc-123",
+      creationDate: "2025-01-01",
+      deviceInfo: " MacBook Pro ",
+      tagNames: [{ name: "dev", color: "#00f" }],
+    });
+
+    const blob = JSON.parse(fullBlob);
+    expect(blob.entryType).toBe(ENTRY_TYPE.PASSKEY);
+    expect(blob.relyingPartyId).toBe("github.com");
+    expect(blob.relyingPartyName).toBe("GitHub");
+    expect(blob.username).toBe("user@gh");
+    expect(blob.credentialId).toBe("cred-abc-123");
+    expect(blob.deviceInfo).toBe("MacBook Pro");
+
+    const overview = JSON.parse(overviewBlob);
+    expect(overview.title).toBe("GitHub Passkey");
+    expect(overview.username).toBe("user@gh");
+  });
 });

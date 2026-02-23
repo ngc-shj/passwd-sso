@@ -60,10 +60,11 @@ describe("GET /api/orgs/pending-key-distributions", () => {
       orgId: "org-1",
       userId: "pending-user",
       ecdhPublicKey: "pub-key",
-      name: "Test User",
-      email: "test@test.com",
       orgKeyVersion: 1,
     });
+    // PII (name, email) must NOT be included in response (S-16)
+    expect(json[0]).not.toHaveProperty("name");
+    expect(json[0]).not.toHaveProperty("email");
   });
 
   it("queries for pending members with correct filters", async () => {

@@ -1,93 +1,103 @@
 # コードレビュー: feat/org-e2e-ecdh
-日時: 2026-02-23T22:30:00+09:00
-レビュー回数: 1回目
+日時: 2026-02-23T23:00:00+09:00
+レビュー回数: 2回目
 
 ## 前回からの変更
-初回レビュー
+1回目レビュー (S-01〜S-11) の全指摘を修正済み。2回目レビューで新規指摘 (S-12〜S-16, F-2, F-9, T-4〜T-9) を対応。
 
 ## セキュリティ観点の指摘
 
-### [CRITICAL] S-01: `createOrgKeyEscrow` の `hkdfSalt` が鍵導出に未使用 (Dead Salt)
+### [CRITICAL] S-01: `createOrgKeyEscrow` の `hkdfSalt` が鍵導出に未使用 (Dead Salt) — 解決済み
 
-- **ファイル:** `src/lib/crypto-org.ts`, 行 362-403
-- **問題:** `createOrgKeyEscrow` は32バイトのランダム `salt` を生成し `hkdfSalt` として返すが、`wrapOrgKeyForMember` 呼び出しに渡されていない。`deriveOrgWrappingKey` は `SHA-256(orgId)` を salt として使用。DB に保存される `hkdfSalt` は鍵導出に一切関与しない。
-- **影響:** DB フィールドが嘘の値を保存。Emergency Access と設計が不整合。
-- **推奨修正:** `wrapOrgKeyForMember` と `unwrapOrgKey` にランダム salt を引数として追加し、HKDF salt として使用する。
+- **問題:** ランダム salt が `wrapOrgKeyForMember` に渡されていなかった。
+- **対応:** `deriveOrgWrappingKey` の引数を `orgId: string` → `salt: Uint8Array` に変更。全関数チェーン修正。
 
-### [MEDIUM] S-03: `distributePendingKeys` で `orgKeyBytes` がゼロクリアされない
+### [MEDIUM] S-03: `distributePendingKeys` で `orgKeyBytes` がゼロクリアされない — 解決済み
+### [MEDIUM] S-04: `getOrgEncryptionKey` で `orgKeyBytes` がゼロクリアされない — 解決済み
+### [MEDIUM] S-09: `getOrgEncryptionKey` の再帰呼び出し — 解決済み (再帰除去)
+### [LOW] S-05: ECDH private key コピーのゼロクリア — 解決済み
+### [LOW] S-06: Referrer-Policy 未設定 — 解決済み
+### [LOW] S-08: shareKey ゼロクリア — 解決済み
+### [LOW] S-11: confirm-key 配布済み上書き — 解決済み
 
-- **ファイル:** `src/lib/org-vault-context.tsx`, 行 248-258
-- **問題:** `unwrapOrgKey` の返り値 `orgKeyBytes` が使用後にゼロクリアされない。
-- **推奨修正:** 配布ループの `finally` ブロックで `orgKeyBytes.fill(0)` を追加。
+### [MEDIUM] S-12: `confirm-key` の TOCTOU — `keyDistributed` チェックがトランザクション外 — 解決済み
 
-### [MEDIUM] S-04: `getOrgEncryptionKey` で `orgKeyBytes` がゼロクリアされない
+- **問題:** `keyDistributed` チェック (行 62) と `$transaction` (行 87) の間にレースコンディションの可能性。
+- **対応:** バッチ `$transaction` をインタラクティブ `$transaction` に変更。トランザクション内で `keyDistributed` を再チェック。
+- 修正ファイル: `src/app/api/orgs/[orgId]/members/[memberId]/confirm-key/route.ts`
 
-- **ファイル:** `src/lib/org-vault-context.tsx`, 行 140-153
-- **問題:** `unwrapOrgKey` から返された `orgKeyBytes` が `deriveOrgEncryptionKey` に渡された後、ゼロクリアされない。
-- **推奨修正:** `deriveOrgEncryptionKey` 呼び出し後に `orgKeyBytes.fill(0)` を追加。
+### [MEDIUM] S-13: `org-create-dialog` の `orgKey` がゼロクリアされない — 解決済み
 
-### [MEDIUM] S-09: `getOrgEncryptionKey` の再帰呼び出しによる潜在的な無限ループ
+- **問題:** `generateOrgSymmetricKey()` で生成した `orgKey` が `createOrgKeyEscrow` 後にゼロクリアされない。
+- **対応:** `try/finally` で `orgKey.fill(0)` を追加。
+- 修正ファイル: `src/components/org/org-create-dialog.tsx`
 
-- **ファイル:** `src/lib/org-vault-context.tsx`, 行 162-167
-- **問題:** 短時間に複数回ローテーションされた場合、再帰呼び出しが無限ループする可能性。
-- **推奨修正:** リトライカウンターを導入 (max 2 retries)。
+### [MEDIUM] S-14: `share-e2e-entry-view` の `keyBytes` がゼロクリアされない — 解決済み
 
-### [LOW] S-05: `getEcdhPrivateKeyBytes` のコピーが呼び出し元でゼロクリアされない
+- **問題:** 復号完了後に `keyBytes` がゼロクリアされない。
+- **対応:** `.finally(() => keyBytes.fill(0))` を追加。
+- 修正ファイル: `src/components/share/share-e2e-entry-view.tsx`
 
-- **ファイル:** `src/lib/vault-context.tsx`, 行 642-644 / `src/lib/org-vault-context.tsx`, 行 103, 189
-- **推奨修正:** 各呼び出し箇所で使用後にゼロクリア。
+### [LOW] S-15: パスワード作成時の `orgKeyVersion` 未検証 — 解決済み
 
-### [LOW] S-06: E2E Share ページに `Referrer-Policy: no-referrer` が未設定
+- **問題:** クライアントが古い `orgKeyVersion` で暗号化したデータを送信できてしまう。
+- **対応:** POST 時に `org.orgKeyVersion` と照合し、不一致で 409 を返す。`ORG_KEY_VERSION_MISMATCH` エラーコード追加。
+- 修正ファイル: `src/app/api/orgs/[orgId]/passwords/route.ts`, `src/lib/api-error-codes.ts`, `messages/{en,ja}/ApiErrors.json`
 
-- **ファイル:** `src/app/s/[token]/page.tsx`
-- **推奨修正:** 共有ページに `<meta name="referrer" content="no-referrer" />` を設定。
+### [LOW] S-16: `pending-key-distributions` レスポンスに PII (name, email) が含まれる — 解決済み
 
-### [LOW] S-08: Share dialog の `shareKey` がゼロクリアされない
-
-- **ファイル:** `src/components/share/share-dialog.tsx`, 行 162-213
-- **推奨修正:** URL 構築後に `shareKeyForFragment.fill(0)` を追加。
-
-### [LOW] S-11: `confirm-key` の upsert で既に配布済みメンバーの key 上書きが可能
-
-- **ファイル:** `src/app/api/orgs/[orgId]/members/[memberId]/confirm-key/route.ts`, 行 79-110
-- **推奨修正:** `keyDistributed: true` のメンバーに対する上書きを拒否する。
+- **問題:** バックグラウンド鍵配布には `ecdhPublicKey` のみ必要。`name`/`email` は不要な漏洩リスク。
+- **対応:** select と response mapping から `name`/`email` を除去。
+- 修正ファイル: `src/app/api/orgs/pending-key-distributions/route.ts`
 
 ## 機能観点の指摘
-(2回目レビューで評価予定)
+
+### [MEDIUM] F-2: `rotate-key` の `entries` 配列にサイズ上限なし — 解決済み
+
+- **問題:** 大量エントリによるメモリ枯渇の可能性。
+- **対応:** `.max(1000)` をスキーマに追加。
+- 修正ファイル: `src/app/api/orgs/[orgId]/rotate-key/route.ts`
+
+### [MEDIUM] F-9: PUT の history snapshot と entry update が別トランザクション — 解決済み
+
+- **問題:** history 作成と entry 更新が別々に実行され、間にクラッシュすると不整合になる。
+- **対応:** 単一の `$transaction` に統合。
+- 修正ファイル: `src/app/api/orgs/[orgId]/passwords/[id]/route.ts`
 
 ## テスト観点の指摘
-(2回目レビューで評価予定)
+
+### T-4: `confirm-key` の `KEY_ALREADY_DISTRIBUTED` テスト — 解決済み
+
+- **対応:** TOCTOU レース (トランザクション内での再チェック) テストを追加。
+- 修正ファイル: `src/app/api/orgs/[orgId]/members/[memberId]/confirm-key/route.test.ts`
+
+### T-5: `rotate-key` の org 未存在 (404) テスト — 解決済み
+### T-6: `rotate-key` の権限不足 (403) テスト — 解決済み
+### F-2 テスト: entries 上限超過 (400) テスト — 解決済み
+
+- 修正ファイル: `src/app/api/orgs/[orgId]/rotate-key/route.test.ts`
+
+### T-9: `member-key` の `keyVersion=0` 境界テスト — 解決済み
+
+- 修正ファイル: `src/app/api/orgs/[orgId]/member-key/route.test.ts`
+
+### T-8: `org-entry-payload` の IDENTITY/PASSKEY テスト — 解決済み
+
+- 修正ファイル: `src/lib/org-entry-payload.test.ts`
+
+### S-15 テスト: `orgKeyVersion` 不一致テスト — 解決済み
+
+- 修正ファイル: `src/app/api/orgs/[orgId]/passwords/route.test.ts`
+
+### S-16 テスト: PII 除外テスト — 解決済み
+
+- 修正ファイル: `src/app/api/orgs/pending-key-distributions/route.test.ts`
+
+### T-1/T-2/T-3/T-7: 新規テストファイル作成 — 保留
+
+- `org-vault-context.tsx`, `org-entry-save.ts`, `share-e2e-entry-view.tsx` のユニットテストは、複雑な React コンテキスト/Web Crypto API モック基盤が必要。別 PR で対応予定。
+- Zod スキーマ (T-7) はルートハンドラテスト内でバリデーションが間接的にカバー済み。
 
 ## 対応状況
 
-### S-01: Dead Salt
-- 対応: `deriveOrgWrappingKey` の引数を `orgId: string` → `salt: Uint8Array` に変更。`wrapOrgKeyForMember` に `hkdfSalt` パラメータ追加。`unwrapOrgKey` に `hkdfSalt: string` (hex) パラメータ追加。`createOrgKeyEscrow` がランダム salt を `wrapOrgKeyForMember` に渡すよう修正。`deriveOrgHkdfSalt(orgId)` 関数を削除。
-- 修正ファイル: `src/lib/crypto-org.ts`, `src/lib/org-vault-context.tsx`, `src/lib/crypto-org.test.ts`
-
-### S-03: distributePendingKeys の orgKeyBytes ゼロクリア
-- 対応: `finally` ブロックで `orgKeyBytes?.fill(0)` を追加。
-- 修正ファイル: `src/lib/org-vault-context.tsx`
-
-### S-04: getOrgEncryptionKey の orgKeyBytes ゼロクリア
-- 対応: `deriveOrgEncryptionKey` 呼び出し直後に `orgKeyBytes.fill(0)` を追加。
-- 修正ファイル: `src/lib/org-vault-context.tsx`
-
-### S-09: getOrgEncryptionKey の再帰呼び出し
-- 対応: 再帰を完全に除去。サーバーは常に最新 keyVersion を返すため、再帰は不要。キャッシュ更新後にそのまま return。
-- 修正ファイル: `src/lib/org-vault-context.tsx`
-
-### S-05: ECDH private key コピーのゼロクリア
-- 対応: `getOrgEncryptionKey` と `distributePendingKeys` 両方で、`importKey` 後に `ecdhPrivateKeyBytes.fill(0)` を追加。catch/finally でも確実にクリア。
-- 修正ファイル: `src/lib/org-vault-context.tsx`
-
-### S-06: E2E Share ページの Referrer-Policy
-- 対応: `ShareE2EEntryView` に `useEffect` で `<meta name="referrer" content="no-referrer" />` を動的追加。
-- 修正ファイル: `src/components/share/share-e2e-entry-view.tsx`
-
-### S-08: shareKey のゼロクリア
-- 対応: URL 構築後に `shareKeyForFragment.fill(0)` を追加。`finally` ブロックでも `shareKeyForFragment?.fill(0)` でカバー。
-- 修正ファイル: `src/components/share/share-dialog.tsx`
-
-### S-11: confirm-key の配布済みチェック
-- 対応: `targetMember.keyDistributed === true` の場合に 409 を返すガードを追加。`KEY_ALREADY_DISTRIBUTED` エラーコードを新設。
-- 修正ファイル: `src/app/api/orgs/[orgId]/members/[memberId]/confirm-key/route.ts`, `src/lib/api-error-codes.ts`, `messages/en/ApiErrors.json`, `messages/ja/ApiErrors.json`
+全 2324 テスト pass。
