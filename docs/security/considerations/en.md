@@ -5,7 +5,7 @@ This document summarizes practical security considerations for `passwd-sso` (web
 ## 1. Threat Model (High Level)
 
 - Personal vault entries are encrypted client-side (E2E); server stores ciphertext only.
-- Organization vault entries are encrypted server-side with per-org keys wrapped by `ORG_MASTER_KEY`.
+- Organization vault entries are encrypted end-to-end (client-side, ECDH-P256 member-key distribution).
 - Browser extension is convenience UX; it must not weaken the core vault security model.
 
 ## 1.1 Architecture Diagram (ASCII)
@@ -23,7 +23,7 @@ This document summarizes practical security considerations for `passwd-sso` (web
 │              Next.js App Server              │
 │  - Auth.js session                           │
 │  - API routes                                │
-│  - Org vault server-side crypto              │
+│  - Share links / sends server-side crypto    │
 └───────────┬───────────────────┬──────────────┘
             │ TLS               │ TLS
             ▼                   ▼
@@ -138,13 +138,12 @@ Client(on valid):
   - key: `VERIFIER_PEPPER_KEY` (required in production, 64 hex chars)
   - non-production fallback derives from `ORG_MASTER_KEY`
 
-### Organization Vault (Server Crypto / `src/lib/crypto-server.ts`)
+### Share Links / Sends (Server Crypto / `src/lib/crypto-server.ts`)
 
 - Algorithm: `aes-256-gcm` (Node `crypto`)
 - `ORG_MASTER_KEY`: 64 hex chars (256-bit)
-- Organization key `orgKey`: random `32 bytes`
 - IV: `12 bytes`, AuthTag: `16 bytes`
-- `ORG_MASTER_KEY` wraps `orgKey`; `orgKey` encrypts org entries
+- Used for server-encrypted share links and sends
 
 ### Export Encryption (`src/lib/export-crypto.ts`)
 
@@ -270,10 +269,10 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 
 - Generation:
   - Personal: client generates `secretKey` / `accountSalt`
-  - Organization: server generates `orgKey`
+  - Organization: client-side org key is distributed per member (ECDH-P256)
 - Storage:
   - Personal: `secretKey` stored wrapped by `wrappingKey`
-  - Organization: `orgKey` stored wrapped by `ORG_MASTER_KEY`
+  - Organization: per-member wrapped org keys are stored in `OrgMemberKey`
 - Use:
   - Decryption keys materialize in runtime only after unlock
 - Rotation:
@@ -303,7 +302,7 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 ### 12.2 Suspected server secret leak
 
 1. Rotate `AUTH_SECRET` / `ORG_MASTER_KEY` / `VERIFIER_PEPPER_KEY`  
-2. Assess blast radius (org vault decryptability, share links, sessions)  
+2. Assess blast radius (share links/sends decryptability, sessions)  
 3. Trigger key re-issuance and forced re-auth where required
 
 ### 12.3 Suspected DB leak
