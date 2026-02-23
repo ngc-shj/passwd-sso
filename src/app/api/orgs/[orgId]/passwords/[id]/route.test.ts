@@ -172,6 +172,19 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     expect(json.password).toBeUndefined();
   });
 
+  it("returns 404 when entry belongs to a different org (Q-6 IDOR)", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(
+      makeEntryForGET({ orgId: "other-org-999" }),
+    );
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe("NOT_FOUND");
+  });
+
   it("returns orgFolderId in GET response when entry has a folder", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(
@@ -261,6 +274,21 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(404);
+  });
+
+  it("returns 404 when entry belongs to a different org (Q-7 IDOR)", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(
+      makeEntryForPUT({ orgId: "other-org-999" }),
+    );
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: validE2EBody,
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe("NOT_FOUND");
   });
 
   it("returns 403 when user lacks PASSWORD_UPDATE permission", async () => {
@@ -420,6 +448,30 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("FOLDER_NOT_FOUND");
+  });
+
+  it("updates metadata only without history snapshot (Q-8)", async () => {
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+
+    const TAG_CUID = "cm1234567890abcdefghijkl0";
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        body: { tagIds: [TAG_CUID], isArchived: true },
+      }),
+      createParams({ orgId: ORG_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    // No history snapshot for metadata-only update
+    expect(txMock.orgPasswordEntryHistory.create).not.toHaveBeenCalled();
+    // Tags and isArchived should be set
+    expect(txMock.orgPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          isArchived: true,
+          tags: { set: [{ id: TAG_CUID }] },
+        }),
+      }),
+    );
   });
 
   it("clears orgFolderId when set to null in PUT", async () => {
