@@ -49,6 +49,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 import { POST } from "./route";
+import { logAudit } from "@/lib/audit";
 
 function createRequest(body: unknown) {
   return new NextRequest("http://localhost/api/orgs/org-1/rotate-key", {
@@ -235,7 +236,7 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
     expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
   });
 
-  it("rotates key successfully", async () => {
+  it("rotates key successfully and logs audit (S-2)", async () => {
     const res = await POST(
       createRequest({
         newOrgKeyVersion: 2,
@@ -249,5 +250,37 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
     expect(json.success).toBe(true);
     expect(json.orgKeyVersion).toBe(2);
     expect(mockTransaction).toHaveBeenCalled();
+    expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ORG_KEY_ROTATION",
+        orgId: "org-1",
+        metadata: expect.objectContaining({
+          fromVersion: 1,
+          toVersion: 2,
+          entriesRotated: 1,
+          membersUpdated: 1,
+        }),
+      }),
+    );
+  });
+
+  it("uses newOrgKeyVersion for memberKey creation regardless of payload keyVersion (S-3)", async () => {
+    const res = await POST(
+      createRequest({
+        newOrgKeyVersion: 2,
+        entries: [validEntry("e1")],
+        memberKeys: [{
+          ...validMemberKey("user-1"),
+          keyVersion: 999, // intentionally wrong
+        }],
+      }),
+      createParams("org-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(txMock.orgMemberKey.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ keyVersion: 2 }), // server forces correct version
+      }),
+    );
   });
 });
