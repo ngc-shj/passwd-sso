@@ -9,13 +9,12 @@ export function escapeHtml(str: string): string {
 
 const appName = escapeHtml(process.env.NEXT_PUBLIC_APP_NAME ?? "passwd-sso");
 
-const SUPPORTED_LOCALES = ["ja", "en"] as const;
-const DEFAULT_LOCALE = "ja";
+import { routing } from "@/i18n/routing";
 
 function sanitizeLocale(locale: string): string {
-  return (SUPPORTED_LOCALES as readonly string[]).includes(locale)
+  return (routing.locales as readonly string[]).includes(locale)
     ? locale
-    : DEFAULT_LOCALE;
+    : routing.defaultLocale;
 }
 
 const FOOTER: Record<string, string> = {
@@ -25,7 +24,7 @@ const FOOTER: Record<string, string> = {
 
 export function emailLayout(
   body: string,
-  locale: string = DEFAULT_LOCALE,
+  locale: string = routing.defaultLocale,
 ): string {
   const safeLocale = sanitizeLocale(locale);
   const footer = FOOTER[safeLocale] ?? FOOTER.en;
