@@ -1,15 +1,12 @@
 /**
- * Server-side cryptography module for organization vault.
+ * Server-side cryptography module.
  *
- * Key hierarchy:
+ * Used for share links, sends, and passphrase verification.
+ * Organization vault encryption is fully E2E (client-side) via crypto-org.ts.
+ *
+ * Key hierarchy for shares/sends:
  *   ORG_MASTER_KEY_V{N} (env, 256-bit hex, versioned)
- *     -> AES-256-GCM wrap -> per-org key (Organization.encryptedOrgKey)
- *       -> AES-256-GCM -> OrgPasswordEntry.encryptedBlob / encryptedOverview
- *
- * Versioned master key support:
- *   - ORG_MASTER_KEY alone → treated as V1 (backward compatible)
- *   - ORG_MASTER_KEY_V1 takes precedence over ORG_MASTER_KEY when both set
- *   - ORG_MASTER_KEY_CURRENT_VERSION controls which version is used for new encryptions
+ *     -> AES-256-GCM -> PasswordShare / Send encrypted data
  *
  * Uses node:crypto (NOT Web Crypto API — this runs server-side only).
  */
@@ -25,7 +22,6 @@ import {
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12; // 96 bits, recommended for GCM
-const KEY_LENGTH = 32; // 256 bits
 const AUTH_TAG_LENGTH = 16; // 128 bits
 const HEX64_RE = /^[0-9a-fA-F]{64}$/;
 
@@ -33,10 +29,6 @@ export interface ServerEncryptedData {
   ciphertext: string; // hex
   iv: string; // hex (24 chars)
   authTag: string; // hex (32 chars)
-}
-
-export interface WrappedOrgKey extends ServerEncryptedData {
-  masterKeyVersion: number;
 }
 
 // ─── Master Key (Versioned) ──────────────────────────────────────
@@ -77,85 +69,6 @@ export function getMasterKeyByVersion(version: number): Buffer {
     );
   }
   return Buffer.from(hex, "hex");
-}
-
-/** Get the current master key (shorthand for getMasterKeyByVersion(currentVersion)). */
-function getMasterKey(): Buffer {
-  return getMasterKeyByVersion(getCurrentMasterKeyVersion());
-}
-
-// ─── Per-Org Key Management ─────────────────────────────────────
-
-/** Generate a random 256-bit organization key. */
-export function generateOrgKey(): Buffer {
-  return randomBytes(KEY_LENGTH);
-}
-
-/** Wrap (encrypt) an org key with the current master key. */
-export function wrapOrgKey(orgKey: Buffer): WrappedOrgKey {
-  const version = getCurrentMasterKeyVersion();
-  const masterKey = getMasterKeyByVersion(version);
-  const iv = randomBytes(IV_LENGTH);
-  const cipher = createCipheriv(ALGORITHM, masterKey, iv, {
-    authTagLength: AUTH_TAG_LENGTH,
-  });
-
-  const ciphertext = Buffer.concat([cipher.update(orgKey), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-
-  return {
-    ciphertext: ciphertext.toString("hex"),
-    iv: iv.toString("hex"),
-    authTag: authTag.toString("hex"),
-    masterKeyVersion: version,
-  };
-}
-
-/** Unwrap (decrypt) an org key using the specified master key version. */
-export function unwrapOrgKey(wrapped: ServerEncryptedData, masterKeyVersion: number): Buffer {
-  const masterKey = getMasterKeyByVersion(masterKeyVersion);
-  const iv = Buffer.from(wrapped.iv, "hex");
-  const authTag = Buffer.from(wrapped.authTag, "hex");
-  const ciphertext = Buffer.from(wrapped.ciphertext, "hex");
-
-  const decipher = createDecipheriv(ALGORITHM, masterKey, iv, {
-    authTagLength: AUTH_TAG_LENGTH,
-  });
-  decipher.setAuthTag(authTag);
-
-  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-}
-
-/**
- * Re-wrap an org key from one master key version to another.
- * Decrypts with fromVersion, then encrypts with toVersion.
- * Zeroizes the plaintext org key buffer after use.
- */
-export function rewrapOrgKey(
-  wrapped: ServerEncryptedData,
-  fromVersion: number,
-  toVersion: number
-): WrappedOrgKey {
-  const plainOrgKey = unwrapOrgKey(wrapped, fromVersion);
-  try {
-    const toMasterKey = getMasterKeyByVersion(toVersion);
-    const iv = randomBytes(IV_LENGTH);
-    const cipher = createCipheriv(ALGORITHM, toMasterKey, iv, {
-      authTagLength: AUTH_TAG_LENGTH,
-    });
-
-    const ciphertext = Buffer.concat([cipher.update(plainOrgKey), cipher.final()]);
-    const authTag = cipher.getAuthTag();
-
-    return {
-      ciphertext: ciphertext.toString("hex"),
-      iv: iv.toString("hex"),
-      authTag: authTag.toString("hex"),
-      masterKeyVersion: toVersion,
-    };
-  } finally {
-    plainOrgKey.fill(0);
-  }
 }
 
 // ─── Data Encryption / Decryption ───────────────────────────────

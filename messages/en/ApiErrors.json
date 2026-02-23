@@ -42,7 +42,6 @@
   "memberKeyNotFound": "Member encryption key not found.",
   "vaultNotReady": "Member's vault is not set up yet.",
   "onlyOwnEntries": "You can only modify your own entries.",
-  "decryptFailed": "Failed to decrypt the data.",
   "invalidDateRange": "The expiry date must be after the issue date.",
   "alreadyRevoked": "Already revoked.",
   "upstreamError": "An external service error occurred.",

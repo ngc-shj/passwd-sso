@@ -14,7 +14,6 @@ import { prisma } from "@/lib/prisma";
 import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
-  rewrapOrgKey,
 } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
@@ -116,66 +115,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Find all organizations needing rotation (skip E2E orgs — they don't use server-side keys)
-  const orgs = await prisma.organization.findMany({
-    where: {
-      masterKeyVersion: { lt: targetVersion },
-      e2eEnabled: false,
-    },
-    select: {
-      id: true,
-      encryptedOrgKey: true,
-      orgKeyIv: true,
-      orgKeyAuthTag: true,
-      masterKeyVersion: true,
-    },
-  });
-
-  let rotated = 0;
-  const errors: Array<{ orgId: string; error: string }> = [];
-
-  for (const org of orgs) {
-    try {
-      const rewrapped = rewrapOrgKey(
-        {
-          ciphertext: org.encryptedOrgKey!,
-          iv: org.orgKeyIv!,
-          authTag: org.orgKeyAuthTag!,
-        },
-        org.masterKeyVersion,
-        targetVersion
-      );
-
-      // Optimistic locking: only update if masterKeyVersion hasn't changed
-      const result = await prisma.organization.updateMany({
-        where: {
-          id: org.id,
-          masterKeyVersion: org.masterKeyVersion,
-        },
-        data: {
-          encryptedOrgKey: rewrapped.ciphertext,
-          orgKeyIv: rewrapped.iv,
-          orgKeyAuthTag: rewrapped.authTag,
-          masterKeyVersion: targetVersion,
-        },
-      });
-
-      if (result.count > 0) {
-        rotated++;
-      }
-    } catch (e) {
-      errors.push({
-        orgId: org.id,
-        error: e instanceof Error ? e.message : "Unknown error",
-      });
-    }
-  }
-
-  // Revoke old-version shares if requested.
-  // Skip only when ALL orgs failed (orgs.length > 0 && rotated === 0),
-  // since partial rotation means some data is still on the old key.
+  // Revoke old-version shares if requested
   let revokedShares = 0;
-  if (revokeShares && (orgs.length === 0 || rotated > 0)) {
+  if (revokeShares) {
     const result = await prisma.passwordShare.updateMany({
       where: {
         masterKeyVersion: { lt: targetVersion },
@@ -195,10 +137,7 @@ export async function POST(req: NextRequest) {
     userId: operatorId,
     metadata: {
       targetVersion,
-      total: orgs.length,
-      rotated,
       revokedShares,
-      errors: errors.length,
       ip,
     },
     ip,
@@ -206,9 +145,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     targetVersion,
-    total: orgs.length,
-    rotated,
     revokedShares,
-    errors,
   });
 }

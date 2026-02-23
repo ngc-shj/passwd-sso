@@ -79,7 +79,6 @@ export const API_ERROR = {
   MEMBER_KEY_NOT_FOUND: "MEMBER_KEY_NOT_FOUND",
   VAULT_NOT_READY: "VAULT_NOT_READY",
   ONLY_OWN_ENTRIES: "ONLY_OWN_ENTRIES",
-  DECRYPT_FAILED: "DECRYPT_FAILED",
   INVALID_DATE_RANGE: "INVALID_DATE_RANGE",
   // ── Org Invitations ───────────────────────────────────────
   TOKEN_REQUIRED: "TOKEN_REQUIRED",
@@ -183,7 +182,6 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   MEMBER_KEY_NOT_FOUND: "memberKeyNotFound",
   VAULT_NOT_READY: "vaultNotReady",
   ONLY_OWN_ENTRIES: "onlyOwnEntries",
-  DECRYPT_FAILED: "decryptFailed",
   INVALID_DATE_RANGE: "invalidDateRange",
   TOKEN_REQUIRED: "invalidRequest",
   INVALID_INVITATION: "invalidInvitation",
