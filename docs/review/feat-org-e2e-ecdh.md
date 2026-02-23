@@ -1,9 +1,9 @@
 # コードレビュー: feat/org-e2e-ecdh
-日時: 2026-02-24T02:30:00+09:00
-レビュー回数: 7回目
+日時: 2026-02-24T06:40:00+09:00
+レビュー回数: 8回目
 
 ## 前回からの変更
-6回目レビュー (S-20~S-24, F-17~F-23) の全指摘を修正済み。7回目レビューで新規指摘 (S-25~S-30, F-24~F-29) を対応。
+7回目レビュー (S-25~S-30, F-24~F-29) の全指摘を修正済み。8回目レビューで新規指摘 (N-01~N-03, F-31) を対応。
 
 ## セキュリティ観点の指摘
 
@@ -115,6 +115,24 @@
 - **対応:** `keyVersion > 10000` で 400 を返す上限チェックを追加。
 - 修正ファイル: `src/app/api/orgs/[orgId]/member-key/route.ts`
 
+### [LOW] N-01: `rotate-key` の `memberKeys` 配列に `.max()` なし — 解決済み
+
+- **問題:** `memberKeys` 配列にサイズ上限がなく、巨大ペイロードが受け入れ可能。
+- **対応:** `.max(1000)` を追加。
+- 修正ファイル: `src/app/api/orgs/[orgId]/rotate-key/route.ts`
+
+### [LOW] N-02: `rotate-key` の `newOrgKeyVersion` に上限なし — 解決済み
+
+- **問題:** `newOrgKeyVersion` に `.max()` がなく、S-30 の `member-key` 上限と不整合。
+- **対応:** `.max(10_000)` を追加 (S-30 と整合)。
+- 修正ファイル: `src/app/api/orgs/[orgId]/rotate-key/route.ts`
+
+### [LOW] N-03: `rotate-key` の `$transaction` にタイムアウト未設定 — 解決済み
+
+- **問題:** 1000 エントリの `Promise.all` が長時間実行される可能性があり、デフォルトタイムアウトでは不十分。
+- **対応:** `{ timeout: 60_000 }` を追加。
+- 修正ファイル: `src/app/api/orgs/[orgId]/rotate-key/route.ts`
+
 ## 機能観点の指摘
 
 ### [MEDIUM] F-2: `rotate-key` の `entries` 配列にサイズ上限なし — 解決済み
@@ -198,6 +216,12 @@
 - **問題:** 鍵ローテーション後に古い履歴を復元すると、エントリの `orgKeyVersion` が古くなり、`rotate-key` の `updateMany` where 句で一致しなくなる。
 - **対応:** `rotate-key` の `updateMany` where 句から `orgKeyVersion` を除去。ID セット検証 + 組織レベル楽観ロックで十分に保護。
 - 修正ファイル: `src/app/api/orgs/[orgId]/rotate-key/route.ts`
+
+### [LOW] F-31: 履歴一覧レスポンスに `orgKeyVersion` なし — 解決済み
+
+- **問題:** クライアントが旧バージョン鍵で暗号化された履歴を復号する際、`orgKeyVersion` が不明で正しい鍵を選択できない。
+- **対応:** `orgKeyVersion: h.orgKeyVersion` をレスポンスマッピングに追加。
+- 修正ファイル: `src/app/api/orgs/[orgId]/passwords/[id]/history/route.ts`
 
 ### [LOW] F-30: permanent delete で blob store クリーンアップなし — 既知の制限
 
@@ -359,6 +383,11 @@
 
 - **対応:** 履歴復元で古い orgKeyVersion を持つエントリがあっても鍵ローテーションが成功することを検証。
 - 修正ファイル: `src/app/api/orgs/[orgId]/rotate-key/route.test.ts`
+
+### F-31 テスト: 履歴一覧に `orgKeyVersion` が含まれることを検証 — 解決済み
+
+- **対応:** モックデータに `orgKeyVersion: 2` を追加し、レスポンスに含まれることを検証。
+- 修正ファイル: `src/__tests__/api/orgs/org-history.test.ts`
 
 ### T-1/T-2/T-3/T-7: 新規テストファイル作成 — 保留
 
