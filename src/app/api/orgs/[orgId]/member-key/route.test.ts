@@ -105,6 +105,7 @@ describe("GET /api/orgs/[orgId]/member-key", () => {
     expect(res.status).toBe(200);
     expect(json.encryptedOrgKey).toBe("enc-key");
     expect(json.keyVersion).toBe(2);
+    expect(json.wrapVersion).toBe(1);
     expect(mockPrismaOrgMemberKey.findFirst).toHaveBeenCalledWith({
       where: { orgId: "org-1", userId: "user-1" },
       orderBy: { keyVersion: "desc" },
@@ -130,6 +131,7 @@ describe("GET /api/orgs/[orgId]/member-key", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.keyVersion).toBe(1);
+    expect(json.wrapVersion).toBe(1);
   });
 
   it("returns 400 on invalid keyVersion param", async () => {
