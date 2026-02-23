@@ -399,6 +399,22 @@
 - `org-vault-context.tsx`, `org-entry-save.ts`, `share-e2e-entry-view.tsx` のユニットテストは、複雑な React コンテキスト/Web Crypto API モック基盤が必要。別 PR で対応予定。
 - Zod スキーマ (T-7) はルートハンドラテスト内でバリデーションが間接的にカバー済み。
 
+## 鍵ローテーションポリシー（確定）
+
+### 方針: 全件ローテーション + latest 1本で復号
+
+1. `rotate-key` は全エントリ（active + trash + archived）を対象とする
+2. ローテーション後、全エントリの `orgKeyVersion` は最新に統一される
+3. クライアントは `getOrgEncryptionKey(orgId)` で最新鍵のみ取得・復号する
+4. 履歴レコードは作成時の `orgKeyVersion` を保持（スナップショット）
+5. 履歴復元時、`orgKeyVersion` 不一致が発生する場合はクライアントが旧鍵で復号 → 現鍵で再暗号化 → PUT で書き戻す（未実装、TODO）
+6. 自動フォールバック（vN→vN-1 探索）は oracle 的情報漏洩面で採用しない
+
+### 既知の制限
+
+- 履歴表示 (`entry-history-section.tsx`): 旧バージョンの履歴は latest key で復号を試み、失敗する。`member-key?keyVersion=N` による多版鍵対応は future work。
+- 履歴復元: サーバー側は `history.orgKeyVersion` をそのまま書き戻す。クライアント側の re-encrypt-on-restore は future work。
+
 ## 対応状況
 
 全 2358 テスト pass。
