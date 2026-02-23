@@ -21,6 +21,9 @@ import {
   compareEntriesByDeletedAt,
   type EntrySortOption,
 } from "@/lib/entry-sort";
+import { useOrgVault } from "@/lib/org-vault-context";
+import { decryptData } from "@/lib/crypto-client";
+import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
 interface OrgTrashEntry {
   id: string;
@@ -53,6 +56,7 @@ export function OrgTrashList({
 }: OrgTrashListProps) {
   const t = useTranslations("Trash");
   const tOrg = useTranslations("Org");
+  const { getOrgEncryptionKey } = useOrgVault();
   const [entries, setEntries] = useState<OrgTrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -62,13 +66,66 @@ export function OrgTrashList({
       const res = await fetch(API_PATH.ORGS_TRASH);
       if (!res.ok) return;
       const data = await res.json();
-      if (Array.isArray(data)) setEntries(data);
+      if (!Array.isArray(data)) return;
+
+      const decrypted = await Promise.all(
+        data.map(async (entry: Record<string, unknown>) => {
+          try {
+            const entryOrgId = entry.orgId as string;
+            const orgKey = await getOrgEncryptionKey(entryOrgId);
+            if (!orgKey) throw new Error("No org key");
+            const aad = buildOrgEntryAAD(entryOrgId, entry.id as string, "overview");
+            const json = await decryptData(
+              {
+                ciphertext: entry.encryptedOverview as string,
+                iv: entry.overviewIv as string,
+                authTag: entry.overviewAuthTag as string,
+              },
+              orgKey,
+              aad,
+            );
+            const overview = JSON.parse(json);
+            return {
+              id: entry.id,
+              entryType: entry.entryType,
+              orgId: entryOrgId,
+              orgName: entry.orgName,
+              role: entry.role,
+              title: overview.title ?? "",
+              username: overview.username ?? null,
+              snippet: overview.snippet ?? null,
+              brand: overview.brand ?? null,
+              lastFour: overview.lastFour ?? null,
+              fullName: overview.fullName ?? null,
+              idNumberLast4: overview.idNumberLast4 ?? null,
+              deletedAt: entry.deletedAt,
+            } as OrgTrashEntry;
+          } catch {
+            return {
+              id: entry.id as string,
+              entryType: entry.entryType as EntryTypeValue,
+              orgId: entry.orgId as string,
+              orgName: entry.orgName as string,
+              role: entry.role as string,
+              title: "(decryption failed)",
+              username: null,
+              snippet: null,
+              brand: null,
+              lastFour: null,
+              fullName: null,
+              idNumberLast4: null,
+              deletedAt: entry.deletedAt as string,
+            } as OrgTrashEntry;
+          }
+        }),
+      );
+      setEntries(decrypted);
     } catch {
       // Network error
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [getOrgEncryptionKey]);
 
   useEffect(() => {
     fetchTrash();

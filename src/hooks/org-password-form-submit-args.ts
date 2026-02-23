@@ -12,6 +12,8 @@ type OrgEntryValues = ReturnType<typeof useOrgPasswordFormPresenter>["entryValue
 
 interface BuildOrgSubmitArgsParams {
   orgId: OrgPasswordFormProps["orgId"];
+  orgEncryptionKey: CryptoKey;
+  orgKeyVersion: number;
   onSaved: OrgPasswordFormProps["onSaved"];
   isEdit: boolean;
   editData?: OrgPasswordFormProps["editData"];
@@ -26,6 +28,8 @@ interface BuildOrgSubmitArgsParams {
 
 export function buildOrgSubmitArgs({
   orgId,
+  orgEncryptionKey,
+  orgKeyVersion,
   onSaved,
   isEdit,
   editData,
@@ -39,6 +43,8 @@ export function buildOrgSubmitArgs({
 }: BuildOrgSubmitArgsParams): SubmitOrgPasswordFormArgs {
   return {
     orgId,
+    orgEncryptionKey,
+    orgKeyVersion,
     isEdit,
     editData,
     effectiveEntryType,

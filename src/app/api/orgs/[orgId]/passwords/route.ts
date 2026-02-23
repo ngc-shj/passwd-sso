@@ -138,7 +138,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  const { encryptedBlob, encryptedOverview, aadVersion, orgKeyVersion, entryType, tagIds, orgFolderId } = parsed.data;
+  const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, orgKeyVersion, entryType, tagIds, orgFolderId } = parsed.data;
 
   // Validate orgFolderId belongs to this org
   if (orgFolderId) {
@@ -151,7 +151,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
   }
 
-  const entryId = crypto.randomUUID();
+  // Use client-provided ID (bound into AAD during encryption) or generate one
+  const entryId = clientId ?? crypto.randomUUID();
 
   const entry = await prisma.orgPasswordEntry.create({
     data: {

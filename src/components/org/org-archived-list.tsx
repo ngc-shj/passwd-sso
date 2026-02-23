@@ -13,6 +13,9 @@ import {
   compareEntriesWithFavorite,
   type EntrySortOption,
 } from "@/lib/entry-sort";
+import { useOrgVault } from "@/lib/org-vault-context";
+import { decryptData } from "@/lib/crypto-client";
+import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
 interface OrgArchivedEntry {
   id: string;
@@ -52,6 +55,7 @@ export function OrgArchivedList({
   sortBy = "updatedAt",
 }: OrgArchivedListProps) {
   const t = useTranslations("Org");
+  const { getOrgEncryptionKey } = useOrgVault();
   const [entries, setEntries] = useState<OrgArchivedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -75,13 +79,83 @@ export function OrgArchivedList({
       const res = await fetch(API_PATH.ORGS_ARCHIVED);
       if (!res.ok) return;
       const data = await res.json();
-      if (Array.isArray(data)) setEntries(data);
+      if (!Array.isArray(data)) return;
+
+      // Decrypt overview blobs (entries span multiple orgs)
+      const decrypted = await Promise.all(
+        data.map(async (entry: Record<string, unknown>) => {
+          try {
+            const entryOrgId = entry.orgId as string;
+            const orgKey = await getOrgEncryptionKey(entryOrgId);
+            if (!orgKey) throw new Error("No org key");
+            const aad = buildOrgEntryAAD(entryOrgId, entry.id as string, "overview");
+            const json = await decryptData(
+              {
+                ciphertext: entry.encryptedOverview as string,
+                iv: entry.overviewIv as string,
+                authTag: entry.overviewAuthTag as string,
+              },
+              orgKey,
+              aad,
+            );
+            const overview = JSON.parse(json);
+            return {
+              id: entry.id,
+              entryType: entry.entryType,
+              orgId: entryOrgId,
+              orgName: entry.orgName,
+              role: entry.role,
+              title: overview.title ?? "",
+              username: overview.username ?? null,
+              urlHost: overview.urlHost ?? null,
+              snippet: overview.snippet ?? null,
+              brand: overview.brand ?? null,
+              lastFour: overview.lastFour ?? null,
+              cardholderName: overview.cardholderName ?? null,
+              fullName: overview.fullName ?? null,
+              idNumberLast4: overview.idNumberLast4 ?? null,
+              isFavorite: entry.isFavorite,
+              isArchived: entry.isArchived,
+              tags: entry.tags,
+              createdBy: entry.createdBy,
+              updatedBy: entry.updatedBy,
+              createdAt: entry.createdAt,
+              updatedAt: entry.updatedAt,
+            } as OrgArchivedEntry;
+          } catch {
+            return {
+              id: entry.id as string,
+              entryType: entry.entryType as EntryTypeValue,
+              orgId: entry.orgId as string,
+              orgName: entry.orgName as string,
+              role: entry.role as string,
+              title: "(decryption failed)",
+              username: null,
+              urlHost: null,
+              snippet: null,
+              brand: null,
+              lastFour: null,
+              cardholderName: null,
+              fullName: null,
+              idNumberLast4: null,
+              isFavorite: entry.isFavorite as boolean,
+              isArchived: entry.isArchived as boolean,
+              tags: (entry.tags ?? []) as OrgArchivedEntry["tags"],
+              createdBy: entry.createdBy as OrgArchivedEntry["createdBy"],
+              updatedBy: entry.updatedBy as OrgArchivedEntry["updatedBy"],
+              createdAt: entry.createdAt as string,
+              updatedAt: entry.updatedAt as string,
+            } as OrgArchivedEntry;
+          }
+        }),
+      );
+      setEntries(decrypted);
     } catch {
       // Network error
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [getOrgEncryptionKey]);
 
   useEffect(() => {
     fetchArchived();
@@ -135,15 +209,45 @@ export function OrgArchivedList({
     }
   };
 
+  const decryptFullBlob = useCallback(
+    async (entryOrgId: string, id: string, raw: Record<string, unknown>) => {
+      const orgKey = await getOrgEncryptionKey(entryOrgId);
+      if (!orgKey) throw new Error("No org key");
+      const aad = buildOrgEntryAAD(entryOrgId, id, "blob");
+      const json = await decryptData(
+        {
+          ciphertext: raw.encryptedBlob as string,
+          iv: raw.blobIv as string,
+          authTag: raw.blobAuthTag as string,
+        },
+        orgKey,
+        aad,
+      );
+      return JSON.parse(json) as Record<string, unknown>;
+    },
+    [getOrgEncryptionKey],
+  );
+
   const handleEdit = async (id: string) => {
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;
     try {
       const res = await fetch(apiPath.orgPasswordById(entry.orgId, id));
       if (!res.ok) return;
-      const data = await res.json();
+      const raw = await res.json();
+      const blob = await decryptFullBlob(entry.orgId, id, raw);
       setEditOrgId(entry.orgId);
-      setEditData(data);
+      setEditData({
+        id: raw.id,
+        title: (blob.title as string) ?? "",
+        username: (blob.username as string) ?? null,
+        password: (blob.password as string) ?? "",
+        url: (blob.url as string) ?? null,
+        notes: (blob.notes as string) ?? null,
+        tags: raw.tags,
+        customFields: blob.customFields as EntryCustomField[] | undefined,
+        totp: blob.totp as EntryTotp | null | undefined,
+      });
       setFormOpen(true);
     } catch {
       // ignore
@@ -155,44 +259,45 @@ export function OrgArchivedList({
       async (): Promise<InlineDetailData> => {
         const res = await fetch(apiPath.orgPasswordById(entry.orgId, entry.id));
         if (!res.ok) throw new Error("Failed");
-        const data = await res.json();
+        const raw = await res.json();
+        const blob = await decryptFullBlob(entry.orgId, entry.id, raw);
         return {
-          id: data.id,
+          id: raw.id,
           entryType: entry.entryType,
-          password: data.password ?? "",
-          content: data.content,
-          url: data.url ?? null,
+          password: (blob.password as string) ?? "",
+          content: blob.content as string | undefined,
+          url: (blob.url as string) ?? null,
           urlHost: null,
-          notes: data.notes ?? null,
-          customFields: data.customFields ?? [],
+          notes: (blob.notes as string) ?? null,
+          customFields: (blob.customFields as EntryCustomField[]) ?? [],
           passwordHistory: [],
-          totp: data.totp ?? undefined,
-          brand: data.brand ?? null,
-          cardholderName: data.cardholderName ?? null,
-          cardNumber: data.cardNumber ?? null,
-          expiryMonth: data.expiryMonth ?? null,
-          expiryYear: data.expiryYear ?? null,
-          cvv: data.cvv ?? null,
-          fullName: data.fullName ?? null,
-          address: data.address ?? null,
-          phone: data.phone ?? null,
-          email: data.email ?? null,
-          dateOfBirth: data.dateOfBirth ?? null,
-          nationality: data.nationality ?? null,
-          idNumber: data.idNumber ?? null,
-          issueDate: data.issueDate ?? null,
-          expiryDate: data.expiryDate ?? null,
-          relyingPartyId: data.relyingPartyId ?? null,
-          relyingPartyName: data.relyingPartyName ?? null,
-          username: data.username ?? null,
-          credentialId: data.credentialId ?? null,
-          creationDate: data.creationDate ?? null,
-          deviceInfo: data.deviceInfo ?? null,
-          createdAt: data.createdAt,
-          updatedAt: data.updatedAt,
+          totp: blob.totp as EntryTotp | undefined,
+          brand: blob.brand as string | undefined,
+          cardholderName: blob.cardholderName as string | undefined,
+          cardNumber: blob.cardNumber as string | undefined,
+          expiryMonth: blob.expiryMonth as string | undefined,
+          expiryYear: blob.expiryYear as string | undefined,
+          cvv: blob.cvv as string | undefined,
+          fullName: blob.fullName as string | undefined,
+          address: blob.address as string | undefined,
+          phone: blob.phone as string | undefined,
+          email: blob.email as string | undefined,
+          dateOfBirth: blob.dateOfBirth as string | undefined,
+          nationality: blob.nationality as string | undefined,
+          idNumber: blob.idNumber as string | undefined,
+          issueDate: blob.issueDate as string | undefined,
+          expiryDate: blob.expiryDate as string | undefined,
+          relyingPartyId: blob.relyingPartyId as string | undefined,
+          relyingPartyName: blob.relyingPartyName as string | undefined,
+          username: blob.username as string | undefined,
+          credentialId: blob.credentialId as string | undefined,
+          creationDate: blob.creationDate as string | undefined,
+          deviceInfo: blob.deviceInfo as string | undefined,
+          createdAt: raw.createdAt,
+          updatedAt: raw.updatedAt,
         };
       },
-    []
+    [decryptFullBlob]
   );
 
   const createPasswordFetcher = useCallback(
@@ -200,10 +305,11 @@ export function OrgArchivedList({
       async (): Promise<string> => {
         const res = await fetch(apiPath.orgPasswordById(entry.orgId, entry.id));
         if (!res.ok) throw new Error("Failed");
-        const data = await res.json();
-        return data.password ?? data.content ?? "";
+        const raw = await res.json();
+        const blob = await decryptFullBlob(entry.orgId, entry.id, raw);
+        return (blob.password as string) ?? (blob.content as string) ?? "";
       },
-    []
+    [decryptFullBlob]
   );
 
   const createUrlFetcher = useCallback(
@@ -211,10 +317,11 @@ export function OrgArchivedList({
       async (): Promise<string | null> => {
         const res = await fetch(apiPath.orgPasswordById(entry.orgId, entry.id));
         if (!res.ok) throw new Error("Failed");
-        const data = await res.json();
-        return data.url;
+        const raw = await res.json();
+        const blob = await decryptFullBlob(entry.orgId, entry.id, raw);
+        return (blob.url as string) ?? null;
       },
-    []
+    [decryptFullBlob]
   );
 
   const filtered = entries.filter((p) => {
@@ -287,6 +394,7 @@ export function OrgArchivedList({
             canEdit={entry.role === ORG_ROLE.OWNER || entry.role === ORG_ROLE.ADMIN || entry.role === ORG_ROLE.MEMBER}
             canDelete={entry.role === ORG_ROLE.OWNER || entry.role === ORG_ROLE.ADMIN}
             createdBy={entry.orgName}
+            orgId={entry.orgId}
           />
         ))}
       </div>

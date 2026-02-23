@@ -23,6 +23,9 @@ import type { EntryTypeValue } from "@/lib/constants";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format-datetime";
 import type { EntryCustomField } from "@/lib/entry-form-types";
+import { useOrgVault } from "@/lib/org-vault-context";
+import { decryptData } from "@/lib/crypto-client";
+import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
 interface OrgPasswordDetailProps {
   orgId: string;
@@ -73,6 +76,7 @@ export function OrgPasswordDetail({
   const t = useTranslations("PasswordDetail");
   const tf = useTranslations("PasswordForm");
   const locale = useLocale();
+  const { getOrgEncryptionKey } = useOrgVault();
   const [data, setData] = useState<PasswordData | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showCardNumber, setShowCardNumber] = useState(false);
@@ -95,23 +99,71 @@ export function OrgPasswordDetail({
     setHiddenFieldsVisible(new Set());
     setAttachments([]);
 
-    Promise.all([
-      fetch(apiPath.orgPasswordById(orgId, passwordId))
-        .then((res) => {
-          if (!res.ok) throw new Error("Not found");
-          return res.json();
-        }),
-      fetch(apiPath.orgPasswordAttachments(orgId, passwordId))
-        .then((res) => (res.ok ? res.json() : []))
-        .catch(() => []),
-    ])
-      .then(([entryData, attachData]) => {
-        setData(entryData);
+    (async () => {
+      try {
+        const [entryRes, attachRes] = await Promise.all([
+          fetch(apiPath.orgPasswordById(orgId, passwordId)),
+          fetch(apiPath.orgPasswordAttachments(orgId, passwordId)).catch(() => null),
+        ]);
+        if (!entryRes.ok) throw new Error("Not found");
+        const raw = await entryRes.json();
+        const attachData = attachRes?.ok ? await attachRes.json() : [];
+
+        // Decrypt the blob
+        const orgKey = await getOrgEncryptionKey(orgId);
+        if (!orgKey) throw new Error("No org key");
+        const aad = buildOrgEntryAAD(orgId, raw.id, "blob");
+        const json = await decryptData(
+          {
+            ciphertext: raw.encryptedBlob,
+            iv: raw.blobIv,
+            authTag: raw.blobAuthTag,
+          },
+          orgKey,
+          aad,
+        );
+        const blob = JSON.parse(json);
+
+        setData({
+          id: raw.id,
+          entryType: raw.entryType,
+          title: blob.title ?? "",
+          username: blob.username ?? null,
+          password: blob.password ?? "",
+          content: blob.content ?? undefined,
+          url: blob.url ?? null,
+          notes: blob.notes ?? null,
+          customFields: blob.customFields ?? [],
+          totp: blob.totp ?? null,
+          cardholderName: blob.cardholderName ?? null,
+          cardNumber: blob.cardNumber ?? null,
+          brand: blob.brand ?? null,
+          expiryMonth: blob.expiryMonth ?? null,
+          expiryYear: blob.expiryYear ?? null,
+          cvv: blob.cvv ?? null,
+          fullName: blob.fullName ?? null,
+          address: blob.address ?? null,
+          phone: blob.phone ?? null,
+          email: blob.email ?? null,
+          dateOfBirth: blob.dateOfBirth ?? null,
+          nationality: blob.nationality ?? null,
+          idNumber: blob.idNumber ?? null,
+          issueDate: blob.issueDate ?? null,
+          expiryDate: blob.expiryDate ?? null,
+          tags: raw.tags ?? [],
+          createdBy: raw.createdBy ?? { name: null },
+          updatedBy: raw.updatedBy ?? { name: null },
+          createdAt: raw.createdAt,
+          updatedAt: raw.updatedAt,
+        });
         setAttachments(attachData);
-      })
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, [open, passwordId, orgId]);
+      } catch {
+        setData(null);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [open, passwordId, orgId, getOrgEncryptionKey]);
 
   // Auto-hide password after 30 seconds
   useEffect(() => {

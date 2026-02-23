@@ -50,8 +50,53 @@ interface ShareDialogProps {
   onOpenChange: (open: boolean) => void;
   passwordEntryId?: string;
   orgPasswordEntryId?: string;
-  /** For personal entries, the decrypted data to share (TOTP excluded by caller) */
+  /** Decrypted data to share (TOTP excluded by caller) */
   decryptedData?: Record<string, unknown>;
+  /** Entry type (required for org entries) */
+  entryType?: string;
+}
+
+function hexEncode(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function base64urlEncode(bytes: Uint8Array): string {
+  const binary = String.fromCharCode(...bytes);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function encryptForShare(
+  data: Record<string, unknown>
+): Promise<{ ciphertext: string; iv: string; authTag: string; shareKey: Uint8Array }> {
+  const shareKey = crypto.getRandomValues(new Uint8Array(32));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plaintext = new TextEncoder().encode(JSON.stringify(data));
+
+  const key = await crypto.subtle.importKey(
+    "raw",
+    shareKey,
+    { name: "AES-GCM" },
+    false,
+    ["encrypt"]
+  );
+
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    plaintext
+  );
+
+  // Web Crypto appends 16-byte auth tag to ciphertext
+  const combined = new Uint8Array(encrypted);
+  const ct = combined.slice(0, combined.length - 16);
+  const tag = combined.slice(combined.length - 16);
+
+  return {
+    ciphertext: hexEncode(ct),
+    iv: hexEncode(iv),
+    authTag: hexEncode(tag),
+    shareKey,
+  };
 }
 
 const EXPIRY_OPTIONS = ["1h", "1d", "7d", "30d"] as const;
@@ -62,6 +107,7 @@ export function ShareDialog({
   passwordEntryId,
   orgPasswordEntryId,
   decryptedData,
+  entryType,
 }: ShareDialogProps) {
   const t = useTranslations("Share");
   const tApi = useTranslations("ApiErrors");
@@ -113,11 +159,26 @@ export function ShareDialog({
       const body: Record<string, unknown> = {
         expiresIn,
       };
+      let shareKeyForFragment: Uint8Array | undefined;
+
       if (passwordEntryId) {
         body.passwordEntryId = passwordEntryId;
         body.data = decryptedData;
       } else {
+        // Org entry: E2E — encrypt with random share key
+        if (!decryptedData) {
+          toast.error(t("createError"));
+          return;
+        }
+        const encrypted = await encryptForShare(decryptedData);
         body.orgPasswordEntryId = orgPasswordEntryId;
+        body.encryptedShareData = {
+          ciphertext: encrypted.ciphertext,
+          iv: encrypted.iv,
+          authTag: encrypted.authTag,
+        };
+        body.entryType = entryType;
+        shareKeyForFragment = encrypted.shareKey;
       }
       if (maxViews) {
         const mv = parseInt(maxViews, 10);
@@ -137,7 +198,10 @@ export function ShareDialog({
       }
 
       const data = await res.json();
-      const fullUrl = `${window.location.origin}${data.url}`;
+      let fullUrl = `${window.location.origin}${data.url}`;
+      if (shareKeyForFragment) {
+        fullUrl += `#key=${base64urlEncode(shareKeyForFragment)}`;
+      }
       setCreatedUrl(fullUrl);
       fetchLinks();
       toast.success(t("createSuccess"));

@@ -126,6 +126,7 @@ export async function POST(
     return NextResponse.json({ error: API_ERROR.INVALID_FORM_DATA }, { status: 400 });
   }
 
+  const clientId = formData.get("id") as string | null;
   const file = formData.get("file") as File | null;
   const iv = formData.get("iv") as string | null;
   const authTag = formData.get("authTag") as string | null;
@@ -195,7 +196,7 @@ export async function POST(
   }
 
   const blobStore = getAttachmentBlobStore();
-  const attachmentId = crypto.randomUUID();
+  const attachmentId = clientId ?? crypto.randomUUID();
   const blobContext = { attachmentId, entryId: id, orgId };
   const storedBlob = await blobStore.putObject(buffer, blobContext);
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 1;

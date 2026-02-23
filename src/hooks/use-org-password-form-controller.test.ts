@@ -9,6 +9,7 @@ import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 const submitOrgPasswordFormMock = vi.fn();
 const useOrgPasswordFormDerivedMock = vi.fn();
 const useOrgPasswordFormPresenterMock = vi.fn();
+const mockGetOrgKeyInfo = vi.fn();
 
 vi.mock("@/components/org/org-password-form-actions", () => ({
   submitOrgPasswordForm: (...args: unknown[]) => submitOrgPasswordFormMock(...args),
@@ -22,11 +23,23 @@ vi.mock("@/hooks/use-org-password-form-presenter", () => ({
   useOrgPasswordFormPresenter: (...args: unknown[]) => useOrgPasswordFormPresenterMock(...args),
 }));
 
+vi.mock("@/lib/org-vault-context", () => ({
+  useOrgVault: () => ({
+    getOrgKeyInfo: mockGetOrgKeyInfo,
+    getOrgEncryptionKey: vi.fn(),
+    invalidateOrgKey: vi.fn(),
+    clearAll: vi.fn(),
+    distributePendingKeys: vi.fn(),
+  }),
+}));
+
 describe("useOrgPasswordFormController", () => {
   beforeEach(() => {
     submitOrgPasswordFormMock.mockReset();
     useOrgPasswordFormDerivedMock.mockReset();
     useOrgPasswordFormPresenterMock.mockReset();
+    mockGetOrgKeyInfo.mockReset();
+    mockGetOrgKeyInfo.mockResolvedValue({ key: {} as CryptoKey, keyVersion: 1 });
 
     useOrgPasswordFormPresenterMock.mockReturnValue({
       entryValues: {

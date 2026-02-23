@@ -92,30 +92,31 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Check if the org is E2E-enabled
-  const orgDetails = await prisma.organization.findUnique({
-    where: { id: invitation.orgId },
-    select: { e2eEnabled: true },
+  // Org is always E2E-enabled.
+  // Check if the user has an ECDH public key (vault set up).
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { ecdhPublicKey: true },
   });
-  const isE2E = orgDetails?.e2eEnabled ?? false;
+  const vaultSetupRequired = !user?.ecdhPublicKey;
 
-  // For E2E orgs, check if the user has an ECDH public key (vault set up)
-  let vaultSetupRequired = false;
-  if (isE2E) {
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { ecdhPublicKey: true },
-    });
-    vaultSetupRequired = !user?.ecdhPublicKey;
-  }
-
-  // Create membership and mark invitation as accepted
-  // For E2E orgs, keyDistributed starts as false (admin must distribute key)
+  // Create membership (or re-activate if previously removed) and mark invitation as accepted.
+  // keyDistributed starts as false (admin must distribute org key).
   await prisma.$transaction([
-    prisma.orgMember.create({
-      data: {
+    prisma.orgMember.upsert({
+      where: {
+        orgId_userId: {
+          orgId: invitation.orgId,
+          userId: session.user.id,
+        },
+      },
+      create: {
         orgId: invitation.orgId,
         userId: session.user.id,
+        role: invitation.role,
+        keyDistributed: false,
+      },
+      update: {
         role: invitation.role,
         keyDistributed: false,
       },
@@ -130,9 +131,7 @@ export async function POST(req: NextRequest) {
     org: invitation.org,
     role: invitation.role,
     alreadyMember: false,
-    ...(isE2E && {
-      needsKeyDistribution: true,
-      vaultSetupRequired,
-    }),
+    needsKeyDistribution: true,
+    vaultSetupRequired,
   });
 }

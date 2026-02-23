@@ -1,13 +1,20 @@
 import { toast } from "sonner";
+import { saveOrgEntry } from "@/lib/org-entry-save";
 import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
-import { apiPath } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 interface ExecuteOrgEntrySubmitArgs {
   orgId: string;
   isEdit: boolean;
   editData?: OrgPasswordFormEditData | null;
-  body: unknown;
+  orgEncryptionKey: CryptoKey;
+  orgKeyVersion: number;
+  fullBlob: string;
+  overviewBlob: string;
+  entryType?: EntryTypeValue;
+  tagIds: string[];
+  orgFolderId?: string | null;
   t: PasswordFormTranslator;
   setSaving: (value: boolean) => void;
   handleOpenChange: (open: boolean) => void;
@@ -18,7 +25,13 @@ export async function executeOrgEntrySubmit({
   orgId,
   isEdit,
   editData,
-  body,
+  orgEncryptionKey,
+  orgKeyVersion,
+  fullBlob,
+  overviewBlob,
+  entryType,
+  tagIds,
+  orgFolderId,
   t,
   setSaving,
   handleOpenChange,
@@ -26,14 +39,17 @@ export async function executeOrgEntrySubmit({
 }: ExecuteOrgEntrySubmitArgs): Promise<void> {
   setSaving(true);
   try {
-    const endpoint = isEdit && editData
-      ? apiPath.orgPasswordById(orgId, editData.id)
-      : apiPath.orgPasswords(orgId);
-
-    const res = await fetch(endpoint, {
-      method: isEdit ? "PUT" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+    const res = await saveOrgEntry({
+      mode: isEdit ? "edit" : "create",
+      orgId,
+      initialId: editData?.id,
+      orgEncryptionKey,
+      orgKeyVersion,
+      fullBlob,
+      overviewBlob,
+      entryType,
+      tagIds,
+      orgFolderId,
     });
 
     if (!res.ok) throw new Error("Failed");

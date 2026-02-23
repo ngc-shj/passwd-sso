@@ -659,6 +659,17 @@ export function PasswordCard({
                       toast.error(t("networkError"));
                       return;
                     }
+                  } else if (getDetailProp) {
+                    // Org: decrypt via getDetail, strip TOTP/internal fields
+                    try {
+                      const detail = await getDetailProp();
+                      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                      const { totp: _t, passwordHistory: _ph, id: _id, requireReprompt: _rp, ...safe } = detail;
+                      setShareData(safe as Record<string, unknown>);
+                    } catch {
+                      toast.error(t("networkError"));
+                      return;
+                    }
                   }
                   setShareDialogOpen(true);
                 }}
@@ -760,6 +771,7 @@ export function PasswordCard({
         passwordEntryId={isOrgMode ? undefined : id}
         orgPasswordEntryId={isOrgMode ? id : undefined}
         decryptedData={shareData}
+        entryType={isOrgMode ? entryType : undefined}
       />
 
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

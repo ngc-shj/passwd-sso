@@ -37,6 +37,8 @@ export function handleOrgCardNumberChange({
 
 export interface SubmitOrgPasswordFormArgs {
   orgId: string;
+  orgEncryptionKey: CryptoKey;
+  orgKeyVersion: number;
   isEdit: boolean;
   editData?: OrgPasswordFormEditData | null;
   effectiveEntryType: EntryTypeValue;
@@ -86,6 +88,8 @@ export interface SubmitOrgPasswordFormArgs {
 
 export async function submitOrgPasswordForm({
   orgId,
+  orgEncryptionKey,
+  orgKeyVersion,
   isEdit,
   editData,
   effectiveEntryType,
@@ -146,12 +150,13 @@ export async function submitOrgPasswordForm({
   if (!validation.ok) return;
 
   const tagIds = extractTagIds(selectedTags);
-  const body = buildOrgEntryPayload({
+  const tagNames = selectedTags.map((t) => ({ name: t.name, color: t.color }));
+
+  const { fullBlob, overviewBlob } = buildOrgEntryPayload({
     entryType: effectiveEntryType,
     title,
     notes,
-    tagIds,
-    orgFolderId,
+    tagNames,
     username,
     password,
     url,
@@ -184,7 +189,13 @@ export async function submitOrgPasswordForm({
     orgId,
     isEdit,
     editData,
-    body,
+    orgEncryptionKey,
+    orgKeyVersion,
+    fullBlob,
+    overviewBlob,
+    entryType: effectiveEntryType,
+    tagIds,
+    orgFolderId,
     t,
     setSaving,
     handleOpenChange,

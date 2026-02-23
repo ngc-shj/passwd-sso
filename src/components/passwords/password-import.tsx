@@ -1,7 +1,9 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
+import { useOrgVaultOptional } from "@/lib/org-vault-context";
 import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
 import { FileUp } from "lucide-react";
@@ -27,9 +29,24 @@ interface ImportPanelContentProps {
 function ImportPanelContent({ onComplete, orgId }: ImportPanelContentProps) {
   const t = useTranslations("Import");
   const { encryptionKey, userId } = useVault();
+  const orgVault = useOrgVaultOptional();
   const isOrgImport = Boolean(orgId);
   const tagsPath = orgId ? apiPath.orgTags(orgId) : API_PATH.TAGS;
   const passwordsPath = orgId ? apiPath.orgPasswords(orgId) : API_PATH.PASSWORDS;
+
+  // Resolve org encryption key for org imports
+  const [orgEncryptionKey, setOrgEncryptionKey] = useState<CryptoKey | undefined>();
+  const [orgKeyVersion, setOrgKeyVersion] = useState<number | undefined>();
+  useEffect(() => {
+    if (!isOrgImport || !orgId || !orgVault) return;
+    orgVault.getOrgKeyInfo(orgId).then((info) => {
+      if (info) {
+        setOrgEncryptionKey(info.key);
+        setOrgKeyVersion(info.keyVersion);
+      }
+    });
+  }, [isOrgImport, orgId, orgVault]);
+
   const {
     fileRef,
     entries,
@@ -65,6 +82,9 @@ function ImportPanelContent({ onComplete, orgId }: ImportPanelContentProps) {
     encryptedInput,
     userId: userId ?? undefined,
     encryptionKey: encryptionKey ?? undefined,
+    orgEncryptionKey,
+    orgKeyVersion,
+    orgId,
   });
 
   const reset = () => {
