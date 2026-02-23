@@ -280,6 +280,7 @@ export function OrgVaultProvider({
                     ephemeralPublicKey: escrow.ephemeralPublicKey,
                     hkdfSalt: escrow.hkdfSalt,
                     keyVersion: escrow.keyVersion,
+                    wrapVersion: escrow.wrapVersion,
                   }),
                 }
               );

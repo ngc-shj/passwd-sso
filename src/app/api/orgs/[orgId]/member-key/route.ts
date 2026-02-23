@@ -44,7 +44,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   let memberKey;
   if (keyVersionParam) {
     const keyVersion = parseInt(keyVersionParam, 10);
-    if (isNaN(keyVersion) || keyVersion < 1) {
+    if (isNaN(keyVersion) || keyVersion < 1 || keyVersion > 10000) {
       return NextResponse.json(
         { error: API_ERROR.VALIDATION_ERROR },
         { status: 400 }

@@ -28,7 +28,7 @@ export const ALLOWED_CONTENT_TYPES = [
 // ─── E2E Encrypted Entry Schemas ─────────────────────────────
 
 const encryptedFieldSchema = z.object({
-  ciphertext: z.string().min(1),
+  ciphertext: z.string().min(1).max(500_000), // 500KB limit per ciphertext
   iv: z.string().length(24), // 12 bytes hex
   authTag: z.string().length(32), // 16 bytes hex
 });

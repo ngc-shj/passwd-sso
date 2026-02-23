@@ -212,7 +212,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
 
     return tx.orgPasswordEntry.update({
-      where: { id },
+      where: { id, orgId },
       data: updateData,
       include: {
         tags: { select: { id: true, name: true, color: true } },
