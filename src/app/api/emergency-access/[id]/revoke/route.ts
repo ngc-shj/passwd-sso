@@ -8,6 +8,7 @@ import { sendEmail } from "@/lib/email";
 import { emergencyAccessRevokedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { routing } from "@/i18n/routing";
 
 // POST /api/emergency-access/[id]/revoke — Owner revokes or rejects request
 export async function POST(
@@ -83,8 +84,8 @@ export async function POST(
       });
       if (grantee?.email) {
         const ownerName = session.user.name ?? session.user.email ?? "";
-        const { subject, html, text } = emergencyAccessRevokedEmail("ja", ownerName);
-        sendEmail({ to: grantee.email, subject, html, text });
+        const { subject, html, text } = emergencyAccessRevokedEmail(routing.defaultLocale, ownerName);
+        void sendEmail({ to: grantee.email, subject, html, text });
       }
     }
 

@@ -64,12 +64,19 @@ export function SessionsCard() {
   const [revoking, setRevoking] = useState(false);
 
   const fetchSessions = useCallback(async () => {
-    const res = await fetch(API_PATH.SESSIONS);
-    if (res.ok) {
-      setSessions(await res.json());
+    try {
+      const res = await fetch(API_PATH.SESSIONS);
+      if (res.ok) {
+        setSessions(await res.json());
+      } else {
+        toast.error(t("fetchError"));
+      }
+    } catch {
+      toast.error(t("fetchError"));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchSessions();
@@ -82,7 +89,11 @@ export function SessionsCard() {
       if (res.ok) {
         setSessions((prev) => prev.filter((s) => s.id !== id));
         toast.success(t("revokeSuccess"));
+      } else {
+        toast.error(t("revokeError"));
       }
+    } catch {
+      toast.error(t("revokeError"));
     } finally {
       setRevoking(false);
       setRevokeTarget(null);
@@ -96,7 +107,11 @@ export function SessionsCard() {
       if (res.ok) {
         setSessions((prev) => prev.filter((s) => s.isCurrent));
         toast.success(t("revokeAllSuccess"));
+      } else {
+        toast.error(t("revokeError"));
       }
+    } catch {
+      toast.error(t("revokeError"));
     } finally {
       setRevoking(false);
       setRevokeAllOpen(false);

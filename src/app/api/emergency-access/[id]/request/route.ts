@@ -8,6 +8,7 @@ import { emergencyAccessRequestedEmail } from "@/lib/email/templates/emergency-a
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { routing } from "@/i18n/routing";
 
 const requestLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 3 });
 
@@ -74,8 +75,8 @@ export async function POST(
       select: { name: true, email: true },
     });
     const granteeName = grantee?.name ?? grantee?.email ?? "";
-    const { subject, html, text } = emergencyAccessRequestedEmail("ja", granteeName, grant.waitDays);
-    sendEmail({ to: owner.email, subject, html, text });
+    const { subject, html, text } = emergencyAccessRequestedEmail(routing.defaultLocale, granteeName, grant.waitDays);
+    void sendEmail({ to: owner.email, subject, html, text });
   }
 
   return NextResponse.json({

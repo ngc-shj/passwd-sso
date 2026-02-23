@@ -5,6 +5,7 @@ const { mockAuth, mockPrismaSession, mockRateLimiter, mockLogAudit } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockPrismaSession: {
+      findUnique: vi.fn(),
       findMany: vi.fn(),
       deleteMany: vi.fn(),
     },
@@ -48,6 +49,8 @@ describe("GET /api/sessions", () => {
   });
 
   it("returns sessions with isCurrent flag", async () => {
+    // findUnique looks up the current session by token
+    mockPrismaSession.findUnique.mockResolvedValue({ id: "s1" });
     mockPrismaSession.findMany.mockResolvedValue([
       {
         id: "s1",
@@ -55,7 +58,6 @@ describe("GET /api/sessions", () => {
         lastActiveAt: now,
         ipAddress: "1.2.3.4",
         userAgent: "Mozilla/5.0",
-        sessionToken: "current-token",
       },
       {
         id: "s2",
@@ -63,7 +65,6 @@ describe("GET /api/sessions", () => {
         lastActiveAt: now,
         ipAddress: "5.6.7.8",
         userAgent: "Chrome/120",
-        sessionToken: "other-token",
       },
     ]);
 
@@ -79,6 +80,25 @@ describe("GET /api/sessions", () => {
     expect(json[1].isCurrent).toBe(false);
     // sessionToken must not be exposed
     expect(json[0]).not.toHaveProperty("sessionToken");
+  });
+
+  it("marks all sessions as non-current when cookie is missing", async () => {
+    mockPrismaSession.findMany.mockResolvedValue([
+      {
+        id: "s1",
+        createdAt: now,
+        lastActiveAt: now,
+        ipAddress: null,
+        userAgent: null,
+      },
+    ]);
+    const req = createRequest("GET", "http://localhost:3000/api/sessions");
+    const res = await GET(req);
+    const json = await res.json();
+    expect(json).toHaveLength(1);
+    expect(json[0].isCurrent).toBe(false);
+    // findUnique should not be called when no cookie
+    expect(mockPrismaSession.findUnique).not.toHaveBeenCalled();
   });
 
   it("returns empty array when no sessions", async () => {
@@ -119,6 +139,7 @@ describe("DELETE /api/sessions", () => {
     );
     expect(res.status).toBe(401);
     expect(mockPrismaSession.deleteMany).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("deletes all sessions except current and logs audit", async () => {

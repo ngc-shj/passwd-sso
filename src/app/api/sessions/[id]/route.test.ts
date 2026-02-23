@@ -56,6 +56,16 @@ describe("DELETE /api/sessions/[id]", () => {
     expect(res.status).toBe(429);
   });
 
+  it("returns 401 when session cookie is missing", async () => {
+    const res = await DELETE(
+      createRequest("DELETE", "http://localhost:3000/api/sessions/s1"),
+      createParams({ id: "s1" }),
+    );
+    expect(res.status).toBe(401);
+    expect(mockPrismaSession.findFirst).not.toHaveBeenCalled();
+    expect(mockPrismaSession.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("returns 400 when trying to revoke current session", async () => {
     mockPrismaSession.findFirst.mockResolvedValue({
       sessionToken: "current-token",

@@ -35,17 +35,22 @@ async function handleDELETE(
 
   // Check if the target session is the current one
   const currentToken = getSessionToken(request);
-  if (currentToken) {
-    const target = await prisma.session.findFirst({
-      where: { id, userId: session.user.id },
-      select: { sessionToken: true },
-    });
-    if (target?.sessionToken === currentToken) {
-      return NextResponse.json(
-        { error: API_ERROR.CANNOT_REVOKE_CURRENT_SESSION },
-        { status: 400 },
-      );
-    }
+  if (!currentToken) {
+    return NextResponse.json(
+      { error: API_ERROR.UNAUTHORIZED },
+      { status: 401 },
+    );
+  }
+
+  const target = await prisma.session.findFirst({
+    where: { id, userId: session.user.id },
+    select: { sessionToken: true },
+  });
+  if (target?.sessionToken === currentToken) {
+    return NextResponse.json(
+      { error: API_ERROR.CANNOT_REVOKE_CURRENT_SESSION },
+      { status: 400 },
+    );
   }
 
   // Delete with userId condition to prevent deleting other users' sessions

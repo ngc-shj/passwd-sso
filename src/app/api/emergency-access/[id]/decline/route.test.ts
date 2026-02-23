@@ -100,7 +100,10 @@ describe("POST /api/emergency-access/[id]/decline", () => {
     );
     // Sends declined email to owner
     expect(mockSendEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "owner@test.com" })
+      expect.objectContaining({
+        to: "owner@test.com",
+        subject: expect.stringContaining("辞退"),
+      })
     );
   });
 });

@@ -7,6 +7,7 @@ import { sendEmail } from "@/lib/email";
 import { emergencyAccessApprovedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { routing } from "@/i18n/routing";
 
 // POST /api/emergency-access/[id]/approve — Owner early-approves emergency access request
 export async function POST(
@@ -60,8 +61,8 @@ export async function POST(
     });
     if (grantee?.email) {
       const ownerName = session.user.name ?? session.user.email ?? "";
-      const { subject, html, text } = emergencyAccessApprovedEmail("ja", ownerName);
-      sendEmail({ to: grantee.email, subject, html, text });
+      const { subject, html, text } = emergencyAccessApprovedEmail(routing.defaultLocale, ownerName);
+      void sendEmail({ to: grantee.email, subject, html, text });
     }
   }
 
