@@ -195,12 +195,25 @@ export async function POST(
     );
   }
 
+  const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 1;
+  const orgKeyVersion = orgKeyVersionStr ? parseInt(orgKeyVersionStr, 10) : 1;
+
+  // Validate orgKeyVersion matches current org key version (S-20/F-23)
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { orgKeyVersion: true },
+  });
+  if (!org || orgKeyVersion !== org.orgKeyVersion) {
+    return NextResponse.json(
+      { error: API_ERROR.ORG_KEY_VERSION_MISMATCH },
+      { status: 409 }
+    );
+  }
+
   const blobStore = getAttachmentBlobStore();
   const attachmentId = clientId ?? crypto.randomUUID();
   const blobContext = { attachmentId, entryId: id, orgId };
   const storedBlob = await blobStore.putObject(buffer, blobContext);
-  const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 1;
-  const orgKeyVersion = orgKeyVersionStr ? parseInt(orgKeyVersionStr, 10) : 1;
 
   let attachment;
   try {

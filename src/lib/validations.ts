@@ -130,6 +130,7 @@ export const orgMemberKeySchema = z.object({
   ephemeralPublicKey: z.string().min(1).max(500),
   hkdfSalt: z.string().regex(/^[0-9a-f]{64}$/),
   keyVersion: z.number().int().min(1),
+  wrapVersion: z.number().int().min(1).max(1).default(1),
 });
 
 export const createOrgE2ESchema = createOrgSchema.extend({
@@ -304,6 +305,9 @@ export const createShareLinkSchema = z.object({
 ).refine(
   (d) => (d.orgPasswordEntryId ? !!d.encryptedShareData && !!d.entryType : true),
   { message: "encryptedShareData and entryType are required for org entries" }
+).refine(
+  (d) => (d.orgPasswordEntryId ? !d.data : true),
+  { message: "data must not be present for org entries (use encryptedShareData)" }
 );
 
 // ─── Emergency Access Schemas ─────────────────────────────

@@ -161,16 +161,19 @@ export function ShareDialog({
         expiresIn,
       };
 
+      // Strip TOTP before sharing (F-21)
+      const { totp: _totp, ...safeData } = (decryptedData ?? {}) as Record<string, unknown>;
+
       if (passwordEntryId) {
         body.passwordEntryId = passwordEntryId;
-        body.data = decryptedData;
+        body.data = safeData;
       } else {
         // Org entry: E2E — encrypt with random share key
         if (!decryptedData) {
           toast.error(t("createError"));
           return;
         }
-        const encrypted = await encryptForShare(decryptedData);
+        const encrypted = await encryptForShare(safeData);
         body.orgPasswordEntryId = orgPasswordEntryId;
         body.encryptedShareData = {
           ciphertext: encrypted.ciphertext,

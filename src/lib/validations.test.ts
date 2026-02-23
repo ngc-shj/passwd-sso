@@ -268,4 +268,22 @@ describe("orgMemberKeySchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("defaults wrapVersion to 1 when omitted", () => {
+    const result = orgMemberKeySchema.safeParse(validKey);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.wrapVersion).toBe(1);
+    }
+  });
+
+  it("accepts wrapVersion=1", () => {
+    const result = orgMemberKeySchema.safeParse({ ...validKey, wrapVersion: 1 });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects wrapVersion=2 (unsupported)", () => {
+    const result = orgMemberKeySchema.safeParse({ ...validKey, wrapVersion: 2 });
+    expect(result.success).toBe(false);
+  });
 });

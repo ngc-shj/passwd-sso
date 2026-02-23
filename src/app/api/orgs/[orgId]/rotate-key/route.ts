@@ -101,6 +101,16 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
   }
 
+  // Reject extra memberKeys for non-members (F-18/S-22)
+  for (const k of memberKeys) {
+    if (!memberUserIds.has(k.userId)) {
+      return NextResponse.json(
+        { error: API_ERROR.VALIDATION_ERROR, details: { unknownUserId: k.userId } },
+        { status: 400 }
+      );
+    }
+  }
+
   // Interactive transaction with optimistic lock on orgKeyVersion (S-17)
   try {
     await prisma.$transaction(async (tx) => {
@@ -111,6 +121,14 @@ export async function POST(req: NextRequest, { params }: Params) {
       });
       if (!currentOrg || currentOrg.orgKeyVersion !== org.orgKeyVersion) {
         throw new Error("ORG_KEY_VERSION_CONFLICT");
+      }
+
+      // Verify submitted entries cover ALL org entries (F-17)
+      const entryCount = await tx.orgPasswordEntry.count({
+        where: { orgId, deletedAt: null },
+      });
+      if (entries.length !== entryCount) {
+        throw new Error("ENTRY_COUNT_MISMATCH");
       }
 
       // Re-encrypt all entries with new key
@@ -145,6 +163,7 @@ export async function POST(req: NextRequest, { params }: Params) {
                 ephemeralPublicKey: k.ephemeralPublicKey,
                 hkdfSalt: k.hkdfSalt,
                 keyVersion: newOrgKeyVersion,
+                wrapVersion: k.wrapVersion,
               },
             })
           )
@@ -161,6 +180,12 @@ export async function POST(req: NextRequest, { params }: Params) {
       return NextResponse.json(
         { error: API_ERROR.ORG_KEY_VERSION_MISMATCH },
         { status: 409 }
+      );
+    }
+    if (e instanceof Error && e.message === "ENTRY_COUNT_MISMATCH") {
+      return NextResponse.json(
+        { error: API_ERROR.ENTRY_COUNT_MISMATCH },
+        { status: 400 }
       );
     }
     throw e;

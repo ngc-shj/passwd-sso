@@ -78,9 +78,9 @@ export async function POST(req: NextRequest) {
     }
 
     // `data` is required by schema when `passwordEntryId` is set.
-    const { ...safeData } = data;
+    // TOTP is already stripped by Zod shareDataSchema (no totp field defined)
     entryType = entry.entryType;
-    const plaintext = JSON.stringify(safeData);
+    const plaintext = JSON.stringify(data);
 
     // Encrypt share data with master key
     const encrypted = encryptShareData(plaintext);
