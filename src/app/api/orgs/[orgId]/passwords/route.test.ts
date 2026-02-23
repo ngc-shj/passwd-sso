@@ -34,7 +34,6 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/org-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,
-  isMigrationLocked: vi.fn().mockResolvedValue(false),
   OrgAuthError,
 }));
 

@@ -85,7 +85,6 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
     mockOrgFindUnique.mockResolvedValue({
       e2eEnabled: true,
       orgKeyVersion: 1,
-      migrationInProgress: false,
     });
     mockMemberFindMany.mockResolvedValue([{ userId: "user-1" }]);
     mockTransaction.mockResolvedValue([]);
@@ -108,7 +107,6 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
     mockOrgFindUnique.mockResolvedValue({
       e2eEnabled: false,
       orgKeyVersion: 1,
-      migrationInProgress: false,
     });
     const res = await POST(
       createRequest({
@@ -119,23 +117,6 @@ describe("POST /api/orgs/[orgId]/rotate-key", () => {
       createParams("org-1"),
     );
     expect(res.status).toBe(400);
-  });
-
-  it("returns 423 when migration in progress", async () => {
-    mockOrgFindUnique.mockResolvedValue({
-      e2eEnabled: true,
-      orgKeyVersion: 1,
-      migrationInProgress: true,
-    });
-    const res = await POST(
-      createRequest({
-        newOrgKeyVersion: 2,
-        entries: [validEntry("e1")],
-        memberKeys: [validMemberKey("user-1")],
-      }),
-      createParams("org-1"),
-    );
-    expect(res.status).toBe(423);
   });
 
   it("returns 409 when version mismatch", async () => {

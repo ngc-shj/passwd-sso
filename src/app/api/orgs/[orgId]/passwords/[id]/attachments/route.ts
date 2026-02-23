@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { requireOrgPermission, isMigrationLocked, OrgAuthError } from "@/lib/org-auth";
+import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { AUDIT_TARGET_TYPE, ORG_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -84,10 +84,6 @@ export async function POST(
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
-  }
-
-  if (await isMigrationLocked(orgId)) {
-    return NextResponse.json({ error: API_ERROR.MIGRATION_IN_PROGRESS }, { status: 423 });
   }
 
   const entry = await prisma.orgPasswordEntry.findUnique({

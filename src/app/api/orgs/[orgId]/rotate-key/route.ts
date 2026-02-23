@@ -53,7 +53,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
-    select: { e2eEnabled: true, orgKeyVersion: true, migrationInProgress: true },
+    select: { e2eEnabled: true, orgKeyVersion: true },
   });
 
   if (!org) {
@@ -62,10 +62,6 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   if (!org.e2eEnabled) {
     return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
-  }
-
-  if (org.migrationInProgress) {
-    return NextResponse.json({ error: API_ERROR.MIGRATION_IN_PROGRESS }, { status: 423 });
   }
 
   let body: unknown;
@@ -158,7 +154,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     action: AUDIT_ACTION.ORG_KEY_ROTATION,
     userId: session.user.id,
     orgId,
-    targetType: AUDIT_TARGET_TYPE.ORGANIZATION,
+    targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: orgId,
     metadata: {
       fromVersion: org.orgKeyVersion,

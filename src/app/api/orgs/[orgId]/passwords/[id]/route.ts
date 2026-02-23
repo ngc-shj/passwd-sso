@@ -7,7 +7,6 @@ import {
   requireOrgPermission,
   requireOrgMember,
   hasOrgPermission,
-  isMigrationLocked,
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -89,10 +88,6 @@ export async function PUT(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
-  }
-
-  if (await isMigrationLocked(orgId)) {
-    return NextResponse.json({ error: API_ERROR.MIGRATION_IN_PROGRESS }, { status: 423 });
   }
 
   const entry = await prisma.orgPasswordEntry.findUnique({
@@ -239,10 +234,6 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
-  }
-
-  if (await isMigrationLocked(orgId)) {
-    return NextResponse.json({ error: API_ERROR.MIGRATION_IN_PROGRESS }, { status: 423 });
   }
 
   const existing = await prisma.orgPasswordEntry.findUnique({

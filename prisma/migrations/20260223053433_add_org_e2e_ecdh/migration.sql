@@ -21,7 +21,6 @@ ALTER TABLE "org_password_entry_histories" ADD COLUMN     "org_key_version" INTE
 
 -- AlterTable
 ALTER TABLE "organizations" ADD COLUMN     "e2e_enabled" BOOLEAN NOT NULL DEFAULT false,
-ADD COLUMN     "migration_in_progress" BOOLEAN NOT NULL DEFAULT false,
 ADD COLUMN     "org_key_version" INTEGER NOT NULL DEFAULT 0,
 ALTER COLUMN "encrypted_org_key" DROP NOT NULL,
 ALTER COLUMN "org_key_iv" DROP NOT NULL,
