@@ -160,6 +160,8 @@ describe("crypto-org", () => {
   describe("wrapOrgKeyForMember + unwrapOrgKey (round-trip)", () => {
     it("admin wraps org key, member unwraps it", async () => {
       const orgKey = generateOrgSymmetricKey();
+      const salt = crypto.getRandomValues(new Uint8Array(32));
+      const saltHex = hexEncode(salt);
 
       // Admin generates ephemeral key pair
       const ephemeralKeyPair = await generateECDHKeyPair();
@@ -173,7 +175,7 @@ describe("crypto-org", () => {
         orgKey,
         ephemeralKeyPair.privateKey,
         memberKeyPair.publicKey,
-        TEST_ORG_ID,
+        salt,
         TEST_CTX,
       );
       expect(encrypted.ciphertext).toBeTruthy();
@@ -185,7 +187,7 @@ describe("crypto-org", () => {
         encrypted,
         ephemeralPubJwk,
         memberKeyPair.privateKey,
-        TEST_ORG_ID,
+        saltHex,
         TEST_CTX,
       );
 
@@ -194,6 +196,8 @@ describe("crypto-org", () => {
 
     it("fails with wrong member private key", async () => {
       const orgKey = generateOrgSymmetricKey();
+      const salt = crypto.getRandomValues(new Uint8Array(32));
+      const saltHex = hexEncode(salt);
       const ephemeralKeyPair = await generateECDHKeyPair();
       const ephemeralPubJwk = await exportPublicKey(ephemeralKeyPair.publicKey);
       const memberKeyPair = await generateECDHKeyPair();
@@ -203,17 +207,19 @@ describe("crypto-org", () => {
         orgKey,
         ephemeralKeyPair.privateKey,
         memberKeyPair.publicKey,
-        TEST_ORG_ID,
+        salt,
         TEST_CTX,
       );
 
       await expect(
-        unwrapOrgKey(encrypted, ephemeralPubJwk, wrongKeyPair.privateKey, TEST_ORG_ID, TEST_CTX),
+        unwrapOrgKey(encrypted, ephemeralPubJwk, wrongKeyPair.privateKey, saltHex, TEST_CTX),
       ).rejects.toThrow();
     });
 
     it("fails with wrong AAD (different orgId)", async () => {
       const orgKey = generateOrgSymmetricKey();
+      const salt = crypto.getRandomValues(new Uint8Array(32));
+      const saltHex = hexEncode(salt);
       const ephemeralKeyPair = await generateECDHKeyPair();
       const ephemeralPubJwk = await exportPublicKey(ephemeralKeyPair.publicKey);
       const memberKeyPair = await generateECDHKeyPair();
@@ -222,7 +228,7 @@ describe("crypto-org", () => {
         orgKey,
         ephemeralKeyPair.privateKey,
         memberKeyPair.publicKey,
-        TEST_ORG_ID,
+        salt,
         TEST_CTX,
       );
 
@@ -231,14 +237,17 @@ describe("crypto-org", () => {
           encrypted,
           ephemeralPubJwk,
           memberKeyPair.privateKey,
-          TEST_ORG_ID,
+          saltHex,
           makeCtx({ orgId: "wrong-org-id" }),
         ),
       ).rejects.toThrow();
     });
 
-    it("fails with different orgId in HKDF salt", async () => {
+    it("fails with different HKDF salt", async () => {
       const orgKey = generateOrgSymmetricKey();
+      const salt = crypto.getRandomValues(new Uint8Array(32));
+      const wrongSalt = crypto.getRandomValues(new Uint8Array(32));
+      const wrongSaltHex = hexEncode(wrongSalt);
       const ephemeralKeyPair = await generateECDHKeyPair();
       const ephemeralPubJwk = await exportPublicKey(ephemeralKeyPair.publicKey);
       const memberKeyPair = await generateECDHKeyPair();
@@ -247,18 +256,18 @@ describe("crypto-org", () => {
         orgKey,
         ephemeralKeyPair.privateKey,
         memberKeyPair.publicKey,
-        TEST_ORG_ID,
+        salt,
         TEST_CTX,
       );
 
-      // Different orgId changes both HKDF salt and AAD
+      // Different salt produces different wrapping key → decryption fails
       await expect(
         unwrapOrgKey(
           encrypted,
           ephemeralPubJwk,
           memberKeyPair.privateKey,
-          "different-org-id",
-          makeCtx({ orgId: "different-org-id" }),
+          wrongSaltHex,
+          TEST_CTX,
         ),
       ).rejects.toThrow();
     });
@@ -308,7 +317,7 @@ describe("crypto-org", () => {
         },
         escrow.ephemeralPublicKey,
         memberKeyPair.privateKey,
-        TEST_ORG_ID,
+        escrow.hkdfSalt,
         TEST_CTX,
       );
 
@@ -338,7 +347,7 @@ describe("crypto-org", () => {
         },
         escrow.ephemeralPublicKey,
         memberKeyPair.privateKey,
-        TEST_ORG_ID,
+        escrow.hkdfSalt,
         TEST_CTX,
       );
 
@@ -480,7 +489,7 @@ describe("crypto-org", () => {
         },
         escrow.ephemeralPublicKey,
         memberKeyPair.privateKey,
-        TEST_ORG_ID,
+        escrow.hkdfSalt,
         {
           orgId: TEST_ORG_ID,
           toUserId: "member-001",

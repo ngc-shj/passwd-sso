@@ -12,8 +12,6 @@ import {
   unwrapOrgKey,
   deriveOrgEncryptionKey,
   createOrgKeyEscrow,
-  hexEncode,
-  CURRENT_ORG_WRAP_VERSION,
   type OrgKeyWrapContext,
 } from "./crypto-org";
 import { apiPath, API_PATH } from "@/lib/constants";
@@ -110,12 +108,13 @@ export function OrgVaultProvider({
         // Fetch own OrgMemberKey
         const res = await fetch(apiPath.orgMemberKey(orgId));
         if (!res.ok) {
+          ecdhPrivateKeyBytes.fill(0);
           return null;
         }
 
         const memberKeyData = await res.json();
 
-        // Import ECDH private key
+        // Import ECDH private key, then zero-clear the copy
         const keyBuf = ecdhPrivateKeyBytes.buffer.slice(
           ecdhPrivateKeyBytes.byteOffset,
           ecdhPrivateKeyBytes.byteOffset + ecdhPrivateKeyBytes.byteLength
@@ -127,6 +126,7 @@ export function OrgVaultProvider({
           false,
           ["deriveBits"]
         );
+        ecdhPrivateKeyBytes.fill(0);
 
         // Build AAD context for unwrapping
         const ctx: OrgKeyWrapContext = {
@@ -145,29 +145,24 @@ export function OrgVaultProvider({
           },
           memberKeyData.ephemeralPublicKey,
           ecdhPrivateKey,
-          orgId,
+          memberKeyData.hkdfSalt,
           ctx
         );
 
-        // Derive encryption key from org key
+        // Derive encryption key from org key, then zero-clear raw bytes
         const encryptionKey = await deriveOrgEncryptionKey(orgKeyBytes);
+        orgKeyBytes.fill(0);
 
-        // Cache
+        // Cache (always the latest key from server)
         cacheRef.current.set(orgId, {
           key: encryptionKey,
           keyVersion: memberKeyData.keyVersion,
           cachedAt: Date.now(),
         });
 
-        // Check if cached version matches server version (key rotation detection)
-        if (cached && cached.keyVersion !== memberKeyData.keyVersion) {
-          // Key was rotated — re-fetch
-          cacheRef.current.delete(orgId);
-          return getOrgEncryptionKey(orgId);
-        }
-
         return encryptionKey;
       } catch {
+        ecdhPrivateKeyBytes.fill(0);
         return null;
       }
     },
@@ -198,7 +193,7 @@ export function OrgVaultProvider({
       const pendingMembers = await res.json();
       if (!Array.isArray(pendingMembers) || pendingMembers.length === 0) return;
 
-      // Import ECDH private key for unwrapping
+      // Import ECDH private key for unwrapping, then zero-clear the copy
       const privKeyBuf = ecdhPrivateKeyBytes.buffer.slice(
         ecdhPrivateKeyBytes.byteOffset,
         ecdhPrivateKeyBytes.byteOffset + ecdhPrivateKeyBytes.byteLength
@@ -210,6 +205,7 @@ export function OrgVaultProvider({
         false,
         ["deriveBits"]
       );
+      ecdhPrivateKeyBytes.fill(0);
 
       // Group by orgId for efficiency
       const byOrg = new Map<
@@ -229,6 +225,7 @@ export function OrgVaultProvider({
       }
 
       for (const [orgId, members] of byOrg) {
+        let orgKeyBytes: Uint8Array | undefined;
         try {
           // Get own org key first
           const ownKeyRes = await fetch(apiPath.orgMemberKey(orgId));
@@ -245,7 +242,7 @@ export function OrgVaultProvider({
           };
 
           // Unwrap org key
-          const orgKeyBytes = await unwrapOrgKey(
+          orgKeyBytes = await unwrapOrgKey(
             {
               ciphertext: ownKeyData.encryptedOrgKey,
               iv: ownKeyData.orgKeyIv,
@@ -253,7 +250,7 @@ export function OrgVaultProvider({
             },
             ownKeyData.ephemeralPublicKey,
             ecdhPrivateKey,
-            orgId,
+            ownKeyData.hkdfSalt,
             ownCtx
           );
 
@@ -292,10 +289,14 @@ export function OrgVaultProvider({
           }
         } catch {
           // Skip failed org — will retry on next poll
+        } finally {
+          orgKeyBytes?.fill(0);
         }
       }
     } catch {
       // Silently fail — will retry on next poll
+    } finally {
+      ecdhPrivateKeyBytes.fill(0);
     }
   }, [getEcdhPrivateKeyBytes, getUserId]);
 

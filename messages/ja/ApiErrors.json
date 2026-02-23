@@ -39,6 +39,7 @@
   "cannotRemoveOwner": "オーナーは削除できません。",
   "cannotRemoveHigherRole": "自分と同等以上のメンバーは削除できません。",
   "keyNotDistributed": "暗号化キーがまだ配布されていません。管理者をお待ちください。",
+  "keyAlreadyDistributed": "このメンバーには既に暗号化キーが配布されています。",
   "memberKeyNotFound": "メンバー暗号化キーが見つかりません。",
   "vaultNotReady": "メンバーの保管庫がまだ設定されていません。",
   "onlyOwnEntries": "自分のエントリのみ変更できます。",

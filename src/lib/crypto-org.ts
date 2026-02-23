@@ -5,7 +5,7 @@
  * ECDH key exchange for per-member org key distribution.
  *
  * Key derivation chain:
- *   ECDH(ephemeral, member) → HKDF("passwd-sso-org-v1", SHA-256(orgId)) → AES-256-GCM wrapping key
+ *   ECDH(ephemeral, member) → HKDF("passwd-sso-org-v1", random salt) → AES-256-GCM wrapping key
  *   orgKey → HKDF("passwd-sso-org-enc-v1", empty) → AES-256-GCM encryption key
  *
  * Reuses patterns from crypto-emergency.ts (ECDH) and crypto-client.ts (AES-GCM).
@@ -110,22 +110,16 @@ export async function deriveOrgEncryptionKey(
 // ─── ECDH Wrapping Key Derivation ───────────────────────────────
 
 /**
- * Derive HKDF salt for org key wrapping from orgId.
- * salt = SHA-256(orgId) — provides org-level domain separation.
- */
-async function deriveOrgHkdfSalt(orgId: string): Promise<Uint8Array> {
-  const hash = await crypto.subtle.digest("SHA-256", textEncode(orgId));
-  return new Uint8Array(hash);
-}
-
-/**
  * Derive AES-256-GCM wrapping key from ECDH shared secret.
- * HKDF(sharedBits, info="passwd-sso-org-v1", salt=SHA-256(orgId))
+ * HKDF(sharedBits, info="passwd-sso-org-v1", salt=random per-escrow salt)
+ *
+ * The random salt is generated per key-wrapping operation and stored in OrgMemberKey.
+ * Org-level domain separation is enforced via AAD (which includes orgId).
  */
 async function deriveOrgWrappingKey(
   privateKey: CryptoKey,
   publicKey: CryptoKey,
-  orgId: string
+  salt: Uint8Array
 ): Promise<CryptoKey> {
   // ECDH → shared bits (256 bits)
   const sharedBits = await crypto.subtle.deriveBits(
@@ -141,8 +135,6 @@ async function deriveOrgWrappingKey(
     false,
     ["deriveKey"]
   );
-
-  const salt = await deriveOrgHkdfSalt(orgId);
 
   return crypto.subtle.deriveKey(
     {
@@ -262,13 +254,13 @@ export async function wrapOrgKeyForMember(
   orgKey: Uint8Array,
   ephemeralPrivateKey: CryptoKey,
   memberPublicKey: CryptoKey,
-  orgId: string,
+  hkdfSalt: Uint8Array,
   ctx: OrgKeyWrapContext
 ): Promise<EncryptedData> {
   const wrappingKey = await deriveOrgWrappingKey(
     ephemeralPrivateKey,
     memberPublicKey,
-    orgId
+    hkdfSalt
   );
 
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
@@ -298,20 +290,23 @@ export async function wrapOrgKeyForMember(
 /**
  * Unwrap org symmetric key as a member.
  * Member uses their ECDH private key + admin's ephemeral public key → AES-GCM unwrap.
+ *
+ * @param hkdfSalt - Hex-encoded HKDF salt (stored in OrgMemberKey.hkdfSalt)
  */
 export async function unwrapOrgKey(
   encrypted: EncryptedData,
   ephemeralPublicKeyJwk: string,
   memberPrivateKey: CryptoKey,
-  orgId: string,
+  hkdfSalt: string,
   ctx: OrgKeyWrapContext
 ): Promise<Uint8Array> {
   const ephemeralPublicKey = await importPublicKey(ephemeralPublicKeyJwk);
+  const salt = hexDecode(hkdfSalt);
 
   const wrappingKey = await deriveOrgWrappingKey(
     memberPrivateKey,
     ephemeralPublicKey,
-    orgId
+    salt
   );
 
   const ciphertext = hexDecode(encrypted.ciphertext);
@@ -369,7 +364,7 @@ export async function createOrgKeyEscrow(
   const ephemeralKeyPair = await generateECDHKeyPair();
   const memberPublicKey = await importPublicKey(memberPublicKeyJwk);
 
-  // Random HKDF salt (stored alongside, not used for org domain separation)
+  // Random HKDF salt — used in ECDH wrapping key derivation, stored in OrgMemberKey
   const salt = crypto.getRandomValues(new Uint8Array(HKDF_SALT_LENGTH));
 
   const ctx: OrgKeyWrapContext = {
@@ -383,7 +378,7 @@ export async function createOrgKeyEscrow(
     orgKey,
     ephemeralKeyPair.privateKey,
     memberPublicKey,
-    orgId,
+    salt,
     ctx
   );
 

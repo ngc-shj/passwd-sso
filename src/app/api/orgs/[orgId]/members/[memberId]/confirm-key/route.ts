@@ -58,6 +58,14 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
+  // Prevent overwriting an already-distributed key (S-11)
+  if (targetMember.keyDistributed) {
+    return NextResponse.json(
+      { error: API_ERROR.KEY_ALREADY_DISTRIBUTED },
+      { status: 409 }
+    );
+  }
+
   let body: unknown;
   try {
     body = await req.json();
