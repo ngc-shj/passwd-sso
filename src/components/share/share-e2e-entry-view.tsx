@@ -89,6 +89,15 @@ export function ShareE2EEntryView({
     | { status: "ok"; data: Record<string, unknown> }
   >({ status: "loading" });
 
+  // Prevent URL leakage via Referer header (S-06)
+  useEffect(() => {
+    const meta = document.createElement("meta");
+    meta.name = "referrer";
+    meta.content = "no-referrer";
+    document.head.appendChild(meta);
+    return () => { document.head.removeChild(meta); };
+  }, []);
+
   useEffect(() => {
     // Extract share key from URL fragment and immediately remove it (S-15)
     const hash = window.location.hash;

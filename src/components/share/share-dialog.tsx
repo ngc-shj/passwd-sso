@@ -201,6 +201,7 @@ export function ShareDialog({
       let fullUrl = `${window.location.origin}${data.url}`;
       if (shareKeyForFragment) {
         fullUrl += `#key=${base64urlEncode(shareKeyForFragment)}`;
+        shareKeyForFragment.fill(0);
       }
       setCreatedUrl(fullUrl);
       fetchLinks();
@@ -208,6 +209,7 @@ export function ShareDialog({
     } catch {
       toast.error(t("createError"));
     } finally {
+      shareKeyForFragment?.fill(0);
       setCreating(false);
     }
   };
