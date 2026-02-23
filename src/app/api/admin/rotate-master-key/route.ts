@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
   if (targetVersion !== currentVersion) {
     return NextResponse.json(
       {
-        error: `targetVersion (${targetVersion}) does not match ORG_MASTER_KEY_CURRENT_VERSION (${currentVersion})`,
+        error: `targetVersion (${targetVersion}) does not match SHARE_MASTER_KEY_CURRENT_VERSION (${currentVersion})`,
       },
       { status: 400 }
     );
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
     getMasterKeyByVersion(targetVersion);
   } catch {
     return NextResponse.json(
-      { error: `ORG_MASTER_KEY_V${targetVersion} is not configured` },
+      { error: `SHARE_MASTER_KEY_V${targetVersion} is not configured` },
       { status: 400 }
     );
   }

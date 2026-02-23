@@ -10,14 +10,14 @@ const originalEnv = { ...process.env };
 /** Minimal dev env that passes validation. */
 function setMinimalDevEnv() {
   process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
-  process.env.ORG_MASTER_KEY = "a".repeat(64);
+  process.env.SHARE_MASTER_KEY = "a".repeat(64);
   (process.env as Record<string, string | undefined>).NODE_ENV = "development";
 }
 
 /** Full production env that passes all checks. */
 function setFullProdEnv() {
   process.env.DATABASE_URL = "postgresql://prod:prod@db:5432/passwd";
-  process.env.ORG_MASTER_KEY = "a".repeat(64);
+  process.env.SHARE_MASTER_KEY = "a".repeat(64);
   (process.env as Record<string, string | undefined>).NODE_ENV = "production";
   process.env.VERIFIER_PEPPER_KEY = "b".repeat(64);
   process.env.REDIS_URL = "redis://redis:6379";
@@ -54,7 +54,7 @@ describe("env validation", () => {
     expect(env.DATABASE_URL).toBe(
       "postgresql://test:test@localhost:5432/test",
     );
-    expect(env.ORG_MASTER_KEY).toBe("a".repeat(64));
+    expect(env.SHARE_MASTER_KEY).toBe("a".repeat(64));
     expect(env.NODE_ENV).toBe("development");
     // Defaults
     expect(env.BLOB_BACKEND).toBe("db");
@@ -65,22 +65,22 @@ describe("env validation", () => {
   });
 
   it("throws when DATABASE_URL is missing", async () => {
-    process.env.ORG_MASTER_KEY = "a".repeat(64);
+    process.env.SHARE_MASTER_KEY = "a".repeat(64);
     delete process.env.DATABASE_URL;
     await expect(import("@/lib/env")).rejects.toThrow("DATABASE_URL");
   });
 
-  it("throws when ORG_MASTER_KEY is not 64-char hex", async () => {
+  it("throws when SHARE_MASTER_KEY is not 64-char hex", async () => {
     process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
-    process.env.ORG_MASTER_KEY = "too-short";
-    await expect(import("@/lib/env")).rejects.toThrow("ORG_MASTER_KEY");
+    process.env.SHARE_MASTER_KEY = "too-short";
+    await expect(import("@/lib/env")).rejects.toThrow("SHARE_MASTER_KEY");
   });
 
-  it("trims whitespace from ORG_MASTER_KEY", async () => {
+  it("trims whitespace from SHARE_MASTER_KEY", async () => {
     process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
-    process.env.ORG_MASTER_KEY = `  ${"a".repeat(64)}  `;
+    process.env.SHARE_MASTER_KEY = `  ${"a".repeat(64)}  `;
     const { env } = await import("@/lib/env");
-    expect(env.ORG_MASTER_KEY).toBe("a".repeat(64));
+    expect(env.SHARE_MASTER_KEY).toBe("a".repeat(64));
   });
 
   // ─── Production checks ─────────────────────────────────
@@ -181,7 +181,7 @@ describe("env validation", () => {
 
   it("rejects whitespace-only DATABASE_URL", async () => {
     process.env.DATABASE_URL = "   ";
-    process.env.ORG_MASTER_KEY = "a".repeat(64);
+    process.env.SHARE_MASTER_KEY = "a".repeat(64);
     await expect(import("@/lib/env")).rejects.toThrow("DATABASE_URL");
   });
 
@@ -200,8 +200,8 @@ describe("env validation", () => {
 
   it("rejects hex64 with non-hex characters", async () => {
     process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
-    process.env.ORG_MASTER_KEY = "g".repeat(64); // 'g' is not hex
-    await expect(import("@/lib/env")).rejects.toThrow("ORG_MASTER_KEY");
+    process.env.SHARE_MASTER_KEY = "g".repeat(64); // 'g' is not hex
+    await expect(import("@/lib/env")).rejects.toThrow("SHARE_MASTER_KEY");
   });
 
   // ─── Transforms and defaults ───────────────────────────
@@ -321,62 +321,62 @@ describe("env validation", () => {
     }
   });
 
-  it("requires ORG_MASTER_KEY or ORG_MASTER_KEY_V1 for V1", async () => {
+  it("requires SHARE_MASTER_KEY or SHARE_MASTER_KEY_V1 for V1", async () => {
     setMinimalDevEnv();
-    delete process.env.ORG_MASTER_KEY;
-    delete process.env.ORG_MASTER_KEY_V1;
+    delete process.env.SHARE_MASTER_KEY;
+    delete process.env.SHARE_MASTER_KEY_V1;
     try {
       await import("@/lib/env");
       expect.fail("Should have thrown");
     } catch (error) {
       const message = (error as Error).message;
-      expect(message).toContain("ORG_MASTER_KEY");
+      expect(message).toContain("SHARE_MASTER_KEY");
     }
   });
 
-  it("accepts ORG_MASTER_KEY_V1 without ORG_MASTER_KEY", async () => {
+  it("accepts SHARE_MASTER_KEY_V1 without SHARE_MASTER_KEY", async () => {
     setMinimalDevEnv();
-    delete process.env.ORG_MASTER_KEY;
-    process.env.ORG_MASTER_KEY_V1 = "b".repeat(64);
+    delete process.env.SHARE_MASTER_KEY;
+    process.env.SHARE_MASTER_KEY_V1 = "b".repeat(64);
     const { env } = await import("@/lib/env");
-    expect(env.ORG_MASTER_KEY).toBeUndefined();
+    expect(env.SHARE_MASTER_KEY).toBeUndefined();
   });
 
   // ─── V2+ key rotation scenarios ──────────────────────────
 
   it("accepts CURRENT_VERSION=2 with V2 key", async () => {
     setMinimalDevEnv();
-    process.env.ORG_MASTER_KEY_CURRENT_VERSION = "2";
-    process.env.ORG_MASTER_KEY_V2 = "c".repeat(64);
+    process.env.SHARE_MASTER_KEY_CURRENT_VERSION = "2";
+    process.env.SHARE_MASTER_KEY_V2 = "c".repeat(64);
     const { env } = await import("@/lib/env");
-    expect(env.ORG_MASTER_KEY_CURRENT_VERSION).toBe(2);
+    expect(env.SHARE_MASTER_KEY_CURRENT_VERSION).toBe(2);
   });
 
   it("throws when CURRENT_VERSION=2 but V2 key is missing", async () => {
     setMinimalDevEnv();
-    process.env.ORG_MASTER_KEY_CURRENT_VERSION = "2";
-    await expect(import("@/lib/env")).rejects.toThrow("ORG_MASTER_KEY_V2");
+    process.env.SHARE_MASTER_KEY_CURRENT_VERSION = "2";
+    await expect(import("@/lib/env")).rejects.toThrow("SHARE_MASTER_KEY_V2");
   });
 
   it("throws when CURRENT_VERSION=2 and V2 key is invalid hex", async () => {
     setMinimalDevEnv();
-    process.env.ORG_MASTER_KEY_CURRENT_VERSION = "2";
-    process.env.ORG_MASTER_KEY_V2 = "not-hex-at-all";
-    await expect(import("@/lib/env")).rejects.toThrow("ORG_MASTER_KEY_V2");
+    process.env.SHARE_MASTER_KEY_CURRENT_VERSION = "2";
+    process.env.SHARE_MASTER_KEY_V2 = "not-hex-at-all";
+    await expect(import("@/lib/env")).rejects.toThrow("SHARE_MASTER_KEY_V2");
   });
 
   it("defaults CURRENT_VERSION to 1 when not set", async () => {
     setMinimalDevEnv();
-    delete process.env.ORG_MASTER_KEY_CURRENT_VERSION;
+    delete process.env.SHARE_MASTER_KEY_CURRENT_VERSION;
     const { env } = await import("@/lib/env");
-    expect(env.ORG_MASTER_KEY_CURRENT_VERSION).toBe(1);
+    expect(env.SHARE_MASTER_KEY_CURRENT_VERSION).toBe(1);
   });
 
   it("throws when CURRENT_VERSION exceeds max (101)", async () => {
     setMinimalDevEnv();
-    process.env.ORG_MASTER_KEY_CURRENT_VERSION = "101";
+    process.env.SHARE_MASTER_KEY_CURRENT_VERSION = "101";
     await expect(import("@/lib/env")).rejects.toThrow(
-      "ORG_MASTER_KEY_CURRENT_VERSION"
+      "SHARE_MASTER_KEY_CURRENT_VERSION"
     );
   });
 });

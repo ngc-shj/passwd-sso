@@ -104,7 +104,7 @@ Edit `.env.local` and fill in:
 | `AUTH_JACKSON_ID` | Jackson OIDC client ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC client secret |
 | `SAML_PROVIDER_NAME` | Display name on sign-in page (e.g., "HENNGE") |
-| `ORG_MASTER_KEY` | Master key for server-encrypted share links/sends (legacy V1 alias) — `openssl rand -hex 32` |
+| `SHARE_MASTER_KEY` | Master key for server-encrypted share links/sends — `openssl rand -hex 32` |
 | `VERIFIER_PEPPER_KEY` | Passphrase verifier pepper key — `openssl rand -hex 32` (**required in production**) |
 | `REDIS_URL` | Redis URL for rate limiting (required in production) |
 | `BLOB_BACKEND` | Attachment blob backend (`db` / `s3` / `azure` / `gcs`) |

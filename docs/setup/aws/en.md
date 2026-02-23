@@ -72,7 +72,7 @@ Store these in Secrets Manager:
 - `AUTH_GOOGLE_SECRET`
 - `AUTH_JACKSON_ID`
 - `AUTH_JACKSON_SECRET`
-- `ORG_MASTER_KEY`
+- `SHARE_MASTER_KEY`
 - `REDIS_URL`
 - `BLOB_BACKEND`
 
@@ -87,7 +87,7 @@ Optional:
 Generate:
 ```
 openssl rand -base64 32  # AUTH_SECRET
-openssl rand -hex 32     # ORG_MASTER_KEY
+openssl rand -hex 32     # SHARE_MASTER_KEY
 ```
 
 ## RDS (PostgreSQL)
@@ -114,7 +114,7 @@ Env vars:
 - `AUTH_JACKSON_ID`
 - `AUTH_JACKSON_SECRET`
 - `SAML_PROVIDER_NAME`
-- `ORG_MASTER_KEY`
+- `SHARE_MASTER_KEY`
 - `REDIS_URL`
 - `BLOB_BACKEND`
 - `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` (required if `BLOB_BACKEND=s3`)

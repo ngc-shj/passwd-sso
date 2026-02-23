@@ -29,7 +29,7 @@ app_secrets = {
   AUTH_GOOGLE_SECRET  = "<REPLACE>"
   AUTH_JACKSON_ID     = "<REPLACE>"
   AUTH_JACKSON_SECRET = "<REPLACE>"
-  ORG_MASTER_KEY      = "<REPLACE>"  # Generate with: npm run generate:key
+  SHARE_MASTER_KEY      = "<REPLACE>"  # Generate with: npm run generate:key
   REDIS_URL           = "redis://HOST:6379"
 }
 
