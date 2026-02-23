@@ -1,145 +1,145 @@
-# passwd-sso 商用運用 ToDo
+# passwd-sso Production-Readiness ToDo
 
-最終更新: 2026-02-17
-ベースライン: main ブランチ
-
----
-
-## 凡例
-
-- **必須** — 商用リリースのブロッカー
-- **強く推奨** — リリース後早期に対応
-- **推奨** — 段階的に対応
+Last updated: 2026-02-17  
+Baseline: `main` branch
 
 ---
 
-## 1. 運用基盤
+## Legend
 
-| # | 優先度 | 項目 | 状態 | 備考 |
+- **Required** — blocker for production release
+- **Strongly Recommended** — should be addressed soon after release
+- **Recommended** — phased improvement item
+
+---
+
+## 1. Operational Foundation
+
+| # | Priority | Item | Status | Notes |
 |---|--------|------|------|------|
-| 1.1 | 必須 | CI/CD パイプライン構築 | 対応済み | GitHub Actions 4 並列ジョブ (app-ci / extension-ci / audit-app / audit-ext)。ESLint native flat config 移行済み。PR #18 |
-| 1.2 | 必須 | 監査ログ外部転送 (pino + Fluent Bit) | 対応済み | 監査イベントを構造化 JSON で stdout → Fluent Bit → 任意の転送先。多層防御 (sanitizeMetadata + pino redact)。PR #14 |
-| 1.3 | 必須 | アプリケーション構造化ログ | 対応済み | pino 汎用ロガー (`_logType: "app"`) + `withRequestLog()` ラッパーで requestId・レイテンシ自動記録。Phase 1: vault/passwords/auth/csp-report。CSP report body サニタイズ済み。PR #20 |
-| 1.4 | 必須 | ヘルスチェックエンドポイント | 対応済み | `/api/health/live` (liveness, 200 固定) + `/api/health/ready` (readiness, DB + Redis チェック, unhealthy → 503)。`HEALTH_REDIS_REQUIRED=true` で Redis 障害時 fail 切替。PR #22 |
-| 1.5 | 必須 | 監視・アラート基盤 | 対応済み | Terraform: CloudWatch メトリクスフィルタ (5xx, ヘルスチェック失敗, 高レイテンシ) + アラーム 4 種 + EventBridge ECS 停止検知 + SNS 通知。アプリコードは vendor-neutral。PR #22 |
-| 1.6 | 強く推奨 | エラートラッキング (Sentry 等) | 未着手 | クライアントサイド + サーバーサイドのエラー収集・通知 |
+| 1.1 | Required | Build CI/CD pipeline | Done | GitHub Actions with 4 parallel jobs (app-ci / extension-ci / audit-app / audit-ext). ESLint native flat-config migration completed. PR #18 |
+| 1.2 | Required | External audit-log forwarding (pino + Fluent Bit) | Done | Structured JSON audit events to stdout -> Fluent Bit -> arbitrary sink. Defense in depth (`sanitizeMetadata` + pino redact). PR #14 |
+| 1.3 | Required | Application structured logging | Done | Generic pino app logger (`_logType: "app"`) + `withRequestLog()` wrapper for requestId/latency. Phase 1 coverage: vault/passwords/auth/csp-report. CSP report body sanitized. PR #20 |
+| 1.4 | Required | Health-check endpoints | Done | `/api/health/live` (fixed 200 liveness) + `/api/health/ready` (DB + Redis readiness; unhealthy -> 503). `HEALTH_REDIS_REQUIRED=true` to fail on Redis outage. PR #22 |
+| 1.5 | Required | Monitoring/alerting foundation | Done | Terraform: CloudWatch metric filters (5xx, health failures, high latency) + 4 alarms + EventBridge ECS stop detection + SNS notifications. App code remains vendor-neutral. PR #22 |
+| 1.6 | Strongly Recommended | Error tracking (Sentry etc.) | Not started | Client + server error collection and notifications |
 
 ---
 
-## 2. セキュリティ強化
+## 2. Security Hardening
 
-| # | 優先度 | 項目 | 状態 | 備考 |
+| # | Priority | Item | Status | Notes |
 |---|--------|------|------|------|
-| 2.1 | 必須 | 環境変数バリデーション | 対応済み | Zod スキーマで起動時に 26 変数を一括検証 (`src/lib/env.ts` + `instrumentation.ts`)。PR #17 |
-| 2.2 | 必須 | アカウントロックアウト | 対応済み | DB 永続の段階的ロックアウト (5回→15分, 10回→1h, 15回→24h) + 24h 観測ウィンドウ + 監査ログ (`VAULT_UNLOCK_FAILED` / `VAULT_LOCKOUT_TRIGGERED`)。既存 rate limiter と併用。管理者通知は監査ログ/運用ログ出力まで (CloudWatch Alarm 自動化は次フェーズ)。PR #24 |
-| 2.3 | 必須 | パスフレーズリカバリフロー | 対応済み | 回復キー (256-bit, HKDF+AES-256-GCM) による secretKey 復元 + 新パスフレーズ設定。Vault Reset (全データ削除) を最終手段として提供。未生成時はバナーで促進 (24h 後に再表示)。監査ログ 4 種。CSRF 防御 (Origin 検証) + Rate limit 付き。PR #25 |
-| 2.4 | 強く推奨 | CORS 設定の明示 | 対応済み | Same-origin only ポリシーを明示実装。OPTIONS preflight 204 応答 + `applyCorsHeaders()` で全 API return 経路にヘッダー付与。`Vary: Origin` + case-insensitive 重複排除。Extension は Service Worker + Bearer Token で CORS 迂回。`../security/cors-policy.md` に運用方針を文書化。#46, PR #57 |
-| 2.5 | 強く推奨 | 並行セッション管理 | 未着手 | セッション一覧表示、リモートログアウト、新規ログイン通知 |
-| 2.6 | 強く推奨 | 鍵素材メモリ管理の文書化 | 一部対応 | `../security/security-review.md` に記載あり。Web Crypto API 制約下でのリスク受容判断をユーザー向けにも公開 |
-| 2.7 | 推奨 | セキュリティ第三者監査 | 未着手 | 暗号実装の外部レビュー (NCC Group, Cure53 等) |
+| 2.1 | Required | Environment validation | Done | Startup-time validation of 26 env vars via Zod schema (`src/lib/env.ts` + `instrumentation.ts`). PR #17 |
+| 2.2 | Required | Account lockout | Done | DB-persisted progressive lockout (5->15m, 10->1h, 15->24h) + 24h observation window + audit logs (`VAULT_UNLOCK_FAILED` / `VAULT_LOCKOUT_TRIGGERED`). Works with existing rate limiter. Admin notification currently via audit/ops logs (CloudWatch alarm automation in later phase). PR #24 |
+| 2.3 | Required | Passphrase recovery flow | Done | Recovery key (256-bit, HKDF+AES-256-GCM) restores `secretKey` + sets new passphrase. Vault Reset (full data deletion) as final fallback. Missing-key banner prompt (reappears after 24h). 4 audit events. CSRF (Origin validation) + rate limiting included. PR #25 |
+| 2.4 | Strongly Recommended | Explicit CORS policy | Done | Same-origin-only policy explicitly enforced. OPTIONS preflight 204 + `applyCorsHeaders()` on all API return paths. `Vary: Origin` + case-insensitive dedupe. Extension bypasses CORS via Service Worker + bearer token. Policy documented in `../security/cors-policy.md`. #46, PR #57 |
+| 2.5 | Strongly Recommended | Concurrent session management | Not started | Session list view, remote logout, new-login notification |
+| 2.6 | Strongly Recommended | Document key-material memory handling | Partially done | Covered in `../security/security-review.md`. Risk acceptance under Web Crypto constraints should be published for users as well |
+| 2.7 | Recommended | External third-party security audit | Not started | External crypto review (NCC Group, Cure53, etc.) |
 
 ---
 
-## 3. データ保全・可用性
+## 3. Data Protection / Availability
 
-| # | 優先度 | 項目 | 状態 | 備考 |
+| # | Priority | Item | Status | Notes |
 |---|--------|------|------|------|
-| 3.1 | 必須 | バックアップ・リカバリ戦略 | 対応済み | AWS Backup Vault Lock (WORM/Compliance) + S3 Object Lock + クロスリージョンコピー + EventBridge 失敗通知。RPO 1h / RTO 2h。PR #23 |
-| 3.2 | 強く推奨 | DB コネクションプール設定 | 対応済み | pg.Pool を環境変数で設定可能化 (max / connectionTimeoutMillis / idleTimeoutMillis / maxLifetimeSeconds / statement_timeout)。envInt() で厳密パース + 範囲ガード (production fail-fast)。pool.on("error") + SIGTERM graceful shutdown。CloudWatch RDS DatabaseConnections アラーム追加。#48 |
-| 3.3 | 強く推奨 | マイグレーション戦略の分離 | 対応済み | ECS one-off タスク定義 (Fargate RunTask) でマイグレーションをアプリ起動から完全分離。deploy.sh で migrate → 成功確認 → app 更新の順序を保証。docker-compose は profiles 分離。`../operations/deployment.md`。#47 |
-| 3.4 | 推奨 | Redis 高可用性 | 未着手 | 現行は単一 Redis。Redis Sentinel / ElastiCache 等によるフェイルオーバー |
+| 3.1 | Required | Backup/recovery strategy | Done | AWS Backup Vault Lock (WORM/compliance) + S3 Object Lock + cross-region copy + EventBridge failure notifications. RPO 1h / RTO 2h. PR #23 |
+| 3.2 | Strongly Recommended | DB connection pool tuning | Done | pg.Pool via env tuning (max / connectionTimeoutMillis / idleTimeoutMillis / maxLifetimeSeconds / statement_timeout). `envInt()` strict parse + range guard (production fail-fast). `pool.on("error")` + SIGTERM graceful shutdown. CloudWatch RDS `DatabaseConnections` alarm added. #48 |
+| 3.3 | Strongly Recommended | Separate migration strategy | Done | ECS one-off task definition (Fargate RunTask) fully separates migrations from app startup. `deploy.sh` enforces migrate -> success check -> app update order. docker-compose profile split. `../operations/deployment.md`. #47 |
+| 3.4 | Recommended | Redis high availability | Not started | Current deployment is single Redis. Consider Redis Sentinel / ElastiCache failover |
 
 ---
 
-## 4. テスト・品質保証
+## 4. Testing / Quality Assurance
 
-| # | 優先度 | 項目 | 状態 | 備考 |
+| # | Priority | Item | Status | Notes |
 |---|--------|------|------|------|
-| 4.1 | 必須 | E2E テスト導入 | 対応済み | Playwright (Chromium)。7 spec / 22 ケース: セットアップ → アンロック → CRUD → ロック/再アンロック → Recovery Key → Vault Reset → ロケール切替。Node.js 版暗号ヘルパー (CRYPTO_CONSTANTS 共有)、DB 二重ガード (URL パターン + E2E_ALLOW_DB_MUTATION)、暗号互換性テスト 16 件。CI ジョブ追加 (PostgreSQL + Redis サービス) |
-| 4.2 | 強く推奨 | カバレッジ対象の拡大 | 一部対応 | コンポーネントテスト基盤導入済み (`@testing-library/react` + `jsdom`, `.test.tsx` 対応)。coverage 対象は 4 パスに限定 → crypto-client.ts や components 層を追加 |
-| 4.3 | 強く推奨 | 負荷テスト | 対応済み | k6 6 シナリオ (health / vault-unlock / passwords-list / passwords-create / passwords-generate / mixed-workload)。DB シードスクリプト (三重安全ガード + スモークテスト)。SLO 初期目標 + thresholds による自動合否判定。#49 |
-| 4.4 | 推奨 | セキュリティスキャン自動化 | 未着手 | Dependabot / Snyk / Trivy (コンテナ) を CI に統合 |
+| 4.1 | Required | Introduce E2E tests | Done | Playwright (Chromium). 7 specs / 22 cases: setup -> unlock -> CRUD -> lock/reunlock -> Recovery Key -> Vault Reset -> locale switch. Node crypto helpers (shared `CRYPTO_CONSTANTS`), dual DB safety guard (URL pattern + `E2E_ALLOW_DB_MUTATION`), 16 crypto-compat tests. CI job includes PostgreSQL + Redis services |
+| 4.2 | Strongly Recommended | Expand coverage targets | Partially done | Component test foundation in place (`@testing-library/react` + `jsdom`, `.test.tsx`). Coverage scope still limited to 4 paths -> add `crypto-client.ts` and component layers |
+| 4.3 | Strongly Recommended | Load testing | Done | k6 with 6 scenarios (health / vault-unlock / passwords-list / passwords-create / passwords-generate / mixed-workload). DB seed script with triple safety guards + smoke test. Initial SLO goals + threshold-based pass/fail. #49 |
+| 4.4 | Recommended | Automated security scanning | Not started | Integrate Dependabot / Snyk / Trivy (container) into CI |
 
 ---
 
-## 5. コンプライアンス・ドキュメント
+## 5. Compliance / Documentation
 
-| # | 優先度 | 項目 | 状態 | 備考 |
+| # | Priority | Item | Status | Notes |
 |---|--------|------|------|------|
-| 5.1 | 必須 | プライバシーポリシー・利用規約 | 未着手 | 個人情報保護法 (日本)、GDPR 対応。データ処理契約 (DPA) |
-| 5.2 | 強く推奨 | 依存パッケージのライセンス監査 | 対応済み | CI strict モード (`--strict`) で未レビュー・期限切れを fail。allowlist JSON (11 必須フィールド) で例外管理。ポリシー文書: `../security/license-policy.md` |
-| 5.3 | 強く推奨 | インシデント対応手順書 | 未着手 | 脆弱性発見時のエスカレーション、パッチ適用、ユーザー通知フロー |
-| 5.4 | 推奨 | SOC 2 / ISMAP 等の認証取得 | 未着手 | 長期目標。日本市場向けには ISMAP が有効 |
+| 5.1 | Required | Privacy policy / terms of service | Not started | APPI (Japan), GDPR alignment. Data Processing Agreement (DPA) |
+| 5.2 | Strongly Recommended | Dependency license audit | Done | CI strict mode (`--strict`) fails on unreviewed/expired entries. Allowlist JSON with 11 required fields for exceptions. Policy doc: `../security/license-policy.md` |
+| 5.3 | Strongly Recommended | Incident response runbook | Not started | Escalation, patching, and user-notification flow for vulnerabilities |
+| 5.4 | Recommended | SOC 2 / ISMAP certification | Not started | Long-term goal; ISMAP is especially relevant for Japan market |
 
 ---
 
-## 6. 対応済み
+## 6. Completed Areas
 
-既に商用水準に達している領域。
+Areas already considered at production level.
 
-- 暗号設計: PBKDF2 600k + HKDF ドメイン分離 + AAD バインディング
-- 型安全性: `any` 型 0 件、`as any` 1 件、`@ts-ignore` 0 件、`strict: true`
-- テスト比率: アプリ 38,646 行に対しテスト 20,280 行 (約 52%、119 ファイル / 1,152 テスト)
-- セキュリティレビュー: `../security/security-review.md` 全 6 セクション PASS
-- CSP + nonce 制御 + violation reporting
-- レートリミット (Redis + インメモリフォールバック)
-- i18n (en/ja 884 キー完全一致、APP_NAME 環境変数対応)
-- Terraform インフラコード化 (1,315 行)
-- Docker マルチステージビルド + 非 root 実行
-- ブラウザ拡張のトークンライフサイクル管理
-- 入力バリデーション (Zod 486 行、API 40 箇所)
-- 監査ログ (Personal + Org、フィルタ・エクスポート対応)
-- 監査ログ外部転送 (pino + Fluent Bit サイドカー)
-- 環境変数バリデーション (Zod スキーマ 26 変数、起動時一括検証)
-- CI/CD パイプライン (GitHub Actions 4 並列ジョブ、ESLint + Vitest + Next.js build)
-- アプリケーション構造化ログ (pino + withRequestLog + CSP report サニタイズ)
-- ヘルスチェック (`/api/health/live` liveness + `/api/health/ready` readiness, DB/Redis チェック, タイムアウト保護)
-- 監視・アラート基盤 (CloudWatch メトリクスフィルタ + アラーム + EventBridge ECS 停止検知 + SNS 通知)
-- バックアップ・リカバリ (AWS Backup Vault Lock WORM + S3 Object Lock Compliance + クロスリージョンコピー + EventBridge 失敗通知)
-- パスフレーズリカバリフロー (回復キー: Base32 + HKDF + AES-256-GCM ラップ + Vault Reset: 全データ削除)
-- コンポーネントテスト基盤 (`@testing-library/react` + `jsdom`、signin / header / auto-extension-connect)
-- E2E テスト (Playwright 7 spec / 22 ケース、暗号互換性テスト 16 件、DB 二重ガード + スコープ限定クリーンアップ)
-- マイグレーション戦略の分離 (ECS one-off RunTask + deploy.sh 順序保証 + docker-compose profiles 分離)
-- DB コネクションプール設定 (環境変数チューニング + maxLifetimeSeconds + graceful shutdown + RDS 接続数アラーム)
-- 負荷テスト (k6 6 シナリオ、DB シード三重ガード、SLO 初期目標、thresholds 自動合否判定)
-- 依存パッケージライセンス監査 (allowlist JSON 17 件、strict モード CI 強制、期限切れ検出、ポリシー文書)
-- 本番コード `console.log` 0 件、`TODO/FIXME` 0 件
-
----
-
-## 推奨実行順序 (残りの必須項目)
-
-必須項目 8/9 対応済み。残り:
-
-1. **5.1** プライバシーポリシー・利用規約 — リリース前の法務要件
+- Crypto design: PBKDF2 600k + HKDF domain separation + AAD binding
+- Type safety: `any` count 0, `as any` count 1, `@ts-ignore` count 0, `strict: true`
+- Test ratio: app 38,646 LOC vs tests 20,280 LOC (~52%, 119 files / 1,152 tests)
+- Security review: all 6 sections PASS in `../security/security-review.md`
+- CSP + nonce enforcement + violation reporting
+- Rate limiting (Redis + in-memory fallback)
+- i18n (en/ja 884-key parity, APP_NAME env support)
+- Terraform IaC (1,315 LOC)
+- Docker multi-stage build + non-root runtime
+- Browser-extension token lifecycle controls
+- Input validation (486 LOC Zod schemas, 40 API touchpoints)
+- Audit logs (personal + org, filter/export supported)
+- External audit-log forwarding (pino + Fluent Bit sidecar)
+- Environment validation (26 vars, startup-time schema check)
+- CI/CD pipeline (4 parallel GitHub Actions jobs, ESLint + Vitest + Next.js build)
+- Structured app logging (pino + withRequestLog + CSP-report sanitization)
+- Health checks (`/api/health/live` liveness + `/api/health/ready` readiness, DB/Redis checks, timeout protection)
+- Monitoring/alerting (CloudWatch metric filters + alarms + ECS stop EventBridge + SNS)
+- Backup/recovery (AWS Backup Vault Lock WORM + S3 Object Lock Compliance + cross-region copy + EventBridge failure notify)
+- Passphrase recovery flow (recovery key: Base32 + HKDF + AES-256-GCM wrap + Vault Reset)
+- Component test foundation (`@testing-library/react` + `jsdom`, signin/header/auto-extension-connect)
+- E2E tests (Playwright 7 specs / 22 cases, 16 crypto compatibility tests, dual DB guards + scoped cleanup)
+- Migration strategy separation (ECS one-off RunTask + deploy.sh sequencing + docker-compose profiles split)
+- DB connection pool tuning (env tuning + maxLifetimeSeconds + graceful shutdown + RDS connection alarm)
+- Load testing (k6 6 scenarios, triple-guard seed script, initial SLOs, threshold pass/fail)
+- Dependency license audit (allowlist JSON 17 entries, strict CI enforcement, expiry checks, policy docs)
+- Production code `console.log`: 0, `TODO/FIXME`: 0
 
 ---
 
-## OSS 前提の優先順位 (当面)
+## Recommended Execution Order (Remaining Required Items)
 
-OSS としての公開・運用を前提に、以下は当面スコープ外とする:
+Required items completed: 8/9. Remaining:
 
-- `5.1` プライバシーポリシー・利用規約
-- `2.7` セキュリティ第三者監査
-- `5.4` SOC 2 / ISMAP 等の認証取得
+1. **5.1** Privacy policy / terms — legal requirement before release
 
-### P1 (直近対応)
+---
 
-1. `5.3` インシデント対応手順書
-2. `2.4` CORS 設定の明示
-3. `3.3` マイグレーション戦略の分離
-4. `3.2` DB コネクションプール設定
-5. `4.3` 負荷テスト
+## OSS-Oriented Priority (Near Term)
 
-### P2 (次フェーズ)
+Assuming OSS-first public operation, the following are out of immediate scope:
 
-1. ~~`5.2` 依存パッケージのライセンス監査~~ ✅
-2. `4.4` セキュリティスキャン自動化
-3. `2.5` 並行セッション管理
-4. `1.6` エラートラッキング
-5. `4.2` カバレッジ対象の拡大
+- `5.1` Privacy policy / terms of service
+- `2.7` External third-party security audit
+- `5.4` SOC 2 / ISMAP certifications
 
-### P3 (中長期)
+### P1 (Immediate)
 
-1. `3.4` Redis 高可用性
-2. `2.6` 鍵素材メモリ管理の文書化 (残タスク)
+1. `5.3` Incident response runbook
+2. `2.4` Explicit CORS policy
+3. `3.3` Migration strategy separation
+4. `3.2` DB connection pool tuning
+5. `4.3` Load testing
+
+### P2 (Next Phase)
+
+1. ~~`5.2` Dependency license audit~~ ✅
+2. `4.4` Automated security scanning
+3. `2.5` Concurrent session management
+4. `1.6` Error tracking
+5. `4.2` Coverage expansion
+
+### P3 (Mid/Long Term)
+
+1. `3.4` Redis high availability
+2. `2.6` Additional documentation on key-material memory handling
