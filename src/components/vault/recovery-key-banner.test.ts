@@ -77,6 +77,11 @@ describe("isDismissedInStorage", () => {
     expect(isDismissedInStorage()).toBe(false);
   });
 
+  it("returns false when localStorage has a future timestamp", () => {
+    storageMap.set(DISMISS_KEY, String(Date.now() + TWENTY_FOUR_HOURS));
+    expect(isDismissedInStorage()).toBe(false);
+  });
+
   it("returns false when localStorage throws", () => {
     mockLocalStorage.getItem.mockImplementationOnce(() => {
       throw new Error("storage access denied");

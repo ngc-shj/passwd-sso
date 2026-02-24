@@ -123,28 +123,33 @@ export default function WatchtowerPage() {
       </AlertDialog>
       <div className="mx-auto max-w-4xl space-y-6">
         <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <Shield className="h-6 w-6" />
-              <h1 className="text-2xl font-bold">{t("title")}</h1>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <Shield className="h-6 w-6" />
+                <h1 className="text-2xl font-bold">{t("title")}</h1>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={analyze}
+                disabled={!canAnalyze}
+              >
+                {loading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                {canAnalyze
+                  ? t("refresh")
+                  : t("cooldown", {
+                      seconds: Math.ceil(cooldownRemainingMs / 1000),
+                    })}
+              </Button>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={analyze}
-              disabled={!canAnalyze}
-            >
-              {loading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="mr-2 h-4 w-4" />
-              )}
-              {canAnalyze
-                ? t("refresh")
-                : t("cooldown", {
-                    seconds: Math.ceil(cooldownRemainingMs / 1000),
-                  })}
-            </Button>
+            <p className="text-sm text-muted-foreground">
+              {t("description")}
+            </p>
           </div>
         </Card>
 

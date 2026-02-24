@@ -45,7 +45,7 @@
   "recoveryKey": "回復キー",
   "recoveryKeyBannerMessage": "パスフレーズを忘れた場合に備えて回復キーを設定しましょう。",
   "recoveryKeyBannerAction": "今すぐ設定",
-  "recoveryKeyBannerDismiss": "後で",
+  "recoveryKeyBannerDismiss": "回復キーバナーを閉じる",
   "recoveryKeyDialogTitle": "回復キー",
   "recoveryKeyDialogDescription": "パスフレーズを忘れた場合に保管庫を復旧するための回復キーを生成します。",
   "recoveryKeyEnterPassphrase": "回復キーを生成するには、現在のパスフレーズを入力してください。",

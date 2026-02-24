@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
@@ -16,7 +16,8 @@ export function isDismissedInStorage(): boolean {
   try {
     const ts = localStorage.getItem(DISMISS_KEY);
     if (ts) {
-      return Date.now() - Number(ts) < DISMISS_DURATION_MS;
+      const elapsed = Date.now() - Number(ts);
+      return elapsed >= 0 && elapsed < DISMISS_DURATION_MS;
     }
   } catch {
     // Ignore storage errors
@@ -30,11 +31,11 @@ export function RecoveryKeyBanner() {
   const [manuallyDismissed, setManuallyDismissed] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const visible = useMemo(() => {
-    if (status !== VAULT_STATUS.UNLOCKED || hasRecoveryKey) return false;
-    if (manuallyDismissed) return false;
-    return !isDismissedInStorage();
-  }, [status, hasRecoveryKey, manuallyDismissed]);
+  const visible =
+    status === VAULT_STATUS.UNLOCKED &&
+    !hasRecoveryKey &&
+    !manuallyDismissed &&
+    !isDismissedInStorage();
 
   if (!visible) return null;
 
@@ -61,15 +62,10 @@ export function RecoveryKeyBanner() {
         >
           {t("recoveryKeyBannerAction")}
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleDismiss}
-        >
-          {t("recoveryKeyBannerDismiss")}
-        </Button>
         <button
+          type="button"
           onClick={handleDismiss}
+          aria-label={t("recoveryKeyBannerDismiss")}
           className="ml-1 text-yellow-600 hover:text-yellow-800 dark:text-yellow-400 dark:hover:text-yellow-200"
         >
           <X className="h-4 w-4" />

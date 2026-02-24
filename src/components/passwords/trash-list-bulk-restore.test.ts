@@ -13,8 +13,6 @@ describe("trash list bulk restore wiring", () => {
     expect(src).toContain('t("restoreSelected")');
     expect(src).toContain('t("bulkRestored"');
     expect(src).toContain('t("bulkRestoreFailed"');
-    expect(src).toContain('tl("selectAll")');
-    expect(src).toContain('tl("clearSelection")');
-    expect(src).toContain("sticky top-4");
+    expect(src).toContain("sticky bottom-4");
   });
 });

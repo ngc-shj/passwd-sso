@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
@@ -25,6 +26,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useVaultContext } from "@/hooks/use-vault-context";
+import { useSetActiveVault } from "@/lib/active-vault-context";
 
 interface SidebarProps {
   open: boolean;
@@ -67,6 +69,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     setTagDialogOpen,
     editingTag,
     deletingTag,
+    handleTagCreate,
     handleTagEdit,
     handleTagDeleteClick,
     handleTagSubmit,
@@ -78,6 +81,10 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   });
 
   const vaultContext = useVaultContext(orgs);
+  const setActiveVault = useSetActiveVault();
+  useEffect(() => {
+    setActiveVault(vaultContext);
+  }, [vaultContext, setActiveVault]);
   const {
     activeAuditOrgId,
     isWatchtower,
@@ -148,6 +155,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     handleFolderCreate,
     handleFolderEdit,
     handleFolderDeleteClick,
+    handleTagCreate,
     handleTagEdit,
     handleTagDeleteClick,
   });

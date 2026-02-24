@@ -26,6 +26,12 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
   const [deletingTag, setDeletingTag] = useState<SidebarTagItem | null>(null);
   const [tagOrgId, setTagOrgId] = useState<string | null>(null);
 
+  const handleTagCreate = (orgId?: string) => {
+    setTagOrgId(orgId ?? null);
+    setEditingTag(null);
+    setTagDialogOpen(true);
+  };
+
   const handleTagEdit = (tag: SidebarTagItem, orgId?: string) => {
     setTagOrgId(orgId ?? null);
     setEditingTag(tag);
@@ -42,14 +48,14 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
   };
 
   const handleTagSubmit = async (data: TagSubmitPayload) => {
-    if (!editingTag) return;
-
-    const url = tagOrgId
-      ? `${apiPath.orgTags(tagOrgId)}/${editingTag.id}`
-      : `${API_PATH.TAGS}/${editingTag.id}`;
+    const isEdit = !!editingTag;
+    const url = isEdit
+      ? (tagOrgId ? `${apiPath.orgTags(tagOrgId)}/${editingTag.id}` : `${API_PATH.TAGS}/${editingTag.id}`)
+      : (tagOrgId ? apiPath.orgTags(tagOrgId) : API_PATH.TAGS);
+    const method = isEdit ? "PUT" : "POST";
 
     const res = await fetch(url, {
-      method: "PUT",
+      method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
@@ -59,7 +65,6 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
       throw new Error("API error");
     }
 
-    setTagDialogOpen(false);
     setEditingTag(null);
     refreshData();
   };
@@ -87,6 +92,7 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
     setTagDialogOpen,
     editingTag,
     deletingTag,
+    handleTagCreate,
     handleTagEdit,
     handleTagDeleteClick,
     handleTagSubmit,

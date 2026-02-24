@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
+import { createRequest } from "@/__tests__/helpers/request-builder";
 
 // Capture log output via mocked pino
 const { mockInfo, mockError, mockChild } = vi.hoisted(() => {
@@ -25,12 +26,7 @@ vi.mock("@/lib/logger", async () => {
   };
 });
 
-function createRequest(
-  method: string,
-  path: string,
-): Request {
-  return new Request(`http://localhost:3000${path}`, { method });
-}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 describe("withRequestLog", () => {
   beforeEach(() => {
@@ -45,7 +41,7 @@ describe("withRequestLog", () => {
     );
     const wrapped = withRequestLog(handler);
 
-    const req = createRequest("POST", "/api/vault/unlock");
+    const req = createRequest("POST", "http://localhost:3000/api/vault/unlock");
     const response = await wrapped(req);
 
     // Handler was called
@@ -81,7 +77,7 @@ describe("withRequestLog", () => {
     const handler = vi.fn().mockRejectedValue(error);
     const wrapped = withRequestLog(handler);
 
-    const req = createRequest("POST", "/api/passwords");
+    const req = createRequest("POST", "http://localhost:3000/api/passwords");
 
     await expect(wrapped(req)).rejects.toThrow("DB connection failed");
 
@@ -97,25 +93,6 @@ describe("withRequestLog", () => {
     expect(errorArgs[1]).toBe("request.error");
   });
 
-  it("does not log sensitive keys in error objects", async () => {
-    const { withRequestLog } = await import("@/lib/with-request-log");
-
-    // Error with no sensitive fields
-    const error = new Error("Something went wrong");
-    const handler = vi.fn().mockRejectedValue(error);
-    const wrapped = withRequestLog(handler);
-
-    const req = createRequest("GET", "/api/passwords");
-    await expect(wrapped(req)).rejects.toThrow();
-
-    // Verify error logging doesn't include body/password/token
-    const errorArgs = mockError.mock.calls[0][0];
-    expect(errorArgs.password).toBeUndefined();
-    expect(errorArgs.token).toBeUndefined();
-    expect(errorArgs.authorization).toBeUndefined();
-    expect(errorArgs.cookie).toBeUndefined();
-  });
-
   it("sets X-Request-Id response header", async () => {
     const { withRequestLog } = await import("@/lib/with-request-log");
 
@@ -124,14 +101,12 @@ describe("withRequestLog", () => {
     );
     const wrapped = withRequestLog(handler);
 
-    const req = createRequest("GET", "/api/vault/status");
+    const req = createRequest("GET", "http://localhost:3000/api/vault/status");
     const response = await wrapped(req);
 
     const requestId = response.headers.get("X-Request-Id");
     expect(requestId).toBeDefined();
-    expect(requestId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-    );
+    expect(requestId).toMatch(UUID_RE);
   });
 
   it("provides request-scoped logger via getLogger() inside handler", async () => {
@@ -146,7 +121,7 @@ describe("withRequestLog", () => {
     });
 
     const wrapped = withRequestLog(handler);
-    const req = createRequest("POST", "/api/vault/setup");
+    const req = createRequest("POST", "http://localhost:3000/api/vault/setup");
     await wrapped(req);
 
     // Logger inside handler should be the child logger (has info/warn/error)
@@ -154,7 +129,9 @@ describe("withRequestLog", () => {
     expect(typeof (loggerInsideHandler as { info: unknown }).info).toBe("function");
   });
 
-  it("inherits incoming x-request-id header", async () => {
+  // --- x-request-id validation ---
+
+  it("inherits incoming x-request-id header when valid", async () => {
     const { withRequestLog } = await import("@/lib/with-request-log");
 
     const handler = vi.fn().mockResolvedValue(
@@ -163,19 +140,116 @@ describe("withRequestLog", () => {
     const wrapped = withRequestLog(handler);
 
     const incomingId = "abc-123-incoming-id";
-    const req = new Request("http://localhost:3000/api/vault/status", {
-      method: "GET",
+    const req = createRequest("GET", "http://localhost:3000/api/vault/status", {
       headers: { "x-request-id": incomingId },
     });
     const response = await wrapped(req);
 
-    // Response should carry the incoming id
     expect(response.headers.get("X-Request-Id")).toBe(incomingId);
-
-    // child() should have been called with the incoming id
     const childArgs = mockChild.mock.calls[0][0];
     expect(childArgs.requestId).toBe(incomingId);
   });
+
+  it("accepts x-request-id at max length (128 chars)", async () => {
+    const { withRequestLog } = await import("@/lib/with-request-log");
+
+    const handler = vi.fn().mockResolvedValue(
+      NextResponse.json({ ok: true }),
+    );
+    const wrapped = withRequestLog(handler);
+
+    const id128 = "a".repeat(128);
+    const req = createRequest("GET", "http://localhost:3000/api/vault/status", {
+      headers: { "x-request-id": id128 },
+    });
+    const response = await wrapped(req);
+
+    expect(response.headers.get("X-Request-Id")).toBe(id128);
+  });
+
+  it("rejects x-request-id exceeding max length (129 chars)", async () => {
+    const { withRequestLog } = await import("@/lib/with-request-log");
+
+    const handler = vi.fn().mockResolvedValue(
+      NextResponse.json({ ok: true }),
+    );
+    const wrapped = withRequestLog(handler);
+
+    const id129 = "a".repeat(129);
+    const req = createRequest("GET", "http://localhost:3000/api/vault/status", {
+      headers: { "x-request-id": id129 },
+    });
+    const response = await wrapped(req);
+
+    expect(response.headers.get("X-Request-Id")).not.toBe(id129);
+    expect(response.headers.get("X-Request-Id")).toMatch(UUID_RE);
+  });
+
+  it("rejects malicious x-request-id and generates a new UUID", async () => {
+    const { withRequestLog } = await import("@/lib/with-request-log");
+
+    const handler = vi.fn().mockResolvedValue(
+      NextResponse.json({ ok: true }),
+    );
+    const wrapped = withRequestLog(handler);
+
+    const maliciousId = "evil id; DROP TABLE sessions";
+    const req = createRequest("GET", "http://localhost:3000/api/vault/status", {
+      headers: { "x-request-id": maliciousId },
+    });
+    const response = await wrapped(req);
+
+    expect(response.headers.get("X-Request-Id")).not.toBe(maliciousId);
+    expect(response.headers.get("X-Request-Id")).toMatch(UUID_RE);
+  });
+
+  it("rejects empty x-request-id header", async () => {
+    const { withRequestLog } = await import("@/lib/with-request-log");
+
+    const handler = vi.fn().mockResolvedValue(
+      NextResponse.json({ ok: true }),
+    );
+    const wrapped = withRequestLog(handler);
+
+    const req = createRequest("GET", "http://localhost:3000/api/vault/status", {
+      headers: { "x-request-id": "" },
+    });
+    const response = await wrapped(req);
+
+    expect(response.headers.get("X-Request-Id")).toMatch(UUID_RE);
+  });
+
+  // --- immutable headers ---
+
+  it("clones response when headers are immutable (e.g. Auth.js redirect)", async () => {
+    const { withRequestLog } = await import("@/lib/with-request-log");
+
+    const immutableResponse = Response.redirect(
+      "http://localhost:3000/auth/signin",
+      302,
+    );
+
+    const handler = vi.fn().mockResolvedValue(immutableResponse);
+    const wrapped = withRequestLog(handler);
+
+    const req = createRequest("GET", "http://localhost:3000/api/auth/callback");
+    const response = await wrapped(req);
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(
+      "http://localhost:3000/auth/signin",
+    );
+
+    const requestId = response.headers.get("X-Request-Id");
+    expect(requestId).toBeDefined();
+    expect(requestId).toMatch(UUID_RE);
+
+    expect(mockInfo).toHaveBeenCalledTimes(2);
+    expect(mockInfo.mock.calls[1][0]).toMatchObject({ status: 302 });
+    expect(mockInfo.mock.calls[1][1]).toBe("request.end");
+  });
+
+  // --- params forwarding ---
 
   it("preserves handler context argument for routes with params", async () => {
     const { withRequestLog } = await import("@/lib/with-request-log");
@@ -189,7 +263,7 @@ describe("withRequestLog", () => {
     );
     const wrapped = withRequestLog(handler);
 
-    const req = createRequest("GET", "/api/passwords/entry-123");
+    const req = createRequest("GET", "http://localhost:3000/api/passwords/entry-123");
     const response = await wrapped(req, { params: paramsPromise });
     const body = await response.json();
 

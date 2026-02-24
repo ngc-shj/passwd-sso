@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useImperativeHandle } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
@@ -40,18 +40,25 @@ interface TrashEntry {
   deletedAt: string;
 }
 
-interface TrashListProps {
-  refreshKey: number;
+export interface TrashListHandle {
+  toggleSelectAll: (checked: boolean) => void;
+  allSelected: boolean;
 }
 
-export function TrashList({ refreshKey }: TrashListProps) {
+interface TrashListProps {
+  refreshKey: number;
+  selectionMode?: boolean;
+  onSelectedCountChange?: (count: number, allSelected: boolean) => void;
+  selectAllRef?: React.Ref<TrashListHandle>;
+}
+
+export function TrashList({ refreshKey, selectionMode = false, onSelectedCountChange, selectAllRef }: TrashListProps) {
   const t = useTranslations("Trash");
   const tl = useTranslations("PasswordList");
   const { encryptionKey, userId } = useVault();
   const [entries, setEntries] = useState<TrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const allSelected = entries.length > 0 && selectedIds.size === entries.length;
 
   const fetchTrash = useCallback(async () => {
     if (!encryptionKey) return;
@@ -109,6 +116,24 @@ export function TrashList({ refreshKey }: TrashListProps) {
     });
   }, [entries]);
 
+  // Reset selection when leaving selection mode
+  useEffect(() => {
+    if (!selectionMode) setSelectedIds(new Set());
+  }, [selectionMode]);
+
+  // Sync selected count to parent
+  useEffect(() => {
+    onSelectedCountChange?.(selectedIds.size, entries.length > 0 && selectedIds.size === entries.length);
+  }, [selectedIds.size, entries.length, onSelectedCountChange]);
+
+  // Expose selectAll to parent via imperative handle
+  useImperativeHandle(selectAllRef, () => ({
+    toggleSelectAll: (checked: boolean) => {
+      setSelectedIds(toggleTrashSelectAllIds(entries.map((e) => e.id), checked));
+    },
+    allSelected: entries.length > 0 && selectedIds.size === entries.length,
+  }), [entries, selectedIds]);
+
   const handleRestore = async (id: string) => {
     try {
       const res = await fetch(apiPath.passwordRestore(id), { method: "POST" });
@@ -156,10 +181,6 @@ export function TrashList({ refreshKey }: TrashListProps) {
 
   const toggleSelectOne = (id: string, checked: boolean) => {
     setSelectedIds((prev) => toggleTrashSelectOneId(prev, id, checked));
-  };
-
-  const toggleSelectAll = (checked: boolean) => {
-    setSelectedIds(toggleTrashSelectAllIds(entries.map((entry) => entry.id), checked));
   };
 
   const handleBulkRestore = async () => {
@@ -230,43 +251,17 @@ export function TrashList({ refreshKey }: TrashListProps) {
         </Dialog>
       </div>
 
-      {selectedIds.size > 0 && (
-        <div className="sticky top-4 z-40 flex items-center justify-between rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <div className="flex items-center gap-3">
-            <Checkbox
-              checked={allSelected}
-              onCheckedChange={(v) => toggleSelectAll(Boolean(v))}
-              aria-label={tl("selectAll")}
-            />
-            <span className="text-sm text-muted-foreground">
-              {tl("selectedCount", { count: selectedIds.size })}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSelectedIds(new Set())}
-            >
-              {tl("clearSelection")}
-            </Button>
-            <Button size="sm" onClick={handleBulkRestore}>
-              <RotateCcw className="h-3.5 w-3.5 mr-1" />
-              {t("restoreSelected")}
-            </Button>
-          </div>
-        </div>
-      )}
-
       <div className="space-y-2">
         {entries.map((entry) => (
           <Card key={entry.id} className="transition-colors hover:bg-accent">
             <CardContent className="flex items-center gap-3 px-4 py-2">
-              <Checkbox
-                checked={selectedIds.has(entry.id)}
-                onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
-                aria-label={tl("selectEntry", { title: entry.title })}
-              />
+              {selectionMode && (
+                <Checkbox
+                  checked={selectedIds.has(entry.id)}
+                  onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
+                  aria-label={tl("selectEntry", { title: entry.title })}
+                />
+              )}
               {entry.entryType === ENTRY_TYPE.IDENTITY ? (
                 <IdCard className="h-4 w-4 shrink-0 text-muted-foreground" />
               ) : entry.entryType === ENTRY_TYPE.CREDIT_CARD ? (
@@ -340,6 +335,15 @@ export function TrashList({ refreshKey }: TrashListProps) {
           </Card>
         ))}
       </div>
+
+      {selectionMode && selectedIds.size > 0 && (
+        <div className="sticky bottom-4 z-40 mt-2 flex items-center justify-end rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <Button size="sm" onClick={handleBulkRestore}>
+            <RotateCcw className="h-3.5 w-3.5 mr-1" />
+            {t("restoreSelected")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
