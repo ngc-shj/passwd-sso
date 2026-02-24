@@ -228,7 +228,7 @@ export function OrganizeSection({
           {tags.map((tag) => {
             const colorClass = getTagColorClass(tag.color);
             return (
-              <div key={tag.id} className="group/tag flex items-center">
+              <div key={tag.id} className="flex items-center">
                 <Button
                   variant={activeTagId === tag.id ? "secondary" : "ghost"}
                   className="flex-1 justify-start gap-2 min-w-0"
@@ -243,7 +243,7 @@ export function OrganizeSection({
                   </Link>
                 </Button>
                 {showTagMenu ? (
-                  <div className="shrink-0 relative flex items-center justify-center w-7 h-7">
+                  <div className="group/tag shrink-0 relative flex items-center justify-center w-7 h-7">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button

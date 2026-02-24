@@ -97,13 +97,13 @@ export function FolderTreeNode({
           </Link>
         </Button>
         {showMenu !== false ? (
-          <div className="shrink-0 relative flex items-center justify-center w-7 h-7">
+          <div className="group/fmenu shrink-0 relative flex items-center justify-center w-7 h-7">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="peer absolute inset-0 h-7 w-7 opacity-0 transition-opacity group-hover/folder:opacity-100 focus:opacity-100"
+                  className="peer absolute inset-0 h-7 w-7 opacity-0 transition-opacity group-hover/fmenu:opacity-100 focus:opacity-100"
                   aria-label={`${folder.name} menu`}
                 >
                   <MoreHorizontal className="h-3.5 w-3.5" />
@@ -121,7 +121,7 @@ export function FolderTreeNode({
               </DropdownMenuContent>
             </DropdownMenu>
             {folder.entryCount > 0 && (
-              <span className="text-xs text-muted-foreground transition-opacity group-hover/folder:opacity-0 peer-focus:opacity-0 pointer-events-none">
+              <span className="text-xs text-muted-foreground transition-opacity group-hover/fmenu:opacity-0 peer-focus:opacity-0 pointer-events-none">
                 {folder.entryCount}
               </span>
             )}
