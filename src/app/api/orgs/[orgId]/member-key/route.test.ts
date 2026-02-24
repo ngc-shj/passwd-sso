@@ -15,7 +15,7 @@ const {
   return {
     mockAuth: vi.fn(),
     mockRequireOrgMember: vi.fn(),
-    mockPrismaOrgMember: { findUnique: vi.fn() },
+    mockPrismaOrgMember: { findUnique: vi.fn(), findFirst: vi.fn() },
     mockPrismaOrgMemberKey: { findUnique: vi.fn(), findFirst: vi.fn() },
     OrgAuthError: _OrgAuthError,
   };
@@ -75,7 +75,7 @@ describe("GET /api/orgs/[orgId]/member-key", () => {
   });
 
   it("returns 403 when key not distributed", async () => {
-    mockPrismaOrgMember.findUnique.mockResolvedValue({ keyDistributed: false });
+    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: false });
     const res = await GET(
       createRequest("GET", URL),
       { params: Promise.resolve({ orgId: "org-1" }) },
@@ -86,7 +86,7 @@ describe("GET /api/orgs/[orgId]/member-key", () => {
   });
 
   it("returns latest key when no keyVersion param", async () => {
-    mockPrismaOrgMember.findUnique.mockResolvedValue({ keyDistributed: true });
+    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: true });
     mockPrismaOrgMemberKey.findFirst.mockResolvedValue({
       encryptedOrgKey: "enc-key",
       orgKeyIv: "iv-hex",
@@ -113,7 +113,7 @@ describe("GET /api/orgs/[orgId]/member-key", () => {
   });
 
   it("returns specific key version when param provided", async () => {
-    mockPrismaOrgMember.findUnique.mockResolvedValue({ keyDistributed: true });
+    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: true });
     mockPrismaOrgMemberKey.findUnique.mockResolvedValue({
       encryptedOrgKey: "enc-key-v1",
       orgKeyIv: "iv",
@@ -135,7 +135,7 @@ describe("GET /api/orgs/[orgId]/member-key", () => {
   });
 
   it("returns 400 on invalid keyVersion param", async () => {
-    mockPrismaOrgMember.findUnique.mockResolvedValue({ keyDistributed: true });
+    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: true });
 
     const res = await GET(
       createRequest("GET", `${URL}?keyVersion=abc`),
@@ -145,7 +145,7 @@ describe("GET /api/orgs/[orgId]/member-key", () => {
   });
 
   it("returns 400 when keyVersion=0 (boundary)", async () => {
-    mockPrismaOrgMember.findUnique.mockResolvedValue({ keyDistributed: true });
+    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: true });
 
     const res = await GET(
       createRequest("GET", `${URL}?keyVersion=0`),
@@ -155,7 +155,7 @@ describe("GET /api/orgs/[orgId]/member-key", () => {
   });
 
   it("returns 400 when keyVersion exceeds upper bound (S-30)", async () => {
-    mockPrismaOrgMember.findUnique.mockResolvedValue({ keyDistributed: true });
+    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: true });
 
     const res = await GET(
       createRequest("GET", `${URL}?keyVersion=10001`),
@@ -165,7 +165,7 @@ describe("GET /api/orgs/[orgId]/member-key", () => {
   });
 
   it("returns 404 when member key not found", async () => {
-    mockPrismaOrgMember.findUnique.mockResolvedValue({ keyDistributed: true });
+    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: true });
     mockPrismaOrgMemberKey.findFirst.mockResolvedValue(null);
 
     const res = await GET(

@@ -66,5 +66,13 @@
   "sendFileTypeNotAllowed": "File type is not allowed.",
   "sendStorageLimitExceeded": "Storage limit exceeded.",
   "sessionNotFound": "Session not found.",
-  "cannotRevokeCurrentSession": "Cannot revoke the current session."
+  "cannotRevokeCurrentSession": "Cannot revoke the current session.",
+  "scimTokenInvalid": "Invalid SCIM token.",
+  "scimTokenExpired": "SCIM token has expired.",
+  "scimTokenRevoked": "SCIM token has been revoked.",
+  "scimOwnerProtected": "Cannot modify the organization owner via SCIM.",
+  "scimManagedMember": "This member is managed by SCIM. Please re-activate from your identity provider.",
+  "scimFilterInvalid": "Invalid SCIM filter expression.",
+  "scimUnsupportedOperation": "Unsupported SCIM operation.",
+  "scimResourceExists": "Resource already exists."
 }

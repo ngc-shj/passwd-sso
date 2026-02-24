@@ -41,6 +41,7 @@ export const API_PATH = {
   WATCHTOWER_HIBP: "/api/watchtower/hibp",
   CSP_REPORT: "/api/csp-report",
   SESSIONS: "/api/sessions",
+  SCIM_V2: "/api/scim/v2",
   HEALTH_LIVE: "/api/health/live",
   HEALTH_READY: "/api/health/ready",
 } as const;
@@ -107,4 +108,7 @@ export const apiPath = {
   orgPasswordHistoryRestore: (orgId: string, entryId: string, historyId: string) =>
     `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/history/${historyId}/restore`,
   sessionById: (sessionId: string) => `${API_PATH.SESSIONS}/${sessionId}`,
+  orgScimTokens: (orgId: string) => `${API_PATH.ORGS}/${orgId}/scim-tokens`,
+  orgScimTokenById: (orgId: string, tokenId: string) =>
+    `${API_PATH.ORGS}/${orgId}/scim-tokens/${tokenId}`,
 } as const;

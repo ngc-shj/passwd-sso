@@ -104,6 +104,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "target-user",
       role: ORG_ROLE.MEMBER,
+      deactivatedAt: null,
     });
     const res = await PUT(req, createParams({ orgId: ORG_ID, memberId: MEMBER_ID }));
     expect(res.status).toBe(400);
@@ -117,6 +118,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "target-user",
       role: ORG_ROLE.MEMBER,
+      deactivatedAt: null,
     });
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
@@ -146,6 +148,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "target-user",
       role: ORG_ROLE.MEMBER,
+      deactivatedAt: null,
     });
     mockPrismaOrgMember.update.mockResolvedValue({
       id: MEMBER_ID,
@@ -171,6 +174,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "target-user",
       role: ORG_ROLE.ADMIN,
+      deactivatedAt: null,
     });
     mockPrismaOrgMember.update.mockResolvedValue({
       id: MEMBER_ID,
@@ -201,6 +205,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "target-user",
       role: ORG_ROLE.MEMBER,
+      deactivatedAt: null,
     });
 
     const res = await PUT(
@@ -218,6 +223,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "owner-user",
       role: ORG_ROLE.OWNER,
+      deactivatedAt: null,
     });
 
     const res = await PUT(
@@ -237,6 +243,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "other-admin",
       role: ORG_ROLE.ADMIN,
+      deactivatedAt: null,
     });
 
     const res = await PUT(
@@ -286,6 +293,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "other-admin",
       role: ORG_ROLE.ADMIN,
+      deactivatedAt: null,
     });
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`),
@@ -319,6 +327,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
       id: MEMBER_ID,
       orgId: ORG_ID,
       role: ORG_ROLE.OWNER,
+      deactivatedAt: null,
     });
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`),
@@ -333,6 +342,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "target-user",
       role: ORG_ROLE.MEMBER,
+      deactivatedAt: null,
     });
     mockTransaction.mockResolvedValue([]);
 

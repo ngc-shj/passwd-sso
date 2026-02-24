@@ -120,6 +120,9 @@ model User {
   // Extension tokens
   extensionTokens ExtensionToken[]
 
+  // SCIM tokens
+  createdScimTokens ScimToken[]
+
   // Folder relations
   folders                Folder[]
   orgPasswordHistories   OrgPasswordEntryHistory[]
@@ -143,6 +146,40 @@ model ExtensionToken {
   @@index([userId, revokedAt])
   @@index([expiresAt])
   @@map("extension_tokens")
+}
+
+model ScimToken {
+  id          String    @id @default(cuid())
+  orgId       String    @map("org_id")
+  tokenHash   String    @unique @map("token_hash") @db.VarChar(64)
+  description String?   @db.VarChar(255)
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  revokedAt   DateTime? @map("revoked_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+  createdById String?   @map("created_by_id")
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([orgId, revokedAt])
+  @@map("scim_tokens")
+}
+
+model ScimExternalMapping {
+  id           String   @id @default(cuid())
+  orgId        String   @map("org_id")
+  externalId   String   @map("external_id")
+  resourceType String   @map("resource_type") @db.VarChar(20)
+  internalId   String   @map("internal_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, externalId, resourceType])
+  @@unique([orgId, internalId, resourceType])
+  @@map("scim_external_mappings")
 }
 
 model Tag {
@@ -254,23 +291,27 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  members     OrgMember[]
-  passwords   OrgPasswordEntry[]
-  tags        OrgTag[]
-  folders     OrgFolder[]
-  invitations OrgInvitation[]
-  auditLogs   AuditLog[]
-  memberKeys  OrgMemberKey[]
+  members              OrgMember[]
+  passwords            OrgPasswordEntry[]
+  tags                 OrgTag[]
+  folders              OrgFolder[]
+  invitations          OrgInvitation[]
+  auditLogs            AuditLog[]
+  memberKeys           OrgMemberKey[]
+  scimTokens           ScimToken[]
+  scimExternalMappings ScimExternalMapping[]
 
   @@map("organizations")
 }
 
 model OrgMember {
-  id             String  @id @default(cuid())
-  orgId          String  @map("org_id")
-  userId         String  @map("user_id")
-  role           OrgRole @default(MEMBER)
-  keyDistributed Boolean @default(false) @map("key_distributed")
+  id             String    @id @default(cuid())
+  orgId          String    @map("org_id")
+  userId         String    @map("user_id")
+  role           OrgRole   @default(MEMBER)
+  keyDistributed Boolean   @default(false) @map("key_distributed")
+  deactivatedAt  DateTime? @map("deactivated_at")
+  scimManaged    Boolean   @default(false) @map("scim_managed")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -508,6 +549,14 @@ enum AuditAction {
   ORG_E2E_MIGRATION
   ORG_KEY_ROTATION
   ORG_MEMBER_KEY_DISTRIBUTE
+  SCIM_TOKEN_CREATE
+  SCIM_TOKEN_REVOKE
+  SCIM_USER_CREATE
+  SCIM_USER_UPDATE
+  SCIM_USER_DEACTIVATE
+  SCIM_USER_REACTIVATE
+  SCIM_USER_DELETE
+  SCIM_GROUP_UPDATE
 }
 
 enum AuditScope {

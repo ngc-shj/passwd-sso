@@ -1,0 +1,144 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
+
+const {
+  mockValidateScimToken,
+  mockCheckScimRateLimit,
+  mockOrgMember,
+  mockScimExternalMapping,
+} = vi.hoisted(() => ({
+  mockValidateScimToken: vi.fn(),
+  mockCheckScimRateLimit: vi.fn(),
+  mockOrgMember: { findMany: vi.fn() },
+  mockScimExternalMapping: { upsert: vi.fn() },
+}));
+
+vi.mock("@/lib/scim-token", () => ({
+  validateScimToken: mockValidateScimToken,
+}));
+vi.mock("@/lib/scim/rate-limit", () => ({
+  checkScimRateLimit: mockCheckScimRateLimit,
+}));
+vi.mock("@/lib/audit", () => ({
+  logAudit: vi.fn(),
+  extractRequestMeta: () => ({ ip: null, userAgent: null }),
+}));
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    orgMember: mockOrgMember,
+    scimExternalMapping: mockScimExternalMapping,
+  },
+}));
+
+import { GET, POST } from "./route";
+
+const SCIM_TOKEN_DATA = {
+  ok: true as const,
+  data: { tokenId: "t1", orgId: "org-1", createdById: "u1", auditUserId: "u1" },
+};
+
+function makeReq(
+  options: { searchParams?: Record<string, string>; body?: unknown } = {},
+) {
+  const url = new URL("http://localhost/api/scim/v2/Groups");
+  if (options.searchParams) {
+    for (const [k, v] of Object.entries(options.searchParams)) {
+      url.searchParams.set(k, v);
+    }
+  }
+  const init: RequestInit = { method: options.body ? "POST" : "GET" };
+  if (options.body) {
+    init.body = JSON.stringify(options.body);
+    init.headers = { "content-type": "application/json" };
+  }
+  return new NextRequest(url.toString(), init as ConstructorParameters<typeof NextRequest>[1]);
+}
+
+describe("GET /api/scim/v2/Groups", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
+    mockCheckScimRateLimit.mockResolvedValue(true);
+  });
+
+  it("returns 3 role-based groups (ADMIN, MEMBER, VIEWER)", async () => {
+    mockOrgMember.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeReq());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.totalResults).toBe(3);
+    const names = body.Resources.map((r: { displayName: string }) => r.displayName);
+    expect(names).toContain("ADMIN");
+    expect(names).toContain("MEMBER");
+    expect(names).toContain("VIEWER");
+  });
+
+  it("filters groups by displayName", async () => {
+    mockOrgMember.findMany.mockResolvedValue([]);
+
+    const res = await GET(
+      makeReq({ searchParams: { filter: 'displayName eq "ADMIN"' } }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.totalResults).toBe(1);
+    expect(body.Resources[0].displayName).toBe("ADMIN");
+  });
+
+  it("includes members in group response", async () => {
+    mockOrgMember.findMany.mockResolvedValue([
+      {
+        userId: "user-1",
+        role: "ADMIN",
+        deactivatedAt: null,
+        user: { id: "user-1", email: "admin@example.com" },
+      },
+    ]);
+
+    const res = await GET(makeReq());
+    const body = await res.json();
+    const adminGroup = body.Resources.find(
+      (r: { displayName: string }) => r.displayName === "ADMIN",
+    );
+    expect(adminGroup.members).toHaveLength(1);
+    expect(adminGroup.members[0].value).toBe("user-1");
+  });
+});
+
+describe("POST /api/scim/v2/Groups", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
+    mockCheckScimRateLimit.mockResolvedValue(true);
+  });
+
+  it("registers external mapping for valid role and returns 201", async () => {
+    mockScimExternalMapping.upsert.mockResolvedValue({});
+    mockOrgMember.findMany.mockResolvedValue([]);
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "ADMIN",
+          externalId: "ext-grp-1",
+        },
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(mockScimExternalMapping.upsert).toHaveBeenCalled();
+  });
+
+  it("returns 400 for unknown group name", async () => {
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "UNKNOWN_ROLE",
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+});

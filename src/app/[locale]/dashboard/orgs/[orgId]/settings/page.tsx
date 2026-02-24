@@ -36,6 +36,7 @@ import { CopyButton } from "@/components/passwords/copy-button";
 import { Link } from "@/i18n/navigation";
 import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
+import { ScimTokenManager } from "@/components/org/scim-token-manager";
 import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 
@@ -595,6 +596,11 @@ export default function OrgSettingsPage({
               </Card>
             )}
           </>
+        )}
+
+        {/* SCIM Provisioning — OWNER/ADMIN only */}
+        {(isOwner || org.role === ORG_ROLE.ADMIN) && (
+          <ScimTokenManager orgId={orgId} locale={locale} />
         )}
 
         {/* Delete org */}

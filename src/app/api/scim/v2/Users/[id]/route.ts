@@ -1,0 +1,320 @@
+import type { NextRequest } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { validateScimToken } from "@/lib/scim-token";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { scimResponse, scimError } from "@/lib/scim/response";
+import { userToScimUser, type ScimUserInput } from "@/lib/scim/serializers";
+import { scimUserSchema, scimPatchOpSchema } from "@/lib/scim/validations";
+import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
+import { checkScimRateLimit } from "@/lib/scim/rate-limit";
+import { API_ERROR } from "@/lib/api-error-codes";
+import type { AuditAction } from "@prisma/client";
+import { ORG_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+
+type Params = { params: Promise<{ id: string }> };
+
+function getScimBaseUrl(req: NextRequest): string {
+  const proto = req.headers.get("x-forwarded-proto") ?? "https";
+  const host = req.headers.get("host") ?? "localhost";
+  return `${proto}://${host}/api/scim/v2`;
+}
+
+/** Resolve SCIM id → userId. The id could be a userId directly or via ScimExternalMapping. */
+async function resolveUserId(orgId: string, scimId: string): Promise<string | null> {
+  // First try as direct userId (OrgMember.userId)
+  const member = await prisma.orgMember.findUnique({
+    where: { orgId_userId: { orgId, userId: scimId } },
+    select: { userId: true },
+  });
+  if (member) return member.userId;
+
+  // Try via ScimExternalMapping
+  const mapping = await prisma.scimExternalMapping.findFirst({
+    where: { orgId, internalId: scimId, resourceType: "User" },
+    select: { internalId: true },
+  });
+  return mapping?.internalId ?? null;
+}
+
+async function fetchUserResource(
+  orgId: string,
+  userId: string,
+  baseUrl: string,
+) {
+  const member = await prisma.orgMember.findUnique({
+    where: { orgId_userId: { orgId, userId } },
+    include: { user: { select: { id: true, email: true, name: true } } },
+  });
+  if (!member) return null;
+
+  const extMapping = await prisma.scimExternalMapping.findFirst({
+    where: { orgId, internalId: userId, resourceType: "User" },
+    select: { externalId: true },
+  });
+
+  const input: ScimUserInput = {
+    userId: member.userId,
+    email: member.user.email!,
+    name: member.user.name,
+    deactivatedAt: member.deactivatedAt,
+    externalId: extMapping?.externalId,
+  };
+
+  return userToScimUser(input, baseUrl);
+}
+
+// GET /api/scim/v2/Users/[id]
+export async function GET(req: NextRequest, { params }: Params) {
+  const result = await validateScimToken(req);
+  if (!result.ok) {
+    return scimError(401, API_ERROR[result.error]);
+  }
+  const { orgId } = result.data;
+
+  if (!(await checkScimRateLimit(orgId))) {
+    return scimError(429, "Too many requests");
+  }
+
+  const { id } = await params;
+  const userId = await resolveUserId(orgId, id);
+  if (!userId) {
+    return scimError(404, "User not found");
+  }
+
+  const baseUrl = getScimBaseUrl(req);
+  const resource = await fetchUserResource(orgId, userId, baseUrl);
+  if (!resource) {
+    return scimError(404, "User not found");
+  }
+
+  return scimResponse(resource);
+}
+
+// PUT /api/scim/v2/Users/[id] — Full replace (update OrgMember attributes only)
+export async function PUT(req: NextRequest, { params }: Params) {
+  const result = await validateScimToken(req);
+  if (!result.ok) {
+    return scimError(401, API_ERROR[result.error]);
+  }
+  const { orgId, auditUserId } = result.data;
+
+  if (!(await checkScimRateLimit(orgId))) {
+    return scimError(429, "Too many requests");
+  }
+
+  const { id } = await params;
+  const userId = await resolveUserId(orgId, id);
+  if (!userId) {
+    return scimError(404, "User not found");
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return scimError(400, "Invalid JSON");
+  }
+
+  const parsed = scimUserSchema.safeParse(body);
+  if (!parsed.success) {
+    return scimError(400, parsed.error.issues.map((i) => i.message).join("; "));
+  }
+
+  const { active, externalId } = parsed.data;
+
+  // OWNER protection
+  const member = await prisma.orgMember.findUnique({
+    where: { orgId_userId: { orgId, userId } },
+  });
+  if (!member) {
+    return scimError(404, "User not found");
+  }
+  if (member.role === ORG_ROLE.OWNER && active === false) {
+    return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
+  }
+
+  // Update OrgMember attributes
+  await prisma.orgMember.update({
+    where: { id: member.id },
+    data: {
+      deactivatedAt: active === false ? (member.deactivatedAt ?? new Date()) : null,
+    },
+  });
+
+  // Update external mapping if provided
+  if (externalId) {
+    await prisma.scimExternalMapping.upsert({
+      where: {
+        orgId_externalId_resourceType: { orgId, externalId, resourceType: "User" },
+      },
+      create: { orgId, externalId, resourceType: "User", internalId: userId },
+      update: { internalId: userId },
+    });
+  }
+
+  logAudit({
+    scope: AUDIT_SCOPE.ORG,
+    action: AUDIT_ACTION.SCIM_USER_UPDATE,
+    userId: auditUserId,
+    orgId,
+    targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
+    targetId: userId,
+    metadata: { active, externalId },
+    ...extractRequestMeta(req),
+  });
+
+  const baseUrl = getScimBaseUrl(req);
+  const resource = await fetchUserResource(orgId, userId, baseUrl);
+  return scimResponse(resource!);
+}
+
+// PATCH /api/scim/v2/Users/[id] — Partial update
+export async function PATCH(req: NextRequest, { params }: Params) {
+  const result = await validateScimToken(req);
+  if (!result.ok) {
+    return scimError(401, API_ERROR[result.error]);
+  }
+  const { orgId, auditUserId } = result.data;
+
+  if (!(await checkScimRateLimit(orgId))) {
+    return scimError(429, "Too many requests");
+  }
+
+  const { id } = await params;
+  const userId = await resolveUserId(orgId, id);
+  if (!userId) {
+    return scimError(404, "User not found");
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return scimError(400, "Invalid JSON");
+  }
+
+  const parsed = scimPatchOpSchema.safeParse(body);
+  if (!parsed.success) {
+    return scimError(400, parsed.error.issues.map((i) => i.message).join("; "));
+  }
+
+  let patchResult;
+  try {
+    patchResult = parseUserPatchOps(parsed.data.Operations);
+  } catch (e) {
+    if (e instanceof PatchParseError) {
+      return scimError(400, e.message);
+    }
+    throw e;
+  }
+
+  const member = await prisma.orgMember.findUnique({
+    where: { orgId_userId: { orgId, userId } },
+  });
+  if (!member) {
+    return scimError(404, "User not found");
+  }
+
+  // OWNER protection
+  if (member.role === ORG_ROLE.OWNER && patchResult.active === false) {
+    return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
+  }
+
+  // Build update data
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updateData: Record<string, any> = {};
+  let auditAction: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
+
+  if (patchResult.active !== undefined) {
+    if (patchResult.active) {
+      updateData.deactivatedAt = null;
+      if (member.deactivatedAt !== null) {
+        auditAction = AUDIT_ACTION.SCIM_USER_REACTIVATE;
+      }
+    } else {
+      updateData.deactivatedAt = member.deactivatedAt ?? new Date();
+      if (member.deactivatedAt === null) {
+        auditAction = AUDIT_ACTION.SCIM_USER_DEACTIVATE;
+      }
+    }
+  }
+
+  if (Object.keys(updateData).length > 0) {
+    await prisma.orgMember.update({
+      where: { id: member.id },
+      data: updateData,
+    });
+  }
+
+  // Update User.name if requested (OrgMember attribute, not User table — per plan)
+  // Note: name.formatted maps to User.name, but per plan we only update User table at first provision.
+  // For PATCH, we skip User.name updates to avoid multi-org side effects.
+
+  logAudit({
+    scope: AUDIT_SCOPE.ORG,
+    action: auditAction,
+    userId: auditUserId,
+    orgId,
+    targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
+    targetId: userId,
+    metadata: { active: patchResult.active, name: patchResult.name },
+    ...extractRequestMeta(req),
+  });
+
+  const baseUrl = getScimBaseUrl(req);
+  const resource = await fetchUserResource(orgId, userId, baseUrl);
+  return scimResponse(resource!);
+}
+
+// DELETE /api/scim/v2/Users/[id] — Hard delete OrgMember + OrgMemberKey + ScimExternalMapping
+export async function DELETE(req: NextRequest, { params }: Params) {
+  const result = await validateScimToken(req);
+  if (!result.ok) {
+    return scimError(401, API_ERROR[result.error]);
+  }
+  const { orgId, auditUserId } = result.data;
+
+  if (!(await checkScimRateLimit(orgId))) {
+    return scimError(429, "Too many requests");
+  }
+
+  const { id } = await params;
+  const userId = await resolveUserId(orgId, id);
+  if (!userId) {
+    return scimError(404, "User not found");
+  }
+
+  const member = await prisma.orgMember.findUnique({
+    where: { orgId_userId: { orgId, userId } },
+  });
+  if (!member) {
+    return scimError(404, "User not found");
+  }
+
+  // OWNER protection
+  if (member.role === ORG_ROLE.OWNER) {
+    return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
+  }
+
+  // Atomic delete: OrgMemberKey + ScimExternalMapping + OrgMember
+  await prisma.$transaction([
+    prisma.orgMemberKey.deleteMany({ where: { orgId, userId } }),
+    prisma.scimExternalMapping.deleteMany({
+      where: { orgId, internalId: userId, resourceType: "User" },
+    }),
+    prisma.orgMember.delete({ where: { id: member.id } }),
+  ]);
+
+  logAudit({
+    scope: AUDIT_SCOPE.ORG,
+    action: AUDIT_ACTION.SCIM_USER_DELETE,
+    userId: auditUserId,
+    orgId,
+    targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
+    targetId: userId,
+    metadata: { email: member.userId, role: member.role },
+    ...extractRequestMeta(req),
+  });
+
+  return new Response(null, { status: 204 });
+}

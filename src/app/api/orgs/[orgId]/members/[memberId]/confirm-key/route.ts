@@ -32,13 +32,13 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  // Verify target member exists and belongs to this org
+  // Verify target member exists, belongs to this org, and is active
   const targetMember = await prisma.orgMember.findUnique({
     where: { id: memberId },
-    select: { orgId: true, userId: true, keyDistributed: true },
+    select: { orgId: true, userId: true, keyDistributed: true, deactivatedAt: true },
   });
 
-  if (!targetMember || targetMember.orgId !== orgId) {
+  if (!targetMember || targetMember.orgId !== orgId || targetMember.deactivatedAt !== null) {
     return NextResponse.json(
       { error: API_ERROR.MEMBER_NOT_FOUND },
       { status: 404 }
@@ -83,13 +83,14 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const data = parsed.data;
 
-  // Atomic check-and-set: re-verify keyDistributed + orgKeyVersion inside transaction (S-12/F-16)
+  // Atomic check-and-set: re-verify keyDistributed + deactivatedAt + orgKeyVersion inside transaction (S-12/F-16/S-24)
   const distributed = await prisma.$transaction(async (tx) => {
     const member = await tx.orgMember.findUnique({
       where: { id: memberId },
-      select: { keyDistributed: true },
+      select: { keyDistributed: true, deactivatedAt: true },
     });
-    if (member?.keyDistributed) return "already_distributed" as const;
+    if (!member || member.deactivatedAt !== null) return "member_not_found" as const;
+    if (member.keyDistributed) return "already_distributed" as const;
 
     // Verify keyVersion matches current org key version (F-16)
     const org = await tx.organization.findUnique({
@@ -137,6 +138,12 @@ export async function POST(req: NextRequest, { params }: Params) {
     return "success" as const;
   });
 
+  if (distributed === "member_not_found") {
+    return NextResponse.json(
+      { error: API_ERROR.MEMBER_NOT_FOUND },
+      { status: 404 }
+    );
+  }
   if (distributed === "already_distributed") {
     return NextResponse.json(
       { error: API_ERROR.KEY_ALREADY_DISTRIBUTED },

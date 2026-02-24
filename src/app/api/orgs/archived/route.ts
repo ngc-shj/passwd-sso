@@ -14,7 +14,7 @@ export async function GET() {
 
   // Find all orgs the user is a member of (with role for permission check)
   const memberships = await prisma.orgMember.findMany({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, deactivatedAt: null },
     select: { orgId: true, role: true },
   });
 

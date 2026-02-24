@@ -5,7 +5,7 @@ const { mockAuth, mockPrismaOrgMember, mockPrismaUser,
   mockPrismaOrgMemberKey, mockPrismaOrganization, mockTransaction,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockPrismaOrgMember: { findUnique: vi.fn(), update: vi.fn() },
+  mockPrismaOrgMember: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   mockPrismaUser: { findUnique: vi.fn() },
   mockPrismaOrgMemberKey: { upsert: vi.fn() },
   mockPrismaOrganization: { findUnique: vi.fn() },
@@ -62,7 +62,7 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 404 when admin is not a member", async () => {
-    mockPrismaOrgMember.findUnique.mockResolvedValueOnce(null); // requireOrgPermission
+    mockPrismaOrgMember.findFirst.mockResolvedValueOnce(null); // getOrgMembership (findFirst)
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
       { params: Promise.resolve({ orgId: "org-1", memberId: "member-1" }) },
@@ -71,9 +71,8 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 404 when target member not found", async () => {
-    mockPrismaOrgMember.findUnique
-      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }) // admin
-      .mockResolvedValueOnce(null); // target member
+    mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }); // admin (findFirst)
+    mockPrismaOrgMember.findUnique.mockResolvedValueOnce(null); // target member
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
@@ -83,9 +82,8 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 409 when target user has no ECDH public key", async () => {
-    mockPrismaOrgMember.findUnique
-      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" })
-      .mockResolvedValueOnce({ orgId: "org-1", userId: "target-user", keyDistributed: false });
+    mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" });
+    mockPrismaOrgMember.findUnique.mockResolvedValueOnce({ orgId: "org-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: null });
 
     const res = await POST(
@@ -98,9 +96,8 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 400 on invalid body", async () => {
-    mockPrismaOrgMember.findUnique
-      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" })
-      .mockResolvedValueOnce({ orgId: "org-1", userId: "target-user", keyDistributed: false });
+    mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" });
+    mockPrismaOrgMember.findUnique.mockResolvedValueOnce({ orgId: "org-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
     const res = await POST(
@@ -111,10 +108,10 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
   });
 
   it("distributes key successfully", async () => {
+    mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }); // getOrgMembership (findFirst)
     mockPrismaOrgMember.findUnique
-      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }) // requireOrgPermission
-      .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: false }) // target check
-      .mockResolvedValueOnce({ keyDistributed: false }); // re-check inside tx
+      .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: false, deactivatedAt: null }) // target check
+      .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null }); // re-check inside tx
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
     const res = await POST(
@@ -128,9 +125,8 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 404 when target member belongs to a different org (Q-1 IDOR)", async () => {
-    mockPrismaOrgMember.findUnique
-      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }) // admin
-      .mockResolvedValueOnce({ orgId: "org-OTHER", userId: "target-user", keyDistributed: false }); // target belongs to different org
+    mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }); // admin (findFirst)
+    mockPrismaOrgMember.findUnique.mockResolvedValueOnce({ orgId: "org-OTHER", userId: "target-user", keyDistributed: false, deactivatedAt: null }); // target belongs to different org
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
@@ -142,9 +138,8 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 409 when key already distributed (pre-check, Q-2)", async () => {
-    mockPrismaOrgMember.findUnique
-      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }) // admin
-      .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: true }); // already distributed
+    mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }); // admin (findFirst)
+    mockPrismaOrgMember.findUnique.mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: true, deactivatedAt: null }); // already distributed
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
     const res = await POST(
@@ -159,9 +154,8 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 400 on malformed JSON (Q-3)", async () => {
-    mockPrismaOrgMember.findUnique
-      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" })
-      .mockResolvedValueOnce({ orgId: "org-1", userId: "target-user", keyDistributed: false });
+    mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" });
+    mockPrismaOrgMember.findUnique.mockResolvedValueOnce({ orgId: "org-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
     const { NextRequest } = await import("next/server");
@@ -180,10 +174,10 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 409 when keyVersion does not match org's current version (F-16)", async () => {
+    mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }); // admin (findFirst)
     mockPrismaOrgMember.findUnique
-      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" })
-      .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: false })
-      .mockResolvedValueOnce({ keyDistributed: false }); // re-check passes
+      .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
+      .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null }); // re-check passes
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 }); // org rotated to v2
 
@@ -197,10 +191,10 @@ describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 409 when key already distributed (TOCTOU race)", async () => {
+    mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }); // getOrgMembership (findFirst)
     mockPrismaOrgMember.findUnique
-      .mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }) // requireOrgPermission
-      .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: false }) // target check (passes)
-      .mockResolvedValueOnce({ keyDistributed: true }); // re-check inside tx (race: another admin distributed first)
+      .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: false, deactivatedAt: null }) // target check (passes)
+      .mockResolvedValueOnce({ keyDistributed: true, deactivatedAt: null }); // re-check inside tx (race: another admin distributed first)
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
     const res = await POST(

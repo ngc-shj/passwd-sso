@@ -30,6 +30,7 @@ const ROLE_PERMISSIONS: Record<OrgRole, Set<OrgPermission>> = {
     ORG_PERMISSION.PASSWORD_UPDATE,
     ORG_PERMISSION.PASSWORD_DELETE,
     ORG_PERMISSION.TAG_MANAGE,
+    ORG_PERMISSION.SCIM_MANAGE,
   ]),
   [ORG_ROLE.ADMIN]: new Set([
     ORG_PERMISSION.ORG_UPDATE,
@@ -41,6 +42,7 @@ const ROLE_PERMISSIONS: Record<OrgRole, Set<OrgPermission>> = {
     ORG_PERMISSION.PASSWORD_UPDATE,
     ORG_PERMISSION.PASSWORD_DELETE,
     ORG_PERMISSION.TAG_MANAGE,
+    ORG_PERMISSION.SCIM_MANAGE,
   ]),
   [ORG_ROLE.MEMBER]: new Set([
     ORG_PERMISSION.PASSWORD_CREATE,
@@ -76,11 +78,15 @@ export function isRoleAbove(actorRole: OrgRole, targetRole: OrgRole): boolean {
 
 /**
  * Get the membership record for a user in an org.
- * Returns null if the user is not a member.
+ * Returns null if the user is not a member (or is deactivated).
+ *
+ * Uses findFirst instead of findUnique because Prisma's findUnique
+ * cannot include non-unique-index fields (deactivatedAt) in the where clause.
+ * The @@unique([orgId, userId]) constraint ensures at most one row per org+user.
  */
 export async function getOrgMembership(userId: string, orgId: string) {
-  return prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId, userId } },
+  return prisma.orgMember.findFirst({
+    where: { orgId, userId, deactivatedAt: null },
   });
 }
 

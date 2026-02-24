@@ -66,5 +66,13 @@
   "sendFileTypeNotAllowed": "許可されていないファイル形式です。",
   "sendStorageLimitExceeded": "ストレージ制限を超えています。",
   "sessionNotFound": "セッションが見つかりません。",
-  "cannotRevokeCurrentSession": "現在のセッションは取り消しできません。"
+  "cannotRevokeCurrentSession": "現在のセッションは取り消しできません。",
+  "scimTokenInvalid": "無効な SCIM トークンです。",
+  "scimTokenExpired": "SCIM トークンの有効期限が切れています。",
+  "scimTokenRevoked": "SCIM トークンは無効化されています。",
+  "scimOwnerProtected": "SCIM 経由で組織オーナーを変更することはできません。",
+  "scimManagedMember": "このメンバーは SCIM で管理されています。ID プロバイダーから再有効化してください。",
+  "scimFilterInvalid": "無効な SCIM フィルタ式です。",
+  "scimUnsupportedOperation": "サポートされていない SCIM 操作です。",
+  "scimResourceExists": "リソースは既に存在します。"
 }
