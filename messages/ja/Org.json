@@ -90,5 +90,7 @@
   "organizationArchive": "組織のアーカイブ",
   "organizationTrash": "組織のゴミ箱",
   "backToOrg": "{name} に戻る",
-  "tags": "タグ"
+  "tags": "タグ",
+  "keyPendingTitle": "暗号鍵の配布を待っています",
+  "keyPendingDesc": "パスワードにアクセスするには、管理者が暗号鍵を配布する必要があります。管理者がオンラインになると自動的に配布されます。"
 }

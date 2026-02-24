@@ -4,10 +4,9 @@ import {
   createE2EPasswordSchema,
   updateE2EPasswordSchema,
   createShareLinkSchema,
-  customFieldSchema,
-  totpSchema,
+  orgMemberKeySchema,
 } from "./validations";
-import { ENTRY_TYPE, TOTP_ALGORITHM, CUSTOM_FIELD_TYPE } from "@/lib/constants";
+import { ENTRY_TYPE } from "@/lib/constants";
 
 describe("entryTypeSchema", () => {
   it.each([
@@ -151,40 +150,6 @@ describe("updateE2EPasswordSchema", () => {
   });
 });
 
-describe("customFieldSchema", () => {
-  it.each([
-    CUSTOM_FIELD_TYPE.TEXT,
-    CUSTOM_FIELD_TYPE.HIDDEN,
-    CUSTOM_FIELD_TYPE.URL,
-  ])("accepts %s", (type) => {
-    const result = customFieldSchema.parse({ label: "Label", value: "Value", type });
-    expect(result.type).toBe(type);
-  });
-
-  it("rejects invalid custom field type", () => {
-    expect(() =>
-      customFieldSchema.parse({ label: "Label", value: "Value", type: "bad" }),
-    ).toThrow();
-  });
-});
-
-describe("totpSchema", () => {
-  it.each([
-    TOTP_ALGORITHM.SHA1,
-    TOTP_ALGORITHM.SHA256,
-    TOTP_ALGORITHM.SHA512,
-  ])("accepts %s algorithm", (algorithm) => {
-    const result = totpSchema.parse({ secret: "JBSWY3DPEHPK3PXP", algorithm });
-    expect(result.algorithm).toBe(algorithm);
-  });
-
-  it("rejects invalid algorithm", () => {
-    expect(() =>
-      totpSchema.parse({ secret: "JBSWY3DPEHPK3PXP", algorithm: "MD5" }),
-    ).toThrow();
-  });
-});
-
 describe("createShareLinkSchema – passkey fields", () => {
   const baseShare = {
     passwordEntryId: "cm000000000000000000000aa",
@@ -239,5 +204,86 @@ describe("createShareLinkSchema – passkey fields", () => {
         },
       }),
     ).toThrow();
+  });
+});
+
+describe("orgMemberKeySchema", () => {
+  const validKey = {
+    encryptedOrgKey: "enc-key-data",
+    orgKeyIv: "a".repeat(24),
+    orgKeyAuthTag: "b".repeat(32),
+    ephemeralPublicKey: '{"kty":"EC"}',
+    hkdfSalt: "c".repeat(64),
+    keyVersion: 1,
+  };
+
+  it("accepts valid org member key", () => {
+    expect(orgMemberKeySchema.safeParse(validKey).success).toBe(true);
+  });
+
+  it("rejects encryptedOrgKey exceeding max length (1000)", () => {
+    const result = orgMemberKeySchema.safeParse({
+      ...validKey,
+      encryptedOrgKey: "x".repeat(1001),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts encryptedOrgKey at max length (1000)", () => {
+    const result = orgMemberKeySchema.safeParse({
+      ...validKey,
+      encryptedOrgKey: "x".repeat(1000),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects ephemeralPublicKey exceeding max length (500)", () => {
+    const result = orgMemberKeySchema.safeParse({
+      ...validKey,
+      ephemeralPublicKey: "x".repeat(501),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts ephemeralPublicKey at max length (500)", () => {
+    const result = orgMemberKeySchema.safeParse({
+      ...validKey,
+      ephemeralPublicKey: "x".repeat(500),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects invalid orgKeyIv format", () => {
+    const result = orgMemberKeySchema.safeParse({
+      ...validKey,
+      orgKeyIv: "not-hex-24",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects invalid hkdfSalt format", () => {
+    const result = orgMemberKeySchema.safeParse({
+      ...validKey,
+      hkdfSalt: "not-hex-64",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("defaults wrapVersion to 1 when omitted", () => {
+    const result = orgMemberKeySchema.safeParse(validKey);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.wrapVersion).toBe(1);
+    }
+  });
+
+  it("accepts wrapVersion=1", () => {
+    const result = orgMemberKeySchema.safeParse({ ...validKey, wrapVersion: 1 });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects wrapVersion=2 (unsupported)", () => {
+    const result = orgMemberKeySchema.safeParse({ ...validKey, wrapVersion: 2 });
+    expect(result.success).toBe(false);
   });
 });

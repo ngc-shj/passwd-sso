@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "sonner";
 import { submitOrgPasswordForm } from "@/components/org/org-password-form-actions";
 import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
 import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
@@ -11,6 +12,7 @@ import {
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 import { type OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 import { buildOrgSubmitArgs } from "@/hooks/org-password-form-submit-args";
+import { useOrgVault } from "@/lib/org-vault-context";
 
 export interface OrgPasswordFormControllerArgs {
   orgId: OrgPasswordFormProps["orgId"];
@@ -36,6 +38,7 @@ export function useOrgPasswordFormController({
   handleOpenChange,
 }: OrgPasswordFormControllerArgs) {
   const { setters } = formState;
+  const { getOrgKeyInfo } = useOrgVault();
   const { entryValues, cardNumberValid, entryCopy, entrySpecificFieldsProps } =
     useOrgPasswordFormPresenter({
     isEdit,
@@ -53,8 +56,16 @@ export function useOrgPasswordFormController({
   });
 
   const handleSubmit = async () => {
+    const keyInfo = await getOrgKeyInfo(orgId);
+    if (!keyInfo) {
+      toast.error(translations.t("failedToSave"));
+      return;
+    }
+
     const submitArgs = buildOrgSubmitArgs({
       orgId,
+      orgEncryptionKey: keyInfo.key,
+      orgKeyVersion: keyInfo.keyVersion,
       onSaved,
       isEdit,
       editData,

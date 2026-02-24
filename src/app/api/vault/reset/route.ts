@@ -97,7 +97,14 @@ async function handlePOST(request: NextRequest) {
       where: { ownerId: userId },
       data: { status: "REVOKED", revokedAt: new Date() },
     }),
-    // Null out vault + recovery + lockout fields on User
+    // Org E2E: delete all OrgMemberKey records for this user
+    prisma.orgMemberKey.deleteMany({ where: { userId } }),
+    // Org E2E: reset keyDistributed on all OrgMember records for this user
+    prisma.orgMember.updateMany({
+      where: { userId },
+      data: { keyDistributed: false },
+    }),
+    // Null out vault + recovery + lockout + ECDH fields on User
     prisma.user.update({
       where: { id: userId },
       data: {
@@ -122,6 +129,11 @@ async function handlePOST(request: NextRequest) {
         failedUnlockAttempts: 0,
         lastFailedUnlockAt: null,
         accountLockedUntil: null,
+        // ECDH key pair (org E2E)
+        ecdhPublicKey: null,
+        encryptedEcdhPrivateKey: null,
+        ecdhPrivateKeyIv: null,
+        ecdhPrivateKeyAuthTag: null,
       },
     }),
   ]);

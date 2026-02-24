@@ -6,7 +6,7 @@ const {
   mockRequireOrgPermission,
   mockPrismaOrgPasswordEntry,
   mockPrismaAttachment,
-  mockEncryptServerBinary,
+  mockPrismaOrganization,
   MockOrgAuthError,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -19,7 +19,9 @@ const {
     count: vi.fn(),
     create: vi.fn(),
   },
-  mockEncryptServerBinary: vi.fn(),
+  mockPrismaOrganization: {
+    findUnique: vi.fn(),
+  },
   MockOrgAuthError: class MockOrgAuthError extends Error {
     status: number;
     constructor(message: string, status = 403) {
@@ -38,16 +40,9 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgPasswordEntry: mockPrismaOrgPasswordEntry,
     attachment: mockPrismaAttachment,
+    organization: mockPrismaOrganization,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
-}));
-vi.mock("@/lib/crypto-server", () => ({
-  unwrapOrgKey: vi.fn(() => new Uint8Array([1, 2, 3])),
-  encryptServerBinary: mockEncryptServerBinary,
-}));
-vi.mock("@/lib/crypto-aad", () => ({
-  buildAttachmentAAD: vi.fn(() => "aad"),
-  AAD_VERSION: 1,
 }));
 
 import { GET, POST } from "./route";
@@ -69,6 +64,10 @@ function createFormDataRequest(
   for (const [k, v] of Object.entries(fields)) formData.append(k, v);
   return new NextRequest(url, { method: "POST", body: formData, headers });
 }
+
+// Valid hex strings for client-encrypted fields
+const VALID_IV = "a".repeat(24);
+const VALID_AUTH_TAG = "b".repeat(32);
 
 describe("GET /api/orgs/[orgId]/passwords/[id]/attachments", () => {
   beforeEach(() => {
@@ -137,20 +136,9 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireOrgPermission.mockResolvedValue(undefined);
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
-      orgId: "org-1",
-      org: {
-        encryptedOrgKey: "aa",
-        orgKeyIv: "bb",
-        orgKeyAuthTag: "cc",
-      },
-    });
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "org-1" });
     mockPrismaAttachment.count.mockResolvedValue(0);
-    mockEncryptServerBinary.mockReturnValue({
-      ciphertext: new Uint8Array([9, 8, 7]),
-      iv: "a".repeat(24),
-      authTag: "b".repeat(32),
-    });
+    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -160,6 +148,9 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
+        iv: VALID_IV,
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "3",
       }),
       createParams("org-1", "pw-1"),
     );
@@ -175,6 +166,9 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
+        iv: VALID_IV,
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "3",
       }),
       createParams("org-1", "pw-1"),
     );
@@ -190,6 +184,9 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
+        iv: VALID_IV,
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "3",
       }),
       createParams("org-1", "pw-1"),
     );
@@ -214,6 +211,9 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/zip",
+        iv: VALID_IV,
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "3",
       }),
       createParams("org-1", "pw-1"),
     );
@@ -229,6 +229,9 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
+        iv: VALID_IV,
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "3",
       }),
       createParams("org-1", "pw-1"),
     );
@@ -245,6 +248,9 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
           file: new Blob(["abc"]),
           filename: "doc.pdf",
           contentType: "application/pdf",
+          iv: VALID_IV,
+          authTag: VALID_AUTH_TAG,
+          sizeBytes: "3",
         },
         { "content-length": String(30 * 1024 * 1024) },
       ),
@@ -262,6 +268,9 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
         file: huge,
         filename: "doc.pdf",
         contentType: "application/pdf",
+        iv: VALID_IV,
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "100",
       }),
       createParams("org-1", "pw-1"),
     );
@@ -287,13 +296,50 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
         file: new Blob(["abc"]),
         filename: "bad.exe",
         contentType: "application/pdf",
+        iv: VALID_IV,
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "3",
       }),
       createParams("org-1", "pw-1"),
     );
     expect(res.status).toBe(400);
   });
 
-  it("creates attachment with blob-store data", async () => {
+  it("returns 400 for invalid iv format", async () => {
+    const res = await POST(
+      createFormDataRequest("http://localhost/api/orgs/org-1/passwords/pw-1/attachments", {
+        file: new Blob(["abc"]),
+        filename: "doc.pdf",
+        contentType: "application/pdf",
+        iv: "bad-iv",
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "3",
+      }),
+      createParams("org-1", "pw-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.error).toBe("INVALID_IV_FORMAT");
+  });
+
+  it("returns 400 for invalid authTag format", async () => {
+    const res = await POST(
+      createFormDataRequest("http://localhost/api/orgs/org-1/passwords/pw-1/attachments", {
+        file: new Blob(["abc"]),
+        filename: "doc.pdf",
+        contentType: "application/pdf",
+        iv: VALID_IV,
+        authTag: "bad-tag",
+        sizeBytes: "3",
+      }),
+      createParams("org-1", "pw-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.error).toBe("INVALID_AUTH_TAG_FORMAT");
+  });
+
+  it("creates attachment with client-encrypted data", async () => {
     mockPrismaAttachment.create.mockResolvedValue({
       id: "att-1",
       filename: "doc.pdf",
@@ -306,6 +352,11 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
+        iv: VALID_IV,
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "3",
+        orgKeyVersion: "1",
+        aadVersion: "1",
       }),
       createParams("org-1", "pw-1"),
     );
@@ -313,9 +364,33 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
     expect(mockPrismaAttachment.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          encryptedData: expect.any(Uint8Array),
+          iv: VALID_IV,
+          authTag: VALID_AUTH_TAG,
+          sizeBytes: 3,
+          keyVersion: 1,
+          aadVersion: 1,
+          orgPasswordEntryId: "pw-1",
         }),
       }),
     );
+  });
+
+  it("returns 409 when orgKeyVersion does not match (S-20)", async () => {
+    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 });
+    const res = await POST(
+      createFormDataRequest("http://localhost/api/orgs/org-1/passwords/pw-1/attachments", {
+        file: new Blob(["abc"]),
+        filename: "doc.pdf",
+        contentType: "application/pdf",
+        iv: VALID_IV,
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "3",
+        orgKeyVersion: "1",
+      }),
+      createParams("org-1", "pw-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
   });
 });

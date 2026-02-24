@@ -17,6 +17,9 @@ interface UseImportExecutionParams {
   encryptedInput: boolean;
   userId?: string;
   encryptionKey?: CryptoKey;
+  orgEncryptionKey?: CryptoKey;
+  orgKeyVersion?: number;
+  orgId?: string;
 }
 
 interface ImportResult {
@@ -43,6 +46,9 @@ export function useImportExecution({
   encryptedInput,
   userId,
   encryptionKey,
+  orgEncryptionKey,
+  orgKeyVersion,
+  orgId,
 }: UseImportExecutionParams): UseImportExecutionResult {
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
@@ -59,6 +65,7 @@ export function useImportExecution({
   const runImport = async (entries: ParsedEntry[]) => {
     if (entries.length === 0) return;
     if (!isOrgImport && !encryptionKey) return;
+    if (isOrgImport && !orgEncryptionKey) return;
 
     setImporting(true);
     setProgress({ current: 0, total: entries.length });
@@ -71,6 +78,9 @@ export function useImportExecution({
         sourceFilename,
         userId,
         encryptionKey: encryptionKey ?? undefined,
+        orgEncryptionKey: orgEncryptionKey ?? undefined,
+        orgKeyVersion,
+        orgId,
         onProgress: (current, total) => setProgress({ current, total }),
       });
 

@@ -6,7 +6,6 @@ const {
   mockRequireOrgPermission,
   mockPrismaOrgPasswordEntry,
   mockPrismaAttachment,
-  mockDecryptServerBinary,
   MockOrgAuthError,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -18,7 +17,6 @@ const {
     findUnique: vi.fn(),
     delete: vi.fn(),
   },
-  mockDecryptServerBinary: vi.fn(),
   MockOrgAuthError: class MockOrgAuthError extends Error {
     status: number;
     constructor(message: string, status = 403) {
@@ -40,13 +38,6 @@ vi.mock("@/lib/prisma", () => ({
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
-vi.mock("@/lib/crypto-server", () => ({
-  unwrapOrgKey: vi.fn(() => new Uint8Array([1, 2, 3])),
-  decryptServerBinary: mockDecryptServerBinary,
-}));
-vi.mock("@/lib/crypto-aad", () => ({
-  buildAttachmentAAD: vi.fn(() => "aad"),
-}));
 
 import { GET, DELETE } from "./route";
 
@@ -63,14 +54,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () =
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireOrgPermission.mockResolvedValue(undefined);
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
-      orgId: "org-1",
-      org: {
-        encryptedOrgKey: "aa",
-        orgKeyIv: "bb",
-        orgKeyAuthTag: "cc",
-      },
-    });
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "org-1" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -125,18 +109,18 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () =
     expect(res.status).toBe(404);
   });
 
-  it("returns decrypted binary stream", async () => {
+  it("returns encrypted data as JSON for client-side decryption", async () => {
     mockPrismaAttachment.findUnique.mockResolvedValue({
       id: "att-1",
       filename: "doc.pdf",
       contentType: "application/pdf",
       sizeBytes: 4,
-      encryptedData: new Uint8Array([1, 2, 3]),
+      encryptedData: Buffer.from([1, 2, 3]),
       iv: "a".repeat(24),
       authTag: "b".repeat(32),
+      keyVersion: 1,
       aadVersion: 1,
     });
-    mockDecryptServerBinary.mockReturnValue(Buffer.from("test"));
 
     const res = await GET(
       createRequest(
@@ -145,10 +129,15 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () =
       ),
       createParams("org-1", "pw-1", "att-1"),
     );
-    const text = Buffer.from(await res.arrayBuffer()).toString("utf8");
+    const json = await res.json();
     expect(res.status).toBe(200);
-    expect(text).toBe("test");
-    expect(mockDecryptServerBinary).toHaveBeenCalled();
+    expect(json.id).toBe("att-1");
+    expect(json.filename).toBe("doc.pdf");
+    expect(json.encryptedData).toBe(Buffer.from([1, 2, 3]).toString("base64"));
+    expect(json.iv).toBe("a".repeat(24));
+    expect(json.authTag).toBe("b".repeat(32));
+    expect(json.keyVersion).toBe(1);
+    expect(json.aadVersion).toBe(1);
   });
 });
 
@@ -218,6 +207,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", (
     mockPrismaAttachment.findUnique.mockResolvedValue({
       id: "att-1",
       filename: "doc.pdf",
+      encryptedData: Buffer.from([1, 2, 3]),
     });
     mockPrismaAttachment.delete.mockResolvedValue({});
 

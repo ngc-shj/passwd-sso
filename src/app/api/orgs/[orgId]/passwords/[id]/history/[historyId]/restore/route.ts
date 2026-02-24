@@ -51,6 +51,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         blobIv: entry.blobIv,
         blobAuthTag: entry.blobAuthTag,
         aadVersion: entry.aadVersion,
+        orgKeyVersion: entry.orgKeyVersion,
         changedById: session.user.id,
       },
     });
@@ -67,7 +68,10 @@ export async function POST(req: NextRequest, { params }: Params) {
       });
     }
 
-    // Restore
+    // Restore: writes back history blob with its original orgKeyVersion.
+    // If history.orgKeyVersion !== org.orgKeyVersion (e.g. after key rotation),
+    // the client must detect the mismatch, decrypt with the old key via
+    // GET /member-key?keyVersion=N, re-encrypt with the current key, and PUT.
     await tx.orgPasswordEntry.update({
       where: { id },
       data: {
@@ -75,6 +79,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         blobIv: history.blobIv,
         blobAuthTag: history.blobAuthTag,
         aadVersion: history.aadVersion,
+        orgKeyVersion: history.orgKeyVersion,
         updatedById: session.user.id,
       },
     });

@@ -6,5 +6,5 @@ beforeEach(() => {
 });
 
 // Set required env vars for crypto-server.ts and Prisma
-process.env.ORG_MASTER_KEY = "a".repeat(64);
+process.env.SHARE_MASTER_KEY = "a".repeat(64);
 process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";

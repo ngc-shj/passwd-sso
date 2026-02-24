@@ -5,7 +5,7 @@ This document summarizes practical security considerations for `passwd-sso` (web
 ## 1. Threat Model (High Level)
 
 - Personal vault entries are encrypted client-side (E2E); server stores ciphertext only.
-- Organization vault entries are encrypted server-side with per-org keys wrapped by `ORG_MASTER_KEY`.
+- Organization vault entries are encrypted end-to-end (client-side, ECDH-P256 member-key distribution).
 - Browser extension is convenience UX; it must not weaken the core vault security model.
 
 ## 1.1 Architecture Diagram (ASCII)
@@ -23,7 +23,7 @@ This document summarizes practical security considerations for `passwd-sso` (web
 │              Next.js App Server              │
 │  - Auth.js session                           │
 │  - API routes                                │
-│  - Org vault server-side crypto              │
+│  - Share links / sends server-side crypto    │
 └───────────┬───────────────────┬──────────────┘
             │ TLS               │ TLS
             ▼                   ▼
@@ -136,15 +136,14 @@ Client(on valid):
 - Stored value in DB: `hmacVerifier(verifierHash)`
   - HMAC: `SHA-256`
   - key: `VERIFIER_PEPPER_KEY` (required in production, 64 hex chars)
-  - non-production fallback derives from `ORG_MASTER_KEY`
+  - non-production fallback derives from `SHARE_MASTER_KEY`
 
-### Organization Vault (Server Crypto / `src/lib/crypto-server.ts`)
+### Share Links / Sends (Server Crypto / `src/lib/crypto-server.ts`)
 
 - Algorithm: `aes-256-gcm` (Node `crypto`)
-- `ORG_MASTER_KEY`: 64 hex chars (256-bit)
-- Organization key `orgKey`: random `32 bytes`
+- `SHARE_MASTER_KEY`: 64 hex chars (256-bit)
 - IV: `12 bytes`, AuthTag: `16 bytes`
-- `ORG_MASTER_KEY` wraps `orgKey`; `orgKey` encrypts org entries
+- Used for server-encrypted share links and sends
 
 ### Export Encryption (`src/lib/export-crypto.ts`)
 
@@ -184,7 +183,7 @@ Client(on valid):
 ## 2. Core Security Controls
 
 - Use HTTPS everywhere in production.
-- Keep `AUTH_SECRET` and `ORG_MASTER_KEY` in a secret manager (never in Git).
+- Keep `AUTH_SECRET` and `SHARE_MASTER_KEY` in a secret manager (never in Git).
 - Enforce DB/Redis/blob TLS.
 - Enable Redis in production (`REDIS_URL`) to keep unlock rate limiting effective.
 - Keep CSP enabled; avoid adding unsafe script/style exceptions.
@@ -258,7 +257,7 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 
 - HTTPS/TLS is correctly enforced
 - Browser runtime is not compromised
-- Server secrets (`AUTH_SECRET`, `ORG_MASTER_KEY`, etc.) are properly protected
+- Server secrets (`AUTH_SECRET`, `SHARE_MASTER_KEY`, etc.) are properly protected
 
 ### Non-Goals
 
@@ -270,10 +269,10 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 
 - Generation:
   - Personal: client generates `secretKey` / `accountSalt`
-  - Organization: server generates `orgKey`
+  - Organization: client-side org key is distributed per member (ECDH-P256)
 - Storage:
   - Personal: `secretKey` stored wrapped by `wrappingKey`
-  - Organization: `orgKey` stored wrapped by `ORG_MASTER_KEY`
+  - Organization: per-member wrapped org keys are stored in `OrgMemberKey`
 - Use:
   - Decryption keys materialize in runtime only after unlock
 - Rotation:
@@ -302,8 +301,8 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 
 ### 12.2 Suspected server secret leak
 
-1. Rotate `AUTH_SECRET` / `ORG_MASTER_KEY` / `VERIFIER_PEPPER_KEY`  
-2. Assess blast radius (org vault decryptability, share links, sessions)  
+1. Rotate `AUTH_SECRET` / `SHARE_MASTER_KEY` / `VERIFIER_PEPPER_KEY`  
+2. Assess blast radius (share links/sends decryptability, sessions)  
 3. Trigger key re-issuance and forced re-auth where required
 
 ### 12.3 Suspected DB leak
@@ -364,7 +363,7 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 
 - Plaintext passphrase
 - Decrypted plaintext entries
-- Server secrets such as `AUTH_SECRET` / `ORG_MASTER_KEY`
+- Server secrets such as `AUTH_SECRET` / `SHARE_MASTER_KEY`
 
 ### 14.4 Why This Is Accepted
 

@@ -32,6 +32,8 @@ async function handleGET(req: NextRequest) {
   }
   const userId = authResult.userId;
 
+  const isExtensionToken = authResult.type === "token";
+
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -42,6 +44,13 @@ async function handleGET(req: NextRequest) {
       secretKeyAuthTag: true,
       keyVersion: true,
       passphraseVerifierHmac: true,
+      // ECDH fields for org E2E (excluded for extension tokens)
+      ...(!isExtensionToken && {
+        ecdhPublicKey: true,
+        encryptedEcdhPrivateKey: true,
+        ecdhPrivateKeyIv: true,
+        ecdhPrivateKeyAuthTag: true,
+      }),
     },
   });
 
@@ -66,6 +75,16 @@ async function handleGET(req: NextRequest) {
     },
   });
 
+  // Build ECDH fields only for session-based auth (not extension tokens)
+  const ecdhFields = !isExtensionToken && "ecdhPublicKey" in user
+    ? {
+        ecdhPublicKey: user.ecdhPublicKey,
+        encryptedEcdhPrivateKey: user.encryptedEcdhPrivateKey,
+        ecdhPrivateKeyIv: user.ecdhPrivateKeyIv,
+        ecdhPrivateKeyAuthTag: user.ecdhPrivateKeyAuthTag,
+      }
+    : {};
+
   return NextResponse.json({
     userId,
     accountSalt: user.accountSalt,
@@ -81,6 +100,7 @@ async function handleGET(req: NextRequest) {
           authTag: vaultKey.verificationAuthTag,
         }
       : null,
+    ...ecdhFields,
   });
 }
 

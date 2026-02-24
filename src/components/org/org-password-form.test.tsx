@@ -20,6 +20,37 @@ vi.mock("@/lib/ime-guard", () => ({
   preventIMESubmit: vi.fn(),
 }));
 
+vi.mock("@/lib/org-vault-context", () => ({
+  useOrgVault: () => ({
+    getOrgKeyInfo: vi.fn().mockResolvedValue({ key: {} as CryptoKey, keyVersion: 1 }),
+    getOrgEncryptionKey: vi.fn(),
+    invalidateOrgKey: vi.fn(),
+    clearAll: vi.fn(),
+    distributePendingKeys: vi.fn(),
+  }),
+}));
+
+// Mock saveOrgEntry to skip encryption (this is a UI test, not a crypto test)
+vi.mock("@/lib/org-entry-save", () => ({
+  saveOrgEntry: vi.fn(async (params: Record<string, unknown>) => {
+    const orgId = params.orgId as string;
+    const initialId = params.initialId as string | undefined;
+    const mode = params.mode as string;
+    const endpoint = mode === "create"
+      ? `/api/orgs/${orgId}/passwords`
+      : `/api/orgs/${orgId}/passwords/${initialId}`;
+    return fetch(endpoint, {
+      method: mode === "create" ? "POST" : "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        orgFolderId: params.orgFolderId,
+        tagIds: params.tagIds,
+        entryType: params.entryType,
+      }),
+    });
+  }),
+}));
+
 vi.mock("@/lib/generator-prefs", () => ({
   DEFAULT_GENERATOR_SETTINGS: {
     mode: "password",

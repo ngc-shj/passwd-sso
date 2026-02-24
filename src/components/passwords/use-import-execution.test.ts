@@ -113,6 +113,9 @@ describe("useImportExecution", () => {
         passwordsPath: "/api/orgs/o1/passwords",
         sourceFilename: "org.csv",
         encryptedInput: false,
+        orgEncryptionKey: {} as CryptoKey,
+        orgKeyVersion: 1,
+        orgId: "o1",
       })
     );
 

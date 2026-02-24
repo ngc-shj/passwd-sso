@@ -46,7 +46,7 @@ resource "aws_ecs_task_definition" "app" {
         { name = "AUTH_GOOGLE_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_GOOGLE_SECRET::" },
         { name = "AUTH_JACKSON_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_ID::" },
         { name = "AUTH_JACKSON_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_SECRET::" },
-        { name = "ORG_MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:ORG_MASTER_KEY::" },
+        { name = "SHARE_MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SHARE_MASTER_KEY::" },
         { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" },
       ]
       healthCheck = {

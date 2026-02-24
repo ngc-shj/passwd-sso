@@ -6,10 +6,7 @@ const {
   mockAuth,
   mockFindMany,
   mockRequireOrgPermission,
-  mockOrgFindUnique,
   mockOrgEntryFindMany,
-  mockUnwrapOrgKey,
-  mockDecryptServerData,
   OrgAuthError,
 } = vi.hoisted(() => {
     class OrgAuthError extends Error {
@@ -24,10 +21,7 @@ const {
       mockAuth: vi.fn(),
       mockFindMany: vi.fn(),
       mockRequireOrgPermission: vi.fn(),
-      mockOrgFindUnique: vi.fn(),
       mockOrgEntryFindMany: vi.fn(),
-      mockUnwrapOrgKey: vi.fn(),
-      mockDecryptServerData: vi.fn(),
       OrgAuthError,
     };
   });
@@ -35,7 +29,6 @@ const {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     auditLog: { findMany: mockFindMany },
-    organization: { findUnique: mockOrgFindUnique },
     orgPasswordEntry: { findMany: mockOrgEntryFindMany },
   },
 }));
@@ -43,13 +36,6 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/org-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,
   OrgAuthError,
-}));
-vi.mock("@/lib/crypto-server", () => ({
-  unwrapOrgKey: mockUnwrapOrgKey,
-  decryptServerData: mockDecryptServerData,
-}));
-vi.mock("@/lib/crypto-aad", () => ({
-  buildOrgEntryAAD: () => "test-aad",
 }));
 
 import { GET } from "@/app/api/orgs/[orgId]/audit-logs/route";
@@ -111,6 +97,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     ];
 
     mockFindMany.mockResolvedValue(logs);
+    mockOrgEntryFindMany.mockResolvedValue([]);
 
     const req = createRequest(
       "GET",
@@ -374,7 +361,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     ).rejects.toThrow("Unexpected");
   });
 
-  it("resolves entry names from decrypted overview", async () => {
+  it("returns entryOverviews with encrypted overview data for entry targets", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
 
@@ -393,23 +380,16 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     ];
     mockFindMany.mockResolvedValue(logs);
 
-    mockOrgFindUnique.mockResolvedValue({
-      encryptedOrgKey: "enc",
-      orgKeyIv: "iv",
-      orgKeyAuthTag: "tag",
-      masterKeyVersion: 1,
-    });
-    mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
     mockOrgEntryFindMany.mockResolvedValue([
       {
         id: "entry-1",
         encryptedOverview: "enc-ov",
-        overviewIv: "iv",
-        overviewAuthTag: "tag",
+        overviewIv: "a".repeat(24),
+        overviewAuthTag: "b".repeat(32),
         aadVersion: 1,
+        orgKeyVersion: 1,
       },
     ]);
-    mockDecryptServerData.mockReturnValue(JSON.stringify({ title: "My Login" }));
 
     const req = createRequest(
       "GET",
@@ -419,19 +399,27 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
-    expect(json.entryNames).toEqual({ "entry-1": "My Login" });
+    expect(json.entryOverviews).toEqual({
+      "entry-1": {
+        encryptedOverview: "enc-ov",
+        overviewIv: "a".repeat(24),
+        overviewAuthTag: "b".repeat(32),
+        aadVersion: 1,
+        orgKeyVersion: 1,
+      },
+    });
   });
 
-  it("skips entry name on decrypt failure", async () => {
+  it("returns empty entryOverviews when no entry targets", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
 
     const logs = [
       {
         id: "log-1",
-        action: AUDIT_ACTION.ENTRY_UPDATE,
-        targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
-        targetId: "entry-2",
+        action: AUDIT_ACTION.ORG_MEMBER_INVITE,
+        targetType: null,
+        targetId: null,
         metadata: null,
         ip: null,
         userAgent: null,
@@ -441,26 +429,6 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     ];
     mockFindMany.mockResolvedValue(logs);
 
-    mockOrgFindUnique.mockResolvedValue({
-      encryptedOrgKey: "enc",
-      orgKeyIv: "iv",
-      orgKeyAuthTag: "tag",
-      masterKeyVersion: 1,
-    });
-    mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
-    mockOrgEntryFindMany.mockResolvedValue([
-      {
-        id: "entry-2",
-        encryptedOverview: "bad",
-        overviewIv: "iv",
-        overviewAuthTag: "tag",
-        aadVersion: 0,
-      },
-    ]);
-    mockDecryptServerData.mockImplementation(() => {
-      throw new Error("Decryption failed");
-    });
-
     const req = createRequest(
       "GET",
       `http://localhost/api/orgs/${ORG_ID}/audit-logs`
@@ -469,38 +437,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
-    expect(json.entryNames).toEqual({});
-  });
-
-  it("returns empty entryNames when org not found", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
-
-    const logs = [
-      {
-        id: "log-1",
-        action: AUDIT_ACTION.ENTRY_DELETE,
-        targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
-        targetId: "entry-3",
-        metadata: null,
-        ip: null,
-        userAgent: null,
-        createdAt: new Date(),
-        user: { id: "u1", name: "Alice", image: null },
-      },
-    ];
-    mockFindMany.mockResolvedValue(logs);
-    mockOrgFindUnique.mockResolvedValue(null);
-
-    const req = createRequest(
-      "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs`
-    );
-    const res = await GET(req, createParams({ orgId: ORG_ID }));
-    const { status, json } = await parseResponse(res);
-
-    expect(status).toBe(200);
-    expect(json.entryNames).toEqual({});
+    expect(json.entryOverviews).toEqual({});
   });
 
   it("applies action group filter", async () => {

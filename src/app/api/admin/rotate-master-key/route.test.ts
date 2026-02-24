@@ -7,15 +7,11 @@ const V2_KEY = randomBytes(32).toString("hex");
 const ADMIN_TOKEN = randomBytes(32).toString("hex");
 
 const {
-  mockFindMany,
-  mockUpdateMany,
   mockShareUpdateMany,
   mockUserFindUnique,
   mockCheck,
   mockLogAudit,
 } = vi.hoisted(() => ({
-  mockFindMany: vi.fn(),
-  mockUpdateMany: vi.fn(),
   mockShareUpdateMany: vi.fn(),
   mockUserFindUnique: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue(true),
@@ -24,7 +20,6 @@ const {
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    organization: { findMany: mockFindMany, updateMany: mockUpdateMany },
     passwordShare: { updateMany: mockShareUpdateMany },
     user: { findUnique: mockUserFindUnique },
   },
@@ -87,9 +82,9 @@ describe("POST /api/admin/rotate-master-key", () => {
     mockCheck.mockResolvedValue(true);
 
     setEnv({
-      ORG_MASTER_KEY: V1_KEY,
-      ORG_MASTER_KEY_V2: V2_KEY,
-      ORG_MASTER_KEY_CURRENT_VERSION: "2",
+      SHARE_MASTER_KEY: V1_KEY,
+      SHARE_MASTER_KEY_V2: V2_KEY,
+      SHARE_MASTER_KEY_CURRENT_VERSION: "2",
       ADMIN_API_TOKEN: ADMIN_TOKEN,
     });
   });
@@ -152,30 +147,8 @@ describe("POST /api/admin/rotate-master-key", () => {
     expect(body.error).toContain("operatorId");
   });
 
-  it("rotates org keys successfully", async () => {
+  it("returns 200 with targetVersion and revokedShares=0 when no shares to revoke", async () => {
     mockUserFindUnique.mockResolvedValue({ id: "user-1" });
-
-    // Use real crypto for this test
-    const { generateOrgKey, wrapOrgKey } = await import(
-      "@/lib/crypto-server"
-    );
-
-    // Simulate V1 wrapped org
-    setEnv({ ORG_MASTER_KEY_CURRENT_VERSION: "1" });
-    const orgKey = generateOrgKey();
-    const wrappedV1 = wrapOrgKey(orgKey);
-    setEnv({ ORG_MASTER_KEY_CURRENT_VERSION: "2" });
-
-    mockFindMany.mockResolvedValue([
-      {
-        id: "org-1",
-        encryptedOrgKey: wrappedV1.ciphertext,
-        orgKeyIv: wrappedV1.iv,
-        orgKeyAuthTag: wrappedV1.authTag,
-        masterKeyVersion: 1,
-      },
-    ]);
-    mockUpdateMany.mockResolvedValue({ count: 1 });
 
     const req = createRequest(
       { targetVersion: 2, operatorId: "user-1" },
@@ -186,19 +159,7 @@ describe("POST /api/admin/rotate-master-key", () => {
 
     const body = await res.json();
     expect(body.targetVersion).toBe(2);
-    expect(body.total).toBe(1);
-    expect(body.rotated).toBe(1);
-    expect(body.errors).toHaveLength(0);
-
-    // Verify updateMany was called with optimistic locking
-    expect(mockUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "org-1", masterKeyVersion: 1 },
-        data: expect.objectContaining({
-          masterKeyVersion: 2,
-        }),
-      })
-    );
+    expect(body.revokedShares).toBe(0);
 
     // Verify audit log was called
     expect(mockLogAudit).toHaveBeenCalledWith(
@@ -207,31 +168,14 @@ describe("POST /api/admin/rotate-master-key", () => {
         userId: "user-1",
         metadata: expect.objectContaining({
           targetVersion: 2,
-          rotated: 1,
+          revokedShares: 0,
         }),
       })
     );
   });
 
-  it("returns 0 rotated when all orgs already at target version", async () => {
-    mockUserFindUnique.mockResolvedValue({ id: "user-1" });
-    mockFindMany.mockResolvedValue([]); // no orgs with old version
-
-    const req = createRequest(
-      { targetVersion: 2, operatorId: "user-1" },
-      ADMIN_TOKEN
-    );
-    const res = await POST(req);
-    expect(res.status).toBe(200);
-
-    const body = await res.json();
-    expect(body.total).toBe(0);
-    expect(body.rotated).toBe(0);
-  });
-
   it("revokes old shares when revokeShares is true", async () => {
     mockUserFindUnique.mockResolvedValue({ id: "user-1" });
-    mockFindMany.mockResolvedValue([]);
     mockShareUpdateMany.mockResolvedValue({ count: 3 });
 
     const req = createRequest(
@@ -256,7 +200,6 @@ describe("POST /api/admin/rotate-master-key", () => {
 
   it("does not call shareUpdateMany when revokeShares is false", async () => {
     mockUserFindUnique.mockResolvedValue({ id: "user-1" });
-    mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
       { targetVersion: 2, operatorId: "user-1", revokeShares: false },
@@ -285,78 +228,6 @@ describe("POST /api/admin/rotate-master-key", () => {
     );
     const res = await POST(req);
     expect(res.status).toBe(401);
-  });
-
-  it("reports partial failure in errors array", async () => {
-    mockUserFindUnique.mockResolvedValue({ id: "user-1" });
-
-    const { generateOrgKey, wrapOrgKey } = await import(
-      "@/lib/crypto-server"
-    );
-
-    // Create two V1-wrapped orgs
-    setEnv({ ORG_MASTER_KEY_CURRENT_VERSION: "1" });
-    const orgKey1 = generateOrgKey();
-    const wrapped1 = wrapOrgKey(orgKey1);
-    const orgKey2 = generateOrgKey();
-    const wrapped2 = wrapOrgKey(orgKey2);
-    setEnv({ ORG_MASTER_KEY_CURRENT_VERSION: "2" });
-
-    mockFindMany.mockResolvedValue([
-      {
-        id: "org-ok",
-        encryptedOrgKey: wrapped1.ciphertext,
-        orgKeyIv: wrapped1.iv,
-        orgKeyAuthTag: wrapped1.authTag,
-        masterKeyVersion: 1,
-      },
-      {
-        id: "org-corrupt",
-        encryptedOrgKey: "invalid-ciphertext",
-        orgKeyIv: wrapped2.iv,
-        orgKeyAuthTag: wrapped2.authTag,
-        masterKeyVersion: 1,
-      },
-    ]);
-    mockUpdateMany.mockResolvedValue({ count: 1 });
-
-    const req = createRequest(
-      { targetVersion: 2, operatorId: "user-1" },
-      ADMIN_TOKEN
-    );
-    const res = await POST(req);
-    expect(res.status).toBe(200);
-
-    const body = await res.json();
-    expect(body.total).toBe(2);
-    expect(body.rotated).toBe(1);
-    expect(body.errors).toHaveLength(1);
-    expect(body.errors[0].orgId).toBe("org-corrupt");
-  });
-
-  it("does not revoke shares when all orgs fail rotation", async () => {
-    mockUserFindUnique.mockResolvedValue({ id: "user-1" });
-    mockFindMany.mockResolvedValue([
-      {
-        id: "org-fail",
-        encryptedOrgKey: "bad-data",
-        orgKeyIv: "bad-iv",
-        orgKeyAuthTag: "bad-tag",
-        masterKeyVersion: 1,
-      },
-    ]);
-
-    const req = createRequest(
-      { targetVersion: 2, operatorId: "user-1", revokeShares: true },
-      ADMIN_TOKEN
-    );
-    const res = await POST(req);
-    expect(res.status).toBe(200);
-
-    const body = await res.json();
-    expect(body.errors).toHaveLength(1);
-    expect(body.revokedShares).toBe(0);
-    expect(mockShareUpdateMany).not.toHaveBeenCalled();
   });
 
   it("checks rate limit after auth (429 only for authenticated requests)", async () => {

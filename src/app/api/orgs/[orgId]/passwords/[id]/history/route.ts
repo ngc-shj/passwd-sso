@@ -49,6 +49,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
         authTag: h.blobAuthTag,
       },
       aadVersion: h.aadVersion,
+      orgKeyVersion: h.orgKeyVersion,
       changedAt: h.changedAt,
       changedBy: h.changedBy,
     })),
