@@ -1,57 +1,58 @@
 # コードレビュー: fix/recovery-banner-and-immutable-headers
-日時: 2026-02-24T00:00:00+09:00
-レビュー回数: 1回目
+日時: 2026-02-24
+総ループ回数: 3回
+最終状態: 指摘なし（全観点クリア）
 
-## 前回からの変更
-初回レビュー
+## ラウンド1 指摘と対応
 
-## 機能観点の指摘
+### S-1: x-request-id バリデーション不足
+- **対応**: `/^[\w\-]{1,128}$/` でバリデーション追加
+- **修正ファイル**: `src/lib/with-request-log.ts:29-31`
 
-### F-1 (軽微/既存) useMemo の依存配列から isDismissedInStorage() の結果が漏れている
-- **ファイル:** `src/components/vault/recovery-key-banner.tsx` 33-37行目
-- **問題:** `isDismissedInStorage()` は localStorage を読み取る外部副作用だが、useMemo の依存配列にリアクティブな値として含まれない。24時間後に dismiss 期限切れになっても再計算されない。
-- **影響:** 実害は低い（ページ遷移等で再評価される）
-- **推奨:** 今回の変更スコープ外。将来の改善として対応。
+### F-1: useMemo + localStorage の誤用
+- **対応**: useMemo を削除、通常の変数に変更
+- **修正ファイル**: `src/components/vault/recovery-key-banner.tsx:33-37`
 
-### F-2 (情報) NextResponse 固有プロパティの clone 時の喪失可能性
-- **ファイル:** `src/lib/with-request-log.ts` 52-56行目
-- **問題:** `new Response(response.body, response)` は NextResponse 固有の内部プロパティを引き継がない。
-- **影響:** Auth.js リダイレクトレスポンス（body null, immutable headers）に限定されるため実害なし。
+### F-4: dismiss ボタン重複
+- **対応**: テキストボタンを削除、X アイコンのみ残す。`type="button"` + `aria-label` 追加
+- **修正ファイル**: `src/components/vault/recovery-key-banner.tsx:64-71`
 
-### F-3 (推奨) immutable headers テストの欠如
-- **ファイル:** `src/__tests__/with-request-log.test.ts`
-- **問題:** 新しい try/catch + clone パスのテストがない。
-- **推奨:** immutable headers を持つ Response を返すテストケースを追加。
+### T-1: immutable headers clone パスのテスト欠如
+- **対応**: `Response.redirect()` を使ったテストケース追加
+- **修正ファイル**: `src/__tests__/with-request-log.test.ts`
 
-### F-4 (軽微/既存) dismiss ボタンが重複
-- **ファイル:** `src/components/vault/recovery-key-banner.tsx` 63-76行目
-- **問題:** テキスト付き「後で」ボタンと X アイコンボタンの両方が同じ handleDismiss を呼ぶ。
-- **影響:** UX の問題。今回の変更スコープ外。
+## ラウンド2 指摘と対応
 
-## セキュリティ観点の指摘
+### N-1: テストファイル重複
+- **対応**: `src/lib/with-request-log.test.ts` を削除（全テストが `src/__tests__/` でカバー済み）
 
-### S-1 (低リスク/既存) x-request-id ヘッダの入力バリデーション不足
-- **ファイル:** `src/lib/with-request-log.ts` 29-30行目
-- **問題:** クライアントからの `x-request-id` ヘッダをバリデーションなしに信頼。ログインジェクションの可能性。
-- **推奨:** UUID形式 or 妥当な長さ・文字セットにバリデーション。
-- **注意:** 今回のコミットで導入された問題ではない。
+### N-2: aria-label の翻訳
+- **対応**: aria-label 用に操作目的の翻訳に変更（en: "Dismiss recovery key banner", ja: "回復キーバナーを閉じる"）
 
-その他の観点（脅威モデル、認証・認可、データ保護、XSS/injection）: **指摘なし。**
-VaultGate の認証境界は維持されており、秘密情報の露出リスク増加もない。
+### N-3: isDismissedInStorage の未来タイムスタンプ対策
+- **対応**: `elapsed >= 0` ガード追加 + テスト追加
+- **修正ファイル**: `src/components/vault/recovery-key-banner.tsx:19`, `recovery-key-banner.test.ts`
 
-## テスト観点の指摘
+### N-4: createRequest が Request を返していた
+- **対応**: 共通ヘルパー `src/__tests__/helpers/request-builder.ts` の `createRequest` (NextRequest) に統一
+- **修正ファイル**: `src/__tests__/with-request-log.test.ts`
 
-### T-1 (高) immutable headers clone フォールバックパスのテスト不在
-- **ファイル:** `src/__tests__/with-request-log.test.ts` (新規追加)
-- **問題:** catch ブロック（49-57行目）が今回の変更の核心だがテストがない。
-- **推奨:** `Response.redirect()` または headers.set をスローするモックでテスト。
+### N-5: sensitive keys テストが実質無意味
+- **対応**: テスト削除
 
-### T-2 (低) clone 後のレスポンスボディ保全テスト
-- **ファイル:** `src/__tests__/with-request-log.test.ts` (新規追加)
-- **問題:** clone 後にボディが正しく転送される検証がない。実害は低い（リダイレクトは body null）。
+### N-6: x-request-id 境界値テスト不足
+- **対応**: 128文字(受理), 129文字(拒否), 空文字列(拒否) のテスト追加
+- **修正ファイル**: `src/__tests__/with-request-log.test.ts`
 
-### T-3 (低/既存) vault-gate / dashboard-shell のコンポーネントテスト不在
-- 今回の変更スコープ外の既存問題。
+## ラウンド3 最終確認
 
-## 対応状況
-（修正後に追記）
+3専門家（機能・セキュリティ・テスト）全員から「指摘なし」。
+
+- 機能: 全ロジック正常、翻訳適切、コンポーネント構造妥当
+- セキュリティ: x-request-id バリデーション妥当、ログインジェクション対策済み、XSS リスクなし
+- テスト: 全19テスト通過、境界値・異常値・副作用の検証が網羅
+
+## テスト結果
+- with-request-log: 11テスト全通過
+- recovery-key-banner: 8テスト全通過
+- lint: 通過
