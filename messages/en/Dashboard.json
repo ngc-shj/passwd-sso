@@ -51,5 +51,8 @@
   "folderDeleteConfirm": "Delete folder \"{name}\"? Sub-folders will be promoted to the parent, and entries will be unassigned.",
   "tagDeleteConfirm": "Delete tag \"{name}\"? This action cannot be undone.",
   "folderMaxDepth": "Maximum folder depth ({max}) exceeded.",
-  "settings": "Settings"
+  "settings": "Settings",
+  "select": "Select",
+  "close": "Close",
+  "selectAll": "Select All"
 }

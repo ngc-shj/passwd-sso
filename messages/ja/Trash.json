@@ -13,5 +13,7 @@
   "emptyTrashConfirm": "ゴミ箱のすべてのアイテムを完全に削除しますか？この操作は取り消せません。",
   "emptyTrashSuccess": "ゴミ箱を空にしました",
   "failedAction": "操作に失敗しました",
-  "networkError": "ネットワークエラー"
+  "networkError": "ネットワークエラー",
+  "select": "選択",
+  "close": "閉じる"
 }
