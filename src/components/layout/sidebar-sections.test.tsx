@@ -175,6 +175,7 @@ describe("OrganizeSection", () => {
         onOpenChange={() => {}}
         t={(k) => k}
         canCreateFolder
+        canCreateTag={false}
         folders={[]}
         activeFolderId={null}
         linkHref={() => "/dashboard"}
@@ -183,6 +184,7 @@ describe("OrganizeSection", () => {
         activeTagId={null}
         tagHref={() => "/dashboard"}
         onCreateFolder={onCreateFolder}
+        onCreateTag={() => {}}
         onEditFolder={() => {}}
         onDeleteFolder={() => {}}
         onEditTag={() => {}}
@@ -196,6 +198,38 @@ describe("OrganizeSection", () => {
     expect(onCreateFolder).toHaveBeenCalledTimes(1);
   });
 
+  it("calls onCreateTag when create tag button is clicked", () => {
+    const onCreateTag = vi.fn();
+
+    render(
+      <OrganizeSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        canCreateFolder={false}
+        canCreateTag
+        folders={[]}
+        activeFolderId={null}
+        linkHref={() => "/dashboard"}
+        showFolderMenu={false}
+        tags={[]}
+        activeTagId={null}
+        tagHref={() => "/dashboard"}
+        onCreateFolder={() => {}}
+        onCreateTag={onCreateTag}
+        onEditFolder={() => {}}
+        onDeleteFolder={() => {}}
+        onEditTag={() => {}}
+        onDeleteTag={() => {}}
+        showTagMenu
+        onNavigate={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "createTag" }));
+    expect(onCreateTag).toHaveBeenCalledTimes(1);
+  });
+
   it("calls tag menu callbacks", () => {
     const onEditTag = vi.fn();
     const onDeleteTag = vi.fn();
@@ -206,6 +240,7 @@ describe("OrganizeSection", () => {
         onOpenChange={() => {}}
         t={(k) => k}
         canCreateFolder
+        canCreateTag
         folders={[]}
         activeFolderId={null}
         linkHref={() => "/dashboard"}
@@ -214,6 +249,7 @@ describe("OrganizeSection", () => {
         activeTagId={null}
         tagHref={(id) => `/dashboard/tags/${id}`}
         onCreateFolder={() => {}}
+        onCreateTag={() => {}}
         onEditFolder={() => {}}
         onDeleteFolder={() => {}}
         onEditTag={onEditTag}

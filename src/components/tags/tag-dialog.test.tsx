@@ -83,4 +83,81 @@ describe("TagDialog", () => {
 
     expect(onSubmit).toHaveBeenCalledWith({ name: "Ops", color: "#abcdef" });
   });
+
+  it("closes dialog on successful submit", async () => {
+    const onOpenChange = vi.fn();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <TagDialog
+        open
+        onOpenChange={onOpenChange}
+        editTag={{ id: "t1", name: "Ops", color: null }}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "save" }));
+    });
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("keeps dialog open on submit failure", async () => {
+    const onOpenChange = vi.fn();
+    const onSubmit = vi.fn().mockRejectedValue(new Error("API error"));
+
+    render(
+      <TagDialog
+        open
+        onOpenChange={onOpenChange}
+        editTag={{ id: "t1", name: "Ops", color: null }}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "save" }));
+    });
+
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("renders create mode when editTag is null", () => {
+    render(
+      <TagDialog
+        open
+        onOpenChange={() => {}}
+        editTag={null}
+        onSubmit={async () => {}}
+      />
+    );
+
+    expect(screen.getByText("createTag")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "create" })).toBeInTheDocument();
+    expect(screen.getByLabelText("tagName")).toHaveValue("");
+  });
+
+  it("submits new tag in create mode", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <TagDialog
+        open
+        onOpenChange={() => {}}
+        editTag={null}
+        onSubmit={onSubmit}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("tagName"), { target: { value: "New Tag" } });
+    fireEvent.change(screen.getByLabelText("tagColor"), { target: { value: "#aabbcc" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "create" }));
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith({ name: "New Tag", color: "#aabbcc" });
+  });
 });

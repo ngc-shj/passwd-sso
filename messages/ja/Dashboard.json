@@ -9,6 +9,7 @@
   "tags": "タグ",
   "vault": "保管庫",
   "personalVault": "個人の保管庫",
+  "personalVaultShort": "個人",
   "security": "セキュリティ",
   "auditLog": "監査ログ",
   "auditLogPersonal": "アカウント",
@@ -41,6 +42,7 @@
   "createFolder": "新規フォルダ",
   "editFolder": "フォルダを編集",
   "deleteFolder": "フォルダを削除",
+  "createTag": "新規タグ",
   "editTag": "タグを編集",
   "deleteTag": "タグを削除",
   "folderName": "フォルダ名",
@@ -51,5 +53,8 @@
   "folderDeleteConfirm": "フォルダ「{name}」を削除しますか？サブフォルダは親に昇格し、エントリは未所属になります。",
   "tagDeleteConfirm": "タグ「{name}」を削除しますか？この操作は元に戻せません。",
   "folderMaxDepth": "フォルダの最大階層数（{max}）を超えています。",
-  "settings": "設定"
+  "settings": "設定",
+  "select": "選択",
+  "close": "閉じる",
+  "selectAll": "すべて選択"
 }

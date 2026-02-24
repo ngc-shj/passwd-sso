@@ -33,6 +33,7 @@ function makeParams() {
     handleFolderCreate: vi.fn(),
     handleFolderEdit: vi.fn(),
     handleFolderDeleteClick: vi.fn(),
+    handleTagCreate: vi.fn(),
     handleTagEdit: vi.fn(),
     handleTagDeleteClick: vi.fn(),
   };
@@ -82,6 +83,7 @@ describe("useSidebarViewModel", () => {
     expect(result.current.onCreateFolder).toBe(params.handleFolderCreate);
     expect(result.current.onEditFolder).toBe(params.handleFolderEdit);
     expect(result.current.onDeleteFolder).toBe(params.handleFolderDeleteClick);
+    expect(result.current.onCreateTag).toBe(params.handleTagCreate);
     expect(result.current.onEditTag).toBe(params.handleTagEdit);
     expect(result.current.onDeleteTag).toBe(params.handleTagDeleteClick);
 

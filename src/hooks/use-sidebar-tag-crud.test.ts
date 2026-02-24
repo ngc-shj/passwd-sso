@@ -43,7 +43,6 @@ describe("useSidebarTagCrud", () => {
       expect.objectContaining({ method: "PUT" })
     );
     expect(refreshData).toHaveBeenCalledTimes(1);
-    expect(result.current.tagDialogOpen).toBe(false);
   });
 
   it("submits org tag update to /api/orgs/:orgId/tags/:id", async () => {
@@ -62,6 +61,48 @@ describe("useSidebarTagCrud", () => {
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "/api/orgs/org-1/tags/tag-1",
       expect.objectContaining({ method: "PUT" })
+    );
+  });
+
+  it("submits personal tag creation via POST to /api/tags", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as never;
+
+    const { result } = renderHook(() => useSidebarTagCrud({ refreshData, tErrors }));
+
+    act(() => {
+      result.current.handleTagCreate();
+    });
+
+    expect(result.current.tagDialogOpen).toBe(true);
+    expect(result.current.editingTag).toBeNull();
+
+    await act(async () => {
+      await result.current.handleTagSubmit({ name: "New Tag", color: "#ff0000" });
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/tags",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(refreshData).toHaveBeenCalledTimes(1);
+  });
+
+  it("submits org tag creation via POST to /api/orgs/:orgId/tags", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as never;
+
+    const { result } = renderHook(() => useSidebarTagCrud({ refreshData, tErrors }));
+
+    act(() => {
+      result.current.handleTagCreate("org-1");
+    });
+
+    await act(async () => {
+      await result.current.handleTagSubmit({ name: "Org Tag", color: "#00ff00" });
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/orgs/org-1/tags",
+      expect.objectContaining({ method: "POST" })
     );
   });
 

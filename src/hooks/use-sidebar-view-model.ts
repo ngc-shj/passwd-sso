@@ -39,6 +39,7 @@ interface UseSidebarViewModelParams {
   handleFolderCreate: (orgId?: string) => void;
   handleFolderEdit: (folder: SidebarFolderItem, orgId?: string) => void;
   handleFolderDeleteClick: (folder: SidebarFolderItem, orgId?: string) => void;
+  handleTagCreate: (orgId?: string) => void;
   handleTagEdit: (tag: SidebarOrganizeTagItem, orgId?: string) => void;
   handleTagDeleteClick: (tag: SidebarOrganizeTagItem, orgId?: string) => void;
 }
@@ -72,6 +73,7 @@ export function useSidebarViewModel({
   handleFolderCreate,
   handleFolderEdit,
   handleFolderDeleteClick,
+  handleTagCreate,
   handleTagEdit,
   handleTagDeleteClick,
 }: UseSidebarViewModelParams): SidebarContentProps {
@@ -118,6 +120,7 @@ export function useSidebarViewModel({
     toggleSection,
     onVaultChange,
     onCreateFolder: handleFolderCreate,
+    onCreateTag: handleTagCreate,
     onEditFolder: handleFolderEdit,
     onDeleteFolder: handleFolderDeleteClick,
     onEditTag: handleTagEdit,

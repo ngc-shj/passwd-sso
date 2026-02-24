@@ -22,8 +22,11 @@ vi.mock("@/components/layout/sidebar-sections", () => ({
   VaultSection: () => <div>vault</div>,
   CategoriesSection: () => <div>categories</div>,
   VaultManagementSection: () => <div>vault-management</div>,
-  OrganizeSection: ({ onCreateFolder }: { onCreateFolder: () => void }) => (
-    <button onClick={onCreateFolder}>create-folder</button>
+  OrganizeSection: ({ onCreateFolder, onCreateTag }: { onCreateFolder: () => void; onCreateTag: () => void }) => (
+    <>
+      <button onClick={onCreateFolder}>create-folder</button>
+      <button onClick={onCreateTag}>create-tag</button>
+    </>
   ),
 }));
 
@@ -56,6 +59,7 @@ function baseProps(overrides: Partial<SidebarContentProps> = {}): SidebarContent
     toggleSection: vi.fn(() => vi.fn()),
     onVaultChange: vi.fn(),
     onCreateFolder: vi.fn(),
+    onCreateTag: vi.fn(),
     onEditFolder: vi.fn(),
     onDeleteFolder: vi.fn(),
     onEditTag: vi.fn(),
@@ -91,5 +95,23 @@ describe("SidebarContent", () => {
     fireEvent.click(screen.getByRole("button", { name: "create-folder" }));
 
     expect(props.onCreateFolder).toHaveBeenCalledWith("org-1");
+  });
+
+  it("calls onCreateTag without orgId in personal context", () => {
+    const props = baseProps({ vaultContext: { type: "personal" } });
+    render(<SidebarContent {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "create-tag" }));
+
+    expect(props.onCreateTag).toHaveBeenCalledWith();
+  });
+
+  it("calls onCreateTag with orgId in org context", () => {
+    const props = baseProps({ vaultContext: { type: "org", orgId: "org-1" } });
+    render(<SidebarContent {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "create-tag" }));
+
+    expect(props.onCreateTag).toHaveBeenCalledWith("org-1");
   });
 });

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect, Fragment } from "react";
+import { useState, useRef, useEffect, Fragment, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { SearchBar } from "@/components/layout/search-bar";
-import { PasswordList, type SortOption } from "@/components/passwords/password-list";
-import { TrashList } from "@/components/passwords/trash-list";
+import { PasswordList, type SortOption, type PasswordListHandle } from "@/components/passwords/password-list";
+import { TrashList, type TrashListHandle } from "@/components/passwords/trash-list";
 import { PasswordNewDialog } from "@/components/passwords/password-new-dialog";
 import { EntryListHeader } from "@/components/passwords/entry-list-header";
 import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
@@ -21,7 +21,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, CheckSquare } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 
@@ -36,6 +37,7 @@ interface PasswordDashboardProps {
 
 export function PasswordDashboard({ view, tagId, folderId, entryType }: PasswordDashboardProps) {
   const t = useTranslations("Dashboard");
+  const tl = useTranslations("PasswordList");
   const ts = useTranslations("Shortcuts");
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -44,7 +46,12 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [newEntryType, setNewEntryType] = useState<EntryTypeValue>(ENTRY_TYPE.LOGIN);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedCount, setSelectedCount] = useState(0);
+  const [allSelected, setAllSelected] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const passwordListRef = useRef<PasswordListHandle>(null);
+  const trashListRef = useRef<TrashListHandle>(null);
 
   const isTrash = view === "trash";
   const isFavorites = view === "favorites";
@@ -94,6 +101,21 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   const isPrimaryScopeLabel =
     isTrash || isArchive || isFavorites || isPersonalAll || isCategorySelected || isFolderOrTagSelected;
 
+  // Reset selection mode when view changes (adjust state during render)
+  const viewKey = `${view}|${tagId}|${folderId}|${entryType}`;
+  const [prevViewKey, setPrevViewKey] = useState(viewKey);
+  if (prevViewKey !== viewKey) {
+    setPrevViewKey(viewKey);
+    setSelectionMode(false);
+  }
+
+  const handleSelectedCountChange = useCallback((count: number, isAllSelected: boolean) => {
+    setSelectedCount(count);
+    setAllSelected(isAllSelected);
+  }, []);
+
+  const activeListRef = isTrash ? trashListRef : passwordListRef;
+
   // Listen for vault-data-changed (import, etc.)
   useEffect(() => {
     const handler = () => setRefreshKey((k) => k + 1);
@@ -116,6 +138,15 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
       }
 
       if (e.key === "Escape") {
+        if (inInput && searchQuery) {
+          setSearchQuery("");
+          searchRef.current?.blur();
+          return;
+        }
+        if (selectionMode) {
+          setSelectionMode(false);
+          return;
+        }
         if (searchQuery) {
           setSearchQuery("");
           searchRef.current?.blur();
@@ -149,7 +180,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [searchQuery, isTrash, isArchive, contextualEntryType]);
+  }, [searchQuery, isTrash, isArchive, contextualEntryType, selectionMode]);
 
   const isMac = typeof navigator !== "undefined" && navigator.platform.toUpperCase().includes("MAC");
   const mod = isMac ? "⌘" : "Ctrl+";
@@ -175,52 +206,84 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
           subtitle={subtitle}
           showSubtitle={!isPrimaryScopeLabel}
           actions={
-            <>
-              {!isTrash && !isArchive && (
-                contextualEntryType ? (
-                  <Button
-                    onClick={() => {
-                      setNewEntryType(contextualEntryType);
-                      setNewDialogOpen(true);
-                    }}
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    {t("newItem")}
-                  </Button>
-                ) : (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button>
-                        <Plus className="h-4 w-4 mr-2" />
-                        {t("newItem")}
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.LOGIN); setNewDialogOpen(true); }}>
-                        <KeyRound className="h-4 w-4 mr-2" />
-                        {t("newPassword")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setNewDialogOpen(true); }}>
-                        <FileText className="h-4 w-4 mr-2" />
-                        {t("newSecureNote")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setNewDialogOpen(true); }}>
-                        <CreditCard className="h-4 w-4 mr-2" />
-                        {t("newCreditCard")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.IDENTITY); setNewDialogOpen(true); }}>
-                        <IdCard className="h-4 w-4 mr-2" />
-                        {t("newIdentity")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.PASSKEY); setNewDialogOpen(true); }}>
-                        <Fingerprint className="h-4 w-4 mr-2" />
-                        {t("newPasskey")}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )
-              )}
-            </>
+            selectionMode ? (
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={allSelected}
+                    onCheckedChange={(v) => activeListRef.current?.toggleSelectAll(Boolean(v))}
+                    aria-label={t("selectAll")}
+                  />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">
+                    {selectedCount > 0
+                      ? tl("selectedCount", { count: selectedCount })
+                      : t("selectAll")}
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectionMode(false)}
+                >
+                  {t("close")}
+                </Button>
+              </div>
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectionMode(true)}
+                >
+                  <CheckSquare className="h-4 w-4 mr-2" />
+                  {t("select")}
+                </Button>
+                {!isTrash && !isArchive && (
+                  contextualEntryType ? (
+                    <Button
+                      onClick={() => {
+                        setNewEntryType(contextualEntryType);
+                        setNewDialogOpen(true);
+                      }}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      {t("newItem")}
+                    </Button>
+                  ) : (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button>
+                          <Plus className="h-4 w-4 mr-2" />
+                          {t("newItem")}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.LOGIN); setNewDialogOpen(true); }}>
+                          <KeyRound className="h-4 w-4 mr-2" />
+                          {t("newPassword")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setNewDialogOpen(true); }}>
+                          <FileText className="h-4 w-4 mr-2" />
+                          {t("newSecureNote")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setNewDialogOpen(true); }}>
+                          <CreditCard className="h-4 w-4 mr-2" />
+                          {t("newCreditCard")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.IDENTITY); setNewDialogOpen(true); }}>
+                          <IdCard className="h-4 w-4 mr-2" />
+                          {t("newIdentity")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.PASSKEY); setNewDialogOpen(true); }}>
+                          <Fingerprint className="h-4 w-4 mr-2" />
+                          {t("newPasskey")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )
+                )}
+              </>
+            )
           }
         />
 
@@ -243,23 +306,27 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
 
         <div className="space-y-4">
           {isTrash ? (
-            <>
-              <TrashList refreshKey={refreshKey} />
-            </>
+            <TrashList
+              refreshKey={refreshKey}
+              selectionMode={selectionMode}
+              onSelectedCountChange={handleSelectedCountChange}
+              selectAllRef={trashListRef}
+            />
           ) : (
-            <>
-              <PasswordList
-                searchQuery={searchQuery}
-                tagId={tagId ?? null}
-                folderId={folderId ?? null}
-                entryType={entryType}
-                refreshKey={refreshKey}
-                favoritesOnly={isFavorites}
-                archivedOnly={isArchive}
-                sortBy={sortBy}
-                onDataChange={handleDataChange}
-              />
-            </>
+            <PasswordList
+              searchQuery={searchQuery}
+              tagId={tagId ?? null}
+              folderId={folderId ?? null}
+              entryType={entryType}
+              refreshKey={refreshKey}
+              favoritesOnly={isFavorites}
+              archivedOnly={isArchive}
+              sortBy={sortBy}
+              onDataChange={handleDataChange}
+              selectionMode={selectionMode}
+              onSelectedCountChange={handleSelectedCountChange}
+              selectAllRef={passwordListRef}
+            />
           )}
         </div>
       </div>

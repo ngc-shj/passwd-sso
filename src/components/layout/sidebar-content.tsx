@@ -43,6 +43,7 @@ export interface SidebarContentProps {
   toggleSection: (key: SidebarSection) => (open: boolean) => void;
   onVaultChange: (value: string) => void;
   onCreateFolder: (orgId?: string) => void;
+  onCreateTag: (orgId?: string) => void;
   onEditFolder: (folder: SidebarFolderItem, orgId?: string) => void;
   onDeleteFolder: (folder: SidebarFolderItem, orgId?: string) => void;
   onEditTag: (tag: SidebarOrganizeTagItem, orgId?: string) => void;
@@ -76,6 +77,7 @@ export function SidebarContent({
   toggleSection,
   onVaultChange,
   onCreateFolder,
+  onCreateTag,
   onEditFolder,
   onDeleteFolder,
   onEditTag,
@@ -134,6 +136,12 @@ export function SidebarContent({
             ? onCreateFolder(vaultContext.orgId)
             : onCreateFolder()
         }
+        onCreateTag={() =>
+          vaultContext.type === "org"
+            ? onCreateTag(vaultContext.orgId)
+            : onCreateTag()
+        }
+        canCreateTag={vaultContext.type !== "org" || selectedOrgCanManageTags}
         onEditFolder={(f) =>
           vaultContext.type === "org"
             ? onEditFolder(f, vaultContext.orgId)

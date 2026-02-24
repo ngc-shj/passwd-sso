@@ -294,7 +294,7 @@ export default function OrgSettingsPage({
         <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
           <div className="flex flex-col items-start gap-2 min-w-0">
             <h1 className="truncate text-2xl font-bold">
-              {org.name} - {t("settings")}
+              {t("orgSettings")}
             </h1>
           </div>
         </Card>
