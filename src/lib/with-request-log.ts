@@ -45,9 +45,16 @@ export function withRequestLog<H extends RouteHandler>(handler: H): H {
         const durationMs = Math.round(performance.now() - start);
 
         reqLogger.info({ status: response.status, durationMs }, "request.end");
-        response.headers.set("X-Request-Id", requestId);
 
-        return response;
+        try {
+          response.headers.set("X-Request-Id", requestId);
+          return response;
+        } catch {
+          // Auth.js redirect responses have immutable headers — clone to mutate
+          const cloned = new Response(response.body, response);
+          cloned.headers.set("X-Request-Id", requestId);
+          return cloned;
+        }
       } catch (err) {
         const durationMs = Math.round(performance.now() - start);
         reqLogger.error({ err, durationMs }, "request.error");
