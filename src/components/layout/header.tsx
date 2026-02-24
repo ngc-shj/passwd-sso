@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
-import { KeyRound, Lock, Menu, RefreshCw, ShieldCheck } from "lucide-react";
+import { Building2, KeyRound, Lock, Menu, RefreshCw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -19,6 +19,7 @@ import { useVault } from "@/lib/vault-context";
 import { APP_NAME, VAULT_STATUS } from "@/lib/constants";
 import { ChangePassphraseDialog } from "@/components/vault/change-passphrase-dialog";
 import { RecoveryKeyDialog } from "@/components/vault/recovery-key-dialog";
+import { useActiveVault } from "@/lib/active-vault-context";
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -28,6 +29,8 @@ export function Header({ onMenuToggle }: HeaderProps) {
   const { data: session } = useSession();
   const { status: vaultStatus, lock } = useVault();
   const t = useTranslations("Vault");
+  const tDash = useTranslations("Dashboard");
+  const activeVault = useActiveVault();
   const [mounted, setMounted] = useState(false);
   const [changePassOpen, setChangePassOpen] = useState(false);
   const [recoveryKeyOpen, setRecoveryKeyOpen] = useState(false);
@@ -48,6 +51,26 @@ export function Header({ onMenuToggle }: HeaderProps) {
         >
           <Menu className="h-5 w-5" />
         </Button>
+
+        {activeVault && (
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground md:hidden">
+            {activeVault.type === "personal" ? (
+              <>
+                <Lock className="h-4 w-4 shrink-0" />
+                <span className="truncate max-w-[8rem]">
+                  {tDash("personalVaultShort")}
+                </span>
+              </>
+            ) : (
+              <>
+                <Building2 className="h-4 w-4 shrink-0" />
+                <span className="truncate max-w-[8rem]">
+                  {activeVault.orgName}
+                </span>
+              </>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center gap-2 font-semibold">
           <KeyRound className="h-5 w-5" />
