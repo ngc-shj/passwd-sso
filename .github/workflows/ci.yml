@@ -67,7 +67,7 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
-      ORG_MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      SHARE_MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       AUTH_SECRET: "ci-secret-value-that-is-at-least-32-chars"
       AUTH_URL: "http://localhost:3000"
       VERIFIER_PEPPER_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -147,7 +147,7 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
-      ORG_MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      SHARE_MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       AUTH_SECRET: "ci-secret-value-that-is-at-least-32-chars"
       AUTH_URL: "http://localhost:3000"
       VERIFIER_PEPPER_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
