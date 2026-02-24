@@ -269,7 +269,7 @@ describe("Sidebar folder CRUD integration", () => {
     const sidebar = within(getDesktopSidebar());
 
     // Open folder dialog via the "+" button
-    const createBtn = sidebar.getByRole("button", { name: "createFolder" });
+    const createBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
     fireEvent.click(createBtn);
 
     // FolderDialog should now be open with captured props
@@ -413,7 +413,7 @@ describe("Sidebar folder CRUD integration", () => {
     const sidebar = within(getDesktopSidebar());
 
     // Open folder dialog
-    const createBtn = sidebar.getByRole("button", { name: "createFolder" });
+    const createBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
     fireEvent.click(createBtn);
 
     // Reset call count to track only the post-submit re-fetch
@@ -453,7 +453,7 @@ describe("Sidebar folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
-    const createBtn = sidebar.getByRole("button", { name: "createFolder" });
+    const createBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
     fireEvent.click(createBtn);
 
     // Configure fetch to fail with non-JSON response
@@ -518,7 +518,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     // Org folder create button with org-specific aria-label
-    const orgCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
+    const orgCreateBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
     expect(orgCreateBtn).toBeInTheDocument();
   });
 
@@ -540,7 +540,7 @@ describe("Sidebar org folder CRUD integration", () => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
     });
 
-    const orgCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
+    const orgCreateBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
     expect(orgCreateBtn).toBeInTheDocument();
   });
 
@@ -562,7 +562,7 @@ describe("Sidebar org folder CRUD integration", () => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
     });
 
-    const orgCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
+    const orgCreateBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
     expect(orgCreateBtn).toBeEnabled();
   });
 
@@ -629,7 +629,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     // Click the org folder create button
-    const orgCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
+    const orgCreateBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
     fireEvent.click(orgCreateBtn);
 
     expect(capturedFolderDialogProps).not.toBeNull();
@@ -674,7 +674,7 @@ describe("Sidebar org folder CRUD integration", () => {
 
     // Even with zero org folders, OWNER should see the create button inside org submenu
     await waitFor(() => {
-      expect(sidebar.getByRole("button", { name: "createFolder" })).toBeInTheDocument();
+      expect(sidebar.getByRole("menuitem", { name: "createFolder" })).toBeInTheDocument();
     });
   });
 
@@ -698,7 +698,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     // MEMBER can create folders, even when org has zero folders.
-    const orgCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
+    const orgCreateBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
     expect(orgCreateBtn).toBeEnabled();
   });
 });

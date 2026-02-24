@@ -138,6 +138,11 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
       }
 
       if (e.key === "Escape") {
+        if (inInput && searchQuery) {
+          setSearchQuery("");
+          searchRef.current?.blur();
+          return;
+        }
         if (selectionMode) {
           setSelectionMode(false);
           return;
