@@ -18,6 +18,7 @@ export async function GET() {
     where: {
       userId: session.user.id,
       role: { in: [ORG_ROLE.OWNER, ORG_ROLE.ADMIN] },
+      deactivatedAt: null,
     },
     select: { orgId: true },
   });
@@ -33,6 +34,7 @@ export async function GET() {
     where: {
       orgId: { in: orgIds },
       keyDistributed: false,
+      deactivatedAt: null,
       user: {
         ecdhPublicKey: { not: null },
       },

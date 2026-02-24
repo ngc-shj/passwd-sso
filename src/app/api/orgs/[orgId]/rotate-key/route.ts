@@ -106,9 +106,9 @@ export async function POST(req: NextRequest, { params }: Params) {
         throw new Error("ORG_KEY_VERSION_CONFLICT");
       }
 
-      // Verify all current members have a key in the payload (F-26: inside tx)
+      // Verify all active members have a key in the payload (F-26: inside tx)
       const members = await tx.orgMember.findMany({
-        where: { orgId },
+        where: { orgId, deactivatedAt: null },
         select: { userId: true },
       });
       const memberUserIds = new Set(members.map((m) => m.userId));

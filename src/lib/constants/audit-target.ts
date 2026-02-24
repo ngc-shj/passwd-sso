@@ -8,6 +8,8 @@ export const AUDIT_TARGET_TYPE = {
   ORG_PASSWORD_ENTRY: "OrgPasswordEntry",
   PASSWORD_ENTRY: "PasswordEntry",
   PASSWORD_SHARE: "PasswordShare",
+  SCIM_TOKEN: "ScimToken",
+  SCIM_EXTERNAL_MAPPING: "ScimExternalMapping",
   SESSION: "Session",
 } as const;
 

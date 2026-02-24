@@ -22,6 +22,8 @@ export default defineConfig({
         "src/lib/password-generator.ts",
         "src/lib/email/**/*.ts",
         "src/lib/auth-adapter.ts",
+        "src/lib/scim-token.ts",
+        "src/lib/scim/*.ts",
       ],
       exclude: ["src/app/api/auth/**"],
     },

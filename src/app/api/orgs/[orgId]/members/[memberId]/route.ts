@@ -40,7 +40,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     where: { id: memberId },
   });
 
-  if (!target || target.orgId !== orgId) {
+  if (!target || target.orgId !== orgId || target.deactivatedAt !== null) {
     return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
   }
 
@@ -178,7 +178,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     where: { id: memberId },
   });
 
-  if (!target || target.orgId !== orgId) {
+  if (!target || target.orgId !== orgId || target.deactivatedAt !== null) {
     return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
   }
 

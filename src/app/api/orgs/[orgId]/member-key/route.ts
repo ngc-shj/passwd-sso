@@ -26,8 +26,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   // Check if key has been distributed to this member
-  const membership = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId, userId: session.user.id } },
+  const membership = await prisma.orgMember.findFirst({
+    where: { orgId, userId: session.user.id, deactivatedAt: null },
     select: { keyDistributed: true },
   });
 

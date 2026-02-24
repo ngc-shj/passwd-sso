@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Check if already a member
+  // Check if already a member (active or deactivated)
   const existingMember = await prisma.orgMember.findUnique({
     where: {
       orgId_userId: {
@@ -82,14 +82,27 @@ export async function POST(req: NextRequest) {
   });
 
   if (existingMember) {
-    await prisma.orgInvitation.update({
-      where: { id: invitation.id },
-      data: { status: INVITATION_STATUS.ACCEPTED },
-    });
-    return NextResponse.json({
-      org: invitation.org,
-      alreadyMember: true,
-    });
+    // Active member → already a member
+    if (existingMember.deactivatedAt === null) {
+      await prisma.orgInvitation.update({
+        where: { id: invitation.id },
+        data: { status: INVITATION_STATUS.ACCEPTED },
+      });
+      return NextResponse.json({
+        org: invitation.org,
+        alreadyMember: true,
+      });
+    }
+
+    // Deactivated + scimManaged → reject, IdP should re-activate
+    if (existingMember.scimManaged) {
+      return NextResponse.json(
+        { error: API_ERROR.SCIM_MANAGED_MEMBER },
+        { status: 409 }
+      );
+    }
+
+    // Deactivated + !scimManaged → re-activate via invitation
   }
 
   // Org is always E2E-enabled.
@@ -100,7 +113,7 @@ export async function POST(req: NextRequest) {
   });
   const vaultSetupRequired = !user?.ecdhPublicKey;
 
-  // Create membership (or re-activate if previously removed) and mark invitation as accepted.
+  // Create membership (or re-activate if previously deactivated) and mark invitation as accepted.
   // keyDistributed starts as false (admin must distribute org key).
   await prisma.$transaction([
     prisma.orgMember.upsert({
@@ -119,6 +132,8 @@ export async function POST(req: NextRequest) {
       update: {
         role: invitation.role,
         keyDistributed: false,
+        deactivatedAt: null,
+        scimManaged: false,
       },
     }),
     prisma.orgInvitation.update({
