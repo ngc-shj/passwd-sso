@@ -83,6 +83,7 @@ export function FolderTreeNode({
                   setOpen((prev) => !prev);
                 }}
                 role="button"
+                aria-expanded={isExpanded ? "true" : "false"}
                 aria-label={isExpanded ? `Collapse ${folder.name}` : `Expand ${folder.name}`}
               >
                 <FolderOpen className="h-4 w-4 transition-opacity group-hover/folder:opacity-0" />

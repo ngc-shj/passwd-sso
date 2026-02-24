@@ -48,6 +48,7 @@ describe("useSidebarNavigationState", () => {
     expect(result.current.selectedFolders).toEqual(folders);
     expect(result.current.selectedTags).toEqual([
       { id: "t1", name: "keep", color: null, count: 2 },
+      { id: "t2", name: "skip", color: null, count: 0 },
     ]);
   });
 
@@ -73,7 +74,10 @@ describe("useSidebarNavigationState", () => {
     expect(result.current.selectedFolderId).toBe("of1");
     expect(result.current.isSelectedVaultFavorites).toBe(true);
     expect(result.current.selectedFolders).toEqual(orgFolderGroups[0].folders);
-    expect(result.current.selectedTags).toEqual([{ id: "ot1", name: "OrgTag", color: "blue", count: 4 }]);
+    expect(result.current.selectedTags).toEqual([
+      { id: "ot1", name: "OrgTag", color: "blue", count: 4 },
+      { id: "ot2", name: "OrgEmpty", color: null, count: 0 },
+    ]);
   });
 
   it("detects org audit log path separately", () => {
@@ -113,7 +117,7 @@ describe("useSidebarNavigationState", () => {
     expect(result.current.selectedOrgCanManageTags).toBe(true);
   });
 
-  it("filters out zero-count org tags for consistency with personal tags", () => {
+  it("includes zero-count org tags", () => {
     const { result } = renderHook(() =>
       useSidebarNavigationState({
         pathname: "/ja/dashboard/orgs/org-1",
@@ -129,6 +133,7 @@ describe("useSidebarNavigationState", () => {
 
     expect(result.current.selectedTags).toEqual([
       { id: "ot1", name: "OrgTag", color: "blue", count: 4 },
+      { id: "ot2", name: "OrgEmpty", color: null, count: 0 },
     ]);
   });
 });
