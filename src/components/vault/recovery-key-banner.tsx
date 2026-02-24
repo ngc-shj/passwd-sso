@@ -16,7 +16,8 @@ export function isDismissedInStorage(): boolean {
   try {
     const ts = localStorage.getItem(DISMISS_KEY);
     if (ts) {
-      return Date.now() - Number(ts) < DISMISS_DURATION_MS;
+      const elapsed = Date.now() - Number(ts);
+      return elapsed >= 0 && elapsed < DISMISS_DURATION_MS;
     }
   } catch {
     // Ignore storage errors
