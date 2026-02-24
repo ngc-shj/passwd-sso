@@ -113,7 +113,6 @@ export default function OrgAuditLogsPage({
   const locale = useLocale();
   const [logs, setLogs] = useState<OrgAuditLogItem[]>([]);
   const [entryNames, setEntryNames] = useState<Record<string, string>>({});
-  const [orgName, setOrgName] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -144,15 +143,6 @@ export default function OrgAuditLogsPage({
     },
     [orgId, selectedActions, dateFrom, dateTo]
   );
-
-  useEffect(() => {
-    fetch(`/api/orgs/${orgId}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.name) setOrgName(String(data.name));
-      })
-      .catch(() => {});
-  }, [orgId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -406,7 +396,7 @@ export default function OrgAuditLogsPage({
           <ScrollText className="h-6 w-6" />
           <div>
             <h1 className="text-2xl font-bold">
-              {orgName ? t("orgAuditLog", { orgName }) : t("title")}
+              {t("title")}
             </h1>
           </div>
         </div>
