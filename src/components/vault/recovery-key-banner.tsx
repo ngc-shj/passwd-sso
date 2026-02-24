@@ -49,7 +49,7 @@ export function RecoveryKeyBanner() {
 
   return (
     <>
-      <div className="flex items-center gap-3 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm">
+      <div className="mx-4 mt-4 flex items-center gap-3 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm md:mx-6 md:mt-6">
         <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-600 dark:text-yellow-400" />
         <p className="flex-1 text-yellow-800 dark:text-yellow-300">
           {t("recoveryKeyBannerMessage")}

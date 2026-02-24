@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Header } from "./header";
 import { Sidebar } from "./sidebar";
+import { RecoveryKeyBanner } from "@/components/vault/recovery-key-banner";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -13,6 +14,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar open={sidebarOpen} onOpenChange={setSidebarOpen} />
         <main className="min-h-0 flex-1 overflow-auto">
+          <RecoveryKeyBanner />
           {children}
         </main>
       </div>
