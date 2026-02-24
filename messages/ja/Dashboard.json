@@ -9,6 +9,7 @@
   "tags": "タグ",
   "vault": "保管庫",
   "personalVault": "個人の保管庫",
+  "personalVaultShort": "個人",
   "security": "セキュリティ",
   "auditLog": "監査ログ",
   "auditLogPersonal": "アカウント",

@@ -9,6 +9,7 @@
   "tags": "Tags",
   "vault": "Vault",
   "personalVault": "Personal Vault",
+  "personalVaultShort": "Personal",
   "security": "Security",
   "auditLog": "Audit Log",
   "auditLogPersonal": "Account",
