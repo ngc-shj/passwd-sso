@@ -41,6 +41,7 @@
   "createFolder": "新規フォルダ",
   "editFolder": "フォルダを編集",
   "deleteFolder": "フォルダを削除",
+  "createTag": "新規タグ",
   "editTag": "タグを編集",
   "deleteTag": "タグを削除",
   "folderName": "フォルダ名",

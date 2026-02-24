@@ -125,11 +125,8 @@ export function useSidebarNavigationState({
             name: tag.name,
             color: tag.color,
             count: tag.count,
-          }))
-            .filter((tag) => tag.count > 0) ?? []
-        : tags
-            .filter((tag) => tag.passwordCount > 0)
-            .map((tag) => ({
+          })) ?? []
+        : tags.map((tag) => ({
               id: tag.id,
               name: tag.name,
               color: tag.color,

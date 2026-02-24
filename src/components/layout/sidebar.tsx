@@ -67,6 +67,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     setTagDialogOpen,
     editingTag,
     deletingTag,
+    handleTagCreate,
     handleTagEdit,
     handleTagDeleteClick,
     handleTagSubmit,
@@ -148,6 +149,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     handleFolderCreate,
     handleFolderEdit,
     handleFolderDeleteClick,
+    handleTagCreate,
     handleTagEdit,
     handleTagDeleteClick,
   });
