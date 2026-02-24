@@ -154,7 +154,7 @@ describe("withRequestLog", () => {
     expect(typeof (loggerInsideHandler as { info: unknown }).info).toBe("function");
   });
 
-  it("inherits incoming x-request-id header", async () => {
+  it("inherits incoming x-request-id header when valid", async () => {
     const { withRequestLog } = await import("@/lib/with-request-log");
 
     const handler = vi.fn().mockResolvedValue(
@@ -175,6 +175,87 @@ describe("withRequestLog", () => {
     // child() should have been called with the incoming id
     const childArgs = mockChild.mock.calls[0][0];
     expect(childArgs.requestId).toBe(incomingId);
+  });
+
+  it("rejects malicious x-request-id and generates a new UUID", async () => {
+    const { withRequestLog } = await import("@/lib/with-request-log");
+
+    const handler = vi.fn().mockResolvedValue(
+      NextResponse.json({ ok: true }),
+    );
+    const wrapped = withRequestLog(handler);
+
+    // Spaces and special chars should be rejected by our validation
+    const maliciousId = "evil id; DROP TABLE sessions";
+    const req = new Request("http://localhost:3000/api/vault/status", {
+      method: "GET",
+      headers: { "x-request-id": maliciousId },
+    });
+    const response = await wrapped(req);
+
+    // Should NOT use the malicious id — should generate a new UUID
+    const requestId = response.headers.get("X-Request-Id");
+    expect(requestId).not.toBe(maliciousId);
+    expect(requestId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it("rejects oversized x-request-id header", async () => {
+    const { withRequestLog } = await import("@/lib/with-request-log");
+
+    const handler = vi.fn().mockResolvedValue(
+      NextResponse.json({ ok: true }),
+    );
+    const wrapped = withRequestLog(handler);
+
+    const oversizedId = "a".repeat(200);
+    const req = new Request("http://localhost:3000/api/vault/status", {
+      method: "GET",
+      headers: { "x-request-id": oversizedId },
+    });
+    const response = await wrapped(req);
+
+    // Should NOT use the oversized id
+    const requestId = response.headers.get("X-Request-Id");
+    expect(requestId).not.toBe(oversizedId);
+    expect(requestId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it("clones response when headers are immutable (e.g. Auth.js redirect)", async () => {
+    const { withRequestLog } = await import("@/lib/with-request-log");
+
+    // Response.redirect() produces a response with immutable headers
+    const immutableResponse = Response.redirect(
+      "http://localhost:3000/auth/signin",
+      302,
+    );
+
+    const handler = vi.fn().mockResolvedValue(immutableResponse);
+    const wrapped = withRequestLog(handler);
+
+    const req = createRequest("GET", "/api/auth/callback");
+    const response = await wrapped(req);
+
+    // Should preserve redirect status and Location header
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(
+      "http://localhost:3000/auth/signin",
+    );
+
+    // Should have X-Request-Id set via the cloned response
+    const requestId = response.headers.get("X-Request-Id");
+    expect(requestId).toBeDefined();
+    expect(requestId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+
+    // request.start and request.end should both be logged
+    expect(mockInfo).toHaveBeenCalledTimes(2);
+    expect(mockInfo.mock.calls[1][0]).toMatchObject({ status: 302 });
+    expect(mockInfo.mock.calls[1][1]).toBe("request.end");
   });
 
   it("preserves handler context argument for routes with params", async () => {
