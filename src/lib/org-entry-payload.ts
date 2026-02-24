@@ -1,14 +1,13 @@
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
-import { filterNonEmptyCustomFields } from "@/lib/entry-form-helpers";
+import { filterNonEmptyCustomFields, parseUrlHost } from "@/lib/entry-form-helpers";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 
 export interface BuildOrgEntryPayloadInput {
   entryType: EntryTypeValue;
   title: string;
   notes: string;
-  tagIds: string[];
-  orgFolderId: string | null;
+  tagNames: { name: string; color: string | null }[];
 
   username?: string;
   password?: string;
@@ -42,71 +41,88 @@ export interface BuildOrgEntryPayloadInput {
   deviceInfo?: string;
 }
 
+/**
+ * Build fullBlob + overviewBlob JSON strings for E2E encryption.
+ * The blobs are encrypted client-side before sending to the server.
+ */
 export function buildOrgEntryPayload(
   input: BuildOrgEntryPayloadInput
-): Record<string, unknown> {
-  const shared = {
-    title: input.title.trim(),
-    notes: input.notes.trim() || undefined,
-    tagIds: input.tagIds,
-    orgFolderId: input.orgFolderId ?? null,
-  };
+): { fullBlob: string; overviewBlob: string } {
+  const tags = input.tagNames;
+  const title = input.title.trim();
+  const notes = input.notes.trim() || null;
+
+  let entryFields: Record<string, unknown>;
 
   switch (input.entryType) {
     case ENTRY_TYPE.PASSKEY:
-      return {
-        entryType: ENTRY_TYPE.PASSKEY,
-        ...shared,
-        relyingPartyId: input.relyingPartyId?.trim(),
-        relyingPartyName: input.relyingPartyName?.trim() || undefined,
-        username: input.username?.trim() || undefined,
-        credentialId: input.credentialId?.trim() || undefined,
-        creationDate: input.creationDate || undefined,
-        deviceInfo: input.deviceInfo?.trim() || undefined,
+      entryFields = {
+        relyingPartyId: input.relyingPartyId?.trim() || null,
+        relyingPartyName: input.relyingPartyName?.trim() || null,
+        username: input.username?.trim() || null,
+        credentialId: input.credentialId?.trim() || null,
+        creationDate: input.creationDate || null,
+        deviceInfo: input.deviceInfo?.trim() || null,
       };
+      break;
     case ENTRY_TYPE.IDENTITY:
-      return {
-        entryType: ENTRY_TYPE.IDENTITY,
-        ...shared,
-        fullName: input.fullName?.trim() || undefined,
-        address: input.address?.trim() || undefined,
-        phone: input.phone?.trim() || undefined,
-        email: input.email?.trim() || undefined,
-        dateOfBirth: input.dateOfBirth || undefined,
-        nationality: input.nationality?.trim() || undefined,
-        idNumber: input.idNumber?.trim() || undefined,
-        issueDate: input.issueDate || undefined,
-        expiryDate: input.expiryDate || undefined,
+      entryFields = {
+        fullName: input.fullName?.trim() || null,
+        address: input.address?.trim() || null,
+        phone: input.phone?.trim() || null,
+        email: input.email?.trim() || null,
+        dateOfBirth: input.dateOfBirth || null,
+        nationality: input.nationality?.trim() || null,
+        idNumber: input.idNumber?.trim() || null,
+        issueDate: input.issueDate || null,
+        expiryDate: input.expiryDate || null,
       };
+      break;
     case ENTRY_TYPE.CREDIT_CARD:
-      return {
-        entryType: ENTRY_TYPE.CREDIT_CARD,
-        ...shared,
-        cardholderName: input.cardholderName?.trim() || undefined,
-        cardNumber: input.cardNumber || undefined,
-        brand: input.brand || undefined,
-        expiryMonth: input.expiryMonth || undefined,
-        expiryYear: input.expiryYear || undefined,
-        cvv: input.cvv || undefined,
+      entryFields = {
+        cardholderName: input.cardholderName?.trim() || null,
+        cardNumber: input.cardNumber || null,
+        brand: input.brand || null,
+        expiryMonth: input.expiryMonth || null,
+        expiryYear: input.expiryYear || null,
+        cvv: input.cvv || null,
       };
+      break;
     case ENTRY_TYPE.SECURE_NOTE:
-      return {
-        entryType: ENTRY_TYPE.SECURE_NOTE,
-        ...shared,
+      entryFields = {
         content: input.content ?? "",
       };
+      break;
     case ENTRY_TYPE.LOGIN:
     default: {
-      const body: Record<string, unknown> = {
-        ...shared,
-        username: input.username?.trim() || undefined,
-        password: input.password ?? "",
-        url: input.url?.trim() || undefined,
-      };
       const validFields = filterNonEmptyCustomFields(input.customFields ?? []);
-      if (validFields.length > 0) body.customFields = validFields;
-      body.totp = input.totp ?? null;
-      return body;
+      entryFields = {
+        username: input.username?.trim() || null,
+        password: input.password ?? "",
+        url: input.url?.trim() || null,
+        ...(validFields.length > 0 && { customFields: validFields }),
+        ...(input.totp && { totp: input.totp }),
+      };
+      break;
     }
   }
+
+  const fullBlob = JSON.stringify({
+    entryType: input.entryType,
+    title,
+    notes,
+    tags,
+    ...entryFields,
+  });
+
+  // Overview: minimal summary for list rendering
+  const urlHost = input.url ? parseUrlHost(input.url) : null;
+  const overviewBlob = JSON.stringify({
+    title,
+    username: input.username?.trim() || null,
+    urlHost,
+    tags,
+  });
+
+  return { fullBlob, overviewBlob };
 }

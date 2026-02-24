@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { executeOrgEntrySubmit } from "@/components/org/org-entry-submit";
 
 const toastErrorMock = vi.fn();
 const toastSuccessMock = vi.fn();
@@ -11,10 +10,23 @@ vi.mock("sonner", () => ({
   },
 }));
 
+const { mockSaveOrgEntry } = vi.hoisted(() => ({
+  mockSaveOrgEntry: vi.fn(),
+}));
+
+vi.mock("@/lib/org-entry-save", () => ({
+  saveOrgEntry: mockSaveOrgEntry,
+}));
+
+import { executeOrgEntrySubmit } from "@/components/org/org-entry-submit";
+
+const dummyKey = {} as CryptoKey;
+
 describe("executeOrgEntrySubmit", () => {
   beforeEach(() => {
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
+    mockSaveOrgEntry.mockReset();
     vi.restoreAllMocks();
   });
 
@@ -23,15 +35,16 @@ describe("executeOrgEntrySubmit", () => {
     const onSaved = vi.fn();
     const handleOpenChange = vi.fn();
 
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true })
-    );
+    mockSaveOrgEntry.mockResolvedValue({ ok: true });
 
     await executeOrgEntrySubmit({
       orgId: "org-1",
       isEdit: false,
-      body: { title: "A" },
+      orgEncryptionKey: dummyKey,
+      orgKeyVersion: 1,
+      fullBlob: '{"title":"A"}',
+      overviewBlob: '{"title":"A"}',
+      tagIds: [],
       t: (key) => key,
       setSaving,
       handleOpenChange,
@@ -47,10 +60,7 @@ describe("executeOrgEntrySubmit", () => {
   it("handles error and resets saving", async () => {
     const setSaving = vi.fn();
 
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: false })
-    );
+    mockSaveOrgEntry.mockResolvedValue({ ok: false });
 
     await executeOrgEntrySubmit({
       orgId: "org-1",
@@ -64,7 +74,11 @@ describe("executeOrgEntrySubmit", () => {
         notes: null,
         tags: [],
       },
-      body: { title: "A" },
+      orgEncryptionKey: dummyKey,
+      orgKeyVersion: 1,
+      fullBlob: '{"title":"A"}',
+      overviewBlob: '{"title":"A"}',
+      tagIds: [],
       t: (key) => key,
       setSaving,
       handleOpenChange: vi.fn(),

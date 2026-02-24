@@ -108,7 +108,7 @@ ECS task definitions reference secrets in `{secret_arn}:KEY::` format.
 | `AUTH_GOOGLE_SECRET` | Google OAuth Client Secret |
 | `AUTH_JACKSON_ID` | Jackson OIDC Client ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret |
-| `ORG_MASTER_KEY` | Org encryption master key (256-bit hex) |
+| `SHARE_MASTER_KEY` | Share links/sends encryption master key (256-bit hex) |
 | `REDIS_URL` | Redis connection string |
 
 ### Required Secrets (jackson)

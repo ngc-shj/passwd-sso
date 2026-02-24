@@ -1,7 +1,12 @@
 /**
  * POST /api/admin/rotate-master-key
  *
- * Re-wraps all Organization keys from an old master key version to a new one.
+ * Revokes share links encrypted with old master key versions.
+ *
+ * Note:
+ * - Organization vault encryption is E2E-only; server-side org key re-wrap is removed.
+ * - This endpoint now validates the target master key version and optionally
+ *   revokes old-version PasswordShare rows.
  * Authenticated via ADMIN_API_TOKEN bearer token (not session).
  *
  * Body: { targetVersion: number, operatorId: string, revokeShares?: boolean }
@@ -14,7 +19,6 @@ import { prisma } from "@/lib/prisma";
 import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
-  rewrapOrgKey,
 } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
@@ -88,7 +92,7 @@ export async function POST(req: NextRequest) {
   if (targetVersion !== currentVersion) {
     return NextResponse.json(
       {
-        error: `targetVersion (${targetVersion}) does not match ORG_MASTER_KEY_CURRENT_VERSION (${currentVersion})`,
+        error: `targetVersion (${targetVersion}) does not match SHARE_MASTER_KEY_CURRENT_VERSION (${currentVersion})`,
       },
       { status: 400 }
     );
@@ -99,7 +103,7 @@ export async function POST(req: NextRequest) {
     getMasterKeyByVersion(targetVersion);
   } catch {
     return NextResponse.json(
-      { error: `ORG_MASTER_KEY_V${targetVersion} is not configured` },
+      { error: `SHARE_MASTER_KEY_V${targetVersion} is not configured` },
       { status: 400 }
     );
   }
@@ -116,63 +120,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Find all organizations needing rotation
-  const orgs = await prisma.organization.findMany({
-    where: { masterKeyVersion: { lt: targetVersion } },
-    select: {
-      id: true,
-      encryptedOrgKey: true,
-      orgKeyIv: true,
-      orgKeyAuthTag: true,
-      masterKeyVersion: true,
-    },
-  });
-
-  let rotated = 0;
-  const errors: Array<{ orgId: string; error: string }> = [];
-
-  for (const org of orgs) {
-    try {
-      const rewrapped = rewrapOrgKey(
-        {
-          ciphertext: org.encryptedOrgKey,
-          iv: org.orgKeyIv,
-          authTag: org.orgKeyAuthTag,
-        },
-        org.masterKeyVersion,
-        targetVersion
-      );
-
-      // Optimistic locking: only update if masterKeyVersion hasn't changed
-      const result = await prisma.organization.updateMany({
-        where: {
-          id: org.id,
-          masterKeyVersion: org.masterKeyVersion,
-        },
-        data: {
-          encryptedOrgKey: rewrapped.ciphertext,
-          orgKeyIv: rewrapped.iv,
-          orgKeyAuthTag: rewrapped.authTag,
-          masterKeyVersion: targetVersion,
-        },
-      });
-
-      if (result.count > 0) {
-        rotated++;
-      }
-    } catch (e) {
-      errors.push({
-        orgId: org.id,
-        error: e instanceof Error ? e.message : "Unknown error",
-      });
-    }
-  }
-
-  // Revoke old-version shares if requested.
-  // Skip only when ALL orgs failed (orgs.length > 0 && rotated === 0),
-  // since partial rotation means some data is still on the old key.
+  // Revoke old-version shares if requested
   let revokedShares = 0;
-  if (revokeShares && (orgs.length === 0 || rotated > 0)) {
+  if (revokeShares) {
     const result = await prisma.passwordShare.updateMany({
       where: {
         masterKeyVersion: { lt: targetVersion },
@@ -192,10 +142,7 @@ export async function POST(req: NextRequest) {
     userId: operatorId,
     metadata: {
       targetVersion,
-      total: orgs.length,
-      rotated,
       revokedShares,
-      errors: errors.length,
       ip,
     },
     ip,
@@ -203,9 +150,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     targetVersion,
-    total: orgs.length,
-    rotated,
     revokedShares,
-    errors,
   });
 }

@@ -93,7 +93,7 @@ describe("GET /api/vault/unlock/data", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns encrypted key data with verification artifact", async () => {
+  it("returns encrypted key data with verification artifact and ECDH fields", async () => {
     mockPrismaUser.findUnique.mockResolvedValue({
       vaultSetupAt: new Date(),
       accountSalt: "salt-hex",
@@ -102,6 +102,10 @@ describe("GET /api/vault/unlock/data", () => {
       secretKeyAuthTag: "tag-hex",
       keyVersion: 1,
       passphraseVerifierHmac: null,
+      ecdhPublicKey: "ecdh-pub-jwk",
+      encryptedEcdhPrivateKey: "ecdh-priv-enc",
+      ecdhPrivateKeyIv: "ecdh-iv",
+      ecdhPrivateKeyAuthTag: "ecdh-tag",
     });
     mockPrismaVaultKey.findUnique.mockResolvedValue({
       verificationCiphertext: "v-cipher",
@@ -125,7 +129,41 @@ describe("GET /api/vault/unlock/data", () => {
         iv: "v-iv",
         authTag: "v-tag",
       },
+      ecdhPublicKey: "ecdh-pub-jwk",
+      encryptedEcdhPrivateKey: "ecdh-priv-enc",
+      ecdhPrivateKeyIv: "ecdh-iv",
+      ecdhPrivateKeyAuthTag: "ecdh-tag",
     });
+  });
+
+  it("excludes ECDH fields when using extension token", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockExtTokenFindUnique.mockResolvedValue({
+      id: "tok-3",
+      userId: "token-user",
+      scope: "vault:unlock-data",
+      expiresAt: new Date("2030-01-01"),
+      revokedAt: null,
+    });
+    mockPrismaUser.findUnique.mockResolvedValue({
+      vaultSetupAt: new Date(),
+      accountSalt: "salt-hex",
+      encryptedSecretKey: "enc-key",
+      secretKeyIv: "iv-hex",
+      secretKeyAuthTag: "tag-hex",
+      keyVersion: 1,
+      passphraseVerifierHmac: null,
+      // ECDH fields should NOT be selected for extension tokens
+    });
+    mockPrismaVaultKey.findUnique.mockResolvedValue(null);
+
+    const res = await GET(reqWithAuth("c".repeat(64)));
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.ecdhPublicKey).toBeUndefined();
+    expect(json.encryptedEcdhPrivateKey).toBeUndefined();
+    expect(json.ecdhPrivateKeyIv).toBeUndefined();
+    expect(json.ecdhPrivateKeyAuthTag).toBeUndefined();
   });
 
   it("returns null verificationArtifact when vaultKey not found", async () => {

@@ -15,16 +15,18 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Security Audit (Watchtower)** - Breached (HIBP), weak, reused, old, and HTTP-URL detection with security score
 - **Import / Export** - Bitwarden, 1Password, Chrome CSV import; CSV/JSON export profiles: compatible and passwd-sso (full-fidelity)
 - **Password-Protected Export** - AES-256-GCM encrypted exports with PBKDF2 (600k)
-- **Attachments** - Encrypted file attachments (personal E2E, org server-side)
+- **Attachments** - Encrypted file attachments (personal and org E2E)
 - **Share Links** - Time-limited read-only sharing with access logs
 - **Audit Logs** - Personal and org audit logs with filters and export events
 - **Emergency Access** - Request/approve temporary vault access with key exchange
+- **Session Management** - List active sessions and revoke single/all sessions
+- **Security Notifications** - Email notifications for emergency-access events
 - **Key Rotation** - Rotate vault encryption key with passphrase verification
 - **Tags & Organization** - Color-coded tags, favorites, archive, soft-delete trash (30-day auto-purge)
 - **Keyboard Shortcuts** - `/ or Cmd+K` search, `n` new, `?` help, `Esc` clear
 - **i18n** - English and Japanese (next-intl)
 - **Dark Mode** - Light / dark / system (next-themes)
-- **Organization Vault** - Team password sharing with server-side AES-256-GCM encryption and RBAC (Owner/Admin/Member/Viewer)
+- **Organization Vault** - Team password sharing with E2E encryption (ECDH-P256) and RBAC (Owner/Admin/Member/Viewer)
 - **Recovery Key** - 256-bit recovery key (HKDF + AES-256-GCM) with Base32 encoding and checksum; recover vault access without passphrase
 - **Vault Reset** - Last-resort full vault deletion with explicit confirmation ("DELETE MY VAULT")
 - **Account Lockout** - Progressive lockout (5→15min, 10→1h, 15→24h) with audit logging
@@ -44,18 +46,18 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 | Auth | Auth.js v5 (database sessions) |
 | SAML Bridge | BoxyHQ SAML Jackson (Docker) |
 | UI | Tailwind CSS 4 + shadcn/ui + Radix UI |
-| Encryption | Web Crypto API (client-side) + AES-256-GCM (server-side for org vault) |
+| Encryption | Web Crypto API (vault E2E) + AES-256-GCM (server-side for share links/sends) |
 | Cache / Rate Limit | Redis 7 |
 
 ## Architecture
 
 ```
 Browser (Web Crypto API)
-  │  ← Personal vault: AES-256-GCM E2E encrypt/decrypt
+  │  ← Personal & org vault: AES-256-GCM E2E encrypt/decrypt
   ▼
 Next.js App (SSR / API Routes)
   │  ← Auth.js sessions, route protection, RBAC
-  │  ← Org vault: server-side AES-256-GCM encrypt/decrypt
+  │  ← Share links / sends: server-side AES-256-GCM encryption
   ▼
 PostgreSQL ← Prisma 7          Redis ← rate limiting
   │
@@ -65,7 +67,7 @@ SAML Jackson (Docker) ← SAML 2.0 IdP (HENNGE, Okta, Azure AD, etc.)
 
 **Personal vault** — All password data is encrypted **client-side** before being sent to the server. The server stores only ciphertext. Decryption happens exclusively in the browser using a key derived from the user's master passphrase.
 
-**Organization vault** — Shared passwords are encrypted **server-side** with per-org keys (wrapped by `ORG_MASTER_KEY`). This enables instant sharing across team members without requiring individual key exchange.
+**Organization vault** — Shared passwords are encrypted **end-to-end (client-side)**. Organization key distribution uses ECDH-P256 member-key exchange.
 
 ## Getting Started
 
@@ -102,7 +104,7 @@ Edit `.env.local` and fill in:
 | `AUTH_JACKSON_ID` | Jackson OIDC client ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC client secret |
 | `SAML_PROVIDER_NAME` | Display name on sign-in page (e.g., "HENNGE") |
-| `ORG_MASTER_KEY` | Org vault master key — `openssl rand -hex 32` |
+| `SHARE_MASTER_KEY` | Master key for server-encrypted share links/sends — `openssl rand -hex 32` |
 | `VERIFIER_PEPPER_KEY` | Passphrase verifier pepper key — `openssl rand -hex 32` (**required in production**) |
 | `REDIS_URL` | Redis URL for rate limiting (required in production) |
 | `BLOB_BACKEND` | Attachment blob backend (`db` / `s3` / `azure` / `gcs`) |
@@ -203,16 +205,28 @@ npm run build
 |---|---|
 | `npm run dev` | Development server (Turbopack) |
 | `npm run build` | Production build |
-| `npm run start` | Start production server |
 | `npm run lint` | ESLint |
-| `npm test` | Run tests (Vitest) |
 | `npm run test:watch` | Run tests in watch mode |
 | `npm run test:coverage` | Run tests with coverage |
+| `npm run test:e2e` | Run Playwright E2E tests |
 | `npm run db:migrate` | Prisma migrate (dev) |
 | `npm run db:push` | Push schema without migration |
 | `npm run db:seed` | Seed data |
 | `npm run db:studio` | Prisma Studio GUI |
 | `npm run generate:key` | Generate 256-bit hex key |
+| `npm run licenses:check` | Check app dependency licenses (non-strict) |
+| `npm run licenses:check:strict` | Check app dependency licenses (strict; CI mode) |
+| `npm run licenses:check:ext` | Check extension dependency licenses (non-strict) |
+| `npm run licenses:check:ext:strict` | Check extension dependency licenses (strict; CI mode) |
+| `npm run test:load:smoke` | Run load-test seed smoke checks |
+| `npm run test:load:seed` | Seed load-test users/sessions |
+| `npm run test:load` | Run k6 mixed-workload baseline scenario |
+| `npm run test:load:health` | Run k6 health endpoint scenario |
+| `npm run test:load:cleanup` | Cleanup load-test users/sessions |
+
+Lifecycle scripts (not listed under `available via npm run`):
+- `npm test` - Run tests once (`vitest run`)
+- `npm start` - Start production server (`next start`)
 
 ## Project Structure
 
@@ -249,8 +263,9 @@ src/
 ├── lib/
 │   ├── crypto-client.ts      # Client-side E2E encryption (personal vault)
 │   ├── crypto-recovery.ts    # Recovery Key crypto (HKDF + AES-256-GCM wrap)
-│   ├── crypto-server.ts      # Server-side encryption (org vault)
+│   ├── crypto-server.ts      # Server-side crypto for share links/sends + verifier HMAC
 │   ├── crypto-aad.ts         # Additional Authenticated Data for encryption
+│   ├── crypto-org.ts         # Org E2E cryptography (ECDH-P256 key exchange)
 │   ├── crypto-emergency.ts   # Emergency access key exchange
 │   ├── export-crypto.ts      # Password-protected export encryption
 │   ├── org-auth.ts           # Org RBAC authorization helpers
@@ -284,26 +299,27 @@ extension/
 - **Session security** - Database sessions (not JWT), 8-hour timeout with 1-hour extension
 - **Auto-lock** - Vault locks after 15 min idle or 5 min tab hidden
 - **Clipboard clear** - Copied passwords auto-clear after 30 seconds
-- **Organization vault** - Server-side AES-256-GCM with per-org keys wrapped by `ORG_MASTER_KEY`
+- **Organization vault** - End-to-end encryption (ECDH-P256) with per-member key distribution
 - **RBAC** - Owner / Admin / Member / Viewer role-based access control for organizations
 - **Recovery Key** - 256-bit random → HKDF → AES-256-GCM wrap of secret key; server stores only HMAC(pepper, verifierHash)
 - **Vault Reset** - Last-resort full data deletion with fixed confirmation token
 - **Account lockout** - Progressive lockout (5→15min, 10→1h, 15→24h) with DB persistence and audit logging
-- **Rate limiting** - Redis-backed rate limiting on vault unlock (5 attempts per 15 min)
+- **Rate limiting** - Redis-backed rate limiting on sensitive endpoints (including vault unlock)
 - **CSRF defense** - JSON body + SameSite cookie + CSP + Origin header validation on destructive endpoints
 - **CSP** - Content Security Policy with nonce-based script control and violation reporting
 
 ## Deployment Guides
 
-- [Docker Compose Setup (English)](docs/setup.docker.en.md) / [日本語](docs/setup.docker.ja.md)
-- [AWS Deployment (English)](docs/setup.aws.en.md) / [日本語](docs/setup.aws.ja.md)
-- [Vercel Deployment (English)](docs/setup.vercel.en.md) / [日本語](docs/setup.vercel.ja.md)
+- Setup docs policy: `docs/setup/README.md` (English-only)
+- [Docker Compose Setup](docs/setup/docker/en.md)
+- [AWS Deployment](docs/setup/aws/en.md)
+- [Vercel Deployment](docs/setup/vercel/en.md)
 - [Terraform (AWS) — English](infra/terraform/README.md) / [日本語](infra/terraform/README.ja.md)
 
 ## Security Documentation
 
 - [Security Policy](SECURITY.md)
-- [Security Considerations (English)](docs/security-considerations.en.md) / [日本語](docs/security-considerations.ja.md)
+- [Security Considerations (English)](docs/security/considerations/en.md) / [日本語](docs/security/considerations/ja.md)
 
 ## License
 

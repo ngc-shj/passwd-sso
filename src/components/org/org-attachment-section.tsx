@@ -25,9 +25,16 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { useOrgVault } from "@/lib/org-vault-context";
+import {
+  encryptBinary,
+  decryptBinary,
+} from "@/lib/crypto-client";
+import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { apiPath } from "@/lib/constants";
 import {
   ALLOWED_EXTENSIONS,
+  ALLOWED_CONTENT_TYPES,
   MAX_FILE_SIZE,
   MAX_ATTACHMENTS_PER_ENTRY,
 } from "@/lib/validations";
@@ -60,6 +67,10 @@ function getFileIcon(contentType: string) {
   return File;
 }
 
+function getExtension(filename: string): string {
+  return filename.split(".").pop()?.toLowerCase() ?? "";
+}
+
 export function OrgAttachmentSection({
   orgId,
   entryId,
@@ -70,6 +81,7 @@ export function OrgAttachmentSection({
   const t = useTranslations("Attachments");
   const tApi = useTranslations("ApiErrors");
   const tc = useTranslations("Common");
+  const { getOrgEncryptionKey, getOrgKeyInfo } = useOrgVault();
   const [uploading, setUploading] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<OrgAttachmentMeta | null>(null);
@@ -82,6 +94,19 @@ export function OrgAttachmentSection({
 
     if (fileInputRef.current) fileInputRef.current.value = "";
 
+    // Validate extension
+    const ext = getExtension(file.name);
+    if (!ALLOWED_EXTENSIONS.includes(ext as typeof ALLOWED_EXTENSIONS[number])) {
+      toast.error(t("invalidExtension", { allowed: ALLOWED_EXTENSIONS.join(", ") }));
+      return;
+    }
+
+    // Validate content type
+    if (!ALLOWED_CONTENT_TYPES.includes(file.type as typeof ALLOWED_CONTENT_TYPES[number])) {
+      toast.error(t("invalidContentType"));
+      return;
+    }
+
     // Validate size
     if (file.size > MAX_FILE_SIZE) {
       toast.error(t("fileTooLarge", { max: formatFileSize(MAX_FILE_SIZE) }));
@@ -93,13 +118,35 @@ export function OrgAttachmentSection({
       return;
     }
 
+    const keyInfo = await getOrgKeyInfo(orgId);
+    if (!keyInfo) {
+      toast.error(t("uploadError"));
+      return;
+    }
+
     setUploading(true);
     try {
-      // Org: send plaintext file — server encrypts
+      // Read file as ArrayBuffer
+      const arrayBuffer = await file.arrayBuffer();
+
+      // Pre-generate attachment ID for AAD binding
+      const attachmentId = crypto.randomUUID();
+      const aad = buildAttachmentAAD(entryId, attachmentId);
+
+      // Encrypt client-side with AAD
+      const encrypted = await encryptBinary(arrayBuffer, keyInfo.key, aad);
+
+      // Build FormData with encrypted blob
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("id", attachmentId);
+      formData.append("file", new Blob([encrypted.ciphertext.buffer.slice(0) as ArrayBuffer]));
+      formData.append("iv", encrypted.iv);
+      formData.append("authTag", encrypted.authTag);
       formData.append("filename", file.name);
       formData.append("contentType", file.type);
+      formData.append("sizeBytes", file.size.toString());
+      formData.append("aadVersion", String(AAD_VERSION));
+      formData.append("orgKeyVersion", keyInfo.keyVersion.toString());
 
       const res = await fetch(
         apiPath.orgPasswordAttachments(orgId, entryId),
@@ -125,13 +172,35 @@ export function OrgAttachmentSection({
   const handleDownload = async (attachment: OrgAttachmentMeta) => {
     setDownloading(attachment.id);
     try {
-      // Org: server decrypts and returns plaintext binary
+      const orgKey = await getOrgEncryptionKey(orgId);
+      if (!orgKey) throw new Error("No org key");
+
       const res = await fetch(
         apiPath.orgPasswordAttachmentById(orgId, entryId, attachment.id)
       );
       if (!res.ok) throw new Error("Download failed");
 
-      const blob = await res.blob();
+      const data = await res.json();
+
+      // Decode base64 encrypted data
+      const binaryStr = atob(data.encryptedData);
+      const ciphertext = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        ciphertext[i] = binaryStr.charCodeAt(i);
+      }
+
+      // Decrypt client-side (with AAD if aadVersion >= 1)
+      const aad = data.aadVersion >= 1
+        ? buildAttachmentAAD(entryId, attachment.id)
+        : undefined;
+      const decrypted = await decryptBinary(
+        { ciphertext, iv: data.iv, authTag: data.authTag },
+        orgKey,
+        aad,
+      );
+
+      // Trigger download
+      const blob = new Blob([decrypted], { type: attachment.contentType });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -186,6 +255,7 @@ export function OrgAttachmentSection({
               ref={fileInputRef}
               type="file"
               className="hidden"
+              title={t("upload")}
               accept={ALLOWED_EXTENSIONS.map((e) => `.${e}`).join(",")}
               onChange={handleUpload}
               disabled={uploading}

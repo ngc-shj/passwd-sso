@@ -1,7 +1,6 @@
 import { encryptData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
+import { buildPersonalEntryAAD, buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import {
-  buildOrgImportPayload,
   buildPersonalImportBlobs,
   resolveEntryTagIds,
   resolveTagNameToIdForImport,
@@ -16,6 +15,9 @@ interface RunImportParams {
   sourceFilename: string;
   userId?: string;
   encryptionKey?: CryptoKey;
+  orgEncryptionKey?: CryptoKey;
+  orgKeyVersion?: number;
+  orgId?: string;
   onProgress?: (current: number, total: number) => void;
 }
 
@@ -40,10 +42,16 @@ export async function runImportEntries({
   sourceFilename,
   userId,
   encryptionKey,
+  orgEncryptionKey,
+  orgKeyVersion,
+  orgId,
   onProgress,
 }: RunImportParams): Promise<RunImportResult> {
   if (!isOrgImport && !encryptionKey) {
     throw new Error("encryptionKey is required for personal import");
+  }
+  if (isOrgImport && (!orgEncryptionKey || !orgId)) {
+    throw new Error("orgEncryptionKey and orgId are required for org import");
   }
 
   let successCount = 0;
@@ -59,10 +67,25 @@ export async function runImportEntries({
       let res: Response;
 
       if (isOrgImport) {
+        const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
+        const entryId = crypto.randomUUID();
+        const blobAad = buildOrgEntryAAD(orgId!, entryId, "blob");
+        const overviewAad = buildOrgEntryAAD(orgId!, entryId, "overview");
+        const encryptedBlob = await encryptData(fullBlob, orgEncryptionKey!, blobAad);
+        const encryptedOverview = await encryptData(overviewBlob, orgEncryptionKey!, overviewAad);
+
         res = await fetch(passwordsPath, {
           method: "POST",
           headers,
-          body: JSON.stringify(buildOrgImportPayload(entry, tagIds)),
+          body: JSON.stringify({
+            id: entryId,
+            encryptedBlob,
+            encryptedOverview,
+            entryType: entry.entryType,
+            aadVersion: AAD_VERSION,
+            orgKeyVersion: orgKeyVersion ?? 1,
+            tagIds,
+          }),
         });
       } else {
         const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);

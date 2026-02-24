@@ -120,6 +120,7 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/history/[historyId]/restore", ()
       blobIv: "curIv",
       blobAuthTag: "curTag",
       aadVersion: 1,
+      orgKeyVersion: 3,
     });
     mockHistoryFindUnique.mockResolvedValue({
       id: "h1",
@@ -128,6 +129,7 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/history/[historyId]/restore", ()
       blobIv: "oldIv",
       blobAuthTag: "oldTag",
       aadVersion: 0,
+      orgKeyVersion: 2,
       changedAt: new Date("2025-01-01"),
     });
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {

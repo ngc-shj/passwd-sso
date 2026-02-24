@@ -7,8 +7,9 @@ import { ChevronDown, ChevronRight, Eye, EyeOff, History, RotateCcw } from "luci
 import { Button } from "@/components/ui/button";
 import { apiPath } from "@/lib/constants";
 import { useVault } from "@/lib/vault-context";
+import { useOrgVault } from "@/lib/org-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
+import { buildPersonalEntryAAD, buildOrgEntryAAD } from "@/lib/crypto-aad";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -132,6 +133,7 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
   const t = useTranslations("PasswordDetail");
   const locale = useLocale();
   const { encryptionKey, userId } = useVault();
+  const { getOrgEncryptionKey } = useOrgVault();
   const { requireVerification, repromptDialog } = useReprompt();
   const [expanded, setExpanded] = useState(false);
   const [histories, setHistories] = useState<HistoryEntry[]>([]);
@@ -184,11 +186,29 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
     setViewLoading(true);
     try {
       if (orgId) {
-        // Org entries: server-side decryption
+        // Org entries: fetch encrypted blob, then decrypt client-side.
+        // TODO: If h.orgKeyVersion !== current org version, fetch old key via
+        // GET /member-key?keyVersion=N for correct decryption.
+        // Currently uses latest key only — history from before key rotation
+        // will fail to decrypt until re-encryption is implemented.
         const res = await fetch(apiPath.orgPasswordHistoryById(orgId, entryId, h.id));
-        if (res.ok) {
-          setViewData(await res.json());
-        }
+        if (!res.ok) return;
+        const data = await res.json();
+        const orgKey = await getOrgEncryptionKey(orgId);
+        if (!orgKey) return;
+        const aad = data.aadVersion >= 1
+          ? buildOrgEntryAAD(orgId, entryId, "blob")
+          : undefined;
+        const plaintext = await decryptData(
+          {
+            ciphertext: data.encryptedBlob,
+            iv: data.blobIv,
+            authTag: data.blobAuthTag,
+          },
+          orgKey,
+          aad,
+        );
+        setViewData(JSON.parse(plaintext));
       } else {
         // Personal entries: client-side decryption
         if (!encryptionKey || !userId) return;

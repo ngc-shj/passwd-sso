@@ -6,10 +6,7 @@ import {
   generateShareToken,
   hashToken,
   encryptShareData,
-  unwrapOrgKey,
-  decryptServerData,
 } from "@/lib/crypto-server";
-import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -60,11 +57,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { passwordEntryId, orgPasswordEntryId, data, expiresIn, maxViews } =
+  const { passwordEntryId, orgPasswordEntryId, data, encryptedShareData, expiresIn, maxViews } =
     parsed.data;
 
-  let plaintext: string;
+  let encryptedData: string;
+  let dataIv: string;
+  let dataAuthTag: string;
+  let masterKeyVersion: number;
   let entryType: EntryTypeValue;
+  let orgId: string | undefined;
 
   if (passwordEntryId) {
     // Personal entry — verify ownership
@@ -75,35 +76,32 @@ export async function POST(req: NextRequest) {
     if (!entry || entry.userId !== session.user.id) {
       return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
     }
+
     // `data` is required by schema when `passwordEntryId` is set.
-    // Keep defensive fallback to empty object to avoid runtime throws on malformed inputs.
-    const { ...safeData } = data;
+    // TOTP is already stripped by Zod shareDataSchema (no totp field defined)
     entryType = entry.entryType;
-    plaintext = JSON.stringify(safeData);
+    const plaintext = JSON.stringify(data);
+
+    // Encrypt share data with master key
+    const encrypted = encryptShareData(plaintext);
+    encryptedData = encrypted.ciphertext;
+    dataIv = encrypted.iv;
+    dataAuthTag = encrypted.authTag;
+    masterKeyVersion = encrypted.masterKeyVersion;
   } else {
-    // Org entry — verify permission
-    const entry = await prisma.orgPasswordEntry.findUnique({
+    // Org entry — E2E: client sends pre-encrypted share data
+    const orgEntry = await prisma.orgPasswordEntry.findUnique({
       where: { id: orgPasswordEntryId! },
-      include: {
-        org: {
-          select: {
-            id: true,
-            encryptedOrgKey: true,
-            orgKeyIv: true,
-            orgKeyAuthTag: true,
-            masterKeyVersion: true,
-          },
-        },
-      },
+      select: { orgId: true, entryType: true },
     });
-    if (!entry) {
+    if (!orgEntry) {
       return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
     }
 
     try {
       await requireOrgPermission(
         session.user.id,
-        entry.org.id,
+        orgEntry.orgId,
         ORG_PERMISSION.PASSWORD_READ
       );
     } catch (e) {
@@ -113,32 +111,14 @@ export async function POST(req: NextRequest) {
       throw e;
     }
 
-    // Decrypt org entry → strip TOTP → re-encrypt with master key
-    const orgKey = unwrapOrgKey({
-      ciphertext: entry.org.encryptedOrgKey,
-      iv: entry.org.orgKeyIv,
-      authTag: entry.org.orgKeyAuthTag,
-    }, entry.org.masterKeyVersion);
-    const blobAad = entry.aadVersion >= 1
-      ? Buffer.from(buildOrgEntryAAD(entry.org.id, entry.id, "blob"))
-      : undefined;
-    const blob = JSON.parse(
-      decryptServerData(
-        { ciphertext: entry.encryptedBlob, iv: entry.blobIv, authTag: entry.blobAuthTag },
-        orgKey,
-        blobAad
-      )
-    );
-
-    // Strip TOTP
-    delete blob.totp;
-
-    entryType = entry.entryType;
-    plaintext = JSON.stringify(blob);
+    // Store client-encrypted data as-is (masterKeyVersion=0 = E2E share)
+    encryptedData = encryptedShareData!.ciphertext;
+    dataIv = encryptedShareData!.iv;
+    dataAuthTag = encryptedShareData!.authTag;
+    masterKeyVersion = 0;
+    entryType = orgEntry.entryType as EntryTypeValue;
+    orgId = orgEntry.orgId;
   }
-
-  // Encrypt share data with master key
-  const encrypted = encryptShareData(plaintext);
 
   // Generate token
   const token = generateShareToken();
@@ -150,10 +130,10 @@ export async function POST(req: NextRequest) {
     data: {
       tokenHash,
       entryType,
-      encryptedData: encrypted.ciphertext,
-      dataIv: encrypted.iv,
-      dataAuthTag: encrypted.authTag,
-      masterKeyVersion: encrypted.masterKeyVersion,
+      encryptedData,
+      dataIv,
+      dataAuthTag,
+      masterKeyVersion,
       expiresAt,
       maxViews: maxViews ?? null,
       createdById: session.user.id,
@@ -168,14 +148,7 @@ export async function POST(req: NextRequest) {
     scope: orgPasswordEntryId ? AUDIT_SCOPE.ORG : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.SHARE_CREATE,
     userId: session.user.id,
-    orgId: orgPasswordEntryId
-      ? (
-          await prisma.orgPasswordEntry.findUnique({
-            where: { id: orgPasswordEntryId },
-            select: { orgId: true },
-          })
-        )?.orgId
-      : undefined,
+    orgId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
     metadata: { expiresIn, maxViews: maxViews ?? null },

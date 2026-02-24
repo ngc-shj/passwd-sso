@@ -21,12 +21,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2 } from "lucide-react";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { ORG_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-sort";
+import { useOrgVault } from "@/lib/org-vault-context";
+import { decryptData } from "@/lib/crypto-client";
+import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
 interface OrgInfo {
   id: string;
@@ -72,11 +75,13 @@ export default function OrgDashboardPage({
   const activeScope = searchParams.get("scope");
   const t = useTranslations("Org");
   const tDash = useTranslations("Dashboard");
+  const { getOrgEncryptionKey } = useOrgVault();
   const [org, setOrg] = useState<OrgInfo | null>(null);
   const [passwords, setPasswords] = useState<OrgPasswordEntry[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [keyPending, setKeyPending] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<EntrySortOption>("updatedAt");
   const [formOpen, setFormOpen] = useState(false);
@@ -140,23 +145,95 @@ export default function OrgDashboardPage({
     }
   };
 
-  const fetchPasswords = useCallback(() => {
+  const fetchPasswords = useCallback(async () => {
     setLoading(true);
-    const params = new URLSearchParams();
-    if (activeTagId) params.set("tag", activeTagId);
-    if (activeFolderId) params.set("folder", activeFolderId);
-    if (activeEntryType) params.set("type", activeEntryType);
-    if (isOrgFavorites) params.set("favorites", "true");
-    const qs = params.toString();
-    const url = `${apiPath.orgPasswords(orgId)}${qs ? `?${qs}` : ""}`;
-    fetch(url)
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) setPasswords(data);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [orgId, activeTagId, activeFolderId, activeEntryType, isOrgFavorites]);
+    try {
+      const params = new URLSearchParams();
+      if (activeTagId) params.set("tag", activeTagId);
+      if (activeFolderId) params.set("folder", activeFolderId);
+      if (activeEntryType) params.set("type", activeEntryType);
+      if (isOrgFavorites) params.set("favorites", "true");
+      const qs = params.toString();
+      const url = `${apiPath.orgPasswords(orgId)}${qs ? `?${qs}` : ""}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!Array.isArray(data)) return;
+
+      const orgKey = await getOrgEncryptionKey(orgId);
+      if (!orgKey) {
+        setKeyPending(true);
+        setPasswords([]);
+        return;
+      }
+      setKeyPending(false);
+
+      const decrypted = await Promise.all(
+        data.map(async (entry: Record<string, unknown>) => {
+          try {
+            const aad = buildOrgEntryAAD(orgId, entry.id as string, "overview");
+            const json = await decryptData(
+              {
+                ciphertext: entry.encryptedOverview as string,
+                iv: entry.overviewIv as string,
+                authTag: entry.overviewAuthTag as string,
+              },
+              orgKey,
+              aad,
+            );
+            const overview = JSON.parse(json);
+            return {
+              id: entry.id,
+              entryType: entry.entryType,
+              title: overview.title ?? "",
+              username: overview.username ?? null,
+              urlHost: overview.urlHost ?? null,
+              snippet: overview.snippet ?? null,
+              brand: overview.brand ?? null,
+              lastFour: overview.lastFour ?? null,
+              cardholderName: overview.cardholderName ?? null,
+              fullName: overview.fullName ?? null,
+              idNumberLast4: overview.idNumberLast4 ?? null,
+              relyingPartyId: overview.relyingPartyId ?? null,
+              isFavorite: entry.isFavorite,
+              isArchived: entry.isArchived,
+              tags: entry.tags,
+              createdBy: entry.createdBy,
+              updatedBy: entry.updatedBy,
+              createdAt: entry.createdAt,
+              updatedAt: entry.updatedAt,
+            } as OrgPasswordEntry;
+          } catch {
+            return {
+              id: entry.id as string,
+              entryType: (entry.entryType ?? ENTRY_TYPE.LOGIN) as EntryTypeValue,
+              title: "(decryption failed)",
+              username: null,
+              urlHost: null,
+              snippet: null,
+              brand: null,
+              lastFour: null,
+              cardholderName: null,
+              fullName: null,
+              idNumberLast4: null,
+              relyingPartyId: null,
+              isFavorite: entry.isFavorite as boolean,
+              isArchived: entry.isArchived as boolean,
+              tags: (entry.tags ?? []) as OrgPasswordEntry["tags"],
+              createdBy: entry.createdBy as OrgPasswordEntry["createdBy"],
+              updatedBy: entry.updatedBy as OrgPasswordEntry["updatedBy"],
+              createdAt: entry.createdAt as string,
+              updatedAt: entry.updatedAt as string,
+            } as OrgPasswordEntry;
+          }
+        }),
+      );
+      setPasswords(decrypted);
+    } catch {
+      // network error
+    } finally {
+      setLoading(false);
+    }
+  }, [orgId, activeTagId, activeFolderId, activeEntryType, isOrgFavorites, getOrgEncryptionKey]);
 
   useEffect(() => {
     setLoadError(false);
@@ -271,12 +348,65 @@ export default function OrgDashboardPage({
     }
   };
 
+  const decryptFullBlob = useCallback(
+    async (id: string, raw: Record<string, unknown>) => {
+      const orgKey = await getOrgEncryptionKey(orgId);
+      if (!orgKey) throw new Error("No org key");
+      const aad = buildOrgEntryAAD(orgId, id, "blob");
+      const json = await decryptData(
+        {
+          ciphertext: raw.encryptedBlob as string,
+          iv: raw.blobIv as string,
+          authTag: raw.blobAuthTag as string,
+        },
+        orgKey,
+        aad,
+      );
+      return JSON.parse(json) as Record<string, unknown>;
+    },
+    [orgId, getOrgEncryptionKey],
+  );
+
   const handleEdit = async (id: string) => {
     try {
       const res = await fetch(apiPath.orgPasswordById(orgId, id));
       if (!res.ok) throw new Error("Failed");
-      const data = await res.json();
-      setEditData(data);
+      const raw = await res.json();
+      const blob = await decryptFullBlob(id, raw);
+      setEditData({
+        id: raw.id,
+        entryType: raw.entryType,
+        title: (blob.title as string) ?? "",
+        username: (blob.username as string) ?? null,
+        password: (blob.password as string) ?? "",
+        content: blob.content as string | undefined,
+        url: (blob.url as string) ?? null,
+        notes: (blob.notes as string) ?? null,
+        tags: raw.tags,
+        customFields: blob.customFields as EntryCustomField[] | undefined,
+        totp: blob.totp as EntryTotp | null | undefined,
+        cardholderName: blob.cardholderName as string | null | undefined,
+        cardNumber: blob.cardNumber as string | null | undefined,
+        brand: blob.brand as string | null | undefined,
+        expiryMonth: blob.expiryMonth as string | null | undefined,
+        expiryYear: blob.expiryYear as string | null | undefined,
+        cvv: blob.cvv as string | null | undefined,
+        fullName: blob.fullName as string | null | undefined,
+        address: blob.address as string | null | undefined,
+        phone: blob.phone as string | null | undefined,
+        email: blob.email as string | null | undefined,
+        dateOfBirth: blob.dateOfBirth as string | null | undefined,
+        nationality: blob.nationality as string | null | undefined,
+        idNumber: blob.idNumber as string | null | undefined,
+        issueDate: blob.issueDate as string | null | undefined,
+        expiryDate: blob.expiryDate as string | null | undefined,
+        relyingPartyId: blob.relyingPartyId as string | null | undefined,
+        relyingPartyName: blob.relyingPartyName as string | null | undefined,
+        credentialId: blob.credentialId as string | null | undefined,
+        creationDate: blob.creationDate as string | null | undefined,
+        deviceInfo: blob.deviceInfo as string | null | undefined,
+        orgFolderId: (raw.orgFolderId as string) ?? null,
+      });
       setFormOpen(true);
     } catch {
       toast.error(t("networkError"));
@@ -287,64 +417,67 @@ export default function OrgDashboardPage({
     (id: string, eType?: EntryTypeValue) => async (): Promise<InlineDetailData> => {
       const res = await fetch(apiPath.orgPasswordById(orgId, id));
       if (!res.ok) throw new Error("Failed");
-      const data = await res.json();
+      const raw = await res.json();
+      const blob = await decryptFullBlob(id, raw);
       return {
-        id: data.id,
+        id: raw.id,
         entryType: eType,
-        password: data.password ?? "",
-        content: data.content,
-        url: data.url ?? null,
+        password: (blob.password as string) ?? "",
+        content: blob.content as string | undefined,
+        url: (blob.url as string) ?? null,
         urlHost: null,
-        notes: data.notes ?? null,
-        customFields: data.customFields ?? [],
+        notes: (blob.notes as string) ?? null,
+        customFields: (blob.customFields as EntryCustomField[]) ?? [],
         passwordHistory: [],
-        totp: data.totp ?? undefined,
-        cardholderName: data.cardholderName ?? undefined,
-        cardNumber: data.cardNumber ?? undefined,
-        brand: data.brand ?? undefined,
-        expiryMonth: data.expiryMonth ?? undefined,
-        expiryYear: data.expiryYear ?? undefined,
-        cvv: data.cvv ?? undefined,
-        fullName: data.fullName ?? undefined,
-        address: data.address ?? undefined,
-        phone: data.phone ?? undefined,
-        email: data.email ?? undefined,
-        dateOfBirth: data.dateOfBirth ?? undefined,
-        nationality: data.nationality ?? undefined,
-        idNumber: data.idNumber ?? undefined,
-        issueDate: data.issueDate ?? undefined,
-        expiryDate: data.expiryDate ?? undefined,
-        relyingPartyId: data.relyingPartyId ?? undefined,
-        relyingPartyName: data.relyingPartyName ?? undefined,
-        username: data.username ?? undefined,
-        credentialId: data.credentialId ?? undefined,
-        creationDate: data.creationDate ?? undefined,
-        deviceInfo: data.deviceInfo ?? undefined,
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
+        totp: blob.totp as EntryTotp | undefined,
+        cardholderName: blob.cardholderName as string | undefined,
+        cardNumber: blob.cardNumber as string | undefined,
+        brand: blob.brand as string | undefined,
+        expiryMonth: blob.expiryMonth as string | undefined,
+        expiryYear: blob.expiryYear as string | undefined,
+        cvv: blob.cvv as string | undefined,
+        fullName: blob.fullName as string | undefined,
+        address: blob.address as string | undefined,
+        phone: blob.phone as string | undefined,
+        email: blob.email as string | undefined,
+        dateOfBirth: blob.dateOfBirth as string | undefined,
+        nationality: blob.nationality as string | undefined,
+        idNumber: blob.idNumber as string | undefined,
+        issueDate: blob.issueDate as string | undefined,
+        expiryDate: blob.expiryDate as string | undefined,
+        relyingPartyId: blob.relyingPartyId as string | undefined,
+        relyingPartyName: blob.relyingPartyName as string | undefined,
+        username: blob.username as string | undefined,
+        credentialId: blob.credentialId as string | undefined,
+        creationDate: blob.creationDate as string | undefined,
+        deviceInfo: blob.deviceInfo as string | undefined,
+        createdAt: raw.createdAt,
+        updatedAt: raw.updatedAt,
       };
     },
-    [orgId]
+    [orgId, decryptFullBlob],
   );
 
   const createPasswordFetcher = useCallback(
     (id: string) => async (): Promise<string> => {
       const res = await fetch(apiPath.orgPasswordById(orgId, id));
       if (!res.ok) throw new Error("Failed");
-      const data = await res.json();
-      return data.password ?? data.content ?? "";
+      const raw = await res.json();
+      const blob = await decryptFullBlob(id, raw);
+      return (blob.password as string) ?? (blob.content as string) ?? "";
     },
-    [orgId]
+    [orgId, decryptFullBlob],
   );
 
   const createUrlFetcher = useCallback(
     (id: string) => async (): Promise<string | null> => {
       const res = await fetch(apiPath.orgPasswordById(orgId, id));
       if (!res.ok) throw new Error("Failed");
-      const data = await res.json();
-      return data.url;
+      const raw = await res.json();
+      const blob = await decryptFullBlob(id, raw);
+      return (blob.url as string) ?? null;
     },
-    [orgId]
+    [orgId, decryptFullBlob],
   );
 
   const filtered = passwords.filter((p) => {
@@ -463,6 +596,22 @@ export default function OrgDashboardPage({
             }}
           />
         </div>
+
+        {keyPending && !isOrgSpecialView && (
+          <Card className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+            <div className="flex items-start gap-3">
+              <Clock className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
+              <div>
+                <p className="font-medium text-amber-800 dark:text-amber-300">
+                  {t("keyPendingTitle")}
+                </p>
+                <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">
+                  {t("keyPendingDesc")}
+                </p>
+              </div>
+            </div>
+          </Card>
+        )}
 
         {isOrgArchive ? (
           <OrgArchivedList

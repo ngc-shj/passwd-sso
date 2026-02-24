@@ -33,9 +33,9 @@
 | 2.1 | 必須 | 環境変数バリデーション | 対応済み | Zod スキーマで起動時に 26 変数を一括検証 (`src/lib/env.ts` + `instrumentation.ts`)。PR #17 |
 | 2.2 | 必須 | アカウントロックアウト | 対応済み | DB 永続の段階的ロックアウト (5回→15分, 10回→1h, 15回→24h) + 24h 観測ウィンドウ + 監査ログ (`VAULT_UNLOCK_FAILED` / `VAULT_LOCKOUT_TRIGGERED`)。既存 rate limiter と併用。管理者通知は監査ログ/運用ログ出力まで (CloudWatch Alarm 自動化は次フェーズ)。PR #24 |
 | 2.3 | 必須 | パスフレーズリカバリフロー | 対応済み | 回復キー (256-bit, HKDF+AES-256-GCM) による secretKey 復元 + 新パスフレーズ設定。Vault Reset (全データ削除) を最終手段として提供。未生成時はバナーで促進 (24h 後に再表示)。監査ログ 4 種。CSRF 防御 (Origin 検証) + Rate limit 付き。PR #25 |
-| 2.4 | 強く推奨 | CORS 設定の明示 | 対応済み | Same-origin only ポリシーを明示実装。OPTIONS preflight 204 応答 + `applyCorsHeaders()` で全 API return 経路にヘッダー付与。`Vary: Origin` + case-insensitive 重複排除。Extension は Service Worker + Bearer Token で CORS 迂回。docs/cors-policy.md に運用方針を文書化。#46, PR #57 |
+| 2.4 | 強く推奨 | CORS 設定の明示 | 対応済み | Same-origin only ポリシーを明示実装。OPTIONS preflight 204 応答 + `applyCorsHeaders()` で全 API return 経路にヘッダー付与。`Vary: Origin` + case-insensitive 重複排除。Extension は Service Worker + Bearer Token で CORS 迂回。`../security/cors-policy.md` に運用方針を文書化。#46, PR #57 |
 | 2.5 | 強く推奨 | 並行セッション管理 | 未着手 | セッション一覧表示、リモートログアウト、新規ログイン通知 |
-| 2.6 | 強く推奨 | 鍵素材メモリ管理の文書化 | 一部対応 | security-review.md に記載あり。Web Crypto API 制約下でのリスク受容判断をユーザー向けにも公開 |
+| 2.6 | 強く推奨 | 鍵素材メモリ管理の文書化 | 一部対応 | `../security/security-review.md` に記載あり。Web Crypto API 制約下でのリスク受容判断をユーザー向けにも公開 |
 | 2.7 | 推奨 | セキュリティ第三者監査 | 未着手 | 暗号実装の外部レビュー (NCC Group, Cure53 等) |
 
 ---
@@ -46,7 +46,7 @@
 |---|--------|------|------|------|
 | 3.1 | 必須 | バックアップ・リカバリ戦略 | 対応済み | AWS Backup Vault Lock (WORM/Compliance) + S3 Object Lock + クロスリージョンコピー + EventBridge 失敗通知。RPO 1h / RTO 2h。PR #23 |
 | 3.2 | 強く推奨 | DB コネクションプール設定 | 対応済み | pg.Pool を環境変数で設定可能化 (max / connectionTimeoutMillis / idleTimeoutMillis / maxLifetimeSeconds / statement_timeout)。envInt() で厳密パース + 範囲ガード (production fail-fast)。pool.on("error") + SIGTERM graceful shutdown。CloudWatch RDS DatabaseConnections アラーム追加。#48 |
-| 3.3 | 強く推奨 | マイグレーション戦略の分離 | 対応済み | ECS one-off タスク定義 (Fargate RunTask) でマイグレーションをアプリ起動から完全分離。deploy.sh で migrate → 成功確認 → app 更新の順序を保証。docker-compose は profiles 分離。docs/deployment.md。#47 |
+| 3.3 | 強く推奨 | マイグレーション戦略の分離 | 対応済み | ECS one-off タスク定義 (Fargate RunTask) でマイグレーションをアプリ起動から完全分離。deploy.sh で migrate → 成功確認 → app 更新の順序を保証。docker-compose は profiles 分離。`../operations/deployment.md`。#47 |
 | 3.4 | 推奨 | Redis 高可用性 | 未着手 | 現行は単一 Redis。Redis Sentinel / ElastiCache 等によるフェイルオーバー |
 
 ---
@@ -67,7 +67,7 @@
 | # | 優先度 | 項目 | 状態 | 備考 |
 |---|--------|------|------|------|
 | 5.1 | 必須 | プライバシーポリシー・利用規約 | 未着手 | 個人情報保護法 (日本)、GDPR 対応。データ処理契約 (DPA) |
-| 5.2 | 強く推奨 | 依存パッケージのライセンス監査 | 対応済み | CI strict モード (`--strict`) で未レビュー・期限切れを fail。allowlist JSON (11 必須フィールド) で例外管理。ポリシー文書: `docs/license-policy.md` |
+| 5.2 | 強く推奨 | 依存パッケージのライセンス監査 | 対応済み | CI strict モード (`--strict`) で未レビュー・期限切れを fail。allowlist JSON (11 必須フィールド) で例外管理。ポリシー文書: `../security/license-policy.md` |
 | 5.3 | 強く推奨 | インシデント対応手順書 | 未着手 | 脆弱性発見時のエスカレーション、パッチ適用、ユーザー通知フロー |
 | 5.4 | 推奨 | SOC 2 / ISMAP 等の認証取得 | 未着手 | 長期目標。日本市場向けには ISMAP が有効 |
 
@@ -80,7 +80,7 @@
 - 暗号設計: PBKDF2 600k + HKDF ドメイン分離 + AAD バインディング
 - 型安全性: `any` 型 0 件、`as any` 1 件、`@ts-ignore` 0 件、`strict: true`
 - テスト比率: アプリ 38,646 行に対しテスト 20,280 行 (約 52%、119 ファイル / 1,152 テスト)
-- セキュリティレビュー: security-review.md 全 6 セクション PASS
+- セキュリティレビュー: `../security/security-review.md` 全 6 セクション PASS
 - CSP + nonce 制御 + violation reporting
 - レートリミット (Redis + インメモリフォールバック)
 - i18n (en/ja 884 キー完全一致、APP_NAME 環境変数対応)

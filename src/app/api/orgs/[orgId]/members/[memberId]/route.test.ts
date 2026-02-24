@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgMember, mockRequireOrgPermission, mockIsRoleAbove, OrgAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgMember, mockPrismaOrgMemberKey, mockTransaction, mockRequireOrgPermission, mockIsRoleAbove, OrgAuthError } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -17,6 +17,10 @@ const { mockAuth, mockPrismaOrgMember, mockRequireOrgPermission, mockIsRoleAbove
       update: vi.fn(),
       delete: vi.fn(),
     },
+    mockPrismaOrgMemberKey: {
+      deleteMany: vi.fn(),
+    },
+    mockTransaction: vi.fn(),
     mockRequireOrgPermission: vi.fn(),
     mockIsRoleAbove: vi.fn(),
     OrgAuthError: _OrgAuthError,
@@ -25,7 +29,12 @@ const { mockAuth, mockPrismaOrgMember, mockRequireOrgPermission, mockIsRoleAbove
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { orgMember: mockPrismaOrgMember, auditLog: { create: vi.fn().mockResolvedValue({}) } },
+  prisma: {
+    orgMember: mockPrismaOrgMember,
+    orgMemberKey: mockPrismaOrgMemberKey,
+    $transaction: mockTransaction,
+    auditLog: { create: vi.fn().mockResolvedValue({}) },
+  },
 }));
 vi.mock("@/lib/org-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,
@@ -318,13 +327,14 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
     expect(res.status).toBe(403);
   });
 
-  it("removes member successfully", async () => {
+  it("removes member successfully and deletes OrgMemberKeys", async () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
       orgId: ORG_ID,
+      userId: "target-user",
       role: ORG_ROLE.MEMBER,
     });
-    mockPrismaOrgMember.delete.mockResolvedValue({});
+    mockTransaction.mockResolvedValue([]);
 
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`),
@@ -333,5 +343,9 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
+    expect(mockTransaction).toHaveBeenCalledWith([
+      mockPrismaOrgMemberKey.deleteMany({ where: { orgId: ORG_ID, userId: "target-user" } }),
+      mockPrismaOrgMember.delete({ where: { id: MEMBER_ID } }),
+    ]);
   });
 });

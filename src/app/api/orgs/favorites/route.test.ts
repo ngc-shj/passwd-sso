@@ -1,11 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockAuth, mockPrismaOrgMember, mockPrismaOrgPasswordFavorite, mockUnwrapOrgKey, mockDecryptServerData, mockHasOrgPermission } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaOrgMember, mockPrismaOrgPasswordFavorite, mockHasOrgPermission } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaOrgMember: { findMany: vi.fn() },
   mockPrismaOrgPasswordFavorite: { findMany: vi.fn() },
-  mockUnwrapOrgKey: vi.fn(),
-  mockDecryptServerData: vi.fn(),
   mockHasOrgPermission: vi.fn(),
 }));
 
@@ -15,10 +13,6 @@ vi.mock("@/lib/prisma", () => ({
     orgMember: mockPrismaOrgMember,
     orgPasswordFavorite: mockPrismaOrgPasswordFavorite,
   },
-}));
-vi.mock("@/lib/crypto-server", () => ({
-  unwrapOrgKey: mockUnwrapOrgKey,
-  decryptServerData: mockDecryptServerData,
 }));
 vi.mock("@/lib/org-auth", () => ({
   hasOrgPermission: mockHasOrgPermission,
@@ -32,7 +26,6 @@ describe("GET /api/orgs/favorites", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockHasOrgPermission.mockReturnValue(true);
-    mockUnwrapOrgKey.mockReturnValue(Buffer.alloc(32));
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -49,7 +42,7 @@ describe("GET /api/orgs/favorites", () => {
     expect(json).toEqual([]);
   });
 
-  it("returns favorited entries with decrypted overviews and entryType", async () => {
+  it("returns favorited entries with encrypted overviews (E2E mode)", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
     mockPrismaOrgMember.findMany.mockResolvedValue([
       { orgId: "org-1", role: ORG_ROLE.MEMBER },
@@ -63,9 +56,11 @@ describe("GET /api/orgs/favorites", () => {
           deletedAt: null,
           isArchived: false,
           encryptedOverview: "cipher",
-          overviewIv: "iv",
-          overviewAuthTag: "tag",
-          org: { id: "org-1", name: "My Org", encryptedOrgKey: "ek", orgKeyIv: "iv", orgKeyAuthTag: "tag", masterKeyVersion: 1 },
+          overviewIv: "a".repeat(24),
+          overviewAuthTag: "b".repeat(32),
+          aadVersion: 1,
+          orgKeyVersion: 1,
+          org: { id: "org-1", name: "My Org" },
           tags: [],
           createdBy: { id: "u1", name: "User", image: null },
           updatedBy: { id: "u1", name: "User" },
@@ -74,16 +69,73 @@ describe("GET /api/orgs/favorites", () => {
         },
       },
     ]);
-    mockDecryptServerData.mockReturnValue(
-      JSON.stringify({ title: "Fav PW", username: "admin", urlHost: "example.com" })
-    );
 
     const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
-    expect(json[0].title).toBe("Fav PW");
+    // E2E mode: encrypted fields returned as-is for client decryption
+    expect(json[0].encryptedOverview).toBe("cipher");
+    expect(json[0].overviewIv).toBe("a".repeat(24));
+    expect(json[0].overviewAuthTag).toBe("b".repeat(32));
+    expect(json[0].aadVersion).toBe(1);
+    expect(json[0].orgKeyVersion).toBe(1);
     expect(json[0].entryType).toBe(ENTRY_TYPE.LOGIN);
     expect(json[0].isFavorite).toBe(true);
+    // No decrypted title/username fields
+    expect(json[0].title).toBeUndefined();
+  });
+
+  it("filters out deleted and archived entries", async () => {
+    const now = new Date("2025-01-01T00:00:00Z");
+    mockPrismaOrgMember.findMany.mockResolvedValue([
+      { orgId: "org-1", role: ORG_ROLE.MEMBER },
+    ]);
+    mockPrismaOrgPasswordFavorite.findMany.mockResolvedValue([
+      {
+        orgPasswordEntry: {
+          id: "pw-del",
+          orgId: "org-1",
+          entryType: ENTRY_TYPE.LOGIN,
+          deletedAt: now,
+          isArchived: false,
+          encryptedOverview: "c",
+          overviewIv: "a".repeat(24),
+          overviewAuthTag: "b".repeat(32),
+          aadVersion: 1,
+          orgKeyVersion: 1,
+          org: { id: "org-1", name: "My Org" },
+          tags: [],
+          createdBy: { id: "u1", name: "User", image: null },
+          updatedBy: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      {
+        orgPasswordEntry: {
+          id: "pw-arch",
+          orgId: "org-1",
+          entryType: ENTRY_TYPE.LOGIN,
+          deletedAt: null,
+          isArchived: true,
+          encryptedOverview: "c",
+          overviewIv: "a".repeat(24),
+          overviewAuthTag: "b".repeat(32),
+          aadVersion: 1,
+          orgKeyVersion: 1,
+          org: { id: "org-1", name: "My Org" },
+          tags: [],
+          createdBy: { id: "u1", name: "User", image: null },
+          updatedBy: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+    ]);
+
+    const res = await GET();
+    const json = await res.json();
+    expect(json).toEqual([]);
   });
 });

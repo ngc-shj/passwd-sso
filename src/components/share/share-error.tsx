@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { ShieldX, ShieldAlert, Clock, Eye, LinkIcon } from "lucide-react";
+import { ShieldX, ShieldAlert, Clock, Eye, LinkIcon, KeyRound } from "lucide-react";
 import { Card } from "@/components/ui/card";
 
 const ICONS: Record<string, React.ReactNode> = {
@@ -10,6 +10,8 @@ const ICONS: Record<string, React.ReactNode> = {
   revoked: <ShieldX className="h-10 w-10 text-muted-foreground" />,
   maxViews: <Eye className="h-10 w-10 text-muted-foreground" />,
   rateLimited: <ShieldAlert className="h-10 w-10 text-muted-foreground" />,
+  missingKey: <KeyRound className="h-10 w-10 text-muted-foreground" />,
+  decryptFailed: <KeyRound className="h-10 w-10 text-muted-foreground" />,
 };
 
 export function ShareError({ reason }: { reason: string }) {

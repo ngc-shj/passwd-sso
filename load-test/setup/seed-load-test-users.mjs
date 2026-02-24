@@ -12,8 +12,8 @@
  *   DATABASE_URL             - PostgreSQL connection string
  *   ALLOW_LOAD_TEST_SEED=true     - Explicit opt-in required
  *   ALLOW_NON_TEST_DBNAME=true    - Override dbname pattern check (e.g. dev DB named "passwd_sso")
- *   VERIFIER_PEPPER_KEY           - 64-char hex for HMAC verifier (or ORG_MASTER_KEY for dev fallback)
- *   ORG_MASTER_KEY                - 64-char hex master key (for dev verifier pepper derivation)
+ *   VERIFIER_PEPPER_KEY           - 64-char hex for HMAC verifier (or SHARE_MASTER_KEY for dev fallback)
+ *   SHARE_MASTER_KEY                - 64-char hex master key (for dev verifier pepper derivation)
  *   BASE_URL                      - App base URL for smoke check (default: http://localhost:3000)
  *
  * Safety guards (all three must pass):
@@ -177,12 +177,12 @@ function getVerifierPepper() {
   if (pepperHex && /^[0-9a-f]{64}$/.test(pepperHex.toLowerCase())) {
     return Buffer.from(pepperHex, "hex");
   }
-  // Dev fallback: derive from ORG_MASTER_KEY
-  const masterHex = process.env.ORG_MASTER_KEY;
+  // Dev fallback: derive from SHARE_MASTER_KEY
+  const masterHex = process.env.SHARE_MASTER_KEY;
   if (masterHex && masterHex.length === 64) {
     return createHash("sha256").update("verifier-pepper:").update(Buffer.from(masterHex, "hex")).digest();
   }
-  throw new Error("VERIFIER_PEPPER_KEY or ORG_MASTER_KEY required for verifier HMAC");
+  throw new Error("VERIFIER_PEPPER_KEY or SHARE_MASTER_KEY required for verifier HMAC");
 }
 
 function hmacVerifier(verifierHashHex) {
