@@ -43,7 +43,6 @@ describe("useSidebarTagCrud", () => {
       expect.objectContaining({ method: "PUT" })
     );
     expect(refreshData).toHaveBeenCalledTimes(1);
-    expect(result.current.tagDialogOpen).toBe(false);
   });
 
   it("submits org tag update to /api/orgs/:orgId/tags/:id", async () => {

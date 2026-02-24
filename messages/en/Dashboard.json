@@ -41,6 +41,7 @@
   "createFolder": "New Folder",
   "editFolder": "Edit Folder",
   "deleteFolder": "Delete Folder",
+  "createTag": "New Tag",
   "editTag": "Edit Tag",
   "deleteTag": "Delete Tag",
   "folderName": "Folder Name",

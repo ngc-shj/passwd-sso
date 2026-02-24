@@ -27,6 +27,7 @@ export function TagDialog({ open, onOpenChange, editTag, onSubmit }: TagDialogPr
   const [color, setColor] = useState("#4f46e5");
   const [colorChanged, setColorChanged] = useState(false);
   const [loading, setLoading] = useState(false);
+  const isEdit = !!editTag;
 
   useEffect(() => {
     if (!open) return;
@@ -47,6 +48,10 @@ export function TagDialog({ open, onOpenChange, editTag, onSubmit }: TagDialogPr
     setLoading(true);
     try {
       await onSubmit({ name: name.trim(), color: normalizedColor });
+      onOpenChange(false);
+    } catch {
+      // Error already handled by caller (e.g. toast in sidebar).
+      // Dialog stays open so the user can correct input.
     } finally {
       setLoading(false);
     }
@@ -56,7 +61,7 @@ export function TagDialog({ open, onOpenChange, editTag, onSubmit }: TagDialogPr
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("editTag")}</DialogTitle>
+          <DialogTitle>{isEdit ? t("editTag") : t("createTag")}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
@@ -96,7 +101,7 @@ export function TagDialog({ open, onOpenChange, editTag, onSubmit }: TagDialogPr
             {tCommon("cancel")}
           </Button>
           <Button onClick={handleSubmit} disabled={!name.trim() || loading}>
-            {tCommon("save")}
+            {isEdit ? tCommon("save") : tCommon("create")}
           </Button>
         </DialogFooter>
       </DialogContent>

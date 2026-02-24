@@ -25,6 +25,7 @@ import {
   CreditCard,
   IdCard,
   Fingerprint,
+  FolderOpen,
   Plus,
   Link as LinkIcon,
   ScrollText,
@@ -133,6 +134,7 @@ interface OrganizeSectionProps {
   onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
   canCreateFolder: boolean;
+  canCreateTag: boolean;
   folders: SidebarFolderItem[];
   activeFolderId: string | null;
   linkHref: (folderId: string) => string;
@@ -141,6 +143,7 @@ interface OrganizeSectionProps {
   activeTagId: string | null;
   tagHref: (tagId: string) => string;
   onCreateFolder: () => void;
+  onCreateTag: () => void;
   onEditFolder: (folder: SidebarFolderItem) => void;
   onDeleteFolder: (folder: SidebarFolderItem) => void;
   onEditTag: (tag: SidebarOrganizeTagItem) => void;
@@ -154,6 +157,7 @@ export function OrganizeSection({
   onOpenChange,
   t,
   canCreateFolder,
+  canCreateTag,
   folders,
   activeFolderId,
   linkHref,
@@ -162,6 +166,7 @@ export function OrganizeSection({
   activeTagId,
   tagHref,
   onCreateFolder,
+  onCreateTag,
   onEditFolder,
   onDeleteFolder,
   onEditTag,
@@ -177,16 +182,28 @@ export function OrganizeSection({
             {t("organize")}
           </CollapsibleSectionHeader>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 shrink-0 mr-1"
-          onClick={onCreateFolder}
-          disabled={!canCreateFolder}
-          aria-label={t("createFolder")}
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 shrink-0 mr-1"
+              disabled={!canCreateFolder && !canCreateTag}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={onCreateFolder} disabled={!canCreateFolder}>
+              <FolderOpen className="h-3.5 w-3.5 mr-2" />
+              {t("createFolder")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onCreateTag} disabled={!canCreateTag}>
+              <Tag className="h-3.5 w-3.5 mr-2" />
+              {t("createTag")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <CollapsibleContent>
         <div className="space-y-1 mb-2">
