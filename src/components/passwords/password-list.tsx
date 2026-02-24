@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useImperativeHandle } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
@@ -69,6 +69,11 @@ interface DisplayEntry {
 
 export type SortOption = EntrySortOption;
 
+export interface PasswordListHandle {
+  toggleSelectAll: (checked: boolean) => void;
+  allSelected: boolean;
+}
+
 interface PasswordListProps {
   searchQuery: string;
   tagId: string | null;
@@ -79,6 +84,9 @@ interface PasswordListProps {
   archivedOnly?: boolean;
   sortBy?: SortOption;
   onDataChange?: () => void;
+  selectionMode?: boolean;
+  onSelectedCountChange?: (count: number, allSelected: boolean) => void;
+  selectAllRef?: React.Ref<PasswordListHandle>;
 }
 
 
@@ -92,6 +100,9 @@ export function PasswordList({
   archivedOnly = false,
   sortBy = "updatedAt",
   onDataChange,
+  selectionMode = false,
+  onSelectedCountChange,
+  selectAllRef,
 }: PasswordListProps) {
   const t = useTranslations("PasswordList");
   const { encryptionKey, userId } = useVault();
@@ -202,6 +213,24 @@ export function PasswordList({
     });
   }, [entries]);
 
+  // Reset selection when leaving selection mode
+  useEffect(() => {
+    if (!selectionMode) setSelectedIds(new Set());
+  }, [selectionMode]);
+
+  // Sync selected count to parent
+  useEffect(() => {
+    onSelectedCountChange?.(selectedIds.size, entries.length > 0 && selectedIds.size === entries.length);
+  }, [selectedIds.size, entries.length, onSelectedCountChange]);
+
+  // Expose selectAll to parent via imperative handle
+  useImperativeHandle(selectAllRef, () => ({
+    toggleSelectAll: (checked: boolean) => {
+      setSelectedIds(toggleSelectAllIds(entries.map((e) => e.id), checked));
+    },
+    allSelected: entries.length > 0 && selectedIds.size === entries.length,
+  }), [entries, selectedIds]);
+
   const handleToggleFavorite = async (id: string, current: boolean) => {
     // Optimistic update
     setEntries((prev) =>
@@ -250,12 +279,6 @@ export function PasswordList({
       fetchPasswords();
     }
     onDataChange?.();
-  };
-
-  const allSelected = entries.length > 0 && selectedIds.size === entries.length;
-
-  const toggleSelectAll = (checked: boolean) => {
-    setSelectedIds(toggleSelectAllIds(entries.map((e) => e.id), checked));
   };
 
   const toggleSelectOne = (id: string, checked: boolean) => {
@@ -357,26 +380,76 @@ export function PasswordList({
 
   return (
     <div className="space-y-2">
-      {selectedIds.size > 0 && (
-        <div className="sticky top-4 z-40 mb-2 flex items-center justify-between rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <div className="flex items-center gap-3">
+      {entries.map((entry) => (
+        selectionMode ? (
+          <div key={entry.id} className="flex items-start gap-2">
             <Checkbox
-              checked={allSelected}
-              onCheckedChange={(v) => toggleSelectAll(Boolean(v))}
-              aria-label={t("selectAll")}
+              className="mt-4"
+              checked={selectedIds.has(entry.id)}
+              onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
+              aria-label={t("selectEntry", { title: entry.title })}
             />
-            <span className="text-sm text-muted-foreground">
-              {t("selectedCount", { count: selectedIds.size })}
-            </span>
+            <div className="flex-1 min-w-0">
+              <PasswordCard
+                id={entry.id}
+                entryType={entry.entryType}
+                title={entry.title}
+                username={entry.username}
+                urlHost={entry.urlHost}
+                snippet={entry.snippet}
+                brand={entry.brand}
+                lastFour={entry.lastFour}
+                cardholderName={entry.cardholderName}
+                fullName={entry.fullName}
+                idNumberLast4={entry.idNumberLast4}
+                relyingPartyId={entry.relyingPartyId}
+                tags={entry.tags}
+                isFavorite={entry.isFavorite}
+                isArchived={entry.isArchived}
+                requireReprompt={entry.requireReprompt}
+                expiresAt={entry.expiresAt}
+                expanded={expandedId === entry.id}
+                onToggleFavorite={handleToggleFavorite}
+                onToggleArchive={handleToggleArchive}
+                onDelete={handleDelete}
+                onToggleExpand={handleToggleExpand}
+                onRefresh={() => { fetchPasswords(); onDataChange?.(); }}
+              />
+            </div>
           </div>
+        ) : (
+          <PasswordCard
+            key={entry.id}
+            id={entry.id}
+            entryType={entry.entryType}
+            title={entry.title}
+            username={entry.username}
+            urlHost={entry.urlHost}
+            snippet={entry.snippet}
+            brand={entry.brand}
+            lastFour={entry.lastFour}
+            cardholderName={entry.cardholderName}
+            fullName={entry.fullName}
+            idNumberLast4={entry.idNumberLast4}
+            relyingPartyId={entry.relyingPartyId}
+            tags={entry.tags}
+            isFavorite={entry.isFavorite}
+            isArchived={entry.isArchived}
+            requireReprompt={entry.requireReprompt}
+            expiresAt={entry.expiresAt}
+            expanded={expandedId === entry.id}
+            onToggleFavorite={handleToggleFavorite}
+            onToggleArchive={handleToggleArchive}
+            onDelete={handleDelete}
+            onToggleExpand={handleToggleExpand}
+            onRefresh={() => { fetchPasswords(); onDataChange?.(); }}
+          />
+        )
+      ))}
+
+      {selectionMode && selectedIds.size > 0 && (
+        <div className="sticky bottom-4 z-40 mt-2 flex items-center justify-end rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSelectedIds(new Set())}
-            >
-              {t("clearSelection")}
-            </Button>
             {archivedOnly ? (
               <Button
                 variant="secondary"
@@ -413,44 +486,6 @@ export function PasswordList({
           </div>
         </div>
       )}
-
-      {entries.map((entry) => (
-        <div key={entry.id} className="flex items-start gap-2">
-          <Checkbox
-            className="mt-4"
-            checked={selectedIds.has(entry.id)}
-            onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
-            aria-label={t("selectEntry", { title: entry.title })}
-          />
-          <div className="flex-1 min-w-0">
-            <PasswordCard
-              id={entry.id}
-              entryType={entry.entryType}
-              title={entry.title}
-              username={entry.username}
-              urlHost={entry.urlHost}
-              snippet={entry.snippet}
-              brand={entry.brand}
-              lastFour={entry.lastFour}
-              cardholderName={entry.cardholderName}
-              fullName={entry.fullName}
-              idNumberLast4={entry.idNumberLast4}
-              relyingPartyId={entry.relyingPartyId}
-              tags={entry.tags}
-              isFavorite={entry.isFavorite}
-              isArchived={entry.isArchived}
-              requireReprompt={entry.requireReprompt}
-              expiresAt={entry.expiresAt}
-              expanded={expandedId === entry.id}
-              onToggleFavorite={handleToggleFavorite}
-              onToggleArchive={handleToggleArchive}
-              onDelete={handleDelete}
-              onToggleExpand={handleToggleExpand}
-              onRefresh={() => { fetchPasswords(); onDataChange?.(); }}
-            />
-          </div>
-        </div>
-      ))}
 
       <AlertDialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
         <AlertDialogContent>

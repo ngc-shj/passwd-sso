@@ -214,7 +214,7 @@ export function OrganizeSection({
               <div key={tag.id} className="group/tag flex items-center">
                 <Button
                   variant={activeTagId === tag.id ? "secondary" : "ghost"}
-                  className="flex-1 justify-start gap-2"
+                  className="flex-1 justify-start gap-2 min-w-0"
                   asChild
                 >
                   <Link href={tagHref(tag.id)} onClick={onNavigate}>
@@ -223,33 +223,43 @@ export function OrganizeSection({
                       className={cn("h-3 w-3 rounded-full p-0", colorClass && "tag-color-bg", colorClass)}
                     />
                     <span className="truncate">{tag.name}</span>
-                    <span className="ml-auto text-xs text-muted-foreground">{tag.count}</span>
                   </Link>
                 </Button>
-                {showTagMenu && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 shrink-0 opacity-0 group-hover/tag:opacity-100 focus:opacity-100"
-                        aria-label={`${tag.name} menu`}
-                      >
-                        <MoreHorizontal className="h-3.5 w-3.5" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => onEditTag(tag)}>
-                        <Pencil className="h-3.5 w-3.5 mr-2" />
-                        {t("editTag")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem className="text-destructive" onClick={() => onDeleteTag(tag)}>
-                        <TrashIcon className="h-3.5 w-3.5 mr-2" />
-                        {t("deleteTag")}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+                {showTagMenu ? (
+                  <div className="shrink-0 relative flex items-center justify-center w-7 h-7">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="peer absolute inset-0 h-7 w-7 opacity-0 transition-opacity group-hover/tag:opacity-100 focus:opacity-100"
+                          aria-label={`${tag.name} menu`}
+                        >
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => onEditTag(tag)}>
+                          <Pencil className="h-3.5 w-3.5 mr-2" />
+                          {t("editTag")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem className="text-destructive" onClick={() => onDeleteTag(tag)}>
+                          <TrashIcon className="h-3.5 w-3.5 mr-2" />
+                          {t("deleteTag")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    {tag.count > 0 && (
+                      <span className="text-xs text-muted-foreground transition-opacity group-hover/tag:opacity-0 peer-focus:opacity-0 pointer-events-none">
+                        {tag.count}
+                      </span>
+                    )}
+                  </div>
+                ) : tag.count > 0 ? (
+                  <span className="shrink-0 text-xs text-muted-foreground px-2">
+                    {tag.count}
+                  </span>
+                ) : null}
               </div>
             );
           })}

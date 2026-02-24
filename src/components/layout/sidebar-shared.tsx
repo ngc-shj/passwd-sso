@@ -68,56 +68,69 @@ export function FolderTreeNode({
   return (
     <>
       <div className="group/folder flex items-center" style={{ paddingLeft: `${depth * 12}px` }}>
-        {hasChildren ? (
-          <button
-            type="button"
-            onClick={() => setOpen((prev) => !prev)}
-            className="h-6 w-6 shrink-0 flex items-center justify-center rounded hover:bg-accent"
-            aria-label={isExpanded ? `Collapse ${folder.name}` : `Expand ${folder.name}`}
-            aria-expanded={isExpanded}
-          >
-            {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-          </button>
-        ) : (
-          <span className="w-6 shrink-0" />
-        )}
         <Button
           variant={activeFolderId === folder.id ? "secondary" : "ghost"}
           className="flex-1 justify-start gap-2 min-w-0"
           asChild
         >
           <Link href={linkHref(folder.id)} onClick={onNavigate}>
-            <FolderOpen className="h-4 w-4 shrink-0" />
-            <span className="truncate">{folder.name}</span>
-            {folder.entryCount > 0 && (
-              <span className="ml-auto text-xs text-muted-foreground">{folder.entryCount}</span>
+            {hasChildren ? (
+              <span
+                className="relative shrink-0 h-4 w-4"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setOpen((prev) => !prev);
+                }}
+                role="button"
+                aria-label={isExpanded ? `Collapse ${folder.name}` : `Expand ${folder.name}`}
+              >
+                <FolderOpen className="h-4 w-4 transition-opacity group-hover/folder:opacity-0" />
+                <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover/folder:opacity-100">
+                  {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                </span>
+              </span>
+            ) : (
+              <FolderOpen className="h-4 w-4 shrink-0" />
             )}
+            <span className="truncate">{folder.name}</span>
           </Link>
         </Button>
-        {showMenu !== false && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0 opacity-0 group-hover/folder:opacity-100 focus:opacity-100"
-                aria-label={`${folder.name} menu`}
-              >
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onEdit(folder)}>
-                <Pencil className="h-3.5 w-3.5 mr-2" />
-                {tCommon("edit")}
-              </DropdownMenuItem>
-              <DropdownMenuItem className="text-destructive" onClick={() => onDelete(folder)}>
-                <Trash2 className="h-3.5 w-3.5 mr-2" />
-                {tDashboard("deleteFolder")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+        {showMenu !== false ? (
+          <div className="shrink-0 relative flex items-center justify-center w-7 h-7">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="peer absolute inset-0 h-7 w-7 opacity-0 transition-opacity group-hover/folder:opacity-100 focus:opacity-100"
+                  aria-label={`${folder.name} menu`}
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => onEdit(folder)}>
+                  <Pencil className="h-3.5 w-3.5 mr-2" />
+                  {tCommon("edit")}
+                </DropdownMenuItem>
+                <DropdownMenuItem className="text-destructive" onClick={() => onDelete(folder)}>
+                  <Trash2 className="h-3.5 w-3.5 mr-2" />
+                  {tDashboard("deleteFolder")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {folder.entryCount > 0 && (
+              <span className="text-xs text-muted-foreground transition-opacity group-hover/folder:opacity-0 peer-focus:opacity-0 pointer-events-none">
+                {folder.entryCount}
+              </span>
+            )}
+          </div>
+        ) : folder.entryCount > 0 ? (
+          <span className="shrink-0 text-xs text-muted-foreground px-2">
+            {folder.entryCount}
+          </span>
+        ) : null}
       </div>
       {hasChildren &&
         isExpanded &&

@@ -13,5 +13,7 @@
   "emptyTrashConfirm": "Permanently delete all items in trash? This cannot be undone.",
   "emptyTrashSuccess": "Trash emptied",
   "failedAction": "Operation failed",
-  "networkError": "Network error"
+  "networkError": "Network error",
+  "select": "Select",
+  "close": "Close"
 }
