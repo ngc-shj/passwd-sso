@@ -7,3 +7,4 @@ Language policy:
 
 - `deployment.md`
 - `backup-recovery/en.md` / `backup-recovery/ja.md`
+- `scim-smoke-test.md`

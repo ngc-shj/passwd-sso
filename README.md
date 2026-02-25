@@ -223,6 +223,7 @@ npm run build
 | `npm run test:load` | Run k6 mixed-workload baseline scenario |
 | `npm run test:load:health` | Run k6 health endpoint scenario |
 | `npm run test:load:cleanup` | Cleanup load-test users/sessions |
+| `npm run scim:smoke` | Run SCIM API smoke checks without IdP (requires `SCIM_TOKEN`) |
 
 Lifecycle scripts (not listed under `available via npm run`):
 - `npm test` - Run tests once (`vitest run`)
