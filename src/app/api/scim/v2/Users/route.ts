@@ -269,7 +269,11 @@ export async function POST(req: NextRequest) {
     if (e instanceof Error && e.message === "SCIM_EXTERNAL_ID_CONFLICT") {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+    if (
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      e.code === "P2002" &&
+      (e.meta?.modelName === "ScimExternalMapping" || e.meta?.target === "scim_external_mappings")
+    ) {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }
     throw e;

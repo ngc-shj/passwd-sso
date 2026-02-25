@@ -143,6 +143,29 @@ describe("POST /api/scim/v2/Groups", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 409 on P2002 race condition for ScimExternalMapping create", async () => {
+    const { Prisma } = await import("@prisma/client");
+    const p2002 = new Prisma.PrismaClientKnownRequestError(
+      "Unique constraint failed",
+      { code: "P2002", clientVersion: "7.0.0", meta: { modelName: "ScimExternalMapping" } },
+    );
+    mockScimExternalMapping.findUnique.mockResolvedValue(null); // check passes
+    mockScimExternalMapping.create.mockRejectedValue(p2002);    // but create races
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "ADMIN",
+          externalId: "ext-grp-race",
+        },
+      }),
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.detail).toContain("externalId");
+  });
+
   it("returns 409 when externalId is already mapped to a different group", async () => {
     mockScimExternalMapping.findUnique.mockResolvedValue({
       internalId: "different-group-id",

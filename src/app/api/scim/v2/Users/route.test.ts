@@ -395,4 +395,49 @@ describe("POST /api/scim/v2/Users", () => {
     const body = await res.json();
     expect(body.detail).toContain("externalId");
   });
+
+  it("returns 409 on P2002 race condition for ScimExternalMapping create", async () => {
+    const { Prisma } = await import("@prisma/client");
+    const p2002 = new Prisma.PrismaClientKnownRequestError(
+      "Unique constraint failed",
+      { code: "P2002", clientVersion: "7.0.0", meta: { modelName: "ScimExternalMapping" } },
+    );
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      const tx = {
+        user: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({
+            id: "new-user",
+            email: "race@example.com",
+            name: null,
+          }),
+        },
+        orgMember: {
+          findUnique: vi
+            .fn()
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ userId: "new-user", deactivatedAt: null }),
+          create: vi.fn().mockResolvedValue({}),
+        },
+        scimExternalMapping: {
+          findUnique: vi.fn().mockResolvedValue(null), // check passes
+          create: vi.fn().mockRejectedValue(p2002),    // but create races
+        },
+      };
+      return fn(tx);
+    });
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "race@example.com",
+          externalId: "ext-race",
+        },
+      }),
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.detail).toContain("externalId");
+  });
 });
