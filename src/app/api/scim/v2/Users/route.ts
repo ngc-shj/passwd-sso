@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { validateScimToken } from "@/lib/scim-token";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
@@ -266,6 +267,9 @@ export async function POST(req: NextRequest) {
       return scimError(409, "User already exists in this organization", "uniqueness");
     }
     if (e instanceof Error && e.message === "SCIM_EXTERNAL_ID_CONFLICT") {
+      return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
+    }
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }
     throw e;
