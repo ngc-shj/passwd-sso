@@ -216,7 +216,18 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     );
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.detail).toContain("No such member");
+    expect(body.detail).toContain("Referenced member does not exist");
+  });
+
+  it("returns 400 for invalid JSON body", async () => {
+    const req = new NextRequest(
+      `http://localhost/api/scim/v2/Groups/${ADMIN_GROUP_ID}`,
+      { method: "PATCH", body: "not-json", headers: { "content-type": "application/json" } },
+    );
+    const res = await PATCH(req, makeParams(ADMIN_GROUP_ID));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("Invalid JSON");
   });
 
   it("handles multiple operations in a single PATCH", async () => {
@@ -329,7 +340,47 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     );
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.detail).toContain("No such member");
+    expect(body.detail).toContain("Referenced member does not exist");
+  });
+
+  it("returns 404 for unknown group id", async () => {
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "ADMIN",
+          members: [],
+        },
+      }),
+      makeParams("unknown-group-id"),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 400 for invalid JSON body", async () => {
+    const req = new NextRequest(
+      `http://localhost/api/scim/v2/Groups/${ADMIN_GROUP_ID}`,
+      { method: "PUT", body: "not-json", headers: { "content-type": "application/json" } },
+    );
+    const res = await PUT(req, makeParams(ADMIN_GROUP_ID));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("Invalid JSON");
+  });
+
+  it("returns 400 for Zod validation failure (missing schemas)", async () => {
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          displayName: "ADMIN",
+          members: [],
+        },
+      }),
+      makeParams(ADMIN_GROUP_ID),
+    );
+    expect(res.status).toBe(400);
   });
 });
 

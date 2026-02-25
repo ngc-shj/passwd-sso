@@ -620,4 +620,134 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("unknown"));
     expect(res.status).toBe(404);
   });
+
+  it("returns 409 on P2003 FK constraint violation", async () => {
+    const { Prisma } = await import("@prisma/client");
+    const p2003 = new Prisma.PrismaClientKnownRequestError(
+      "Foreign key constraint failed",
+      { code: "P2003", clientVersion: "7.0.0", meta: {} },
+    );
+    mockOrgMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
+      .mockResolvedValueOnce({
+        id: "m1",
+        role: "MEMBER",
+        userId: "user-1",
+        user: { email: "test@example.com" },
+      });
+    mockTransaction.mockRejectedValue(p2003);
+
+    const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.detail).toContain("related resources");
+  });
+
+  it("returns 404 when scimId exceeds 255 characters", async () => {
+    const longId = "a".repeat(256);
+    const res = await GET(makeReq(), makeParams(longId));
+    expect(res.status).toBe(404);
+    // resolveUserId should short-circuit, no DB calls
+    expect(mockOrgMember.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe("PATCH /api/scim/v2/Users/[id] — additional edge cases", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
+    mockCheckScimRateLimit.mockResolvedValue(true);
+  });
+
+  it("returns 400 for invalid JSON body", async () => {
+    mockOrgMember.findUnique.mockResolvedValueOnce({ userId: "user-1" }); // resolveUserId
+
+    const req = new NextRequest("http://localhost/api/scim/v2/Users/user-1", {
+      method: "PATCH",
+      body: "not-json",
+      headers: { "content-type": "application/json" },
+    });
+    const res = await PATCH(req, makeParams("user-1"));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("Invalid JSON");
+  });
+
+  it("returns 400 for missing PatchOp schema URN", async () => {
+    mockOrgMember.findUnique.mockResolvedValueOnce({ userId: "user-1" }); // resolveUserId
+
+    const res = await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["wrong:schema"],
+          Operations: [{ op: "replace", path: "active", value: false }],
+        },
+      }),
+      makeParams("user-1"),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("PatchOp");
+  });
+});
+
+describe("PUT /api/scim/v2/Users/[id] — externalId change", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
+    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        orgMember: mockOrgMember,
+        user: mockUser,
+        scimExternalMapping: mockScimExternalMapping,
+      }),
+    );
+  });
+
+  it("deletes stale mapping before creating new one when externalId changes", async () => {
+    mockOrgMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
+      .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // role check
+      .mockResolvedValueOnce({ // fetchUserResource
+        userId: "user-1", orgId: "org-1", deactivatedAt: null,
+        user: { id: "user-1", email: "test@example.com", name: "Test" },
+      });
+    mockOrgMember.update.mockResolvedValue({});
+    // New externalId "ext-B" doesn't exist yet
+    mockScimExternalMapping.findUnique.mockResolvedValue(null);
+    mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 1 });
+    mockScimExternalMapping.create.mockResolvedValue({});
+    mockScimExternalMapping.findFirst.mockResolvedValue({ externalId: "ext-B" });
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "test@example.com",
+          active: true,
+          externalId: "ext-B",
+        },
+      }),
+      makeParams("user-1"),
+    );
+    expect(res.status).toBe(200);
+    // deleteMany should be called BEFORE create to clear stale mapping
+    expect(mockScimExternalMapping.deleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orgId: "org-1",
+          internalId: "user-1",
+          resourceType: "User",
+        }),
+      }),
+    );
+    expect(mockScimExternalMapping.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ externalId: "ext-B" }),
+      }),
+    );
+  });
 });

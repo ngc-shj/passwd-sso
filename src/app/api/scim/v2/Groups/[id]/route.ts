@@ -151,17 +151,19 @@ export async function PUT(req: NextRequest, { params }: Params) {
         if (fresh?.role === ORG_ROLE.OWNER) {
           throw new Error("SCIM_OWNER_PROTECTED");
         }
-        // Default to MEMBER when removed from a group
-        await tx.orgMember.update({
-          where: { id: m.id },
-          data: { role: ORG_ROLE.MEMBER },
-        });
+        // Only demote if member is still in the target role (avoids overwriting concurrent changes)
+        if (fresh?.role === role) {
+          await tx.orgMember.update({
+            where: { id: m.id },
+            data: { role: ORG_ROLE.MEMBER },
+          });
+        }
       }
     });
   } catch (e) {
     if (e instanceof Error) {
       if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
-        return scimError(400, `No such member: ${e.message.split(":")[1]}`);
+        return scimError(400, "Referenced member does not exist in this organization");
       }
       if (e.message === "SCIM_OWNER_PROTECTED") {
         return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
@@ -261,7 +263,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   } catch (e) {
     if (e instanceof Error) {
       if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
-        return scimError(400, `No such member: ${e.message.split(":")[1]}`);
+        return scimError(400, "Referenced member does not exist in this organization");
       }
       if (e.message === "SCIM_OWNER_PROTECTED") {
         return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
@@ -294,6 +296,12 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
+  }
+
+  const { orgId } = result.data;
+
+  if (!(await checkScimRateLimit(orgId))) {
+    return scimError(429, "Too many requests");
   }
 
   // Consume params to avoid Next.js warning

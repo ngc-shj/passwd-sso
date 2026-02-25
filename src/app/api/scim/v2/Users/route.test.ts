@@ -15,7 +15,7 @@ const {
   mockLogAudit: vi.fn(),
   mockOrgMember: { findMany: vi.fn(), count: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
   mockUser: { findUnique: vi.fn(), create: vi.fn() },
-  mockScimExternalMapping: { findUnique: vi.fn(), findMany: vi.fn(), upsert: vi.fn(), create: vi.fn() },
+  mockScimExternalMapping: { findUnique: vi.fn(), findMany: vi.fn(), upsert: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
 }));
 
@@ -93,6 +93,30 @@ describe("GET /api/scim/v2/Users", () => {
     expect(body.schemas).toContain("urn:ietf:params:scim:api:messages:2.0:ListResponse");
     expect(body.totalResults).toBe(1);
     expect(body.Resources[0].userName).toBe("test@example.com");
+  });
+
+  it("filters out null-email users at query level for consistent totalResults", async () => {
+    mockOrgMember.findMany.mockResolvedValue([]);
+    mockOrgMember.count.mockResolvedValue(0);
+    mockScimExternalMapping.findMany.mockResolvedValue([]);
+
+    await GET(makeReq());
+
+    // Verify the where clause includes user.email filter
+    expect(mockOrgMember.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          user: { email: { not: null } },
+        }),
+      }),
+    );
+    expect(mockOrgMember.count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          user: { email: { not: null } },
+        }),
+      }),
+    );
   });
 
   it("passes pagination params correctly", async () => {
@@ -244,6 +268,7 @@ describe("POST /api/scim/v2/Users", () => {
         scimExternalMapping: {
           findUnique: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({}),
+          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         },
       };
       return fn(tx);
@@ -285,6 +310,7 @@ describe("POST /api/scim/v2/Users", () => {
         scimExternalMapping: {
           findUnique: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({}),
+          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         },
       };
       const result = await fn(tx);
@@ -333,6 +359,45 @@ describe("POST /api/scim/v2/Users", () => {
     expect(res.status).toBe(409);
   });
 
+  it("logs SCIM_USER_REACTIVATE when re-activating a deactivated member", async () => {
+    const mockMemberUpdate = vi.fn().mockResolvedValue({});
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      const tx = {
+        user: {
+          findUnique: vi.fn().mockResolvedValue({ id: "user-1", email: "re@example.com" }),
+        },
+        orgMember: {
+          findUnique: vi
+            .fn()
+            .mockResolvedValueOnce({
+              id: "m1",
+              deactivatedAt: new Date("2024-01-01"),
+            })
+            .mockResolvedValueOnce({ userId: "user-1", deactivatedAt: null }),
+          update: mockMemberUpdate,
+        },
+        scimExternalMapping: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({}),
+          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      };
+      return fn(tx);
+    });
+
+    await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "re@example.com",
+        },
+      }),
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "SCIM_USER_REACTIVATE" }),
+    );
+  });
+
   it("re-activates a deactivated member", async () => {
     const mockMemberUpdate = vi.fn().mockResolvedValue({});
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
@@ -353,6 +418,7 @@ describe("POST /api/scim/v2/Users", () => {
         scimExternalMapping: {
           findUnique: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({}),
+          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         },
       };
       return fn(tx);
@@ -460,6 +526,7 @@ describe("POST /api/scim/v2/Users", () => {
         },
         scimExternalMapping: {
           findUnique: vi.fn().mockResolvedValue(null), // check passes
+          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
           create: vi.fn().mockRejectedValue(p2002),    // but create races
         },
       };

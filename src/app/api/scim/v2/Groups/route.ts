@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
     (r) => r.toLowerCase() === displayName.toLowerCase(),
   );
   if (!matchedRole) {
-    return scimError(400, `Unknown group name: ${displayName}. Valid names: ${SCIM_GROUP_ROLES.join(", ")}`);
+    return scimError(400, `Unknown group displayName. Valid names: ${SCIM_GROUP_ROLES.join(", ")}`);
   }
 
   const groupId = roleGroupId(orgId, matchedRole);
