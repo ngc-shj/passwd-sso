@@ -218,6 +218,35 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     expect(body.detail).toContain("externalId");
   });
 
+  it("does not remap unrelated P2002 errors to externalId conflict", async () => {
+    const { Prisma } = await import("@prisma/client");
+    const p2002 = new Prisma.PrismaClientKnownRequestError(
+      "Unique constraint failed",
+      { code: "P2002", clientVersion: "7.0.0", meta: { modelName: "User" } },
+    );
+    mockOrgMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null });
+    mockOrgMember.update.mockResolvedValue({});
+    mockScimExternalMapping.findUnique.mockResolvedValue(null);
+    mockScimExternalMapping.create.mockRejectedValue(p2002);
+
+    await expect(
+      PUT(
+        makeReq({
+          method: "PUT",
+          body: {
+            schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            userName: "test@example.com",
+            active: true,
+            externalId: "ext-race",
+          },
+        }),
+        makeParams("user-1"),
+      ),
+    ).rejects.toBe(p2002);
+  });
+
   it("updates OrgMember atomically via $transaction", async () => {
     mockOrgMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
@@ -339,7 +368,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     );
   });
 
-  it("updates User.name when name.formatted is provided", async () => {
+  it("does not update User.name via PUT (multi-org safety)", async () => {
     mockOrgMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // role check
@@ -347,10 +376,9 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
         userId: "user-1",
         orgId: "org-1",
         deactivatedAt: null,
-        user: { id: "user-1", email: "test@example.com", name: "New Name" },
+        user: { id: "user-1", email: "test@example.com", name: "Old Name" },
       });
     mockOrgMember.update.mockResolvedValue({});
-    mockUser.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
     const res = await PUT(
@@ -366,10 +394,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       makeParams("user-1"),
     );
     expect(res.status).toBe(200);
-    expect(mockUser.update).toHaveBeenCalledWith({
-      where: { id: "user-1" },
-      data: { name: "New Name" },
-    });
+    expect(mockUser.update).not.toHaveBeenCalled();
   });
 
   it("returns 400 for invalid JSON body", async () => {

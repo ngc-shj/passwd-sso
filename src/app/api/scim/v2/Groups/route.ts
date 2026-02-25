@@ -1,5 +1,4 @@
 import type { NextRequest } from "next/server";
-import { Prisma } from "@prisma/client";
 import type { OrgRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { validateScimToken } from "@/lib/scim-token";
@@ -18,6 +17,7 @@ import { scimGroupSchema } from "@/lib/scim/validations";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { ORG_ROLE } from "@/lib/constants";
+import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 
 /** Non-OWNER roles exposed as SCIM Groups. */
 const SCIM_GROUP_ROLES: OrgRole[] = [
@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
           data: { orgId, externalId, resourceType: "Group", internalId: groupId },
         });
       } catch (e) {
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+        if (isScimExternalMappingUniqueViolation(e)) {
           return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
         }
         throw e;

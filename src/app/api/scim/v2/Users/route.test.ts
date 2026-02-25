@@ -211,6 +211,17 @@ describe("GET /api/scim/v2/Users", () => {
     expect(body.detail).toContain("OR");
   });
 
+  it("returns 400 for conflicting externalId filters in AND expression", async () => {
+    const res = await GET(
+      makeReq({
+        searchParams: { filter: 'externalId eq "ext-1" and externalId eq "ext-2"' },
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("Conflicting externalId");
+  });
+
   it("filters by externalId via ScimExternalMapping", async () => {
     mockScimExternalMapping.findUnique.mockResolvedValue({
       internalId: "user-1",
