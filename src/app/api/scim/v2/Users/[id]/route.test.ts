@@ -6,6 +6,7 @@ const {
   mockCheckScimRateLimit,
   mockLogAudit,
   mockOrgMember,
+  mockUser,
   mockScimExternalMapping,
   mockOrgMemberKey,
   mockTransaction,
@@ -14,6 +15,7 @@ const {
   mockCheckScimRateLimit: vi.fn(),
   mockLogAudit: vi.fn(),
   mockOrgMember: { findUnique: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  mockUser: { update: vi.fn() },
   mockScimExternalMapping: { findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   mockOrgMemberKey: { deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: mockOrgMember,
+    user: mockUser,
     scimExternalMapping: mockScimExternalMapping,
     orgMemberKey: mockOrgMemberKey,
     $transaction: mockTransaction,
@@ -231,6 +234,71 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     expect(res.status).toBe(200);
     expect(mockLogAudit).toHaveBeenCalled();
   });
+
+  it("reactivates a deactivated user via PUT active:true", async () => {
+    mockOrgMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
+      .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: new Date("2024-01-01"), userId: "user-1" }) // role check
+      .mockResolvedValueOnce({ // fetchUserResource
+        userId: "user-1",
+        orgId: "org-1",
+        deactivatedAt: null,
+        user: { id: "user-1", email: "test@example.com", name: "Test" },
+      });
+    mockOrgMember.update.mockResolvedValue({});
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "test@example.com",
+          active: true,
+        },
+      }),
+      makeParams("user-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(mockOrgMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ deactivatedAt: null }),
+      }),
+    );
+  });
+
+  it("updates User.name when name.formatted is provided", async () => {
+    mockOrgMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
+      .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // role check
+      .mockResolvedValueOnce({ // fetchUserResource
+        userId: "user-1",
+        orgId: "org-1",
+        deactivatedAt: null,
+        user: { id: "user-1", email: "test@example.com", name: "New Name" },
+      });
+    mockOrgMember.update.mockResolvedValue({});
+    mockUser.update.mockResolvedValue({});
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "test@example.com",
+          name: { formatted: "New Name" },
+          active: true,
+        },
+      }),
+      makeParams("user-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(mockUser.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { name: "New Name" },
+    });
+  });
 });
 
 describe("PATCH /api/scim/v2/Users/[id]", () => {
@@ -316,7 +384,12 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
   it("deletes OrgMember, OrgMemberKey, and ScimExternalMapping atomically", async () => {
     mockOrgMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
-      .mockResolvedValueOnce({ id: "m1", role: "MEMBER", userId: "user-1" }); // member lookup
+      .mockResolvedValueOnce({ // member lookup (includes user for email)
+        id: "m1",
+        role: "MEMBER",
+        userId: "user-1",
+        user: { email: "test@example.com" },
+      });
     mockTransaction.mockResolvedValue([]);
 
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
@@ -326,12 +399,23 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     const txArg = mockTransaction.mock.calls[0][0];
     expect(txArg).toHaveLength(3);
     expect(mockLogAudit).toHaveBeenCalled();
+    // Verify audit metadata contains email
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ email: "test@example.com" }),
+      }),
+    );
   });
 
   it("blocks DELETE on OWNER", async () => {
     mockOrgMember.findUnique
       .mockResolvedValueOnce({ userId: "owner-1" }) // resolveUserId
-      .mockResolvedValueOnce({ id: "m1", role: "OWNER", userId: "owner-1" });
+      .mockResolvedValueOnce({
+        id: "m1",
+        role: "OWNER",
+        userId: "owner-1",
+        user: { email: "owner@example.com" },
+      });
 
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("owner-1"));
     expect(res.status).toBe(403);

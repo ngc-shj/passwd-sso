@@ -53,6 +53,14 @@ describe("DELETE /api/orgs/[orgId]/scim-tokens/[tokenId]", () => {
     mockRequireOrgPermission.mockResolvedValue(undefined);
   });
 
+  it("returns 403 if no SCIM_MANAGE permission", async () => {
+    mockRequireOrgPermission.mockRejectedValue(
+      new OrgAuthError("FORBIDDEN", 403),
+    );
+    const res = await DELETE(makeReq(), makeParams("org-1", "t1"));
+    expect(res.status).toBe(403);
+  });
+
   it("returns 401 if not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await DELETE(makeReq(), makeParams("org-1", "t1"));

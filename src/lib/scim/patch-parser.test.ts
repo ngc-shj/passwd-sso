@@ -51,6 +51,14 @@ describe("parseUserPatchOps", () => {
     ).toThrow(PatchParseError);
   });
 
+  it("rejects externalId path (not supported via PATCH)", () => {
+    expect(() =>
+      parseUserPatchOps([
+        { op: "replace", path: "externalId", value: "ext-123" },
+      ]),
+    ).toThrow(PatchParseError);
+  });
+
   it("rejects non-boolean active", () => {
     expect(() =>
       parseUserPatchOps([

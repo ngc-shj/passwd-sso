@@ -3,6 +3,15 @@ import { NextResponse } from "next/server";
 const SCIM_CONTENT_TYPE = "application/scim+json";
 
 /**
+ * Build the SCIM base URL from the environment.
+ * Uses `NEXTAUTH_URL` to avoid trusting client-supplied Host/X-Forwarded-Proto headers.
+ */
+export function getScimBaseUrl(): string {
+  const base = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
+  return `${base.replace(/\/$/, "")}/api/scim/v2`;
+}
+
+/**
  * Create a SCIM-compliant JSON response with `application/scim+json`.
  */
 export function scimResponse(body: unknown, status = 200): NextResponse {

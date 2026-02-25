@@ -16,7 +16,7 @@ const { mockAuth, mockRequireOrgPermission, OrgAuthError, mockLogAudit, mockScim
       mockRequireOrgPermission: vi.fn(),
       OrgAuthError: _OrgAuthError,
       mockLogAudit: vi.fn(),
-      mockScimToken: { findMany: vi.fn(), create: vi.fn() },
+      mockScimToken: { findMany: vi.fn(), create: vi.fn(), count: vi.fn() },
       mockHashToken: vi.fn().mockReturnValue("hashed-token"),
     };
   },
@@ -108,7 +108,19 @@ describe("POST /api/orgs/[orgId]/scim-tokens", () => {
     mockRequireOrgPermission.mockResolvedValue(undefined);
   });
 
+  it("returns 409 when active token limit is exceeded", async () => {
+    mockScimToken.count.mockResolvedValue(10);
+    const res = await POST(
+      makeReq({ body: { description: "Overflow" } }),
+      makeParams("org-1"),
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toContain("SCIM_TOKEN_LIMIT_EXCEEDED");
+  });
+
   it("creates a token and returns plaintext once", async () => {
+    mockScimToken.count.mockResolvedValue(0);
     mockScimToken.create.mockResolvedValue({
       id: "t-new",
       description: "My token",
@@ -127,6 +139,22 @@ describe("POST /api/orgs/[orgId]/scim-tokens", () => {
     expect(mockLogAudit).toHaveBeenCalled();
   });
 
+  it("returns 400 for expiresInDays exceeding max", async () => {
+    const res = await POST(
+      makeReq({ body: { expiresInDays: 3651 } }),
+      makeParams("org-1"),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for expiresInDays of zero", async () => {
+    const res = await POST(
+      makeReq({ body: { expiresInDays: 0 } }),
+      makeParams("org-1"),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("returns 400 for invalid body", async () => {
     const res = await POST(
       makeReq({ body: { expiresInDays: -1 } }),
@@ -136,6 +164,7 @@ describe("POST /api/orgs/[orgId]/scim-tokens", () => {
   });
 
   it("accepts null expiresInDays (never expires)", async () => {
+    mockScimToken.count.mockResolvedValue(0);
     mockScimToken.create.mockResolvedValue({
       id: "t-no-exp",
       description: null,

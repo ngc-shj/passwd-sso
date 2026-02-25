@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { scimResponse, scimError, scimListResponse } from "./response";
+import { describe, it, expect, afterEach } from "vitest";
+import { scimResponse, scimError, scimListResponse, getScimBaseUrl } from "./response";
 
 describe("scimResponse", () => {
   it("sets Content-Type to application/scim+json", async () => {
@@ -63,5 +63,32 @@ describe("scimListResponse", () => {
     const res = scimListResponse([], 0, 5);
     const body = await res.json();
     expect(body.startIndex).toBe(5);
+  });
+});
+
+describe("getScimBaseUrl", () => {
+  const originalEnv = process.env.NEXTAUTH_URL;
+
+  afterEach(() => {
+    if (originalEnv !== undefined) {
+      process.env.NEXTAUTH_URL = originalEnv;
+    } else {
+      delete process.env.NEXTAUTH_URL;
+    }
+  });
+
+  it("uses NEXTAUTH_URL from env", () => {
+    process.env.NEXTAUTH_URL = "https://example.com";
+    expect(getScimBaseUrl()).toBe("https://example.com/api/scim/v2");
+  });
+
+  it("strips trailing slash from NEXTAUTH_URL", () => {
+    process.env.NEXTAUTH_URL = "https://example.com/";
+    expect(getScimBaseUrl()).toBe("https://example.com/api/scim/v2");
+  });
+
+  it("falls back to localhost when NEXTAUTH_URL is not set", () => {
+    delete process.env.NEXTAUTH_URL;
+    expect(getScimBaseUrl()).toBe("http://localhost:3000/api/scim/v2");
   });
 });

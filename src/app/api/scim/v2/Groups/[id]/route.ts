@@ -3,7 +3,7 @@ import type { OrgRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { validateScimToken } from "@/lib/scim-token";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { scimResponse, scimError } from "@/lib/scim/response";
+import { scimResponse, scimError, getScimBaseUrl } from "@/lib/scim/response";
 import {
   roleToScimGroup,
   roleGroupId,
@@ -23,12 +23,6 @@ const SCIM_GROUP_ROLES: OrgRole[] = [
   ORG_ROLE.VIEWER,
 ];
 
-function getScimBaseUrl(req: NextRequest): string {
-  const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  const host = req.headers.get("host") ?? "localhost";
-  return `${proto}://${host}/api/scim/v2`;
-}
-
 /** Resolve a SCIM Group ID back to (orgId, role). */
 function resolveGroupRole(orgId: string, scimId: string): OrgRole | null {
   for (const role of SCIM_GROUP_ROLES) {
@@ -46,10 +40,12 @@ async function buildGroupResource(
     where: { orgId, role, deactivatedAt: null },
     include: { user: { select: { id: true, email: true } } },
   });
-  const memberInputs: ScimGroupMemberInput[] = members.map((m) => ({
-    userId: m.userId,
-    email: m.user.email!,
-  }));
+  const memberInputs: ScimGroupMemberInput[] = members
+    .filter((m) => m.user.email != null)
+    .map((m) => ({
+      userId: m.userId,
+      email: m.user.email!,
+    }));
   return roleToScimGroup(orgId, role, memberInputs, baseUrl);
 }
 
@@ -71,7 +67,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     return scimError(404, "Group not found");
   }
 
-  const baseUrl = getScimBaseUrl(req);
+  const baseUrl = getScimBaseUrl();
   const resource = await buildGroupResource(orgId, role, baseUrl);
   return scimResponse(resource);
 }
@@ -137,28 +133,44 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
   }
 
-  // Apply changes
-  for (const userId of toAdd) {
-    const member = await prisma.orgMember.findUnique({
-      where: { orgId_userId: { orgId, userId } },
-      select: { id: true, role: true },
-    });
-    if (!member) continue;
-    if (member.role === ORG_ROLE.OWNER) {
-      return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
-    }
-    await prisma.orgMember.update({
-      where: { id: member.id },
-      data: { role },
-    });
-  }
+  // Apply changes atomically
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const userId of toAdd) {
+        const member = await tx.orgMember.findUnique({
+          where: { orgId_userId: { orgId, userId } },
+          select: { id: true, role: true },
+        });
+        if (!member) {
+          throw new Error(`SCIM_NO_SUCH_MEMBER:${userId}`);
+        }
+        if (member.role === ORG_ROLE.OWNER) {
+          throw new Error("SCIM_OWNER_PROTECTED");
+        }
+        await tx.orgMember.update({
+          where: { id: member.id },
+          data: { role },
+        });
+      }
 
-  for (const m of toRemove) {
-    // Default to MEMBER when removed from a group
-    await prisma.orgMember.update({
-      where: { id: m.id },
-      data: { role: ORG_ROLE.MEMBER },
+      for (const m of toRemove) {
+        // Default to MEMBER when removed from a group
+        await tx.orgMember.update({
+          where: { id: m.id },
+          data: { role: ORG_ROLE.MEMBER },
+        });
+      }
     });
+  } catch (e) {
+    if (e instanceof Error) {
+      if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
+        return scimError(400, `No such member: ${e.message.split(":")[1]}`);
+      }
+      if (e.message === "SCIM_OWNER_PROTECTED") {
+        return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
+      }
+    }
+    throw e;
   }
 
   logAudit({
@@ -172,7 +184,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     ...extractRequestMeta(req),
   });
 
-  const baseUrl = getScimBaseUrl(req);
+  const baseUrl = getScimBaseUrl();
   const resource = await buildGroupResource(orgId, role, baseUrl);
   return scimResponse(resource);
 }
@@ -217,32 +229,48 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  for (const action of actions) {
-    const member = await prisma.orgMember.findUnique({
-      where: { orgId_userId: { orgId, userId: action.userId } },
-      select: { id: true, role: true },
-    });
-    if (!member) continue;
-
-    // OWNER protection
-    if (member.role === ORG_ROLE.OWNER) {
-      return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
-    }
-
-    if (action.op === "add") {
-      await prisma.orgMember.update({
-        where: { id: member.id },
-        data: { role },
-      });
-    } else if (action.op === "remove") {
-      // When removed from a group, default to MEMBER
-      if (member.role === role) {
-        await prisma.orgMember.update({
-          where: { id: member.id },
-          data: { role: ORG_ROLE.MEMBER },
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const action of actions) {
+        const member = await tx.orgMember.findUnique({
+          where: { orgId_userId: { orgId, userId: action.userId } },
+          select: { id: true, role: true },
         });
+        if (!member) {
+          throw new Error(`SCIM_NO_SUCH_MEMBER:${action.userId}`);
+        }
+
+        // OWNER protection
+        if (member.role === ORG_ROLE.OWNER) {
+          throw new Error("SCIM_OWNER_PROTECTED");
+        }
+
+        if (action.op === "add") {
+          await tx.orgMember.update({
+            where: { id: member.id },
+            data: { role },
+          });
+        } else if (action.op === "remove") {
+          // When removed from a group, default to MEMBER
+          if (member.role === role) {
+            await tx.orgMember.update({
+              where: { id: member.id },
+              data: { role: ORG_ROLE.MEMBER },
+            });
+          }
+        }
+      }
+    });
+  } catch (e) {
+    if (e instanceof Error) {
+      if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
+        return scimError(400, `No such member: ${e.message.split(":")[1]}`);
+      }
+      if (e.message === "SCIM_OWNER_PROTECTED") {
+        return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
       }
     }
+    throw e;
   }
 
   logAudit({
@@ -259,7 +287,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     ...extractRequestMeta(req),
   });
 
-  const baseUrl = getScimBaseUrl(req);
+  const baseUrl = getScimBaseUrl();
   const resource = await buildGroupResource(orgId, role, baseUrl);
   return scimResponse(resource);
 }

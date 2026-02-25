@@ -266,7 +266,7 @@ export function ScimTokenManager({ orgId, locale }: Props) {
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
                           <AlertDialogAction
                             onClick={() => handleRevoke(token.id)}
                           >

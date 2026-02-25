@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseScimFilter,
   filterToPrismaWhere,
+  extractExternalIdValue,
   hasAttribute,
   FilterParseError,
 } from "./filter-parser";
@@ -55,6 +56,15 @@ describe("parseScimFilter", () => {
     expect(result).toHaveProperty("or");
     const or = (result as { or: unknown[] }).or;
     expect(or).toHaveLength(2);
+  });
+
+  it("rejects mixed and/or connectives", () => {
+    expect(() =>
+      parseScimFilter('userName eq "a" and active eq true or userName eq "b"'),
+    ).toThrow(FilterParseError);
+    expect(() =>
+      parseScimFilter('userName eq "a" and active eq true or userName eq "b"'),
+    ).toThrow(/Mixing.*and.*or/);
   });
 
   it("rejects filter exceeding max length", () => {
@@ -120,12 +130,55 @@ describe("hasAttribute", () => {
   });
 });
 
+describe("extractExternalIdValue", () => {
+  it("returns value from simple externalId eq filter", () => {
+    const ast = parseScimFilter('externalId eq "ext-123"');
+    expect(extractExternalIdValue(ast)).toBe("ext-123");
+  });
+
+  it("returns null when no externalId filter", () => {
+    const ast = parseScimFilter('userName eq "test@example.com"');
+    expect(extractExternalIdValue(ast)).toBeNull();
+  });
+
+  it("finds externalId nested inside AND", () => {
+    const ast = parseScimFilter('userName eq "test" and externalId eq "ext-456"');
+    expect(extractExternalIdValue(ast)).toBe("ext-456");
+  });
+
+  it("finds externalId nested inside OR", () => {
+    const ast = parseScimFilter('externalId eq "ext-789" or userName eq "test"');
+    expect(extractExternalIdValue(ast)).toBe("ext-789");
+  });
+
+  it("returns null for active-only filter", () => {
+    const ast = parseScimFilter("active eq true");
+    expect(extractExternalIdValue(ast)).toBeNull();
+  });
+});
+
 describe("filterToPrismaWhere", () => {
   it("converts userName eq to Prisma where", () => {
     const ast = parseScimFilter('userName eq "test@example.com"');
     const where = filterToPrismaWhere(ast);
     expect(where).toEqual({
       user: { is: { email: "test@example.com" } },
+    });
+  });
+
+  it("converts userName co to Prisma where with contains", () => {
+    const ast = parseScimFilter('userName co "test"');
+    const where = filterToPrismaWhere(ast);
+    expect(where).toEqual({
+      user: { is: { email: { contains: "test" } } },
+    });
+  });
+
+  it("converts userName sw to Prisma where with startsWith", () => {
+    const ast = parseScimFilter('userName sw "admin"');
+    const where = filterToPrismaWhere(ast);
+    expect(where).toEqual({
+      user: { is: { email: { startsWith: "admin" } } },
     });
   });
 
@@ -145,5 +198,16 @@ describe("filterToPrismaWhere", () => {
     const ast = parseScimFilter('userName eq "test" and active eq true');
     const where = filterToPrismaWhere(ast);
     expect(where).toHaveProperty("AND");
+  });
+
+  it("converts externalId eq to empty object (resolved by caller)", () => {
+    const ast = parseScimFilter('externalId eq "ext-1"');
+    const where = filterToPrismaWhere(ast);
+    expect(where).toEqual({});
+  });
+
+  it("rejects non-eq operator on externalId", () => {
+    const ast = parseScimFilter('externalId co "ext"');
+    expect(() => filterToPrismaWhere(ast)).toThrow(FilterParseError);
   });
 });
