@@ -28,9 +28,9 @@ async function resolveUserId(orgId: string, scimId: string): Promise<string | nu
   });
   if (member) return member.userId;
 
-  // Try via ScimExternalMapping
+  // Try via ScimExternalMapping (scimId may be an externalId from the IdP)
   const mapping = await prisma.scimExternalMapping.findFirst({
-    where: { orgId, internalId: scimId, resourceType: "User" },
+    where: { orgId, externalId: scimId, resourceType: "User" },
     select: { internalId: true },
   });
   return mapping?.internalId ?? null;
@@ -143,13 +143,19 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // Update external mapping if provided
   if (externalId) {
-    await prisma.scimExternalMapping.upsert({
+    const existingMapping = await prisma.scimExternalMapping.findUnique({
       where: {
         orgId_externalId_resourceType: { orgId, externalId, resourceType: "User" },
       },
-      create: { orgId, externalId, resourceType: "User", internalId: userId },
-      update: { internalId: userId },
     });
+    if (existingMapping && existingMapping.internalId !== userId) {
+      return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
+    }
+    if (!existingMapping) {
+      await prisma.scimExternalMapping.create({
+        data: { orgId, externalId, resourceType: "User", internalId: userId },
+      });
+    }
   }
 
   logAudit({

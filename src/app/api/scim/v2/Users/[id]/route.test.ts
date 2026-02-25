@@ -14,7 +14,7 @@ const {
   mockCheckScimRateLimit: vi.fn(),
   mockLogAudit: vi.fn(),
   mockOrgMember: { findUnique: vi.fn(), update: vi.fn(), delete: vi.fn() },
-  mockScimExternalMapping: { findFirst: vi.fn(), deleteMany: vi.fn() },
+  mockScimExternalMapping: { findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   mockOrgMemberKey: { deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
 }));
@@ -73,6 +73,33 @@ describe("GET /api/scim/v2/Users/[id]", () => {
     expect(res.status).toBe(404);
   });
 
+  it("resolves user via externalId in ScimExternalMapping", async () => {
+    // First call: direct userId lookup → not found
+    mockOrgMember.findUnique
+      .mockResolvedValueOnce(null) // resolveUserId direct lookup
+      .mockResolvedValueOnce({ // fetchUserResource
+        userId: "internal-1",
+        orgId: "org-1",
+        deactivatedAt: null,
+        user: { id: "internal-1", email: "ext@example.com", name: "Ext User" },
+      });
+    // Second: ScimExternalMapping lookup → found
+    mockScimExternalMapping.findFirst
+      .mockResolvedValueOnce({ internalId: "internal-1" }) // resolveUserId mapping
+      .mockResolvedValueOnce(null); // fetchUserResource extMapping
+
+    const res = await GET(makeReq(), makeParams("ext-id-123"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.userName).toBe("ext@example.com");
+    // Verify ScimExternalMapping was searched by externalId
+    expect(mockScimExternalMapping.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ externalId: "ext-id-123" }),
+      }),
+    );
+  });
+
   it("returns user resource when found via direct userId", async () => {
     mockOrgMember.findUnique.mockResolvedValue({
       userId: "user-1",
@@ -117,6 +144,34 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       makeParams("owner-1"),
     );
     expect(res.status).toBe(403);
+  });
+
+  it("returns 409 when externalId is already mapped to a different user", async () => {
+    mockOrgMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
+      .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }); // role check
+    mockOrgMember.update.mockResolvedValue({});
+    // externalId already mapped to a different user
+    mockScimExternalMapping.findUnique.mockResolvedValue({
+      internalId: "other-user",
+      externalId: "ext-1",
+    });
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "test@example.com",
+          active: true,
+          externalId: "ext-1",
+        },
+      }),
+      makeParams("user-1"),
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.detail).toContain("externalId");
   });
 
   it("updates OrgMember and returns the resource", async () => {

@@ -10,7 +10,7 @@ const {
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
   mockOrgMember: { findMany: vi.fn() },
-  mockScimExternalMapping: { upsert: vi.fn() },
+  mockScimExternalMapping: { findUnique: vi.fn(), create: vi.fn(), upsert: vi.fn() },
 }));
 
 vi.mock("@/lib/scim-token", () => ({
@@ -114,7 +114,8 @@ describe("POST /api/scim/v2/Groups", () => {
   });
 
   it("registers external mapping for valid role and returns 201", async () => {
-    mockScimExternalMapping.upsert.mockResolvedValue({});
+    mockScimExternalMapping.findUnique.mockResolvedValue(null);
+    mockScimExternalMapping.create.mockResolvedValue({});
     mockOrgMember.findMany.mockResolvedValue([]);
 
     const res = await POST(
@@ -127,7 +128,7 @@ describe("POST /api/scim/v2/Groups", () => {
       }),
     );
     expect(res.status).toBe(201);
-    expect(mockScimExternalMapping.upsert).toHaveBeenCalled();
+    expect(mockScimExternalMapping.create).toHaveBeenCalled();
   });
 
   it("returns 400 for unknown group name", async () => {
@@ -140,5 +141,25 @@ describe("POST /api/scim/v2/Groups", () => {
       }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("returns 409 when externalId is already mapped to a different group", async () => {
+    mockScimExternalMapping.findUnique.mockResolvedValue({
+      internalId: "different-group-id",
+      externalId: "ext-grp-conflict",
+    });
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "ADMIN",
+          externalId: "ext-grp-conflict",
+        },
+      }),
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.detail).toContain("externalId");
   });
 });

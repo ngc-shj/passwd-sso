@@ -287,3 +287,20 @@ export function filterToPrismaWhere(
   }
   return comparisonToPrisma(expr);
 }
+
+/**
+ * Check if a filter AST contains a specific attribute anywhere (including
+ * nested AND/OR branches). Used to detect `active` filters at any depth.
+ */
+export function hasAttribute(
+  expr: ScimFilterExpression,
+  attr: string,
+): boolean {
+  if ("and" in expr) {
+    return expr.and.some((child) => hasAttribute(child, attr));
+  }
+  if ("or" in expr) {
+    return expr.or.some((child) => hasAttribute(child, attr));
+  }
+  return expr.attr === attr;
+}
