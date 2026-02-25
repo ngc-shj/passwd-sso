@@ -223,6 +223,7 @@ npm run build
 | `npm run test:load` | k6 mixed-workload シナリオ実行 |
 | `npm run test:load:health` | k6 health シナリオ実行 |
 | `npm run test:load:cleanup` | 負荷テスト用ユーザー/セッションを削除 |
+| `npm run scim:smoke` | IdP なしで SCIM API のスモークチェック実行（`SCIM_TOKEN` 必須） |
 
 ライフサイクルスクリプト（`available via npm run` には出ない）:
 - `npm test` - テスト一括実行（`vitest run`）
