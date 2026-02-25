@@ -155,6 +155,11 @@ describe("extractExternalIdValue", () => {
     const ast = parseScimFilter("active eq true");
     expect(extractExternalIdValue(ast)).toBeNull();
   });
+
+  it("throws on conflicting externalId values in AND expression", () => {
+    const ast = parseScimFilter('externalId eq "ext-1" and externalId eq "ext-2"');
+    expect(() => extractExternalIdValue(ast)).toThrow(FilterParseError);
+  });
 });
 
 describe("filterToPrismaWhere", () => {

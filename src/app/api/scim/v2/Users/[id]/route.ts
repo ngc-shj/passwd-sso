@@ -11,6 +11,7 @@ import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { AuditAction } from "@prisma/client";
 import { ORG_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -145,7 +146,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     auditAction = AUDIT_ACTION.SCIM_USER_REACTIVATE;
   }
 
-  // Atomic update: OrgMember + User.name + externalId mapping
+  // Atomic update: OrgMember + externalId mapping
   try {
     await prisma.$transaction(async (tx) => {
       // Update OrgMember attributes
@@ -156,14 +157,6 @@ export async function PUT(req: NextRequest, { params }: Params) {
           scimManaged: true,
         },
       });
-
-      // Update User.name if name.formatted is provided
-      if (name?.formatted !== undefined) {
-        await tx.user.update({
-          where: { id: userId },
-          data: { name: name.formatted },
-        });
-      }
 
       // Update external mapping if provided; clear if omitted (PUT = full replace)
       if (externalId) {
@@ -195,7 +188,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     if (e instanceof Error && e.message === "SCIM_EXTERNAL_ID_CONFLICT") {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+    if (isScimExternalMappingUniqueViolation(e)) {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }
     throw e;
@@ -208,7 +201,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     orgId,
     targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
     targetId: userId,
-    metadata: { active, externalId },
+    metadata: { active, externalId, name: name?.formatted },
     ...extractRequestMeta(req),
   });
 

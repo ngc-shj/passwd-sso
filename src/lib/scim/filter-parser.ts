@@ -294,21 +294,32 @@ export function filterToPrismaWhere(
 export function extractExternalIdValue(
   expr: ScimFilterExpression,
 ): string | null {
-  if ("and" in expr) {
-    for (const child of expr.and) {
-      const v = extractExternalIdValue(child);
-      if (v !== null) return v;
+  let found: string | null = null;
+
+  function visit(node: ScimFilterExpression): void {
+    if ("and" in node) {
+      for (const child of node.and) visit(child);
+      return;
     }
-    return null;
-  }
-  if ("or" in expr) {
-    for (const child of expr.or) {
-      const v = extractExternalIdValue(child);
-      if (v !== null) return v;
+    if ("or" in node) {
+      for (const child of node.or) visit(child);
+      return;
     }
-    return null;
+    if (node.attr !== "externalId") return;
+
+    if (found === null) {
+      found = node.value;
+      return;
+    }
+    if (found !== node.value) {
+      throw new FilterParseError(
+        "Conflicting externalId filters are not supported",
+      );
+    }
   }
-  return expr.attr === "externalId" ? expr.value : null;
+
+  visit(expr);
+  return found;
 }
 
 /**
