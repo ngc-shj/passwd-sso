@@ -119,6 +119,33 @@ describe("POST /api/orgs/[orgId]/scim-tokens", () => {
     expect(body.error).toContain("SCIM_TOKEN_LIMIT_EXCEEDED");
   });
 
+  it("excludes expired tokens from active count", async () => {
+    mockScimToken.count.mockResolvedValue(0);
+    mockScimToken.create.mockResolvedValue({
+      id: "t-ok",
+      description: null,
+      expiresAt: null,
+      createdAt: new Date(),
+    });
+
+    await POST(
+      makeReq({ body: { description: "After expired" } }),
+      makeParams("org-1"),
+    );
+    // Verify count query includes expiry filter (OR clause)
+    expect(mockScimToken.count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          revokedAt: null,
+          OR: expect.arrayContaining([
+            { expiresAt: null },
+            { expiresAt: { gt: expect.any(Date) } },
+          ]),
+        }),
+      }),
+    );
+  });
+
   it("creates a token and returns plaintext once", async () => {
     mockScimToken.count.mockResolvedValue(0);
     mockScimToken.create.mockResolvedValue({

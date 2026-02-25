@@ -62,16 +62,17 @@ export async function GET(req: NextRequest) {
     roleToScimGroup(orgId, role, membersByRole.get(role) ?? [], baseUrl),
   );
 
-  // Support filter by displayName
+  // Support filter by displayName (only supported filter for Groups)
   const filterParam = req.nextUrl.searchParams.get("filter");
   if (filterParam) {
     const match = filterParam.match(/displayName\s+eq\s+"([^"]+)"/i);
-    if (match) {
-      const filtered = groups.filter(
-        (g) => g.displayName.toLowerCase() === match[1].toLowerCase(),
-      );
-      return scimListResponse(filtered, filtered.length);
+    if (!match) {
+      return scimError(400, "Only 'displayName eq' filter is supported for Groups");
     }
+    const filtered = groups.filter(
+      (g) => g.displayName.toLowerCase() === match[1].toLowerCase(),
+    );
+    return scimListResponse(filtered, filtered.length);
   }
 
   return scimListResponse(groups, groups.length);
@@ -145,10 +146,12 @@ export async function POST(req: NextRequest) {
     include: { user: { select: { id: true, email: true } } },
   });
 
-  const memberInputs: ScimGroupMemberInput[] = members.map((m) => ({
-    userId: m.userId,
-    email: m.user.email!,
-  }));
+  const memberInputs: ScimGroupMemberInput[] = members
+    .filter((m) => m.user.email != null)
+    .map((m) => ({
+      userId: m.userId,
+      email: m.user.email!,
+    }));
 
   const resource = roleToScimGroup(orgId, matchedRole, memberInputs, baseUrl);
   return scimResponse(resource, 201);

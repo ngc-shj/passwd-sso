@@ -86,6 +86,17 @@ describe("GET /api/scim/v2/Groups", () => {
     expect(body.Resources[0].displayName).toBe("ADMIN");
   });
 
+  it("returns 400 for unsupported filter", async () => {
+    mockOrgMember.findMany.mockResolvedValue([]);
+
+    const res = await GET(
+      makeReq({ searchParams: { filter: 'userName eq "test"' } }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("displayName eq");
+  });
+
   it("includes members in group response", async () => {
     mockOrgMember.findMany.mockResolvedValue([
       {
