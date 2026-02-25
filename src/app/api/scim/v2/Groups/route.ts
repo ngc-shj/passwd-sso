@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 import type { OrgRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { validateScimToken } from "@/lib/scim-token";
@@ -127,9 +128,16 @@ export async function POST(req: NextRequest) {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }
     if (!existingMapping) {
-      await prisma.scimExternalMapping.create({
-        data: { orgId, externalId, resourceType: "Group", internalId: groupId },
-      });
+      try {
+        await prisma.scimExternalMapping.create({
+          data: { orgId, externalId, resourceType: "Group", internalId: groupId },
+        });
+      } catch (e) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+          return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
+        }
+        throw e;
+      }
     }
   }
 
