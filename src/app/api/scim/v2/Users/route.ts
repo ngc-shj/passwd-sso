@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
   // No deactivatedAt filter by default — RFC 7644 §3.4.2 requires unfiltered
   // GET to return all resources. The `active` field distinguishes state.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let prismaWhere: Record<string, any> = { orgId };
+  let prismaWhere: Record<string, any> = { orgId, user: { email: { not: null } } };
 
   if (filterParam) {
     try {
@@ -105,9 +105,7 @@ export async function GET(req: NextRequest) {
   });
   const extIdMap = new Map(mappings.map((m) => [m.internalId, m.externalId]));
 
-  const resources = members
-    .filter((m) => m.user.email != null)
-    .map((m) => {
+  const resources = members.map((m) => {
       const input: ScimUserInput = {
         userId: m.userId,
         email: m.user.email!,
@@ -209,6 +207,10 @@ export async function POST(req: NextRequest) {
           throw new Error("SCIM_EXTERNAL_ID_CONFLICT");
         }
         if (!existing) {
+          // Delete stale mapping for this user (handles externalId change on re-activation)
+          await tx.scimExternalMapping.deleteMany({
+            where: { orgId, internalId: user.id, resourceType: "User" },
+          });
           await tx.scimExternalMapping.create({
             data: {
               orgId,
@@ -225,12 +227,12 @@ export async function POST(req: NextRequest) {
         where: { orgId_userId: { orgId, userId: user.id } },
       });
 
-      return { user, member: member!, externalId };
+      return { user, member: member!, externalId, reactivated: !!existingMember };
     });
 
     logAudit({
       scope: AUDIT_SCOPE.ORG,
-      action: AUDIT_ACTION.SCIM_USER_CREATE,
+      action: created.reactivated ? AUDIT_ACTION.SCIM_USER_REACTIVATE : AUDIT_ACTION.SCIM_USER_CREATE,
       userId: auditUserId,
       orgId,
       targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,

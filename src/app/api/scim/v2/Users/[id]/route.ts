@@ -176,6 +176,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
           throw new Error("SCIM_EXTERNAL_ID_CONFLICT");
         }
         if (!existingMapping) {
+          // Delete stale mapping for this user (handles externalId change: ext-A → ext-B)
+          await tx.scimExternalMapping.deleteMany({
+            where: { orgId, internalId: userId, resourceType: "User" },
+          });
           await tx.scimExternalMapping.create({
             data: { orgId, externalId, resourceType: "User", internalId: userId },
           });

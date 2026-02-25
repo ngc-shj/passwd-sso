@@ -142,7 +142,7 @@ describe("POST /api/scim/v2/Groups", () => {
     expect(mockScimExternalMapping.create).toHaveBeenCalled();
   });
 
-  it("returns 400 for unknown group name", async () => {
+  it("returns 400 for unknown group name without echoing input", async () => {
     const res = await POST(
       makeReq({
         body: {
@@ -152,6 +152,22 @@ describe("POST /api/scim/v2/Groups", () => {
       }),
     );
     expect(res.status).toBe(400);
+    const body = await res.json();
+    // S-23: Error should NOT echo the user-provided displayName
+    expect(body.detail).not.toContain("UNKNOWN_ROLE");
+    expect(body.detail).toContain("Valid names");
+  });
+
+  it("returns 400 for invalid JSON body", async () => {
+    const req = new NextRequest("http://localhost/api/scim/v2/Groups", {
+      method: "POST",
+      body: "not-json",
+      headers: { "content-type": "application/json" },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("Invalid JSON");
   });
 
   it("returns 409 on P2002 race condition for ScimExternalMapping create", async () => {

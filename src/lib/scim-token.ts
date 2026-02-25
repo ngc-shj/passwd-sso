@@ -98,7 +98,9 @@ export async function validateScimToken(
         where: { id: token.id },
         data: { lastUsedAt: new Date(now) },
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.warn("Failed to update SCIM token lastUsedAt:", err);
+      });
   }
 
   return {

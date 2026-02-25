@@ -51,7 +51,8 @@ export const scimPatchOpSchema = z.object({
         value: z.unknown().optional(),
       }),
     )
-    .min(1),
+    .min(1)
+    .max(100),
 });
 
 export type ScimPatchOpInput = z.infer<typeof scimPatchOpSchema>;
@@ -74,6 +75,7 @@ export const scimGroupSchema = z.object({
         value: z.string(),
       }),
     )
+    .max(1000)
     .optional()
     .default([]),
 });
