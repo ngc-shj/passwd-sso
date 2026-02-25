@@ -248,9 +248,9 @@ function comparisonToPrisma(node: ScimFilterNode): PrismaWhere {
       case "eq":
         return { [field]: { is: { email: normalized } } };
       case "co":
-        return { [field]: { is: { email: { contains: normalized } } } };
+        return { [field]: { is: { email: { contains: normalized, mode: "insensitive" } } } };
       case "sw":
-        return { [field]: { is: { email: { startsWith: normalized } } } };
+        return { [field]: { is: { email: { startsWith: normalized, mode: "insensitive" } } } };
     }
   }
 

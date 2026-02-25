@@ -166,19 +166,19 @@ describe("filterToPrismaWhere", () => {
     });
   });
 
-  it("converts userName co to Prisma where with contains", () => {
+  it("converts userName co to Prisma where with case-insensitive contains", () => {
     const ast = parseScimFilter('userName co "test"');
     const where = filterToPrismaWhere(ast);
     expect(where).toEqual({
-      user: { is: { email: { contains: "test" } } },
+      user: { is: { email: { contains: "test", mode: "insensitive" } } },
     });
   });
 
-  it("converts userName sw to Prisma where with startsWith", () => {
+  it("converts userName sw to Prisma where with case-insensitive startsWith", () => {
     const ast = parseScimFilter('userName sw "admin"');
     const where = filterToPrismaWhere(ast);
     expect(where).toEqual({
-      user: { is: { email: { startsWith: "admin" } } },
+      user: { is: { email: { startsWith: "admin", mode: "insensitive" } } },
     });
   });
 

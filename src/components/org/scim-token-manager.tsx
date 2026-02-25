@@ -64,11 +64,15 @@ export function ScimTokenManager({ orgId, locale }: Props) {
       const res = await fetch(apiPath.orgScimTokens(orgId));
       if (res.ok) {
         setTokens(await res.json());
+      } else {
+        toast.error(t("networkError"));
       }
+    } catch {
+      toast.error(t("networkError"));
     } finally {
       setLoading(false);
     }
-  }, [orgId]);
+  }, [orgId, t]);
 
   useEffect(() => {
     fetchTokens();
@@ -92,19 +96,29 @@ export function ScimTokenManager({ orgId, locale }: Props) {
         setExpiresInDays("365");
         toast.success(t("scimTokenCreated"));
         fetchTokens();
+      } else {
+        toast.error(t("networkError"));
       }
+    } catch {
+      toast.error(t("networkError"));
     } finally {
       setCreating(false);
     }
   };
 
   const handleRevoke = async (tokenId: string) => {
-    const res = await fetch(apiPath.orgScimTokenById(orgId, tokenId), {
-      method: "DELETE",
-    });
-    if (res.ok) {
-      toast.success(t("scimTokenRevoked"));
-      fetchTokens();
+    try {
+      const res = await fetch(apiPath.orgScimTokenById(orgId, tokenId), {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        toast.success(t("scimTokenRevoked"));
+        fetchTokens();
+      } else {
+        toast.error(t("networkError"));
+      }
+    } catch {
+      toast.error(t("networkError"));
     }
   };
 

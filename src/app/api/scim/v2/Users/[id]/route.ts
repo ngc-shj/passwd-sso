@@ -129,50 +129,64 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
   }
 
-  // Update OrgMember attributes
-  await prisma.orgMember.update({
-    where: { id: member.id },
-    data: {
-      deactivatedAt: active === false ? (member.deactivatedAt ?? new Date()) : null,
-      scimManaged: true,
-    },
-  });
-
-  // Update User.name if name.formatted is provided
-  if (name?.formatted !== undefined) {
-    await prisma.user.update({
-      where: { id: userId },
-      data: { name: name.formatted },
-    });
+  // Determine audit action based on active state change
+  let auditAction: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
+  if (active === false && member.deactivatedAt === null) {
+    auditAction = AUDIT_ACTION.SCIM_USER_DEACTIVATE;
+  } else if (active !== false && member.deactivatedAt !== null) {
+    auditAction = AUDIT_ACTION.SCIM_USER_REACTIVATE;
   }
 
-  // Update external mapping if provided
-  if (externalId) {
-    const existingMapping = await prisma.scimExternalMapping.findUnique({
-      where: {
-        orgId_externalId_resourceType: { orgId, externalId, resourceType: "User" },
-      },
+  // Atomic update: OrgMember + User.name + externalId mapping
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Update OrgMember attributes
+      await tx.orgMember.update({
+        where: { id: member.id },
+        data: {
+          deactivatedAt: active === false ? (member.deactivatedAt ?? new Date()) : null,
+          scimManaged: true,
+        },
+      });
+
+      // Update User.name if name.formatted is provided
+      if (name?.formatted !== undefined) {
+        await tx.user.update({
+          where: { id: userId },
+          data: { name: name.formatted },
+        });
+      }
+
+      // Update external mapping if provided
+      if (externalId) {
+        const existingMapping = await tx.scimExternalMapping.findUnique({
+          where: {
+            orgId_externalId_resourceType: { orgId, externalId, resourceType: "User" },
+          },
+        });
+        if (existingMapping && existingMapping.internalId !== userId) {
+          throw new Error("SCIM_EXTERNAL_ID_CONFLICT");
+        }
+        if (!existingMapping) {
+          await tx.scimExternalMapping.create({
+            data: { orgId, externalId, resourceType: "User", internalId: userId },
+          });
+        }
+      }
     });
-    if (existingMapping && existingMapping.internalId !== userId) {
+  } catch (e) {
+    if (e instanceof Error && e.message === "SCIM_EXTERNAL_ID_CONFLICT") {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }
-    if (!existingMapping) {
-      try {
-        await prisma.scimExternalMapping.create({
-          data: { orgId, externalId, resourceType: "User", internalId: userId },
-        });
-      } catch (e) {
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-          return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
-        }
-        throw e;
-      }
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }
+    throw e;
   }
 
   logAudit({
     scope: AUDIT_SCOPE.ORG,
-    action: AUDIT_ACTION.SCIM_USER_UPDATE,
+    action: auditAction,
     userId: auditUserId,
     orgId,
     targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
@@ -257,12 +271,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     }
   }
 
-  if (Object.keys(updateData).length > 0) {
-    await prisma.orgMember.update({
-      where: { id: member.id },
-      data: updateData,
-    });
-  }
+  // Always mark as SCIM-managed when touched via PATCH
+  updateData.scimManaged = true;
+
+  await prisma.orgMember.update({
+    where: { id: member.id },
+    data: updateData,
+  });
 
   // Update User.name if requested (OrgMember attribute, not User table — per plan)
   // Note: name.formatted maps to User.name, but per plan we only update User table at first provision.

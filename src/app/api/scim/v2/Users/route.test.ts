@@ -147,6 +147,28 @@ describe("GET /api/scim/v2/Users", () => {
     expect(callArgs.where.OR).toBeDefined();
   });
 
+  it("returns correct pagination metadata (startIndex, itemsPerPage)", async () => {
+    mockOrgMember.findMany.mockResolvedValue([
+      {
+        userId: "user-1",
+        orgId: "org-1",
+        deactivatedAt: null,
+        user: { id: "user-1", email: "a@example.com", name: "A" },
+      },
+    ]);
+    mockOrgMember.count.mockResolvedValue(25);
+    mockScimExternalMapping.findMany.mockResolvedValue([]);
+
+    const res = await GET(
+      makeReq({ searchParams: { startIndex: "11", count: "10" } }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.startIndex).toBe(11);
+    expect(body.itemsPerPage).toBe(1);
+    expect(body.totalResults).toBe(25);
+  });
+
   it("returns 429 when rate limited", async () => {
     mockCheckScimRateLimit.mockResolvedValue(false);
     const res = await GET(makeReq());

@@ -175,6 +175,131 @@
 
 **推奨対応**: SCIM_MANAGE 権限なしの 403 テスト追加。
 
-## 対応状況
+## 対応状況 (Loop 1)
+
+### F-1 [Critical]: externalId フィルタの AND/OR 結合時マーカー解決
+- 対応: `_externalIdFilter` マーカーを廃止し、`extractExternalIdValue()` による AST 走査に変更
+- 修正ファイル: src/lib/scim/filter-parser.ts, src/app/api/scim/v2/Users/route.ts
+
+### F-2 [High]: User.email non-null assertion
+- 対応: serializer 呼び出し前に `email` null フィルタ追加
+- 修正ファイル: src/app/api/scim/v2/Groups/[id]/route.ts
+
+### F-3 [High]: UUID v5 namespace
+- 対応: アプリ固有 namespace UUID に変更
+- 修正ファイル: src/lib/scim/serializers.ts
+
+### F-4 [High]: and/or 混在フィルタ拒否
+- 対応: `parseExpression` で混在検出 → `FilterParseError`
+- 修正ファイル: src/lib/scim/filter-parser.ts
+
+### F-5 [High]: PUT /Users で name.formatted 更新
+- 対応: `prisma.user.update` 追加
+- 修正ファイル: src/app/api/scim/v2/Users/[id]/route.ts
+
+### F-6~F-14, S-5~S-9 [Medium/Low]: 各種修正
+- 修正完了
+
+### T-1~T-11: テスト修正・追加
+- 修正完了
+
+---
+
+# コードレビュー Loop 2
+
+日時: 2026-02-25T21:00:00+09:00
+レビュー回数: 2回目
+
+## 前回からの変更
+
+Loop 1 の全指摘 (F-1~F-14, S-1~S-10, T-1~T-11) を修正・コミット済み
+
+## 機能観点の指摘
+
+### F2-1 [High] PUT /Users/[id] の OrgMember 更新と externalId マッピングが非アトミック
+
+**問題**: PUT ハンドラが `orgMember.update`, `user.update`, `scimExternalMapping.create` を個別に実行。途中エラーで不整合の可能性。
+
+**影響**: externalId マッピング作成失敗時に OrgMember は更新済みの不整合状態。
+
+**推奨対応**: `$transaction` で全操作を囲む。
+
+### F2-2 [High] PATCH /Users/[id] で scimManaged: true が設定されない
+
+**問題**: PATCH ハンドラの `updateData` に `scimManaged: true` が含まれない。PUT では設定済み。
+
+**影響**: PATCH で deactivate されたメンバーが `scimManaged: false` のまま残り、手動招待を誤って許可する可能性。
+
+**推奨対応**: `updateData` に `scimManaged: true` を追加。
+
+### F2-3 [Medium] PUT の監査アクションが常に SCIM_USER_UPDATE
+
+**問題**: PUT は deactivate/reactivate 時も `SCIM_USER_UPDATE` を記録。PATCH では分岐済み。
+
+**推奨対応**: PATCH と同様に deactivate/reactivate を判定して監査アクションを分岐。
+
+### F2-4 [Medium] POST /Groups が members フィールドを無視
+
+**問題**: IdP が POST /Groups で `members` を送信しても完全に無視される。
+
+**推奨対応**: MVP では members を無視する設計だが、ログ出力追加。
+
+### F2-5 [Medium] Groups GET で未サポートフィルタがサイレント通過
+
+**問題**: `displayName` 以外のフィルタが渡された場合、全グループを返す。
+
+**推奨対応**: `displayName eq` 以外のフィルタに 400 返却。
+
+### F2-6 [Medium] トークン数制限が期限切れトークンを含む
+
+**問題**: `scimToken.count({ where: { orgId, revokedAt: null } })` が期限切れトークンもカウント。
+
+**推奨対応**: `expiresAt` 条件追加で期限切れを除外。
+
+### F2-7 [Low] OWNER が SCIM グループに含まれない — スキップ (設計決定)
+
+### F2-8 [Low] ScimTokenManager のエラーハンドリング不足
+
+**問題**: fetch 失敗時にユーザーへのフィードバックがない。
+
+**推奨対応**: `toast.error()` 追加。
+
+### F2-9 [Low] Groups POST の email non-null assertion
+
+**問題**: L150 `email: m.user.email!` — null 可能性。
+
+**推奨対応**: `Groups/[id]/route.ts` と同様に null フィルタ追加。
+
+## セキュリティ観点の指摘
+
+### S-10 [Medium] PUT /Users 非アトミック — F2-1 と重複
+
+### S-11 [Medium] PATCH scimManaged 未設定 — F2-2 と重複
+
+### S-12 [Low] Non-null assertions — F2-9 と重複
+
+### S-13 [Low] TOCTOU in Groups PUT OWNER check — スキップ (tx 内チェックで緩和済み)
+
+### S-14 [Low] Non-atomic token count — スキップ (管理操作、低頻度)
+
+### S-15 [Low] userName フィルタの case-sensitivity
+
+**問題**: `filterToPrismaWhere` が `email: value` (case-sensitive) を生成。
+
+**推奨対応**: Prisma の `mode: 'insensitive'` を使用。
+
+## テスト観点の指摘
+
+### T2-1 [Low] confirm-key TOCTOU レーステスト不足
+
+### T2-2 [Low] PUT/DELETE member の deactivated → 404 テスト不足
+
+### T2-3 [Low] invitations POST の deactivated+scimManaged 分岐テスト不足
+
+### T2-4 [Medium] PATCH deactivation で scimManaged 未検証 — F2-2 と重複
+
+### T2-5 [Low] pagination metadata テスト不足
+
+## 対応状況 (Loop 2)
 
 （修正後に追記）
