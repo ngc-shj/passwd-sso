@@ -201,6 +201,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   await prisma.$transaction([
     prisma.orgMemberKey.deleteMany({ where: { orgId, userId: target.userId } }),
+    prisma.scimExternalMapping.deleteMany({
+      where: { orgId, internalId: target.userId, resourceType: "User" },
+    }),
     prisma.orgMember.delete({ where: { id: memberId } }),
   ]);
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgMember, mockPrismaOrgMemberKey, mockTransaction, mockRequireOrgPermission, mockIsRoleAbove, OrgAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgMember, mockPrismaOrgMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireOrgPermission, mockIsRoleAbove, OrgAuthError } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -20,6 +20,9 @@ const { mockAuth, mockPrismaOrgMember, mockPrismaOrgMemberKey, mockTransaction, 
     mockPrismaOrgMemberKey: {
       deleteMany: vi.fn(),
     },
+    mockPrismaScimExternalMapping: {
+      deleteMany: vi.fn(),
+    },
     mockTransaction: vi.fn(),
     mockRequireOrgPermission: vi.fn(),
     mockIsRoleAbove: vi.fn(),
@@ -32,6 +35,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: mockPrismaOrgMember,
     orgMemberKey: mockPrismaOrgMemberKey,
+    scimExternalMapping: mockPrismaScimExternalMapping,
     $transaction: mockTransaction,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
@@ -355,6 +359,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
     expect(json.success).toBe(true);
     expect(mockTransaction).toHaveBeenCalledWith([
       mockPrismaOrgMemberKey.deleteMany({ where: { orgId: ORG_ID, userId: "target-user" } }),
+      mockPrismaScimExternalMapping.deleteMany({ where: { orgId: ORG_ID, internalId: "target-user", resourceType: "User" } }),
       mockPrismaOrgMember.delete({ where: { id: MEMBER_ID } }),
     ]);
   });

@@ -10,7 +10,7 @@ const {
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
   mockOrgMember: { findMany: vi.fn() },
-  mockScimExternalMapping: { findUnique: vi.fn(), create: vi.fn(), upsert: vi.fn() },
+  mockScimExternalMapping: { findUnique: vi.fn(), create: vi.fn(), deleteMany: vi.fn(), upsert: vi.fn() },
 }));
 
 vi.mock("@/lib/scim-token", () => ({

@@ -123,6 +123,19 @@ describe("scimPatchOpSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("rejects Operations exceeding max count of 100", () => {
+    const ops = Array.from({ length: 101 }, () => ({
+      op: "replace" as const,
+      path: "active",
+      value: false,
+    }));
+    const result = scimPatchOpSchema.safeParse({
+      schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+      Operations: ops,
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe("scimGroupSchema", () => {
@@ -161,6 +174,18 @@ describe("scimGroupSchema", () => {
     const result = scimGroupSchema.safeParse({
       schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
       displayName: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects members exceeding max count of 1000", () => {
+    const members = Array.from({ length: 1001 }, (_, i) => ({
+      value: `user-${i}`,
+    }));
+    const result = scimGroupSchema.safeParse({
+      schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+      displayName: "ADMIN",
+      members,
     });
     expect(result.success).toBe(false);
   });
