@@ -175,6 +175,18 @@ describe("GET /api/scim/v2/Users", () => {
     expect(res.status).toBe(429);
   });
 
+  it("returns 400 for externalId in OR filter", async () => {
+    const res = await GET(
+      makeReq({
+        searchParams: { filter: 'externalId eq "ext-1" or userName eq "test@example.com"' },
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("externalId");
+    expect(body.detail).toContain("OR");
+  });
+
   it("filters by externalId via ScimExternalMapping", async () => {
     mockScimExternalMapping.findUnique.mockResolvedValue({
       internalId: "user-1",

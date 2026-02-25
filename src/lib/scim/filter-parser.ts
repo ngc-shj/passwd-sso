@@ -246,7 +246,7 @@ function comparisonToPrisma(node: ScimFilterNode): PrismaWhere {
     const field = "user";
     switch (op) {
       case "eq":
-        return { [field]: { is: { email: normalized } } };
+        return { [field]: { is: { email: { equals: normalized, mode: "insensitive" } } } };
       case "co":
         return { [field]: { is: { email: { contains: normalized, mode: "insensitive" } } } };
       case "sw":

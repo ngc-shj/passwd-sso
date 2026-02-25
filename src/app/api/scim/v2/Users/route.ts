@@ -49,8 +49,13 @@ export async function GET(req: NextRequest) {
       const ast = parseScimFilter(filterParam);
 
       // Pre-resolve externalId via ScimExternalMapping before building WHERE.
-      // This works regardless of nesting depth (AND/OR).
       const extIdValue = extractExternalIdValue(ast);
+
+      // Reject externalId in OR expressions — semantics are ambiguous
+      if (extIdValue !== null && "or" in ast) {
+        return scimError(400, "externalId filter is not supported in OR expressions");
+      }
+
       if (extIdValue !== null) {
         const mapping = await prisma.scimExternalMapping.findUnique({
           where: {

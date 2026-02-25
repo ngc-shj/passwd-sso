@@ -128,7 +128,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     ...extractRequestMeta(req),
   });
 
-  // Return plaintext only once
+  // Return plaintext only once — no-store prevents caching of sensitive token
   return NextResponse.json(
     {
       id: token.id,
@@ -137,6 +137,6 @@ export async function POST(req: NextRequest, { params }: Params) {
       expiresAt: token.expiresAt,
       createdAt: token.createdAt,
     },
-    { status: 201 },
+    { status: 201, headers: { "Cache-Control": "no-store" } },
   );
 }
