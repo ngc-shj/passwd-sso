@@ -15,7 +15,7 @@ const {
   mockLogAudit: vi.fn(),
   mockOrgMember: { findMany: vi.fn(), count: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
   mockUser: { findUnique: vi.fn(), create: vi.fn() },
-  mockScimExternalMapping: { findUnique: vi.fn(), findMany: vi.fn(), upsert: vi.fn() },
+  mockScimExternalMapping: { findUnique: vi.fn(), findMany: vi.fn(), upsert: vi.fn(), create: vi.fn() },
   mockTransaction: vi.fn(),
 }));
 
@@ -114,6 +114,41 @@ describe("GET /api/scim/v2/Users", () => {
     expect(res.status).toBe(400);
   });
 
+  it("removes default deactivatedAt when active filter is inside AND", async () => {
+    mockOrgMember.findMany.mockResolvedValue([]);
+    mockOrgMember.count.mockResolvedValue(0);
+    mockScimExternalMapping.findMany.mockResolvedValue([]);
+
+    await GET(
+      makeReq({
+        searchParams: { filter: 'userName eq "test@example.com" and active eq false' },
+      }),
+    );
+
+    // The where clause should NOT have deactivatedAt: null at top level
+    // since the active filter inside AND controls it
+    const callArgs = mockOrgMember.findMany.mock.calls[0][0];
+    expect(callArgs.where.deactivatedAt).toBeUndefined();
+    expect(callArgs.where.AND).toBeDefined();
+  });
+
+  it("removes default deactivatedAt when active filter is inside OR", async () => {
+    mockOrgMember.findMany.mockResolvedValue([]);
+    mockOrgMember.count.mockResolvedValue(0);
+    mockScimExternalMapping.findMany.mockResolvedValue([]);
+
+    await GET(
+      makeReq({
+        searchParams: { filter: 'active eq true or userName eq "test@example.com"' },
+      }),
+    );
+
+    const callArgs = mockOrgMember.findMany.mock.calls[0][0];
+    // Top-level deactivatedAt: null should be removed
+    expect(callArgs.where.deactivatedAt).toBeUndefined();
+    expect(callArgs.where.OR).toBeDefined();
+  });
+
   it("filters by externalId via ScimExternalMapping", async () => {
     mockScimExternalMapping.findUnique.mockResolvedValue({
       internalId: "user-1",
@@ -168,7 +203,10 @@ describe("POST /api/scim/v2/Users", () => {
             }), // re-fetch
           create: vi.fn().mockResolvedValue({}),
         },
-        scimExternalMapping: { upsert: vi.fn().mockResolvedValue({}) },
+        scimExternalMapping: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({}),
+        },
       };
       return fn(tx);
     });
@@ -206,7 +244,10 @@ describe("POST /api/scim/v2/Users", () => {
             .mockResolvedValueOnce({ userId: "new-user", deactivatedAt: null }),
           create: vi.fn().mockResolvedValue({}),
         },
-        scimExternalMapping: { upsert: vi.fn() },
+        scimExternalMapping: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({}),
+        },
       };
       const result = await fn(tx);
       // Verify the email was lowercased in the user lookup
@@ -270,7 +311,10 @@ describe("POST /api/scim/v2/Users", () => {
             .mockResolvedValueOnce({ userId: "user-1", deactivatedAt: null }),
           update: mockMemberUpdate,
         },
-        scimExternalMapping: { upsert: vi.fn() },
+        scimExternalMapping: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({}),
+        },
       };
       return fn(tx);
     });
@@ -311,5 +355,44 @@ describe("POST /api/scim/v2/Users", () => {
       }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("returns 409 when externalId is already mapped to a different user", async () => {
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      const tx = {
+        user: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({
+            id: "new-user",
+            email: "new@example.com",
+            name: null,
+          }),
+        },
+        orgMember: {
+          findUnique: vi.fn().mockResolvedValueOnce(null),
+          create: vi.fn().mockResolvedValue({}),
+        },
+        scimExternalMapping: {
+          findUnique: vi.fn().mockResolvedValue({
+            internalId: "other-user", // different user
+            externalId: "ext-conflict",
+          }),
+        },
+      };
+      return fn(tx);
+    });
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "new@example.com",
+          externalId: "ext-conflict",
+        },
+      }),
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.detail).toContain("externalId");
   });
 });

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseScimFilter,
   filterToPrismaWhere,
+  hasAttribute,
   FilterParseError,
 } from "./filter-parser";
 
@@ -95,6 +96,27 @@ describe("parseScimFilter", () => {
       op: "eq",
       value: "ext-123",
     });
+  });
+});
+
+describe("hasAttribute", () => {
+  it("detects attribute in simple filter", () => {
+    const ast = parseScimFilter("active eq true");
+    expect(hasAttribute(ast, "active")).toBe(true);
+    expect(hasAttribute(ast, "userName")).toBe(false);
+  });
+
+  it("detects attribute nested inside AND", () => {
+    const ast = parseScimFilter('userName eq "test" and active eq false');
+    expect(hasAttribute(ast, "active")).toBe(true);
+    expect(hasAttribute(ast, "userName")).toBe(true);
+    expect(hasAttribute(ast, "externalId")).toBe(false);
+  });
+
+  it("detects attribute nested inside OR", () => {
+    const ast = parseScimFilter('active eq true or userName eq "test"');
+    expect(hasAttribute(ast, "active")).toBe(true);
+    expect(hasAttribute(ast, "userName")).toBe(true);
   });
 });
 

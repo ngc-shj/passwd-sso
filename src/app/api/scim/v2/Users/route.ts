@@ -11,6 +11,7 @@ import { userToScimUser, type ScimUserInput } from "@/lib/scim/serializers";
 import {
   parseScimFilter,
   filterToPrismaWhere,
+  hasAttribute,
   FilterParseError,
 } from "@/lib/scim/filter-parser";
 import { scimUserSchema } from "@/lib/scim/validations";
@@ -49,6 +50,13 @@ export async function GET(req: NextRequest) {
   if (filterParam) {
     try {
       const ast = parseScimFilter(filterParam);
+
+      // If the filter includes `active` at any nesting depth, remove the
+      // default `deactivatedAt: null` so filterToPrismaWhere controls it.
+      if (hasAttribute(ast, "active")) {
+        delete prismaWhere.deactivatedAt;
+      }
+
       const where = filterToPrismaWhere(ast);
 
       // Extract _externalIdFilter marker if present
@@ -56,18 +64,6 @@ export async function GET(req: NextRequest) {
         const f = where._externalIdFilter as { op: string; value: string };
         externalIdEqFilter = f.value;
         delete where._externalIdFilter;
-      }
-
-      // Handle active filter: merge into org member where
-      if (where.deactivatedAt !== undefined) {
-        if (where.deactivatedAt === null) {
-          // active=true — already default
-        } else {
-          // active=false — include deactivated
-          delete prismaWhere.deactivatedAt;
-          prismaWhere.deactivatedAt = { not: null };
-        }
-        delete where.deactivatedAt;
       }
 
       prismaWhere = { ...prismaWhere, ...where };
@@ -209,7 +205,7 @@ export async function POST(req: NextRequest) {
 
       // Create external mapping (if externalId provided)
       if (externalId) {
-        await tx.scimExternalMapping.upsert({
+        const existing = await tx.scimExternalMapping.findUnique({
           where: {
             orgId_externalId_resourceType: {
               orgId,
@@ -217,16 +213,20 @@ export async function POST(req: NextRequest) {
               resourceType: "User",
             },
           },
-          create: {
-            orgId,
-            externalId,
-            resourceType: "User",
-            internalId: user.id,
-          },
-          update: {
-            internalId: user.id,
-          },
         });
+        if (existing && existing.internalId !== user.id) {
+          throw new Error("SCIM_EXTERNAL_ID_CONFLICT");
+        }
+        if (!existing) {
+          await tx.scimExternalMapping.create({
+            data: {
+              orgId,
+              externalId,
+              resourceType: "User",
+              internalId: user.id,
+            },
+          });
+        }
       }
 
       // Re-fetch to get latest state
@@ -264,6 +264,9 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     if (e instanceof Error && e.message === "SCIM_RESOURCE_EXISTS") {
       return scimError(409, "User already exists in this organization", "uniqueness");
+    }
+    if (e instanceof Error && e.message === "SCIM_EXTERNAL_ID_CONFLICT") {
+      return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }
     throw e;
   }

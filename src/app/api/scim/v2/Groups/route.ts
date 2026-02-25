@@ -118,13 +118,19 @@ export async function POST(req: NextRequest) {
 
   // Register external mapping if externalId provided
   if (externalId) {
-    await prisma.scimExternalMapping.upsert({
+    const existingMapping = await prisma.scimExternalMapping.findUnique({
       where: {
         orgId_externalId_resourceType: { orgId, externalId, resourceType: "Group" },
       },
-      create: { orgId, externalId, resourceType: "Group", internalId: groupId },
-      update: { internalId: groupId },
     });
+    if (existingMapping && existingMapping.internalId !== groupId) {
+      return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
+    }
+    if (!existingMapping) {
+      await prisma.scimExternalMapping.create({
+        data: { orgId, externalId, resourceType: "Group", internalId: groupId },
+      });
+    }
   }
 
   const baseUrl = getScimBaseUrl(req);
