@@ -174,6 +174,36 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     expect(body.detail).toContain("externalId");
   });
 
+  it("returns 409 on P2002 race condition for ScimExternalMapping create", async () => {
+    const { Prisma } = await import("@prisma/client");
+    const p2002 = new Prisma.PrismaClientKnownRequestError(
+      "Unique constraint failed",
+      { code: "P2002", clientVersion: "7.0.0", meta: { modelName: "ScimExternalMapping" } },
+    );
+    mockOrgMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
+      .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }); // role check
+    mockOrgMember.update.mockResolvedValue({});
+    mockScimExternalMapping.findUnique.mockResolvedValue(null); // check passes
+    mockScimExternalMapping.create.mockRejectedValue(p2002);    // but create races
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "test@example.com",
+          active: true,
+          externalId: "ext-race",
+        },
+      }),
+      makeParams("user-1"),
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.detail).toContain("externalId");
+  });
+
   it("updates OrgMember and returns the resource", async () => {
     mockOrgMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
