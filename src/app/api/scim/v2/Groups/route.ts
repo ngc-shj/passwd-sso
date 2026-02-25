@@ -129,6 +129,10 @@ export async function POST(req: NextRequest) {
     }
     if (!existingMapping) {
       try {
+        // Delete stale mapping for this group (handles externalId reassignment)
+        await prisma.scimExternalMapping.deleteMany({
+          where: { orgId, internalId: groupId, resourceType: "Group" },
+        });
         await prisma.scimExternalMapping.create({
           data: { orgId, externalId, resourceType: "Group", internalId: groupId },
         });

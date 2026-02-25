@@ -398,8 +398,9 @@ describe("POST /api/scim/v2/Users", () => {
     );
   });
 
-  it("re-activates a deactivated member", async () => {
+  it("re-activates a deactivated member and clears stale externalId mapping", async () => {
     const mockMemberUpdate = vi.fn().mockResolvedValue({});
+    const mockMappingDeleteMany = vi.fn().mockResolvedValue({ count: 1 });
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const tx = {
         user: {
@@ -418,7 +419,7 @@ describe("POST /api/scim/v2/Users", () => {
         scimExternalMapping: {
           findUnique: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({}),
-          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+          deleteMany: mockMappingDeleteMany,
         },
       };
       return fn(tx);
@@ -437,6 +438,16 @@ describe("POST /api/scim/v2/Users", () => {
     expect(mockMemberUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ deactivatedAt: null, scimManaged: true }),
+      }),
+    );
+    // T5-1: Verify stale mapping is deleted before new one is created
+    expect(mockMappingDeleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orgId: "org-1",
+          internalId: "user-1",
+          resourceType: "User",
+        }),
       }),
     );
   });

@@ -23,11 +23,30 @@ const SCIM_GROUP_ROLES: OrgRole[] = [
   ORG_ROLE.VIEWER,
 ];
 
-/** Resolve a SCIM Group ID back to (orgId, role). */
-function resolveGroupRole(orgId: string, scimId: string): OrgRole | null {
+/** Resolve a SCIM Group ID back to (orgId, role). Falls back to ScimExternalMapping. */
+async function resolveGroupRole(orgId: string, scimId: string): Promise<OrgRole | null> {
+  // First try computed group IDs
   for (const role of SCIM_GROUP_ROLES) {
     if (roleGroupId(orgId, role) === scimId) return role;
   }
+
+  // Fallback: resolve via ScimExternalMapping (IdP may use externalId as the group id)
+  const mapping = await prisma.scimExternalMapping.findUnique({
+    where: {
+      orgId_externalId_resourceType: {
+        orgId,
+        externalId: scimId,
+        resourceType: "Group",
+      },
+    },
+    select: { internalId: true },
+  });
+  if (mapping) {
+    for (const role of SCIM_GROUP_ROLES) {
+      if (roleGroupId(orgId, role) === mapping.internalId) return role;
+    }
+  }
+
   return null;
 }
 
@@ -62,7 +81,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   const { id } = await params;
-  const role = resolveGroupRole(orgId, id);
+  const role = await resolveGroupRole(orgId, id);
   if (!role) {
     return scimError(404, "Group not found");
   }
@@ -85,7 +104,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   const { id } = await params;
-  const role = resolveGroupRole(orgId, id);
+  const role = await resolveGroupRole(orgId, id);
   if (!role) {
     return scimError(404, "Group not found");
   }
@@ -201,7 +220,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const { id } = await params;
-  const role = resolveGroupRole(orgId, id);
+  const role = await resolveGroupRole(orgId, id);
   if (!role) {
     return scimError(404, "Group not found");
   }

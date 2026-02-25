@@ -7,12 +7,14 @@ const {
   mockCheckScimRateLimit,
   mockLogAudit,
   mockOrgMember,
+  mockScimExternalMapping,
   mockTransaction,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
   mockLogAudit: vi.fn(),
   mockOrgMember: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+  mockScimExternalMapping: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
 }));
 
@@ -29,6 +31,7 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: mockOrgMember,
+    scimExternalMapping: mockScimExternalMapping,
     $transaction: mockTransaction,
   },
 }));
@@ -61,7 +64,7 @@ function makeReq(options: { method?: string; body?: unknown } = {}) {
 
 describe("GET /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
   });
@@ -97,7 +100,7 @@ describe("GET /api/scim/v2/Groups/[id]", () => {
 
 describe("PATCH /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
     // Transaction executes callback with same mock objects
@@ -265,7 +268,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
 
 describe("PUT /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
     // Transaction executes callback with same mock objects
@@ -382,11 +385,47 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it("skips demotion when member's role was changed concurrently", async () => {
+    mockOrgMember.findMany
+      .mockResolvedValueOnce([{ id: "m1", userId: "user-1", role: "ADMIN" }])
+      .mockResolvedValueOnce([]); // buildGroupResource
+    // tx re-check: role changed to VIEWER concurrently
+    mockOrgMember.findUnique.mockResolvedValue({ role: "VIEWER" });
+    mockOrgMember.update.mockResolvedValue({});
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "ADMIN",
+          members: [],
+        },
+      }),
+      makeParams(ADMIN_GROUP_ID),
+    );
+    expect(res.status).toBe(200);
+    // Member's role is VIEWER (not ADMIN), so no demotion should occur
+    expect(mockOrgMember.update).not.toHaveBeenCalled();
+  });
+
+  it("resolves group via ScimExternalMapping fallback", async () => {
+    mockScimExternalMapping.findUnique.mockResolvedValue({
+      internalId: ADMIN_GROUP_ID,
+    });
+    mockOrgMember.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeReq(), makeParams("ext-group-id-from-idp"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.displayName).toBe("ADMIN");
+  });
 });
 
 describe("DELETE /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
   });
@@ -397,5 +436,14 @@ describe("DELETE /api/scim/v2/Groups/[id]", () => {
       makeParams(ADMIN_GROUP_ID),
     );
     expect(res.status).toBe(405);
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockCheckScimRateLimit.mockResolvedValue(false);
+    const res = await DELETE(
+      makeReq({ method: "DELETE" }),
+      makeParams(ADMIN_GROUP_ID),
+    );
+    expect(res.status).toBe(429);
   });
 });
