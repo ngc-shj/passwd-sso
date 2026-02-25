@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgMember, mockPrismaOrgMemberKey, mockTransaction, mockRequireOrgPermission, mockIsRoleAbove, OrgAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgMember, mockPrismaOrgMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireOrgPermission, mockIsRoleAbove, OrgAuthError } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -20,6 +20,9 @@ const { mockAuth, mockPrismaOrgMember, mockPrismaOrgMemberKey, mockTransaction, 
     mockPrismaOrgMemberKey: {
       deleteMany: vi.fn(),
     },
+    mockPrismaScimExternalMapping: {
+      deleteMany: vi.fn(),
+    },
     mockTransaction: vi.fn(),
     mockRequireOrgPermission: vi.fn(),
     mockIsRoleAbove: vi.fn(),
@@ -32,6 +35,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: mockPrismaOrgMember,
     orgMemberKey: mockPrismaOrgMemberKey,
+    scimExternalMapping: mockPrismaScimExternalMapping,
     $transaction: mockTransaction,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
@@ -104,6 +108,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "target-user",
       role: ORG_ROLE.MEMBER,
+      deactivatedAt: null,
     });
     const res = await PUT(req, createParams({ orgId: ORG_ID, memberId: MEMBER_ID }));
     expect(res.status).toBe(400);
@@ -117,6 +122,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "target-user",
       role: ORG_ROLE.MEMBER,
+      deactivatedAt: null,
     });
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
@@ -146,6 +152,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "target-user",
       role: ORG_ROLE.MEMBER,
+      deactivatedAt: null,
     });
     mockPrismaOrgMember.update.mockResolvedValue({
       id: MEMBER_ID,
@@ -171,6 +178,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "target-user",
       role: ORG_ROLE.ADMIN,
+      deactivatedAt: null,
     });
     mockPrismaOrgMember.update.mockResolvedValue({
       id: MEMBER_ID,
@@ -201,6 +209,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "target-user",
       role: ORG_ROLE.MEMBER,
+      deactivatedAt: null,
     });
 
     const res = await PUT(
@@ -218,6 +227,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "owner-user",
       role: ORG_ROLE.OWNER,
+      deactivatedAt: null,
     });
 
     const res = await PUT(
@@ -237,6 +247,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "other-admin",
       role: ORG_ROLE.ADMIN,
+      deactivatedAt: null,
     });
 
     const res = await PUT(
@@ -286,6 +297,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "other-admin",
       role: ORG_ROLE.ADMIN,
+      deactivatedAt: null,
     });
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`),
@@ -319,6 +331,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
       id: MEMBER_ID,
       orgId: ORG_ID,
       role: ORG_ROLE.OWNER,
+      deactivatedAt: null,
     });
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`),
@@ -333,6 +346,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
       orgId: ORG_ID,
       userId: "target-user",
       role: ORG_ROLE.MEMBER,
+      deactivatedAt: null,
     });
     mockTransaction.mockResolvedValue([]);
 
@@ -345,6 +359,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
     expect(json.success).toBe(true);
     expect(mockTransaction).toHaveBeenCalledWith([
       mockPrismaOrgMemberKey.deleteMany({ where: { orgId: ORG_ID, userId: "target-user" } }),
+      mockPrismaScimExternalMapping.deleteMany({ where: { orgId: ORG_ID, internalId: "target-user", resourceType: "User" } }),
       mockPrismaOrgMember.delete({ where: { id: MEMBER_ID } }),
     ]);
   });

@@ -25,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 
   const members = await prisma.orgMember.findMany({
-    where: { orgId },
+    where: { orgId, deactivatedAt: null },
     include: {
       user: {
         select: { id: true, name: true, email: true, image: true },

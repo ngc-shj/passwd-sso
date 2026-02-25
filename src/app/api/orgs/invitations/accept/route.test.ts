@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgInvitation, mockPrismaOrgMember, mockPrismaUser, mockTransaction } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaOrgInvitation, mockPrismaOrgMember, mockPrismaUser, mockTransaction, mockRateLimiter } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaOrgInvitation: {
     findUnique: vi.fn(),
@@ -14,6 +14,7 @@ const { mockAuth, mockPrismaOrgInvitation, mockPrismaOrgMember, mockPrismaUser, 
   },
   mockPrismaUser: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
+  mockRateLimiter: { check: vi.fn() },
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -24,6 +25,9 @@ vi.mock("@/lib/prisma", () => ({
     user: mockPrismaUser,
     $transaction: mockTransaction,
   },
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: () => mockRateLimiter,
 }));
 
 import { POST } from "./route";
@@ -47,6 +51,7 @@ describe("POST /api/orgs/invitations/accept", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id", email: "user@test.com" } });
     mockTransaction.mockResolvedValue([{}, {}]);
+    mockRateLimiter.check.mockResolvedValue(true);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -105,7 +110,10 @@ describe("POST /api/orgs/invitations/accept", () => {
 
   it("handles already-member case gracefully", async () => {
     mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
-    mockPrismaOrgMember.findUnique.mockResolvedValue({ id: "existing-member" });
+    mockPrismaOrgMember.findUnique.mockResolvedValue({
+      id: "existing-member",
+      deactivatedAt: null,
+    });
 
     const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
       body: { token: "valid-token" },
@@ -113,6 +121,40 @@ describe("POST /api/orgs/invitations/accept", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.alreadyMember).toBe(true);
+  });
+
+  it("returns 409 for deactivated scimManaged member", async () => {
+    mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaOrgMember.findUnique.mockResolvedValue({
+      id: "deactivated-member",
+      deactivatedAt: new Date("2024-01-01"),
+      scimManaged: true,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+      body: { token: "valid-token" },
+    }));
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("SCIM_MANAGED_MEMBER");
+  });
+
+  it("re-activates deactivated non-scimManaged member", async () => {
+    mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaOrgMember.findUnique.mockResolvedValue({
+      id: "deactivated-member",
+      deactivatedAt: new Date("2024-01-01"),
+      scimManaged: false,
+    });
+    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+      body: { token: "valid-token" },
+    }));
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.alreadyMember).toBe(false);
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
 
   it("accepts invitation and creates membership", async () => {

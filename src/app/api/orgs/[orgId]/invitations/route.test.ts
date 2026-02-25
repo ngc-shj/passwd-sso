@@ -126,7 +126,7 @@ describe("POST /api/orgs/[orgId]/invitations", () => {
 
   it("returns 409 when user is already a member", async () => {
     mockPrismaUser.findUnique.mockResolvedValue({ id: "existing-user" });
-    mockPrismaOrgMember.findUnique.mockResolvedValue({ id: "existing-member" });
+    mockPrismaOrgMember.findUnique.mockResolvedValue({ id: "existing-member", deactivatedAt: null });
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`, {

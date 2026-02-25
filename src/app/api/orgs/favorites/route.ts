@@ -14,7 +14,7 @@ export async function GET() {
 
   // Build role map for permission check + UI display
   const memberships = await prisma.orgMember.findMany({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, deactivatedAt: null },
     select: { orgId: true, role: true },
   });
   const roleMap = new Map(memberships.map((m) => [m.orgId, m.role]));

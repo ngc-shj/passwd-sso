@@ -98,10 +98,21 @@ export async function POST(req: NextRequest, { params }: Params) {
       },
     });
     if (existingMember) {
-      return NextResponse.json(
-        { error: API_ERROR.ALREADY_A_MEMBER },
-        { status: 409 }
-      );
+      // Active member → already a member
+      if (existingMember.deactivatedAt === null) {
+        return NextResponse.json(
+          { error: API_ERROR.ALREADY_A_MEMBER },
+          { status: 409 }
+        );
+      }
+      // Deactivated + scimManaged → must re-activate via IdP
+      if (existingMember.scimManaged) {
+        return NextResponse.json(
+          { error: API_ERROR.SCIM_MANAGED_MEMBER },
+          { status: 409 }
+        );
+      }
+      // Deactivated + !scimManaged → allow invitation (accept will re-activate)
     }
   }
 
