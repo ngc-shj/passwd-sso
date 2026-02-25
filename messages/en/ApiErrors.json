@@ -74,5 +74,6 @@
   "scimManagedMember": "This member is managed by SCIM. Please re-activate from your identity provider.",
   "scimFilterInvalid": "Invalid SCIM filter expression.",
   "scimUnsupportedOperation": "Unsupported SCIM operation.",
-  "scimResourceExists": "Resource already exists."
+  "scimResourceExists": "Resource already exists.",
+  "scimTokenLimitExceeded": "Maximum number of SCIM tokens reached. Please revoke unused tokens first."
 }

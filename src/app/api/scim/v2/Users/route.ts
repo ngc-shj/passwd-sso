@@ -7,24 +7,19 @@ import {
   scimResponse,
   scimError,
   scimListResponse,
+  getScimBaseUrl,
 } from "@/lib/scim/response";
 import { userToScimUser, type ScimUserInput } from "@/lib/scim/serializers";
 import {
   parseScimFilter,
   filterToPrismaWhere,
-  hasAttribute,
+  extractExternalIdValue,
   FilterParseError,
 } from "@/lib/scim/filter-parser";
 import { scimUserSchema } from "@/lib/scim/validations";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { ORG_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-
-function getScimBaseUrl(req: NextRequest): string {
-  const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  const host = req.headers.get("host") ?? "localhost";
-  return `${proto}://${host}/api/scim/v2`;
-}
 
 // GET /api/scim/v2/Users — List/filter users in the org
 export async function GET(req: NextRequest) {
@@ -43,30 +38,36 @@ export async function GET(req: NextRequest) {
   const count = Math.min(200, Math.max(1, parseInt(url.searchParams.get("count") ?? "100", 10) || 100));
   const filterParam = url.searchParams.get("filter");
 
-  // Build Prisma where clause
+  // Build Prisma where clause.
+  // No deactivatedAt filter by default — RFC 7644 §3.4.2 requires unfiltered
+  // GET to return all resources. The `active` field distinguishes state.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let prismaWhere: Record<string, any> = { orgId, deactivatedAt: null };
-  let externalIdEqFilter: string | null = null;
+  let prismaWhere: Record<string, any> = { orgId };
 
   if (filterParam) {
     try {
       const ast = parseScimFilter(filterParam);
 
-      // If the filter includes `active` at any nesting depth, remove the
-      // default `deactivatedAt: null` so filterToPrismaWhere controls it.
-      if (hasAttribute(ast, "active")) {
-        delete prismaWhere.deactivatedAt;
+      // Pre-resolve externalId via ScimExternalMapping before building WHERE.
+      // This works regardless of nesting depth (AND/OR).
+      const extIdValue = extractExternalIdValue(ast);
+      if (extIdValue !== null) {
+        const mapping = await prisma.scimExternalMapping.findUnique({
+          where: {
+            orgId_externalId_resourceType: {
+              orgId,
+              externalId: extIdValue,
+              resourceType: "User",
+            },
+          },
+        });
+        if (!mapping) {
+          return scimListResponse([], 0, startIndex);
+        }
+        prismaWhere.userId = mapping.internalId;
       }
 
       const where = filterToPrismaWhere(ast);
-
-      // Extract _externalIdFilter marker if present
-      if (where._externalIdFilter) {
-        const f = where._externalIdFilter as { op: string; value: string };
-        externalIdEqFilter = f.value;
-        delete where._externalIdFilter;
-      }
-
       prismaWhere = { ...prismaWhere, ...where };
     } catch (e) {
       if (e instanceof FilterParseError) {
@@ -74,24 +75,6 @@ export async function GET(req: NextRequest) {
       }
       throw e;
     }
-  }
-
-  // If filtering by externalId, resolve via ScimExternalMapping first
-  if (externalIdEqFilter) {
-    const mapping = await prisma.scimExternalMapping.findUnique({
-      where: {
-        orgId_externalId_resourceType: {
-          orgId,
-          externalId: externalIdEqFilter,
-          resourceType: "User",
-        },
-      },
-    });
-    if (!mapping) {
-      return scimListResponse([], 0, startIndex);
-    }
-    // Add userId filter from mapping
-    prismaWhere.userId = mapping.internalId;
   }
 
   const [members, totalResults] = await Promise.all([
@@ -107,7 +90,7 @@ export async function GET(req: NextRequest) {
     prisma.orgMember.count({ where: prismaWhere }),
   ]);
 
-  const baseUrl = getScimBaseUrl(req);
+  const baseUrl = getScimBaseUrl();
 
   // Batch-fetch external IDs for the result set
   const userIds = members.map((m) => m.userId);
@@ -117,16 +100,18 @@ export async function GET(req: NextRequest) {
   });
   const extIdMap = new Map(mappings.map((m) => [m.internalId, m.externalId]));
 
-  const resources = members.map((m) => {
-    const input: ScimUserInput = {
-      userId: m.userId,
-      email: m.user.email!,
-      name: m.user.name,
-      deactivatedAt: m.deactivatedAt,
-      externalId: extIdMap.get(m.userId),
-    };
-    return userToScimUser(input, baseUrl);
-  });
+  const resources = members
+    .filter((m) => m.user.email != null)
+    .map((m) => {
+      const input: ScimUserInput = {
+        userId: m.userId,
+        email: m.user.email!,
+        name: m.user.name,
+        deactivatedAt: m.deactivatedAt,
+        externalId: extIdMap.get(m.userId),
+      };
+      return userToScimUser(input, baseUrl);
+    });
 
   return scimListResponse(resources, totalResults, startIndex);
 }
@@ -249,11 +234,11 @@ export async function POST(req: NextRequest) {
       ...extractRequestMeta(req),
     });
 
-    const baseUrl = getScimBaseUrl(req);
+    const baseUrl = getScimBaseUrl();
     const resource = userToScimUser(
       {
         userId: created.user.id,
-        email: created.user.email!,
+        email: userName, // already validated by Zod
         name: created.user.name,
         deactivatedAt: created.member.deactivatedAt,
         externalId: created.externalId,

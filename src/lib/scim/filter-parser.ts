@@ -171,27 +171,35 @@ export function parseScimFilter(filter: string): ScimFilterExpression {
 
   function parseExpression(): ScimFilterExpression {
     let left: ScimFilterExpression = parseComparison();
+    let connective: "and" | "or" | null = null;
 
     while (pos < tokens.length) {
       const next = tokens[pos];
-      if (next.type === "and") {
-        pos++;
-        const right = parseComparison();
+      if (next.type !== "and" && next.type !== "or") break;
+
+      // Reject mixed and/or (RFC 7644 requires and > or precedence,
+      // which is not implemented in this MVP parser)
+      if (connective !== null && connective !== next.type) {
+        throw new FilterParseError(
+          "Mixing \"and\" and \"or\" is not supported; use separate requests",
+        );
+      }
+      connective = next.type;
+
+      pos++;
+      const right = parseComparison();
+      if (connective === "and") {
         if ("and" in left) {
           (left as ScimFilterAnd).and.push(right);
         } else {
           left = { and: [left, right] };
         }
-      } else if (next.type === "or") {
-        pos++;
-        const right = parseComparison();
+      } else {
         if ("or" in left) {
           (left as ScimFilterOr).or.push(right);
         } else {
           left = { or: [left, right] };
         }
-      } else {
-        break;
       }
     }
 
@@ -247,24 +255,14 @@ function comparisonToPrisma(node: ScimFilterNode): PrismaWhere {
   }
 
   if (attr === "externalId") {
-    // Filter via ScimExternalMapping
-    switch (op) {
-      case "eq":
-        return {
-          user: {
-            is: {
-              id: {
-                // Will be resolved by caller to use ScimExternalMapping lookup
-              },
-            },
-          },
-          _externalIdFilter: { op: "eq", value },
-        };
-      default:
-        throw new FilterParseError(
-          `Operator "${op}" not supported for externalId`,
-        );
+    // externalId is resolved by caller via ScimExternalMapping lookup.
+    // Return empty object — caller injects userId after resolution.
+    if (op !== "eq") {
+      throw new FilterParseError(
+        `Operator "${op}" not supported for externalId`,
+      );
     }
+    return {};
   }
 
   throw new FilterParseError(`Unsupported attribute: ${attr}`);
@@ -273,8 +271,9 @@ function comparisonToPrisma(node: ScimFilterNode): PrismaWhere {
 /**
  * Convert a parsed SCIM filter AST to a Prisma `where` clause.
  *
- * Note: `externalId` filters return a special `_externalIdFilter` marker
- * that callers must resolve separately (via ScimExternalMapping lookup).
+ * `externalId` nodes produce empty objects — callers must pre-resolve
+ * externalId via `extractExternalIdValue()` + ScimExternalMapping lookup
+ * and inject the resulting userId into the WHERE clause.
  */
 export function filterToPrismaWhere(
   expr: ScimFilterExpression,
@@ -286,6 +285,30 @@ export function filterToPrismaWhere(
     return { OR: expr.or.map(filterToPrismaWhere) };
   }
   return comparisonToPrisma(expr);
+}
+
+/**
+ * Extract the value of an `externalId eq "..."` node from anywhere in the AST.
+ * Returns `null` if no externalId filter is found.
+ */
+export function extractExternalIdValue(
+  expr: ScimFilterExpression,
+): string | null {
+  if ("and" in expr) {
+    for (const child of expr.and) {
+      const v = extractExternalIdValue(child);
+      if (v !== null) return v;
+    }
+    return null;
+  }
+  if ("or" in expr) {
+    for (const child of expr.or) {
+      const v = extractExternalIdValue(child);
+      if (v !== null) return v;
+    }
+    return null;
+  }
+  return expr.attr === "externalId" ? expr.value : null;
 }
 
 /**

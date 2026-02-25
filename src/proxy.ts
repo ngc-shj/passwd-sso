@@ -95,6 +95,8 @@ async function handleApiAuth(request: NextRequest) {
     return applyCorsHeaders(request, NextResponse.next());
   }
 
+  // Note: /api/scim/v2/* is intentionally NOT listed here — SCIM endpoints
+  // use their own Bearer token auth (validateScimToken) in each route handler.
   if (
     pathname.startsWith(API_PATH.PASSWORDS) ||
     pathname.startsWith(API_PATH.TAGS) ||

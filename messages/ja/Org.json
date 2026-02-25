@@ -118,5 +118,6 @@
   "scimCreatedBy": "{name} が作成",
   "scimLastUsed": "最終使用: {date}",
   "scimNeverUsed": "未使用",
-  "scimExpiresAt": "有効期限: {date}"
+  "scimExpiresAt": "有効期限: {date}",
+  "cancel": "キャンセル"
 }

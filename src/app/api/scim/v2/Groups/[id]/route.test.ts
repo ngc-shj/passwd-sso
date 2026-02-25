@@ -7,11 +7,13 @@ const {
   mockCheckScimRateLimit,
   mockLogAudit,
   mockOrgMember,
+  mockTransaction,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
   mockLogAudit: vi.fn(),
   mockOrgMember: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+  mockTransaction: vi.fn(),
 }));
 
 vi.mock("@/lib/scim-token", () => ({
@@ -27,6 +29,7 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: mockOrgMember,
+    $transaction: mockTransaction,
   },
 }));
 
@@ -84,6 +87,12 @@ describe("GET /api/scim/v2/Groups/[id]", () => {
     expect(body.displayName).toBe("ADMIN");
     expect(body.members).toHaveLength(1);
   });
+
+  it("returns 429 when rate limited", async () => {
+    mockCheckScimRateLimit.mockResolvedValue(false);
+    const res = await GET(makeReq(), makeParams(ADMIN_GROUP_ID));
+    expect(res.status).toBe(429);
+  });
 });
 
 describe("PATCH /api/scim/v2/Groups/[id]", () => {
@@ -91,6 +100,10 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     vi.clearAllMocks();
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
+    // Transaction executes callback with same mock objects
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({ orgMember: mockOrgMember }),
+    );
   });
 
   it("adds a member to the group", async () => {
@@ -181,6 +194,62 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
       }),
     );
   });
+
+  it("returns 400 for non-existent member", async () => {
+    mockOrgMember.findUnique.mockResolvedValue(null);
+
+    const res = await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [
+            {
+              op: "add",
+              path: "members",
+              value: [{ value: "no-such-user" }],
+            },
+          ],
+        },
+      }),
+      makeParams(ADMIN_GROUP_ID),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("No such member");
+  });
+
+  it("handles multiple operations in a single PATCH", async () => {
+    mockOrgMember.findUnique
+      .mockResolvedValueOnce({ id: "m1", role: "MEMBER" })   // user-1
+      .mockResolvedValueOnce({ id: "m2", role: "ADMIN" });    // user-2
+    mockOrgMember.update.mockResolvedValue({});
+    mockOrgMember.findMany.mockResolvedValue([]);
+
+    const res = await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [
+            {
+              op: "add",
+              path: "members",
+              value: [{ value: "user-1" }],
+            },
+            {
+              op: "remove",
+              path: "members",
+              value: [{ value: "user-2" }],
+            },
+          ],
+        },
+      }),
+      makeParams(ADMIN_GROUP_ID),
+    );
+    expect(res.status).toBe(200);
+    expect(mockOrgMember.update).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("PUT /api/scim/v2/Groups/[id]", () => {
@@ -188,6 +257,10 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     vi.clearAllMocks();
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
+    // Transaction executes callback with same mock objects
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({ orgMember: mockOrgMember }),
+    );
   });
 
   it("replaces group members", async () => {
@@ -196,7 +269,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
       .mockResolvedValueOnce([{ id: "m1", userId: "user-1", role: "ADMIN" }]) // current members
       .mockResolvedValueOnce([]); // buildGroupResource
 
-    // user-2 will be added
+    // user-2 will be added; OWNER check for user-1 removal returns non-OWNER
     mockOrgMember.findUnique.mockResolvedValue({ id: "m2", role: "MEMBER" });
     mockOrgMember.update.mockResolvedValue({});
 
@@ -233,6 +306,30 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
       makeParams(ADMIN_GROUP_ID),
     );
     expect(res.status).toBe(403);
+  });
+
+  it("returns 400 when adding non-existent member", async () => {
+    mockOrgMember.findMany
+      .mockResolvedValueOnce([]) // current members (none)
+      .mockResolvedValueOnce([]); // buildGroupResource
+
+    // Inside tx: member not found
+    mockOrgMember.findUnique.mockResolvedValue(null);
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "ADMIN",
+          members: [{ value: "no-such-user" }],
+        },
+      }),
+      makeParams(ADMIN_GROUP_ID),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("No such member");
   });
 });
 

@@ -114,7 +114,7 @@ describe("GET /api/scim/v2/Users", () => {
     expect(res.status).toBe(400);
   });
 
-  it("removes default deactivatedAt when active filter is inside AND", async () => {
+  it("applies compound AND filter correctly", async () => {
     mockOrgMember.findMany.mockResolvedValue([]);
     mockOrgMember.count.mockResolvedValue(0);
     mockScimExternalMapping.findMany.mockResolvedValue([]);
@@ -125,14 +125,13 @@ describe("GET /api/scim/v2/Users", () => {
       }),
     );
 
-    // The where clause should NOT have deactivatedAt: null at top level
-    // since the active filter inside AND controls it
     const callArgs = mockOrgMember.findMany.mock.calls[0][0];
+    // No default deactivatedAt — active filter is inside AND
     expect(callArgs.where.deactivatedAt).toBeUndefined();
     expect(callArgs.where.AND).toBeDefined();
   });
 
-  it("removes default deactivatedAt when active filter is inside OR", async () => {
+  it("applies compound OR filter correctly", async () => {
     mockOrgMember.findMany.mockResolvedValue([]);
     mockOrgMember.count.mockResolvedValue(0);
     mockScimExternalMapping.findMany.mockResolvedValue([]);
@@ -144,9 +143,14 @@ describe("GET /api/scim/v2/Users", () => {
     );
 
     const callArgs = mockOrgMember.findMany.mock.calls[0][0];
-    // Top-level deactivatedAt: null should be removed
     expect(callArgs.where.deactivatedAt).toBeUndefined();
     expect(callArgs.where.OR).toBeDefined();
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockCheckScimRateLimit.mockResolvedValue(false);
+    const res = await GET(makeReq());
+    expect(res.status).toBe(429);
   });
 
   it("filters by externalId via ScimExternalMapping", async () => {
@@ -265,6 +269,7 @@ describe("POST /api/scim/v2/Users", () => {
         },
       }),
     );
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
 
   it("returns 409 for active duplicate user", async () => {

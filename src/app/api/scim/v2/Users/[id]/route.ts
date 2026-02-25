@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { validateScimToken } from "@/lib/scim-token";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { scimResponse, scimError } from "@/lib/scim/response";
+import { scimResponse, scimError, getScimBaseUrl } from "@/lib/scim/response";
 import { userToScimUser, type ScimUserInput } from "@/lib/scim/serializers";
 import { scimUserSchema, scimPatchOpSchema } from "@/lib/scim/validations";
 import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
@@ -13,12 +13,6 @@ import type { AuditAction } from "@prisma/client";
 import { ORG_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ id: string }> };
-
-function getScimBaseUrl(req: NextRequest): string {
-  const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  const host = req.headers.get("host") ?? "localhost";
-  return `${proto}://${host}/api/scim/v2`;
-}
 
 /** Resolve SCIM id → userId. The id could be a userId directly or via ScimExternalMapping. */
 async function resolveUserId(orgId: string, scimId: string): Promise<string | null> {
@@ -46,7 +40,7 @@ async function fetchUserResource(
     where: { orgId_userId: { orgId, userId } },
     include: { user: { select: { id: true, email: true, name: true } } },
   });
-  if (!member) return null;
+  if (!member || !member.user.email) return null;
 
   const extMapping = await prisma.scimExternalMapping.findFirst({
     where: { orgId, internalId: userId, resourceType: "User" },
@@ -55,7 +49,7 @@ async function fetchUserResource(
 
   const input: ScimUserInput = {
     userId: member.userId,
-    email: member.user.email!,
+    email: member.user.email,
     name: member.user.name,
     deactivatedAt: member.deactivatedAt,
     externalId: extMapping?.externalId,
@@ -82,7 +76,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     return scimError(404, "User not found");
   }
 
-  const baseUrl = getScimBaseUrl(req);
+  const baseUrl = getScimBaseUrl();
   const resource = await fetchUserResource(orgId, userId, baseUrl);
   if (!resource) {
     return scimError(404, "User not found");
@@ -121,11 +115,12 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return scimError(400, parsed.error.issues.map((i) => i.message).join("; "));
   }
 
-  const { active, externalId } = parsed.data;
+  const { active, externalId, name } = parsed.data;
 
   // OWNER protection
   const member = await prisma.orgMember.findUnique({
     where: { orgId_userId: { orgId, userId } },
+    select: { id: true, role: true, deactivatedAt: true, userId: true },
   });
   if (!member) {
     return scimError(404, "User not found");
@@ -139,8 +134,17 @@ export async function PUT(req: NextRequest, { params }: Params) {
     where: { id: member.id },
     data: {
       deactivatedAt: active === false ? (member.deactivatedAt ?? new Date()) : null,
+      scimManaged: true,
     },
   });
+
+  // Update User.name if name.formatted is provided
+  if (name?.formatted !== undefined) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { name: name.formatted },
+    });
+  }
 
   // Update external mapping if provided
   if (externalId) {
@@ -177,7 +181,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     ...extractRequestMeta(req),
   });
 
-  const baseUrl = getScimBaseUrl(req);
+  const baseUrl = getScimBaseUrl();
   const resource = await fetchUserResource(orgId, userId, baseUrl);
   return scimResponse(resource!);
 }
@@ -275,7 +279,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     ...extractRequestMeta(req),
   });
 
-  const baseUrl = getScimBaseUrl(req);
+  const baseUrl = getScimBaseUrl();
   const resource = await fetchUserResource(orgId, userId, baseUrl);
   return scimResponse(resource!);
 }
@@ -300,6 +304,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   const member = await prisma.orgMember.findUnique({
     where: { orgId_userId: { orgId, userId } },
+    include: { user: { select: { email: true } } },
   });
   if (!member) {
     return scimError(404, "User not found");
@@ -326,7 +331,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     orgId,
     targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
     targetId: userId,
-    metadata: { email: member.userId, role: member.role },
+    metadata: { email: member.user.email, role: member.role },
     ...extractRequestMeta(req),
   });
 

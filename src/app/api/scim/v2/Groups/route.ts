@@ -7,6 +7,7 @@ import {
   scimResponse,
   scimError,
   scimListResponse,
+  getScimBaseUrl,
 } from "@/lib/scim/response";
 import {
   roleToScimGroup,
@@ -25,12 +26,6 @@ const SCIM_GROUP_ROLES: OrgRole[] = [
   ORG_ROLE.VIEWER,
 ];
 
-function getScimBaseUrl(req: NextRequest): string {
-  const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  const host = req.headers.get("host") ?? "localhost";
-  return `${proto}://${host}/api/scim/v2`;
-}
-
 // GET /api/scim/v2/Groups — List all role-based groups
 export async function GET(req: NextRequest) {
   const result = await validateScimToken(req);
@@ -43,7 +38,7 @@ export async function GET(req: NextRequest) {
     return scimError(429, "Too many requests");
   }
 
-  const baseUrl = getScimBaseUrl(req);
+  const baseUrl = getScimBaseUrl();
 
   // Fetch all active members grouped by role
   const members = await prisma.orgMember.findMany({
@@ -56,9 +51,10 @@ export async function GET(req: NextRequest) {
     membersByRole.set(role, []);
   }
   for (const m of members) {
+    if (!m.user.email) continue;
     const list = membersByRole.get(m.role);
     if (list) {
-      list.push({ userId: m.userId, email: m.user.email! });
+      list.push({ userId: m.userId, email: m.user.email });
     }
   }
 
@@ -141,7 +137,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const baseUrl = getScimBaseUrl(req);
+  const baseUrl = getScimBaseUrl();
 
   // Fetch current members for this role
   const members = await prisma.orgMember.findMany({

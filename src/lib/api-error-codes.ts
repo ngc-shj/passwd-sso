@@ -140,6 +140,7 @@ export const API_ERROR = {
   SCIM_FILTER_INVALID: "SCIM_FILTER_INVALID",
   SCIM_UNSUPPORTED_OPERATION: "SCIM_UNSUPPORTED_OPERATION",
   SCIM_RESOURCE_EXISTS: "SCIM_RESOURCE_EXISTS",
+  SCIM_TOKEN_LIMIT_EXCEEDED: "SCIM_TOKEN_LIMIT_EXCEEDED",
 } as const;
 
 export type ApiErrorCode = (typeof API_ERROR)[keyof typeof API_ERROR];
@@ -242,6 +243,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   SCIM_FILTER_INVALID: "scimFilterInvalid",
   SCIM_UNSUPPORTED_OPERATION: "scimUnsupportedOperation",
   SCIM_RESOURCE_EXISTS: "scimResourceExists",
+  SCIM_TOKEN_LIMIT_EXCEEDED: "scimTokenLimitExceeded",
 } satisfies Record<ApiErrorCode, string>;
 
 /**

@@ -118,5 +118,6 @@
   "scimCreatedBy": "Created by {name}",
   "scimLastUsed": "Last used {date}",
   "scimNeverUsed": "Never used",
-  "scimExpiresAt": "Expires {date}"
+  "scimExpiresAt": "Expires {date}",
+  "cancel": "Cancel"
 }

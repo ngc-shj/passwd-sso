@@ -1,8 +1,8 @@
 import type { OrgRole } from "@prisma/client";
 import { v5 as uuid5 } from "uuid";
 
-// UUID v5 namespace for SCIM Group IDs (randomly generated, fixed)
-const SCIM_GROUP_NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+// App-specific UUID v5 namespace for SCIM Group IDs — do NOT change once deployed
+const SCIM_GROUP_NAMESPACE = "125b7a5b-23f9-495c-bd0a-369bae10337e";
 
 /**
  * DB row shape expected by `userToScimUser()`.

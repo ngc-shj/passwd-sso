@@ -85,6 +85,17 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
+  // Limit active tokens per org (max 10)
+  const tokenCount = await prisma.scimToken.count({
+    where: { orgId, revokedAt: null },
+  });
+  if (tokenCount >= 10) {
+    return NextResponse.json(
+      { error: API_ERROR.SCIM_TOKEN_LIMIT_EXCEEDED },
+      { status: 409 },
+    );
+  }
+
   const plaintext = generateScimToken();
   const tokenHash = hashToken(plaintext);
 

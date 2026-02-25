@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
 
   return scimResponse([
     {
+      schemas: ["urn:ietf:params:scim:schemas:core:2.0:Schema"],
       id: "urn:ietf:params:scim:schemas:core:2.0:User",
       name: "User",
       description: "User Account",
@@ -65,6 +66,7 @@ export async function GET(req: NextRequest) {
       },
     },
     {
+      schemas: ["urn:ietf:params:scim:schemas:core:2.0:Schema"],
       id: "urn:ietf:params:scim:schemas:core:2.0:Group",
       name: "Group",
       description: "Group (role-based)",
