@@ -146,7 +146,7 @@ describe("POST /api/orgs/[orgId]/invitations", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockUserFindUnique.mockResolvedValue({ id: "u2", email: "existing@test.com" });
-    mockOrgMemberFindUnique.mockResolvedValue({ id: "m1" });
+    mockOrgMemberFindUnique.mockResolvedValue({ id: "m1", deactivatedAt: null });
     const req = createRequest("POST", undefined, { body: { email: "existing@test.com", role: "MEMBER" } });
     const res = await POST(req, createParams({ orgId: "o1" }));
     const { status, json } = await parseResponse(res);

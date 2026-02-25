@@ -40,7 +40,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     where: { id: memberId },
   });
 
-  if (!target || target.orgId !== orgId) {
+  if (!target || target.orgId !== orgId || target.deactivatedAt !== null) {
     return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
   }
 
@@ -178,7 +178,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     where: { id: memberId },
   });
 
-  if (!target || target.orgId !== orgId) {
+  if (!target || target.orgId !== orgId || target.deactivatedAt !== null) {
     return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
   }
 
@@ -201,6 +201,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   await prisma.$transaction([
     prisma.orgMemberKey.deleteMany({ where: { orgId, userId: target.userId } }),
+    prisma.scimExternalMapping.deleteMany({
+      where: { orgId, internalId: target.userId, resourceType: "User" },
+    }),
     prisma.orgMember.delete({ where: { id: memberId } }),
   ]);
 

@@ -122,19 +122,19 @@ describe("getOrgMembership", () => {
     vi.clearAllMocks();
   });
 
-  it("returns membership when found", async () => {
+  it("returns membership when found (active member)", async () => {
     const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: ORG_ROLE.MEMBER };
-    mockPrisma.orgMember.findUnique.mockResolvedValue(membership);
+    mockPrisma.orgMember.findFirst.mockResolvedValue(membership);
 
     const result = await getOrgMembership("u-1", "org-1");
     expect(result).toEqual(membership);
-    expect(mockPrisma.orgMember.findUnique).toHaveBeenCalledWith({
-      where: { orgId_userId: { orgId: "org-1", userId: "u-1" } },
+    expect(mockPrisma.orgMember.findFirst).toHaveBeenCalledWith({
+      where: { orgId: "org-1", userId: "u-1", deactivatedAt: null },
     });
   });
 
   it("returns null when not found", async () => {
-    mockPrisma.orgMember.findUnique.mockResolvedValue(null);
+    mockPrisma.orgMember.findFirst.mockResolvedValue(null);
     const result = await getOrgMembership("u-1", "org-1");
     expect(result).toBeNull();
   });
@@ -147,14 +147,14 @@ describe("requireOrgMember", () => {
 
   it("returns membership when found", async () => {
     const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: ORG_ROLE.OWNER };
-    mockPrisma.orgMember.findUnique.mockResolvedValue(membership);
+    mockPrisma.orgMember.findFirst.mockResolvedValue(membership);
 
     const result = await requireOrgMember("u-1", "org-1");
     expect(result).toEqual(membership);
   });
 
   it("throws OrgAuthError(404) when not found", async () => {
-    mockPrisma.orgMember.findUnique.mockResolvedValue(null);
+    mockPrisma.orgMember.findFirst.mockResolvedValue(null);
 
     await expect(requireOrgMember("u-1", "org-1")).rejects.toThrow(OrgAuthError);
     try {
@@ -173,7 +173,7 @@ describe("requireOrgPermission", () => {
 
   it("returns membership when permission is granted", async () => {
     const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: ORG_ROLE.OWNER };
-    mockPrisma.orgMember.findUnique.mockResolvedValue(membership);
+    mockPrisma.orgMember.findFirst.mockResolvedValue(membership);
 
     const result = await requireOrgPermission("u-1", "org-1", ORG_PERMISSION.ORG_DELETE);
     expect(result).toEqual(membership);
@@ -181,7 +181,7 @@ describe("requireOrgPermission", () => {
 
   it("throws OrgAuthError(403) when permission is denied", async () => {
     const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: ORG_ROLE.VIEWER };
-    mockPrisma.orgMember.findUnique.mockResolvedValue(membership);
+    mockPrisma.orgMember.findFirst.mockResolvedValue(membership);
 
     await expect(
       requireOrgPermission("u-1", "org-1", ORG_PERMISSION.PASSWORD_CREATE)
@@ -195,12 +195,30 @@ describe("requireOrgPermission", () => {
   });
 
   it("throws OrgAuthError(404) when not a member", async () => {
-    mockPrisma.orgMember.findUnique.mockResolvedValue(null);
+    mockPrisma.orgMember.findFirst.mockResolvedValue(null);
 
     try {
       await requireOrgPermission("u-1", "org-1", ORG_PERMISSION.PASSWORD_READ);
     } catch (err) {
       expect((err as OrgAuthError).status).toBe(404);
     }
+  });
+});
+
+describe("SCIM_MANAGE permission", () => {
+  it("OWNER has SCIM_MANAGE permission", () => {
+    expect(hasOrgPermission(ORG_ROLE.OWNER, ORG_PERMISSION.SCIM_MANAGE)).toBe(true);
+  });
+
+  it("ADMIN has SCIM_MANAGE permission", () => {
+    expect(hasOrgPermission(ORG_ROLE.ADMIN, ORG_PERMISSION.SCIM_MANAGE)).toBe(true);
+  });
+
+  it("MEMBER does not have SCIM_MANAGE permission", () => {
+    expect(hasOrgPermission(ORG_ROLE.MEMBER, ORG_PERMISSION.SCIM_MANAGE)).toBe(false);
+  });
+
+  it("VIEWER does not have SCIM_MANAGE permission", () => {
+    expect(hasOrgPermission(ORG_ROLE.VIEWER, ORG_PERMISSION.SCIM_MANAGE)).toBe(false);
   });
 });
