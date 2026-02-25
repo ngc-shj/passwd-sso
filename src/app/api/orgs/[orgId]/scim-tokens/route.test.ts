@@ -160,6 +160,8 @@ describe("POST /api/orgs/[orgId]/scim-tokens", () => {
       makeParams("org-1"),
     );
     expect(res.status).toBe(201);
+    // S-22: Verify Cache-Control: no-store on token response
+    expect(res.headers.get("cache-control")).toBe("no-store");
     const body = await res.json();
     expect(body.token).toBe("scim_mock_token_value");
     expect(body.id).toBe("t-new");

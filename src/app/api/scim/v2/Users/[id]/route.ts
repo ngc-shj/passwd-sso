@@ -16,6 +16,8 @@ type Params = { params: Promise<{ id: string }> };
 
 /** Resolve SCIM id → userId. The id could be a userId directly or via ScimExternalMapping. */
 async function resolveUserId(orgId: string, scimId: string): Promise<string | null> {
+  if (scimId.length > 255) return null;
+
   // First try as direct userId (OrgMember.userId)
   const member = await prisma.orgMember.findUnique({
     where: { orgId_userId: { orgId, userId: scimId } },
@@ -24,8 +26,14 @@ async function resolveUserId(orgId: string, scimId: string): Promise<string | nu
   if (member) return member.userId;
 
   // Try via ScimExternalMapping (scimId may be an externalId from the IdP)
-  const mapping = await prisma.scimExternalMapping.findFirst({
-    where: { orgId, externalId: scimId, resourceType: "User" },
+  const mapping = await prisma.scimExternalMapping.findUnique({
+    where: {
+      orgId_externalId_resourceType: {
+        orgId,
+        externalId: scimId,
+        resourceType: "User",
+      },
+    },
     select: { internalId: true },
   });
   return mapping?.internalId ?? null;
@@ -157,7 +165,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
         });
       }
 
-      // Update external mapping if provided
+      // Update external mapping if provided; clear if omitted (PUT = full replace)
       if (externalId) {
         const existingMapping = await tx.scimExternalMapping.findUnique({
           where: {
@@ -172,6 +180,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
             data: { orgId, externalId, resourceType: "User", internalId: userId },
           });
         }
+      } else {
+        // PUT is a full replace — no externalId means clear any existing mapping
+        await tx.scimExternalMapping.deleteMany({
+          where: { orgId, internalId: userId, resourceType: "User" },
+        });
       }
     });
   } catch (e) {
@@ -331,13 +344,20 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   // Atomic delete: OrgMemberKey + ScimExternalMapping + OrgMember
-  await prisma.$transaction([
-    prisma.orgMemberKey.deleteMany({ where: { orgId, userId } }),
-    prisma.scimExternalMapping.deleteMany({
-      where: { orgId, internalId: userId, resourceType: "User" },
-    }),
-    prisma.orgMember.delete({ where: { id: member.id } }),
-  ]);
+  try {
+    await prisma.$transaction([
+      prisma.orgMemberKey.deleteMany({ where: { orgId, userId } }),
+      prisma.scimExternalMapping.deleteMany({
+        where: { orgId, internalId: userId, resourceType: "User" },
+      }),
+      prisma.orgMember.delete({ where: { id: member.id } }),
+    ]);
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {
+      return scimError(409, "Cannot delete user: related resources exist");
+    }
+    throw e;
+  }
 
   logAudit({
     scope: AUDIT_SCOPE.ORG,

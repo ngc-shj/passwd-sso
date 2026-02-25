@@ -116,24 +116,13 @@ export async function PUT(req: NextRequest, { params }: Params) {
   // Members to remove from this role (will become MEMBER)
   const toRemove = currentMembers.filter((m) => !requestedUserIds.has(m.userId));
 
-  // OWNER protection: block changing OWNER members
-  for (const m of toRemove) {
-    const fullMember = await prisma.orgMember.findUnique({
-      where: { orgId_userId: { orgId, userId: m.userId } },
-      select: { role: true },
-    });
-    if (fullMember?.role === ORG_ROLE.OWNER) {
-      return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
-    }
-  }
-
   // Block adding members to OWNER role (OWNER role is not a SCIM group, but guard anyway)
   // Note: SCIM_GROUP_ROLES excludes OWNER, so this shouldn't happen, but defensive check
   if (role === ORG_ROLE.OWNER) {
     return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
   }
 
-  // Apply changes atomically
+  // Apply changes atomically — all OWNER checks inside tx to avoid TOCTOU
   try {
     await prisma.$transaction(async (tx) => {
       for (const userId of toAdd) {
@@ -154,6 +143,14 @@ export async function PUT(req: NextRequest, { params }: Params) {
       }
 
       for (const m of toRemove) {
+        // Re-check role inside tx to avoid TOCTOU
+        const fresh = await tx.orgMember.findUnique({
+          where: { id: m.id },
+          select: { role: true },
+        });
+        if (fresh?.role === ORG_ROLE.OWNER) {
+          throw new Error("SCIM_OWNER_PROTECTED");
+        }
         // Default to MEMBER when removed from a group
         await tx.orgMember.update({
           where: { id: m.id },

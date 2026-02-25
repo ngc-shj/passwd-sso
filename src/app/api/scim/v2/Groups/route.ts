@@ -65,6 +65,9 @@ export async function GET(req: NextRequest) {
   // Support filter by displayName (only supported filter for Groups)
   const filterParam = req.nextUrl.searchParams.get("filter");
   if (filterParam) {
+    if (filterParam.length > 256) {
+      return scimError(400, "Filter exceeds maximum length of 256 characters");
+    }
     const match = filterParam.match(/displayName\s+eq\s+"([^"]+)"/i);
     if (!match) {
       return scimError(400, "Only 'displayName eq' filter is supported for Groups");

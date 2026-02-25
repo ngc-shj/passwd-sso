@@ -158,11 +158,11 @@ describe("extractExternalIdValue", () => {
 });
 
 describe("filterToPrismaWhere", () => {
-  it("converts userName eq to Prisma where", () => {
+  it("converts userName eq to Prisma where with case-insensitive equals", () => {
     const ast = parseScimFilter('userName eq "test@example.com"');
     const where = filterToPrismaWhere(ast);
     expect(where).toEqual({
-      user: { is: { email: "test@example.com" } },
+      user: { is: { email: { equals: "test@example.com", mode: "insensitive" } } },
     });
   });
 

@@ -86,19 +86,25 @@ describe("GET /api/scim/v2/Users/[id]", () => {
         deactivatedAt: null,
         user: { id: "internal-1", email: "ext@example.com", name: "Ext User" },
       });
-    // Second: ScimExternalMapping lookup → found
+    // resolveUserId: ScimExternalMapping.findUnique → found
+    mockScimExternalMapping.findUnique
+      .mockResolvedValueOnce({ internalId: "internal-1" });
+    // fetchUserResource: ScimExternalMapping.findFirst → no mapping
     mockScimExternalMapping.findFirst
-      .mockResolvedValueOnce({ internalId: "internal-1" }) // resolveUserId mapping
-      .mockResolvedValueOnce(null); // fetchUserResource extMapping
+      .mockResolvedValueOnce(null);
 
     const res = await GET(makeReq(), makeParams("ext-id-123"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.userName).toBe("ext@example.com");
-    // Verify ScimExternalMapping was searched by externalId
-    expect(mockScimExternalMapping.findFirst).toHaveBeenCalledWith(
+    // Verify ScimExternalMapping.findUnique was searched with compound key
+    expect(mockScimExternalMapping.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ externalId: "ext-id-123" }),
+        where: expect.objectContaining({
+          orgId_externalId_resourceType: expect.objectContaining({
+            externalId: "ext-id-123",
+          }),
+        }),
       }),
     );
   });
@@ -238,6 +244,12 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     );
     expect(res.status).toBe(200);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+    // T3-1: Verify scimManaged is always set in PUT
+    expect(mockOrgMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ scimManaged: true }),
+      }),
+    );
     expect(mockLogAudit).toHaveBeenCalled();
   });
 
@@ -359,6 +371,58 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       data: { name: "New Name" },
     });
   });
+
+  it("returns 400 for invalid JSON body", async () => {
+    mockOrgMember.findUnique.mockResolvedValueOnce({ userId: "user-1" }); // resolveUserId
+
+    const req = new NextRequest("http://localhost/api/scim/v2/Users/user-1", {
+      method: "PUT",
+      body: "not-json",
+      headers: { "content-type": "application/json" },
+    });
+    const res = await PUT(req, makeParams("user-1"));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("Invalid JSON");
+  });
+
+  it("clears externalId mapping when externalId is omitted in PUT", async () => {
+    mockOrgMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
+      .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // role check
+      .mockResolvedValueOnce({ // fetchUserResource
+        userId: "user-1",
+        orgId: "org-1",
+        deactivatedAt: null,
+        user: { id: "user-1", email: "test@example.com", name: "Test" },
+      });
+    mockOrgMember.update.mockResolvedValue({});
+    mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 1 });
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "test@example.com",
+          active: true,
+          // no externalId — should trigger cleanup
+        },
+      }),
+      makeParams("user-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(mockScimExternalMapping.deleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orgId: "org-1",
+          internalId: "user-1",
+          resourceType: "User",
+        }),
+      }),
+    );
+  });
 });
 
 describe("PATCH /api/scim/v2/Users/[id]", () => {
@@ -434,6 +498,71 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       makeParams("user-1"),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("reactivates a deactivated user via PATCH active=true", async () => {
+    mockOrgMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
+      .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: new Date("2024-01-01") }) // member lookup
+      .mockResolvedValueOnce({ // fetchUserResource
+        userId: "user-1",
+        orgId: "org-1",
+        deactivatedAt: null,
+        user: { id: "user-1", email: "test@example.com", name: "Test" },
+      });
+    mockOrgMember.update.mockResolvedValue({});
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
+
+    const res = await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{ op: "replace", path: "active", value: true }],
+        },
+      }),
+      makeParams("user-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(mockOrgMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          deactivatedAt: null,
+          scimManaged: true,
+        }),
+      }),
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "SCIM_USER_REACTIVATE" }),
+    );
+  });
+
+  it("does not update User.name via PATCH (multi-org safety)", async () => {
+    mockOrgMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
+      .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // member lookup
+      .mockResolvedValueOnce({ // fetchUserResource
+        userId: "user-1",
+        orgId: "org-1",
+        deactivatedAt: null,
+        user: { id: "user-1", email: "test@example.com", name: "Test" },
+      });
+    mockOrgMember.update.mockResolvedValue({});
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
+
+    const res = await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{ op: "replace", path: "name.formatted", value: "New Name" }],
+        },
+      }),
+      makeParams("user-1"),
+    );
+    expect(res.status).toBe(200);
+    // User.update should NOT be called — PATCH skips User.name for multi-org safety
+    expect(mockUser.update).not.toHaveBeenCalled();
   });
 });
 
