@@ -5,15 +5,15 @@ import {
   submitTeamPasswordForm,
 } from "@/components/team/team-password-form-actions";
 
-const executeOrgEntrySubmitMock = vi.fn();
+const executeTeamEntrySubmitMock = vi.fn();
 
 vi.mock("@/components/team/team-entry-submit", () => ({
-  executeOrgEntrySubmit: (...args: unknown[]) => executeOrgEntrySubmitMock(...args),
+  executeTeamEntrySubmit: (...args: unknown[]) => executeTeamEntrySubmitMock(...args),
 }));
 
 describe("org-password-form-actions", () => {
   beforeEach(() => {
-    executeOrgEntrySubmitMock.mockReset();
+    executeTeamEntrySubmitMock.mockReset();
   });
 
   it("updates brand automatically when brand source is auto", () => {
@@ -53,7 +53,7 @@ describe("org-password-form-actions", () => {
     const setExpiryError = vi.fn();
 
     await submitTeamPasswordForm({
-      orgId: "org-1",
+      teamId: "org-1",
       isEdit: false,
       effectiveEntryType: ENTRY_TYPE.IDENTITY,
       title: "id",
@@ -102,6 +102,6 @@ describe("org-password-form-actions", () => {
 
     expect(setDobError).toHaveBeenCalledWith("dob future");
     expect(setExpiryError).toHaveBeenCalledWith("expiry before issue");
-    expect(executeOrgEntrySubmitMock).not.toHaveBeenCalled();
+    expect(executeTeamEntrySubmitMock).not.toHaveBeenCalled();
   });
 });

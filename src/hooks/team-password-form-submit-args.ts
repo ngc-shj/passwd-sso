@@ -8,12 +8,12 @@ import type { TeamPasswordFormTranslations } from "@/hooks/entry-form-translatio
 import type { TeamPasswordFormState } from "@/hooks/use-team-password-form-state";
 import type { useTeamPasswordFormPresenter } from "@/hooks/use-team-password-form-presenter";
 
-type OrgEntryValues = ReturnType<typeof useTeamPasswordFormPresenter>["entryValues"];
+type TeamEntryValues = ReturnType<typeof useTeamPasswordFormPresenter>["entryValues"];
 
-interface BuildOrgSubmitArgsParams {
-  orgId: TeamPasswordFormProps["orgId"];
-  orgEncryptionKey: CryptoKey;
-  orgKeyVersion: number;
+interface BuildTeamSubmitArgsParams {
+  teamId: TeamPasswordFormProps["orgId"];
+  teamEncryptionKey: CryptoKey;
+  teamKeyVersion: number;
   onSaved: TeamPasswordFormProps["onSaved"];
   isEdit: boolean;
   editData?: TeamPasswordFormProps["editData"];
@@ -22,14 +22,14 @@ interface BuildOrgSubmitArgsParams {
   translations: TeamPasswordFormTranslations;
   handleOpenChange: (open: boolean) => void;
   setters: Pick<TeamPasswordFormState["setters"], "setDobError" | "setExpiryError" | "setSaving">;
-  entryValues: OrgEntryValues;
+  entryValues: TeamEntryValues;
   cardNumberValid: boolean;
 }
 
 export function buildTeamSubmitArgs({
-  orgId,
-  orgEncryptionKey,
-  orgKeyVersion,
+  teamId,
+  teamEncryptionKey,
+  teamKeyVersion,
   onSaved,
   isEdit,
   editData,
@@ -40,11 +40,11 @@ export function buildTeamSubmitArgs({
   setters,
   entryValues,
   cardNumberValid,
-}: BuildOrgSubmitArgsParams): SubmitTeamPasswordFormArgs {
+}: BuildTeamSubmitArgsParams): SubmitTeamPasswordFormArgs {
   return {
-    orgId,
-    orgEncryptionKey,
-    orgKeyVersion,
+    teamId,
+    teamEncryptionKey,
+    teamKeyVersion,
     isEdit,
     editData,
     effectiveEntryType,

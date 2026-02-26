@@ -18,11 +18,11 @@ vi.mock("@/lib/org-entry-save", () => ({
   saveOrgEntry: mockSaveOrgEntry,
 }));
 
-import { executeOrgEntrySubmit } from "@/components/team/team-entry-submit";
+import { executeTeamEntrySubmit } from "@/components/team/team-entry-submit";
 
 const dummyKey = {} as CryptoKey;
 
-describe("executeOrgEntrySubmit", () => {
+describe("executeTeamEntrySubmit", () => {
   beforeEach(() => {
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
@@ -37,11 +37,11 @@ describe("executeOrgEntrySubmit", () => {
 
     mockSaveOrgEntry.mockResolvedValue({ ok: true });
 
-    await executeOrgEntrySubmit({
+    await executeTeamEntrySubmit({
       teamId: "team-1",
       isEdit: false,
-      orgEncryptionKey: dummyKey,
-      orgKeyVersion: 1,
+      teamEncryptionKey: dummyKey,
+      teamKeyVersion: 1,
       fullBlob: '{"title":"A"}',
       overviewBlob: '{"title":"A"}',
       tagIds: [],
@@ -62,7 +62,7 @@ describe("executeOrgEntrySubmit", () => {
 
     mockSaveOrgEntry.mockResolvedValue({ ok: false });
 
-    await executeOrgEntrySubmit({
+    await executeTeamEntrySubmit({
       teamId: "team-1",
       isEdit: true,
       editData: {
@@ -74,8 +74,8 @@ describe("executeOrgEntrySubmit", () => {
         notes: null,
         tags: [],
       },
-      orgEncryptionKey: dummyKey,
-      orgKeyVersion: 1,
+      teamEncryptionKey: dummyKey,
+      teamKeyVersion: 1,
       fullBlob: '{"title":"A"}',
       overviewBlob: '{"title":"A"}',
       tagIds: [],

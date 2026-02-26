@@ -85,7 +85,7 @@ describe("useTeamPasswordFormController", () => {
   it("returns derived state and entry-specific props", () => {
     const { result } = renderHook(() =>
       useTeamPasswordFormController({
-        orgId: "org-1",
+        teamId: "org-1",
         onSaved: vi.fn(),
         isEdit: false,
         editData: null,
@@ -122,7 +122,7 @@ describe("useTeamPasswordFormController", () => {
 
     const { result } = renderHook(() =>
       useTeamPasswordFormController({
-        orgId: "org-1",
+        teamId: "org-1",
         onSaved,
         isEdit: true,
         editData: { id: "entry-1", title: "t", username: null, password: "p", url: null, notes: null },
@@ -152,7 +152,7 @@ describe("useTeamPasswordFormController", () => {
 
     expect(submitTeamPasswordFormMock).toHaveBeenCalledTimes(1);
     expect(submitTeamPasswordFormMock.mock.calls[0]?.[0]).toMatchObject({
-      orgId: "org-1",
+      teamId: "org-1",
       isEdit: true,
       onSaved,
       handleOpenChange,
@@ -162,7 +162,7 @@ describe("useTeamPasswordFormController", () => {
   it("uses presenter output for entry-specific props", () => {
     renderHook(() =>
       useTeamPasswordFormController({
-        orgId: "org-1",
+        teamId: "org-1",
         onSaved: vi.fn(),
         isEdit: false,
         editData: null,

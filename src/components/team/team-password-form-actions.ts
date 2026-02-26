@@ -2,7 +2,7 @@ import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
 import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
 import { extractTagIds } from "@/lib/entry-form-helpers";
 import { detectCardBrand, formatCardNumber, normalizeCardBrand, normalizeCardNumber } from "@/lib/credit-card";
-import { executeOrgEntrySubmit } from "@/components/team/team-entry-submit";
+import { executeTeamEntrySubmit } from "@/components/team/team-entry-submit";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
@@ -36,9 +36,9 @@ export function handleOrgCardNumberChange({
 }
 
 export interface SubmitTeamPasswordFormArgs {
-  orgId: string;
-  orgEncryptionKey: CryptoKey;
-  orgKeyVersion: number;
+  teamId: string;
+  teamEncryptionKey: CryptoKey;
+  teamKeyVersion: number;
   isEdit: boolean;
   editData?: TeamPasswordFormEditData | null;
   effectiveEntryType: EntryTypeValue;
@@ -87,9 +87,9 @@ export interface SubmitTeamPasswordFormArgs {
 }
 
 export async function submitTeamPasswordForm({
-  orgId,
-  orgEncryptionKey,
-  orgKeyVersion,
+  teamId,
+  teamEncryptionKey,
+  teamKeyVersion,
   isEdit,
   editData,
   effectiveEntryType,
@@ -185,12 +185,12 @@ export async function submitTeamPasswordForm({
     deviceInfo,
   });
 
-  await executeOrgEntrySubmit({
-    teamId: orgId,
+  await executeTeamEntrySubmit({
+    teamId: teamId,
     isEdit,
     editData,
-    orgEncryptionKey,
-    orgKeyVersion,
+    teamEncryptionKey,
+    teamKeyVersion,
     fullBlob,
     overviewBlob,
     entryType: effectiveEntryType,

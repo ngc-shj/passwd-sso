@@ -15,7 +15,7 @@ import { buildTeamSubmitArgs } from "@/hooks/team-password-form-submit-args";
 import { useTeamVault } from "@/lib/team-vault-context";
 
 export interface TeamPasswordFormControllerArgs {
-  orgId: TeamPasswordFormProps["orgId"];
+  teamId: TeamPasswordFormProps["orgId"];
   onSaved: TeamPasswordFormProps["onSaved"];
   isEdit: boolean;
   editData?: TeamPasswordFormProps["editData"];
@@ -26,13 +26,13 @@ export interface TeamPasswordFormControllerArgs {
   handleOpenChange: (open: boolean) => void;
 }
 
-export interface TeamPasswordFormControllerCompatArgs extends Omit<TeamPasswordFormControllerArgs, "orgId"> {
+export interface TeamPasswordFormControllerCompatArgs extends Omit<TeamPasswordFormControllerArgs, "teamId"> {
   teamId?: TeamPasswordFormProps["orgId"];
   orgId?: TeamPasswordFormProps["orgId"];
 }
 
 function useTeamPasswordFormControllerInternal({
-  orgId,
+  teamId,
   onSaved,
   isEdit,
   editData,
@@ -61,16 +61,16 @@ function useTeamPasswordFormControllerInternal({
   });
 
   const handleSubmit = async () => {
-    const keyInfo = await getTeamKeyInfo(orgId);
+    const keyInfo = await getTeamKeyInfo(teamId);
     if (!keyInfo) {
       toast.error(translations.t("failedToSave"));
       return;
     }
 
     const submitArgs = buildTeamSubmitArgs({
-      orgId,
-      orgEncryptionKey: keyInfo.key,
-      orgKeyVersion: keyInfo.keyVersion,
+      teamId,
+      teamEncryptionKey: keyInfo.key,
+      teamKeyVersion: keyInfo.keyVersion,
       onSaved,
       isEdit,
       editData,
@@ -104,7 +104,7 @@ export function useTeamPasswordFormController({
     throw new Error("useTeamPasswordFormController requires teamId or orgId");
   }
   return useTeamPasswordFormControllerInternal({
-    orgId: scopedTeamId,
+    teamId: scopedTeamId,
     ...rest,
   });
 }

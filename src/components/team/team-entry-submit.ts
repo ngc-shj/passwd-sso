@@ -4,12 +4,12 @@ import type { TeamPasswordFormEditData } from "@/components/team/team-password-f
 import type { EntryTypeValue } from "@/lib/constants";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 
-interface ExecuteOrgEntrySubmitArgs {
+interface ExecuteTeamEntrySubmitArgs {
   teamId: string;
   isEdit: boolean;
   editData?: TeamPasswordFormEditData | null;
-  orgEncryptionKey: CryptoKey;
-  orgKeyVersion: number;
+  teamEncryptionKey: CryptoKey;
+  teamKeyVersion: number;
   fullBlob: string;
   overviewBlob: string;
   entryType?: EntryTypeValue;
@@ -21,12 +21,12 @@ interface ExecuteOrgEntrySubmitArgs {
   onSaved: () => void;
 }
 
-export async function executeOrgEntrySubmit({
+export async function executeTeamEntrySubmit({
   teamId,
   isEdit,
   editData,
-  orgEncryptionKey,
-  orgKeyVersion,
+  teamEncryptionKey,
+  teamKeyVersion,
   fullBlob,
   overviewBlob,
   entryType,
@@ -36,15 +36,15 @@ export async function executeOrgEntrySubmit({
   setSaving,
   handleOpenChange,
   onSaved,
-}: ExecuteOrgEntrySubmitArgs): Promise<void> {
+}: ExecuteTeamEntrySubmitArgs): Promise<void> {
   setSaving(true);
   try {
     const res = await saveOrgEntry({
       mode: isEdit ? "edit" : "create",
       teamId,
       initialId: editData?.id,
-      orgEncryptionKey,
-      orgKeyVersion,
+      orgEncryptionKey: teamEncryptionKey,
+      orgKeyVersion: teamKeyVersion,
       fullBlob,
       overviewBlob,
       entryType,
