@@ -175,7 +175,7 @@ describe("PUT /api/teams/[teamId]", () => {
   it("sets description to null when empty string", async () => {
     mockPrismaOrganization.update.mockResolvedValue({
       id: TEAM_ID,
-      name: "Org",
+      name: "Team",
       slug: "org",
       description: null,
       updatedAt: now,
@@ -194,7 +194,7 @@ describe("PUT /api/teams/[teamId]", () => {
   it("sets description to value when non-empty", async () => {
     mockPrismaOrganization.update.mockResolvedValue({
       id: TEAM_ID,
-      name: "Org",
+      name: "Team",
       slug: "org",
       description: "Hello",
       updatedAt: now,

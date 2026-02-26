@@ -236,7 +236,7 @@ describe("TeamDashboardPage — scopes", () => {
     });
 
     await waitFor(() => {
-      // Org fetch should happen
+      // Team fetch should happen
       const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
       expect(calls.some((u: string) => u.includes("/api/teams/team-1") && !u.includes("/passwords"))).toBe(true);
     });

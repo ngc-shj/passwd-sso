@@ -1,6 +1,6 @@
 /**
  * Shared helpers for folder depth validation and circular reference detection.
- * Used by both Personal (Folder) and Org (OrgFolder) APIs via callback injection.
+ * Used by both Personal (Folder) and Team (TeamFolder) APIs via callback injection.
  */
 
 export interface ParentNode {

@@ -661,7 +661,7 @@ export function PasswordCard({
                       return;
                     }
                   } else if (getDetailProp) {
-                    // Org: decrypt via getDetail, strip TOTP/internal fields
+                    // Team: decrypt via getDetail, strip TOTP/internal fields
                     try {
                       const detail = await getDetailProp();
                       // eslint-disable-next-line @typescript-eslint/no-unused-vars
