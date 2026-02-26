@@ -15,10 +15,10 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, tokenId } = await params;
+  const { teamId, tokenId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.SCIM_MANAGE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.SCIM_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -31,7 +31,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     select: { id: true, orgId: true, revokedAt: true },
   });
 
-  if (!token || token.orgId !== orgId) {
+  if (!token || token.orgId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -48,7 +48,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.SCIM_TOKEN_REVOKE,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.SCIM_TOKEN,
     targetId: tokenId,
     ...extractRequestMeta(req),

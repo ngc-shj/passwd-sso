@@ -14,10 +14,10 @@ export async function POST(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, id } = await params;
+  const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_READ);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -31,7 +31,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
     select: { orgId: true },
   });
 
-  if (!entry || entry.orgId !== orgId) {
+  if (!entry || entry.orgId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 

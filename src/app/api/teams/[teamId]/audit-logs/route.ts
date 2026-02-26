@@ -23,10 +23,10 @@ export async function GET(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.ORG_UPDATE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.ORG_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const limit = Math.min(Math.max(parseInt(limitParam ?? "50", 10) || 50, 1), 100);
 
   const where: Record<string, unknown> = {
-    orgId,
+    orgId: teamId,
     scope: AUDIT_SCOPE.ORG,
   };
 

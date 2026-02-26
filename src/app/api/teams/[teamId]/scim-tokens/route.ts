@@ -24,10 +24,10 @@ export async function GET(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.SCIM_MANAGE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.SCIM_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   const tokens = await prisma.scimToken.findMany({
-    where: { orgId },
+    where: { orgId: teamId },
     select: {
       id: true,
       description: true,
@@ -59,10 +59,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.SCIM_MANAGE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.SCIM_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Limit active (non-revoked, non-expired) tokens per org (max 10)
   const tokenCount = await prisma.scimToken.count({
     where: {
-      orgId,
+      orgId: teamId,
       revokedAt: null,
       OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     },
@@ -108,7 +108,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     : null;
 
   const org = await prisma.organization.findUnique({
-    where: { id: orgId },
+    where: { id: teamId },
     select: { tenantId: true },
   });
   if (!org?.tenantId) {
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const token = await prisma.scimToken.create({
     data: {
-      orgId,
+      orgId: teamId,
       tenantId: org.tenantId,
       tokenHash,
       description: parsed.data.description ?? null,
@@ -133,7 +133,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.SCIM_TOKEN_CREATE,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.SCIM_TOKEN,
     targetId: token.id,
     metadata: { description: parsed.data.description, expiresInDays: parsed.data.expiresInDays },
