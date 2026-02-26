@@ -9,7 +9,7 @@ import { extractTenantClaimValue, slugifyTenant } from "@/lib/tenant-claim";
 import { withBypassRls } from "@/lib/tenant-rls";
 import authConfig from "./auth.config";
 
-async function ensureTenantMembershipForSignIn(
+export async function ensureTenantMembershipForSignIn(
   userId: string,
   account?: Account | null,
   profile?: Record<string, unknown> | null,
