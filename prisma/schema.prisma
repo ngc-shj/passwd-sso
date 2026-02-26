@@ -368,7 +368,7 @@ model OrgMember {
   user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([orgId, userId])
-  @@map("org_members")
+  @@map("team_members")
 }
 
 model OrgMemberKey {
@@ -390,7 +390,7 @@ model OrgMemberKey {
 
   @@unique([orgId, userId, keyVersion])
   @@index([userId])
-  @@map("org_member_keys")
+  @@map("team_member_keys")
 }
 
 model OrgPasswordEntry {
@@ -432,7 +432,7 @@ model OrgPasswordEntry {
   histories   OrgPasswordEntryHistory[]
 
   @@index([orgId])
-  @@map("org_password_entries")
+  @@map("team_password_entries")
 }
 
 model OrgTag {
@@ -449,7 +449,7 @@ model OrgTag {
   passwords OrgPasswordEntry[]
 
   @@unique([name, orgId])
-  @@map("org_tags")
+  @@map("team_tags")
 }
 
 model OrgPasswordFavorite {
@@ -463,7 +463,7 @@ model OrgPasswordFavorite {
   orgPasswordEntry OrgPasswordEntry @relation(fields: [orgPasswordEntryId], references: [id], onDelete: Cascade)
 
   @@unique([userId, orgPasswordEntryId])
-  @@map("org_password_favorites")
+  @@map("team_password_favorites")
 }
 
 model OrgInvitation {
@@ -483,7 +483,7 @@ model OrgInvitation {
   org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   invitedBy User         @relation(fields: [invitedById], references: [id])
 
-  @@map("org_invitations")
+  @@map("team_invitations")
 }
 
 // ─── Share Link Models ─────────────────────────────────────────
@@ -756,7 +756,7 @@ model OrgFolder {
 
   @@unique([name, parentId, orgId])
   @@index([orgId])
-  @@map("org_folders")
+  @@map("team_folders")
 }
 
 // ─── Entry History Models ───────────────────────────────────
@@ -792,7 +792,7 @@ model OrgPasswordEntryHistory {
   changedBy User             @relation(fields: [changedById], references: [id])
 
   @@index([entryId, changedAt])
-  @@map("org_password_entry_histories")
+  @@map("team_password_entry_histories")
 }
 
 model EmergencyAccessKeyPair {
