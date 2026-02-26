@@ -82,7 +82,7 @@ describe("DELETE /api/teams/[teamId]/invitations/[invId]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 404 when invitation belongs to different org", async () => {
+  it("returns 404 when invitation belongs to different team", async () => {
     mockPrismaOrgInvitation.findUnique.mockResolvedValue({ id: INV_ID, orgId: "other-team" });
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/invitations/${INV_ID}`),

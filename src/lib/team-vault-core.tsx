@@ -105,7 +105,7 @@ export function TeamVaultProvider({
       }
 
       try {
-        // Fetch own OrgMemberKey
+        // Fetch own TeamMemberKey
         const res = await fetch(apiPath.teamMemberKey(teamId));
         if (!res.ok) {
           ecdhPrivateKeyBytes.fill(0);
@@ -136,8 +136,8 @@ export function TeamVaultProvider({
           wrapVersion: memberKeyData.wrapVersion,
         };
 
-        // Unwrap org key
-        const orgKeyBytes = await unwrapTeamKey(
+        // Unwrap team key
+        const teamKeyBytes = await unwrapTeamKey(
           {
             ciphertext: memberKeyData.encryptedOrgKey,
             iv: memberKeyData.orgKeyIv,
@@ -149,9 +149,9 @@ export function TeamVaultProvider({
           ctx
         );
 
-        // Derive encryption key from org key, then zero-clear raw bytes
-        const encryptionKey = await deriveTeamEncryptionKey(orgKeyBytes);
-        orgKeyBytes.fill(0);
+        // Derive encryption key from team key, then zero-clear raw bytes
+        const encryptionKey = await deriveTeamEncryptionKey(teamKeyBytes);
+        teamKeyBytes.fill(0);
 
         // Cache (always the latest key from server)
         cacheRef.current.set(teamId, {
@@ -226,9 +226,9 @@ export function TeamVaultProvider({
       }
 
       for (const [teamId, members] of byTeam) {
-        let orgKeyBytes: Uint8Array | undefined;
+        let teamKeyBytes: Uint8Array | undefined;
         try {
-          // Get own org key first
+          // Get own team key first
           const ownKeyRes = await fetch(apiPath.teamMemberKey(teamId));
           if (!ownKeyRes.ok) continue;
 
@@ -242,8 +242,8 @@ export function TeamVaultProvider({
             wrapVersion: ownKeyData.wrapVersion,
           };
 
-          // Unwrap org key
-          orgKeyBytes = await unwrapTeamKey(
+          // Unwrap team key
+          teamKeyBytes = await unwrapTeamKey(
             {
               ciphertext: ownKeyData.encryptedOrgKey,
               iv: ownKeyData.orgKeyIv,
@@ -255,13 +255,13 @@ export function TeamVaultProvider({
             ownCtx
           );
 
-          // For each pending member, wrap org key with their ECDH public key
+          // For each pending member, wrap team key with their ECDH public key
           for (const member of members) {
             try {
               if (!member.ecdhPublicKey) continue;
 
               const escrow = await createTeamKeyEscrow(
-                orgKeyBytes,
+                teamKeyBytes,
                 member.ecdhPublicKey,
                 teamId,
                 member.userId,
@@ -292,7 +292,7 @@ export function TeamVaultProvider({
         } catch {
           // Skip failed team — will retry on next poll
         } finally {
-          orgKeyBytes?.fill(0);
+          teamKeyBytes?.fill(0);
         }
       }
     } catch {

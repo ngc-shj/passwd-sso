@@ -107,7 +107,7 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("VALIDATION_ERROR");
   });
 
-  it("returns 400 when org share includes data field (S-24)", async () => {
+  it("returns 400 when team share includes data field (S-24)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
@@ -183,7 +183,7 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
   });
 
-  it("creates E2E org share link with client-encrypted data", async () => {
+  it("creates E2E team share link with client-encrypted data", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue({ orgId: "team-123" });
     mockCreate.mockResolvedValue({
@@ -236,7 +236,7 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("INVALID_JSON");
   });
 
-  it("returns 404 when org entry not found", async () => {
+  it("returns 404 when team entry not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue(null);
 
@@ -258,7 +258,7 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("NOT_FOUND");
   });
 
-  it("returns TeamAuthError status for org entry permission denied", async () => {
+  it("returns TeamAuthError status for team entry permission denied", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValueOnce({ orgId: "team-123" });
 
@@ -307,7 +307,7 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("NOT_FOUND");
   });
 
-  it("returns 400 when org share omits encryptedShareData", async () => {
+  it("returns 400 when team share omits encryptedShareData", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
 
     const req = createRequest("POST", "http://localhost/api/share-links", {

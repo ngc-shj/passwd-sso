@@ -64,7 +64,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 403 when not org member", async () => {
+  it("returns 403 when not team member", async () => {
     mockRequireTeamMember.mockRejectedValue(
       new TeamAuthError("NOT_A_MEMBER", 403),
     );
@@ -85,7 +85,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 404 when entry orgId does not match", async () => {
+  it("returns 404 when entry teamId does not match", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       orgId: "other-team",
       entryType: "LOGIN",

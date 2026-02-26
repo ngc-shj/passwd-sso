@@ -139,7 +139,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { encryptedBlob, encryptedOverview, aadVersion, orgKeyVersion, tagIds, orgFolderId, isArchived } = parsed.data;
   const isFullUpdate = encryptedBlob !== undefined;
 
-  // Validate orgKeyVersion matches current org key version (F-13)
+  // Validate orgKeyVersion matches current team key version (F-13)
   if (isFullUpdate) {
     const org = await prisma.organization.findUnique({
       where: { id: teamId },

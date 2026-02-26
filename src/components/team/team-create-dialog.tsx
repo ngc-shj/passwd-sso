@@ -72,18 +72,18 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
       const teamId = crypto.randomUUID();
 
       // Generate team symmetric key and wrap it for the owner
-      const orgKey = generateTeamSymmetricKey();
+      const teamKey = generateTeamSymmetricKey();
       let escrow;
       try {
         escrow = await createTeamKeyEscrow(
-          orgKey,
+          teamKey,
           ecdhPublicKeyJwk,
           teamId,
           userId!,
           1
         );
       } finally {
-        orgKey.fill(0);
+      teamKey.fill(0);
       }
 
       const res = await fetch(API_PATH.TEAMS, {

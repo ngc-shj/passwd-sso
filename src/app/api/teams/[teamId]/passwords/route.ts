@@ -140,7 +140,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, orgKeyVersion, entryType, tagIds, orgFolderId } = parsed.data;
 
-  // Validate orgKeyVersion matches current org key version
+  // Validate orgKeyVersion matches current team key version
   const org = await prisma.organization.findUnique({
     where: { id: teamId },
     select: { orgKeyVersion: true },

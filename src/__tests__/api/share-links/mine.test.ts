@@ -294,7 +294,7 @@ describe("GET /api/share-links/mine", () => {
     expect(mockFindMany).not.toHaveBeenCalled();
   });
 
-  it("limits org scoped list to self-created links for VIEWER", async () => {
+  it("limits team scoped list to self-created links for VIEWER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.VIEWER });
     mockFindMany.mockResolvedValue([]);
@@ -312,7 +312,7 @@ describe("GET /api/share-links/mine", () => {
     );
   });
 
-  it("does not limit org scoped list to self-created links for MEMBER", async () => {
+  it("does not limit team scoped list to self-created links for MEMBER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.MEMBER });
     mockFindMany.mockResolvedValue([]);
@@ -336,7 +336,7 @@ describe("GET /api/share-links/mine", () => {
     );
   });
 
-  it("does not limit org scoped list to self-created links for OWNER", async () => {
+  it("does not limit team scoped list to self-created links for OWNER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);

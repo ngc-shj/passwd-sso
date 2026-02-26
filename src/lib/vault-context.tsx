@@ -157,7 +157,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const wrappedKeyRef = useRef<{ ciphertext: string; iv: string; authTag: string } | null>(null);
   const lastActivityRef = useRef(Date.now());
   const hiddenAtRef = useRef<number | null>(null);
-  // ECDH key pair for org E2E encryption
+  // ECDH key pair for team E2E encryption
   const ecdhPrivateKeyBytesRef = useRef<Uint8Array | null>(null);
   const ecdhPublicKeyJwkRef = useRef<string | null>(null);
 
@@ -521,7 +521,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         authTag: vaultData.secretKeyAuthTag,
       };
 
-      // 6b. Restore ECDH private key if available (org E2E)
+      // 6b. Restore ECDH private key if available (team E2E)
       if (vaultData.encryptedEcdhPrivateKey && vaultData.ecdhPrivateKeyIv && vaultData.ecdhPrivateKeyAuthTag) {
         try {
           const ecdhWrapKey = await deriveEcdhWrappingKey(secretKey);

@@ -126,7 +126,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
 
   it("returns 404 when target member belongs to a different org (Q-1 IDOR)", async () => {
     mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "team-1" }); // admin (findFirst)
-    mockPrismaOrgMember.findUnique.mockResolvedValueOnce({ orgId: "team-OTHER", userId: "target-user", keyDistributed: false, deactivatedAt: null }); // target belongs to different org
+    mockPrismaOrgMember.findUnique.mockResolvedValueOnce({ orgId: "team-OTHER", userId: "target-user", keyDistributed: false, deactivatedAt: null }); // target belongs to different team
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),

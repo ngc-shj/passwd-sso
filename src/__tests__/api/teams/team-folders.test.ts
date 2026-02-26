@@ -69,7 +69,7 @@ describe("GET /api/teams/[teamId]/folders", () => {
     expect(status).toBe(401);
   });
 
-  it("returns 403 when not org member", async () => {
+  it("returns 403 when not team member", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamMember.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const req = createRequest("GET");

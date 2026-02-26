@@ -47,7 +47,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
     expect(json.error).toBe("UNAUTHORIZED");
   });
 
-  it("returns 403 when not org member", async () => {
+  it("returns 403 when not team member", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamMember.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const req = createRequest("GET");
@@ -68,7 +68,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
     expect(json.error).toBe("NOT_FOUND");
   });
 
-  it("returns 404 when entry belongs to different org", async () => {
+  it("returns 404 when entry belongs to different team", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamMember.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ orgId: "other-team" });

@@ -96,7 +96,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns org auth error when permission denied", async () => {
+  it("returns team auth error when permission denied", async () => {
     mockRequireTeamPermission.mockRejectedValue(
       new MockTeamAuthError("FORBIDDEN", 403),
     );
@@ -157,7 +157,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns org auth error when update permission denied", async () => {
+  it("returns team auth error when update permission denied", async () => {
     mockRequireTeamPermission.mockRejectedValue(
       new MockTeamAuthError("FORBIDDEN", 403),
     );

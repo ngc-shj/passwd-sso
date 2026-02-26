@@ -126,7 +126,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
     expect(status).toBe(404);
   });
 
-  it("returns 404 when entry belongs to different org", async () => {
+  it("returns 404 when entry belongs to different team", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ orgId: "other-team" });
