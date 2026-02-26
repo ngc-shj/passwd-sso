@@ -10,21 +10,23 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-interface VaultSelectorOrg {
+interface VaultSelectorTeam {
   id: string;
   name: string;
 }
 
 interface VaultSelectorProps {
   value: string;
-  orgs: VaultSelectorOrg[];
+  teams?: VaultSelectorTeam[];
+  orgs?: VaultSelectorTeam[];
   onValueChange: (value: string) => void;
 }
 
-export function VaultSelector({ value, orgs, onValueChange }: VaultSelectorProps) {
+export function VaultSelector({ value, teams, orgs, onValueChange }: VaultSelectorProps) {
+  const teamOptions = teams ?? orgs ?? [];
   const t = useTranslations("Dashboard");
 
-  if (orgs.length === 0) {
+  if (teamOptions.length === 0) {
     return null;
   }
 
@@ -42,10 +44,10 @@ export function VaultSelector({ value, orgs, onValueChange }: VaultSelectorProps
             <Lock className="h-4 w-4" />
             {t("personalVault")}
           </SelectItem>
-          {orgs.map((org) => (
-            <SelectItem key={org.id} value={org.id}>
+          {teamOptions.map((team) => (
+            <SelectItem key={team.id} value={team.id}>
               <Building2 className="h-4 w-4" />
-              {org.name}
+              {team.name}
             </SelectItem>
           ))}
         </SelectContent>
