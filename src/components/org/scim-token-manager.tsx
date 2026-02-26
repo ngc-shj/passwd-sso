@@ -41,11 +41,11 @@ interface ScimToken {
 }
 
 interface Props {
-  orgId: string;
+  teamId: string;
   locale: string;
 }
 
-export function ScimTokenManager({ orgId, locale }: Props) {
+export function ScimTokenManager({ teamId, locale }: Props) {
   const t = useTranslations("Org");
   const [tokens, setTokens] = useState<ScimToken[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,7 +61,7 @@ export function ScimTokenManager({ orgId, locale }: Props) {
 
   const fetchTokens = useCallback(async () => {
     try {
-      const res = await fetch(apiPath.orgScimTokens(orgId));
+      const res = await fetch(apiPath.teamScimTokens(teamId));
       if (res.ok) {
         setTokens(await res.json());
       } else {
@@ -72,7 +72,7 @@ export function ScimTokenManager({ orgId, locale }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [orgId, t]);
+  }, [teamId, t]);
 
   useEffect(() => {
     fetchTokens();
@@ -81,7 +81,7 @@ export function ScimTokenManager({ orgId, locale }: Props) {
   const handleCreate = async () => {
     setCreating(true);
     try {
-      const res = await fetch(apiPath.orgScimTokens(orgId), {
+      const res = await fetch(apiPath.teamScimTokens(teamId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -108,7 +108,7 @@ export function ScimTokenManager({ orgId, locale }: Props) {
 
   const handleRevoke = async (tokenId: string) => {
     try {
-      const res = await fetch(apiPath.orgScimTokenById(orgId, tokenId), {
+      const res = await fetch(apiPath.teamScimTokenById(teamId, tokenId), {
         method: "DELETE",
       });
       if (res.ok) {

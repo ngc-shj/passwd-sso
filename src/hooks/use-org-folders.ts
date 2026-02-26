@@ -4,14 +4,14 @@ import { useEffect, useState } from "react";
 import { apiPath } from "@/lib/constants";
 import type { OrgFolderItem } from "@/components/org/org-password-form-types";
 
-export function useOrgFolders(open: boolean, orgId: string) {
+export function useOrgFolders(open: boolean, teamId: string) {
   const [folders, setFolders] = useState<OrgFolderItem[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
 
-    const url = apiPath.orgFolders(orgId);
+    const url = apiPath.teamFolders(teamId);
     fetch(url)
       .then((res) => {
         if (!res.ok) throw new Error(`${res.status}`);
@@ -28,7 +28,7 @@ export function useOrgFolders(open: boolean, orgId: string) {
           `Failed to load ${url}: ${e instanceof Error ? e.message : "unknown"}`,
         );
       });
-  }, [open, orgId]);
+  }, [open, teamId]);
 
   return { folders, fetchError };
 }

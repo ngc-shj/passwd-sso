@@ -26,7 +26,7 @@ export default function OrgsPage() {
 
   const fetchOrgs = () => {
     setLoading(true);
-    fetch(API_PATH.ORGS)
+    fetch(API_PATH.TEAMS)
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data)) setOrgs(data);

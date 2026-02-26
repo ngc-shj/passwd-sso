@@ -63,7 +63,7 @@ export function OrgTrashList({
   const fetchTrash = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(API_PATH.ORGS_TRASH);
+      const res = await fetch(API_PATH.TEAMS_TRASH);
       if (!res.ok) return;
       const data = await res.json();
       if (!Array.isArray(data)) return;
@@ -134,7 +134,7 @@ export function OrgTrashList({
   const handleRestore = async (entry: OrgTrashEntry) => {
     try {
       const res = await fetch(
-        apiPath.orgPasswordRestore(entry.orgId, entry.id),
+        apiPath.teamPasswordRestore(entry.orgId, entry.id),
         { method: "POST" }
       );
       if (res.ok) {
@@ -151,7 +151,7 @@ export function OrgTrashList({
   const handleDeletePermanently = async (entry: OrgTrashEntry) => {
     try {
       const res = await fetch(
-        `${apiPath.orgPasswordById(entry.orgId, entry.id)}?permanent=true`,
+        `${apiPath.teamPasswordById(entry.orgId, entry.id)}?permanent=true`,
         { method: "DELETE" }
       );
       if (res.ok) {

@@ -36,7 +36,7 @@ export function OrgTagInput({ orgId, selectedTags, onChange }: OrgTagInputProps)
 
   const fetchTags = useCallback(async () => {
     try {
-      const res = await fetch(apiPath.orgTags(orgId));
+      const res = await fetch(apiPath.teamTags(orgId));
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data)) setAllTags(data);
@@ -90,7 +90,7 @@ export function OrgTagInput({ orgId, selectedTags, onChange }: OrgTagInputProps)
     if (!inputValue.trim() || creating) return;
     setCreating(true);
     try {
-      const res = await fetch(apiPath.orgTags(orgId), {
+      const res = await fetch(apiPath.teamTags(orgId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: inputValue.trim() }),

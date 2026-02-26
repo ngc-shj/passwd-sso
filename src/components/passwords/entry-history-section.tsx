@@ -147,7 +147,7 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
     setLoading(true);
     try {
       const url = orgId
-        ? apiPath.orgPasswordHistory(orgId, entryId)
+        ? apiPath.teamPasswordHistory(orgId, entryId)
         : apiPath.passwordHistory(entryId);
       const res = await fetch(url);
       if (res.ok) {
@@ -168,7 +168,7 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
     setRestoring(true);
     try {
       const url = orgId
-        ? apiPath.orgPasswordHistoryRestore(orgId, entryId, restoreTarget.id)
+        ? apiPath.teamPasswordHistoryRestore(orgId, entryId, restoreTarget.id)
         : apiPath.passwordHistoryRestore(entryId, restoreTarget.id);
       const res = await fetch(url, { method: "POST" });
       if (res.ok) {
@@ -191,7 +191,7 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
         // GET /member-key?keyVersion=N for correct decryption.
         // Currently uses latest key only — history from before key rotation
         // will fail to decrypt until re-encryption is implemented.
-        const res = await fetch(apiPath.orgPasswordHistoryById(orgId, entryId, h.id));
+        const res = await fetch(apiPath.teamPasswordHistoryById(orgId, entryId, h.id));
         if (!res.ok) return;
         const data = await res.json();
         const orgKey = await getOrgEncryptionKey(orgId);

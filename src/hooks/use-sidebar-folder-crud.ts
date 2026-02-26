@@ -53,10 +53,10 @@ export function useSidebarFolderCrud({
     const isOrg = folderOrgId !== null;
     const url = editingFolder
       ? isOrg
-        ? apiPath.orgFolderById(folderOrgId, editingFolder.id)
+        ? apiPath.teamFolderById(folderOrgId, editingFolder.id)
         : apiPath.folderById(editingFolder.id)
       : isOrg
-        ? apiPath.orgFolders(folderOrgId)
+        ? apiPath.teamFolders(folderOrgId)
         : API_PATH.FOLDERS;
     const method = editingFolder ? "PUT" : "POST";
 
@@ -75,7 +75,7 @@ export function useSidebarFolderCrud({
   const handleFolderDelete = async () => {
     if (!deletingFolder) return;
     const url = folderOrgId
-      ? apiPath.orgFolderById(folderOrgId, deletingFolder.id)
+      ? apiPath.teamFolderById(folderOrgId, deletingFolder.id)
       : apiPath.folderById(deletingFolder.id);
     const res = await fetch(url, { method: "DELETE" });
     if (!res.ok) {

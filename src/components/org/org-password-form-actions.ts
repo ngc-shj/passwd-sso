@@ -186,7 +186,7 @@ export async function submitOrgPasswordForm({
   });
 
   await executeOrgEntrySubmit({
-    orgId,
+    teamId: orgId,
     isEdit,
     editData,
     orgEncryptionKey,

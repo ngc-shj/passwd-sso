@@ -5,7 +5,7 @@ import type { EntryTypeValue } from "@/lib/constants";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 interface ExecuteOrgEntrySubmitArgs {
-  orgId: string;
+  teamId: string;
   isEdit: boolean;
   editData?: OrgPasswordFormEditData | null;
   orgEncryptionKey: CryptoKey;
@@ -22,7 +22,7 @@ interface ExecuteOrgEntrySubmitArgs {
 }
 
 export async function executeOrgEntrySubmit({
-  orgId,
+  teamId,
   isEdit,
   editData,
   orgEncryptionKey,
@@ -41,7 +41,7 @@ export async function executeOrgEntrySubmit({
   try {
     const res = await saveOrgEntry({
       mode: isEdit ? "edit" : "create",
-      orgId,
+      teamId,
       initialId: editData?.id,
       orgEncryptionKey,
       orgKeyVersion,

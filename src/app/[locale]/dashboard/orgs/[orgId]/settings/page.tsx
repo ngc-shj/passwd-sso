@@ -72,7 +72,7 @@ export default function OrgSettingsPage({
 }: {
   params: Promise<{ orgId: string }>;
 }) {
-  const { orgId } = use(params);
+  const { orgId: teamId } = use(params);
   const t = useTranslations("Org");
   const locale = useLocale();
   const router = useRouter();
@@ -100,7 +100,7 @@ export default function OrgSettingsPage({
   }, []);
 
   const fetchAll = () => {
-    fetch(apiPath.orgById(orgId))
+    fetch(apiPath.teamById(teamId))
       .then((r) => {
         if (!r.ok) throw new Error("Forbidden");
         return r.json();
@@ -116,14 +116,14 @@ export default function OrgSettingsPage({
         setLoadError(true);
       });
 
-    fetch(apiPath.orgMembers(orgId))
+    fetch(apiPath.teamMembers(teamId))
       .then((r) => r.json())
       .then((d) => {
         if (Array.isArray(d)) setMembers(d);
       })
       .catch(() => {});
 
-    fetch(apiPath.orgInvitations(orgId))
+    fetch(apiPath.teamInvitations(teamId))
       .then((r) => r.json())
       .then((d) => {
         if (Array.isArray(d)) setInvitations(d);
@@ -135,7 +135,7 @@ export default function OrgSettingsPage({
     setOrg(null);
     setLoadError(false);
     fetchAll();
-  }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [teamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isOwner = org?.role === ORG_ROLE.OWNER;
   const isAdmin = org?.role === ORG_ROLE.ADMIN || isOwner;
@@ -143,7 +143,7 @@ export default function OrgSettingsPage({
   const handleUpdateOrg = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiPath.orgById(orgId), {
+      const res = await fetch(apiPath.teamById(teamId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim(), description: description.trim() }),
@@ -161,7 +161,7 @@ export default function OrgSettingsPage({
 
   const handleDeleteOrg = async () => {
     try {
-      const res = await fetch(apiPath.orgById(orgId), { method: "DELETE" });
+      const res = await fetch(apiPath.teamById(teamId), { method: "DELETE" });
       if (!res.ok) throw new Error("Failed");
       toast.success(t("deleted"));
       window.dispatchEvent(new CustomEvent("org-data-changed"));
@@ -175,7 +175,7 @@ export default function OrgSettingsPage({
     if (!invEmail.trim()) return;
     setInviting(true);
     try {
-      const res = await fetch(apiPath.orgInvitations(orgId), {
+      const res = await fetch(apiPath.teamInvitations(teamId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: invEmail.trim(), role: invRole }),
@@ -206,7 +206,7 @@ export default function OrgSettingsPage({
 
   const handleCancelInvitation = async (invId: string) => {
     try {
-      await fetch(apiPath.orgInvitationById(orgId, invId), {
+      await fetch(apiPath.teamInvitationById(teamId, invId), {
         method: "DELETE",
       });
       toast.success(t("invitationCancelled"));
@@ -218,7 +218,7 @@ export default function OrgSettingsPage({
 
   const handleChangeRole = async (memberId: string, role: string) => {
     try {
-      const res = await fetch(apiPath.orgMemberById(orgId, memberId), {
+      const res = await fetch(apiPath.teamMemberById(teamId, memberId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role }),
@@ -233,7 +233,7 @@ export default function OrgSettingsPage({
 
   const handleTransferOwnership = async (memberId: string) => {
     try {
-      const res = await fetch(apiPath.orgMemberById(orgId, memberId), {
+      const res = await fetch(apiPath.teamMemberById(teamId, memberId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: ORG_ROLE.OWNER }),
@@ -249,7 +249,7 @@ export default function OrgSettingsPage({
 
   const handleRemoveMember = async (memberId: string) => {
     try {
-      const res = await fetch(apiPath.orgMemberById(orgId, memberId), {
+      const res = await fetch(apiPath.teamMemberById(teamId, memberId), {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed");
@@ -600,7 +600,7 @@ export default function OrgSettingsPage({
 
         {/* SCIM Provisioning — OWNER/ADMIN only */}
         {(isOwner || org.role === ORG_ROLE.ADMIN) && (
-          <ScimTokenManager orgId={orgId} locale={locale} />
+          <ScimTokenManager teamId={teamId} locale={locale} />
         )}
 
         {/* Delete org */}

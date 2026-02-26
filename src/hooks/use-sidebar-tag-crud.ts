@@ -50,8 +50,8 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
   const handleTagSubmit = async (data: TagSubmitPayload) => {
     const isEdit = !!editingTag;
     const url = isEdit
-      ? (tagOrgId ? `${apiPath.orgTags(tagOrgId)}/${editingTag.id}` : `${API_PATH.TAGS}/${editingTag.id}`)
-      : (tagOrgId ? apiPath.orgTags(tagOrgId) : API_PATH.TAGS);
+      ? (tagOrgId ? `${apiPath.teamTags(tagOrgId)}/${editingTag.id}` : `${API_PATH.TAGS}/${editingTag.id}`)
+      : (tagOrgId ? apiPath.teamTags(tagOrgId) : API_PATH.TAGS);
     const method = isEdit ? "PUT" : "POST";
 
     const res = await fetch(url, {
@@ -73,7 +73,7 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
     if (!deletingTag) return;
 
     const url = tagOrgId
-      ? `${apiPath.orgTags(tagOrgId)}/${deletingTag.id}`
+      ? `${apiPath.teamTags(tagOrgId)}/${deletingTag.id}`
       : `${API_PATH.TAGS}/${deletingTag.id}`;
 
     const res = await fetch(url, { method: "DELETE" });

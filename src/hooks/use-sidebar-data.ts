@@ -88,7 +88,7 @@ export function useSidebarData(pathname: string) {
     const [nextTags, nextFolders, nextOrgs] = await Promise.all([
       fetchArray<SidebarTagItem>(API_PATH.TAGS, reportError),
       fetchArray<SidebarFolderItem>(API_PATH.FOLDERS, reportError),
-      fetchArray<SidebarOrgItem>(API_PATH.ORGS, reportError),
+      fetchArray<SidebarOrgItem>(API_PATH.TEAMS, reportError),
     ]);
 
     if (seq !== refreshSeqRef.current) return;
@@ -100,7 +100,7 @@ export function useSidebarData(pathname: string) {
       setOrgs([]);
       setOrgTagGroups([]);
       setOrgFolderGroups([]);
-      setLastError(errors[0] ?? `Failed to fetch ${API_PATH.ORGS}`);
+      setLastError(errors[0] ?? `Failed to fetch ${API_PATH.TEAMS}`);
       return;
     }
 
@@ -110,10 +110,10 @@ export function useSidebarData(pathname: string) {
       nextOrgs.map(async (org) => {
         const [orgTags, orgFolders] = await Promise.all([
           fetchArray<{ id: string; name: string; color: string | null; count: number }>(
-            apiPath.orgTags(org.id),
+            apiPath.teamTags(org.id),
             reportError,
           ),
-          fetchArray<SidebarFolderItem>(apiPath.orgFolders(org.id), reportError),
+          fetchArray<SidebarFolderItem>(apiPath.teamFolders(org.id), reportError),
         ]);
         return { org, orgTags, orgFolders };
       })

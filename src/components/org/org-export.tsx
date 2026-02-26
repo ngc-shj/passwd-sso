@@ -64,7 +64,7 @@ function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
 
     try {
       // Fetch list of all org passwords (overview only)
-      const listRes = await fetch(apiPath.orgPasswords(orgId));
+      const listRes = await fetch(apiPath.teamPasswords(orgId));
       if (!listRes.ok) throw new Error("Failed to fetch list");
       const list: { id: string; entryType: string }[] = await listRes.json();
 
@@ -77,7 +77,7 @@ function OrgExportPanelContent({ orgId }: OrgExportPanelContentProps) {
       let skippedCount = 0;
       for (const item of list) {
         try {
-          const res = await fetch(apiPath.orgPasswordById(orgId, item.id));
+          const res = await fetch(apiPath.teamPasswordById(orgId, item.id));
           if (!res.ok) {
             skippedCount++;
             continue;

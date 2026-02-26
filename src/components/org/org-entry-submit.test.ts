@@ -38,7 +38,7 @@ describe("executeOrgEntrySubmit", () => {
     mockSaveOrgEntry.mockResolvedValue({ ok: true });
 
     await executeOrgEntrySubmit({
-      orgId: "org-1",
+      teamId: "team-1",
       isEdit: false,
       orgEncryptionKey: dummyKey,
       orgKeyVersion: 1,
@@ -63,7 +63,7 @@ describe("executeOrgEntrySubmit", () => {
     mockSaveOrgEntry.mockResolvedValue({ ok: false });
 
     await executeOrgEntrySubmit({
-      orgId: "org-1",
+      teamId: "team-1",
       isEdit: true,
       editData: {
         id: "entry-1",

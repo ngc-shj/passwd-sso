@@ -76,7 +76,7 @@ export function OrgArchivedList({
   const fetchArchived = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(API_PATH.ORGS_ARCHIVED);
+      const res = await fetch(API_PATH.TEAMS_ARCHIVED);
       if (!res.ok) return;
       const data = await res.json();
       if (!Array.isArray(data)) return;
@@ -169,7 +169,7 @@ export function OrgArchivedList({
       prev.map((e) => (e.id === id ? { ...e, isFavorite: !e.isFavorite } : e))
     );
     try {
-      await fetch(apiPath.orgPasswordFavorite(entry.orgId, id), {
+      await fetch(apiPath.teamPasswordFavorite(entry.orgId, id), {
         method: "POST",
       });
     } catch {
@@ -184,7 +184,7 @@ export function OrgArchivedList({
     // Unarchive: remove from this list
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(apiPath.orgPasswordById(entry.orgId, id), {
+      const res = await fetch(apiPath.teamPasswordById(entry.orgId, id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isArchived: false }),
@@ -200,7 +200,7 @@ export function OrgArchivedList({
     if (!entry) return;
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(apiPath.orgPasswordById(entry.orgId, id), {
+      const res = await fetch(apiPath.teamPasswordById(entry.orgId, id), {
         method: "DELETE",
       });
       if (!res.ok) fetchArchived();
@@ -232,7 +232,7 @@ export function OrgArchivedList({
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;
     try {
-      const res = await fetch(apiPath.orgPasswordById(entry.orgId, id));
+      const res = await fetch(apiPath.teamPasswordById(entry.orgId, id));
       if (!res.ok) return;
       const raw = await res.json();
       const blob = await decryptFullBlob(entry.orgId, id, raw);
@@ -257,7 +257,7 @@ export function OrgArchivedList({
   const createDetailFetcher = useCallback(
     (entry: OrgArchivedEntry) =>
       async (): Promise<InlineDetailData> => {
-        const res = await fetch(apiPath.orgPasswordById(entry.orgId, entry.id));
+        const res = await fetch(apiPath.teamPasswordById(entry.orgId, entry.id));
         if (!res.ok) throw new Error("Failed");
         const raw = await res.json();
         const blob = await decryptFullBlob(entry.orgId, entry.id, raw);
@@ -303,7 +303,7 @@ export function OrgArchivedList({
   const createPasswordFetcher = useCallback(
     (entry: OrgArchivedEntry) =>
       async (): Promise<string> => {
-        const res = await fetch(apiPath.orgPasswordById(entry.orgId, entry.id));
+        const res = await fetch(apiPath.teamPasswordById(entry.orgId, entry.id));
         if (!res.ok) throw new Error("Failed");
         const raw = await res.json();
         const blob = await decryptFullBlob(entry.orgId, entry.id, raw);
@@ -315,7 +315,7 @@ export function OrgArchivedList({
   const createUrlFetcher = useCallback(
     (entry: OrgArchivedEntry) =>
       async (): Promise<string | null> => {
-        const res = await fetch(apiPath.orgPasswordById(entry.orgId, entry.id));
+        const res = await fetch(apiPath.teamPasswordById(entry.orgId, entry.id));
         if (!res.ok) throw new Error("Failed");
         const raw = await res.json();
         const blob = await decryptFullBlob(entry.orgId, entry.id, raw);

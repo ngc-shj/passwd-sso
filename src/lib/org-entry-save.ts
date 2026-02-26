@@ -5,7 +5,7 @@ import type { EntryTypeValue } from "@/lib/constants";
 
 interface SaveOrgEntryParams {
   mode: "create" | "edit";
-  orgId: string;
+  teamId: string;
   initialId?: string;
   orgEncryptionKey: CryptoKey;
   orgKeyVersion: number;
@@ -18,7 +18,7 @@ interface SaveOrgEntryParams {
 
 export async function saveOrgEntry({
   mode,
-  orgId,
+  teamId,
   initialId,
   orgEncryptionKey,
   orgKeyVersion,
@@ -34,8 +34,8 @@ export async function saveOrgEntry({
 
   const entryId = mode === "create" ? crypto.randomUUID() : initialId!;
 
-  const blobAAD = buildOrgEntryAAD(orgId, entryId, "blob");
-  const overviewAAD = buildOrgEntryAAD(orgId, entryId, "overview");
+  const blobAAD = buildOrgEntryAAD(teamId, entryId, "blob");
+  const overviewAAD = buildOrgEntryAAD(teamId, entryId, "overview");
 
   const encryptedBlob = await encryptData(fullBlob, orgEncryptionKey, blobAAD);
   const encryptedOverview = await encryptData(overviewBlob, orgEncryptionKey, overviewAAD);
@@ -55,8 +55,8 @@ export async function saveOrgEntry({
   if (orgFolderId !== undefined) body.orgFolderId = orgFolderId;
 
   const endpoint = mode === "create"
-    ? apiPath.orgPasswords(orgId)
-    : apiPath.orgPasswordById(orgId, initialId!);
+    ? apiPath.teamPasswords(teamId)
+    : apiPath.teamPasswordById(teamId, initialId!);
   const method = mode === "create" ? "POST" : "PUT";
 
   return fetch(endpoint, {

@@ -86,7 +86,7 @@ export function OrgCreateDialog({ trigger, onCreated }: OrgCreateDialogProps) {
         orgKey.fill(0);
       }
 
-      const res = await fetch(API_PATH.ORGS, {
+      const res = await fetch(API_PATH.TEAMS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -104,7 +104,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, orgId }: Passwor
     async function loadAttachments() {
       try {
         const url = orgId
-          ? apiPath.orgPasswordAttachments(orgId, data.id)
+          ? apiPath.teamPasswordAttachments(orgId, data.id)
           : apiPath.passwordAttachments(data.id);
         const res = await fetch(url);
         if (res.ok && !cancelled) {

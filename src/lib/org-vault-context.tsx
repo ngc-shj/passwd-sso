@@ -106,7 +106,7 @@ export function OrgVaultProvider({
 
       try {
         // Fetch own OrgMemberKey
-        const res = await fetch(apiPath.orgMemberKey(orgId));
+        const res = await fetch(apiPath.teamMemberKey(orgId));
         if (!res.ok) {
           ecdhPrivateKeyBytes.fill(0);
           return null;
@@ -188,7 +188,7 @@ export function OrgVaultProvider({
 
     try {
       // Fetch pending key distributions
-      const res = await fetch(API_PATH.ORGS_PENDING_KEY_DISTRIBUTIONS);
+      const res = await fetch(API_PATH.TEAMS_PENDING_KEY_DISTRIBUTIONS);
       if (!res.ok) return;
 
       const pendingMembers = await res.json();
@@ -229,7 +229,7 @@ export function OrgVaultProvider({
         let orgKeyBytes: Uint8Array | undefined;
         try {
           // Get own org key first
-          const ownKeyRes = await fetch(apiPath.orgMemberKey(orgId));
+          const ownKeyRes = await fetch(apiPath.teamMemberKey(orgId));
           if (!ownKeyRes.ok) continue;
 
           const ownKeyData = await ownKeyRes.json();
@@ -270,7 +270,7 @@ export function OrgVaultProvider({
 
               // Send to confirm-key endpoint
               await fetch(
-                apiPath.orgMemberConfirmKey(orgId, member.memberId),
+                apiPath.teamMemberConfirmKey(orgId, member.memberId),
                 {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },

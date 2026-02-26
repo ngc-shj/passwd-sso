@@ -33,7 +33,7 @@ export default function AcceptInvitePage({
     setError(null);
 
     try {
-      const res = await fetch(API_PATH.ORGS_INVITATIONS_ACCEPT, {
+      const res = await fetch(API_PATH.TEAMS_INVITATIONS_ACCEPT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),

@@ -67,7 +67,7 @@ export default function OrgDashboardPage({
 }: {
   params: Promise<{ orgId: string }>;
 }) {
-  const { orgId } = use(params);
+  const { orgId: teamId } = use(params);
   const searchParams = useSearchParams();
   const activeTagId = searchParams.get("tag");
   const activeFolderId = searchParams.get("folder");
@@ -128,7 +128,7 @@ export default function OrgDashboardPage({
 
   const fetchOrg = async (): Promise<boolean> => {
     try {
-      const res = await fetch(apiPath.orgById(orgId));
+      const res = await fetch(apiPath.teamById(teamId));
       if (!res.ok) {
         setOrg(null);
         setLoadError(true);
@@ -154,12 +154,12 @@ export default function OrgDashboardPage({
       if (activeEntryType) params.set("type", activeEntryType);
       if (isOrgFavorites) params.set("favorites", "true");
       const qs = params.toString();
-      const url = `${apiPath.orgPasswords(orgId)}${qs ? `?${qs}` : ""}`;
+      const url = `${apiPath.teamPasswords(teamId)}${qs ? `?${qs}` : ""}`;
       const res = await fetch(url);
       const data = await res.json();
       if (!Array.isArray(data)) return;
 
-      const orgKey = await getOrgEncryptionKey(orgId);
+      const orgKey = await getOrgEncryptionKey(teamId);
       if (!orgKey) {
         setKeyPending(true);
         setPasswords([]);
@@ -170,7 +170,7 @@ export default function OrgDashboardPage({
       const decrypted = await Promise.all(
         data.map(async (entry: Record<string, unknown>) => {
           try {
-            const aad = buildOrgEntryAAD(orgId, entry.id as string, "overview");
+            const aad = buildOrgEntryAAD(teamId, entry.id as string, "overview");
             const json = await decryptData(
               {
                 ciphertext: entry.encryptedOverview as string,
@@ -233,7 +233,7 @@ export default function OrgDashboardPage({
     } finally {
       setLoading(false);
     }
-  }, [orgId, activeTagId, activeFolderId, activeEntryType, isOrgFavorites, getOrgEncryptionKey]);
+  }, [teamId, activeTagId, activeFolderId, activeEntryType, isOrgFavorites, getOrgEncryptionKey]);
 
   useEffect(() => {
     setLoadError(false);
@@ -242,7 +242,7 @@ export default function OrgDashboardPage({
       if (ok && !isOrgSpecialView) fetchPasswords();
       else setLoading(false);
     })();
-  }, [orgId, fetchPasswords, isOrgSpecialView]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [teamId, fetchPasswords, isOrgSpecialView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const canCreate =
     org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN || org?.role === ORG_ROLE.MEMBER;
@@ -312,7 +312,7 @@ export default function OrgDashboardPage({
       );
     }
     try {
-      const res = await fetch(apiPath.orgPasswordFavorite(orgId, id), {
+      const res = await fetch(apiPath.teamPasswordFavorite(teamId, id), {
         method: "POST",
       });
       if (!res.ok) fetchPasswords();
@@ -324,7 +324,7 @@ export default function OrgDashboardPage({
   const handleToggleArchive = async (id: string, current: boolean) => {
     setPasswords((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(apiPath.orgPasswordById(orgId, id), {
+      const res = await fetch(apiPath.teamPasswordById(teamId, id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isArchived: !current }),
@@ -338,7 +338,7 @@ export default function OrgDashboardPage({
   const handleDelete = async (id: string) => {
     setPasswords((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(apiPath.orgPasswordById(orgId, id), {
+      const res = await fetch(apiPath.teamPasswordById(teamId, id), {
         method: "DELETE",
       });
       if (!res.ok) fetchPasswords();
@@ -350,9 +350,9 @@ export default function OrgDashboardPage({
 
   const decryptFullBlob = useCallback(
     async (id: string, raw: Record<string, unknown>) => {
-      const orgKey = await getOrgEncryptionKey(orgId);
+      const orgKey = await getOrgEncryptionKey(teamId);
       if (!orgKey) throw new Error("No org key");
-      const aad = buildOrgEntryAAD(orgId, id, "blob");
+      const aad = buildOrgEntryAAD(teamId, id, "blob");
       const json = await decryptData(
         {
           ciphertext: raw.encryptedBlob as string,
@@ -364,12 +364,12 @@ export default function OrgDashboardPage({
       );
       return JSON.parse(json) as Record<string, unknown>;
     },
-    [orgId, getOrgEncryptionKey],
+    [teamId, getOrgEncryptionKey],
   );
 
   const handleEdit = async (id: string) => {
     try {
-      const res = await fetch(apiPath.orgPasswordById(orgId, id));
+      const res = await fetch(apiPath.teamPasswordById(teamId, id));
       if (!res.ok) throw new Error("Failed");
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);
@@ -415,7 +415,7 @@ export default function OrgDashboardPage({
 
   const createDetailFetcher = useCallback(
     (id: string, eType?: EntryTypeValue) => async (): Promise<InlineDetailData> => {
-      const res = await fetch(apiPath.orgPasswordById(orgId, id));
+      const res = await fetch(apiPath.teamPasswordById(teamId, id));
       if (!res.ok) throw new Error("Failed");
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);
@@ -455,29 +455,29 @@ export default function OrgDashboardPage({
         updatedAt: raw.updatedAt,
       };
     },
-    [orgId, decryptFullBlob],
+    [teamId, decryptFullBlob],
   );
 
   const createPasswordFetcher = useCallback(
     (id: string) => async (): Promise<string> => {
-      const res = await fetch(apiPath.orgPasswordById(orgId, id));
+      const res = await fetch(apiPath.teamPasswordById(teamId, id));
       if (!res.ok) throw new Error("Failed");
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);
       return (blob.password as string) ?? (blob.content as string) ?? "";
     },
-    [orgId, decryptFullBlob],
+    [teamId, decryptFullBlob],
   );
 
   const createUrlFetcher = useCallback(
     (id: string) => async (): Promise<string | null> => {
-      const res = await fetch(apiPath.orgPasswordById(orgId, id));
+      const res = await fetch(apiPath.teamPasswordById(teamId, id));
       if (!res.ok) throw new Error("Failed");
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);
       return (blob.url as string) ?? null;
     },
-    [orgId, decryptFullBlob],
+    [teamId, decryptFullBlob],
   );
 
   const filtered = passwords.filter((p) => {
@@ -615,14 +615,14 @@ export default function OrgDashboardPage({
 
         {isOrgArchive ? (
           <OrgArchivedList
-            orgId={orgId}
+            orgId={teamId}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
             sortBy={sortBy}
           />
         ) : isOrgTrash ? (
           <OrgTrashList
-            orgId={orgId}
+            orgId={teamId}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
             sortBy={sortBy}
@@ -685,7 +685,7 @@ export default function OrgDashboardPage({
                     ? t("createdBy", { name: entry.createdBy.name })
                     : undefined
                 }
-                orgId={orgId}
+                orgId={teamId}
               />
             ))}
           </div>
@@ -693,7 +693,7 @@ export default function OrgDashboardPage({
       </div>
 
       <OrgPasswordForm
-        orgId={orgId}
+        orgId={teamId}
         open={formOpen}
         onOpenChange={setFormOpen}
         onSaved={() => {

@@ -108,7 +108,7 @@ export default function OrgAuditLogsPage({
 }: {
   params: Promise<{ orgId: string }>;
 }) {
-  const { orgId } = use(params);
+  const { orgId: teamId } = use(params);
   const t = useTranslations("AuditLog");
   const locale = useLocale();
   const [logs, setLogs] = useState<OrgAuditLogItem[]>([]);
@@ -136,12 +136,12 @@ export default function OrgAuditLogsPage({
       if (cursor) params.set("cursor", cursor);
 
       const res = await fetch(
-        `${apiPath.orgAuditLogs(orgId)}?${params.toString()}`
+        `${apiPath.teamAuditLogs(teamId)}?${params.toString()}`
       );
       if (!res.ok) return null;
       return res.json();
     },
-    [orgId, selectedActions, dateFrom, dateTo]
+    [teamId, selectedActions, dateFrom, dateTo]
   );
 
   useEffect(() => {

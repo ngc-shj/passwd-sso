@@ -149,7 +149,7 @@ export function OrgAttachmentSection({
       formData.append("orgKeyVersion", keyInfo.keyVersion.toString());
 
       const res = await fetch(
-        apiPath.orgPasswordAttachments(orgId, entryId),
+        apiPath.teamPasswordAttachments(orgId, entryId),
         { method: "POST", body: formData }
       );
 
@@ -176,7 +176,7 @@ export function OrgAttachmentSection({
       if (!orgKey) throw new Error("No org key");
 
       const res = await fetch(
-        apiPath.orgPasswordAttachmentById(orgId, entryId, attachment.id)
+        apiPath.teamPasswordAttachmentById(orgId, entryId, attachment.id)
       );
       if (!res.ok) throw new Error("Download failed");
 
@@ -222,7 +222,7 @@ export function OrgAttachmentSection({
     setDeleting(true);
     try {
       const res = await fetch(
-        apiPath.orgPasswordAttachmentById(orgId, entryId, deleteTarget.id),
+        apiPath.teamPasswordAttachmentById(orgId, entryId, deleteTarget.id),
         { method: "DELETE" }
       );
       if (!res.ok) throw new Error("Delete failed");

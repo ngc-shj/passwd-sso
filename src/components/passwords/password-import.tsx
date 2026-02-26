@@ -31,8 +31,8 @@ function ImportPanelContent({ onComplete, orgId }: ImportPanelContentProps) {
   const { encryptionKey, userId } = useVault();
   const orgVault = useOrgVaultOptional();
   const isOrgImport = Boolean(orgId);
-  const tagsPath = orgId ? apiPath.orgTags(orgId) : API_PATH.TAGS;
-  const passwordsPath = orgId ? apiPath.orgPasswords(orgId) : API_PATH.PASSWORDS;
+  const tagsPath = orgId ? apiPath.teamTags(orgId) : API_PATH.TAGS;
+  const passwordsPath = orgId ? apiPath.teamPasswords(orgId) : API_PATH.PASSWORDS;
 
   // Resolve org encryption key for org imports
   const [orgEncryptionKey, setOrgEncryptionKey] = useState<CryptoKey | undefined>();
