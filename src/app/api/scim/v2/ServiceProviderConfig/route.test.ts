@@ -52,5 +52,7 @@ describe("GET /api/scim/v2/ServiceProviderConfig", () => {
     expect(body.patch.supported).toBe(true);
     expect(body.filter.supported).toBe(true);
     expect(body.bulk.supported).toBe(false);
+    expect(body.documentationUri).toBe("https://tools.ietf.org/html/rfc7644");
+    expect(body.authenticationSchemes[0].specUri).toBe("https://tools.ietf.org/html/rfc6750");
   });
 });
