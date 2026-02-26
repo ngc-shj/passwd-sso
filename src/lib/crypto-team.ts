@@ -70,7 +70,7 @@ function textEncode(text: string): ArrayBuffer {
 // ─── Org Symmetric Key Generation ───────────────────────────────
 
 /** Generate a random 256-bit org symmetric key */
-export function generateOrgSymmetricKey(): Uint8Array {
+export function generateTeamSymmetricKey(): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(32));
 }
 
@@ -82,7 +82,7 @@ export function generateOrgSymmetricKey(): Uint8Array {
  *
  * Salt is empty because orgKey itself is unique per org (256-bit random).
  */
-export async function deriveOrgEncryptionKey(
+export async function deriveTeamEncryptionKey(
   orgKey: Uint8Array
 ): Promise<CryptoKey> {
   const hkdfKey = await crypto.subtle.importKey(
@@ -183,7 +183,7 @@ export async function deriveEcdhWrappingKey(
 
 // ─── AAD for OrgMemberKey Wrapping ──────────────────────────────
 
-export interface OrgKeyWrapContext {
+export interface TeamKeyWrapContext {
   orgId: string;
   toUserId: string;
   keyVersion: number;
@@ -199,7 +199,7 @@ export interface OrgKeyWrapContext {
  * Fields: orgId | toUserId | keyVersion | wrapVersion
  * Prevents cross-org, cross-user, and cross-version transplant attacks.
  */
-export function buildOrgKeyWrapAAD(ctx: OrgKeyWrapContext): Uint8Array {
+export function buildTeamKeyWrapAAD(ctx: TeamKeyWrapContext): Uint8Array {
   const fields = [
     ctx.orgId,
     ctx.toUserId,
@@ -250,12 +250,12 @@ export function buildOrgKeyWrapAAD(ctx: OrgKeyWrapContext): Uint8Array {
  * Wrap org symmetric key for a member using ECDH.
  * Admin generates ephemeral key pair → ECDH with member's public key → AES-GCM wrap.
  */
-export async function wrapOrgKeyForMember(
+export async function wrapTeamKeyForMember(
   orgKey: Uint8Array,
   ephemeralPrivateKey: CryptoKey,
   memberPublicKey: CryptoKey,
   hkdfSalt: Uint8Array,
-  ctx: OrgKeyWrapContext
+  ctx: TeamKeyWrapContext
 ): Promise<EncryptedData> {
   const wrappingKey = await deriveOrgWrappingKey(
     ephemeralPrivateKey,
@@ -264,7 +264,7 @@ export async function wrapOrgKeyForMember(
   );
 
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
-  const aad = buildOrgKeyWrapAAD(ctx);
+  const aad = buildTeamKeyWrapAAD(ctx);
 
   const encrypted = await crypto.subtle.encrypt(
     {
@@ -293,12 +293,12 @@ export async function wrapOrgKeyForMember(
  *
  * @param hkdfSalt - Hex-encoded HKDF salt (stored in OrgMemberKey.hkdfSalt)
  */
-export async function unwrapOrgKey(
+export async function unwrapTeamKey(
   encrypted: EncryptedData,
   ephemeralPublicKeyJwk: string,
   memberPrivateKey: CryptoKey,
   hkdfSalt: string,
-  ctx: OrgKeyWrapContext
+  ctx: TeamKeyWrapContext
 ): Promise<Uint8Array> {
   const ephemeralPublicKey = await importPublicKey(ephemeralPublicKeyJwk);
   const salt = hexDecode(hkdfSalt);
@@ -317,7 +317,7 @@ export async function unwrapOrgKey(
   combined.set(ciphertext);
   combined.set(authTag, ciphertext.length);
 
-  const aad = buildOrgKeyWrapAAD(ctx);
+  const aad = buildTeamKeyWrapAAD(ctx);
 
   const decrypted = await crypto.subtle.decrypt(
     {
@@ -354,7 +354,7 @@ export interface OrgKeyEscrowResult {
  * @param toUserId - Member user ID
  * @param keyVersion - Org key version
  */
-export async function createOrgKeyEscrow(
+export async function createTeamKeyEscrow(
   orgKey: Uint8Array,
   memberPublicKeyJwk: string,
   orgId: string,
@@ -367,14 +367,14 @@ export async function createOrgKeyEscrow(
   // Random HKDF salt — used in ECDH wrapping key derivation, stored in OrgMemberKey
   const salt = crypto.getRandomValues(new Uint8Array(HKDF_SALT_LENGTH));
 
-  const ctx: OrgKeyWrapContext = {
+  const ctx: TeamKeyWrapContext = {
     orgId,
     toUserId,
     keyVersion,
     wrapVersion: CURRENT_ORG_WRAP_VERSION,
   };
 
-  const encrypted = await wrapOrgKeyForMember(
+  const encrypted = await wrapTeamKeyForMember(
     orgKey,
     ephemeralKeyPair.privateKey,
     memberPublicKey,

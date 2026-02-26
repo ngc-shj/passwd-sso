@@ -19,7 +19,7 @@ import { Building2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH } from "@/lib/constants";
 import { useVault } from "@/lib/vault-context";
-import { generateOrgSymmetricKey, createOrgKeyEscrow } from "@/lib/crypto-team";
+import { generateTeamSymmetricKey, createTeamKeyEscrow } from "@/lib/crypto-team";
 
 interface TeamCreateDialogProps {
   trigger: React.ReactNode;
@@ -72,10 +72,10 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
       const teamId = crypto.randomUUID();
 
       // Generate team symmetric key and wrap it for the owner
-      const orgKey = generateOrgSymmetricKey();
+      const orgKey = generateTeamSymmetricKey();
       let escrow;
       try {
-        escrow = await createOrgKeyEscrow(
+        escrow = await createTeamKeyEscrow(
           orgKey,
           ecdhPublicKeyJwk,
           teamId,

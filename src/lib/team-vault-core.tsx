@@ -9,10 +9,10 @@ import {
   type ReactNode,
 } from "react";
 import {
-  unwrapOrgKey,
-  deriveOrgEncryptionKey,
-  createOrgKeyEscrow,
-  type OrgKeyWrapContext,
+  unwrapTeamKey,
+  deriveTeamEncryptionKey,
+  createTeamKeyEscrow,
+  type TeamKeyWrapContext,
 } from "./crypto-team";
 import { apiPath, API_PATH } from "@/lib/constants";
 
@@ -129,7 +129,7 @@ export function TeamVaultProvider({
         ecdhPrivateKeyBytes.fill(0);
 
         // Build AAD context for unwrapping
-        const ctx: OrgKeyWrapContext = {
+        const ctx: TeamKeyWrapContext = {
           orgId: teamId,
           toUserId: userId,
           keyVersion: memberKeyData.keyVersion,
@@ -137,7 +137,7 @@ export function TeamVaultProvider({
         };
 
         // Unwrap org key
-        const orgKeyBytes = await unwrapOrgKey(
+        const orgKeyBytes = await unwrapTeamKey(
           {
             ciphertext: memberKeyData.encryptedOrgKey,
             iv: memberKeyData.orgKeyIv,
@@ -150,7 +150,7 @@ export function TeamVaultProvider({
         );
 
         // Derive encryption key from org key, then zero-clear raw bytes
-        const encryptionKey = await deriveOrgEncryptionKey(orgKeyBytes);
+        const encryptionKey = await deriveTeamEncryptionKey(orgKeyBytes);
         orgKeyBytes.fill(0);
 
         // Cache (always the latest key from server)
@@ -235,7 +235,7 @@ export function TeamVaultProvider({
           const ownKeyData = await ownKeyRes.json();
 
           // Build AAD context for own key unwrapping
-          const ownCtx: OrgKeyWrapContext = {
+          const ownCtx: TeamKeyWrapContext = {
             orgId: teamId,
             toUserId: userId,
             keyVersion: ownKeyData.keyVersion,
@@ -243,7 +243,7 @@ export function TeamVaultProvider({
           };
 
           // Unwrap org key
-          orgKeyBytes = await unwrapOrgKey(
+          orgKeyBytes = await unwrapTeamKey(
             {
               ciphertext: ownKeyData.encryptedOrgKey,
               iv: ownKeyData.orgKeyIv,
@@ -260,7 +260,7 @@ export function TeamVaultProvider({
             try {
               if (!member.ecdhPublicKey) continue;
 
-              const escrow = await createOrgKeyEscrow(
+              const escrow = await createTeamKeyEscrow(
                 orgKeyBytes,
                 member.ecdhPublicKey,
                 teamId,
