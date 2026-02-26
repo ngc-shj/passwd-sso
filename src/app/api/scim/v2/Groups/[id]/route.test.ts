@@ -40,7 +40,7 @@ import { GET, PUT, PATCH, DELETE } from "./route";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
-  data: { tokenId: "t1", orgId: "org-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
+  data: { tokenId: "t1", teamId: "org-1", orgId: "org-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
 };
 
 // Compute a valid ADMIN group ID for org-1
