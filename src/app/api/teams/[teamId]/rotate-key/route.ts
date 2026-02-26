@@ -48,10 +48,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.ORG_UPDATE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.ORG_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const org = await prisma.organization.findUnique({
-    where: { id: orgId },
+    where: { id: teamId },
     select: { orgKeyVersion: true },
   });
 
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     await prisma.$transaction(async (tx) => {
       // Re-verify orgKeyVersion hasn't changed since pre-read
       const currentOrg = await tx.organization.findUnique({
-        where: { id: orgId },
+        where: { id: teamId },
         select: { orgKeyVersion: true },
       });
       if (!currentOrg || currentOrg.orgKeyVersion !== org.orgKeyVersion) {
@@ -108,7 +108,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
       // Verify all active members have a key in the payload (F-26: inside tx)
       const members = await tx.orgMember.findMany({
-        where: { orgId, deactivatedAt: null },
+        where: { orgId: teamId, deactivatedAt: null },
         select: { userId: true },
       });
       const memberUserIds = new Set(members.map((m) => m.userId));
@@ -126,7 +126,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
       // Verify submitted entries exactly match ALL org entries (including trash)
       const allEntries = await tx.orgPasswordEntry.findMany({
-        where: { orgId },
+        where: { orgId: teamId },
         select: { id: true },
       });
       if (entries.length !== allEntries.length) {
@@ -155,7 +155,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         const result = await tx.orgPasswordEntry.updateMany({
           where: {
             id: entry.id,
-            orgId,
+            orgId: teamId,
           },
           data: {
             encryptedBlob: entry.encryptedBlob.ciphertext,
@@ -179,7 +179,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         memberKeys.map((k) =>
             tx.orgMemberKey.create({
               data: {
-                orgId,
+                orgId: teamId,
                 userId: k.userId,
                 encryptedOrgKey: k.encryptedOrgKey,
                 orgKeyIv: k.orgKeyIv,
@@ -195,7 +195,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
       // Bump org key version
       await tx.organization.update({
-        where: { id: orgId },
+        where: { id: teamId },
         data: { orgKeyVersion: newOrgKeyVersion },
       });
     }, { timeout: 60_000 });
@@ -225,9 +225,9 @@ export async function POST(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.ORG_KEY_ROTATION,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
-    targetId: orgId,
+    targetId: teamId,
     metadata: {
       fromVersion: org.orgKeyVersion,
       toVersion: newOrgKeyVersion,

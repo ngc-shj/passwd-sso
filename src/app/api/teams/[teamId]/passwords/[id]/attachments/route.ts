@@ -30,10 +30,10 @@ export async function GET(
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, id } = await params;
+  const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_READ);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -46,7 +46,7 @@ export async function GET(
     select: { orgId: true },
   });
 
-  if (!entry || entry.orgId !== orgId) {
+  if (!entry || entry.orgId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -75,10 +75,10 @@ export async function POST(
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, id } = await params;
+  const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_UPDATE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -91,7 +91,7 @@ export async function POST(
     select: { orgId: true },
   });
 
-  if (!entry || entry.orgId !== orgId) {
+  if (!entry || entry.orgId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -200,7 +200,7 @@ export async function POST(
 
   // Validate orgKeyVersion matches current org key version (S-20/F-23)
   const org = await prisma.organization.findUnique({
-    where: { id: orgId },
+    where: { id: teamId },
     select: { orgKeyVersion: true },
   });
   if (!org || orgKeyVersion !== org.orgKeyVersion) {
@@ -212,7 +212,7 @@ export async function POST(
 
   const blobStore = getAttachmentBlobStore();
   const attachmentId = clientId ?? crypto.randomUUID();
-  const blobContext = { attachmentId, entryId: id, orgId };
+  const blobContext = { attachmentId, entryId: id, orgId: teamId };
   const storedBlob = await blobStore.putObject(buffer, blobContext);
 
   let attachment;
@@ -248,7 +248,7 @@ export async function POST(
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.ATTACHMENT_UPLOAD,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.ATTACHMENT,
     targetId: attachment.id,
     metadata: { filename: sanitizedFilename, sizeBytes: originalSize, entryId: id },

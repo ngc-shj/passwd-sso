@@ -13,10 +13,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamMember(session.user.id, orgId);
+    await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -25,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 
   const members = await prisma.orgMember.findMany({
-    where: { orgId, deactivatedAt: null },
+    where: { orgId: teamId, deactivatedAt: null },
     include: {
       user: {
         select: { id: true, name: true, email: true, image: true },

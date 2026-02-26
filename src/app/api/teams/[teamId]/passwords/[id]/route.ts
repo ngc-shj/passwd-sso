@@ -21,10 +21,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, id } = await params;
+  const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_READ);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -45,7 +45,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     },
   });
 
-  if (!entry || entry.orgId !== orgId) {
+  if (!entry || entry.orgId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -78,11 +78,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, id } = await params;
+  const { teamId, id } = await params;
 
   let membership;
   try {
-    membership = await requireTeamMember(session.user.id, orgId);
+    membership = await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -103,7 +103,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     },
   });
 
-  if (!entry || entry.orgId !== orgId) {
+  if (!entry || entry.orgId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -142,7 +142,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   // Validate orgKeyVersion matches current org key version (F-13)
   if (isFullUpdate) {
     const org = await prisma.organization.findUnique({
-      where: { id: orgId },
+      where: { id: teamId },
       select: { orgKeyVersion: true },
     });
     if (!org || orgKeyVersion !== org.orgKeyVersion) {
@@ -159,7 +159,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       where: { id: orgFolderId },
       select: { orgId: true },
     });
-    if (!folder || folder.orgId !== orgId) {
+    if (!folder || folder.orgId !== teamId) {
       return NextResponse.json({ error: API_ERROR.FOLDER_NOT_FOUND }, { status: 400 });
     }
   }
@@ -212,7 +212,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
 
     return tx.orgPasswordEntry.update({
-      where: { id, orgId },
+      where: { id, orgId: teamId },
       data: updateData,
       include: {
         tags: { select: { id: true, name: true, color: true } },
@@ -224,7 +224,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.ENTRY_UPDATE,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: id,
     ...extractRequestMeta(req),
@@ -245,10 +245,10 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, id } = await params;
+  const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_DELETE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -260,7 +260,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     where: { id },
   });
 
-  if (!existing || existing.orgId !== orgId) {
+  if (!existing || existing.orgId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -280,7 +280,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.ENTRY_DELETE,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: id,
     metadata: { permanent },

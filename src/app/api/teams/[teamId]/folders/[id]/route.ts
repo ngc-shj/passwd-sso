@@ -28,10 +28,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, id } = await params;
+  const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -40,7 +40,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   const existing = await prisma.orgFolder.findUnique({ where: { id } });
-  if (!existing || existing.orgId !== orgId) {
+  if (!existing || existing.orgId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -72,7 +72,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       if (newParentId) {
         // Parent ownership + existence check
         try {
-          await validateParentFolder(newParentId, orgId, getOrgParent);
+          await validateParentFolder(newParentId, teamId, getOrgParent);
         } catch {
           return NextResponse.json(
             { error: API_ERROR.NOT_FOUND },
@@ -97,7 +97,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       }
 
       try {
-        await validateFolderDepth(newParentId, orgId, getOrgParent);
+        await validateFolderDepth(newParentId, teamId, getOrgParent);
       } catch {
         return NextResponse.json(
           { error: API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED },
@@ -118,7 +118,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (finalName !== existing.name || finalParentId !== existing.parentId) {
     if (finalParentId) {
       const dup = await prisma.orgFolder.findUnique({
-        where: { name_parentId_orgId: { name: finalName, parentId: finalParentId, orgId } },
+        where: { name_parentId_orgId: { name: finalName, parentId: finalParentId, orgId: teamId } },
       });
       if (dup && dup.id !== id) {
         return NextResponse.json(
@@ -128,7 +128,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       }
     } else {
       const rootDup = await prisma.orgFolder.findFirst({
-        where: { name: finalName, parentId: null, orgId },
+        where: { name: finalName, parentId: null, orgId: teamId },
       });
       if (rootDup && rootDup.id !== id) {
         return NextResponse.json(
@@ -148,7 +148,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.FOLDER_UPDATE,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.ORG_FOLDER,
     targetId: id,
     ...extractRequestMeta(req),
@@ -171,10 +171,10 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, id } = await params;
+  const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -183,7 +183,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   const existing = await prisma.orgFolder.findUnique({ where: { id } });
-  if (!existing || existing.orgId !== orgId) {
+  if (!existing || existing.orgId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -194,7 +194,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   });
 
   const siblingsAtTarget = await prisma.orgFolder.findMany({
-    where: { parentId: existing.parentId, orgId },
+    where: { parentId: existing.parentId, orgId: teamId },
     select: { id: true, name: true },
   });
 
@@ -245,7 +245,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.FOLDER_DELETE,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.ORG_FOLDER,
     targetId: id,
     ...extractRequestMeta(req),

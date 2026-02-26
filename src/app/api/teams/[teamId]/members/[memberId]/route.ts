@@ -20,13 +20,13 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, memberId } = await params;
+  const { teamId, memberId } = await params;
 
   let actorMembership;
   try {
     actorMembership = await requireTeamPermission(
       session.user.id,
-      orgId,
+      teamId,
       TEAM_PERMISSION.MEMBER_CHANGE_ROLE
     );
   } catch (e) {
@@ -40,7 +40,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     where: { id: memberId },
   });
 
-  if (!target || target.orgId !== orgId || target.deactivatedAt !== null) {
+  if (!target || target.orgId !== teamId || target.deactivatedAt !== null) {
     return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
   }
 
@@ -86,7 +86,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       scope: AUDIT_SCOPE.ORG,
       action: AUDIT_ACTION.ORG_ROLE_UPDATE,
       userId: session.user.id,
-      orgId,
+      orgId: teamId,
       targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
       targetId: memberId,
       metadata: { newRole: TEAM_ROLE.OWNER, previousRole: target.role, transfer: true },
@@ -134,7 +134,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.ORG_ROLE_UPDATE,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
     targetId: memberId,
     metadata: { newRole: parsed.data.role, previousRole: target.role },
@@ -158,13 +158,13 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, memberId } = await params;
+  const { teamId, memberId } = await params;
 
   let actorMembership;
   try {
     actorMembership = await requireTeamPermission(
       session.user.id,
-      orgId,
+      teamId,
       TEAM_PERMISSION.MEMBER_REMOVE
     );
   } catch (e) {
@@ -178,7 +178,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     where: { id: memberId },
   });
 
-  if (!target || target.orgId !== orgId || target.deactivatedAt !== null) {
+  if (!target || target.orgId !== teamId || target.deactivatedAt !== null) {
     return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
   }
 
@@ -200,9 +200,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   await prisma.$transaction([
-    prisma.orgMemberKey.deleteMany({ where: { orgId, userId: target.userId } }),
+    prisma.orgMemberKey.deleteMany({ where: { orgId: teamId, userId: target.userId } }),
     prisma.scimExternalMapping.deleteMany({
-      where: { orgId, internalId: target.userId, resourceType: "User" },
+      where: { orgId: teamId, internalId: target.userId, resourceType: "User" },
     }),
     prisma.orgMember.delete({ where: { id: memberId } }),
   ]);
@@ -211,7 +211,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.ORG_MEMBER_REMOVE,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
     targetId: memberId,
     metadata: { removedUserId: target.userId, removedRole: target.role },

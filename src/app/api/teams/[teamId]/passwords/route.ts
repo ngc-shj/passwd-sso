@@ -19,10 +19,10 @@ export async function GET(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_READ);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const passwords = await prisma.orgPasswordEntry.findMany({
     where: {
-      orgId,
+      orgId: teamId,
       ...(trashOnly
         ? { deletedAt: { not: null } }
         : { deletedAt: null }),
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     prisma.orgPasswordEntry.deleteMany({
       where: {
-        orgId,
+        orgId: teamId,
         deletedAt: { lt: thirtyDaysAgo },
       },
     }).catch(() => {});
@@ -112,10 +112,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_CREATE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_CREATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -142,7 +142,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // Validate orgKeyVersion matches current org key version
   const org = await prisma.organization.findUnique({
-    where: { id: orgId },
+    where: { id: teamId },
     select: { orgKeyVersion: true },
   });
   if (!org || orgKeyVersion !== org.orgKeyVersion) {
@@ -158,7 +158,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       where: { id: orgFolderId },
       select: { orgId: true },
     });
-    if (!folder || folder.orgId !== orgId) {
+    if (!folder || folder.orgId !== teamId) {
       return NextResponse.json({ error: API_ERROR.FOLDER_NOT_FOUND }, { status: 400 });
     }
   }
@@ -178,7 +178,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       aadVersion,
       orgKeyVersion,
       entryType,
-      orgId,
+      orgId: teamId,
       createdById: session.user.id,
       updatedById: session.user.id,
       ...(orgFolderId ? { orgFolderId } : {}),
@@ -195,7 +195,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.ENTRY_CREATE,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: entry.id,
     ...extractRequestMeta(req),

@@ -27,10 +27,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamMember(session.user.id, orgId);
+    await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -39,7 +39,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 
   const folders = await prisma.orgFolder.findMany({
-    where: { orgId },
+    where: { orgId: teamId },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     include: {
       _count: {
@@ -72,10 +72,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Parent ownership + existence check
   if (parentId) {
     try {
-      await validateParentFolder(parentId, orgId, getOrgParent);
+      await validateParentFolder(parentId, teamId, getOrgParent);
     } catch {
       return NextResponse.json(
         { error: API_ERROR.NOT_FOUND },
@@ -113,7 +113,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   try {
-    await validateFolderDepth(parentId ?? null, orgId, getOrgParent);
+    await validateFolderDepth(parentId ?? null, teamId, getOrgParent);
   } catch {
     return NextResponse.json(
       { error: API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED },
@@ -123,7 +123,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   if (parentId) {
     const dup = await prisma.orgFolder.findUnique({
-      where: { name_parentId_orgId: { name, parentId, orgId } },
+      where: { name_parentId_orgId: { name, parentId, orgId: teamId } },
     });
     if (dup) {
       return NextResponse.json(
@@ -133,7 +133,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
   } else {
     const rootDup = await prisma.orgFolder.findFirst({
-      where: { name, parentId: null, orgId },
+      where: { name, parentId: null, orgId: teamId },
     });
     if (rootDup) {
       return NextResponse.json(
@@ -147,7 +147,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     data: {
       name,
       parentId: parentId ?? null,
-      orgId,
+      orgId: teamId,
       sortOrder: sortOrder ?? 0,
     },
   });
@@ -156,7 +156,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.FOLDER_CREATE,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.ORG_FOLDER,
     targetId: folder.id,
     ...extractRequestMeta(req),

@@ -16,13 +16,13 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, memberId } = await params;
+  const { teamId, memberId } = await params;
 
   // Only OWNER/ADMIN can distribute keys (mapped to MEMBER_INVITE permission)
   try {
     await requireTeamPermission(
       session.user.id,
-      orgId,
+      teamId,
       TEAM_PERMISSION.MEMBER_INVITE
     );
   } catch (e) {
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     select: { orgId: true, userId: true, keyDistributed: true, deactivatedAt: true },
   });
 
-  if (!targetMember || targetMember.orgId !== orgId || targetMember.deactivatedAt !== null) {
+  if (!targetMember || targetMember.orgId !== teamId || targetMember.deactivatedAt !== null) {
     return NextResponse.json(
       { error: API_ERROR.MEMBER_NOT_FOUND },
       { status: 404 }
@@ -94,7 +94,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     // Verify keyVersion matches current org key version (F-16)
     const org = await tx.organization.findUnique({
-      where: { id: orgId },
+      where: { id: teamId },
       select: { orgKeyVersion: true },
     });
     if (!org || data.keyVersion !== org.orgKeyVersion) {
@@ -104,13 +104,13 @@ export async function POST(req: NextRequest, { params }: Params) {
     await tx.orgMemberKey.upsert({
       where: {
         orgId_userId_keyVersion: {
-          orgId,
+          orgId: teamId,
           userId: targetMember.userId,
           keyVersion: data.keyVersion,
         },
       },
       create: {
-        orgId,
+        orgId: teamId,
         userId: targetMember.userId,
         encryptedOrgKey: data.encryptedOrgKey,
         orgKeyIv: data.orgKeyIv,
