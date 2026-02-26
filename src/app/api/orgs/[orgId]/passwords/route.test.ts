@@ -45,7 +45,7 @@ import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
 const ORG_ID = "org-123";
 const now = new Date("2025-01-01T00:00:00Z");
 
-describe("GET /api/orgs/[orgId]/passwords", () => {
+describe("GET /api/teams/[orgId]/passwords", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -57,7 +57,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(401);
@@ -68,7 +68,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
       new OrgAuthError("FORBIDDEN", 403)
     );
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(403);
@@ -78,7 +78,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       GET(
-        createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+        createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
         createParams({ orgId: ORG_ID }),
       ),
     ).rejects.toThrow("unexpected");
@@ -106,7 +106,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     ]);
 
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
       createParams({ orgId: ORG_ID }),
     );
     const json = await res.json();
@@ -126,7 +126,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
         searchParams: { type: "SECURE_NOTE" },
       }),
       createParams({ orgId: ORG_ID }),
@@ -142,7 +142,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
       createParams({ orgId: ORG_ID }),
     );
     const call = mockPrismaOrgPasswordEntry.findMany.mock.calls[0][0];
@@ -153,7 +153,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
         searchParams: { trash: "true" },
       }),
       createParams({ orgId: ORG_ID }),
@@ -169,7 +169,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
       createParams({ orgId: ORG_ID }),
     );
     expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
@@ -183,7 +183,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
         searchParams: { archived: "true" },
       }),
       createParams({ orgId: ORG_ID }),
@@ -199,7 +199,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
       createParams({ orgId: ORG_ID }),
     );
     expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
@@ -213,7 +213,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
         searchParams: { favorites: "true" },
       }),
       createParams({ orgId: ORG_ID }),
@@ -231,7 +231,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
         searchParams: { tag: "tag-456" },
       }),
       createParams({ orgId: ORG_ID }),
@@ -249,7 +249,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
         searchParams: { folder: "folder-789" },
       }),
       createParams({ orgId: ORG_ID }),
@@ -267,7 +267,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
       createParams({ orgId: ORG_ID }),
     );
     const call = mockPrismaOrgPasswordEntry.findMany.mock.calls[0][0];
@@ -275,7 +275,7 @@ describe("GET /api/orgs/[orgId]/passwords", () => {
   });
 });
 
-describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
+describe("POST /api/teams/[orgId]/passwords (E2E)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -295,7 +295,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: validE2EBody }),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, { body: validE2EBody }),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(401);
@@ -304,7 +304,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
   it("returns OrgAuthError status when POST permission denied", async () => {
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: validE2EBody }),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, { body: validE2EBody }),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(403);
@@ -316,7 +316,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       POST(
-        createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: validE2EBody }),
+        createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, { body: validE2EBody }),
         createParams({ orgId: ORG_ID }),
       ),
     ).rejects.toThrow("unexpected");
@@ -324,7 +324,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
 
   it("returns 400 on malformed JSON", async () => {
     const { NextRequest } = await import("next/server");
-    const req = new NextRequest(`http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+    const req = new NextRequest(`http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
       method: "POST",
       body: "not-json",
       headers: { "Content-Type": "application/json" },
@@ -337,7 +337,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
 
   it("returns 400 on invalid E2E body", async () => {
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
         body: { encryptedBlob: { ciphertext: "x", iv: "short", authTag: "y" } },
       }),
       createParams({ orgId: ORG_ID }),
@@ -349,7 +349,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
         body: { ...validE2EBody, orgKeyVersion: 1 }, // stale version
       }),
       createParams({ orgId: ORG_ID }),
@@ -363,7 +363,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
     mockPrismaOrganization.findUnique.mockResolvedValue(null);
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: validE2EBody }),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, { body: validE2EBody }),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(409);
@@ -380,7 +380,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
     });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: validE2EBody }),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, { body: validE2EBody }),
       createParams({ orgId: ORG_ID }),
     );
     const json = await res.json();
@@ -417,7 +417,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
     });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
         body: { ...validE2EBody, tagIds: [TAG_CUID] },
       }),
       createParams({ orgId: ORG_ID }),
@@ -443,7 +443,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
     });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
         body: { ...validE2EBody, orgFolderId: FOLDER_CUID },
       }),
       createParams({ orgId: ORG_ID }),
@@ -461,7 +461,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
     mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: "other-org-999" });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
         body: { ...validE2EBody, orgFolderId: FOLDER_CUID },
       }),
       createParams({ orgId: ORG_ID }),
@@ -476,7 +476,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
     mockPrismaOrgFolder.findUnique.mockResolvedValue(null);
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
         body: { ...validE2EBody, orgFolderId: FOLDER_CUID },
       }),
       createParams({ orgId: ORG_ID }),
@@ -495,7 +495,7 @@ describe("POST /api/orgs/[orgId]/passwords (E2E)", () => {
     });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords`, { body: validE2EBody }),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, { body: validE2EBody }),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(201);

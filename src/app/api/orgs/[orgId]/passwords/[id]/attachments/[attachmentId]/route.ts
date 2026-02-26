@@ -11,7 +11,7 @@ type RouteContext = {
   params: Promise<{ orgId: string; id: string; attachmentId: string }>;
 };
 
-// GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId] - Download encrypted attachment
+// GET /api/teams/[orgId]/passwords/[id]/attachments/[attachmentId] - Download encrypted attachment
 export async function GET(
   _req: NextRequest,
   { params }: RouteContext
@@ -70,7 +70,7 @@ export async function GET(
   });
 }
 
-// DELETE /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId] - Delete attachment
+// DELETE /api/teams/[orgId]/passwords/[id]/attachments/[attachmentId] - Delete attachment
 export async function DELETE(
   req: NextRequest,
   { params }: RouteContext

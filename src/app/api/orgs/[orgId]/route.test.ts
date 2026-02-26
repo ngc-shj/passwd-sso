@@ -49,7 +49,7 @@ const ownerMembership = {
   updatedAt: now,
 };
 
-describe("GET /api/orgs/[orgId]", () => {
+describe("GET /api/teams/[orgId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -59,7 +59,7 @@ describe("GET /api/orgs/[orgId]", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}`),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(401);
@@ -68,7 +68,7 @@ describe("GET /api/orgs/[orgId]", () => {
   it("returns 404 when not a member", async () => {
     mockRequireOrgMember.mockRejectedValue(new OrgAuthError("NOT_FOUND", 404));
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}`),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(404);
@@ -86,7 +86,7 @@ describe("GET /api/orgs/[orgId]", () => {
     });
 
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}`),
       createParams({ orgId: ORG_ID }),
     );
     const json = await res.json();
@@ -99,14 +99,14 @@ describe("GET /api/orgs/[orgId]", () => {
   it("returns 404 when org not found", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue(null);
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}`),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(404);
   });
 });
 
-describe("PUT /api/orgs/[orgId]", () => {
+describe("PUT /api/teams/[orgId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -116,7 +116,7 @@ describe("PUT /api/orgs/[orgId]", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}`, { body: { name: "New" } }),
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}`, { body: { name: "New" } }),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(401);
@@ -125,7 +125,7 @@ describe("PUT /api/orgs/[orgId]", () => {
   it("returns 403 when lacking permission", async () => {
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}`, { body: { name: "New" } }),
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}`, { body: { name: "New" } }),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(403);
@@ -141,7 +141,7 @@ describe("PUT /api/orgs/[orgId]", () => {
     });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}`, { body: { name: "Updated Org" } }),
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}`, { body: { name: "Updated Org" } }),
       createParams({ orgId: ORG_ID }),
     );
     const json = await res.json();
@@ -151,7 +151,7 @@ describe("PUT /api/orgs/[orgId]", () => {
 
   it("returns 400 for invalid JSON body", async () => {
     const { NextRequest } = await import("next/server");
-    const req = new NextRequest(`http://localhost:3000/api/orgs/${ORG_ID}`, {
+    const req = new NextRequest(`http://localhost:3000/api/teams/${ORG_ID}`, {
       method: "PUT",
       body: "not json",
       headers: { "Content-Type": "text/plain" },
@@ -164,7 +164,7 @@ describe("PUT /api/orgs/[orgId]", () => {
 
   it("returns 400 for validation error", async () => {
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}`, { body: { name: "" } }),
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}`, { body: { name: "" } }),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(400);
@@ -182,7 +182,7 @@ describe("PUT /api/orgs/[orgId]", () => {
     });
 
     await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}`, { body: { description: "" } }),
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}`, { body: { description: "" } }),
       createParams({ orgId: ORG_ID }),
     );
     expect(mockPrismaOrganization.update).toHaveBeenCalledWith({
@@ -201,7 +201,7 @@ describe("PUT /api/orgs/[orgId]", () => {
     });
 
     await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}`, { body: { description: "Hello" } }),
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}`, { body: { description: "Hello" } }),
       createParams({ orgId: ORG_ID }),
     );
     expect(mockPrismaOrganization.update).toHaveBeenCalledWith({
@@ -211,7 +211,7 @@ describe("PUT /api/orgs/[orgId]", () => {
   });
 });
 
-describe("DELETE /api/orgs/[orgId]", () => {
+describe("DELETE /api/teams/[orgId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -221,7 +221,7 @@ describe("DELETE /api/orgs/[orgId]", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}`),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(401);
@@ -230,7 +230,7 @@ describe("DELETE /api/orgs/[orgId]", () => {
   it("returns 403 when not OWNER", async () => {
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}`),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(403);
@@ -239,7 +239,7 @@ describe("DELETE /api/orgs/[orgId]", () => {
   it("deletes org successfully", async () => {
     mockPrismaOrganization.delete.mockResolvedValue({});
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}`),
       createParams({ orgId: ORG_ID }),
     );
     const json = await res.json();

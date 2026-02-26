@@ -102,7 +102,7 @@ function makeEntryForPUT(overrides = {}) {
   };
 }
 
-describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
+describe("GET /api/teams/[orgId]/passwords/[id]", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -113,7 +113,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(401);
@@ -122,7 +122,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
   it("returns OrgAuthError status when permission denied", async () => {
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(403);
@@ -132,7 +132,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       GET(
-        createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+        createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
         createParams({ orgId: ORG_ID, id: PW_ID }),
       ),
     ).rejects.toThrow("unexpected");
@@ -141,7 +141,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
   it("returns 404 when entry not found", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(null);
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(404);
@@ -153,7 +153,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     );
 
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     const json = await res.json();
@@ -179,7 +179,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
       makeEntryForGET({ orgId: "other-org-999" }),
     );
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(404);
@@ -194,7 +194,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
     );
 
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     const json = await res.json();
@@ -203,7 +203,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]", () => {
   });
 });
 
-describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
+describe("PUT /api/teams/[orgId]/passwords/[id]", () => {
   const txMock = {
     orgPasswordEntryHistory: {
       create: vi.fn().mockResolvedValue({}),
@@ -237,7 +237,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: validE2EBody,
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -248,7 +248,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
   it("returns OrgAuthError status when not a member", async () => {
     mockRequireOrgMember.mockRejectedValue(new OrgAuthError("NOT_ORG_MEMBER", 403));
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: validE2EBody,
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -260,7 +260,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     mockRequireOrgMember.mockRejectedValue(new Error("unexpected"));
     await expect(
       PUT(
-        createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+        createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
           body: validE2EBody,
         }),
         createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -271,7 +271,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
   it("returns 404 when entry not found for PUT", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(null);
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: validE2EBody,
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -284,7 +284,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
       makeEntryForPUT({ orgId: "other-org-999" }),
     );
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: validE2EBody,
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -298,7 +298,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     mockHasOrgPermission.mockReturnValue(false);
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: validE2EBody,
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -311,7 +311,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 }); // org is at v2
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: { ...validE2EBody, orgKeyVersion: 1 }, // stale version
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -327,7 +327,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
       makeEntryForPUT({ createdById: "other-user" }),
     );
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: validE2EBody,
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -338,7 +338,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
   it("returns 400 on malformed JSON for PUT", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     const { NextRequest } = await import("next/server");
-    const req = new NextRequest(`http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+    const req = new NextRequest(`http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
       method: "PUT",
       body: "not-json",
       headers: { "Content-Type": "application/json" },
@@ -353,7 +353,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     // encryptedBlob present but encryptedOverview missing → refine fails
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: { encryptedBlob: validE2EBody.encryptedBlob, aadVersion: 1, orgKeyVersion: 1 },
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -364,7 +364,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
   it("returns 400 when tagIds contains invalid CUID", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: { ...validE2EBody, tagIds: ["not-a-cuid"] },
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -376,7 +376,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: validE2EBody,
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -423,7 +423,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: ORG_ID });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: { ...validE2EBody, orgFolderId: FOLDER_CUID },
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -442,7 +442,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: "other-org-999" });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: { ...validE2EBody, orgFolderId: FOLDER_CUID },
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -458,7 +458,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrgFolder.findUnique.mockResolvedValue(null);
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: { ...validE2EBody, orgFolderId: FOLDER_CUID },
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -473,7 +473,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
 
     const TAG_CUID = "cm1234567890abcdefghijkl0";
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: { tagIds: [TAG_CUID], isArchived: true },
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -496,7 +496,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: { ...validE2EBody, orgFolderId: null },
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),
@@ -511,7 +511,7 @@ describe("PUT /api/orgs/[orgId]/passwords/[id]", () => {
   });
 });
 
-describe("DELETE /api/orgs/[orgId]/passwords/[id]", () => {
+describe("DELETE /api/teams/[orgId]/passwords/[id]", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -522,7 +522,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(401);
@@ -531,7 +531,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]", () => {
   it("returns OrgAuthError status when permission denied for DELETE", async () => {
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(403);
@@ -541,7 +541,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]", () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       DELETE(
-        createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+        createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
         createParams({ orgId: ORG_ID, id: PW_ID }),
       ),
     ).rejects.toThrow("unexpected");
@@ -550,7 +550,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]", () => {
   it("returns 404 when entry not found", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(null);
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(404);
@@ -559,7 +559,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]", () => {
   it("returns 404 when entry belongs to a different org (R-1 IDOR)", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, orgId: "other-org-999" });
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(404);
@@ -572,7 +572,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrgPasswordEntry.update.mockResolvedValue({});
 
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     const json = await res.json();
@@ -586,7 +586,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]", () => {
     mockPrismaOrgPasswordEntry.delete.mockResolvedValue({});
 
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}`, {
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         searchParams: { permanent: "true" },
       }),
       createParams({ orgId: ORG_ID, id: PW_ID }),

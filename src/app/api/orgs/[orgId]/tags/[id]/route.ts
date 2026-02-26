@@ -8,7 +8,7 @@ import { ORG_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string; id: string }> };
 
-// PUT /api/orgs/[orgId]/tags/[id] — Update org tag
+// PUT /api/teams/[orgId]/tags/[id] — Update org tag
 export async function PUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -61,7 +61,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 }
 
-// DELETE /api/orgs/[orgId]/tags/[id] — Delete org tag
+// DELETE /api/teams/[orgId]/tags/[id] — Delete org tag
 export async function DELETE(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

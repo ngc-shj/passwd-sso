@@ -33,7 +33,7 @@ import { ORG_ROLE } from "@/lib/constants";
 const ORG_ID = "org-123";
 const now = new Date("2025-01-01T00:00:00Z");
 
-describe("GET /api/orgs/[orgId]/members", () => {
+describe("GET /api/teams/[orgId]/members", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -43,7 +43,7 @@ describe("GET /api/orgs/[orgId]/members", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/members`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/members`),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(401);
@@ -52,7 +52,7 @@ describe("GET /api/orgs/[orgId]/members", () => {
   it("returns 404 when not a member", async () => {
     mockRequireOrgMember.mockRejectedValue(new OrgAuthError("NOT_FOUND", 404));
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/members`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/members`),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(404);
@@ -77,7 +77,7 @@ describe("GET /api/orgs/[orgId]/members", () => {
     ]);
 
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/members`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/members`),
       createParams({ orgId: ORG_ID }),
     );
     const json = await res.json();

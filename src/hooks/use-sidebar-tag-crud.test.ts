@@ -45,7 +45,7 @@ describe("useSidebarTagCrud", () => {
     expect(refreshData).toHaveBeenCalledTimes(1);
   });
 
-  it("submits org tag update to /api/orgs/:orgId/tags/:id", async () => {
+  it("submits org tag update to /api/teams/:orgId/tags/:id", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as never;
 
     const { result } = renderHook(() => useSidebarTagCrud({ refreshData, tErrors }));
@@ -59,7 +59,7 @@ describe("useSidebarTagCrud", () => {
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "/api/orgs/org-1/tags/tag-1",
+      "/api/teams/org-1/tags/tag-1",
       expect.objectContaining({ method: "PUT" })
     );
   });
@@ -87,7 +87,7 @@ describe("useSidebarTagCrud", () => {
     expect(refreshData).toHaveBeenCalledTimes(1);
   });
 
-  it("submits org tag creation via POST to /api/orgs/:orgId/tags", async () => {
+  it("submits org tag creation via POST to /api/teams/:orgId/tags", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as never;
 
     const { result } = renderHook(() => useSidebarTagCrud({ refreshData, tErrors }));
@@ -101,7 +101,7 @@ describe("useSidebarTagCrud", () => {
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "/api/orgs/org-1/tags",
+      "/api/teams/org-1/tags",
       expect.objectContaining({ method: "POST" })
     );
   });

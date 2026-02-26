@@ -14,7 +14,7 @@ import { ORG_PERMISSION, ORG_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE 
 
 type Params = { params: Promise<{ orgId: string; id: string }> };
 
-// GET /api/orgs/[orgId]/passwords/[id] — Get password detail (encrypted blob, client decrypts)
+// GET /api/teams/[orgId]/passwords/[id] — Get password detail (encrypted blob, client decrypts)
 export async function GET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -71,7 +71,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   });
 }
 
-// PUT /api/orgs/[orgId]/passwords/[id] — Update password (E2E: full blob replacement)
+// PUT /api/teams/[orgId]/passwords/[id] — Update password (E2E: full blob replacement)
 export async function PUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -238,7 +238,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 }
 
-// DELETE /api/orgs/[orgId]/passwords/[id] — Soft delete (move to trash)
+// DELETE /api/teams/[orgId]/passwords/[id] — Soft delete (move to trash)
 export async function DELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

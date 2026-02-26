@@ -5,7 +5,7 @@ import { hasOrgPermission } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { ORG_PERMISSION } from "@/lib/constants";
 
-// GET /api/orgs/favorites — Get all org passwords favorited by current user
+// GET /api/teams/favorites — Get all org passwords favorited by current user
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {

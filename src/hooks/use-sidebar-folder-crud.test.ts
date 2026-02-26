@@ -82,7 +82,7 @@ describe("useSidebarFolderCrud", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/orgs/org-1/folders/of1",
+      "/api/teams/org-1/folders/of1",
       expect.objectContaining({ method: "PUT" }),
     );
   });

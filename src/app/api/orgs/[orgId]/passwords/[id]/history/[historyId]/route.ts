@@ -6,7 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 
 type Params = { params: Promise<{ orgId: string; id: string; historyId: string }> };
 
-// GET /api/orgs/[orgId]/passwords/[id]/history/[historyId] — Return encrypted history blob (client decrypts)
+// GET /api/teams/[orgId]/passwords/[id]/history/[historyId] — Return encrypted history blob (client decrypts)
 export async function GET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

@@ -5,7 +5,7 @@ import { hasOrgPermission } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { ORG_PERMISSION } from "@/lib/constants";
 
-// GET /api/orgs/trash — Get all trashed org passwords across all orgs
+// GET /api/teams/trash — Get all trashed org passwords across all orgs
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {

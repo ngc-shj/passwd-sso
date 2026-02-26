@@ -8,7 +8,7 @@ import { ORG_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/
 
 type Params = { params: Promise<{ orgId: string; tokenId: string }> };
 
-// DELETE /api/orgs/[orgId]/scim-tokens/[tokenId] — Revoke a SCIM token
+// DELETE /api/teams/[orgId]/scim-tokens/[tokenId] — Revoke a SCIM token
 export async function DELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

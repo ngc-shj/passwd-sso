@@ -41,7 +41,7 @@ const rotateKeySchema = z.object({
   ).min(1).max(1000),
 });
 
-// POST /api/orgs/[orgId]/rotate-key — Rotate org encryption key
+// POST /api/teams/[orgId]/rotate-key — Rotate org encryption key
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

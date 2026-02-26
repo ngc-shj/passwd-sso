@@ -70,7 +70,7 @@ import { ORG_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-1";
 const FOLDER_ID = "cm000000000000000folder1";
-const BASE = `http://localhost:3000/api/orgs/${ORG_ID}/folders/${FOLDER_ID}`;
+const BASE = `http://localhost:3000/api/teams/${ORG_ID}/folders/${FOLDER_ID}`;
 const now = new Date("2025-06-01T00:00:00Z");
 const ownedFolder = {
   id: FOLDER_ID,
@@ -82,7 +82,7 @@ const ownedFolder = {
   updatedAt: now,
 };
 
-describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
+describe("PUT /api/teams/[orgId]/folders/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
@@ -220,7 +220,7 @@ describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
   });
 });
 
-describe("DELETE /api/orgs/[orgId]/folders/[id]", () => {
+describe("DELETE /api/teams/[orgId]/folders/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });

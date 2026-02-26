@@ -44,7 +44,7 @@ import { ORG_ROLE, INVITATION_STATUS } from "@/lib/constants";
 const ORG_ID = "org-123";
 const now = new Date("2025-01-01T00:00:00Z");
 
-describe("GET /api/orgs/[orgId]/invitations", () => {
+describe("GET /api/teams/[orgId]/invitations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -54,7 +54,7 @@ describe("GET /api/orgs/[orgId]/invitations", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/invitations`),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(401);
@@ -63,7 +63,7 @@ describe("GET /api/orgs/[orgId]/invitations", () => {
   it("returns 403 when lacking invite permission", async () => {
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/invitations`),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(403);
@@ -84,7 +84,7 @@ describe("GET /api/orgs/[orgId]/invitations", () => {
     ]);
 
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/invitations`),
       createParams({ orgId: ORG_ID }),
     );
     const json = await res.json();
@@ -94,7 +94,7 @@ describe("GET /api/orgs/[orgId]/invitations", () => {
   });
 });
 
-describe("POST /api/orgs/[orgId]/invitations", () => {
+describe("POST /api/teams/[orgId]/invitations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -106,7 +106,7 @@ describe("POST /api/orgs/[orgId]/invitations", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
         body: { email: "new@test.com", role: ORG_ROLE.MEMBER },
       }),
       createParams({ orgId: ORG_ID }),
@@ -116,7 +116,7 @@ describe("POST /api/orgs/[orgId]/invitations", () => {
 
   it("returns 400 on invalid body", async () => {
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
         body: { email: "invalid" },
       }),
       createParams({ orgId: ORG_ID }),
@@ -129,7 +129,7 @@ describe("POST /api/orgs/[orgId]/invitations", () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue({ id: "existing-member", deactivatedAt: null });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
         body: { email: "existing@test.com", role: ORG_ROLE.MEMBER },
       }),
       createParams({ orgId: ORG_ID }),
@@ -143,7 +143,7 @@ describe("POST /api/orgs/[orgId]/invitations", () => {
     mockPrismaOrgInvitation.findFirst.mockResolvedValue({ id: "existing-inv" });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
         body: { email: "pending@test.com", role: ORG_ROLE.MEMBER },
       }),
       createParams({ orgId: ORG_ID }),
@@ -164,7 +164,7 @@ describe("POST /api/orgs/[orgId]/invitations", () => {
     });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/invitations`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
         body: { email: "new@test.com", role: ORG_ROLE.MEMBER },
       }),
       createParams({ orgId: ORG_ID }),

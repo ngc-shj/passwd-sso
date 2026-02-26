@@ -52,15 +52,15 @@ vi.mock("@/lib/folder-utils", () => ({
   checkCircularReference: vi.fn().mockResolvedValue(false),
 }));
 
-import { PUT, DELETE } from "@/app/api/orgs/[orgId]/folders/[id]/route";
+import { PUT, DELETE } from "@/app/api/teams/[orgId]/folders/[id]/route";
 import { OrgAuthError } from "@/lib/org-auth";
 
-describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
+describe("PUT /api/teams/[orgId]/folders/[id]", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const req = createRequest("PUT", "http://localhost/api/orgs/o1/folders/f1", { body: { name: "x" } });
+    const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: "x" } });
     const res = await PUT(req, createParams({ orgId: "o1", id: "f1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(401);
@@ -69,7 +69,7 @@ describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
   it("returns 403 when lacking permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
-    const req = createRequest("PUT", "http://localhost/api/orgs/o1/folders/f1", { body: { name: "x" } });
+    const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: "x" } });
     const res = await PUT(req, createParams({ orgId: "o1", id: "f1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(403);
@@ -79,7 +79,7 @@ describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockOrgFolderFindUnique.mockResolvedValue(null);
-    const req = createRequest("PUT", "http://localhost/api/orgs/o1/folders/f1", { body: { name: "x" } });
+    const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: "x" } });
     const res = await PUT(req, createParams({ orgId: "o1", id: "f1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(404);
@@ -89,7 +89,7 @@ describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockOrgFolderFindUnique.mockResolvedValue({ id: "f1", orgId: "other-org", parentId: null, name: "Old" });
-    const req = createRequest("PUT", "http://localhost/api/orgs/o1/folders/f1", { body: { name: "x" } });
+    const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: "x" } });
     const res = await PUT(req, createParams({ orgId: "o1", id: "f1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(404);
@@ -104,7 +104,7 @@ describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
     const updated = { ...existing, name: "New", sortOrder: 0, createdAt: new Date(), updatedAt: new Date() };
     mockOrgFolderUpdate.mockResolvedValue(updated);
 
-    const req = createRequest("PUT", "http://localhost/api/orgs/o1/folders/f1", { body: { name: "New" } });
+    const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: "New" } });
     const res = await PUT(req, createParams({ orgId: "o1", id: "f1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(200);
@@ -118,7 +118,7 @@ describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
     mockOrgFolderFindUnique.mockResolvedValueOnce(existing);
     mockOrgFolderFindFirst.mockResolvedValue({ id: "f2", name: "Dup" }); // dup
 
-    const req = createRequest("PUT", "http://localhost/api/orgs/o1/folders/f1", { body: { name: "Dup" } });
+    const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: "Dup" } });
     const res = await PUT(req, createParams({ orgId: "o1", id: "f1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(409);
@@ -129,7 +129,7 @@ describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockOrgFolderFindUnique.mockResolvedValue({ id: "f1", orgId: "o1", parentId: null, name: "Old" });
-    const req = createRequest("PUT", "http://localhost/api/orgs/o1/folders/f1", { body: { name: 123 } });
+    const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: 123 } });
     const res = await PUT(req, createParams({ orgId: "o1", id: "f1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -147,7 +147,7 @@ describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
     const updated = { ...existing, parentId: parentCuid, sortOrder: 0, createdAt: new Date(), updatedAt: new Date() };
     mockOrgFolderUpdate.mockResolvedValue(updated);
 
-    const req = createRequest("PUT", "http://localhost/api/orgs/o1/folders/f1", { body: { parentId: parentCuid } });
+    const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { parentId: parentCuid } });
     const res = await PUT(req, createParams({ orgId: "o1", id: "f1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(200);
@@ -163,7 +163,7 @@ describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
       .mockResolvedValueOnce(existing) // find existing
       .mockResolvedValueOnce({ id: "f2", name: "Dup" }); // dup under parent
 
-    const req = createRequest("PUT", "http://localhost/api/orgs/o1/folders/f1", { body: { name: "Dup" } });
+    const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: "Dup" } });
     const res = await PUT(req, createParams({ orgId: "o1", id: "f1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(409);
@@ -173,7 +173,7 @@ describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
   it("re-throws non-OrgAuthError from PUT", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockRejectedValue(new Error("Unexpected"));
-    const req = createRequest("PUT", "http://localhost/api/orgs/o1/folders/f1", { body: { name: "x" } });
+    const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: "x" } });
     await expect(PUT(req, createParams({ orgId: "o1", id: "f1" }))).rejects.toThrow("Unexpected");
   });
 
@@ -182,7 +182,7 @@ describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockOrgFolderFindUnique.mockResolvedValue({ id: "f1", orgId: "o1", parentId: null, name: "F" });
     const { NextRequest } = await import("next/server");
-    const req = new NextRequest("http://localhost/api/orgs/o1/folders/f1", {
+    const req = new NextRequest("http://localhost/api/teams/o1/folders/f1", {
       method: "PUT",
       body: "not json",
       headers: { "Content-Type": "text/plain" },
@@ -194,7 +194,7 @@ describe("PUT /api/orgs/[orgId]/folders/[id]", () => {
   });
 });
 
-describe("DELETE /api/orgs/[orgId]/folders/[id]", () => {
+describe("DELETE /api/teams/[orgId]/folders/[id]", () => {
   let txOrgFolderUpdate: ReturnType<typeof vi.fn>;
   let txOrgFolderDelete: ReturnType<typeof vi.fn>;
   let txOrgEntryUpdateMany: ReturnType<typeof vi.fn>;

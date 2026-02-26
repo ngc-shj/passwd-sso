@@ -46,7 +46,7 @@ const validInvitation = {
   org: { id: "org-1", name: "My Org", slug: "my-org" },
 };
 
-describe("POST /api/orgs/invitations/accept", () => {
+describe("POST /api/teams/invitations/accept", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id", email: "user@test.com" } });
@@ -56,14 +56,14 @@ describe("POST /api/orgs/invitations/accept", () => {
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "abc" },
     }));
     expect(res.status).toBe(401);
   });
 
   it("returns 400 when token missing", async () => {
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: {},
     }));
     expect(res.status).toBe(400);
@@ -71,7 +71,7 @@ describe("POST /api/orgs/invitations/accept", () => {
 
   it("returns 404 when token is invalid", async () => {
     mockPrismaOrgInvitation.findUnique.mockResolvedValue(null);
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "invalid" },
     }));
     expect(res.status).toBe(404);
@@ -82,7 +82,7 @@ describe("POST /api/orgs/invitations/accept", () => {
       ...validInvitation,
       status: INVITATION_STATUS.ACCEPTED,
     });
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "valid-token" },
     }));
     expect(res.status).toBe(410);
@@ -93,7 +93,7 @@ describe("POST /api/orgs/invitations/accept", () => {
       ...validInvitation,
       expiresAt: new Date("2020-01-01"),
     });
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "valid-token" },
     }));
     expect(res.status).toBe(410);
@@ -102,7 +102,7 @@ describe("POST /api/orgs/invitations/accept", () => {
   it("returns 403 when email doesn't match", async () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id", email: "other@test.com" } });
     mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "valid-token" },
     }));
     expect(res.status).toBe(403);
@@ -115,7 +115,7 @@ describe("POST /api/orgs/invitations/accept", () => {
       deactivatedAt: null,
     });
 
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "valid-token" },
     }));
     const json = await res.json();
@@ -131,7 +131,7 @@ describe("POST /api/orgs/invitations/accept", () => {
       scimManaged: true,
     });
 
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "valid-token" },
     }));
     expect(res.status).toBe(409);
@@ -148,7 +148,7 @@ describe("POST /api/orgs/invitations/accept", () => {
     });
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "valid-token" },
     }));
     const json = await res.json();
@@ -162,7 +162,7 @@ describe("POST /api/orgs/invitations/accept", () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue(null);
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key-jwk" });
 
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "valid-token" },
     }));
     const json = await res.json();
@@ -178,7 +178,7 @@ describe("POST /api/orgs/invitations/accept", () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue(null);
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key-jwk" });
 
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "valid-token" },
     }));
     const json = await res.json();
@@ -192,7 +192,7 @@ describe("POST /api/orgs/invitations/accept", () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue(null);
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: null });
 
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs/invitations/accept", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "valid-token" },
     }));
     const json = await res.json();

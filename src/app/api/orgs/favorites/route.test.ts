@@ -21,7 +21,7 @@ vi.mock("@/lib/org-auth", () => ({
 import { GET } from "./route";
 import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
 
-describe("GET /api/orgs/favorites", () => {
+describe("GET /api/teams/favorites", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });

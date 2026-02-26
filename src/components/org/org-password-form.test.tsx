@@ -37,8 +37,8 @@ vi.mock("@/lib/org-entry-save", () => ({
     const initialId = params.initialId as string | undefined;
     const mode = params.mode as string;
     const endpoint = mode === "create"
-      ? `/api/orgs/${orgId}/passwords`
-      : `/api/orgs/${orgId}/passwords/${initialId}`;
+      ? `/api/teams/${orgId}/passwords`
+      : `/api/teams/${orgId}/passwords/${initialId}`;
     return fetch(endpoint, {
       method: mode === "create" ? "POST" : "PUT",
       headers: { "Content-Type": "application/json" },

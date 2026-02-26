@@ -20,7 +20,7 @@ function getOrgParent(id: string): Promise<ParentNode | null> {
     .then((f) => (f ? { parentId: f.parentId, ownerId: f.orgId } : null));
 }
 
-// GET /api/orgs/[orgId]/folders - List org folders with entry count
+// GET /api/teams/[orgId]/folders - List org folders with entry count
 export async function GET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -65,7 +65,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   );
 }
 
-// POST /api/orgs/[orgId]/folders - Create an org folder
+// POST /api/teams/[orgId]/folders - Create an org folder
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

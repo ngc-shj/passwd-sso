@@ -7,7 +7,7 @@ import { INVITATION_STATUS } from "@/lib/constants";
 
 const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 
-// POST /api/orgs/invitations/accept — Accept an invitation by token
+// POST /api/teams/invitations/accept — Accept an invitation by token
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {

@@ -38,7 +38,7 @@ import { ORG_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-123";
 
-describe("GET /api/orgs/[orgId]/tags", () => {
+describe("GET /api/teams/[orgId]/tags", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -48,7 +48,7 @@ describe("GET /api/orgs/[orgId]/tags", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/tags`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/tags`),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(401);
@@ -60,7 +60,7 @@ describe("GET /api/orgs/[orgId]/tags", () => {
     ]);
 
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/tags`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/tags`),
       createParams({ orgId: ORG_ID }),
     );
     const json = await res.json();
@@ -71,7 +71,7 @@ describe("GET /api/orgs/[orgId]/tags", () => {
   it("returns OrgAuthError status when not a member", async () => {
     mockRequireOrgMember.mockRejectedValue(new OrgAuthError("NOT_ORG_MEMBER", 403));
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/tags`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/tags`),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(403);
@@ -83,7 +83,7 @@ describe("GET /api/orgs/[orgId]/tags", () => {
     mockRequireOrgMember.mockRejectedValue(new Error("unexpected"));
     await expect(
       GET(
-        createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/tags`),
+        createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/tags`),
         createParams({ orgId: ORG_ID }),
       ),
     ).rejects.toThrow("unexpected");
@@ -95,7 +95,7 @@ describe("GET /api/orgs/[orgId]/tags", () => {
     ]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/orgs/${ORG_ID}/tags`),
+      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/tags`),
       createParams({ orgId: ORG_ID }),
     );
 
@@ -115,7 +115,7 @@ describe("GET /api/orgs/[orgId]/tags", () => {
   });
 });
 
-describe("POST /api/orgs/[orgId]/tags", () => {
+describe("POST /api/teams/[orgId]/tags", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -125,7 +125,7 @@ describe("POST /api/orgs/[orgId]/tags", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/tags`, { body: { name: "T" } }),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/tags`, { body: { name: "T" } }),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(401);
@@ -134,7 +134,7 @@ describe("POST /api/orgs/[orgId]/tags", () => {
   it("returns OrgAuthError status when permission denied", async () => {
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/tags`, { body: { name: "T" } }),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/tags`, { body: { name: "T" } }),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(403);
@@ -146,7 +146,7 @@ describe("POST /api/orgs/[orgId]/tags", () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       POST(
-        createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/tags`, { body: { name: "T" } }),
+        createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/tags`, { body: { name: "T" } }),
         createParams({ orgId: ORG_ID }),
       ),
     ).rejects.toThrow("unexpected");
@@ -154,7 +154,7 @@ describe("POST /api/orgs/[orgId]/tags", () => {
 
   it("returns 400 on malformed JSON", async () => {
     const { NextRequest } = await import("next/server");
-    const req = new NextRequest(`http://localhost:3000/api/orgs/${ORG_ID}/tags`, {
+    const req = new NextRequest(`http://localhost:3000/api/teams/${ORG_ID}/tags`, {
       method: "POST",
       body: "not-json",
       headers: { "Content-Type": "application/json" },
@@ -167,7 +167,7 @@ describe("POST /api/orgs/[orgId]/tags", () => {
 
   it("returns 400 on validation error", async () => {
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/tags`, { body: {} }),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/tags`, { body: {} }),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(400);
@@ -178,7 +178,7 @@ describe("POST /api/orgs/[orgId]/tags", () => {
   it("returns 409 when tag already exists", async () => {
     mockPrismaOrgTag.findUnique.mockResolvedValue({ id: "existing" });
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/tags`, { body: { name: "Work" } }),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/tags`, { body: { name: "Work" } }),
       createParams({ orgId: ORG_ID }),
     );
     expect(res.status).toBe(409);
@@ -189,7 +189,7 @@ describe("POST /api/orgs/[orgId]/tags", () => {
     mockPrismaOrgTag.create.mockResolvedValue({ id: "new-tag", name: "Finance", color: null });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/tags`, { body: { name: "Finance" } }),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/tags`, { body: { name: "Finance" } }),
       createParams({ orgId: ORG_ID }),
     );
     const json = await res.json();

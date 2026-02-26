@@ -10,7 +10,7 @@ import { INVITATION_STATUS, ORG_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUD
 
 type Params = { params: Promise<{ orgId: string }> };
 
-// GET /api/orgs/[orgId]/invitations — List pending invitations
+// GET /api/teams/[orgId]/invitations — List pending invitations
 export async function GET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -52,7 +52,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   );
 }
 
-// POST /api/orgs/[orgId]/invitations — Create invitation
+// POST /api/teams/[orgId]/invitations — Create invitation
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

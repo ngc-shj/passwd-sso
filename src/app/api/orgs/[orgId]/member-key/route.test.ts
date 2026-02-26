@@ -35,9 +35,9 @@ vi.mock("@/lib/prisma", () => ({
 
 import { GET } from "./route";
 
-const URL = "http://localhost/api/orgs/org-1/member-key";
+const URL = "http://localhost/api/teams/org-1/member-key";
 
-describe("GET /api/orgs/[orgId]/member-key", () => {
+describe("GET /api/teams/[orgId]/member-key", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });

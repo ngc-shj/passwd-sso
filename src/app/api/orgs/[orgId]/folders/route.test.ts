@@ -53,10 +53,10 @@ import { validateParentFolder, validateFolderDepth } from "@/lib/folder-utils";
 import { ORG_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-1";
-const BASE = `http://localhost:3000/api/orgs/${ORG_ID}/folders`;
+const BASE = `http://localhost:3000/api/teams/${ORG_ID}/folders`;
 const now = new Date("2025-06-01T00:00:00Z");
 
-describe("GET /api/orgs/[orgId]/folders", () => {
+describe("GET /api/teams/[orgId]/folders", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
@@ -114,7 +114,7 @@ describe("GET /api/orgs/[orgId]/folders", () => {
   });
 });
 
-describe("POST /api/orgs/[orgId]/folders", () => {
+describe("POST /api/teams/[orgId]/folders", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });

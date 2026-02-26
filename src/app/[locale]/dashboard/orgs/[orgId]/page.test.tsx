@@ -86,7 +86,7 @@ function makeOrgResponse(role = "OWNER") {
 
 function setupFetch(orgRes = makeOrgResponse(), passwords: unknown[] = []) {
   mockFetch.mockImplementation((url: string) => {
-    if (url.includes("/api/orgs/org-1") && !url.includes("/passwords")) {
+    if (url.includes("/api/teams/org-1") && !url.includes("/passwords")) {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve(orgRes),
@@ -238,7 +238,7 @@ describe("OrgDashboardPage — scopes", () => {
     await waitFor(() => {
       // Org fetch should happen
       const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
-      expect(calls.some((u: string) => u.includes("/api/orgs/org-1") && !u.includes("/passwords"))).toBe(true);
+      expect(calls.some((u: string) => u.includes("/api/teams/org-1") && !u.includes("/passwords"))).toBe(true);
     });
 
     // Password fetch should NOT happen for archive scope
@@ -258,7 +258,7 @@ describe("OrgDashboardPage — scopes", () => {
 
     await waitFor(() => {
       const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
-      expect(calls.some((u: string) => u.includes("/api/orgs/org-1") && !u.includes("/passwords"))).toBe(true);
+      expect(calls.some((u: string) => u.includes("/api/teams/org-1") && !u.includes("/passwords"))).toBe(true);
     });
 
     const passwordCalls = mockFetch.mock.calls
@@ -318,7 +318,7 @@ describe("OrgDashboardPage — role-based rendering", () => {
     await waitFor(() => {
       // Wait for org data to load
       const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
-      expect(calls.some((u: string) => u.includes("/api/orgs/org-1"))).toBe(true);
+      expect(calls.some((u: string) => u.includes("/api/teams/org-1"))).toBe(true);
     });
 
     // newItem should not appear in actions
@@ -338,7 +338,7 @@ describe("OrgDashboardPage — error handling", () => {
 
   it("shows error state when org fetch fails", async () => {
     mockFetch.mockImplementation((url: string) => {
-      if (url.includes("/api/orgs/org-1") && !url.includes("/passwords")) {
+      if (url.includes("/api/teams/org-1") && !url.includes("/passwords")) {
         return Promise.resolve({ ok: false, status: 403 });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });

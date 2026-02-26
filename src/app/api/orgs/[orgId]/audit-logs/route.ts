@@ -16,7 +16,7 @@ type Params = { params: Promise<{ orgId: string }> };
 
 const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 
-// GET /api/orgs/[orgId]/audit-logs — Org audit logs (ADMIN/OWNER only)
+// GET /api/teams/[orgId]/audit-logs — Org audit logs (ADMIN/OWNER only)
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

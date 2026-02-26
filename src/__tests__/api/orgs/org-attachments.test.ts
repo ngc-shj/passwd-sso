@@ -58,7 +58,7 @@ vi.mock("@/lib/blob-store", () => ({
 }));
 
 import { NextRequest } from "next/server";
-import { GET, POST } from "@/app/api/orgs/[orgId]/passwords/[id]/attachments/route";
+import { GET, POST } from "@/app/api/teams/[orgId]/passwords/[id]/attachments/route";
 import { OrgAuthError } from "@/lib/org-auth";
 
 function makeParams(orgId: string, id: string) {
@@ -66,7 +66,7 @@ function makeParams(orgId: string, id: string) {
 }
 
 function createGetRequest() {
-  return new NextRequest("http://localhost/api/orgs/o1/passwords/e1/attachments", {
+  return new NextRequest("http://localhost/api/teams/o1/passwords/e1/attachments", {
     method: "GET",
   });
 }
@@ -79,7 +79,7 @@ function createFormDataRequest(
   for (const [key, value] of Object.entries(fields)) {
     formData.append(key, value);
   }
-  return new NextRequest("http://localhost/api/orgs/o1/passwords/e1/attachments", {
+  return new NextRequest("http://localhost/api/teams/o1/passwords/e1/attachments", {
     method: "POST",
     body: formData,
     headers,
@@ -99,7 +99,7 @@ function validFormFields(): Record<string, string | Blob> {
 
 const ORG_ENTRY = { orgId: "o1" };
 
-describe("GET /api/orgs/[orgId]/passwords/[id]/attachments", () => {
+describe("GET /api/teams/[orgId]/passwords/[id]/attachments", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {
@@ -150,7 +150,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/attachments", () => {
   });
 });
 
-describe("POST /api/orgs/[orgId]/passwords/[id]/attachments", () => {
+describe("POST /api/teams/[orgId]/passwords/[id]/attachments", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {

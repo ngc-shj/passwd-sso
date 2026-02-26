@@ -49,7 +49,7 @@ function createRequest(method: string, url: string) {
   return new NextRequest(url, { method });
 }
 
-describe("GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () => {
+describe("GET /api/teams/[orgId]/passwords/[id]/attachments/[attachmentId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
@@ -62,7 +62,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () =
     const res = await GET(
       createRequest(
         "GET",
-        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("org-1", "pw-1", "att-1"),
     );
@@ -76,7 +76,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () =
     const res = await GET(
       createRequest(
         "GET",
-        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("org-1", "pw-1", "att-1"),
     );
@@ -90,7 +90,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () =
     const res = await GET(
       createRequest(
         "GET",
-        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("org-1", "pw-1", "att-1"),
     );
@@ -102,7 +102,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () =
     const res = await GET(
       createRequest(
         "GET",
-        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("org-1", "pw-1", "att-1"),
     );
@@ -125,7 +125,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () =
     const res = await GET(
       createRequest(
         "GET",
-        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("org-1", "pw-1", "att-1"),
     );
@@ -141,7 +141,7 @@ describe("GET /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () =
   });
 });
 
-describe("DELETE /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", () => {
+describe("DELETE /api/teams/[orgId]/passwords/[id]/attachments/[attachmentId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
@@ -154,7 +154,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", (
     const res = await DELETE(
       createRequest(
         "DELETE",
-        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("org-1", "pw-1", "att-1"),
     );
@@ -168,7 +168,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", (
     const res = await DELETE(
       createRequest(
         "DELETE",
-        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("org-1", "pw-1", "att-1"),
     );
@@ -182,7 +182,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", (
     const res = await DELETE(
       createRequest(
         "DELETE",
-        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("org-1", "pw-1", "att-1"),
     );
@@ -194,7 +194,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", (
     const res = await DELETE(
       createRequest(
         "DELETE",
-        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("org-1", "pw-1", "att-1"),
     );
@@ -214,7 +214,7 @@ describe("DELETE /api/orgs/[orgId]/passwords/[id]/attachments/[attachmentId]", (
     const res = await DELETE(
       createRequest(
         "DELETE",
-        "http://localhost/api/orgs/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("org-1", "pw-1", "att-1"),
     );

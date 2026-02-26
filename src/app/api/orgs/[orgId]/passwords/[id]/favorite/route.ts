@@ -7,7 +7,7 @@ import { ORG_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string; id: string }> };
 
-// POST /api/orgs/[orgId]/passwords/[id]/favorite — Toggle per-user favorite
+// POST /api/teams/[orgId]/passwords/[id]/favorite — Toggle per-user favorite
 export async function POST(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

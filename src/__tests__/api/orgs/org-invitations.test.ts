@@ -50,10 +50,10 @@ vi.mock("node:crypto", () => ({
   randomBytes: () => Buffer.from("a".repeat(32)),
 }));
 
-import { GET, POST } from "@/app/api/orgs/[orgId]/invitations/route";
+import { GET, POST } from "@/app/api/teams/[orgId]/invitations/route";
 import { OrgAuthError } from "@/lib/org-auth";
 
-describe("GET /api/orgs/[orgId]/invitations", () => {
+describe("GET /api/teams/[orgId]/invitations", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {
@@ -97,7 +97,7 @@ describe("GET /api/orgs/[orgId]/invitations", () => {
   });
 });
 
-describe("POST /api/orgs/[orgId]/invitations", () => {
+describe("POST /api/teams/[orgId]/invitations", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {
@@ -121,7 +121,7 @@ describe("POST /api/orgs/[orgId]/invitations", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue(undefined);
     const { NextRequest } = await import("next/server");
-    const req = new NextRequest("http://localhost/api/orgs/o1/invitations", {
+    const req = new NextRequest("http://localhost/api/teams/o1/invitations", {
       method: "POST",
       body: "not json",
       headers: { "Content-Type": "text/plain" },

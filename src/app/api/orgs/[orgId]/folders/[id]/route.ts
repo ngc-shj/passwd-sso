@@ -21,7 +21,7 @@ function getOrgParent(id: string): Promise<ParentNode | null> {
     .then((f) => (f ? { parentId: f.parentId, ownerId: f.orgId } : null));
 }
 
-// PUT /api/orgs/[orgId]/folders/[id] - Update an org folder
+// PUT /api/teams/[orgId]/folders/[id] - Update an org folder
 export async function PUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -164,7 +164,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 }
 
-// DELETE /api/orgs/[orgId]/folders/[id] - Delete an org folder
+// DELETE /api/teams/[orgId]/folders/[id] - Delete an org folder
 export async function DELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

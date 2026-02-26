@@ -36,7 +36,7 @@ import { ORG_ROLE } from "@/lib/constants";
 const ORG_ID = "org-123";
 const PW_ID = "pw-456";
 
-describe("POST /api/orgs/[orgId]/passwords/[id]/restore", () => {
+describe("POST /api/teams/[orgId]/passwords/[id]/restore", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -46,7 +46,7 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/restore", () => {
   it("returns OrgAuthError status when permission denied", async () => {
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}/restore`),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}/restore`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(403);
@@ -58,7 +58,7 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/restore", () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       POST(
-        createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}/restore`),
+        createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}/restore`),
         createParams({ orgId: ORG_ID, id: PW_ID }),
       ),
     ).rejects.toThrow("unexpected");
@@ -67,7 +67,7 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/restore", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}/restore`),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}/restore`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(401);
@@ -76,7 +76,7 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/restore", () => {
   it("returns 404 when entry not found", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(null);
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}/restore`),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}/restore`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(404);
@@ -89,7 +89,7 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/restore", () => {
       deletedAt: null,
     });
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}/restore`),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}/restore`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     expect(res.status).toBe(400);
@@ -104,7 +104,7 @@ describe("POST /api/orgs/[orgId]/passwords/[id]/restore", () => {
     mockPrismaOrgPasswordEntry.update.mockResolvedValue({});
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${PW_ID}/restore`),
+      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}/restore`),
       createParams({ orgId: ORG_ID, id: PW_ID }),
     );
     const json = await res.json();

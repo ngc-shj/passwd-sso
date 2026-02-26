@@ -8,7 +8,7 @@ import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY, ORG_P
 
 type Params = { params: Promise<{ orgId: string; id: string; historyId: string }> };
 
-// POST /api/orgs/[orgId]/passwords/[id]/history/[historyId]/restore
+// POST /api/teams/[orgId]/passwords/[id]/history/[historyId]/restore
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

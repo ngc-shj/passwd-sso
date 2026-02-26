@@ -37,7 +37,7 @@ import { ORG_ROLE } from "@/lib/constants";
 const ORG_ID = "org-123";
 const TAG_ID = "tag-456";
 
-describe("PUT /api/orgs/[orgId]/tags/[id]", () => {
+describe("PUT /api/teams/[orgId]/tags/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -47,7 +47,7 @@ describe("PUT /api/orgs/[orgId]/tags/[id]", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`, { body: { name: "New" } }),
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/tags/${TAG_ID}`, { body: { name: "New" } }),
       createParams({ orgId: ORG_ID, id: TAG_ID }),
     );
     expect(res.status).toBe(401);
@@ -56,7 +56,7 @@ describe("PUT /api/orgs/[orgId]/tags/[id]", () => {
   it("returns OrgAuthError status when permission denied", async () => {
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`, { body: { name: "New" } }),
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/tags/${TAG_ID}`, { body: { name: "New" } }),
       createParams({ orgId: ORG_ID, id: TAG_ID }),
     );
     expect(res.status).toBe(403);
@@ -68,7 +68,7 @@ describe("PUT /api/orgs/[orgId]/tags/[id]", () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       PUT(
-        createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`, { body: { name: "New" } }),
+        createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/tags/${TAG_ID}`, { body: { name: "New" } }),
         createParams({ orgId: ORG_ID, id: TAG_ID }),
       ),
     ).rejects.toThrow("unexpected");
@@ -77,7 +77,7 @@ describe("PUT /api/orgs/[orgId]/tags/[id]", () => {
   it("returns 404 when tag not found", async () => {
     mockPrismaOrgTag.findUnique.mockResolvedValue(null);
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`, { body: { name: "New" } }),
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/tags/${TAG_ID}`, { body: { name: "New" } }),
       createParams({ orgId: ORG_ID, id: TAG_ID }),
     );
     expect(res.status).toBe(404);
@@ -86,7 +86,7 @@ describe("PUT /api/orgs/[orgId]/tags/[id]", () => {
   it("returns 400 on malformed JSON", async () => {
     mockPrismaOrgTag.findUnique.mockResolvedValue({ id: TAG_ID, orgId: ORG_ID });
     const { NextRequest } = await import("next/server");
-    const req = new NextRequest(`http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`, {
+    const req = new NextRequest(`http://localhost:3000/api/teams/${ORG_ID}/tags/${TAG_ID}`, {
       method: "PUT",
       body: "not-json",
       headers: { "Content-Type": "application/json" },
@@ -100,7 +100,7 @@ describe("PUT /api/orgs/[orgId]/tags/[id]", () => {
   it("returns 400 on validation error", async () => {
     mockPrismaOrgTag.findUnique.mockResolvedValue({ id: TAG_ID, orgId: ORG_ID });
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`, { body: {} }),
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/tags/${TAG_ID}`, { body: {} }),
       createParams({ orgId: ORG_ID, id: TAG_ID }),
     );
     expect(res.status).toBe(400);
@@ -113,7 +113,7 @@ describe("PUT /api/orgs/[orgId]/tags/[id]", () => {
     mockPrismaOrgTag.update.mockResolvedValue({ id: TAG_ID, name: "Updated", color: "#00ff00" });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/tags/${TAG_ID}`, {
         body: { name: "Updated", color: "#00ff00" },
       }),
       createParams({ orgId: ORG_ID, id: TAG_ID }),
@@ -128,7 +128,7 @@ describe("PUT /api/orgs/[orgId]/tags/[id]", () => {
     mockPrismaOrgTag.update.mockResolvedValue({ id: TAG_ID, name: "Ops", color: null });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/tags/${TAG_ID}`, {
         body: { name: "Ops", color: null },
       }),
       createParams({ orgId: ORG_ID, id: TAG_ID }),
@@ -139,7 +139,7 @@ describe("PUT /api/orgs/[orgId]/tags/[id]", () => {
   });
 });
 
-describe("DELETE /api/orgs/[orgId]/tags/[id]", () => {
+describe("DELETE /api/teams/[orgId]/tags/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -149,7 +149,7 @@ describe("DELETE /api/orgs/[orgId]/tags/[id]", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/tags/${TAG_ID}`),
       createParams({ orgId: ORG_ID, id: TAG_ID }),
     );
     expect(res.status).toBe(401);
@@ -158,7 +158,7 @@ describe("DELETE /api/orgs/[orgId]/tags/[id]", () => {
   it("returns OrgAuthError status when permission denied", async () => {
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/tags/${TAG_ID}`),
       createParams({ orgId: ORG_ID, id: TAG_ID }),
     );
     expect(res.status).toBe(403);
@@ -170,7 +170,7 @@ describe("DELETE /api/orgs/[orgId]/tags/[id]", () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       DELETE(
-        createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`),
+        createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/tags/${TAG_ID}`),
         createParams({ orgId: ORG_ID, id: TAG_ID }),
       ),
     ).rejects.toThrow("unexpected");
@@ -179,7 +179,7 @@ describe("DELETE /api/orgs/[orgId]/tags/[id]", () => {
   it("returns 404 when tag not found", async () => {
     mockPrismaOrgTag.findUnique.mockResolvedValue(null);
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/tags/${TAG_ID}`),
       createParams({ orgId: ORG_ID, id: TAG_ID }),
     );
     expect(res.status).toBe(404);
@@ -190,7 +190,7 @@ describe("DELETE /api/orgs/[orgId]/tags/[id]", () => {
     mockPrismaOrgTag.delete.mockResolvedValue({});
 
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/tags/${TAG_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/tags/${TAG_ID}`),
       createParams({ orgId: ORG_ID, id: TAG_ID }),
     );
     const json = await res.json();

@@ -34,7 +34,7 @@ describe("useOrgAttachments", () => {
       expect(result.current.attachments).toHaveLength(1);
     });
     expect(result.current.fetchError).toBeNull();
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/orgs/org-1/passwords/entry-1/attachments");
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/teams/org-1/passwords/entry-1/attachments");
   });
 
   it("sets fetchError on non-ok response", async () => {

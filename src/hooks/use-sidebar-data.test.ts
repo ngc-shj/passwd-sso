@@ -13,9 +13,9 @@ function createFetchMock() {
   return vi.fn(async (url: string) => {
     if (url === "/api/tags") return { ok: true, json: async () => tags };
     if (url === "/api/folders") return { ok: true, json: async () => folders };
-    if (url === "/api/orgs") return { ok: true, json: async () => orgs };
-    if (url === "/api/orgs/org-1/tags") return { ok: true, json: async () => orgTags };
-    if (url === "/api/orgs/org-1/folders") return { ok: true, json: async () => orgFolders };
+    if (url === "/api/teams") return { ok: true, json: async () => orgs };
+    if (url === "/api/teams/org-1/tags") return { ok: true, json: async () => orgTags };
+    if (url === "/api/teams/org-1/folders") return { ok: true, json: async () => orgFolders };
     return { ok: false, json: async () => ({}) };
   });
 }
@@ -45,9 +45,9 @@ describe("useSidebarData", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/tags");
     expect(fetchMock).toHaveBeenCalledWith("/api/folders");
-    expect(fetchMock).toHaveBeenCalledWith("/api/orgs");
-    expect(fetchMock).toHaveBeenCalledWith("/api/orgs/org-1/tags");
-    expect(fetchMock).toHaveBeenCalledWith("/api/orgs/org-1/folders");
+    expect(fetchMock).toHaveBeenCalledWith("/api/teams");
+    expect(fetchMock).toHaveBeenCalledWith("/api/teams/org-1/tags");
+    expect(fetchMock).toHaveBeenCalledWith("/api/teams/org-1/folders");
   });
 
   it("refreshes on vault-data-changed event", async () => {
@@ -123,7 +123,7 @@ describe("useSidebarData", () => {
     fetchMock = vi.fn(async (url: string) => {
       if (url === "/api/tags") return { ok: true, json: async () => tags };
       if (url === "/api/folders") return { ok: true, json: async () => folders };
-      if (url === "/api/orgs") return { ok: false, json: async () => ({}) };
+      if (url === "/api/teams") return { ok: false, json: async () => ({}) };
       return { ok: false, json: async () => ({}) };
     }) as Mock;
     globalThis.fetch = fetchMock;
@@ -138,7 +138,7 @@ describe("useSidebarData", () => {
     expect(result.current.orgs).toEqual([]);
     expect(result.current.orgTagGroups).toEqual([]);
     expect(result.current.orgFolderGroups).toEqual([]);
-    expect(result.current.lastError).toContain("/api/orgs");
+    expect(result.current.lastError).toContain("/api/teams");
   });
 
   it("stores fetch error and clears it after successful refresh", async () => {
@@ -151,7 +151,7 @@ describe("useSidebarData", () => {
         return { ok: true, json: async () => tags };
       }
       if (url === "/api/folders") return { ok: true, json: async () => folders };
-      if (url === "/api/orgs") return { ok: true, json: async () => [] };
+      if (url === "/api/teams") return { ok: true, json: async () => [] };
       return { ok: false, status: 404, json: async () => ({}) };
     }) as Mock;
     globalThis.fetch = fetchMock;
@@ -177,14 +177,14 @@ describe("useSidebarData", () => {
     fetchMock = vi.fn(async (url: string) => {
       if (url === "/api/tags") return { ok: true, json: async () => [] };
       if (url === "/api/folders") return { ok: true, json: async () => [] };
-      if (url === "/api/orgs") {
+      if (url === "/api/teams") {
         return {
           ok: true,
           json: async () => [{ id: "org-1", name: "Security", slug: "security", role: "ADMIN" }],
         };
       }
-      if (url === "/api/orgs/org-1/tags") return { ok: true, json: async () => [] };
-      if (url === "/api/orgs/org-1/folders") return { ok: true, json: async () => [] };
+      if (url === "/api/teams/org-1/tags") return { ok: true, json: async () => [] };
+      if (url === "/api/teams/org-1/folders") return { ok: true, json: async () => [] };
       return { ok: false, json: async () => ({}) };
     }) as Mock;
     globalThis.fetch = fetchMock;
@@ -220,7 +220,7 @@ describe("useSidebarData", () => {
         });
       }
       if (url === "/api/folders") return Promise.resolve({ ok: true, json: async () => [] });
-      if (url === "/api/orgs") return Promise.resolve({ ok: true, json: async () => [] });
+      if (url === "/api/teams") return Promise.resolve({ ok: true, json: async () => [] });
       return Promise.resolve({ ok: false, json: async () => ({}) });
     }) as Mock;
     globalThis.fetch = fetchMock;

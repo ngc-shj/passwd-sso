@@ -13,7 +13,7 @@ import { ORG_PERMISSION, ORG_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE 
 
 type Params = { params: Promise<{ orgId: string; memberId: string }> };
 
-// PUT /api/orgs/[orgId]/members/[memberId] — Change member role
+// PUT /api/teams/[orgId]/members/[memberId] — Change member role
 export async function PUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -151,7 +151,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 }
 
-// DELETE /api/orgs/[orgId]/members/[memberId] — Remove member
+// DELETE /api/teams/[orgId]/members/[memberId] — Remove member
 export async function DELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

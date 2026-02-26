@@ -63,12 +63,12 @@ function makeReq(options: { body?: unknown } = {}) {
     init.headers = { "content-type": "application/json" };
   }
   return new NextRequest(
-    "http://localhost/api/orgs/org-1/scim-tokens",
+    "http://localhost/api/teams/org-1/scim-tokens",
     init as ConstructorParameters<typeof NextRequest>[1],
   );
 }
 
-describe("GET /api/orgs/[orgId]/scim-tokens", () => {
+describe("GET /api/teams/[orgId]/scim-tokens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
@@ -111,7 +111,7 @@ describe("GET /api/orgs/[orgId]/scim-tokens", () => {
   });
 });
 
-describe("POST /api/orgs/[orgId]/scim-tokens", () => {
+describe("POST /api/teams/[orgId]/scim-tokens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });

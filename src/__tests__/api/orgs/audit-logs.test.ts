@@ -38,18 +38,18 @@ vi.mock("@/lib/org-auth", () => ({
   OrgAuthError,
 }));
 
-import { GET } from "@/app/api/orgs/[orgId]/audit-logs/route";
+import { GET } from "@/app/api/teams/[orgId]/audit-logs/route";
 import { AUDIT_ACTION, AUDIT_ACTION_GROUP, AUDIT_SCOPE, AUDIT_TARGET_TYPE, ORG_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-1";
 
-describe("GET /api/orgs/[orgId]/audit-logs", () => {
+describe("GET /api/teams/[orgId]/audit-logs", () => {
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs`
     );
 
     const res = await GET(req, createParams({ orgId: ORG_ID }));
@@ -67,7 +67,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs`
     );
 
     const res = await GET(req, createParams({ orgId: ORG_ID }));
@@ -101,7 +101,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs`
     );
 
     const res = await GET(req, createParams({ orgId: ORG_ID }));
@@ -137,7 +137,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?action=${AUDIT_ACTION.ORG_MEMBER_INVITE}`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs?action=${AUDIT_ACTION.ORG_MEMBER_INVITE}`
     );
 
     await GET(req, createParams({ orgId: ORG_ID }));
@@ -158,7 +158,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},${AUDIT_ACTION.ENTRY_UPDATE}`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},${AUDIT_ACTION.ENTRY_UPDATE}`
     );
 
     await GET(req, createParams({ orgId: ORG_ID }));
@@ -179,7 +179,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_TRASH}`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_TRASH}`
     );
 
     await GET(req, createParams({ orgId: ORG_ID }));
@@ -200,7 +200,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_ARCHIVE}`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_ARCHIVE}`
     );
 
     await GET(req, createParams({ orgId: ORG_ID }));
@@ -221,7 +221,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_UNARCHIVE}`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_UNARCHIVE}`
     );
 
     await GET(req, createParams({ orgId: ORG_ID }));
@@ -242,7 +242,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_RESTORE}`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_RESTORE}`
     );
 
     await GET(req, createParams({ orgId: ORG_ID }));
@@ -262,7 +262,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},NOPE`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},NOPE`
     );
 
     const res = await GET(req, createParams({ orgId: ORG_ID }));
@@ -281,7 +281,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?from=2025-01-01T00:00:00Z&to=2025-06-30T23:59:59Z`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs?from=2025-01-01T00:00:00Z&to=2025-06-30T23:59:59Z`
     );
 
     await GET(req, createParams({ orgId: ORG_ID }));
@@ -319,7 +319,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?limit=5`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs?limit=5`
     );
 
     const res = await GET(req, createParams({ orgId: ORG_ID }));
@@ -337,7 +337,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?cursor=bad-cursor`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs?cursor=bad-cursor`
     );
 
     const res = await GET(req, createParams({ orgId: ORG_ID }));
@@ -353,7 +353,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs`
     );
 
     await expect(
@@ -393,7 +393,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs`
     );
     const res = await GET(req, createParams({ orgId: ORG_ID }));
     const { status, json } = await parseResponse(res);
@@ -431,7 +431,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs`
     );
     const res = await GET(req, createParams({ orgId: ORG_ID }));
     const { status, json } = await parseResponse(res);
@@ -447,7 +447,7 @@ describe("GET /api/orgs/[orgId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/orgs/${ORG_ID}/audit-logs?action=${AUDIT_ACTION_GROUP.ENTRY}`
+      `http://localhost/api/teams/${ORG_ID}/audit-logs?action=${AUDIT_ACTION_GROUP.ENTRY}`
     );
 
     await GET(req, createParams({ orgId: ORG_ID }));

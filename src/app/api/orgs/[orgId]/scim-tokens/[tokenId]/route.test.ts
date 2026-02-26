@@ -41,12 +41,12 @@ function makeParams(orgId: string, tokenId: string) {
 }
 
 function makeReq() {
-  return new NextRequest("http://localhost/api/orgs/org-1/scim-tokens/t1", {
+  return new NextRequest("http://localhost/api/teams/org-1/scim-tokens/t1", {
     method: "DELETE",
   });
 }
 
-describe("DELETE /api/orgs/[orgId]/scim-tokens/[tokenId]", () => {
+describe("DELETE /api/teams/[orgId]/scim-tokens/[tokenId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });

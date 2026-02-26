@@ -8,7 +8,7 @@ import { ORG_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/
 
 type Params = { params: Promise<{ orgId: string; id: string }> };
 
-// POST /api/orgs/[orgId]/passwords/[id]/restore — Restore from trash
+// POST /api/teams/[orgId]/passwords/[id]/restore — Restore from trash
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

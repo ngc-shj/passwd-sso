@@ -8,7 +8,7 @@ import { ORG_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string; memberId: string }> };
 
-// POST /api/orgs/[orgId]/members/[memberId]/confirm-key
+// POST /api/teams/[orgId]/members/[memberId]/confirm-key
 // Admin distributes the org key to a member by encrypting it with member's ECDH public key
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();

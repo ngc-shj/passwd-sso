@@ -35,7 +35,7 @@ describe("useOrgFolders", () => {
     });
     expect(result.current.fetchError).toBeNull();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/orgs/org-1/folders");
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/teams/org-1/folders");
   });
 
   it("sets fetchError on non-ok response", async () => {

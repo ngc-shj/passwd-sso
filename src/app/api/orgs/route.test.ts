@@ -19,7 +19,7 @@ import { ORG_ROLE } from "@/lib/constants";
 
 const now = new Date("2025-01-01T00:00:00Z");
 
-describe("GET /api/orgs", () => {
+describe("GET /api/teams", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -59,7 +59,7 @@ describe("GET /api/orgs", () => {
   });
 });
 
-describe("POST /api/orgs (E2E-only)", () => {
+describe("POST /api/teams (E2E-only)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -80,21 +80,21 @@ describe("POST /api/orgs (E2E-only)", () => {
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
       body: validE2EBody,
     }));
     expect(res.status).toBe(401);
   });
 
   it("returns 400 when orgMemberKey is missing", async () => {
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
       body: { name: "My Org", slug: "my-org" },
     }));
     expect(res.status).toBe(400);
   });
 
   it("returns 400 on invalid body", async () => {
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
       body: { name: "" },
     }));
     expect(res.status).toBe(400);
@@ -102,7 +102,7 @@ describe("POST /api/orgs (E2E-only)", () => {
 
   it("returns 409 when slug already taken", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({ id: "existing" });
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
       body: validE2EBody,
     }));
     expect(res.status).toBe(409);
@@ -120,7 +120,7 @@ describe("POST /api/orgs (E2E-only)", () => {
       createdAt: now,
     });
 
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
       body: validE2EBody,
     }));
     const json = await res.json();
@@ -144,7 +144,7 @@ describe("POST /api/orgs (E2E-only)", () => {
 
   it("returns 400 on malformed JSON", async () => {
     const { NextRequest } = await import("next/server");
-    const req = new NextRequest("http://localhost:3000/api/orgs", {
+    const req = new NextRequest("http://localhost:3000/api/teams", {
       method: "POST",
       body: "not-json",
       headers: { "Content-Type": "application/json" },
@@ -165,7 +165,7 @@ describe("POST /api/orgs (E2E-only)", () => {
       createdAt: now,
     });
 
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
       body: { ...validE2EBody, orgMemberKey: { ...validE2EBody.orgMemberKey, wrapVersion: 1 } },
     }));
     expect(res.status).toBe(201);
@@ -196,7 +196,7 @@ describe("POST /api/orgs (E2E-only)", () => {
       },
     };
 
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/orgs", {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
       body: invalidBody,
     }));
     expect(res.status).toBe(400);

@@ -12,7 +12,7 @@ import { ORG_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string }> };
 
-// GET /api/orgs/[orgId] — Get organization details
+// GET /api/teams/[orgId] — Get organization details
 export async function GET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -54,7 +54,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 }
 
-// PUT /api/orgs/[orgId] — Update organization
+// PUT /api/teams/[orgId] — Update organization
 export async function PUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -107,7 +107,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 }
 
-// DELETE /api/orgs/[orgId] — Delete organization (OWNER only)
+// DELETE /api/teams/[orgId] — Delete organization (OWNER only)
 export async function DELETE(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

@@ -54,7 +54,7 @@ const MEMBER_ID = "member-target";
 
 const ownerMembership = { id: "member-owner", orgId: ORG_ID, userId: "test-user-id", role: ORG_ROLE.OWNER };
 
-describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
+describe("PUT /api/teams/[orgId]/members/[memberId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -65,7 +65,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
         body: { role: ORG_ROLE.ADMIN },
       }),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
@@ -76,7 +76,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
   it("returns 403 when lacking permission", async () => {
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
         body: { role: ORG_ROLE.ADMIN },
       }),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
@@ -88,7 +88,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       PUT(
-        createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
+        createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
           body: { role: ORG_ROLE.ADMIN },
         }),
         createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
@@ -98,7 +98,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
 
   it("returns 400 on malformed JSON", async () => {
     const { NextRequest } = await import("next/server");
-    const req = new NextRequest(`http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
+    const req = new NextRequest(`http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
       method: "PUT",
       body: "not-json",
       headers: { "Content-Type": "application/json" },
@@ -125,7 +125,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
       deactivatedAt: null,
     });
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
         body: { role: "INVALID_ROLE" },
       }),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
@@ -138,7 +138,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
   it("returns 404 when member not found", async () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue(null);
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
         body: { role: ORG_ROLE.ADMIN },
       }),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
@@ -162,7 +162,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
     });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
         body: { role: ORG_ROLE.ADMIN },
       }),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
@@ -188,7 +188,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
     });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
         body: { role: ORG_ROLE.OWNER },
       }),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
@@ -213,7 +213,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
     });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
         body: { role: ORG_ROLE.OWNER },
       }),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
@@ -231,7 +231,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
     });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
         body: { role: ORG_ROLE.ADMIN },
       }),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
@@ -251,7 +251,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
     });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
         body: { role: ORG_ROLE.MEMBER },
       }),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
@@ -260,7 +260,7 @@ describe("PUT /api/orgs/[orgId]/members/[memberId]", () => {
   });
 });
 
-describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
+describe("DELETE /api/teams/[orgId]/members/[memberId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
@@ -271,7 +271,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
   it("returns OrgAuthError status when DELETE permission denied", async () => {
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(403);
@@ -283,7 +283,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       DELETE(
-        createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`),
+        createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
         createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
       ),
     ).rejects.toThrow("unexpected");
@@ -300,7 +300,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
       deactivatedAt: null,
     });
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(403);
@@ -311,7 +311,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(401);
@@ -320,7 +320,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
   it("returns 404 when member not found", async () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue(null);
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(404);
@@ -334,7 +334,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
       deactivatedAt: null,
     });
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(403);
@@ -351,7 +351,7 @@ describe("DELETE /api/orgs/[orgId]/members/[memberId]", () => {
     mockTransaction.mockResolvedValue([]);
 
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/orgs/${ORG_ID}/members/${MEMBER_ID}`),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
       createParams({ orgId: ORG_ID, memberId: MEMBER_ID }),
     );
     const json = await res.json();

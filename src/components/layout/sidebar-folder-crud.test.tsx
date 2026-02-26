@@ -208,32 +208,32 @@ function mockFetchSuccess(overrides?: {
   const orgFolders = overrides?.orgFoldersData ?? [];
   const orgTags = overrides?.orgTagsData ?? [];
   return vi.fn((url: string) => {
-    if (url.includes("/api/tags") && !url.includes("/api/orgs/")) {
+    if (url.includes("/api/tags") && !url.includes("/api/teams/")) {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve([]),
       });
     }
-    if (url.includes("/api/folders") && !url.includes("/api/orgs/")) {
+    if (url.includes("/api/folders") && !url.includes("/api/teams/")) {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve(folders),
       });
     }
     // Org-specific sub-resource fetches (tags, folders)
-    if (url.match(/\/api\/orgs\/[^/]+\/tags/)) {
+    if (url.match(/\/api\/teams\/[^/]+\/tags/)) {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve(orgTags),
       });
     }
-    if (url.match(/\/api\/orgs\/[^/]+\/folders/)) {
+    if (url.match(/\/api\/teams\/[^/]+\/folders/)) {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve(orgFolders),
       });
     }
-    if (url.includes("/api/orgs")) {
+    if (url.includes("/api/teams")) {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve(orgsData),
@@ -432,7 +432,7 @@ describe("Sidebar folder CRUD integration", () => {
 
     await capturedFolderDialogProps!.onSubmit({ name: "New Folder", parentId: null });
 
-    // fetchData() should have been called (GET /api/folders, /api/tags, /api/orgs)
+    // fetchData() should have been called (GET /api/folders, /api/tags, /api/teams)
     await waitFor(() => {
       const postSubmitCalls = fetchMock.mock.calls.slice(callCountBefore);
       const getFoldersCalls = postSubmitCalls.filter(
@@ -655,7 +655,7 @@ describe("Sidebar org folder CRUD integration", () => {
       (c: [string, RequestInit?]) => c[1]?.method === "POST",
     );
     expect(postCalls.length).toBe(1);
-    expect(postCalls[0][0]).toContain("/api/orgs/org-1/folders");
+    expect(postCalls[0][0]).toContain("/api/teams/org-1/folders");
   });
 
   it("shows org folder create button even when org has zero folders (OWNER)", async () => {

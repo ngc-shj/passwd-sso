@@ -7,7 +7,7 @@ import { ORG_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ orgId: string; invId: string }> };
 
-// DELETE /api/orgs/[orgId]/invitations/[invId] — Cancel invitation
+// DELETE /api/teams/[orgId]/invitations/[invId] — Cancel invitation
 export async function DELETE(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

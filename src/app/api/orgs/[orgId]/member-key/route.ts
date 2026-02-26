@@ -6,7 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 
 type Params = { params: Promise<{ orgId: string }> };
 
-// GET /api/orgs/[orgId]/member-key — Get own OrgMemberKey
+// GET /api/teams/[orgId]/member-key — Get own OrgMemberKey
 // Query: ?keyVersion=N (optional, defaults to latest)
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();

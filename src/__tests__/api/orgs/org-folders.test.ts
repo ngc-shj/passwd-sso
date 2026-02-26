@@ -54,11 +54,11 @@ vi.mock("@/lib/folder-utils", () => ({
   validateFolderDepth: vi.fn(),
 }));
 
-import { GET, POST } from "@/app/api/orgs/[orgId]/folders/route";
+import { GET, POST } from "@/app/api/teams/[orgId]/folders/route";
 import { OrgAuthError } from "@/lib/org-auth";
 import { validateParentFolder, validateFolderDepth } from "@/lib/folder-utils";
 
-describe("GET /api/orgs/[orgId]/folders", () => {
+describe("GET /api/teams/[orgId]/folders", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {
@@ -101,7 +101,7 @@ describe("GET /api/orgs/[orgId]/folders", () => {
   });
 });
 
-describe("POST /api/orgs/[orgId]/folders", () => {
+describe("POST /api/teams/[orgId]/folders", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {
@@ -125,7 +125,7 @@ describe("POST /api/orgs/[orgId]/folders", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue(undefined);
     const { NextRequest } = await import("next/server");
-    const req = new NextRequest("http://localhost/api/orgs/o1/folders", {
+    const req = new NextRequest("http://localhost/api/teams/o1/folders", {
       method: "POST",
       body: "not json",
       headers: { "Content-Type": "text/plain" },

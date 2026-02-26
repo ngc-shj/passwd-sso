@@ -20,7 +20,7 @@ function getExtension(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() ?? "";
 }
 
-// GET /api/orgs/[orgId]/passwords/[id]/attachments - List attachment metadata
+// GET /api/teams/[orgId]/passwords/[id]/attachments - List attachment metadata
 export async function GET(
   _req: NextRequest,
   { params }: RouteContext
@@ -65,7 +65,7 @@ export async function GET(
   return NextResponse.json(attachments);
 }
 
-// POST /api/orgs/[orgId]/passwords/[id]/attachments - Upload attachment (client-side encrypted)
+// POST /api/teams/[orgId]/passwords/[id]/attachments - Upload attachment (client-side encrypted)
 export async function POST(
   req: NextRequest,
   { params }: RouteContext

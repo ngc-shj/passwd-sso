@@ -44,14 +44,14 @@ const ENTRY_ID = "entry-456";
 const HISTORY_ID = "hist-789";
 
 function makeUrl() {
-  return `http://localhost:3000/api/orgs/${ORG_ID}/passwords/${ENTRY_ID}/history/${HISTORY_ID}`;
+  return `http://localhost:3000/api/teams/${ORG_ID}/passwords/${ENTRY_ID}/history/${HISTORY_ID}`;
 }
 
 function makeParams() {
   return createParams({ orgId: ORG_ID, id: ENTRY_ID, historyId: HISTORY_ID });
 }
 
-describe("GET /api/orgs/[orgId]/passwords/[id]/history/[historyId]", () => {
+describe("GET /api/teams/[orgId]/passwords/[id]/history/[historyId]", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });

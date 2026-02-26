@@ -32,7 +32,7 @@ vi.mock("@/lib/prisma", () => ({
 
 import { POST } from "./route";
 
-const URL = "http://localhost/api/orgs/org-1/members/member-1/confirm-key";
+const URL = "http://localhost/api/teams/org-1/members/member-1/confirm-key";
 
 const validBody = {
   encryptedOrgKey: "encrypted-org-key-data",
@@ -43,7 +43,7 @@ const validBody = {
   keyVersion: 1,
 };
 
-describe("POST /api/orgs/[orgId]/members/[memberId]/confirm-key", () => {
+describe("POST /api/teams/[orgId]/members/[memberId]/confirm-key", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "admin-user" } });

@@ -17,7 +17,7 @@ const createTokenSchema = z.object({
   expiresInDays: z.number().int().min(1).max(3650).nullable().optional().default(365),
 });
 
-// GET /api/orgs/[orgId]/scim-tokens — List SCIM tokens
+// GET /api/teams/[orgId]/scim-tokens — List SCIM tokens
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   return NextResponse.json(tokens);
 }
 
-// POST /api/orgs/[orgId]/scim-tokens — Generate a new SCIM token
+// POST /api/teams/[orgId]/scim-tokens — Generate a new SCIM token
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

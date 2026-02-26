@@ -14,7 +14,7 @@ vi.mock("@/lib/prisma", () => ({
 
 import { GET } from "./route";
 
-describe("GET /api/orgs/pending-key-distributions", () => {
+describe("GET /api/teams/pending-key-distributions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "admin-user" } });

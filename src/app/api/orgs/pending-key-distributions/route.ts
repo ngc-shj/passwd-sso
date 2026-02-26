@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { ORG_ROLE } from "@/lib/constants";
 
-// GET /api/orgs/pending-key-distributions
+// GET /api/teams/pending-key-distributions
 // Returns all pending key distributions across all orgs where the user is OWNER/ADMIN.
 // Used for automatic background key distribution after vault unlock.
 export async function GET() {

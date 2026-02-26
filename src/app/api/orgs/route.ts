@@ -5,7 +5,7 @@ import { createOrgE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { ORG_ROLE } from "@/lib/constants";
 
-// GET /api/orgs — List organizations the user belongs to
+// GET /api/teams — List organizations the user belongs to
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
@@ -36,7 +36,7 @@ export async function GET() {
   return NextResponse.json(orgs);
 }
 
-// POST /api/orgs — Create a new E2E-enabled organization
+// POST /api/teams — Create a new E2E-enabled organization
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
