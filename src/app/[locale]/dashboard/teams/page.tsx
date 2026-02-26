@@ -5,12 +5,12 @@ import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { OrgCreateDialog } from "@/components/team/team-create-dialog";
-import { OrgRoleBadge } from "@/components/team/team-role-badge";
+import { OrgCreateDialog as TeamCreateDialog } from "@/components/team/team-create-dialog";
+import { OrgRoleBadge as TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Plus, Building2, Users, KeyRound } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
 
-interface OrgListItem {
+interface TeamListItem {
   id: string;
   name: string;
   slug: string;
@@ -19,30 +19,30 @@ interface OrgListItem {
   createdAt: string;
 }
 
-export default function OrgsPage() {
+export default function TeamsPage() {
   const t = useTranslations("Team");
-  const [orgs, setOrgs] = useState<OrgListItem[]>([]);
+  const [teams, setTeams] = useState<TeamListItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchOrgs = () => {
+  const fetchTeams = () => {
     setLoading(true);
     fetch(API_PATH.TEAMS)
       .then((res) => res.json())
       .then((data) => {
-        if (Array.isArray(data)) setOrgs(data);
+        if (Array.isArray(data)) setTeams(data);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   };
 
   const handleCreated = () => {
-    fetchOrgs();
+    fetchTeams();
     window.dispatchEvent(new CustomEvent("org-data-changed"));
   };
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchOrgs();
+    fetchTeams();
   }, []);
 
   return (
@@ -57,7 +57,7 @@ export default function OrgsPage() {
               </div>
               <p className="text-sm text-muted-foreground">{t("manage")}</p>
             </div>
-            <OrgCreateDialog
+            <TeamCreateDialog
               trigger={
                 <Button>
                   <Plus className="mr-2 h-4 w-4" />
@@ -73,7 +73,7 @@ export default function OrgsPage() {
           <div className="flex items-center justify-center py-12">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
-        ) : orgs.length === 0 ? (
+        ) : teams.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
             <Building2 className="mb-4 h-12 w-12 text-muted-foreground" />
             <p className="text-muted-foreground">{t("noOrgs")}</p>
@@ -83,19 +83,19 @@ export default function OrgsPage() {
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {orgs.map((org) => (
+            {teams.map((team) => (
               <Link
-                key={org.id}
-                href={`/dashboard/teams/${org.id}`}
+                key={team.id}
+                href={`/dashboard/teams/${team.id}`}
                 className="group block rounded-xl border bg-card/80 p-4 transition-colors hover:bg-accent"
               >
                 <div className="mb-2 flex items-start justify-between gap-2">
-                  <h3 className="truncate font-semibold">{org.name}</h3>
-                  <OrgRoleBadge role={org.role} />
+                  <h3 className="truncate font-semibold">{team.name}</h3>
+                  <TeamRoleBadge role={team.role} />
                 </div>
-                {org.description && (
+                {team.description && (
                   <p className="mb-3 line-clamp-2 text-sm text-muted-foreground">
-                    {org.description}
+                    {team.description}
                   </p>
                 )}
                 <div className="flex items-center gap-4 text-xs text-muted-foreground">

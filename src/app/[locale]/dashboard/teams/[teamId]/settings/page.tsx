@@ -3,7 +3,7 @@
 import { useEffect, useState, use } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
-import { OrgRoleBadge } from "@/components/team/team-role-badge";
+import { OrgRoleBadge as TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -40,7 +40,7 @@ import { ScimTokenManager } from "@/components/team/team-scim-token-manager";
 import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 
-interface OrgInfo {
+interface TeamInfo {
   id: string;
   name: string;
   slug: string;
@@ -67,7 +67,7 @@ interface Invitation {
   invitedBy: { name: string | null };
 }
 
-export default function OrgSettingsPage({
+export default function TeamSettingsPage({
   params,
 }: {
   params: Promise<{ teamId: string }>;
@@ -77,7 +77,7 @@ export default function OrgSettingsPage({
   const locale = useLocale();
   const router = useRouter();
 
-  const [org, setOrg] = useState<OrgInfo | null>(null);
+  const [team, setTeam] = useState<TeamInfo | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
@@ -106,13 +106,13 @@ export default function OrgSettingsPage({
         return r.json();
       })
       .then((d) => {
-        setOrg(d);
+        setTeam(d);
         setName(d.name);
         setDescription(d.description ?? "");
         setLoadError(false);
       })
       .catch(() => {
-        setOrg(null);
+        setTeam(null);
         setLoadError(true);
       });
 
@@ -132,15 +132,15 @@ export default function OrgSettingsPage({
   };
 
   useEffect(() => {
-    setOrg(null);
+    setTeam(null);
     setLoadError(false);
     fetchAll();
   }, [teamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const isOwner = org?.role === ORG_ROLE.OWNER;
-  const isAdmin = org?.role === ORG_ROLE.ADMIN || isOwner;
+  const isOwner = team?.role === ORG_ROLE.OWNER;
+  const isAdmin = team?.role === ORG_ROLE.ADMIN || isOwner;
 
-  const handleUpdateOrg = async () => {
+  const handleUpdateTeam = async () => {
     setSaving(true);
     try {
       const res = await fetch(apiPath.teamById(teamId), {
@@ -159,7 +159,7 @@ export default function OrgSettingsPage({
     }
   };
 
-  const handleDeleteOrg = async () => {
+  const handleDeleteTeam = async () => {
     try {
       const res = await fetch(apiPath.teamById(teamId), { method: "DELETE" });
       if (!res.ok) throw new Error("Failed");
@@ -260,7 +260,7 @@ export default function OrgSettingsPage({
     }
   };
 
-  if (!org) {
+  if (!team) {
     if (loadError) {
       return (
         <div className="flex-1 overflow-auto p-4 md:p-6">
@@ -316,8 +316,8 @@ export default function OrgSettingsPage({
                 <div className="space-y-2">
                   <Label>{t("slug")}</Label>
                   <div className="flex items-center gap-2">
-                    <Input value={org.slug} readOnly />
-                    <CopyButton getValue={() => org.slug} />
+                    <Input value={team.slug} readOnly />
+                    <CopyButton getValue={() => team.slug} />
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {t("slugHelp")}
@@ -335,7 +335,7 @@ export default function OrgSettingsPage({
               {isAdmin && (
                 <div className="flex justify-end pt-1">
                   <Button
-                    onClick={handleUpdateOrg}
+                    onClick={handleUpdateTeam}
                     disabled={saving || !name.trim()}
                   >
                     {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
@@ -432,7 +432,7 @@ export default function OrgSettingsPage({
                     </AlertDialog>
                   </div>
                 ) : (
-                  <OrgRoleBadge role={m.role} />
+                  <TeamRoleBadge role={m.role} />
                 )}
               </div>
             ))}
@@ -469,7 +469,7 @@ export default function OrgSettingsPage({
                         <p className="text-sm font-medium truncate">
                           {m.name ?? m.email}
                         </p>
-                        <OrgRoleBadge role={m.role} />
+                        <TeamRoleBadge role={m.role} />
                       </div>
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
@@ -575,7 +575,7 @@ export default function OrgSettingsPage({
                             })}
                           </p>
                         </div>
-                        <OrgRoleBadge role={inv.role} />
+                        <TeamRoleBadge role={inv.role} />
                         <CopyButton
                           getValue={() =>
                             `${window.location.origin}/dashboard/teams/invite/${inv.token}`
@@ -599,7 +599,7 @@ export default function OrgSettingsPage({
         )}
 
         {/* SCIM Provisioning — OWNER/ADMIN only */}
-        {(isOwner || org.role === ORG_ROLE.ADMIN) && (
+        {(isOwner || team.role === ORG_ROLE.ADMIN) && (
           <ScimTokenManager teamId={teamId} locale={locale} />
         )}
 
@@ -619,12 +619,12 @@ export default function OrgSettingsPage({
                   <AlertDialogHeader>
                     <AlertDialogTitle>{t("deleteOrg")}</AlertDialogTitle>
                     <AlertDialogDescription>
-                      {t("deleteOrgConfirm", { name: org.name })}
+                      {t("deleteOrgConfirm", { name: team.name })}
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleDeleteOrg}>
+                    <AlertDialogAction onClick={handleDeleteTeam}>
                       {t("deleteOrg")}
                     </AlertDialogAction>
                   </AlertDialogFooter>
