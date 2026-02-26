@@ -25,7 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useVaultContext } from "@/hooks/use-vault-context";
+import { useTeamVaultContext } from "@/hooks/use-vault-context";
 import { useSetActiveVault } from "@/lib/active-vault-context";
 
 interface SidebarProps {
@@ -85,7 +85,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     tErrors,
   });
 
-  const vaultContext = useVaultContext(teams);
+  const vaultContext = useTeamVaultContext(teams);
   const setActiveVault = useSetActiveVault();
   useEffect(() => {
     setActiveVault(vaultContext);
