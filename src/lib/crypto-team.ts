@@ -33,7 +33,7 @@ const AES_KEY_LENGTH = 256;
 const IV_LENGTH = 12;
 const HKDF_SALT_LENGTH = 32;
 
-/** HKDF info for org key wrapping (ECDH → AES key) */
+/** HKDF info for team key wrapping (ECDH → AES key) */
 const HKDF_TEAM_WRAP_INFO = "passwd-sso-org-v1";
 
 /** HKDF info for team entry encryption (teamKey → AES key) */
@@ -47,7 +47,7 @@ export const CURRENT_TEAM_WRAP_VERSION = 1;
 /** AAD scope for OrgMemberKey wrapping */
 const AAD_SCOPE_ORG_KEY = "OK";
 
-/** AAD version for org key wrapping */
+/** AAD version for team key wrapping */
 const AAD_VERSION = 1;
 
 // ─── Utility ────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ export function generateTeamSymmetricKey(): Uint8Array {
  * Derive AES-256-GCM encryption key from team symmetric key.
  * HKDF(teamKey, info="passwd-sso-org-enc-v1", salt=empty)
  *
- * Salt is empty because teamKey itself is unique per org (256-bit random).
+ * Salt is empty because teamKey itself is unique per team (256-bit random).
  */
 export async function deriveTeamEncryptionKey(
   teamKey: Uint8Array
