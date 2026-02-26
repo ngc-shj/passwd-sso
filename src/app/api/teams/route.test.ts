@@ -69,7 +69,7 @@ describe("POST /api/teams (E2E-only)", () => {
     name: "E2E Team",
     slug: "e2e-org",
     orgMemberKey: {
-      encryptedOrgKey: "encrypted-org-key-data",
+      encryptedOrgKey: "encrypted-team-key-data",
       orgKeyIv: "a".repeat(24),
       orgKeyAuthTag: "b".repeat(32),
       ephemeralPublicKey: '{"kty":"EC","crv":"P-256","x":"test","y":"test"}',
@@ -113,7 +113,7 @@ describe("POST /api/teams (E2E-only)", () => {
   it("creates E2E org with OrgMemberKey (201)", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue(null);
     mockPrismaOrganization.create.mockResolvedValue({
-      id: "e2e-org-id",
+      id: "e2e-team-id",
       name: "E2E Team",
       slug: "e2e-org",
       description: null,
@@ -125,7 +125,7 @@ describe("POST /api/teams (E2E-only)", () => {
     }));
     const json = await res.json();
     expect(res.status).toBe(201);
-    expect(json.id).toBe("e2e-org-id");
+    expect(json.id).toBe("e2e-team-id");
     expect(json.role).toBe(TEAM_ROLE.OWNER);
     expect(mockPrismaOrganization.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -133,7 +133,7 @@ describe("POST /api/teams (E2E-only)", () => {
           orgKeyVersion: 1,
           memberKeys: expect.objectContaining({
             create: expect.objectContaining({
-              encryptedOrgKey: "encrypted-org-key-data",
+              encryptedOrgKey: "encrypted-team-key-data",
               keyVersion: 1,
             }),
           }),
@@ -158,7 +158,7 @@ describe("POST /api/teams (E2E-only)", () => {
   it("saves wrapVersion to OrgMemberKey (S-26/F-24)", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue(null);
     mockPrismaOrganization.create.mockResolvedValue({
-      id: "e2e-org-id",
+      id: "e2e-team-id",
       name: "E2E Team",
       slug: "e2e-org",
       description: null,

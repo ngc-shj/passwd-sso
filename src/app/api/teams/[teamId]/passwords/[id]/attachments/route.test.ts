@@ -79,7 +79,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(
-      createRequest("GET", "http://localhost/api/teams/org-1/passwords/pw-1/attachments"),
+      createRequest("GET", "http://localhost/api/teams/team-1/passwords/pw-1/attachments"),
       createParams("team-1", "pw-1"),
     );
     expect(res.status).toBe(401);
@@ -90,7 +90,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
       orgId: "other-team",
     });
     const res = await GET(
-      createRequest("GET", "http://localhost/api/teams/org-1/passwords/pw-1/attachments"),
+      createRequest("GET", "http://localhost/api/teams/team-1/passwords/pw-1/attachments"),
       createParams("team-1", "pw-1"),
     );
     expect(res.status).toBe(404);
@@ -101,7 +101,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
       new MockTeamAuthError("FORBIDDEN", 403),
     );
     const res = await GET(
-      createRequest("GET", "http://localhost/api/teams/org-1/passwords/pw-1/attachments"),
+      createRequest("GET", "http://localhost/api/teams/team-1/passwords/pw-1/attachments"),
       createParams("team-1", "pw-1"),
     );
     const json = await res.json();
@@ -121,7 +121,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
       },
     ]);
     const res = await GET(
-      createRequest("GET", "http://localhost/api/teams/org-1/passwords/pw-1/attachments"),
+      createRequest("GET", "http://localhost/api/teams/team-1/passwords/pw-1/attachments"),
       createParams("team-1", "pw-1"),
     );
     const json = await res.json();
@@ -144,7 +144,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -162,7 +162,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
       new MockTeamAuthError("FORBIDDEN", 403),
     );
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -180,7 +180,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 404 when entry does not belong to org", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -195,7 +195,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 when required fields are missing", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         filename: "doc.pdf",
       }),
       createParams("team-1", "pw-1"),
@@ -207,7 +207,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 when content type is not allowed", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/zip",
@@ -225,7 +225,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 400 when attachment limit is exceeded", async () => {
     mockPrismaAttachment.count.mockResolvedValue(20);
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -243,7 +243,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 413 when declared content-length is too large", async () => {
     const res = await POST(
       createFormDataRequest(
-        "http://localhost/api/teams/org-1/passwords/pw-1/attachments",
+        "http://localhost/api/teams/team-1/passwords/pw-1/attachments",
         {
           file: new Blob(["abc"]),
           filename: "doc.pdf",
@@ -264,7 +264,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 400 when actual file size exceeds max", async () => {
     const huge = new Blob([new Uint8Array(11 * 1024 * 1024)]);
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: huge,
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -292,7 +292,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 for invalid extension", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "bad.exe",
         contentType: "application/pdf",
@@ -307,7 +307,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 for invalid iv format", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -324,7 +324,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 for invalid authTag format", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -348,7 +348,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
       createdAt: new Date(),
     });
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -378,7 +378,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 409 when orgKeyVersion does not match (S-20)", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 });
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",

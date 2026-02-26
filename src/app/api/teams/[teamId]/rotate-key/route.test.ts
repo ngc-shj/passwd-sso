@@ -48,7 +48,7 @@ import { POST } from "./route";
 import { logAudit } from "@/lib/audit";
 
 function createRequest(body: unknown) {
-  return new NextRequest("http://localhost/api/teams/org-1/rotate-key", {
+  return new NextRequest("http://localhost/api/teams/team-1/rotate-key", {
     method: "POST",
     body: JSON.stringify(body),
     headers: { "Content-Type": "application/json" },
@@ -184,7 +184,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   });
 
   it("returns 400 on malformed JSON (Q-4)", async () => {
-    const req = new NextRequest("http://localhost/api/teams/org-1/rotate-key", {
+    const req = new NextRequest("http://localhost/api/teams/team-1/rotate-key", {
       method: "POST",
       body: "not-json",
       headers: { "Content-Type": "application/json" },

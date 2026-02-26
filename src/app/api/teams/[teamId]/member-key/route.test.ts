@@ -35,7 +35,7 @@ vi.mock("@/lib/prisma", () => ({
 
 import { GET } from "./route";
 
-const URL = "http://localhost/api/teams/org-1/member-key";
+const URL = "http://localhost/api/teams/team-1/member-key";
 
 describe("GET /api/teams/[teamId]/member-key", () => {
   beforeEach(() => {

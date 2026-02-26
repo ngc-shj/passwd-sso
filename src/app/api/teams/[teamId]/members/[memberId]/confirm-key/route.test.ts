@@ -32,10 +32,10 @@ vi.mock("@/lib/prisma", () => ({
 
 import { POST } from "./route";
 
-const URL = "http://localhost/api/teams/org-1/members/member-1/confirm-key";
+const URL = "http://localhost/api/teams/team-1/members/member-1/confirm-key";
 
 const validBody = {
-  encryptedOrgKey: "encrypted-org-key-data",
+  encryptedOrgKey: "encrypted-team-key-data",
   orgKeyIv: "a".repeat(24),
   orgKeyAuthTag: "b".repeat(32),
   ephemeralPublicKey: '{"kty":"EC","crv":"P-256","x":"test","y":"test"}',

@@ -43,7 +43,7 @@ const SCIM_TOKEN_DATA = {
   data: { tokenId: "t1", teamId: "team-1", orgId: "team-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
 };
 
-// Compute a valid ADMIN group ID for org-1
+// Compute a valid ADMIN group ID for team-1
 const ADMIN_GROUP_ID = roleGroupId("team-1", "ADMIN");
 
 function makeParams(id: string) {

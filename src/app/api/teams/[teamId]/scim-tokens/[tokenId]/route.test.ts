@@ -41,7 +41,7 @@ function makeParams(teamId: string, tokenId: string) {
 }
 
 function makeReq() {
-  return new NextRequest("http://localhost/api/teams/org-1/scim-tokens/t1", {
+  return new NextRequest("http://localhost/api/teams/team-1/scim-tokens/t1", {
     method: "DELETE",
   });
 }

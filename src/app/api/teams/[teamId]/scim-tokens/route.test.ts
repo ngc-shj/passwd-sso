@@ -63,7 +63,7 @@ function makeReq(options: { body?: unknown } = {}) {
     init.headers = { "content-type": "application/json" };
   }
   return new NextRequest(
-    "http://localhost/api/teams/org-1/scim-tokens",
+    "http://localhost/api/teams/team-1/scim-tokens",
     init as ConstructorParameters<typeof NextRequest>[1],
   );
 }

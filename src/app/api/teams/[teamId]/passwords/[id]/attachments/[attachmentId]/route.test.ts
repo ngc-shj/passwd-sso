@@ -62,7 +62,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
     const res = await GET(
       createRequest(
         "GET",
-        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/team-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("team-1", "pw-1", "att-1"),
     );
@@ -76,7 +76,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
     const res = await GET(
       createRequest(
         "GET",
-        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/team-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("team-1", "pw-1", "att-1"),
     );
@@ -90,7 +90,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
     const res = await GET(
       createRequest(
         "GET",
-        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/team-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("team-1", "pw-1", "att-1"),
     );
@@ -102,7 +102,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
     const res = await GET(
       createRequest(
         "GET",
-        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/team-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("team-1", "pw-1", "att-1"),
     );
@@ -125,7 +125,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
     const res = await GET(
       createRequest(
         "GET",
-        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/team-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("team-1", "pw-1", "att-1"),
     );
@@ -154,7 +154,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     const res = await DELETE(
       createRequest(
         "DELETE",
-        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/team-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("team-1", "pw-1", "att-1"),
     );
@@ -168,7 +168,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     const res = await DELETE(
       createRequest(
         "DELETE",
-        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/team-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("team-1", "pw-1", "att-1"),
     );
@@ -182,7 +182,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     const res = await DELETE(
       createRequest(
         "DELETE",
-        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/team-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("team-1", "pw-1", "att-1"),
     );
@@ -194,7 +194,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     const res = await DELETE(
       createRequest(
         "DELETE",
-        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/team-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("team-1", "pw-1", "att-1"),
     );
@@ -214,7 +214,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     const res = await DELETE(
       createRequest(
         "DELETE",
-        "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
+        "http://localhost/api/teams/team-1/passwords/pw-1/attachments/att-1",
       ),
       createParams("team-1", "pw-1", "att-1"),
     );

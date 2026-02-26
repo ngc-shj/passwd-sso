@@ -49,7 +49,7 @@ vi.mock("@/lib/team-vault-context", () => ({
 
 vi.mock("@/lib/crypto-aad", () => ({
   buildPersonalEntryAAD: vi.fn().mockReturnValue("test-aad"),
-  buildTeamEntryAAD: vi.fn().mockReturnValue("test-org-aad"),
+  buildTeamEntryAAD: vi.fn().mockReturnValue("test-team-aad"),
 }));
 
 vi.mock("sonner", () => ({
