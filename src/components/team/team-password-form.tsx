@@ -18,7 +18,7 @@ import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import { useOrgPasswordFormModel } from "@/hooks/use-org-password-form-model";
+import { useTeamPasswordFormModel } from "@/hooks/use-team-password-form-model";
 import { buildOrgFormSectionsProps } from "@/hooks/org-form-sections-props";
 
 export function OrgPasswordForm({
@@ -47,7 +47,8 @@ export function OrgPasswordForm({
     handleSubmit,
     hasChanges,
     submitDisabled,
-  } = useOrgPasswordFormModel({
+  } = useTeamPasswordFormModel({
+    teamId: scopedId,
     orgId: scopedId,
     open,
     onOpenChange,
