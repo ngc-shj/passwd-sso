@@ -3,12 +3,12 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { buildOrgSubmitDisabled } from "@/hooks/team-password-form-derived-helpers";
+import { buildTeamSubmitDisabled } from "@/hooks/team-password-form-derived-helpers";
 import { useTeamPasswordFormDerived } from "@/hooks/use-team-password-form-derived";
-import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
-import type { OrgEntryFieldValues } from "@/hooks/use-team-password-form-state";
+import type { TeamEntryKindState } from "@/components/team/team-entry-kind";
+import type { TeamEntryFieldValues } from "@/hooks/use-team-password-form-state";
 
-function baseEntryKindState(): OrgEntryKindState {
+function baseEntryKindState(): TeamEntryKindState {
   return {
     entryKind: "password",
     isLoginEntry: true,
@@ -19,7 +19,7 @@ function baseEntryKindState(): OrgEntryKindState {
   };
 }
 
-function baseEntryValues(): OrgEntryFieldValues {
+function baseEntryValues(): TeamEntryFieldValues {
   return {
     title: "Title",
     notes: "memo",
@@ -100,9 +100,9 @@ describe("useTeamPasswordFormDerived", () => {
   });
 });
 
-describe("buildOrgSubmitDisabled", () => {
+describe("buildTeamSubmitDisabled", () => {
   it("returns false when all fields are valid for login", () => {
-    const result = buildOrgSubmitDisabled({
+    const result = buildTeamSubmitDisabled({
       entryKindState: baseEntryKindState(),
       entryValues: { title: "Title", password: "pass", relyingPartyId: "" },
       cardNumberValid: true,
@@ -111,7 +111,7 @@ describe("buildOrgSubmitDisabled", () => {
   });
 
   it("returns true when title is empty", () => {
-    const result = buildOrgSubmitDisabled({
+    const result = buildTeamSubmitDisabled({
       entryKindState: baseEntryKindState(),
       entryValues: { title: "  ", password: "pass", relyingPartyId: "" },
       cardNumberValid: true,
@@ -120,7 +120,7 @@ describe("buildOrgSubmitDisabled", () => {
   });
 
   it("returns true when passkey relyingPartyId is empty", () => {
-    const result = buildOrgSubmitDisabled({
+    const result = buildTeamSubmitDisabled({
       entryKindState: {
         entryKind: "passkey",
         isLoginEntry: false,
@@ -136,7 +136,7 @@ describe("buildOrgSubmitDisabled", () => {
   });
 
   it("returns true when credit card number is invalid", () => {
-    const result = buildOrgSubmitDisabled({
+    const result = buildTeamSubmitDisabled({
       entryKindState: {
         entryKind: "creditCard",
         isLoginEntry: false,
@@ -152,7 +152,7 @@ describe("buildOrgSubmitDisabled", () => {
   });
 
   it("returns false for secure note with only title", () => {
-    const result = buildOrgSubmitDisabled({
+    const result = buildTeamSubmitDisabled({
       entryKindState: {
         entryKind: "secureNote",
         isLoginEntry: false,

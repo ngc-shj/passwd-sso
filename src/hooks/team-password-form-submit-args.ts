@@ -2,7 +2,7 @@
 
 import type { SubmitTeamPasswordFormArgs } from "@/components/team/team-password-form-actions";
 import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
-import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
+import type { TeamEntryKindState } from "@/components/team/team-entry-kind";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { TeamPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import type { TeamPasswordFormState } from "@/hooks/use-team-password-form-state";
@@ -18,7 +18,7 @@ interface BuildOrgSubmitArgsParams {
   isEdit: boolean;
   editData?: TeamPasswordFormProps["editData"];
   effectiveEntryType: EntryTypeValue;
-  entryKindState: OrgEntryKindState;
+  entryKindState: TeamEntryKindState;
   translations: TeamPasswordFormTranslations;
   handleOpenChange: (open: boolean) => void;
   setters: Pick<TeamPasswordFormState["setters"], "setDobError" | "setExpiryError" | "setSaving">;

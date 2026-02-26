@@ -1,4 +1,4 @@
-import type { OrgEntryKind } from "@/components/team/team-password-form-types";
+import type { TeamEntryKind } from "@/components/team/team-password-form-types";
 
 export interface EntryLocaleCopy {
   edit: string;
@@ -12,8 +12,8 @@ export interface EntryLocaleCopy {
 
 interface BuildOrgEntryCopyArgs {
   isEdit: boolean;
-  entryKind: OrgEntryKind;
-  copyByKind: Record<OrgEntryKind, EntryLocaleCopy>;
+  entryKind: TeamEntryKind;
+  copyByKind: Record<TeamEntryKind, EntryLocaleCopy>;
 }
 
 export function buildOrgEntryCopy({

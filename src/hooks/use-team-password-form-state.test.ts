@@ -3,7 +3,7 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
-  selectOrgEntryFieldValues,
+  selectTeamEntryFieldValues,
   useTeamPasswordFormState,
 } from "@/hooks/use-team-password-form-state";
 import { ENTRY_TYPE } from "@/lib/constants";
@@ -63,7 +63,7 @@ describe("useTeamPasswordFormState", () => {
       }),
     );
 
-    const selected = selectOrgEntryFieldValues(result.current.values);
+    const selected = selectTeamEntryFieldValues(result.current.values);
 
     expect(selected).toEqual(
       expect.objectContaining({

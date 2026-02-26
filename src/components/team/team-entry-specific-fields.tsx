@@ -6,11 +6,11 @@ import { OrgCreditCardFields } from "@/components/team/team-credit-card-fields";
 import { OrgIdentityFields } from "@/components/team/team-identity-fields";
 import { OrgPasskeyFields } from "@/components/team/team-passkey-fields";
 import { OrgSecureNoteFields } from "@/components/team/team-secure-note-fields";
-import type { OrgEntryKind } from "@/components/team/team-password-form-types";
+import type { TeamEntryKind } from "@/components/team/team-password-form-types";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 
 interface TeamEntrySpecificFieldsProps {
-  entryKind: OrgEntryKind;
+  entryKind: TeamEntryKind;
   notesLabel: string;
   notesPlaceholder: string;
   notes: string;

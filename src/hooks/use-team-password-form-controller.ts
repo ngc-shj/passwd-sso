@@ -3,7 +3,7 @@
 import { toast } from "sonner";
 import { submitTeamPasswordForm } from "@/components/team/team-password-form-actions";
 import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
-import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
+import type { TeamEntryKindState } from "@/components/team/team-entry-kind";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { TeamPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import {
@@ -20,7 +20,7 @@ export interface TeamPasswordFormControllerArgs {
   isEdit: boolean;
   editData?: TeamPasswordFormProps["editData"];
   effectiveEntryType: EntryTypeValue;
-  entryKindState: OrgEntryKindState;
+  entryKindState: TeamEntryKindState;
   translations: TeamPasswordFormTranslations;
   formState: TeamPasswordFormState;
   handleOpenChange: (open: boolean) => void;

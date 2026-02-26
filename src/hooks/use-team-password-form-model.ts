@@ -1,7 +1,7 @@
 "use client";
 
 import { ENTRY_TYPE } from "@/lib/constants";
-import { getOrgEntryKindState } from "@/components/team/team-entry-kind";
+import { getTeamEntryKindState } from "@/components/team/team-entry-kind";
 import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
 import { useTeamAttachments } from "@/hooks/use-team-attachments";
 import { useTeamFolders } from "@/hooks/use-team-folders";
@@ -39,7 +39,7 @@ function useTeamPasswordFormModelInternal({
   const translations = toTeamPasswordFormTranslations(translationBundle);
 
   const effectiveEntryType = editData?.entryType ?? entryTypeProp;
-  const entryKindState = getOrgEntryKindState(effectiveEntryType);
+  const entryKindState = getTeamEntryKindState(effectiveEntryType);
   const { isLoginEntry } = entryKindState;
   const isEdit = !!editData;
 

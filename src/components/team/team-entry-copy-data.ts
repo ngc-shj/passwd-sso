@@ -1,5 +1,5 @@
 import type { EntryLocaleCopy } from "@/components/team/team-entry-copy";
-import type { OrgEntryKind } from "@/components/team/team-password-form-types";
+import type { TeamEntryKind } from "@/components/team/team-password-form-types";
 import type {
   CreditCardFormTranslator,
   IdentityFormTranslator,
@@ -22,7 +22,7 @@ export function buildOrgEntryCopyData({
   tcc,
   ti,
   tpk,
-}: BuildOrgEntryCopyDataArgs): Record<OrgEntryKind, EntryLocaleCopy> {
+}: BuildOrgEntryCopyDataArgs): Record<TeamEntryKind, EntryLocaleCopy> {
   return {
     passkey: {
       edit: tpk("editPasskey"),

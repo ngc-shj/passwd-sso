@@ -1,20 +1,20 @@
 import { formatCardNumber } from "@/lib/credit-card";
 import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
-import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
-import type { OrgEntryFieldValues } from "@/hooks/use-team-password-form-state";
+import type { TeamEntryKindState } from "@/components/team/team-entry-kind";
+import type { TeamEntryFieldValues } from "@/hooks/use-team-password-form-state";
 import type { EntryTypeValue } from "@/lib/constants";
 
-export type OrgSnapshotBaselineArgs = {
+export type TeamSnapshotBaselineArgs = {
   effectiveEntryType: EntryTypeValue;
   editData?: TeamPasswordFormProps["editData"];
-  entryKindState: OrgEntryKindState;
+  entryKindState: TeamEntryKindState;
 };
 
 export function buildBaselineSnapshot({
   effectiveEntryType,
   editData,
   entryKindState,
-}: OrgSnapshotBaselineArgs): string {
+}: TeamSnapshotBaselineArgs): string {
   const { isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey } = entryKindState;
   return JSON.stringify({
     entryType: effectiveEntryType,
@@ -74,8 +74,8 @@ export function buildBaselineSnapshot({
 
 export type BuildCurrentSnapshotArgs = {
   effectiveEntryType: EntryTypeValue;
-  entryKindState: OrgEntryKindState;
-  entryValues: OrgEntryFieldValues;
+  entryKindState: TeamEntryKindState;
+  entryValues: TeamEntryFieldValues;
 };
 
 export function buildCurrentSnapshot({
@@ -153,13 +153,13 @@ export function buildCurrentSnapshot({
   });
 }
 
-export function buildOrgSubmitDisabled({
+export function buildTeamSubmitDisabled({
   entryKindState,
   entryValues,
   cardNumberValid,
 }: {
-  entryKindState: OrgEntryKindState;
-  entryValues: Pick<OrgEntryFieldValues, "title" | "password" | "relyingPartyId">;
+  entryKindState: TeamEntryKindState;
+  entryValues: Pick<TeamEntryFieldValues, "title" | "password" | "relyingPartyId">;
   cardNumberValid: boolean;
 }): boolean {
   const { isPasskey, isLoginEntry, isCreditCard } = entryKindState;

@@ -2,7 +2,7 @@ import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 
-export type OrgEntryKind =
+export type TeamEntryKind =
   | "password"
   | "secureNote"
   | "creditCard"

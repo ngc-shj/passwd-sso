@@ -31,7 +31,7 @@ export type TeamPasswordFormLifecycleSetters = TeamPasswordFormSettersState & {
   setAttachments: (value: OrgAttachmentMeta[]) => void;
 };
 
-export interface OrgEntryFieldValues {
+export interface TeamEntryFieldValues {
   title: string;
   notes: string;
   selectedTags: TeamTagData[];
@@ -64,7 +64,7 @@ export interface OrgEntryFieldValues {
   deviceInfo: string;
 }
 
-export function selectOrgEntryFieldValues(values: TeamPasswordFormValues): OrgEntryFieldValues {
+export function selectTeamEntryFieldValues(values: TeamPasswordFormValues): TeamEntryFieldValues {
   return {
     title: values.title,
     notes: values.notes,
