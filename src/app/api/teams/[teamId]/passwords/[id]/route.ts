@@ -153,7 +153,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
   }
 
-  // Validate orgFolderId belongs to this org
+  // Validate orgFolderId belongs to this team
   if (orgFolderId) {
     const folder = await prisma.orgFolder.findUnique({
       where: { id: orgFolderId },

@@ -25,7 +25,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  // Verify the password belongs to this org
+  // Verify the password belongs to this team
   const entry = await prisma.orgPasswordEntry.findUnique({
     where: { id },
     select: { orgId: true },

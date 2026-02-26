@@ -140,7 +140,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(json.details.missingKeyFor).toBe("user-2");
   });
 
-  it("returns 404 when org not found", async () => {
+  it("returns 404 when team not found", async () => {
     mockOrgFindUnique.mockResolvedValue(null);
     const res = await POST(
       createRequest({
@@ -254,7 +254,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     );
   });
 
-  it("returns 400 when entry count does not match org entries (F-17)", async () => {
+  it("returns 400 when entry count does not match team entries (F-17)", async () => {
     // Team has 3 entries but client submits only 1
     txMock.orgPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e2" }, { id: "e3" }]);
     const res = await POST(
@@ -270,7 +270,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(json.error).toBe("ENTRY_COUNT_MISMATCH");
   });
 
-  it("returns 400 when submitted entry IDs do not exactly match org entries", async () => {
+  it("returns 400 when submitted entry IDs do not exactly match team entries", async () => {
     txMock.orgPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }]);
     const res = await POST(
       createRequest({

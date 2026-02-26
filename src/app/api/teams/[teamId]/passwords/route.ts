@@ -12,7 +12,7 @@ type Params = { params: Promise<{ teamId: string }> };
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
-// GET /api/teams/[teamId]/passwords — List org passwords (encrypted overviews, client decrypts)
+// GET /api/teams/[teamId]/passwords — List team passwords (encrypted overviews, client decrypts)
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -105,7 +105,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   return NextResponse.json(entries);
 }
 
-// POST /api/teams/[teamId]/passwords — Create org password (E2E: client encrypts)
+// POST /api/teams/[teamId]/passwords — Create team password (E2E: client encrypts)
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -152,7 +152,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  // Validate orgFolderId belongs to this org
+  // Validate orgFolderId belongs to this team
   if (orgFolderId) {
     const folder = await prisma.orgFolder.findUnique({
       where: { id: orgFolderId },

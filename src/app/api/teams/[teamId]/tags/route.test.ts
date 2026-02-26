@@ -54,7 +54,7 @@ describe("GET /api/teams/[teamId]/tags", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns org tags with counts", async () => {
+  it("returns team tags with counts", async () => {
     mockPrismaOrgTag.findMany.mockResolvedValue([
       { id: "t1", name: "Work", color: "#ff0000", _count: { passwords: 5 } },
     ]);
@@ -184,7 +184,7 @@ describe("POST /api/teams/[teamId]/tags", () => {
     expect(res.status).toBe(409);
   });
 
-  it("creates org tag (201)", async () => {
+  it("creates team tag (201)", async () => {
     mockPrismaOrgTag.findUnique.mockResolvedValue(null);
     mockPrismaOrgTag.create.mockResolvedValue({ id: "new-tag", name: "Finance", color: null });
 

@@ -124,7 +124,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         }
       }
 
-      // Verify submitted entries exactly match ALL org entries (including trash)
+      // Verify submitted entries exactly match ALL team entries (including trash)
       const allEntries = await tx.orgPasswordEntry.findMany({
         where: { orgId: teamId },
         select: { id: true },
@@ -193,7 +193,7 @@ export async function POST(req: NextRequest, { params }: Params) {
           )
       );
 
-      // Bump org key version
+      // Bump team key version
       await tx.organization.update({
         where: { id: teamId },
         data: { orgKeyVersion: newOrgKeyVersion },

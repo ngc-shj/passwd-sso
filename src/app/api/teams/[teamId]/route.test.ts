@@ -96,7 +96,7 @@ describe("GET /api/teams/[teamId]", () => {
     expect(json.passwordCount).toBe(10);
   });
 
-  it("returns 404 when org not found", async () => {
+  it("returns 404 when team not found", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue(null);
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}`),

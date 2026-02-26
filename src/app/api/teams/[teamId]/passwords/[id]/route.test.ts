@@ -174,7 +174,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
     expect(json.password).toBeUndefined();
   });
 
-  it("returns 404 when entry belongs to a different org (Q-6 IDOR)", async () => {
+  it("returns 404 when entry belongs to a different team (Q-6 IDOR)", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(
       makeEntryForGET({ orgId: "other-team-999" }),
     );
@@ -279,7 +279,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 404 when entry belongs to a different org (Q-7 IDOR)", async () => {
+  it("returns 404 when entry belongs to a different team (Q-7 IDOR)", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(
       makeEntryForPUT({ orgId: "other-team-999" }),
     );
@@ -306,7 +306,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     expect(res.status).toBe(403);
   });
 
-  it("returns 409 when orgKeyVersion does not match org's current version (F-13)", async () => {
+  it("returns 409 when orgKeyVersion does not match team's current version (F-13)", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 }); // org is at v2
 
@@ -436,7 +436,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     );
   });
 
-  it("returns 400 when orgFolderId belongs to a different org in PUT", async () => {
+  it("returns 400 when orgFolderId belongs to a different team in PUT", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: "other-team-999" });
@@ -556,7 +556,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 404 when entry belongs to a different org (R-1 IDOR)", async () => {
+  it("returns 404 when entry belongs to a different team (R-1 IDOR)", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, orgId: "other-team-999" });
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`),

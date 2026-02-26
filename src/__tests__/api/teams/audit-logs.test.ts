@@ -59,7 +59,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     expect(json.error).toBe("UNAUTHORIZED");
   });
 
-  it("returns 403 when user lacks org:update permission", async () => {
+  it("returns 403 when user lacks team:update permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockRejectedValue(
       new TeamAuthError("FORBIDDEN", 403)
@@ -77,7 +77,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     expect(json.error).toBe("FORBIDDEN");
   });
 
-  it("returns org audit logs for ADMIN/OWNER", async () => {
+  it("returns team audit logs for ADMIN/OWNER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
 

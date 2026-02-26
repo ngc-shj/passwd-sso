@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
   const vaultSetupRequired = !user?.ecdhPublicKey;
 
   // Create membership (or re-activate if previously deactivated) and mark invitation as accepted.
-  // keyDistributed starts as false (admin must distribute org key).
+  // keyDistributed starts as false (admin must distribute team key).
   await prisma.$transaction([
     prisma.orgMember.upsert({
       where: {

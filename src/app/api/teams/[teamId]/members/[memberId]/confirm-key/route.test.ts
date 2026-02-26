@@ -124,7 +124,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
 
-  it("returns 404 when target member belongs to a different org (Q-1 IDOR)", async () => {
+  it("returns 404 when target member belongs to a different team (Q-1 IDOR)", async () => {
     mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "team-1" }); // admin (findFirst)
     mockPrismaOrgMember.findUnique.mockResolvedValueOnce({ orgId: "team-OTHER", userId: "target-user", keyDistributed: false, deactivatedAt: null }); // target belongs to different team
 
@@ -173,7 +173,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     expect(json.error).toBe("INVALID_JSON");
   });
 
-  it("returns 409 when keyVersion does not match org's current version (F-16)", async () => {
+  it("returns 409 when keyVersion does not match team's current version (F-16)", async () => {
     mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "team-1" }); // admin (findFirst)
     mockPrismaOrgMember.findUnique
       .mockResolvedValueOnce({ id: "member-1", orgId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })

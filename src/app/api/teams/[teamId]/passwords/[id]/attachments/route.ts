@@ -198,7 +198,7 @@ export async function POST(
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 1;
   const orgKeyVersion = orgKeyVersionStr ? parseInt(orgKeyVersionStr, 10) : 1;
 
-  // Validate orgKeyVersion matches current org key version (S-20/F-23)
+  // Validate orgKeyVersion matches current team key version (S-20/F-23)
   const team = await prisma.organization.findUnique({
     where: { id: teamId },
     select: { orgKeyVersion: true },

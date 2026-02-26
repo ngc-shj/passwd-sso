@@ -345,7 +345,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 409 when orgKeyVersion does not match org's current version (S-15)", async () => {
+  it("returns 409 when orgKeyVersion does not match team's current version (S-15)", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 });
 
     const res = await POST(
@@ -359,7 +359,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
   });
 
-  it("returns 409 when org not found (Q-9)", async () => {
+  it("returns 409 when team not found (Q-9)", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue(null);
 
     const res = await POST(
@@ -456,7 +456,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     );
   });
 
-  it("returns 400 when orgFolderId belongs to a different org", async () => {
+  it("returns 400 when orgFolderId belongs to a different team", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
     mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: "other-team-999" });
 

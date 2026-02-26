@@ -12,7 +12,7 @@ import { TEAM_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ teamId: string }> };
 
-// GET /api/teams/[teamId]/tags — List org tags
+// GET /api/teams/[teamId]/tags — List team tags
 export async function GET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -54,7 +54,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   );
 }
 
-// POST /api/teams/[teamId]/tags — Create org tag
+// POST /api/teams/[teamId]/tags — Create team tag
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

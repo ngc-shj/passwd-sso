@@ -9,7 +9,7 @@ import { TEAM_PERMISSION } from "@/lib/constants";
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
 // POST /api/teams/[teamId]/members/[memberId]/confirm-key
-// Admin distributes the org key to a member by encrypting it with member's ECDH public key
+// Admin distributes the team key to a member by encrypting it with member's ECDH public key
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  // Verify target member exists, belongs to this org, and is active
+  // Verify target member exists, belongs to this team, and is active
   const targetMember = await prisma.orgMember.findUnique({
     where: { id: memberId },
     select: { orgId: true, userId: true, keyDistributed: true, deactivatedAt: true },
@@ -92,7 +92,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (!member || member.deactivatedAt !== null) return "member_not_found" as const;
     if (member.keyDistributed) return "already_distributed" as const;
 
-    // Verify keyVersion matches current org key version (F-16)
+    // Verify keyVersion matches current team key version (F-16)
     const team = await tx.organization.findUnique({
       where: { id: teamId },
       select: { orgKeyVersion: true },

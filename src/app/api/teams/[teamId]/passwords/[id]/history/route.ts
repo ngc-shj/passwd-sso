@@ -6,7 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
-// GET /api/teams/[teamId]/passwords/[id]/history - List org entry history
+// GET /api/teams/[teamId]/passwords/[id]/history - List team entry history
 export async function GET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {

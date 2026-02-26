@@ -76,7 +76,7 @@ describe("DELETE /api/teams/[teamId]/scim-tokens/[tokenId]", () => {
   it("returns 404 for orgId mismatch (IDOR prevention)", async () => {
     mockScimToken.findUnique.mockResolvedValue({
       id: "t1",
-      orgId: "other-team", // different org
+      orgId: "other-team", // different team
       revokedAt: null,
     });
     const res = await DELETE(makeReq(), makeParams("team-1", "t1"));
