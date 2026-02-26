@@ -416,7 +416,7 @@ model OrgPasswordEntry {
   orgId       String  @map("team_id")
   createdById String  @map("created_by_id")
   updatedById String  @map("updated_by_id")
-  orgFolderId String? @map("org_folder_id")
+  orgFolderId String? @map("team_folder_id")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -455,7 +455,7 @@ model OrgTag {
 model OrgPasswordFavorite {
   id                 String @id @default(cuid())
   userId             String @map("user_id")
-  orgPasswordEntryId String @map("org_password_entry_id")
+  orgPasswordEntryId String @map("team_password_entry_id")
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -505,7 +505,7 @@ model PasswordShare {
 
   // Entry share relations
   passwordEntryId    String? @map("password_entry_id")
-  orgPasswordEntryId String? @map("org_password_entry_id")
+  orgPasswordEntryId String? @map("team_password_entry_id")
 
   // Send-specific fields
   sendName        String? @map("send_name") @db.VarChar(200)
@@ -648,7 +648,7 @@ model Attachment {
   aadVersion    Int    @default(0) @map("aad_version")
 
   passwordEntryId    String?  @map("password_entry_id")
-  orgPasswordEntryId String?  @map("org_password_entry_id")
+  orgPasswordEntryId String?  @map("team_password_entry_id")
   createdById        String   @map("created_by_id")
   createdAt          DateTime @default(now()) @map("created_at")
 
