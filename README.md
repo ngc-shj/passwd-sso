@@ -22,11 +22,11 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Session Management** - List active sessions and revoke single/all sessions
 - **Security Notifications** - Email notifications for emergency-access events
 - **Key Rotation** - Rotate vault encryption key with passphrase verification
-- **Tags & Organization** - Color-coded tags, favorites, archive, soft-delete trash (30-day auto-purge)
+- **Tags & Team** - Color-coded tags, favorites, archive, soft-delete trash (30-day auto-purge)
 - **Keyboard Shortcuts** - `/ or Cmd+K` search, `n` new, `?` help, `Esc` clear
 - **i18n** - English and Japanese (next-intl)
 - **Dark Mode** - Light / dark / system (next-themes)
-- **Organization Vault** - Team password sharing with E2E encryption (ECDH-P256) and RBAC (Owner/Admin/Member/Viewer)
+- **Team Vault** - Team password sharing with E2E encryption (ECDH-P256) and RBAC (Owner/Admin/Member/Viewer)
 - **Recovery Key** - 256-bit recovery key (HKDF + AES-256-GCM) with Base32 encoding and checksum; recover vault access without passphrase
 - **Vault Reset** - Last-resort full vault deletion with explicit confirmation ("DELETE MY VAULT")
 - **Account Lockout** - Progressive lockout (5→15min, 10→1h, 15→24h) with audit logging
@@ -67,7 +67,7 @@ SAML Jackson (Docker) ← SAML 2.0 IdP (HENNGE, Okta, Azure AD, etc.)
 
 **Personal vault** — All password data is encrypted **client-side** before being sent to the server. The server stores only ciphertext. Decryption happens exclusively in the browser using a key derived from the user's master passphrase.
 
-**Organization vault** — Shared passwords are encrypted **end-to-end (client-side)**. Organization key distribution uses ECDH-P256 member-key exchange.
+**Team vault** — Shared passwords are encrypted **end-to-end (client-side)**. Team key distribution uses ECDH-P256 member-key exchange.
 
 ## Getting Started
 
@@ -242,7 +242,7 @@ src/
 │   ├── passwords/            # Password CRUD + generation
 │   ├── tags/                 # Tag CRUD
 │   ├── vault/                # Setup, unlock, status, key rotation, recovery key, reset
-│   ├── orgs/                 # Organization management
+│   ├── teams/                # Team management API
 │   ├── share-links/          # Share link CRUD + access
 │   ├── audit-logs/           # Audit log queries
 │   ├── emergency-access/     # Emergency access workflows
@@ -300,8 +300,8 @@ extension/
 - **Session security** - Database sessions (not JWT), 8-hour timeout with 1-hour extension
 - **Auto-lock** - Vault locks after 15 min idle or 5 min tab hidden
 - **Clipboard clear** - Copied passwords auto-clear after 30 seconds
-- **Organization vault** - End-to-end encryption (ECDH-P256) with per-member key distribution
-- **RBAC** - Owner / Admin / Member / Viewer role-based access control for organizations
+- **Team vault** - End-to-end encryption (ECDH-P256) with per-member key distribution
+- **RBAC** - Owner / Admin / Member / Viewer role-based access control for teams
 - **Recovery Key** - 256-bit random → HKDF → AES-256-GCM wrap of secret key; server stores only HMAC(pepper, verifierHash)
 - **Vault Reset** - Last-resort full data deletion with fixed confirmation token
 - **Account lockout** - Progressive lockout (5→15min, 10→1h, 15→24h) with DB persistence and audit logging

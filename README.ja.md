@@ -242,7 +242,7 @@ src/
 │   ├── passwords/            # パスワード CRUD + 生成
 │   ├── tags/                 # タグ CRUD
 │   ├── vault/                # セットアップ、アンロック、ステータス、鍵ローテーション、回復キー、リセット
-│   ├── orgs/                 # 組織管理
+│   ├── teams/                # チーム管理API
 │   ├── share-links/          # 共有リンク CRUD + アクセス
 │   ├── audit-logs/           # 監査ログクエリ
 │   ├── emergency-access/     # 緊急アクセスワークフロー
