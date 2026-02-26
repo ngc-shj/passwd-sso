@@ -187,7 +187,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(409);
-    expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
+    expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
   });
 
   it("returns 409 when key already distributed (TOCTOU race)", async () => {

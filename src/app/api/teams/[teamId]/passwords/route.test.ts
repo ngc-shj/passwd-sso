@@ -356,7 +356,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     );
     expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
+    expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
   });
 
   it("returns 409 when team not found (Q-9)", async () => {
@@ -368,7 +368,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     );
     expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
+    expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
   });
 
   it("creates E2E entry with pre-encrypted blobs (201)", async () => {

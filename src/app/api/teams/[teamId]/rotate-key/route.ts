@@ -65,7 +65,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   });
 
   if (!team) {
-    return NextResponse.json({ error: API_ERROR.ORG_NOT_FOUND }, { status: 404 });
+    return NextResponse.json({ error: API_ERROR.TEAM_NOT_FOUND }, { status: 404 });
   }
 
   let body: unknown;
@@ -202,7 +202,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   } catch (e) {
     if (e instanceof Error && e.message === "ORG_KEY_VERSION_CONFLICT") {
       return NextResponse.json(
-        { error: API_ERROR.ORG_KEY_VERSION_MISMATCH },
+        { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
         { status: 409 }
       );
     }

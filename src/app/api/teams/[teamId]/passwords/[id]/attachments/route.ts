@@ -205,7 +205,7 @@ export async function POST(
   });
   if (!team || orgKeyVersion !== team.orgKeyVersion) {
     return NextResponse.json(
-      { error: API_ERROR.ORG_KEY_VERSION_MISMATCH },
+      { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
       { status: 409 }
     );
   }

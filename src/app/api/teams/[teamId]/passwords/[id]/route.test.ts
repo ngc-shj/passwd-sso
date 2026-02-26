@@ -318,7 +318,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     );
     expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
+    expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
   });
 
   it("returns 403 when MEMBER tries to update another's entry", async () => {

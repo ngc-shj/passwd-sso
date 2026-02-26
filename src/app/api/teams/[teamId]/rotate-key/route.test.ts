@@ -152,7 +152,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     );
     expect(res.status).toBe(404);
     const json = await res.json();
-    expect(json.error).toBe("ORG_NOT_FOUND");
+    expect(json.error).toBe("TEAM_NOT_FOUND");
   });
 
   it("returns 403 when user lacks permission", async () => {
@@ -223,7 +223,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(409);
-    expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
+    expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
   });
 
   it("rotates key successfully and logs audit (S-2)", async () => {

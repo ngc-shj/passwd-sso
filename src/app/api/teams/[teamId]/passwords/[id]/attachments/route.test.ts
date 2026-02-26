@@ -391,6 +391,6 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(409);
-    expect(json.error).toBe("ORG_KEY_VERSION_MISMATCH");
+    expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
   });
 });
