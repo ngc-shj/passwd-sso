@@ -108,7 +108,7 @@ model User {
   passwordShares       PasswordShare[]
   attachments          Attachment[]
 
-  // ECDH key pair for org E2E encryption
+  // ECDH key pair for team E2E encryption
   ecdhPublicKey           String? @map("ecdh_public_key") @db.Text
   encryptedEcdhPrivateKey String? @map("encrypted_ecdh_private_key") @db.Text
   ecdhPrivateKeyIv        String? @map("ecdh_private_key_iv") @db.VarChar(24)
@@ -300,7 +300,7 @@ model Team {
   description String? @db.Text
 
   // E2E encryption (ECDH-P256)
-  teamKeyVersion Int @default(1) @map("org_key_version")
+  teamKeyVersion Int @default(1) @map("team_key_version")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -375,9 +375,9 @@ model TeamMemberKey {
   id                 String   @id @default(cuid())
   teamId              String   @map("team_id")
   userId             String   @map("user_id")
-  encryptedTeamKey   String   @map("encrypted_org_key") @db.Text
-  teamKeyIv           String   @map("org_key_iv") @db.VarChar(24)
-  teamKeyAuthTag      String   @map("org_key_auth_tag") @db.VarChar(32)
+  encryptedTeamKey   String   @map("encrypted_team_key") @db.Text
+  teamKeyIv           String   @map("team_key_iv") @db.VarChar(24)
+  teamKeyAuthTag      String   @map("team_key_auth_tag") @db.VarChar(32)
   ephemeralPublicKey String   @map("ephemeral_public_key") @db.Text
   hkdfSalt           String   @map("hkdf_salt") @db.VarChar(64)
   wrapVersion        Int      @default(1) @map("wrap_version")
@@ -405,7 +405,7 @@ model TeamPasswordEntry {
   overviewIv        String    @map("overview_iv") @db.VarChar(24)
   overviewAuthTag   String    @map("overview_auth_tag") @db.VarChar(32)
   aadVersion        Int       @default(0) @map("aad_version")
-  teamKeyVersion     Int       @default(0) @map("org_key_version")
+  teamKeyVersion     Int       @default(0) @map("team_key_version")
   entryType         EntryType @default(LOGIN) @map("entry_type")
 
   // Metadata (unencrypted)
@@ -784,7 +784,7 @@ model TeamPasswordEntryHistory {
   blobIv        String   @map("blob_iv") @db.VarChar(24)
   blobAuthTag   String   @map("blob_auth_tag") @db.VarChar(32)
   aadVersion    Int      @default(0) @map("aad_version")
-  teamKeyVersion Int      @default(0) @map("org_key_version")
+  teamKeyVersion Int      @default(0) @map("team_key_version")
   changedById   String   @map("changed_by_id")
   changedAt     DateTime @default(now()) @map("changed_at")
 
