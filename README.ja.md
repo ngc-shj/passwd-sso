@@ -235,7 +235,7 @@ npm run build
 src/
 ├── app/[locale]/
 │   ├── page.tsx              # ランディング / サインイン
-│   ├── dashboard/            # 個人 Vault、組織 Vault、Watchtower 等
+│   ├── dashboard/            # 個人 Vault、チーム Vault、Watchtower 等
 │   └── auth/                 # 認証ページ
 ├── app/api/
 │   ├── auth/                 # Auth.js ハンドラー
@@ -252,7 +252,7 @@ src/
 ├── components/
 │   ├── layout/               # Header, Sidebar, SearchBar
 │   ├── passwords/            # PasswordList, PasswordForm, Generator、エントリタイプフォーム
-│   ├── org/                  # 組織 Vault UI（一覧、フォーム、設定、招待）
+│   ├── team/                 # チーム Vault UI（一覧、フォーム、設定、招待）
 │   ├── emergency-access/     # 緊急アクセス UI
 │   ├── share/                # 共有リンク UI
 │   ├── watchtower/           # セキュリティ監査ダッシュボード
@@ -266,10 +266,10 @@ src/
 │   ├── crypto-recovery.ts    # 回復キー暗号モジュール（HKDF + AES-256-GCM ラップ）
 │   ├── crypto-server.ts      # 共有リンク / Send 用サーバー暗号 + verifier HMAC
 │   ├── crypto-aad.ts         # 暗号化の追加認証データ（AAD）
-│   ├── crypto-org.ts         # 組織 E2E 暗号（ECDH-P256 鍵交換）
+│   ├── crypto-team.ts        # チーム E2E 暗号（ECDH-P256 鍵交換）
 │   ├── crypto-emergency.ts   # 緊急アクセス鍵交換
 │   ├── export-crypto.ts      # パスワード保護エクスポート暗号化
-│   ├── org-auth.ts           # 組織 RBAC 認可ヘルパー
+│   ├── team-auth.ts          # チーム RBAC 認可ヘルパー
 │   ├── audit.ts              # 監査ログヘルパー
 │   ├── vault-context.tsx     # Vault ロック/アンロック状態
 │   ├── password-generator.ts # サーバーサイド安全生成

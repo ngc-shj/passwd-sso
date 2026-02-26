@@ -15,9 +15,9 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Security Audit (Watchtower)** - Breached (HIBP), weak, reused, old, and HTTP-URL detection with security score
 - **Import / Export** - Bitwarden, 1Password, Chrome CSV import; CSV/JSON export profiles: compatible and passwd-sso (full-fidelity)
 - **Password-Protected Export** - AES-256-GCM encrypted exports with PBKDF2 (600k)
-- **Attachments** - Encrypted file attachments (personal and org E2E)
+- **Attachments** - Encrypted file attachments (personal and team E2E)
 - **Share Links** - Time-limited read-only sharing with access logs
-- **Audit Logs** - Personal and org audit logs with filters and export events
+- **Audit Logs** - Personal and team audit logs with filters and export events
 - **Emergency Access** - Request/approve temporary vault access with key exchange
 - **Session Management** - List active sessions and revoke single/all sessions
 - **Security Notifications** - Email notifications for emergency-access events
@@ -53,7 +53,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 
 ```
 Browser (Web Crypto API)
-  │  ← Personal & org vault: AES-256-GCM E2E encrypt/decrypt
+  │  ← Personal & team vault: AES-256-GCM E2E encrypt/decrypt
   ▼
 Next.js App (SSR / API Routes)
   │  ← Auth.js sessions, route protection, RBAC
@@ -235,7 +235,7 @@ Lifecycle scripts (not listed under `available via npm run`):
 src/
 ├── app/[locale]/
 │   ├── page.tsx              # Landing / Sign-in
-│   ├── dashboard/            # Personal vault, org vault, watchtower, etc.
+│   ├── dashboard/            # Personal vault, team vault, watchtower, etc.
 │   └── auth/                 # Auth pages
 ├── app/api/
 │   ├── auth/                 # Auth.js handlers
@@ -252,7 +252,7 @@ src/
 ├── components/
 │   ├── layout/               # Header, Sidebar, SearchBar
 │   ├── passwords/            # PasswordList, PasswordForm, Generator, entry type forms
-│   ├── org/                  # Org vault UI (list, form, settings, invitations)
+│   ├── team/                 # Team vault UI (list, form, settings, invitations)
 │   ├── emergency-access/     # Emergency access UI
 │   ├── share/                # Share link UI
 │   ├── watchtower/           # Security audit dashboard
@@ -266,10 +266,10 @@ src/
 │   ├── crypto-recovery.ts    # Recovery Key crypto (HKDF + AES-256-GCM wrap)
 │   ├── crypto-server.ts      # Server-side crypto for share links/sends + verifier HMAC
 │   ├── crypto-aad.ts         # Additional Authenticated Data for encryption
-│   ├── crypto-org.ts         # Org E2E cryptography (ECDH-P256 key exchange)
+│   ├── crypto-team.ts        # Team E2E cryptography (ECDH-P256 key exchange)
 │   ├── crypto-emergency.ts   # Emergency access key exchange
 │   ├── export-crypto.ts      # Password-protected export encryption
-│   ├── org-auth.ts           # Org RBAC authorization helpers
+│   ├── team-auth.ts          # Team RBAC authorization helpers
 │   ├── audit.ts              # Audit log helpers
 │   ├── vault-context.tsx     # Vault lock/unlock state
 │   ├── password-generator.ts # Server-side secure generation
