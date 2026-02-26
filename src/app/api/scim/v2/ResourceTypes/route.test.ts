@@ -24,7 +24,7 @@ describe("GET /api/scim/v2/ResourceTypes", () => {
     vi.clearAllMocks();
     mockValidateScimToken.mockResolvedValue({
       ok: true,
-      data: { tokenId: "t1", teamId: "org-1", orgId: "org-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
+      data: { tokenId: "t1", teamId: "team-1", orgId: "team-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
     });
     mockCheckScimRateLimit.mockResolvedValue(true);
   });

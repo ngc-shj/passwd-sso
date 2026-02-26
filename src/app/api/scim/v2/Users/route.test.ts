@@ -42,7 +42,7 @@ import { GET, POST } from "./route";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
-  data: { tokenId: "t1", teamId: "org-1", orgId: "org-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
+  data: { tokenId: "t1", teamId: "team-1", orgId: "team-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
 };
 
 function makeReq(
@@ -79,7 +79,7 @@ describe("GET /api/scim/v2/Users", () => {
     mockOrgMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
-        orgId: "org-1",
+        orgId: "team-1",
         deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       },
@@ -175,7 +175,7 @@ describe("GET /api/scim/v2/Users", () => {
     mockOrgMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
-        orgId: "org-1",
+        orgId: "team-1",
         deactivatedAt: null,
         user: { id: "user-1", email: "a@example.com", name: "A" },
       },
@@ -229,7 +229,7 @@ describe("GET /api/scim/v2/Users", () => {
     mockOrgMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
-        orgId: "org-1",
+        orgId: "team-1",
         deactivatedAt: null,
         user: { id: "user-1", email: "ext@example.com", name: "Ext" },
       },

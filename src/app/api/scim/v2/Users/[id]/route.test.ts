@@ -45,7 +45,7 @@ import { GET, PUT, PATCH, DELETE } from "./route";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
-  data: { tokenId: "t1", teamId: "org-1", orgId: "org-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
+  data: { tokenId: "t1", teamId: "team-1", orgId: "team-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
 };
 
 function makeParams(id: string) {
@@ -82,7 +82,7 @@ describe("GET /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce(null) // resolveUserId direct lookup
       .mockResolvedValueOnce({ // fetchUserResource
         userId: "internal-1",
-        orgId: "org-1",
+        orgId: "team-1",
         deactivatedAt: null,
         user: { id: "internal-1", email: "ext@example.com", name: "Ext User" },
       });
@@ -112,7 +112,7 @@ describe("GET /api/scim/v2/Users/[id]", () => {
   it("returns user resource when found via direct userId", async () => {
     mockOrgMember.findUnique.mockResolvedValue({
       userId: "user-1",
-      orgId: "org-1",
+      orgId: "team-1",
       deactivatedAt: null,
       role: "MEMBER",
       user: { id: "user-1", email: "test@example.com", name: "Test" },
@@ -253,7 +253,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // role check
       .mockResolvedValueOnce({ // fetchUserResource
         userId: "user-1",
-        orgId: "org-1",
+        orgId: "team-1",
         deactivatedAt: new Date(),
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
@@ -287,7 +287,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // active → deactivate
       .mockResolvedValueOnce({ // fetchUserResource
-        userId: "user-1", orgId: "org-1", deactivatedAt: new Date(),
+        userId: "user-1", orgId: "team-1", deactivatedAt: new Date(),
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
     mockOrgMember.update.mockResolvedValue({});
@@ -314,7 +314,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: new Date("2024-01-01") }) // deactivated → reactivate
       .mockResolvedValueOnce({ // fetchUserResource
-        userId: "user-1", orgId: "org-1", deactivatedAt: null,
+        userId: "user-1", orgId: "team-1", deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
     mockOrgMember.update.mockResolvedValue({});
@@ -342,7 +342,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: new Date("2024-01-01"), userId: "user-1" }) // role check
       .mockResolvedValueOnce({ // fetchUserResource
         userId: "user-1",
-        orgId: "org-1",
+        orgId: "team-1",
         deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
@@ -374,7 +374,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // role check
       .mockResolvedValueOnce({ // fetchUserResource
         userId: "user-1",
-        orgId: "org-1",
+        orgId: "team-1",
         deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Old Name" },
       });
@@ -417,7 +417,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // role check
       .mockResolvedValueOnce({ // fetchUserResource
         userId: "user-1",
-        orgId: "org-1",
+        orgId: "team-1",
         deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
@@ -463,7 +463,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // member lookup
       .mockResolvedValueOnce({ // fetchUserResource
         userId: "user-1",
-        orgId: "org-1",
+        orgId: "team-1",
         deactivatedAt: new Date(),
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
@@ -531,7 +531,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: new Date("2024-01-01") }) // member lookup
       .mockResolvedValueOnce({ // fetchUserResource
         userId: "user-1",
-        orgId: "org-1",
+        orgId: "team-1",
         deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
@@ -568,7 +568,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // member lookup
       .mockResolvedValueOnce({ // fetchUserResource
         userId: "user-1",
-        orgId: "org-1",
+        orgId: "team-1",
         deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
@@ -736,7 +736,7 @@ describe("PUT /api/scim/v2/Users/[id] — externalId change", () => {
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // role check
       .mockResolvedValueOnce({ // fetchUserResource
-        userId: "user-1", orgId: "org-1", deactivatedAt: null,
+        userId: "user-1", orgId: "team-1", deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
     mockOrgMember.update.mockResolvedValue({});
