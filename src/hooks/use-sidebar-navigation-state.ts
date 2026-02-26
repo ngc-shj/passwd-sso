@@ -16,23 +16,32 @@ interface UseSidebarNavigationStateParams {
   pathname: string;
   searchParams: URLSearchParams;
   vaultContext: VaultContext;
-  orgs: SidebarOrgItem[];
+  teams?: SidebarOrgItem[];
+  orgs?: SidebarOrgItem[];
   folders: SidebarFolderItem[];
   tags: SidebarTagItem[];
-  orgFolderGroups: SidebarOrgFolderGroup[];
-  orgTagGroups: SidebarOrgTagGroup[];
+  teamFolderGroups?: SidebarOrgFolderGroup[];
+  orgFolderGroups?: SidebarOrgFolderGroup[];
+  teamTagGroups?: SidebarOrgTagGroup[];
+  orgTagGroups?: SidebarOrgTagGroup[];
 }
 
 export function useSidebarNavigationState({
   pathname,
   searchParams,
   vaultContext,
+  teams,
   orgs,
   folders,
   tags,
+  teamFolderGroups,
   orgFolderGroups,
+  teamTagGroups,
   orgTagGroups,
 }: UseSidebarNavigationStateParams) {
+  const teamItems = teams ?? orgs ?? [];
+  const scopedFolderGroups = teamFolderGroups ?? orgFolderGroups ?? [];
+  const scopedTagGroups = teamTagGroups ?? orgTagGroups ?? [];
   return useMemo(() => {
     const cleanPath = stripLocalePrefix(pathname);
 
@@ -63,12 +72,12 @@ export function useSidebarNavigationState({
       cleanPath.startsWith("/dashboard/emergency-access/");
 
     const selectedOrgId = vaultContext.type === "org" ? vaultContext.orgId : null;
-    const selectedOrg = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId) ?? null : null;
+    const selectedOrg = selectedOrgId ? teamItems.find((org) => org.id === selectedOrgId) ?? null : null;
     const selectedOrgFolderGroup = selectedOrgId
-      ? orgFolderGroups.find((group) => group.orgId === selectedOrgId)
+      ? scopedFolderGroups.find((group) => group.orgId === selectedOrgId)
       : null;
     const selectedOrgTagGroup = selectedOrgId
-      ? orgTagGroups.find((group) => group.orgId === selectedOrgId)
+      ? scopedTagGroups.find((group) => group.orgId === selectedOrgId)
       : null;
 
     const selectedOrgCanManageFolders = selectedOrg
@@ -156,5 +165,5 @@ export function useSidebarNavigationState({
       selectedFolders,
       selectedTags,
     };
-  }, [pathname, searchParams, vaultContext, orgs, folders, tags, orgFolderGroups, orgTagGroups]);
+  }, [pathname, searchParams, vaultContext, teamItems, folders, tags, scopedFolderGroups, scopedTagGroups]);
 }
