@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { Settings } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { SessionsCard } from "@/components/sessions/sessions-card";
+import { ScimProvisioningCard } from "@/components/settings/scim-provisioning-card";
 
 export default function SettingsPage() {
   const t = useTranslations("Sessions");
@@ -24,6 +25,7 @@ export default function SettingsPage() {
         </Card>
 
         <SessionsCard />
+        <ScimProvisioningCard />
       </div>
     </div>
   );

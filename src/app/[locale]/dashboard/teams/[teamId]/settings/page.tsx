@@ -597,18 +597,6 @@ export default function TeamSettingsPage({
           </>
         )}
 
-        {/* SCIM is tenant-scoped, not team-scoped */}
-        {(isOwner || team.role === TEAM_ROLE.ADMIN) && (
-          <Card className="rounded-xl border bg-card/80 p-4">
-            <section className="space-y-2">
-              <h2 className="text-lg font-semibold">{t("scimTitle")}</h2>
-              <p className="text-sm text-muted-foreground">
-                SCIM provisioning is managed at Tenant Settings, not Team Settings.
-              </p>
-            </section>
-          </Card>
-        )}
-
         {/* Delete team */}
         {isOwner && (
           <Card className="rounded-xl border border-destructive/30 p-4">
