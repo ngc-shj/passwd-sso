@@ -21,12 +21,12 @@ import { API_PATH } from "@/lib/constants";
 import { useVault } from "@/lib/vault-context";
 import { generateOrgSymmetricKey, createOrgKeyEscrow } from "@/lib/crypto-org";
 
-interface OrgCreateDialogProps {
+interface TeamCreateDialogProps {
   trigger: React.ReactNode;
   onCreated: () => void;
 }
 
-export function OrgCreateDialog({ trigger, onCreated }: OrgCreateDialogProps) {
+export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) {
   const t = useTranslations("Team");
   const { status, userId, getEcdhPublicKeyJwk } = useVault();
   const [open, setOpen] = useState(false);
@@ -68,17 +68,17 @@ export function OrgCreateDialog({ trigger, onCreated }: OrgCreateDialogProps) {
         throw new Error("ECDH key not available");
       }
 
-      // Generate org ID client-side (needed for AAD in key escrow)
-      const orgId = crypto.randomUUID();
+      // Generate team ID client-side (needed for AAD in key escrow)
+      const teamId = crypto.randomUUID();
 
-      // Generate org symmetric key and wrap it for the owner
+      // Generate team symmetric key and wrap it for the owner
       const orgKey = generateOrgSymmetricKey();
       let escrow;
       try {
         escrow = await createOrgKeyEscrow(
           orgKey,
           ecdhPublicKeyJwk,
-          orgId,
+          teamId,
           userId!,
           1
         );
@@ -90,7 +90,7 @@ export function OrgCreateDialog({ trigger, onCreated }: OrgCreateDialogProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: orgId,
+          id: teamId,
           name: name.trim(),
           slug: slug.trim(),
           description: description.trim() || undefined,
@@ -146,9 +146,9 @@ export function OrgCreateDialog({ trigger, onCreated }: OrgCreateDialogProps) {
         <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="org-name">{t("orgName")}</Label>
+              <Label htmlFor="team-name">{t("orgName")}</Label>
               <Input
-                id="org-name"
+                id="team-name"
                 value={name}
                 onChange={(e) => handleNameChange(e.target.value)}
                 placeholder={t("orgNamePlaceholder")}
@@ -156,9 +156,9 @@ export function OrgCreateDialog({ trigger, onCreated }: OrgCreateDialogProps) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="org-slug">{t("slug")}</Label>
+              <Label htmlFor="team-slug">{t("slug")}</Label>
               <Input
-                id="org-slug"
+                id="team-slug"
                 value={slug}
                 onChange={(e) => {
                   setSlug(e.target.value);
@@ -174,9 +174,9 @@ export function OrgCreateDialog({ trigger, onCreated }: OrgCreateDialogProps) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="org-desc">{t("description")}</Label>
+            <Label htmlFor="team-desc">{t("description")}</Label>
             <Textarea
-              id="org-desc"
+              id="team-desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t("descriptionPlaceholder")}
