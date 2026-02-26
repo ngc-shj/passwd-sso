@@ -8,7 +8,7 @@ import { CopyButton } from "./copy-button";
 import { Favicon } from "./favicon";
 import { TOTPField, type TOTPEntry } from "./totp-field";
 import { AttachmentSection, type AttachmentMeta } from "./attachment-section";
-import { OrgAttachmentSection, type OrgAttachmentMeta } from "@/components/team/team-attachment-section";
+import { TeamAttachmentSection, type TeamAttachmentMeta } from "@/components/team/team-attachment-section";
 import { EntryHistorySection } from "./entry-history-section";
 import { formatCardNumber } from "@/lib/credit-card";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
@@ -78,7 +78,7 @@ interface PasswordDetailInlineProps {
 const REVEAL_TIMEOUT = 30_000;
 
 export function PasswordDetailInline({ data, onEdit, onRefresh, orgId, teamId }: PasswordDetailInlineProps) {
-  const scopedId = teamId ?? orgId;
+  const scopedTeamId = teamId ?? orgId;
   const t = useTranslations("PasswordDetail");
   const tc = useTranslations("Common");
   const locale = useLocale();
@@ -99,20 +99,20 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, orgId, teamId }:
 
   // Attachment state
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
-  const [orgAttachments, setOrgAttachments] = useState<OrgAttachmentMeta[]>([]);
+  const [teamAttachments, setTeamAttachments] = useState<TeamAttachmentMeta[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     async function loadAttachments() {
       try {
-        const url = scopedId
-          ? apiPath.teamPasswordAttachments(scopedId, data.id)
+        const url = scopedTeamId
+          ? apiPath.teamPasswordAttachments(scopedTeamId, data.id)
           : apiPath.passwordAttachments(data.id);
         const res = await fetch(url);
         if (res.ok && !cancelled) {
           const loaded = await res.json();
-          if (scopedId) {
-            setOrgAttachments(loaded);
+          if (scopedTeamId) {
+            setTeamAttachments(loaded);
           } else {
             setAttachments(loaded);
           }
@@ -123,7 +123,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, orgId, teamId }:
     }
     loadAttachments();
     return () => { cancelled = true; };
-  }, [data.id, scopedId]);
+  }, [data.id, scopedTeamId]);
 
   const handleReveal = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
@@ -713,18 +713,20 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, orgId, teamId }:
       {/* Entry History (full blob snapshots) */}
       <EntryHistorySection
         entryId={data.id}
-        orgId={scopedId}
+        teamId={scopedTeamId}
+        orgId={scopedTeamId}
         requireReprompt={data.requireReprompt ?? false}
         onRestore={onRefresh}
       />
 
       {/* Attachments */}
-      {scopedId ? (
-        <OrgAttachmentSection
-          orgId={scopedId}
+      {scopedTeamId ? (
+        <TeamAttachmentSection
+          teamId={scopedTeamId}
+          orgId={scopedTeamId}
           entryId={data.id}
-          attachments={orgAttachments}
-          onAttachmentsChange={setOrgAttachments}
+          attachments={teamAttachments}
+          onAttachmentsChange={setTeamAttachments}
           readOnly={!onEdit}
         />
       ) : (
