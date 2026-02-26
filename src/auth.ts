@@ -56,14 +56,60 @@ async function ensureTenantMembershipForSignIn(
 
     if (!found) return null;
 
-    const existingMembership = await prisma.tenantMember.findFirst({
+    const existingMemberships = await prisma.tenantMember.findMany({
       where: { userId },
       select: { tenantId: true },
+      take: 2,
     });
+    const existingMembership = existingMemberships[0] ?? null;
 
     // Single-tenant sign-in policy: reject cross-tenant login.
     if (existingMembership && existingMembership.tenantId !== found.id) {
-      return null;
+      const isBootstrapTenant = existingMembership.tenantId.startsWith("tenant_usr_");
+      // Allow one-time migration from bootstrap tenant to IdP tenant.
+      if (isBootstrapTenant && existingMemberships.length === 1) {
+        await prisma.$transaction(async (tx) => {
+          await tx.user.update({
+            where: { id: userId },
+            data: { tenantId: found.id },
+          });
+
+          await tx.account.updateMany({
+            where: { userId },
+            data: { tenantId: found.id },
+          });
+
+          await tx.tenantMember.upsert({
+            where: {
+              tenantId_userId: {
+                tenantId: found.id,
+                userId,
+              },
+            },
+            create: {
+              tenantId: found.id,
+              userId,
+              role: "MEMBER",
+            },
+            update: {},
+          });
+
+          await tx.tenantMember.deleteMany({
+            where: { userId, tenantId: existingMembership.tenantId },
+          });
+
+          const stillReferenced = await Promise.all([
+            tx.user.count({ where: { tenantId: existingMembership.tenantId } }),
+            tx.team.count({ where: { tenantId: existingMembership.tenantId } }),
+            tx.tenantMember.count({ where: { tenantId: existingMembership.tenantId } }),
+          ]);
+          if (stillReferenced.every((n) => n === 0)) {
+            await tx.tenant.delete({ where: { id: existingMembership.tenantId } });
+          }
+        });
+      } else {
+        return null;
+      }
     }
 
     await prisma.tenantMember.upsert({
