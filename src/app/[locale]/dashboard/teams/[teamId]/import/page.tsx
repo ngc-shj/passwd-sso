@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { OrgImportPagePanel } from "@/components/passwords/password-import";
 
 export default function OrgImportPage() {
-  const params = useParams<{ orgId: string }>();
+  const params = useParams<{ teamId: string }>();
   const router = useRouter();
 
   const handleComplete = useCallback(() => {
@@ -15,7 +15,7 @@ export default function OrgImportPage() {
 
   return (
     <OrgImportPagePanel
-      orgId={params.orgId}
+      teamId={params.teamId}
       onComplete={handleComplete}
     />
   );

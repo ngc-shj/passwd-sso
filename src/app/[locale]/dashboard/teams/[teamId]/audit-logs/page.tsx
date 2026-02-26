@@ -106,9 +106,9 @@ const ACTION_GROUPS = [
 export default function OrgAuditLogsPage({
   params,
 }: {
-  params: Promise<{ orgId: string }>;
+  params: Promise<{ teamId: string }>;
 }) {
-  const { orgId: teamId } = use(params);
+  const { teamId } = use(params);
   const t = useTranslations("AuditLog");
   const locale = useLocale();
   const [logs, setLogs] = useState<OrgAuditLogItem[]>([]);

@@ -37,7 +37,7 @@ describe("useVaultContext", () => {
   });
 
   it("returns org context for org dashboard path", () => {
-    mockPathname = "/dashboard/orgs/org-1";
+    mockPathname = "/dashboard/teams/org-1";
 
     const { result } = renderHook(() =>
       useVaultContext([{ id: "org-1", name: "Security", role: "ADMIN" }])
@@ -106,7 +106,7 @@ describe("useVaultContext", () => {
   });
 
   it("persists org context when visiting org page", () => {
-    mockPathname = "/dashboard/orgs/org-2";
+    mockPathname = "/dashboard/teams/org-2";
     mockLastContext = "personal";
 
     renderHook(() =>

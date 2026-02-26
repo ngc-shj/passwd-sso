@@ -86,7 +86,7 @@ export default function OrgsPage() {
             {orgs.map((org) => (
               <Link
                 key={org.id}
-                href={`/dashboard/orgs/${org.id}`}
+                href={`/dashboard/teams/${org.id}`}
                 className="group block rounded-xl border bg-card/80 p-4 transition-colors hover:bg-accent"
               >
                 <div className="mb-2 flex items-start justify-between gap-2">

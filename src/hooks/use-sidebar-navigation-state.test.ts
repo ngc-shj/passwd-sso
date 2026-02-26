@@ -55,7 +55,7 @@ describe("useSidebarNavigationState", () => {
   it("derives org navigation state and scope-specific flags", () => {
     const { result } = renderHook(() =>
       useSidebarNavigationState({
-        pathname: "/ja/dashboard/orgs/org-1",
+        pathname: "/ja/dashboard/teams/org-1",
         searchParams: new URLSearchParams("scope=favorites&type=LOGIN&tag=ot1&folder=of1"),
         vaultContext: { type: "org", orgId: "org-1" },
         orgs,
@@ -83,7 +83,7 @@ describe("useSidebarNavigationState", () => {
   it("detects org audit log path separately", () => {
     const { result } = renderHook(() =>
       useSidebarNavigationState({
-        pathname: "/ja/dashboard/orgs/org-1/audit-logs",
+        pathname: "/ja/dashboard/teams/org-1/audit-logs",
         searchParams: new URLSearchParams(),
         vaultContext: { type: "org", orgId: "org-1" },
         orgs,
@@ -102,7 +102,7 @@ describe("useSidebarNavigationState", () => {
   it("allows MEMBER to manage folders and tags in org context", () => {
     const { result } = renderHook(() =>
       useSidebarNavigationState({
-        pathname: "/ja/dashboard/orgs/org-1",
+        pathname: "/ja/dashboard/teams/org-1",
         searchParams: new URLSearchParams(),
         vaultContext: { type: "org", orgId: "org-1" },
         orgs: [{ id: "org-1", name: "Acme", slug: "acme", role: "MEMBER" }],
@@ -120,7 +120,7 @@ describe("useSidebarNavigationState", () => {
   it("includes zero-count org tags", () => {
     const { result } = renderHook(() =>
       useSidebarNavigationState({
-        pathname: "/ja/dashboard/orgs/org-1",
+        pathname: "/ja/dashboard/teams/org-1",
         searchParams: new URLSearchParams(),
         vaultContext: { type: "org", orgId: "org-1" },
         orgs,

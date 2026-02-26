@@ -56,7 +56,7 @@ export function useSidebarNavigationState({
     const activeOrgFolderId = activeOrgId ? searchParams.get("folder") : null;
     const activeOrgTypeFilter = activeOrgId ? searchParams.get("type") : null;
     const activeOrgScope = activeOrgId ? searchParams.get("scope") : null;
-    const isOrgsManage = cleanPath === "/dashboard/orgs";
+    const isOrgsManage = cleanPath === "/dashboard/teams";
     const isShareLinks = cleanPath === "/dashboard/share-links";
     const isEmergencyAccess =
       cleanPath === "/dashboard/emergency-access" ||

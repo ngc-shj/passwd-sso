@@ -59,7 +59,7 @@ describe("UtilitiesSection", () => {
 
     expect(screen.getByRole("link", { name: "orgSettings" })).toHaveAttribute(
       "href",
-      "/dashboard/orgs/org-1/settings"
+      "/dashboard/teams/org-1/settings"
     );
   });
 
@@ -96,7 +96,7 @@ describe("UtilitiesSection", () => {
     );
     expect(screen.getByRole("link", { name: "orgSettings" })).toHaveAttribute(
       "href",
-      "/dashboard/orgs"
+      "/dashboard/teams"
     );
   });
 
@@ -129,11 +129,11 @@ describe("UtilitiesSection", () => {
 
     expect(screen.getByRole("link", { name: "export" })).toHaveAttribute(
       "href",
-      "/dashboard/orgs/org-1/export"
+      "/dashboard/teams/org-1/export"
     );
     expect(screen.getByRole("link", { name: "import" })).toHaveAttribute(
       "href",
-      "/dashboard/orgs/org-1/import"
+      "/dashboard/teams/org-1/import"
     );
   });
 });

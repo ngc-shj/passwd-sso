@@ -78,7 +78,7 @@ export default function AcceptInvitePage({
             role: result.role,
           })}
         </p>
-        <Button onClick={() => router.push(`/dashboard/orgs/${result.org.id}`)}>
+        <Button onClick={() => router.push(`/dashboard/teams/${result.org.id}`)}>
           {result.org.name}
         </Button>
       </div>

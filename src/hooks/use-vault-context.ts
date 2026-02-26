@@ -19,7 +19,7 @@ const CROSS_VAULT_PATHS = [
   "/dashboard/watchtower",
   "/dashboard/share-links",
   "/dashboard/emergency-access",
-  "/dashboard/orgs",
+  "/dashboard/teams",
 ] as const;
 
 function isPersonalVaultPath(path: string): boolean {

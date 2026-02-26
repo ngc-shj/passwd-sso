@@ -11,7 +11,7 @@ describe("audit log page group values", () => {
     const orgPage = readFileSync(
       join(
         process.cwd(),
-        "src/app/[locale]/dashboard/orgs/[orgId]/audit-logs/page.tsx"
+        "src/app/[locale]/dashboard/teams/[teamId]/audit-logs/page.tsx"
       ),
       "utf8"
     );

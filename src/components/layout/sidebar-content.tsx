@@ -120,7 +120,7 @@ export function SidebarContent({
         activeFolderId={selectedFolderId}
         linkHref={(id) =>
           vaultContext.type === "org"
-            ? `/dashboard/orgs/${vaultContext.orgId}?folder=${id}`
+            ? `/dashboard/teams/${vaultContext.orgId}?folder=${id}`
             : `/dashboard/folders/${id}`
         }
         showFolderMenu={vaultContext.type === "org" ? selectedOrgCanManageFolders : true}
@@ -128,7 +128,7 @@ export function SidebarContent({
         activeTagId={selectedTagId}
         tagHref={(id) =>
           vaultContext.type === "org"
-            ? `/dashboard/orgs/${vaultContext.orgId}?tag=${id}`
+            ? `/dashboard/teams/${vaultContext.orgId}?tag=${id}`
             : `/dashboard/tags/${id}`
         }
         onCreateFolder={() =>

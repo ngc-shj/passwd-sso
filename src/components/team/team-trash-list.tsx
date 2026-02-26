@@ -43,17 +43,20 @@ interface OrgTrashEntry {
 
 interface OrgTrashListProps {
   orgId?: string;
+  teamId?: string;
   searchQuery?: string;
   refreshKey: number;
   sortBy?: EntrySortOption;
 }
 
 export function OrgTrashList({
-  orgId,
+  orgId: _orgId,
+  teamId: _teamId,
   searchQuery = "",
   refreshKey,
   sortBy = "updatedAt",
 }: OrgTrashListProps) {
+  const scopedId = _teamId ?? _orgId;
   const t = useTranslations("Trash");
   const tOrg = useTranslations("Team");
   const { getOrgEncryptionKey } = useOrgVault();
@@ -166,7 +169,7 @@ export function OrgTrashList({
   };
 
   const filtered = entries.filter((entry) => {
-    if (orgId && entry.orgId !== orgId) return false;
+    if (scopedId && entry.orgId !== scopedId) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -189,7 +192,7 @@ export function OrgTrashList({
 
   return (
     <div className="mt-6">
-      {!orgId && (
+      {!scopedId && (
         <div className="mb-3 flex items-center gap-2">
           <Building2 className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-medium text-muted-foreground">

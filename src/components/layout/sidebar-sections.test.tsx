@@ -76,10 +76,10 @@ describe("VaultSection", () => {
       />
     );
 
-    expect(screen.getByRole("link", { name: "passwords" })).toHaveAttribute("href", "/dashboard/orgs/org-1");
+    expect(screen.getByRole("link", { name: "passwords" })).toHaveAttribute("href", "/dashboard/teams/org-1");
     expect(screen.getByRole("link", { name: "favorites" })).toHaveAttribute(
       "href",
-      "/dashboard/orgs/org-1?scope=favorites"
+      "/dashboard/teams/org-1?scope=favorites"
     );
   });
 });
@@ -118,7 +118,7 @@ describe("CategoriesSection", () => {
 
     expect(screen.getByRole("link", { name: "catLogin" })).toHaveAttribute(
       "href",
-      "/dashboard/orgs/org-1?type=LOGIN"
+      "/dashboard/teams/org-1?type=LOGIN"
     );
   });
 });
@@ -158,10 +158,10 @@ describe("VaultManagementSection", () => {
       />
     );
 
-    expect(screen.getByRole("link", { name: "archive" })).toHaveAttribute("href", "/dashboard/orgs/org-1?scope=archive");
-    expect(screen.getByRole("link", { name: "trash" })).toHaveAttribute("href", "/dashboard/orgs/org-1?scope=trash");
+    expect(screen.getByRole("link", { name: "archive" })).toHaveAttribute("href", "/dashboard/teams/org-1?scope=archive");
+    expect(screen.getByRole("link", { name: "trash" })).toHaveAttribute("href", "/dashboard/teams/org-1?scope=trash");
     expect(screen.getByRole("link", { name: "shareLinks" })).toHaveAttribute("href", "/dashboard/share-links?org=org-1");
-    expect(screen.getByRole("link", { name: "auditLog" })).toHaveAttribute("href", "/dashboard/orgs/org-1/audit-logs");
+    expect(screen.getByRole("link", { name: "auditLog" })).toHaveAttribute("href", "/dashboard/teams/org-1/audit-logs");
   });
 });
 

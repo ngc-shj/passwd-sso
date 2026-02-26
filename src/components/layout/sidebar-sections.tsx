@@ -55,14 +55,14 @@ export function VaultSection({
   return (
     <div className="space-y-1">
       <Button variant={isSelectedVaultAll ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-        <Link href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}` : "/dashboard"} onClick={onNavigate}>
+        <Link href={isOrg ? `/dashboard/teams/${vaultContext.orgId}` : "/dashboard"} onClick={onNavigate}>
           <KeyRound className="h-4 w-4" />
           {t("passwords")}
         </Link>
       </Button>
       <Button variant={isSelectedVaultFavorites ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
         <Link
-          href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=favorites` : "/dashboard/favorites"}
+          href={isOrg ? `/dashboard/teams/${vaultContext.orgId}?scope=favorites` : "/dashboard/favorites"}
           onClick={onNavigate}
         >
           <Star className="h-4 w-4" />
@@ -107,7 +107,7 @@ export function CategoriesSection({
             const Icon = category.icon;
             const href =
               vaultContext.type === "org"
-                ? `/dashboard/orgs/${vaultContext.orgId}?type=${category.type}`
+                ? `/dashboard/teams/${vaultContext.orgId}?type=${category.type}`
                 : `/dashboard?type=${category.type}`;
             return (
               <Button
@@ -312,7 +312,7 @@ export function VaultManagementSection({
     ? `/dashboard/share-links?org=${encodeURIComponent(vaultContext.orgId)}`
     : "/dashboard/share-links";
   const auditLogHref = isOrg
-    ? `/dashboard/orgs/${vaultContext.orgId}/audit-logs`
+    ? `/dashboard/teams/${vaultContext.orgId}/audit-logs`
     : "/dashboard/audit-logs";
   const isAuditActive = isOrg
     ? activeAuditOrgId === vaultContext.orgId
@@ -326,7 +326,7 @@ export function VaultManagementSection({
         asChild
       >
         <Link
-          href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=archive` : "/dashboard/archive"}
+          href={isOrg ? `/dashboard/teams/${vaultContext.orgId}?scope=archive` : "/dashboard/archive"}
           onClick={onNavigate}
         >
           <Archive className="h-4 w-4" />
@@ -339,7 +339,7 @@ export function VaultManagementSection({
         asChild
       >
         <Link
-          href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=trash` : "/dashboard/trash"}
+          href={isOrg ? `/dashboard/teams/${vaultContext.orgId}?scope=trash` : "/dashboard/trash"}
           onClick={onNavigate}
         >
           <Trash2 className="h-4 w-4" />

@@ -70,9 +70,9 @@ interface Invitation {
 export default function OrgSettingsPage({
   params,
 }: {
-  params: Promise<{ orgId: string }>;
+  params: Promise<{ teamId: string }>;
 }) {
-  const { orgId: teamId } = use(params);
+  const { teamId } = use(params);
   const t = useTranslations("Team");
   const locale = useLocale();
   const router = useRouter();
@@ -165,7 +165,7 @@ export default function OrgSettingsPage({
       if (!res.ok) throw new Error("Failed");
       toast.success(t("deleted"));
       window.dispatchEvent(new CustomEvent("org-data-changed"));
-      router.push("/dashboard/orgs");
+      router.push("/dashboard/teams");
     } catch {
       toast.error(t("deleteFailed"));
     }
@@ -192,7 +192,7 @@ export default function OrgSettingsPage({
       }
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
-      const inviteUrl = `${window.location.origin}/dashboard/orgs/invite/${data.token}`;
+      const inviteUrl = `${window.location.origin}/dashboard/teams/invite/${data.token}`;
       await navigator.clipboard.writeText(inviteUrl);
       toast.success(t("invitedWithLink"));
       setInvEmail("");
@@ -272,7 +272,7 @@ export default function OrgSettingsPage({
                   {t("noOrgsDesc")}
                 </p>
                 <Button variant="ghost" asChild>
-                  <Link href="/dashboard/orgs">
+                  <Link href="/dashboard/teams">
                     {t("manage")}
                   </Link>
                 </Button>
@@ -578,7 +578,7 @@ export default function OrgSettingsPage({
                         <OrgRoleBadge role={inv.role} />
                         <CopyButton
                           getValue={() =>
-                            `${window.location.origin}/dashboard/orgs/invite/${inv.token}`
+                            `${window.location.origin}/dashboard/teams/invite/${inv.token}`
                           }
                         />
                         <Button

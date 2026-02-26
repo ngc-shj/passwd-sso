@@ -86,10 +86,10 @@ export function UtilitiesSection({
   onNavigate,
 }: UtilitiesSectionProps) {
   const exportHref = selectedOrg
-    ? `/dashboard/orgs/${selectedOrg.id}/export`
+    ? `/dashboard/teams/${selectedOrg.id}/export`
     : "/dashboard/export";
   const importHref = selectedOrg
-    ? `/dashboard/orgs/${selectedOrg.id}/import`
+    ? `/dashboard/teams/${selectedOrg.id}/import`
     : "/dashboard/import";
 
   return (
@@ -100,7 +100,7 @@ export function UtilitiesSection({
           {selectedOrg &&
             (selectedOrg.role === ORG_ROLE.OWNER || selectedOrg.role === ORG_ROLE.ADMIN) ? (
             <Button variant="ghost" className="w-full justify-start gap-2" asChild>
-              <Link href={`/dashboard/orgs/${selectedOrg.id}/settings`} onClick={onNavigate}>
+              <Link href={`/dashboard/teams/${selectedOrg.id}/settings`} onClick={onNavigate}>
                 <Settings className="h-4 w-4" />
                 {tOrg("orgSettings")}
               </Link>
@@ -114,7 +114,7 @@ export function UtilitiesSection({
                 </Link>
               </Button>
               <Button variant="ghost" className="w-full justify-start gap-2" asChild>
-                <Link href="/dashboard/orgs" onClick={onNavigate}>
+                <Link href="/dashboard/teams" onClick={onNavigate}>
                   <Settings className="h-4 w-4" />
                   {tOrg("orgSettings")}
                 </Link>

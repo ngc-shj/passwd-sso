@@ -60,7 +60,7 @@ describe("useSidebarViewModel", () => {
       result.current.onVaultChange("org-1");
     });
 
-    expect(params.router.push).toHaveBeenCalledWith("/dashboard/orgs/org-1");
+    expect(params.router.push).toHaveBeenCalledWith("/dashboard/teams/org-1");
     expect(params.onOpenChange).toHaveBeenCalledWith(false);
   });
 

@@ -65,9 +65,9 @@ interface OrgPasswordEntry {
 export default function OrgDashboardPage({
   params,
 }: {
-  params: Promise<{ orgId: string }>;
+  params: Promise<{ teamId: string }>;
 }) {
-  const { orgId: teamId } = use(params);
+  const { teamId } = use(params);
   const searchParams = useSearchParams();
   const activeTagId = searchParams.get("tag");
   const activeFolderId = searchParams.get("folder");
@@ -511,7 +511,7 @@ export default function OrgDashboardPage({
               {t("noOrgsDesc")}
             </p>
             <Button variant="ghost" asChild>
-              <Link href="/dashboard/orgs">
+              <Link href="/dashboard/teams">
                 {t("manage")}
               </Link>
             </Button>
@@ -615,14 +615,14 @@ export default function OrgDashboardPage({
 
         {isOrgArchive ? (
           <OrgArchivedList
-            orgId={teamId}
+            teamId={teamId}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
             sortBy={sortBy}
           />
         ) : isOrgTrash ? (
           <OrgTrashList
-            orgId={teamId}
+            teamId={teamId}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
             sortBy={sortBy}
@@ -694,6 +694,7 @@ export default function OrgDashboardPage({
 
       <OrgPasswordForm
         orgId={teamId}
+        teamId={teamId}
         open={formOpen}
         onOpenChange={setFormOpen}
         onSaved={() => {

@@ -23,12 +23,15 @@ import { buildOrgFormSectionsProps } from "@/hooks/org-form-sections-props";
 
 export function OrgPasswordForm({
   orgId,
+  teamId,
   open,
   onOpenChange,
   onSaved,
   entryType,
   editData,
 }: OrgPasswordFormProps) {
+  const scopedId = teamId ?? orgId;
+  if (!scopedId) return null;
   const {
     t,
     tc,
@@ -45,7 +48,7 @@ export function OrgPasswordForm({
     hasChanges,
     submitDisabled,
   } = useOrgPasswordFormModel({
-    orgId,
+    orgId: scopedId,
     open,
     onOpenChange,
     onSaved,
@@ -58,7 +61,7 @@ export function OrgPasswordForm({
   } = formState;
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
   const { tagsAndFolderProps, customFieldsTotpProps, actionBarProps } = buildOrgFormSectionsProps({
-    orgId,
+    orgId: scopedId,
     tagsTitle: entryCopy.tagsTitle,
     tagsHint: t("tagsHint"),
     folders: orgFolders,
@@ -115,7 +118,7 @@ export function OrgPasswordForm({
         {isEdit && editData && (
           <div className="border-t pt-4">
             <OrgAttachmentSection
-              orgId={orgId}
+              orgId={scopedId}
               entryId={editData.id}
               attachments={attachments}
               onAttachmentsChange={setAttachments}

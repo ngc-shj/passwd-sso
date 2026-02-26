@@ -52,6 +52,7 @@ export interface OrgPasswordFormEditData {
 
 export interface OrgPasswordFormProps {
   orgId: string;
+  teamId?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;

@@ -88,7 +88,7 @@ export function useSidebarViewModel({
         onOpenChange(false);
         return;
       }
-      router.push(`/dashboard/orgs/${value}`);
+      router.push(`/dashboard/teams/${value}`);
       onOpenChange(false);
     },
     [router, onOpenChange],

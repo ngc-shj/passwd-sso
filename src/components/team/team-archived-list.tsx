@@ -43,17 +43,20 @@ interface OrgArchivedEntry {
 
 interface OrgArchivedListProps {
   orgId?: string;
+  teamId?: string;
   searchQuery: string;
   refreshKey: number;
   sortBy?: EntrySortOption;
 }
 
 export function OrgArchivedList({
-  orgId,
+  orgId: _orgId,
+  teamId: _teamId,
   searchQuery,
   refreshKey,
   sortBy = "updatedAt",
 }: OrgArchivedListProps) {
+  const scopedId = _teamId ?? _orgId;
   const t = useTranslations("Team");
   const { getOrgEncryptionKey } = useOrgVault();
   const [entries, setEntries] = useState<OrgArchivedEntry[]>([]);
@@ -325,7 +328,7 @@ export function OrgArchivedList({
   );
 
   const filtered = entries.filter((p) => {
-    if (orgId && p.orgId !== orgId) return false;
+    if (scopedId && p.orgId !== scopedId) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -350,7 +353,7 @@ export function OrgArchivedList({
 
   return (
     <div className="mt-6">
-      {!orgId && (
+      {!scopedId && (
         <div className="mb-3 flex items-center gap-2">
           <Building2 className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-medium text-muted-foreground">

@@ -24,28 +24,30 @@ import { useImportExecution } from "@/components/passwords/use-import-execution"
 interface ImportPanelContentProps {
   onComplete: () => void;
   orgId?: string;
+  teamId?: string;
 }
 
-function ImportPanelContent({ onComplete, orgId }: ImportPanelContentProps) {
+function ImportPanelContent({ onComplete, orgId, teamId }: ImportPanelContentProps) {
+  const scopedId = teamId ?? orgId;
   const t = useTranslations("Import");
   const { encryptionKey, userId } = useVault();
   const orgVault = useOrgVaultOptional();
-  const isOrgImport = Boolean(orgId);
-  const tagsPath = orgId ? apiPath.teamTags(orgId) : API_PATH.TAGS;
-  const passwordsPath = orgId ? apiPath.teamPasswords(orgId) : API_PATH.PASSWORDS;
+  const isOrgImport = Boolean(scopedId);
+  const tagsPath = scopedId ? apiPath.teamTags(scopedId) : API_PATH.TAGS;
+  const passwordsPath = scopedId ? apiPath.teamPasswords(scopedId) : API_PATH.PASSWORDS;
 
   // Resolve org encryption key for org imports
   const [orgEncryptionKey, setOrgEncryptionKey] = useState<CryptoKey | undefined>();
   const [orgKeyVersion, setOrgKeyVersion] = useState<number | undefined>();
   useEffect(() => {
-    if (!isOrgImport || !orgId || !orgVault) return;
-    orgVault.getOrgKeyInfo(orgId).then((info) => {
+    if (!isOrgImport || !scopedId || !orgVault) return;
+    orgVault.getOrgKeyInfo(scopedId).then((info) => {
       if (info) {
         setOrgEncryptionKey(info.key);
         setOrgKeyVersion(info.keyVersion);
       }
     });
-  }, [isOrgImport, orgId, orgVault]);
+  }, [isOrgImport, scopedId, orgVault]);
 
   const {
     fileRef,
@@ -84,7 +86,7 @@ function ImportPanelContent({ onComplete, orgId }: ImportPanelContentProps) {
     encryptionKey: encryptionKey ?? undefined,
     orgEncryptionKey,
     orgKeyVersion,
-    orgId,
+    orgId: scopedId,
   });
 
   const reset = () => {
@@ -148,9 +150,10 @@ function ImportPanelContent({ onComplete, orgId }: ImportPanelContentProps) {
 interface ImportPagePanelProps {
   onComplete: () => void;
   orgId?: string;
+  teamId?: string;
 }
 
-export function ImportPagePanel({ onComplete, orgId }: ImportPagePanelProps) {
+export function ImportPagePanel({ onComplete, orgId, teamId }: ImportPagePanelProps) {
   const t = useTranslations("Import");
   return (
     <PagePane
@@ -162,16 +165,17 @@ export function ImportPagePanel({ onComplete, orgId }: ImportPagePanelProps) {
         />
       }
     >
-      <ImportPanelContent onComplete={onComplete} orgId={orgId} />
+      <ImportPanelContent onComplete={onComplete} orgId={orgId} teamId={teamId} />
     </PagePane>
   );
 }
 
 interface OrgImportPagePanelProps {
-  orgId: string;
+  orgId?: string;
+  teamId?: string;
   onComplete: () => void;
 }
 
-export function OrgImportPagePanel({ orgId, onComplete }: OrgImportPagePanelProps) {
-  return <ImportPagePanel onComplete={onComplete} orgId={orgId} />;
+export function OrgImportPagePanel({ orgId, teamId, onComplete }: OrgImportPagePanelProps) {
+  return <ImportPagePanel onComplete={onComplete} orgId={orgId} teamId={teamId} />;
 }
