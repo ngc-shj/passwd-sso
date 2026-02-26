@@ -16,7 +16,7 @@ const LAST_USED_AT_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
 export interface ValidatedScimToken {
   tokenId: string;
   orgId: string;
-  tenantId: string | null;
+  tenantId: string;
   createdById: string | null;
   /** Always non-null: createdById ?? SCIM_SYSTEM_USER_ID. */
   auditUserId: string;
@@ -93,6 +93,10 @@ export async function validateScimToken(
   if (token.expiresAt && token.expiresAt.getTime() <= Date.now()) {
     return { ok: false, error: "SCIM_TOKEN_EXPIRED" };
   }
+  const tenantId = token.tenantId ?? token.org?.tenantId;
+  if (!tenantId) {
+    return { ok: false, error: "SCIM_TOKEN_INVALID" };
+  }
 
   // Best-effort lastUsedAt update — throttled to reduce DB writes
   const now = Date.now();
@@ -113,7 +117,7 @@ export async function validateScimToken(
     data: {
       tokenId: token.id,
       orgId: token.orgId,
-      tenantId: token.tenantId ?? token.org?.tenantId ?? null,
+      tenantId,
       createdById: token.createdById,
       auditUserId: token.createdById ?? SCIM_SYSTEM_USER_ID,
     },

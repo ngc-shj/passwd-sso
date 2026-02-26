@@ -14,9 +14,9 @@ const {
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
   mockLogAudit: vi.fn(),
-  mockOrgMember: { findUnique: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  mockOrgMember: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), delete: vi.fn() },
   mockUser: { update: vi.fn() },
-  mockScimExternalMapping: { findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
+  mockScimExternalMapping: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   mockOrgMemberKey: { deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
 }));
@@ -45,7 +45,7 @@ import { GET, PUT, PATCH, DELETE } from "./route";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
-  data: { tokenId: "t1", orgId: "org-1", createdById: "u1", auditUserId: "u1" },
+  data: { tokenId: "t1", orgId: "org-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
 };
 
 function makeParams(id: string) {
@@ -86,8 +86,8 @@ describe("GET /api/scim/v2/Users/[id]", () => {
         deactivatedAt: null,
         user: { id: "internal-1", email: "ext@example.com", name: "Ext User" },
       });
-    // resolveUserId: ScimExternalMapping.findUnique → found
-    mockScimExternalMapping.findUnique
+    // resolveUserId: ScimExternalMapping.findFirst → found
+    mockScimExternalMapping.findFirst
       .mockResolvedValueOnce({ internalId: "internal-1" });
     // fetchUserResource: ScimExternalMapping.findFirst → no mapping
     mockScimExternalMapping.findFirst
@@ -97,13 +97,13 @@ describe("GET /api/scim/v2/Users/[id]", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.userName).toBe("ext@example.com");
-    // Verify ScimExternalMapping.findUnique was searched with compound key
-    expect(mockScimExternalMapping.findUnique).toHaveBeenCalledWith(
+    // Verify ScimExternalMapping.findFirst was searched in tenant scope
+    expect(mockScimExternalMapping.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          orgId_externalId_resourceType: expect.objectContaining({
-            externalId: "ext-id-123",
-          }),
+          tenantId: "tenant-1",
+          externalId: "ext-id-123",
+          resourceType: "User",
         }),
       }),
     );
@@ -166,7 +166,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }); // role check
     mockOrgMember.update.mockResolvedValue({});
-    mockScimExternalMapping.findUnique.mockResolvedValue({
+    mockScimExternalMapping.findFirst.mockResolvedValue({
       internalId: "other-user",
       externalId: "ext-1",
     });
@@ -198,7 +198,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }); // role check
     mockOrgMember.update.mockResolvedValue({});
-    mockScimExternalMapping.findUnique.mockResolvedValue(null);
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
     mockScimExternalMapping.create.mockRejectedValue(p2002);
 
     const res = await PUT(
@@ -228,7 +228,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null });
     mockOrgMember.update.mockResolvedValue({});
-    mockScimExternalMapping.findUnique.mockResolvedValue(null);
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
     mockScimExternalMapping.create.mockRejectedValue(p2002);
 
     await expect(
@@ -441,7 +441,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     expect(mockScimExternalMapping.deleteMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          orgId: "org-1",
+          tenantId: "tenant-1",
           internalId: "user-1",
           resourceType: "User",
         }),
@@ -741,10 +741,11 @@ describe("PUT /api/scim/v2/Users/[id] — externalId change", () => {
       });
     mockOrgMember.update.mockResolvedValue({});
     // New externalId "ext-B" doesn't exist yet
-    mockScimExternalMapping.findUnique.mockResolvedValue(null);
+    mockScimExternalMapping.findFirst
+      .mockResolvedValueOnce(null) // uniqueness check
+      .mockResolvedValueOnce({ externalId: "ext-B" }); // fetchUserResource
     mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 1 });
     mockScimExternalMapping.create.mockResolvedValue({});
-    mockScimExternalMapping.findFirst.mockResolvedValue({ externalId: "ext-B" });
 
     const res = await PUT(
       makeReq({
@@ -763,7 +764,7 @@ describe("PUT /api/scim/v2/Users/[id] — externalId change", () => {
     expect(mockScimExternalMapping.deleteMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          orgId: "org-1",
+          tenantId: "tenant-1",
           internalId: "user-1",
           resourceType: "User",
         }),

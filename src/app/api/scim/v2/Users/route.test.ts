@@ -13,9 +13,9 @@ const {
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
   mockLogAudit: vi.fn(),
-  mockOrgMember: { findMany: vi.fn(), count: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
-  mockUser: { findUnique: vi.fn(), create: vi.fn() },
-  mockScimExternalMapping: { findUnique: vi.fn(), findMany: vi.fn(), upsert: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
+  mockOrgMember: { findMany: vi.fn(), count: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
+  mockUser: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
+  mockScimExternalMapping: { findFirst: vi.fn(), findMany: vi.fn(), upsert: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
 }));
 
@@ -42,7 +42,7 @@ import { GET, POST } from "./route";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
-  data: { tokenId: "t1", orgId: "org-1", createdById: "u1", auditUserId: "u1" },
+  data: { tokenId: "t1", orgId: "org-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
 };
 
 function makeReq(
@@ -223,7 +223,7 @@ describe("GET /api/scim/v2/Users", () => {
   });
 
   it("filters by externalId via ScimExternalMapping", async () => {
-    mockScimExternalMapping.findUnique.mockResolvedValue({
+    mockScimExternalMapping.findFirst.mockResolvedValue({
       internalId: "user-1",
     });
     mockOrgMember.findMany.mockResolvedValue([
@@ -258,16 +258,14 @@ describe("POST /api/scim/v2/Users", () => {
   it("creates a new user and returns 201", async () => {
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const tx = {
-        user: {
-          findUnique: vi.fn().mockResolvedValue(null),
+        user: { findUnique: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({
             id: "new-user",
             email: "new@example.com",
             name: "New User",
           }),
         },
-        orgMember: {
-          findUnique: vi
+        orgMember: { findUnique: vi
             .fn()
             .mockResolvedValueOnce(null) // existence check
             .mockResolvedValueOnce({
@@ -277,7 +275,7 @@ describe("POST /api/scim/v2/Users", () => {
           create: vi.fn().mockResolvedValue({}),
         },
         scimExternalMapping: {
-          findUnique: vi.fn().mockResolvedValue(null),
+          findFirst: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({}),
           deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         },
@@ -311,15 +309,14 @@ describe("POST /api/scim/v2/Users", () => {
       });
       const tx = {
         user: { findUnique: mockUserFindUnique, create: mockUserCreate },
-        orgMember: {
-          findUnique: vi
+        orgMember: { findUnique: vi
             .fn()
             .mockResolvedValueOnce(null)
             .mockResolvedValueOnce({ userId: "new-user", deactivatedAt: null }),
           create: vi.fn().mockResolvedValue({}),
         },
         scimExternalMapping: {
-          findUnique: vi.fn().mockResolvedValue(null),
+          findFirst: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({}),
           deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         },
@@ -346,11 +343,9 @@ describe("POST /api/scim/v2/Users", () => {
   it("returns 409 for active duplicate user", async () => {
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const tx = {
-        user: {
-          findUnique: vi.fn().mockResolvedValue({ id: "existing-user", email: "dup@example.com" }),
+        user: { findUnique: vi.fn().mockResolvedValue({ id: "existing-user", email: "dup@example.com" }),
         },
-        orgMember: {
-          findUnique: vi.fn().mockResolvedValue({
+        orgMember: { findUnique: vi.fn().mockResolvedValue({
             id: "m1",
             deactivatedAt: null, // active
           }),
@@ -374,11 +369,9 @@ describe("POST /api/scim/v2/Users", () => {
     const mockMemberUpdate = vi.fn().mockResolvedValue({});
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const tx = {
-        user: {
-          findUnique: vi.fn().mockResolvedValue({ id: "user-1", email: "re@example.com" }),
+        user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", email: "re@example.com" }),
         },
-        orgMember: {
-          findUnique: vi
+        orgMember: { findUnique: vi
             .fn()
             .mockResolvedValueOnce({
               id: "m1",
@@ -388,7 +381,7 @@ describe("POST /api/scim/v2/Users", () => {
           update: mockMemberUpdate,
         },
         scimExternalMapping: {
-          findUnique: vi.fn().mockResolvedValue(null),
+          findFirst: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({}),
           deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         },
@@ -414,11 +407,9 @@ describe("POST /api/scim/v2/Users", () => {
     const mockMappingDeleteMany = vi.fn().mockResolvedValue({ count: 1 });
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const tx = {
-        user: {
-          findUnique: vi.fn().mockResolvedValue({ id: "user-1", email: "re@example.com" }),
+        user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", email: "re@example.com" }),
         },
-        orgMember: {
-          findUnique: vi
+        orgMember: { findUnique: vi
             .fn()
             .mockResolvedValueOnce({
               id: "m1",
@@ -428,7 +419,7 @@ describe("POST /api/scim/v2/Users", () => {
           update: mockMemberUpdate,
         },
         scimExternalMapping: {
-          findUnique: vi.fn().mockResolvedValue(null),
+          findFirst: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({}),
           deleteMany: mockMappingDeleteMany,
         },
@@ -455,7 +446,7 @@ describe("POST /api/scim/v2/Users", () => {
     expect(mockMappingDeleteMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          orgId: "org-1",
+          tenantId: "tenant-1",
           internalId: "user-1",
           resourceType: "User",
         }),
@@ -487,20 +478,18 @@ describe("POST /api/scim/v2/Users", () => {
   it("returns 409 when externalId is already mapped to a different user", async () => {
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const tx = {
-        user: {
-          findUnique: vi.fn().mockResolvedValue(null),
+        user: { findUnique: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({
             id: "new-user",
             email: "new@example.com",
             name: null,
           }),
         },
-        orgMember: {
-          findUnique: vi.fn().mockResolvedValueOnce(null),
+        orgMember: { findUnique: vi.fn().mockResolvedValueOnce(null),
           create: vi.fn().mockResolvedValue({}),
         },
         scimExternalMapping: {
-          findUnique: vi.fn().mockResolvedValue({
+          findFirst: vi.fn().mockResolvedValue({
             internalId: "other-user", // different user
             externalId: "ext-conflict",
           }),
@@ -531,23 +520,21 @@ describe("POST /api/scim/v2/Users", () => {
     );
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const tx = {
-        user: {
-          findUnique: vi.fn().mockResolvedValue(null),
+        user: { findUnique: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({
             id: "new-user",
             email: "race@example.com",
             name: null,
           }),
         },
-        orgMember: {
-          findUnique: vi
+        orgMember: { findUnique: vi
             .fn()
             .mockResolvedValueOnce(null)
             .mockResolvedValueOnce({ userId: "new-user", deactivatedAt: null }),
           create: vi.fn().mockResolvedValue({}),
         },
         scimExternalMapping: {
-          findUnique: vi.fn().mockResolvedValue(null), // check passes
+          findFirst: vi.fn().mockResolvedValue(null), // check passes
           deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
           create: vi.fn().mockRejectedValue(p2002),    // but create races
         },

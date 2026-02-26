@@ -37,12 +37,12 @@ function makeToken(overrides: Record<string, unknown> = {}) {
   return {
     id: "tok-1",
     orgId: "org-1",
-    tenantId: null,
+    tenantId: "tenant-1",
     createdById: "user-1",
     revokedAt: null,
     expiresAt: null,
     lastUsedAt: null,
-    org: { tenantId: null },
+    org: { tenantId: "tenant-1" },
     ...overrides,
   };
 }
@@ -73,7 +73,7 @@ describe("validateScimToken", () => {
       data: {
         tokenId: "tok-1",
         orgId: "org-1",
-        tenantId: null,
+        tenantId: "tenant-1",
         createdById: "user-1",
         auditUserId: "user-1",
       },
@@ -88,7 +88,7 @@ describe("validateScimToken", () => {
     expect(result).toEqual({
       ok: true,
       data: expect.objectContaining({
-        tenantId: null,
+        tenantId: "tenant-1",
         createdById: null,
         auditUserId: SCIM_SYSTEM_USER_ID,
       }),
@@ -250,5 +250,13 @@ describe("validateScimToken", () => {
         tenantId: "tenant-1",
       }),
     });
+  });
+
+  it("rejects token when tenant context is missing", async () => {
+    mockFindUnique.mockResolvedValue(makeToken({ tenantId: null, org: { tenantId: null } }));
+
+    const result = await validateScimToken(bearerRequest("scim_abc123"));
+
+    expect(result).toEqual({ ok: false, error: "SCIM_TOKEN_INVALID" });
   });
 });

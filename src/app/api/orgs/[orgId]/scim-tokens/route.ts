@@ -111,11 +111,17 @@ export async function POST(req: NextRequest, { params }: Params) {
     where: { id: orgId },
     select: { tenantId: true },
   });
+  if (!org?.tenantId) {
+    return NextResponse.json(
+      { error: API_ERROR.SCIM_TOKEN_INVALID },
+      { status: 409 },
+    );
+  }
 
   const token = await prisma.scimToken.create({
     data: {
       orgId,
-      tenantId: org?.tenantId ?? null,
+      tenantId: org.tenantId,
       tokenHash,
       description: parsed.data.description ?? null,
       expiresAt,

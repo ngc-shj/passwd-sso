@@ -21,10 +21,6 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { ORG_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 
-function scimScopeWhere(orgId: string, tenantId: string | null) {
-  return tenantId ? { tenantId } : { orgId };
-}
-
 // GET /api/scim/v2/Users — List/filter users in the org
 export async function GET(req: NextRequest) {
   const result = await validateScimToken(req);
@@ -32,9 +28,8 @@ export async function GET(req: NextRequest) {
     return scimError(401, API_ERROR[result.error]);
   }
   const { orgId, tenantId } = result.data;
-  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(scopeId))) {
+  if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
@@ -62,23 +57,13 @@ export async function GET(req: NextRequest) {
       }
 
       if (extIdValue !== null) {
-        const mapping = tenantId
-          ? await prisma.scimExternalMapping.findFirst({
-              where: {
-                tenantId,
-                externalId: extIdValue,
-                resourceType: "User",
-              },
-            })
-          : await prisma.scimExternalMapping.findUnique({
-              where: {
-                orgId_externalId_resourceType: {
-                  orgId,
-                  externalId: extIdValue,
-                  resourceType: "User",
-                },
-              },
-            });
+        const mapping = await prisma.scimExternalMapping.findFirst({
+          where: {
+            tenantId,
+            externalId: extIdValue,
+            resourceType: "User",
+          },
+        });
         if (!mapping) {
           return scimListResponse([], 0, startIndex);
         }
@@ -114,7 +99,7 @@ export async function GET(req: NextRequest) {
   const userIds = members.map((m) => m.userId);
   const mappings = await prisma.scimExternalMapping.findMany({
     where: {
-      ...scimScopeWhere(orgId, tenantId),
+      tenantId,
       resourceType: "User",
       internalId: { in: userIds },
     },
@@ -143,9 +128,8 @@ export async function POST(req: NextRequest) {
     return scimError(401, API_ERROR[result.error]);
   }
   const { orgId, tenantId, auditUserId } = result.data;
-  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(scopeId))) {
+  if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
@@ -212,23 +196,13 @@ export async function POST(req: NextRequest) {
 
       // Create external mapping (if externalId provided)
       if (externalId) {
-        const existing = tenantId
-          ? await tx.scimExternalMapping.findFirst({
-              where: {
-                tenantId,
-                externalId,
-                resourceType: "User",
-              },
-            })
-          : await tx.scimExternalMapping.findUnique({
-              where: {
-                orgId_externalId_resourceType: {
-                  orgId,
-                  externalId,
-                  resourceType: "User",
-                },
-              },
-            });
+        const existing = await tx.scimExternalMapping.findFirst({
+          where: {
+            tenantId,
+            externalId,
+            resourceType: "User",
+          },
+        });
         if (existing && existing.internalId !== user.id) {
           throw new Error("SCIM_EXTERNAL_ID_CONFLICT");
         }
@@ -236,7 +210,7 @@ export async function POST(req: NextRequest) {
           // Delete stale mapping for this user (handles externalId change on re-activation)
           await tx.scimExternalMapping.deleteMany({
             where: {
-              ...scimScopeWhere(orgId, tenantId),
+              tenantId,
               internalId: user.id,
               resourceType: "User",
             },

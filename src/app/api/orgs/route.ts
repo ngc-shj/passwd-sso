@@ -73,6 +73,13 @@ export async function POST(req: NextRequest) {
   const org = await prisma.organization.create({
     data: {
       ...(clientId ? { id: clientId } : {}),
+      tenant: {
+        create: {
+          name,
+          slug: `tenant-${slug}`,
+          description: description || null,
+        },
+      },
       name,
       slug,
       description: description || null,

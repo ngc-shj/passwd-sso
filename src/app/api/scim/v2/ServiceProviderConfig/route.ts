@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
     return scimError(401, API_ERROR[result.error]);
   }
 
-  if (!(await checkScimRateLimit(result.data.tenantId ?? result.data.orgId))) {
+  if (!(await checkScimRateLimit(result.data.tenantId))) {
     return scimError(429, "Too many requests");
   }
 

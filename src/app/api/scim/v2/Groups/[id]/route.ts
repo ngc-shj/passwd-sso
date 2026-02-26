@@ -23,14 +23,10 @@ const SCIM_GROUP_ROLES: OrgRole[] = [
   ORG_ROLE.VIEWER,
 ];
 
-function scimScopeWhere(orgId: string, tenantId: string | null) {
-  return tenantId ? { tenantId } : { orgId };
-}
-
 /** Resolve a SCIM Group ID back to (orgId, role). Falls back to ScimExternalMapping. */
 async function resolveGroupRole(
   orgId: string,
-  tenantId: string | null,
+  tenantId: string,
   scimId: string,
 ): Promise<OrgRole | null> {
   // First try computed group IDs
@@ -39,25 +35,14 @@ async function resolveGroupRole(
   }
 
   // Fallback: resolve via ScimExternalMapping (IdP may use externalId as the group id)
-  const mapping = tenantId
-    ? await prisma.scimExternalMapping.findFirst({
-        where: {
-          tenantId,
-          externalId: scimId,
-          resourceType: "Group",
-        },
-        select: { internalId: true },
-      })
-    : await prisma.scimExternalMapping.findUnique({
-        where: {
-          orgId_externalId_resourceType: {
-            orgId,
-            externalId: scimId,
-            resourceType: "Group",
-          },
-        },
-        select: { internalId: true },
-      });
+  const mapping = await prisma.scimExternalMapping.findFirst({
+    where: {
+      tenantId,
+      externalId: scimId,
+      resourceType: "Group",
+    },
+    select: { internalId: true },
+  });
   if (mapping) {
     for (const role of SCIM_GROUP_ROLES) {
       if (roleGroupId(orgId, role) === mapping.internalId) return role;
@@ -92,9 +77,8 @@ export async function GET(req: NextRequest, { params }: Params) {
     return scimError(401, API_ERROR[result.error]);
   }
   const { orgId, tenantId } = result.data;
-  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(scopeId))) {
+  if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
@@ -116,9 +100,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return scimError(401, API_ERROR[result.error]);
   }
   const { orgId, tenantId, auditUserId } = result.data;
-  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(scopeId))) {
+  if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
@@ -233,9 +216,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     return scimError(401, API_ERROR[result.error]);
   }
   const { orgId, tenantId, auditUserId } = result.data;
-  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(scopeId))) {
+  if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
@@ -338,9 +320,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   const { orgId, tenantId } = result.data;
-  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(scopeId))) {
+  if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 

@@ -13,8 +13,8 @@ const {
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
   mockLogAudit: vi.fn(),
-  mockOrgMember: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
-  mockScimExternalMapping: { findUnique: vi.fn() },
+  mockOrgMember: { findMany: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+  mockScimExternalMapping: { findFirst: vi.fn() },
   mockTransaction: vi.fn(),
 }));
 
@@ -40,7 +40,7 @@ import { GET, PUT, PATCH, DELETE } from "./route";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
-  data: { tokenId: "t1", orgId: "org-1", createdById: "u1", auditUserId: "u1" },
+  data: { tokenId: "t1", orgId: "org-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
 };
 
 // Compute a valid ADMIN group ID for org-1
@@ -411,7 +411,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
   });
 
   it("resolves group via ScimExternalMapping fallback", async () => {
-    mockScimExternalMapping.findUnique.mockResolvedValue({
+    mockScimExternalMapping.findFirst.mockResolvedValue({
       internalId: ADMIN_GROUP_ID,
     });
     mockOrgMember.findMany.mockResolvedValue([]);

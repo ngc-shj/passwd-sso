@@ -10,7 +10,7 @@ const {
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
   mockOrgMember: { findMany: vi.fn() },
-  mockScimExternalMapping: { findUnique: vi.fn(), create: vi.fn(), deleteMany: vi.fn(), upsert: vi.fn() },
+  mockScimExternalMapping: { findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn(), upsert: vi.fn() },
 }));
 
 vi.mock("@/lib/scim-token", () => ({
@@ -34,7 +34,7 @@ import { GET, POST } from "./route";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
-  data: { tokenId: "t1", orgId: "org-1", createdById: "u1", auditUserId: "u1" },
+  data: { tokenId: "t1", orgId: "org-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
 };
 
 function makeReq(
@@ -125,7 +125,7 @@ describe("POST /api/scim/v2/Groups", () => {
   });
 
   it("registers external mapping for valid role and returns 201", async () => {
-    mockScimExternalMapping.findUnique.mockResolvedValue(null);
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
     mockScimExternalMapping.create.mockResolvedValue({});
     mockOrgMember.findMany.mockResolvedValue([]);
 
@@ -176,7 +176,7 @@ describe("POST /api/scim/v2/Groups", () => {
       "Unique constraint failed",
       { code: "P2002", clientVersion: "7.0.0", meta: { modelName: "ScimExternalMapping" } },
     );
-    mockScimExternalMapping.findUnique.mockResolvedValue(null); // check passes
+    mockScimExternalMapping.findFirst.mockResolvedValue(null); // check passes
     mockScimExternalMapping.create.mockRejectedValue(p2002);    // but create races
 
     const res = await POST(
@@ -199,7 +199,7 @@ describe("POST /api/scim/v2/Groups", () => {
       "Unique constraint failed",
       { code: "P2002", clientVersion: "7.0.0", meta: { modelName: "User" } },
     );
-    mockScimExternalMapping.findUnique.mockResolvedValue(null);
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
     mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
     mockScimExternalMapping.create.mockRejectedValue(p2002);
 
@@ -217,7 +217,7 @@ describe("POST /api/scim/v2/Groups", () => {
   });
 
   it("returns 409 when externalId is already mapped to a different group", async () => {
-    mockScimExternalMapping.findUnique.mockResolvedValue({
+    mockScimExternalMapping.findFirst.mockResolvedValue({
       internalId: "different-group-id",
       externalId: "ext-grp-conflict",
     });

@@ -152,7 +152,7 @@ model ExtensionToken {
 model ScimToken {
   id          String    @id @default(cuid())
   orgId       String    @map("org_id")
-  tenantId    String?   @map("tenant_id")
+  tenantId    String    @map("tenant_id")
   tokenHash   String    @unique @map("token_hash") @db.VarChar(64)
   description String?   @db.VarChar(255)
   expiresAt   DateTime? @map("expires_at")
@@ -162,7 +162,7 @@ model ScimToken {
   createdById String?   @map("created_by_id")
 
   org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  tenant    Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   createdBy User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([orgId, revokedAt])
@@ -173,7 +173,7 @@ model ScimToken {
 model ScimExternalMapping {
   id           String   @id @default(cuid())
   orgId        String   @map("org_id")
-  tenantId     String?  @map("tenant_id")
+  tenantId     String   @map("tenant_id")
   externalId   String   @map("external_id")
   resourceType String   @map("resource_type") @db.VarChar(20)
   internalId   String   @map("internal_id")
@@ -181,10 +181,10 @@ model ScimExternalMapping {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  tenant Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
-  @@unique([orgId, externalId, resourceType])
-  @@unique([orgId, internalId, resourceType])
+  @@unique([tenantId, externalId, resourceType])
+  @@unique([tenantId, internalId, resourceType])
   @@index([tenantId, resourceType])
   @@map("scim_external_mappings")
 }
@@ -294,7 +294,7 @@ enum InvitationStatus {
 
 model Organization {
   id          String  @id @default(cuid())
-  tenantId    String? @map("tenant_id")
+  tenantId    String  @map("tenant_id")
   name        String
   slug        String  @unique
   description String? @db.Text
@@ -314,7 +314,7 @@ model Organization {
   memberKeys           OrgMemberKey[]
   scimTokens           ScimToken[]
   scimExternalMappings ScimExternalMapping[]
-  tenant               Tenant?               @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
   @@map("organizations")
