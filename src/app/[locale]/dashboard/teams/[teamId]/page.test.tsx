@@ -75,7 +75,7 @@ import TeamDashboardPage from "./page";
 
 function makeOrgResponse(role = "OWNER") {
   return {
-    id: "org-1",
+    id: "team-1",
     name: "Test Org",
     slug: "test-org",
     role,
@@ -86,7 +86,7 @@ function makeOrgResponse(role = "OWNER") {
 
 function setupFetch(orgRes = makeOrgResponse(), passwords: unknown[] = []) {
   mockFetch.mockImplementation((url: string) => {
-    if (url.includes("/api/teams/org-1") && !url.includes("/passwords")) {
+    if (url.includes("/api/teams/team-1") && !url.includes("/passwords")) {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve(orgRes),
@@ -105,7 +105,7 @@ function setupFetch(orgRes = makeOrgResponse(), passwords: unknown[] = []) {
 function renderPage() {
   return render(
     <React.Suspense fallback={<div>Loading...</div>}>
-      <TeamDashboardPage params={Promise.resolve({ teamId: "org-1" })} />
+      <TeamDashboardPage params={Promise.resolve({ teamId: "team-1" })} />
     </React.Suspense>,
   );
 }
@@ -238,7 +238,7 @@ describe("TeamDashboardPage — scopes", () => {
     await waitFor(() => {
       // Org fetch should happen
       const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
-      expect(calls.some((u: string) => u.includes("/api/teams/org-1") && !u.includes("/passwords"))).toBe(true);
+      expect(calls.some((u: string) => u.includes("/api/teams/team-1") && !u.includes("/passwords"))).toBe(true);
     });
 
     // Password fetch should NOT happen for archive scope
@@ -258,7 +258,7 @@ describe("TeamDashboardPage — scopes", () => {
 
     await waitFor(() => {
       const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
-      expect(calls.some((u: string) => u.includes("/api/teams/org-1") && !u.includes("/passwords"))).toBe(true);
+      expect(calls.some((u: string) => u.includes("/api/teams/team-1") && !u.includes("/passwords"))).toBe(true);
     });
 
     const passwordCalls = mockFetch.mock.calls
@@ -318,7 +318,7 @@ describe("TeamDashboardPage — role-based rendering", () => {
     await waitFor(() => {
       // Wait for org data to load
       const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
-      expect(calls.some((u: string) => u.includes("/api/teams/org-1"))).toBe(true);
+      expect(calls.some((u: string) => u.includes("/api/teams/team-1"))).toBe(true);
     });
 
     // newItem should not appear in actions
@@ -338,7 +338,7 @@ describe("TeamDashboardPage — error handling", () => {
 
   it("shows error state when org fetch fails", async () => {
     mockFetch.mockImplementation((url: string) => {
-      if (url.includes("/api/teams/org-1") && !url.includes("/passwords")) {
+      if (url.includes("/api/teams/team-1") && !url.includes("/passwords")) {
         return Promise.resolve({ ok: false, status: 403 });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });

@@ -290,7 +290,7 @@ describe("EntryHistorySection", () => {
 
     await act(async () => {
       render(
-        <EntryHistorySection entryId="entry-1" teamId="org-1" />
+        <EntryHistorySection entryId="entry-1" teamId="team-1" />
       );
     });
 
@@ -309,7 +309,7 @@ describe("EntryHistorySection", () => {
       // Verify fetch was called with team history detail URL
       const calls = (fetchMock as ReturnType<typeof vi.fn>).mock.calls;
       const viewCall = calls.find(
-        (c: [string]) => c[0].includes("/teams/org-1/passwords/entry-1/history/h1"),
+        (c: [string]) => c[0].includes("/teams/team-1/passwords/entry-1/history/h1"),
       );
       expect(viewCall).toBeDefined();
       // Verify client-side decryption was called

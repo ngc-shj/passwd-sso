@@ -4,7 +4,7 @@ import { buildTeamSubmitArgs } from "@/hooks/team-password-form-submit-args";
 
 function buildDefaultParams(overrides: Record<string, unknown> = {}) {
   return {
-    teamId: "org-1",
+    teamId: "team-1",
     onSaved: vi.fn(),
     isEdit: false,
     editData: undefined,
@@ -62,7 +62,7 @@ describe("buildTeamSubmitArgs", () => {
     const handleOpenChange = vi.fn();
 
     const args = buildTeamSubmitArgs({
-      teamId: "org-1",
+      teamId: "team-1",
       onSaved,
       isEdit: true,
       editData: {
@@ -128,7 +128,7 @@ describe("buildTeamSubmitArgs", () => {
       cardNumberValid: true,
     });
 
-    expect(args.teamId).toBe("org-1");
+    expect(args.teamId).toBe("team-1");
     expect(args.isIdentity).toBe(true);
     expect(args.title).toBe("title");
     expect(args.password).toBe("pass");

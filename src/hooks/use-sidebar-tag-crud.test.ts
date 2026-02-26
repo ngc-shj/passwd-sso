@@ -51,7 +51,7 @@ describe("useSidebarTagCrud", () => {
     const { result } = renderHook(() => useSidebarTagCrud({ refreshData, tErrors }));
 
     act(() => {
-      result.current.handleTagEdit({ id: "tag-1", name: "Old", color: null }, "org-1");
+      result.current.handleTagEdit({ id: "tag-1", name: "Old", color: null }, "team-1");
     });
 
     await act(async () => {
@@ -59,7 +59,7 @@ describe("useSidebarTagCrud", () => {
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "/api/teams/org-1/tags/tag-1",
+      "/api/teams/team-1/tags/tag-1",
       expect.objectContaining({ method: "PUT" })
     );
   });
@@ -93,7 +93,7 @@ describe("useSidebarTagCrud", () => {
     const { result } = renderHook(() => useSidebarTagCrud({ refreshData, tErrors }));
 
     act(() => {
-      result.current.handleTagCreate("org-1");
+      result.current.handleTagCreate("team-1");
     });
 
     await act(async () => {
@@ -101,7 +101,7 @@ describe("useSidebarTagCrud", () => {
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "/api/teams/org-1/tags",
+      "/api/teams/team-1/tags",
       expect.objectContaining({ method: "POST" })
     );
   });

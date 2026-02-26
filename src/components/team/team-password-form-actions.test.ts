@@ -11,7 +11,7 @@ vi.mock("@/components/team/team-entry-submit", () => ({
   executeTeamEntrySubmit: (...args: unknown[]) => executeTeamEntrySubmitMock(...args),
 }));
 
-describe("org-password-form-actions", () => {
+describe("team-password-form-actions", () => {
   beforeEach(() => {
     executeTeamEntrySubmitMock.mockReset();
   });
@@ -53,7 +53,7 @@ describe("org-password-form-actions", () => {
     const setExpiryError = vi.fn();
 
     await submitTeamPasswordForm({
-      teamId: "org-1",
+      teamId: "team-1",
       isEdit: false,
       effectiveEntryType: ENTRY_TYPE.IDENTITY,
       title: "id",

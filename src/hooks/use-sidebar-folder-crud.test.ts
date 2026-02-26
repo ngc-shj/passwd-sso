@@ -24,7 +24,7 @@ const teamFolders = [
 function makeParams() {
   return {
     folders: personalFolders,
-    teamFolderGroups: [{ teamId: "org-1", teamName: "Acme", teamRole: "ADMIN", folders: teamFolders }],
+    teamFolderGroups: [{ teamId: "team-1", teamName: "Acme", teamRole: "ADMIN", folders: teamFolders }],
     refreshData: vi.fn(),
     tErrors: (key: string) => key,
   };
@@ -46,7 +46,7 @@ describe("useSidebarFolderCrud", () => {
     expect(result.current.dialogFolders).toEqual(personalFolders);
 
     act(() => {
-      result.current.handleFolderCreate("org-1");
+      result.current.handleFolderCreate("team-1");
     });
     expect(result.current.dialogFolders).toEqual(teamFolders);
   });
@@ -74,7 +74,7 @@ describe("useSidebarFolderCrud", () => {
     const { result } = renderHook(() => useSidebarFolderCrud(params));
 
     act(() => {
-      result.current.handleFolderEdit(teamFolders[0], "org-1");
+      result.current.handleFolderEdit(teamFolders[0], "team-1");
     });
 
     await act(async () => {
@@ -82,7 +82,7 @@ describe("useSidebarFolderCrud", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/teams/org-1/folders/of1",
+      "/api/teams/team-1/folders/of1",
       expect.objectContaining({ method: "PUT" }),
     );
   });
