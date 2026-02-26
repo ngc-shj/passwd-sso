@@ -22,14 +22,14 @@ import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
-interface OrgExportPanelContentProps {
-  orgId?: string;
+interface TeamExportPanelContentProps {
   teamId?: string;
+  orgId?: string;
 }
 
-function OrgExportPanelContent({ orgId, teamId }: OrgExportPanelContentProps) {
-  const scopedId = teamId ?? orgId;
-  if (!scopedId) return null;
+function TeamExportPanelContent({ teamId, orgId }: TeamExportPanelContentProps) {
+  const scopedTeamId = teamId ?? orgId;
+  if (!scopedTeamId) return null;
   const t = useTranslations("Export");
   const { getTeamEncryptionKey } = useTeamVault();
   const [exporting, setExporting] = useState(false);
@@ -66,21 +66,21 @@ function OrgExportPanelContent({ orgId, teamId }: OrgExportPanelContentProps) {
     setExporting(true);
 
     try {
-      // Fetch list of all org passwords (overview only)
-      const listRes = await fetch(apiPath.teamPasswords(scopedId));
+      // Fetch list of all team passwords (overview only)
+      const listRes = await fetch(apiPath.teamPasswords(scopedTeamId));
       if (!listRes.ok) throw new Error("Failed to fetch list");
       const list: { id: string; entryType: string }[] = await listRes.json();
 
-      // Get org encryption key for decryption
-      const orgKey = await getTeamEncryptionKey(scopedId);
-      if (!orgKey) throw new Error("No org key");
+      // Get team encryption key for decryption
+      const teamKey = await getTeamEncryptionKey(scopedTeamId);
+      if (!teamKey) throw new Error("No team key");
 
       // Fetch full details for each entry and decrypt
       const entries: ExportEntry[] = [];
       let skippedCount = 0;
       for (const item of list) {
         try {
-          const res = await fetch(apiPath.teamPasswordById(scopedId, item.id));
+          const res = await fetch(apiPath.teamPasswordById(scopedTeamId, item.id));
           if (!res.ok) {
             skippedCount++;
             continue;
@@ -88,14 +88,14 @@ function OrgExportPanelContent({ orgId, teamId }: OrgExportPanelContentProps) {
           const raw = await res.json();
 
           // Decrypt the blob
-          const aad = buildOrgEntryAAD(scopedId, raw.id, "blob");
+          const aad = buildOrgEntryAAD(scopedTeamId, raw.id, "blob");
           const json = await decryptData(
             {
               ciphertext: raw.encryptedBlob,
               iv: raw.blobIv,
               authTag: raw.blobAuthTag,
             },
-            orgKey,
+            teamKey,
             aad,
           );
           const data = JSON.parse(json);
@@ -149,11 +149,11 @@ function OrgExportPanelContent({ orgId, teamId }: OrgExportPanelContentProps) {
         const encrypted = await encryptExport(content, exportPassword, format);
         const encryptedJson = JSON.stringify(encrypted, null, 2);
         blob = new Blob([encryptedJson], { type: "application/json" });
-        filename = `passwd-sso-org-export-${formatExportDate()}.encrypted.json`;
+        filename = `passwd-sso-team-export-${formatExportDate()}.encrypted.json`;
       } else {
         const mimeType = format === "csv" ? "text/csv;charset=utf-8" : "application/json";
         blob = new Blob([content], { type: mimeType });
-        filename = `passwd-sso-org-export-${formatExportDate()}.${format}`;
+        filename = `passwd-sso-team-export-${formatExportDate()}.${format}`;
       }
 
       const url = URL.createObjectURL(blob);
@@ -170,7 +170,7 @@ function OrgExportPanelContent({ orgId, teamId }: OrgExportPanelContentProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          orgId,
+          orgId: scopedTeamId,
           entryCount: entries.length,
           format,
           filename,
@@ -226,7 +226,7 @@ function OrgExportPanelContent({ orgId, teamId }: OrgExportPanelContentProps) {
           passwordError={passwordError}
           exporting={exporting}
           onExport={handleExport}
-          idPrefix="org-"
+          idPrefix="team-"
           showProtectTopBorder={false}
         />
     </>
@@ -235,12 +235,12 @@ function OrgExportPanelContent({ orgId, teamId }: OrgExportPanelContentProps) {
   return content;
 }
 
-interface OrgExportPagePanelProps {
-  orgId?: string;
+interface TeamExportPagePanelProps {
   teamId?: string;
+  orgId?: string;
 }
 
-export function OrgExportPagePanel({ orgId, teamId }: OrgExportPagePanelProps) {
+export function TeamExportPagePanel({ teamId, orgId }: TeamExportPagePanelProps) {
   const t = useTranslations("Export");
   return (
     <PagePane
@@ -252,7 +252,9 @@ export function OrgExportPagePanel({ orgId, teamId }: OrgExportPagePanelProps) {
         />
       }
     >
-      <OrgExportPanelContent orgId={orgId} teamId={teamId} />
+      <TeamExportPanelContent teamId={teamId} orgId={orgId} />
     </PagePane>
   );
 }
+
+export const OrgExportPagePanel = TeamExportPagePanel;
