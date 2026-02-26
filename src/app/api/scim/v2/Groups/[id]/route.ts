@@ -23,24 +23,41 @@ const SCIM_GROUP_ROLES: OrgRole[] = [
   ORG_ROLE.VIEWER,
 ];
 
+function scimScopeWhere(orgId: string, tenantId: string | null) {
+  return tenantId ? { tenantId } : { orgId };
+}
+
 /** Resolve a SCIM Group ID back to (orgId, role). Falls back to ScimExternalMapping. */
-async function resolveGroupRole(orgId: string, scimId: string): Promise<OrgRole | null> {
+async function resolveGroupRole(
+  orgId: string,
+  tenantId: string | null,
+  scimId: string,
+): Promise<OrgRole | null> {
   // First try computed group IDs
   for (const role of SCIM_GROUP_ROLES) {
     if (roleGroupId(orgId, role) === scimId) return role;
   }
 
   // Fallback: resolve via ScimExternalMapping (IdP may use externalId as the group id)
-  const mapping = await prisma.scimExternalMapping.findUnique({
-    where: {
-      orgId_externalId_resourceType: {
-        orgId,
-        externalId: scimId,
-        resourceType: "Group",
-      },
-    },
-    select: { internalId: true },
-  });
+  const mapping = tenantId
+    ? await prisma.scimExternalMapping.findFirst({
+        where: {
+          tenantId,
+          externalId: scimId,
+          resourceType: "Group",
+        },
+        select: { internalId: true },
+      })
+    : await prisma.scimExternalMapping.findUnique({
+        where: {
+          orgId_externalId_resourceType: {
+            orgId,
+            externalId: scimId,
+            resourceType: "Group",
+          },
+        },
+        select: { internalId: true },
+      });
   if (mapping) {
     for (const role of SCIM_GROUP_ROLES) {
       if (roleGroupId(orgId, role) === mapping.internalId) return role;
@@ -74,14 +91,15 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId } = result.data;
+  const { orgId, tenantId } = result.data;
+  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(scopeId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const role = await resolveGroupRole(orgId, id);
+  const role = await resolveGroupRole(orgId, tenantId, id);
   if (!role) {
     return scimError(404, "Group not found");
   }
@@ -97,14 +115,15 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, auditUserId } = result.data;
+  const { orgId, tenantId, auditUserId } = result.data;
+  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(scopeId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const role = await resolveGroupRole(orgId, id);
+  const role = await resolveGroupRole(orgId, tenantId, id);
   if (!role) {
     return scimError(404, "Group not found");
   }
@@ -213,14 +232,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, auditUserId } = result.data;
+  const { orgId, tenantId, auditUserId } = result.data;
+  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(scopeId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const role = await resolveGroupRole(orgId, id);
+  const role = await resolveGroupRole(orgId, tenantId, id);
   if (!role) {
     return scimError(404, "Group not found");
   }
@@ -317,9 +337,10 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return scimError(401, API_ERROR[result.error]);
   }
 
-  const { orgId } = result.data;
+  const { orgId, tenantId } = result.data;
+  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(scopeId))) {
     return scimError(429, "Too many requests");
   }
 

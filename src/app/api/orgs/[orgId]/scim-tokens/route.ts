@@ -107,9 +107,15 @@ export async function POST(req: NextRequest, { params }: Params) {
     ? new Date(Date.now() + parsed.data.expiresInDays * 24 * 60 * 60 * 1000)
     : null;
 
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { tenantId: true },
+  });
+
   const token = await prisma.scimToken.create({
     data: {
       orgId,
+      tenantId: org?.tenantId ?? null,
       tokenHash,
       description: parsed.data.description ?? null,
       expiresAt,

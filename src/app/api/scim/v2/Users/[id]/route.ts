@@ -15,8 +15,16 @@ import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 
 type Params = { params: Promise<{ id: string }> };
 
+function scimScopeWhere(orgId: string, tenantId: string | null) {
+  return tenantId ? { tenantId } : { orgId };
+}
+
 /** Resolve SCIM id → userId. The id could be a userId directly or via ScimExternalMapping. */
-async function resolveUserId(orgId: string, scimId: string): Promise<string | null> {
+async function resolveUserId(
+  orgId: string,
+  tenantId: string | null,
+  scimId: string,
+): Promise<string | null> {
   if (scimId.length > 255) return null;
 
   // First try as direct userId (OrgMember.userId)
@@ -27,21 +35,31 @@ async function resolveUserId(orgId: string, scimId: string): Promise<string | nu
   if (member) return member.userId;
 
   // Try via ScimExternalMapping (scimId may be an externalId from the IdP)
-  const mapping = await prisma.scimExternalMapping.findUnique({
-    where: {
-      orgId_externalId_resourceType: {
-        orgId,
-        externalId: scimId,
-        resourceType: "User",
-      },
-    },
-    select: { internalId: true },
-  });
+  const mapping = tenantId
+    ? await prisma.scimExternalMapping.findFirst({
+        where: {
+          tenantId,
+          externalId: scimId,
+          resourceType: "User",
+        },
+        select: { internalId: true },
+      })
+    : await prisma.scimExternalMapping.findUnique({
+        where: {
+          orgId_externalId_resourceType: {
+            orgId,
+            externalId: scimId,
+            resourceType: "User",
+          },
+        },
+        select: { internalId: true },
+      });
   return mapping?.internalId ?? null;
 }
 
 async function fetchUserResource(
   orgId: string,
+  tenantId: string | null,
   userId: string,
   baseUrl: string,
 ) {
@@ -52,7 +70,11 @@ async function fetchUserResource(
   if (!member || !member.user.email) return null;
 
   const extMapping = await prisma.scimExternalMapping.findFirst({
-    where: { orgId, internalId: userId, resourceType: "User" },
+    where: {
+      ...scimScopeWhere(orgId, tenantId),
+      internalId: userId,
+      resourceType: "User",
+    },
     select: { externalId: true },
   });
 
@@ -73,20 +95,21 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId } = result.data;
+  const { orgId, tenantId } = result.data;
+  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(scopeId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const userId = await resolveUserId(orgId, id);
+  const userId = await resolveUserId(orgId, tenantId, id);
   if (!userId) {
     return scimError(404, "User not found");
   }
 
   const baseUrl = getScimBaseUrl();
-  const resource = await fetchUserResource(orgId, userId, baseUrl);
+  const resource = await fetchUserResource(orgId, tenantId, userId, baseUrl);
   if (!resource) {
     return scimError(404, "User not found");
   }
@@ -100,14 +123,15 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, auditUserId } = result.data;
+  const { orgId, tenantId, auditUserId } = result.data;
+  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(scopeId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const userId = await resolveUserId(orgId, id);
+  const userId = await resolveUserId(orgId, tenantId, id);
   if (!userId) {
     return scimError(404, "User not found");
   }
@@ -160,27 +184,43 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
       // Update external mapping if provided; clear if omitted (PUT = full replace)
       if (externalId) {
-        const existingMapping = await tx.scimExternalMapping.findUnique({
-          where: {
-            orgId_externalId_resourceType: { orgId, externalId, resourceType: "User" },
-          },
-        });
+        const existingMapping = tenantId
+          ? await tx.scimExternalMapping.findFirst({
+              where: {
+                tenantId,
+                externalId,
+                resourceType: "User",
+              },
+            })
+          : await tx.scimExternalMapping.findUnique({
+              where: {
+                orgId_externalId_resourceType: { orgId, externalId, resourceType: "User" },
+              },
+            });
         if (existingMapping && existingMapping.internalId !== userId) {
           throw new Error("SCIM_EXTERNAL_ID_CONFLICT");
         }
         if (!existingMapping) {
           // Delete stale mapping for this user (handles externalId change: ext-A → ext-B)
           await tx.scimExternalMapping.deleteMany({
-            where: { orgId, internalId: userId, resourceType: "User" },
+            where: {
+              ...scimScopeWhere(orgId, tenantId),
+              internalId: userId,
+              resourceType: "User",
+            },
           });
           await tx.scimExternalMapping.create({
-            data: { orgId, externalId, resourceType: "User", internalId: userId },
+            data: { orgId, tenantId, externalId, resourceType: "User", internalId: userId },
           });
         }
       } else {
         // PUT is a full replace — no externalId means clear any existing mapping
         await tx.scimExternalMapping.deleteMany({
-          where: { orgId, internalId: userId, resourceType: "User" },
+          where: {
+            ...scimScopeWhere(orgId, tenantId),
+            internalId: userId,
+            resourceType: "User",
+          },
         });
       }
     });
@@ -206,7 +246,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 
   const baseUrl = getScimBaseUrl();
-  const resource = await fetchUserResource(orgId, userId, baseUrl);
+  const resource = await fetchUserResource(orgId, tenantId, userId, baseUrl);
   return scimResponse(resource!);
 }
 
@@ -216,14 +256,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, auditUserId } = result.data;
+  const { orgId, tenantId, auditUserId } = result.data;
+  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(scopeId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const userId = await resolveUserId(orgId, id);
+  const userId = await resolveUserId(orgId, tenantId, id);
   if (!userId) {
     return scimError(404, "User not found");
   }
@@ -305,7 +346,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   });
 
   const baseUrl = getScimBaseUrl();
-  const resource = await fetchUserResource(orgId, userId, baseUrl);
+  const resource = await fetchUserResource(orgId, tenantId, userId, baseUrl);
   return scimResponse(resource!);
 }
 
@@ -315,14 +356,15 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, auditUserId } = result.data;
+  const { orgId, tenantId, auditUserId } = result.data;
+  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(scopeId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const userId = await resolveUserId(orgId, id);
+  const userId = await resolveUserId(orgId, tenantId, id);
   if (!userId) {
     return scimError(404, "User not found");
   }
@@ -345,7 +387,11 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     await prisma.$transaction([
       prisma.orgMemberKey.deleteMany({ where: { orgId, userId } }),
       prisma.scimExternalMapping.deleteMany({
-        where: { orgId, internalId: userId, resourceType: "User" },
+        where: {
+          ...scimScopeWhere(orgId, tenantId),
+          internalId: userId,
+          resourceType: "User",
+        },
       }),
       prisma.orgMember.delete({ where: { id: member.id } }),
     ]);

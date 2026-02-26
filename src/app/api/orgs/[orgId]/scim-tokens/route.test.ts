@@ -1,7 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockAuth, mockRequireOrgPermission, OrgAuthError, mockLogAudit, mockScimToken, mockHashToken } = vi.hoisted(
+const {
+  mockAuth,
+  mockRequireOrgPermission,
+  OrgAuthError,
+  mockLogAudit,
+  mockScimToken,
+  mockOrganization,
+  mockHashToken,
+} = vi.hoisted(
   () => {
     class _OrgAuthError extends Error {
       status: number;
@@ -17,6 +25,7 @@ const { mockAuth, mockRequireOrgPermission, OrgAuthError, mockLogAudit, mockScim
       OrgAuthError: _OrgAuthError,
       mockLogAudit: vi.fn(),
       mockScimToken: { findMany: vi.fn(), create: vi.fn(), count: vi.fn() },
+      mockOrganization: { findUnique: vi.fn() },
       mockHashToken: vi.fn().mockReturnValue("hashed-token"),
     };
   },
@@ -32,7 +41,7 @@ vi.mock("@/lib/audit", () => ({
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
 }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { scimToken: mockScimToken },
+  prisma: { scimToken: mockScimToken, organization: mockOrganization },
 }));
 vi.mock("@/lib/crypto-server", () => ({
   hashToken: mockHashToken,
@@ -64,6 +73,7 @@ describe("GET /api/orgs/[orgId]/scim-tokens", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockOrganization.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 
   it("returns 401 if not authenticated", async () => {
@@ -106,6 +116,7 @@ describe("POST /api/orgs/[orgId]/scim-tokens", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockOrganization.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 
   it("returns 409 when active token limit is exceeded", async () => {
@@ -209,7 +220,7 @@ describe("POST /api/orgs/[orgId]/scim-tokens", () => {
     // Verify expiresAt was set to null
     expect(mockScimToken.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ expiresAt: null }),
+        data: expect.objectContaining({ expiresAt: null, tenantId: "tenant-1" }),
       }),
     );
   });

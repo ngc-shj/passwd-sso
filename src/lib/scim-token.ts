@@ -16,6 +16,7 @@ const LAST_USED_AT_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
 export interface ValidatedScimToken {
   tokenId: string;
   orgId: string;
+  tenantId: string | null;
   createdById: string | null;
   /** Always non-null: createdById ?? SCIM_SYSTEM_USER_ID. */
   auditUserId: string;
@@ -72,10 +73,14 @@ export async function validateScimToken(
     select: {
       id: true,
       orgId: true,
+      tenantId: true,
       createdById: true,
       revokedAt: true,
       expiresAt: true,
       lastUsedAt: true,
+      org: {
+        select: { tenantId: true },
+      },
     },
   });
 
@@ -108,6 +113,7 @@ export async function validateScimToken(
     data: {
       tokenId: token.id,
       orgId: token.orgId,
+      tenantId: token.tenantId ?? token.org?.tenantId ?? null,
       createdById: token.createdById,
       auditUserId: token.createdById ?? SCIM_SYSTEM_USER_ID,
     },

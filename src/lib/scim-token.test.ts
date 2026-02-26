@@ -37,10 +37,12 @@ function makeToken(overrides: Record<string, unknown> = {}) {
   return {
     id: "tok-1",
     orgId: "org-1",
+    tenantId: null,
     createdById: "user-1",
     revokedAt: null,
     expiresAt: null,
     lastUsedAt: null,
+    org: { tenantId: null },
     ...overrides,
   };
 }
@@ -71,6 +73,7 @@ describe("validateScimToken", () => {
       data: {
         tokenId: "tok-1",
         orgId: "org-1",
+        tenantId: null,
         createdById: "user-1",
         auditUserId: "user-1",
       },
@@ -85,6 +88,7 @@ describe("validateScimToken", () => {
     expect(result).toEqual({
       ok: true,
       data: expect.objectContaining({
+        tenantId: null,
         createdById: null,
         auditUserId: SCIM_SYSTEM_USER_ID,
       }),
@@ -222,11 +226,29 @@ describe("validateScimToken", () => {
       select: {
         id: true,
         orgId: true,
+        tenantId: true,
         createdById: true,
         revokedAt: true,
         expiresAt: true,
         lastUsedAt: true,
+        org: {
+          select: { tenantId: true },
+        },
       },
+    });
+  });
+
+  it("falls back to organization.tenantId when token.tenantId is null", async () => {
+    mockFindUnique.mockResolvedValue(makeToken({ tenantId: null, org: { tenantId: "tenant-1" } }));
+
+    const result = await validateScimToken(bearerRequest("scim_abc123"));
+
+    expect(result).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        orgId: "org-1",
+        tenantId: "tenant-1",
+      }),
     });
   });
 });

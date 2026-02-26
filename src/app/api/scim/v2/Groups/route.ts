@@ -26,15 +26,20 @@ const SCIM_GROUP_ROLES: OrgRole[] = [
   ORG_ROLE.VIEWER,
 ];
 
+function scimScopeWhere(orgId: string, tenantId: string | null) {
+  return tenantId ? { tenantId } : { orgId };
+}
+
 // GET /api/scim/v2/Groups — List all role-based groups
 export async function GET(req: NextRequest) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId } = result.data;
+  const { orgId, tenantId } = result.data;
+  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(scopeId))) {
     return scimError(429, "Too many requests");
   }
 
@@ -87,9 +92,10 @@ export async function POST(req: NextRequest) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId } = result.data;
+  const { orgId, tenantId } = result.data;
+  const scopeId = tenantId ?? orgId;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(scopeId))) {
     return scimError(429, "Too many requests");
   }
 
@@ -119,11 +125,19 @@ export async function POST(req: NextRequest) {
 
   // Register external mapping if externalId provided
   if (externalId) {
-    const existingMapping = await prisma.scimExternalMapping.findUnique({
-      where: {
-        orgId_externalId_resourceType: { orgId, externalId, resourceType: "Group" },
-      },
-    });
+    const existingMapping = tenantId
+      ? await prisma.scimExternalMapping.findFirst({
+          where: {
+            tenantId,
+            externalId,
+            resourceType: "Group",
+          },
+        })
+      : await prisma.scimExternalMapping.findUnique({
+          where: {
+            orgId_externalId_resourceType: { orgId, externalId, resourceType: "Group" },
+          },
+        });
     if (existingMapping && existingMapping.internalId !== groupId) {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }
@@ -131,10 +145,14 @@ export async function POST(req: NextRequest) {
       try {
         // Delete stale mapping for this group (handles externalId reassignment)
         await prisma.scimExternalMapping.deleteMany({
-          where: { orgId, internalId: groupId, resourceType: "Group" },
+          where: {
+            ...scimScopeWhere(orgId, tenantId),
+            internalId: groupId,
+            resourceType: "Group",
+          },
         });
         await prisma.scimExternalMapping.create({
-          data: { orgId, externalId, resourceType: "Group", internalId: groupId },
+          data: { orgId, tenantId, externalId, resourceType: "Group", internalId: groupId },
         });
       } catch (e) {
         if (isScimExternalMappingUniqueViolation(e)) {
