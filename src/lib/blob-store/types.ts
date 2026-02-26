@@ -10,6 +10,8 @@ export type BlobBackend = (typeof BLOB_STORAGE)[keyof typeof BLOB_STORAGE];
 export interface AttachmentBlobContext {
   attachmentId: string;
   entryId: string;
+  teamId?: string;
+  /** Legacy compatibility */
   orgId?: string;
 }
 

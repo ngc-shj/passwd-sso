@@ -4,7 +4,7 @@ export const BLOB_CONTENT_TYPE = {
 
 export const BLOB_OBJECT_SCOPE = {
   PERSONAL: "personal",
-  ORG: "org",
+  TEAM: "team",
 } as const;
 
 export const BLOB_CONFIG_ERROR = {
