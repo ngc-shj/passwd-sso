@@ -1,8 +1,90 @@
 import NextAuth from "next-auth";
+import type { Account } from "next-auth";
 import { createCustomAdapter } from "@/lib/auth-adapter";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+import { extractTenantClaimValue, slugifyTenant } from "@/lib/tenant-claim";
 import authConfig from "./auth.config";
+
+async function ensureTenantMembershipForSignIn(
+  userId: string,
+  account?: Account | null,
+  profile?: Record<string, unknown> | null,
+): Promise<boolean> {
+  const tenantClaim = extractTenantClaimValue(account, profile);
+  if (!tenantClaim) {
+    return false;
+  }
+
+  const tenantSlug = slugifyTenant(tenantClaim);
+  if (!tenantSlug) {
+    return false;
+  }
+
+  const tenant = await prisma.$transaction(async (tx) => {
+    let found = await tx.tenant.findFirst({
+      where: { OR: [{ id: tenantClaim }, { slug: tenantSlug }] },
+      select: { id: true },
+    });
+
+    if (!found) {
+      try {
+        found = await tx.tenant.create({
+          data: {
+            name: tenantClaim,
+            slug: tenantSlug,
+          },
+          select: { id: true },
+        });
+      } catch (e) {
+        if (
+          e instanceof Prisma.PrismaClientKnownRequestError &&
+          e.code === "P2002"
+        ) {
+          found = await tx.tenant.findUnique({
+            where: { slug: tenantSlug },
+            select: { id: true },
+          });
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    if (!found) return null;
+
+    const existingMembership = await tx.tenantMember.findFirst({
+      where: { userId },
+      select: { tenantId: true },
+    });
+
+    // Single-tenant sign-in policy: reject cross-tenant login.
+    if (existingMembership && existingMembership.tenantId !== found.id) {
+      return null;
+    }
+
+    await tx.tenantMember.upsert({
+      where: {
+        tenantId_userId: {
+          tenantId: found.id,
+          userId,
+        },
+      },
+      create: {
+        tenantId: found.id,
+        userId,
+        role: "MEMBER",
+      },
+      update: {},
+    });
+
+    return found;
+  });
+
+  return !!tenant;
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: createCustomAdapter(),
@@ -16,6 +98,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   callbacks: {
     ...authConfig.callbacks,
+    async signIn(params) {
+      const baseSignIn = authConfig.callbacks?.signIn;
+      if (baseSignIn) {
+        const baseResult = await baseSignIn(params);
+        if (!baseResult) return false;
+      }
+
+      if (!params.user?.id) return false;
+
+      const ok = await ensureTenantMembershipForSignIn(
+        params.user.id,
+        params.account,
+        (params.profile ?? null) as Record<string, unknown> | null,
+      );
+      return ok;
+    },
     async session({ session, user }) {
       session.user.id = user.id;
       return session;

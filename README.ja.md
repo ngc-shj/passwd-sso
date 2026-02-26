@@ -100,6 +100,7 @@ cp .env.example .env.local
 | `AUTH_GOOGLE_ID` | Google OAuth クライアント ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth クライアントシークレット |
 | `GOOGLE_WORKSPACE_DOMAIN` | （任意）Google Workspace ドメインに制限 |
+| `AUTH_TENANT_CLAIM_KEYS` | （任意）tenant 解決に使う IdP クレームキーをカンマ区切りで指定（例: `tenant_id,organization`） |
 | `JACKSON_URL` | SAML Jackson URL（デフォルト: `http://localhost:5225`） |
 | `AUTH_JACKSON_ID` | Jackson OIDC クライアント ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC クライアントシークレット |

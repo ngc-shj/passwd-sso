@@ -100,6 +100,7 @@ Edit `.env.local` and fill in:
 | `AUTH_GOOGLE_ID` | Google OAuth client ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth client secret |
 | `GOOGLE_WORKSPACE_DOMAIN` | (Optional) Restrict to a Google Workspace domain |
+| `AUTH_TENANT_CLAIM_KEYS` | (Optional) Comma-separated IdP claim keys used to resolve tenant (e.g. `tenant_id,organization`) |
 | `JACKSON_URL` | SAML Jackson URL (default: `http://localhost:5225`) |
 | `AUTH_JACKSON_ID` | Jackson OIDC client ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC client secret |
