@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createTagSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // GET /api/tags - List user's tags with password count
 export async function GET() {
@@ -11,19 +12,21 @@ export async function GET() {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const tags = await prisma.tag.findMany({
-    where: { userId: session.user.id },
-    orderBy: { name: "asc" },
-    include: {
-      _count: {
-        select: {
-          passwords: {
-            where: { deletedAt: null, isArchived: false },
+  const tags = await withUserTenantRls(session.user.id, async () =>
+    prisma.tag.findMany({
+      where: { userId: session.user.id },
+      orderBy: { name: "asc" },
+      include: {
+        _count: {
+          select: {
+            passwords: {
+              where: { deletedAt: null, isArchived: false },
+            },
           },
         },
       },
-    },
-  });
+    }),
+  );
 
   return NextResponse.json(
     tags.map((tag) => ({
@@ -60,9 +63,11 @@ export async function POST(req: NextRequest) {
   const { name, color } = parsed.data;
 
   // Check for duplicate name per user
-  const existing = await prisma.tag.findUnique({
-    where: { name_userId: { name, userId: session.user.id } },
-  });
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.tag.findUnique({
+      where: { name_userId: { name, userId: session.user.id } },
+    }),
+  );
   if (existing) {
     return NextResponse.json(
       { error: API_ERROR.TAG_ALREADY_EXISTS },
@@ -70,13 +75,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const tag = await prisma.tag.create({
-    data: {
-      name,
-      color: color || null,
-      userId: session.user.id,
-    },
-  });
+  const tag = await withUserTenantRls(session.user.id, async () =>
+    prisma.tag.create({
+      data: {
+        name,
+        color: color || null,
+        userId: session.user.id,
+      },
+    }),
+  );
 
   return NextResponse.json(
     { id: tag.id, name: tag.name, color: tag.color },

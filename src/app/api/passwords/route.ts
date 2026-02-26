@@ -7,6 +7,7 @@ import { authOrToken } from "@/lib/auth-or-token";
 import { withRequestLog } from "@/lib/with-request-log";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
@@ -31,33 +32,37 @@ async function handleGET(req: NextRequest) {
   const archivedOnly = searchParams.get("archived") === "true";
   const folderId = searchParams.get("folder");
 
-  const passwords = await prisma.passwordEntry.findMany({
-    where: {
-      userId,
-      ...(trashOnly
-        ? { deletedAt: { not: null } }
-        : { deletedAt: null }),
-      ...(archivedOnly
-        ? { isArchived: true }
-        : trashOnly ? {} : { isArchived: false }),
-      ...(favoritesOnly ? { isFavorite: true } : {}),
-      ...(tagId ? { tags: { some: { id: tagId } } } : {}),
-      ...(entryType ? { entryType } : {}),
-      ...(folderId ? { folderId } : {}),
-    },
-    include: { tags: { select: { id: true } } },
-    orderBy: [{ isFavorite: "desc" }, { updatedAt: "desc" }],
-  });
+  const passwords = await withUserTenantRls(userId, async () =>
+    prisma.passwordEntry.findMany({
+      where: {
+        userId,
+        ...(trashOnly
+          ? { deletedAt: { not: null } }
+          : { deletedAt: null }),
+        ...(archivedOnly
+          ? { isArchived: true }
+          : trashOnly ? {} : { isArchived: false }),
+        ...(favoritesOnly ? { isFavorite: true } : {}),
+        ...(tagId ? { tags: { some: { id: tagId } } } : {}),
+        ...(entryType ? { entryType } : {}),
+        ...(folderId ? { folderId } : {}),
+      },
+      include: { tags: { select: { id: true } } },
+      orderBy: [{ isFavorite: "desc" }, { updatedAt: "desc" }],
+    }),
+  );
 
   // Auto-purge items deleted more than 30 days ago
   if (!trashOnly) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    await prisma.passwordEntry.deleteMany({
-      where: {
-        userId,
-        deletedAt: { lt: thirtyDaysAgo },
-      },
-    }).catch(() => {});
+    await withUserTenantRls(userId, async () =>
+      prisma.passwordEntry.deleteMany({
+        where: {
+          userId,
+          deletedAt: { lt: thirtyDaysAgo },
+        },
+      }),
+    ).catch(() => {});
   }
 
   // Return encrypted overviews (and optionally blobs) for client-side decryption
@@ -124,7 +129,9 @@ async function handlePOST(req: NextRequest) {
 
   // Verify folder ownership
   if (folderId) {
-    const folder = await prisma.folder.findFirst({ where: { id: folderId, userId } });
+    const folder = await withUserTenantRls(userId, async () =>
+      prisma.folder.findFirst({ where: { id: folderId, userId } }),
+    );
     if (!folder) {
       return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid folderId" }, { status: 400 });
     }
@@ -132,34 +139,38 @@ async function handlePOST(req: NextRequest) {
 
   // Verify tag ownership
   if (tagIds?.length) {
-    const ownedCount = await prisma.tag.count({ where: { id: { in: tagIds }, userId } });
+    const ownedCount = await withUserTenantRls(userId, async () =>
+      prisma.tag.count({ where: { id: { in: tagIds }, userId } }),
+    );
     if (ownedCount !== tagIds.length) {
       return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid tagIds" }, { status: 400 });
     }
   }
 
-  const entry = await prisma.passwordEntry.create({
-    data: {
-      ...(clientId ? { id: clientId } : {}),
-      encryptedBlob: encryptedBlob.ciphertext,
-      blobIv: encryptedBlob.iv,
-      blobAuthTag: encryptedBlob.authTag,
-      encryptedOverview: encryptedOverview.ciphertext,
-      overviewIv: encryptedOverview.iv,
-      overviewAuthTag: encryptedOverview.authTag,
-      keyVersion,
-      aadVersion,
-      entryType,
-      ...(requireReprompt !== undefined ? { requireReprompt } : {}),
-      ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
-      ...(folderId ? { folderId } : {}),
-      userId,
-      ...(tagIds?.length
-        ? { tags: { connect: tagIds.map((id) => ({ id })) } }
-        : {}),
-    },
-    include: { tags: { select: { id: true } } },
-  });
+  const entry = await withUserTenantRls(userId, async () =>
+    prisma.passwordEntry.create({
+      data: {
+        ...(clientId ? { id: clientId } : {}),
+        encryptedBlob: encryptedBlob.ciphertext,
+        blobIv: encryptedBlob.iv,
+        blobAuthTag: encryptedBlob.authTag,
+        encryptedOverview: encryptedOverview.ciphertext,
+        overviewIv: encryptedOverview.iv,
+        overviewAuthTag: encryptedOverview.authTag,
+        keyVersion,
+        aadVersion,
+        entryType,
+        ...(requireReprompt !== undefined ? { requireReprompt } : {}),
+        ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
+        ...(folderId ? { folderId } : {}),
+        userId,
+        ...(tagIds?.length
+          ? { tags: { connect: tagIds.map((id) => ({ id })) } }
+          : {}),
+      },
+      include: { tags: { select: { id: true } } },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
