@@ -5,9 +5,22 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { stripLocalePrefix } from "@/i18n/locale-utils";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 
+export type TeamScopedVaultContext = {
+  type: "org";
+  teamId: string;
+  teamName?: string;
+  teamRole?: string;
+  // Compatibility aliases
+  orgId: string;
+  orgName?: string;
+  orgRole?: string;
+};
+
 export type VaultContext =
   | { type: "personal" }
-  | { type: "org"; orgId: string; orgName?: string; orgRole?: string };
+  | TeamScopedVaultContext;
+
+export type TeamVaultContext = VaultContext;
 
 interface TeamContextItem {
   id: string;
@@ -38,6 +51,18 @@ function isCrossVaultPath(path: string): boolean {
   return CROSS_VAULT_PATHS.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
 }
 
+function createTeamScopedContext(team: TeamContextItem): TeamScopedVaultContext {
+  return {
+    type: "org",
+    teamId: team.id,
+    teamName: team.name,
+    teamRole: team.role,
+    orgId: team.id,
+    orgName: team.name,
+    orgRole: team.role,
+  };
+}
+
 export function useVaultContext(teams: TeamContextItem[]): VaultContext {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -50,7 +75,7 @@ export function useVaultContext(teams: TeamContextItem[]): VaultContext {
       if (shareTeamId) {
         const team = teams.find((item) => item.id === shareTeamId);
         if (team) {
-          return { type: "org", orgId: team.id, orgName: team.name, orgRole: team.role };
+          return createTeamScopedContext(team);
         }
       }
     }
@@ -59,7 +84,7 @@ export function useVaultContext(teams: TeamContextItem[]): VaultContext {
     if (teamMatch) {
       const team = teams.find((item) => item.id === teamMatch[1]);
       if (team) {
-        return { type: "org", orgId: team.id, orgName: team.name, orgRole: team.role };
+        return createTeamScopedContext(team);
       }
     }
 
@@ -70,7 +95,7 @@ export function useVaultContext(teams: TeamContextItem[]): VaultContext {
     if (isCrossVaultPath(cleanPath) && lastContext !== "personal") {
       const team = teams.find((item) => item.id === lastContext);
       if (team) {
-        return { type: "org", orgId: team.id, orgName: team.name, orgRole: team.role };
+        return createTeamScopedContext(team);
       }
     }
 
