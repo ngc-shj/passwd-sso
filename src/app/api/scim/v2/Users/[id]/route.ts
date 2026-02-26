@@ -80,8 +80,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId: legacyOrgId, tenantId } = result.data;
-  const scopedTeamId = teamId ?? legacyOrgId;
+  const { teamId: scopedTeamId, tenantId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -108,8 +107,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId: legacyOrgId, tenantId, auditUserId } = result.data;
-  const scopedTeamId = teamId ?? legacyOrgId;
+  const { teamId: scopedTeamId, tenantId, auditUserId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -235,8 +233,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId: legacyOrgId, tenantId, auditUserId } = result.data;
-  const scopedTeamId = teamId ?? legacyOrgId;
+  const { teamId: scopedTeamId, tenantId, auditUserId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -335,8 +332,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId: legacyOrgId, tenantId, auditUserId } = result.data;
-  const scopedTeamId = teamId ?? legacyOrgId;
+  const { teamId: scopedTeamId, tenantId, auditUserId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
