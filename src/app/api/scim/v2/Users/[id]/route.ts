@@ -80,20 +80,21 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, tenantId } = result.data;
+  const { teamId, orgId, tenantId } = result.data;
+  const scopedTeamId = teamId ?? orgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const userId = await resolveUserId(orgId, tenantId, id);
+  const userId = await resolveUserId(scopedTeamId, tenantId, id);
   if (!userId) {
     return scimError(404, "User not found");
   }
 
   const baseUrl = getScimBaseUrl();
-  const resource = await fetchUserResource(orgId, tenantId, userId, baseUrl);
+  const resource = await fetchUserResource(scopedTeamId, tenantId, userId, baseUrl);
   if (!resource) {
     return scimError(404, "User not found");
   }
@@ -107,14 +108,15 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, tenantId, auditUserId } = result.data;
+  const { teamId, orgId, tenantId, auditUserId } = result.data;
+  const scopedTeamId = teamId ?? orgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const userId = await resolveUserId(orgId, tenantId, id);
+  const userId = await resolveUserId(scopedTeamId, tenantId, id);
   if (!userId) {
     return scimError(404, "User not found");
   }
@@ -135,7 +137,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // OWNER protection
   const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId, userId } },
+    where: { orgId_userId: { orgId: scopedTeamId, userId } },
     select: { id: true, role: true, deactivatedAt: true, userId: true },
   });
   if (!member) {
@@ -187,7 +189,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
             },
           });
           await tx.scimExternalMapping.create({
-            data: { orgId, tenantId, externalId, resourceType: "User", internalId: userId },
+            data: { orgId: scopedTeamId, tenantId, externalId, resourceType: "User", internalId: userId },
           });
         }
       } else {
@@ -215,7 +217,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: auditAction,
     userId: auditUserId,
-    orgId,
+    orgId: scopedTeamId,
     targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
     targetId: userId,
     metadata: { active, externalId, name: name?.formatted },
@@ -223,7 +225,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 
   const baseUrl = getScimBaseUrl();
-  const resource = await fetchUserResource(orgId, tenantId, userId, baseUrl);
+  const resource = await fetchUserResource(scopedTeamId, tenantId, userId, baseUrl);
   return scimResponse(resource!);
 }
 
@@ -233,14 +235,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, tenantId, auditUserId } = result.data;
+  const { teamId, orgId, tenantId, auditUserId } = result.data;
+  const scopedTeamId = teamId ?? orgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const userId = await resolveUserId(orgId, tenantId, id);
+  const userId = await resolveUserId(scopedTeamId, tenantId, id);
   if (!userId) {
     return scimError(404, "User not found");
   }
@@ -268,7 +271,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId, userId } },
+    where: { orgId_userId: { orgId: scopedTeamId, userId } },
   });
   if (!member) {
     return scimError(404, "User not found");
@@ -314,7 +317,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: auditAction,
     userId: auditUserId,
-    orgId,
+    orgId: scopedTeamId,
     targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
     targetId: userId,
     metadata: { active: patchResult.active, name: patchResult.name },
@@ -322,7 +325,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   });
 
   const baseUrl = getScimBaseUrl();
-  const resource = await fetchUserResource(orgId, tenantId, userId, baseUrl);
+  const resource = await fetchUserResource(scopedTeamId, tenantId, userId, baseUrl);
   return scimResponse(resource!);
 }
 
@@ -332,20 +335,21 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, tenantId, auditUserId } = result.data;
+  const { teamId, orgId, tenantId, auditUserId } = result.data;
+  const scopedTeamId = teamId ?? orgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const userId = await resolveUserId(orgId, tenantId, id);
+  const userId = await resolveUserId(scopedTeamId, tenantId, id);
   if (!userId) {
     return scimError(404, "User not found");
   }
 
   const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId, userId } },
+    where: { orgId_userId: { orgId: scopedTeamId, userId } },
     include: { user: { select: { email: true } } },
   });
   if (!member) {
@@ -360,7 +364,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   // Atomic delete: OrgMemberKey + ScimExternalMapping + OrgMember
   try {
     await prisma.$transaction([
-      prisma.orgMemberKey.deleteMany({ where: { orgId, userId } }),
+      prisma.orgMemberKey.deleteMany({ where: { orgId: scopedTeamId, userId } }),
       prisma.scimExternalMapping.deleteMany({
         where: {
           tenantId,
@@ -381,7 +385,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.SCIM_USER_DELETE,
     userId: auditUserId,
-    orgId,
+    orgId: scopedTeamId,
     targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
     targetId: userId,
     metadata: { email: member.user.email, role: member.role },

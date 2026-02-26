@@ -76,20 +76,21 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, tenantId } = result.data;
+  const { teamId, orgId, tenantId } = result.data;
+  const scopedTeamId = teamId ?? orgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const role = await resolveGroupRole(orgId, tenantId, id);
+  const role = await resolveGroupRole(scopedTeamId, tenantId, id);
   if (!role) {
     return scimError(404, "Group not found");
   }
 
   const baseUrl = getScimBaseUrl();
-  const resource = await buildGroupResource(orgId, role, baseUrl);
+  const resource = await buildGroupResource(scopedTeamId, role, baseUrl);
   return scimResponse(resource);
 }
 
@@ -99,14 +100,15 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, tenantId, auditUserId } = result.data;
+  const { teamId, orgId, tenantId, auditUserId } = result.data;
+  const scopedTeamId = teamId ?? orgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const role = await resolveGroupRole(orgId, tenantId, id);
+  const role = await resolveGroupRole(scopedTeamId, tenantId, id);
   if (!role) {
     return scimError(404, "Group not found");
   }
@@ -127,7 +129,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // Get current members in this role
   const currentMembers = await prisma.orgMember.findMany({
-    where: { orgId, role, deactivatedAt: null },
+    where: { orgId: scopedTeamId, role, deactivatedAt: null },
     select: { id: true, userId: true, role: true },
   });
   const currentUserIds = new Set(currentMembers.map((m) => m.userId));
@@ -148,7 +150,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     await prisma.$transaction(async (tx) => {
       for (const userId of toAdd) {
         const member = await tx.orgMember.findUnique({
-          where: { orgId_userId: { orgId, userId } },
+          where: { orgId_userId: { orgId: scopedTeamId, userId } },
           select: { id: true, role: true },
         });
         if (!member) {
@@ -197,7 +199,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
     userId: auditUserId,
-    orgId,
+    orgId: scopedTeamId,
     targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
     targetId: id,
     metadata: { role, added: toAdd.length, removed: toRemove.length },
@@ -205,7 +207,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 
   const baseUrl = getScimBaseUrl();
-  const resource = await buildGroupResource(orgId, role, baseUrl);
+  const resource = await buildGroupResource(scopedTeamId, role, baseUrl);
   return scimResponse(resource);
 }
 
@@ -215,14 +217,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, tenantId, auditUserId } = result.data;
+  const { teamId, orgId, tenantId, auditUserId } = result.data;
+  const scopedTeamId = teamId ?? orgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const role = await resolveGroupRole(orgId, tenantId, id);
+  const role = await resolveGroupRole(scopedTeamId, tenantId, id);
   if (!role) {
     return scimError(404, "Group not found");
   }
@@ -253,7 +256,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     await prisma.$transaction(async (tx) => {
       for (const action of actions) {
         const member = await tx.orgMember.findUnique({
-          where: { orgId_userId: { orgId, userId: action.userId } },
+          where: { orgId_userId: { orgId: scopedTeamId, userId: action.userId } },
           select: { id: true, role: true },
         });
         if (!member) {
@@ -297,7 +300,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
     userId: auditUserId,
-    orgId,
+    orgId: scopedTeamId,
     targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
     targetId: id,
     metadata: {
@@ -308,7 +311,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   });
 
   const baseUrl = getScimBaseUrl();
-  const resource = await buildGroupResource(orgId, role, baseUrl);
+  const resource = await buildGroupResource(scopedTeamId, role, baseUrl);
   return scimResponse(resource);
 }
 
@@ -319,7 +322,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return scimError(401, API_ERROR[result.error]);
   }
 
-  const { orgId, tenantId } = result.data;
+  const { tenantId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");

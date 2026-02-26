@@ -32,7 +32,8 @@ export async function GET(req: NextRequest) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, tenantId } = result.data;
+  const { teamId, orgId, tenantId } = result.data;
+  const scopedTeamId = teamId ?? orgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -42,7 +43,7 @@ export async function GET(req: NextRequest) {
 
   // Fetch all active members grouped by role
   const members = await prisma.orgMember.findMany({
-    where: { orgId, deactivatedAt: null },
+    where: { orgId: scopedTeamId, deactivatedAt: null },
     include: { user: { select: { id: true, email: true } } },
   });
 
@@ -59,7 +60,7 @@ export async function GET(req: NextRequest) {
   }
 
   const groups = SCIM_GROUP_ROLES.map((role) =>
-    roleToScimGroup(orgId, role, membersByRole.get(role) ?? [], baseUrl),
+    roleToScimGroup(scopedTeamId, role, membersByRole.get(role) ?? [], baseUrl),
   );
 
   // Support filter by displayName (only supported filter for Groups)
@@ -87,7 +88,8 @@ export async function POST(req: NextRequest) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, tenantId } = result.data;
+  const { teamId, orgId, tenantId } = result.data;
+  const scopedTeamId = teamId ?? orgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -115,7 +117,7 @@ export async function POST(req: NextRequest) {
     return scimError(400, `Unknown group displayName. Valid names: ${SCIM_GROUP_ROLES.join(", ")}`);
   }
 
-  const groupId = roleGroupId(orgId, matchedRole);
+  const groupId = roleGroupId(scopedTeamId, matchedRole);
 
   // Register external mapping if externalId provided
   if (externalId) {
@@ -140,7 +142,7 @@ export async function POST(req: NextRequest) {
           },
         });
         await prisma.scimExternalMapping.create({
-          data: { orgId, tenantId, externalId, resourceType: "Group", internalId: groupId },
+          data: { orgId: scopedTeamId, tenantId, externalId, resourceType: "Group", internalId: groupId },
         });
       } catch (e) {
         if (isScimExternalMappingUniqueViolation(e)) {
@@ -155,7 +157,7 @@ export async function POST(req: NextRequest) {
 
   // Fetch current members for this role
   const members = await prisma.orgMember.findMany({
-    where: { orgId, role: matchedRole, deactivatedAt: null },
+    where: { orgId: scopedTeamId, role: matchedRole, deactivatedAt: null },
     include: { user: { select: { id: true, email: true } } },
   });
 
@@ -166,6 +168,6 @@ export async function POST(req: NextRequest) {
       email: m.user.email!,
     }));
 
-  const resource = roleToScimGroup(orgId, matchedRole, memberInputs, baseUrl);
+  const resource = roleToScimGroup(scopedTeamId, matchedRole, memberInputs, baseUrl);
   return scimResponse(resource, 201);
 }

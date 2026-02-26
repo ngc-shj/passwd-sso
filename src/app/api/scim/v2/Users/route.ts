@@ -21,13 +21,14 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { ORG_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 
-// GET /api/scim/v2/Users — List/filter users in the org
+// GET /api/scim/v2/Users — List/filter users in the team
 export async function GET(req: NextRequest) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, tenantId } = result.data;
+  const { teamId, orgId, tenantId } = result.data;
+  const scopedTeamId = teamId ?? orgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -42,7 +43,7 @@ export async function GET(req: NextRequest) {
   // No deactivatedAt filter by default — RFC 7644 §3.4.2 requires unfiltered
   // GET to return all resources. The `active` field distinguishes state.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let prismaWhere: Record<string, any> = { orgId, user: { email: { not: null } } };
+  let prismaWhere: Record<string, any> = { orgId: scopedTeamId, user: { email: { not: null } } };
 
   if (filterParam) {
     try {
@@ -121,13 +122,14 @@ export async function GET(req: NextRequest) {
   return scimListResponse(resources, totalResults, startIndex);
 }
 
-// POST /api/scim/v2/Users — Create (provision) a user in the org
+// POST /api/scim/v2/Users — Create (provision) a user in the team
 export async function POST(req: NextRequest) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, tenantId, auditUserId } = result.data;
+  const { teamId, orgId, tenantId, auditUserId } = result.data;
+  const scopedTeamId = teamId ?? orgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -163,7 +165,7 @@ export async function POST(req: NextRequest) {
 
       // Check for existing OrgMember
       const existingMember = await tx.orgMember.findUnique({
-        where: { orgId_userId: { orgId, userId: user.id } },
+        where: { orgId_userId: { orgId: scopedTeamId, userId: user.id } },
       });
 
       if (existingMember) {
@@ -184,7 +186,7 @@ export async function POST(req: NextRequest) {
         // Create new OrgMember
         await tx.orgMember.create({
           data: {
-            orgId,
+            orgId: scopedTeamId,
             userId: user.id,
             role: ORG_ROLE.MEMBER,
             scimManaged: true,
@@ -217,7 +219,7 @@ export async function POST(req: NextRequest) {
           });
           await tx.scimExternalMapping.create({
             data: {
-              orgId,
+              orgId: scopedTeamId,
               tenantId,
               externalId,
               resourceType: "User",
@@ -229,7 +231,7 @@ export async function POST(req: NextRequest) {
 
       // Re-fetch to get latest state
       const member = await tx.orgMember.findUnique({
-        where: { orgId_userId: { orgId, userId: user.id } },
+        where: { orgId_userId: { orgId: scopedTeamId, userId: user.id } },
       });
 
       return { user, member: member!, externalId, reactivated: !!existingMember };
@@ -239,7 +241,7 @@ export async function POST(req: NextRequest) {
       scope: AUDIT_SCOPE.ORG,
       action: created.reactivated ? AUDIT_ACTION.SCIM_USER_REACTIVATE : AUDIT_ACTION.SCIM_USER_CREATE,
       userId: auditUserId,
-      orgId,
+      orgId: scopedTeamId,
       targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
       targetId: created.user.id,
       metadata: { email: userName, externalId },
