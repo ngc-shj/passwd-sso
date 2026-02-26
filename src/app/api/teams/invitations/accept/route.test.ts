@@ -43,7 +43,7 @@ const validInvitation = {
   token: "valid-token",
   status: INVITATION_STATUS.PENDING,
   expiresAt: futureDate,
-  org: { id: "team-1", name: "My Org", slug: "my-org" },
+  org: { id: "team-1", name: "My Team", slug: "my-org" },
 };
 
 describe("POST /api/teams/invitations/accept", () => {
@@ -169,7 +169,7 @@ describe("POST /api/teams/invitations/accept", () => {
     expect(res.status).toBe(200);
     expect(json.alreadyMember).toBe(false);
     expect(json.role).toBe(TEAM_ROLE.MEMBER);
-    expect(json.org.name).toBe("My Org");
+    expect(json.org.name).toBe("My Team");
     expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
 

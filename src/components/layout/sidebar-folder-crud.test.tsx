@@ -221,7 +221,7 @@ function mockFetchSuccess(overrides?: {
         json: () => Promise.resolve(folders),
       });
     }
-    // Org-specific sub-resource fetches (tags, folders)
+    // Team-specific sub-resource fetches (tags, folders)
     if (url.match(/\/api\/teams\/[^/]+\/tags/)) {
       return Promise.resolve({
         ok: true,
@@ -641,14 +641,14 @@ describe("Sidebar team folder CRUD integration", () => {
       if (init?.method === "POST") {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ id: "of2", name: "New Org Folder" }),
+          json: () => Promise.resolve({ id: "of2", name: "New Team Folder" }),
         });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
     });
 
     await act(async () => {
-      await capturedFolderDialogProps!.onSubmit({ name: "New Org Folder", parentId: null });
+      await capturedFolderDialogProps!.onSubmit({ name: "New Team Folder", parentId: null });
     });
 
     // Verify the POST was sent to the team folders endpoint

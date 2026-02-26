@@ -94,7 +94,7 @@ describe("runImportEntries", () => {
     expect(progress).toHaveBeenNthCalledWith(1, 1, 2);
     expect(progress).toHaveBeenNthCalledWith(2, 2, 2);
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    // Org import now encrypts client-side (blob + overview per entry)
+    // Team import now encrypts client-side (blob + overview per entry)
     expect(mockEncryptData).toHaveBeenCalledTimes(4);
   });
 

@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
     dataAuthTag = encrypted.authTag;
     masterKeyVersion = encrypted.masterKeyVersion;
   } else {
-    // Org entry — E2E: client sends pre-encrypted share data
+    // Team entry — E2E: client sends pre-encrypted share data
     const orgEntry = await prisma.orgPasswordEntry.findUnique({
       where: { id: orgPasswordEntryId! },
       select: { orgId: true, entryType: true },

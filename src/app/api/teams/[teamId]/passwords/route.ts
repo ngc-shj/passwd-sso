@@ -141,11 +141,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, orgKeyVersion, entryType, tagIds, orgFolderId } = parsed.data;
 
   // Validate orgKeyVersion matches current team key version
-  const org = await prisma.organization.findUnique({
+  const team = await prisma.organization.findUnique({
     where: { id: teamId },
     select: { orgKeyVersion: true },
   });
-  if (!org || orgKeyVersion !== org.orgKeyVersion) {
+  if (!team || orgKeyVersion !== team.orgKeyVersion) {
     return NextResponse.json(
       { error: API_ERROR.ORG_KEY_VERSION_MISMATCH },
       { status: 409 }

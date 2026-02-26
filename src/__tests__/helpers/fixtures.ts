@@ -59,7 +59,7 @@ export function makeTag(overrides: Record<string, unknown> = {}) {
 export function makeOrg(overrides: Record<string, unknown> = {}) {
   return {
     id: "org-1",
-    name: "Test Org",
+    name: "Test Team",
     slug: "test-org",
     description: "A test organization",
     encryptedOrgKey: "encrypted-key",

@@ -58,7 +58,7 @@ describe("GET /api/teams/archived", () => {
         overviewAuthTag: "aabbccddee0011223344556677889900",
         aadVersion: 1,
         orgKeyVersion: 1,
-        org: { id: "team-1", name: "My Org" },
+        org: { id: "team-1", name: "My Team" },
         tags: [],
         createdBy: { id: "u1", name: "User", image: null },
         updatedBy: { id: "u1", name: "User" },
@@ -79,7 +79,7 @@ describe("GET /api/teams/archived", () => {
     expect(json[0].orgKeyVersion).toBe(1);
     expect(json[0].isArchived).toBe(true);
     expect(json[0].teamId).toBe("team-1");
-    expect(json[0].teamName).toBe("My Org");
+    expect(json[0].teamName).toBe("My Team");
     // Should NOT contain decrypted fields
     expect(json[0].title).toBeUndefined();
     expect(json[0].username).toBeUndefined();

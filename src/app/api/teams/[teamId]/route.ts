@@ -23,7 +23,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
   try {
     const membership = await requireTeamMember(session.user.id, teamId);
-    const org = await prisma.organization.findUnique({
+    const team = await prisma.organization.findUnique({
       where: { id: teamId },
       select: {
         id: true,
@@ -36,15 +36,15 @@ export async function GET(_req: NextRequest, { params }: Params) {
       },
     });
 
-    if (!org) {
+    if (!team) {
       return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
     }
 
     return NextResponse.json({
-      ...org,
+      ...team,
       role: membership.role,
-      memberCount: org._count.members,
-      passwordCount: org._count.passwords,
+      memberCount: team._count.members,
+      passwordCount: team._count.passwords,
     });
   } catch (e) {
     if (e instanceof TeamAuthError) {
@@ -93,17 +93,17 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updateData.description = parsed.data.description || null;
   }
 
-  const org = await prisma.organization.update({
+  const team = await prisma.organization.update({
     where: { id: teamId },
     data: updateData,
   });
 
   return NextResponse.json({
-    id: org.id,
-    name: org.name,
-    slug: org.slug,
-    description: org.description,
-    updatedAt: org.updatedAt,
+    id: team.id,
+    name: team.name,
+    slug: team.slug,
+    description: team.description,
+    updatedAt: team.updatedAt,
   });
 }
 

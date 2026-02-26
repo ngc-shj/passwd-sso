@@ -169,7 +169,7 @@ export function ShareDialog({
         body.passwordEntryId = passwordEntryId;
         body.data = safeData;
       } else {
-        // Org entry: E2E — encrypt with random share key
+        // Team entry: E2E — encrypt with random share key
         if (!decryptedData) {
           toast.error(t("createError"));
           return;

@@ -59,7 +59,7 @@ describe("GET /api/teams/trash", () => {
         overviewAuthTag: "aabbccddee0011223344556677889900",
         aadVersion: 1,
         orgKeyVersion: 1,
-        org: { id: "team-1", name: "My Org" },
+        org: { id: "team-1", name: "My Team" },
         tags: [],
         createdBy: { id: "u1", name: "User", image: null },
         updatedBy: { id: "u1", name: "User" },

@@ -77,7 +77,7 @@ describe("GET /api/teams/[teamId]", () => {
   it("returns org details with counts", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
       id: TEAM_ID,
-      name: "My Org",
+      name: "My Team",
       slug: "my-org",
       description: null,
       createdAt: now,
@@ -134,19 +134,19 @@ describe("PUT /api/teams/[teamId]", () => {
   it("updates org name successfully", async () => {
     mockPrismaOrganization.update.mockResolvedValue({
       id: TEAM_ID,
-      name: "Updated Org",
+      name: "Updated Team",
       slug: "my-org",
       description: null,
       updatedAt: now,
     });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}`, { body: { name: "Updated Org" } }),
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}`, { body: { name: "Updated Team" } }),
       createParams({ teamId: TEAM_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.name).toBe("Updated Org");
+    expect(json.name).toBe("Updated Team");
   });
 
   it("returns 400 for invalid JSON body", async () => {

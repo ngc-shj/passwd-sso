@@ -277,7 +277,7 @@ export function PasswordCard({
     setDetailLoading(true);
 
     if (getDetailProp) {
-      // Org mode: use provided data fetcher
+      // Team mode: use provided data fetcher
       getDetailProp()
         .then((detail) => {
           if (!cancelled) setDetailData(detail);

@@ -255,7 +255,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   });
 
   it("returns 400 when entry count does not match org entries (F-17)", async () => {
-    // Org has 3 entries but client submits only 1
+    // Team has 3 entries but client submits only 1
     txMock.orgPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e2" }, { id: "e3" }]);
     const res = await POST(
       createRequest({
@@ -323,7 +323,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   });
 
   it("includes trashed entries in rotation (all-entries policy)", async () => {
-    // Org has 2 entries: one active (e1), one trashed (e-trash).
+    // Team has 2 entries: one active (e1), one trashed (e-trash).
     // rotate-key must cover ALL entries including trash.
     txMock.orgPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e-trash" }]);
     txMock.orgPasswordEntry.updateMany.mockResolvedValue({ count: 1 });

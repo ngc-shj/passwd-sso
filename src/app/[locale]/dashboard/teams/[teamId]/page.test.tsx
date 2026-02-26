@@ -76,7 +76,7 @@ import TeamDashboardPage from "./page";
 function makeOrgResponse(role = "OWNER") {
   return {
     id: "team-1",
-    name: "Test Org",
+    name: "Test Team",
     slug: "test-org",
     role,
     memberCount: 3,

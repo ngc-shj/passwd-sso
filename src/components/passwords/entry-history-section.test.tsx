@@ -266,7 +266,7 @@ describe("EntryHistorySection", () => {
 
   it("fetches from teamPasswordHistoryById for team entries on View", async () => {
     mockDecryptData.mockResolvedValue(
-      JSON.stringify({ title: "Org PW", password: "secret" }),
+      JSON.stringify({ title: "Team PW", password: "secret" }),
     );
 
     const fetchMock = vi.fn((url: string) => {

@@ -465,7 +465,7 @@ describe("crypto-team", () => {
       const orgEncKey = await deriveTeamEncryptionKey(orgKey);
 
       // 2. Admin encrypts org data
-      const entry = '{"title":"Org Secret","password":"team-pass-123"}';
+      const entry = '{"title":"Team Secret","password":"team-pass-123"}';
       const encryptedEntry = await encryptOrgEntry(entry, orgEncKey);
 
       // 3. Member joins → admin distributes org key

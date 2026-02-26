@@ -10,7 +10,7 @@
  *
  * Scopes:
  *   "PV" — Personal Vault entry  (userId, entryId)
- *   "OV" — Org Vault entry       (orgId, entryId, vaultType)
+ *   "OV" — Team Vault entry       (orgId, entryId, vaultType)
  *   "AT" — Attachment             (entryId, attachmentId)
  */
 

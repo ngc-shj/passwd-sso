@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
     // Deactivated + !scimManaged → re-activate via invitation
   }
 
-  // Org is always E2E-enabled.
+  // Team is always E2E-enabled.
   // Check if the user has an ECDH public key (vault set up).
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },

@@ -1,5 +1,5 @@
 /**
- * Org E2E Encryption (ECDH-P256)
+ * Team E2E Encryption (ECDH-P256)
  *
  * Provides client-side encryption for organization vault entries using
  * ECDH key exchange for per-member org key distribution.
@@ -67,14 +67,14 @@ function textEncode(text: string): ArrayBuffer {
   ) as ArrayBuffer;
 }
 
-// ─── Org Symmetric Key Generation ───────────────────────────────
+// ─── Team Symmetric Key Generation ───────────────────────────────
 
 /** Generate a random 256-bit org symmetric key */
 export function generateTeamSymmetricKey(): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(32));
 }
 
-// ─── Org Encryption Key Derivation ──────────────────────────────
+// ─── Team Encryption Key Derivation ──────────────────────────────
 
 /**
  * Derive AES-256-GCM encryption key from org symmetric key.
@@ -114,7 +114,7 @@ export async function deriveTeamEncryptionKey(
  * HKDF(sharedBits, info="passwd-sso-org-v1", salt=random per-escrow salt)
  *
  * The random salt is generated per key-wrapping operation and stored in OrgMemberKey.
- * Org-level domain separation is enforced via AAD (which includes orgId).
+ * Team-level domain separation is enforced via AAD (which includes orgId).
  */
 async function deriveOrgWrappingKey(
   privateKey: CryptoKey,
@@ -244,7 +244,7 @@ export function buildTeamKeyWrapAAD(ctx: TeamKeyWrapContext): Uint8Array {
   return bytes;
 }
 
-// ─── Org Key Wrapping (Admin → Member) ──────────────────────────
+// ─── Team Key Wrapping (Admin → Member) ──────────────────────────
 
 /**
  * Wrap org symmetric key for a member using ECDH.
@@ -352,7 +352,7 @@ export interface OrgKeyEscrowResult {
  * @param memberPublicKeyJwk - Member's ECDH public key (JWK string)
  * @param orgId - Organization ID
  * @param toUserId - Member user ID
- * @param keyVersion - Org key version
+ * @param keyVersion - Team key version
  */
 export async function createTeamKeyEscrow(
   orgKey: Uint8Array,
@@ -397,7 +397,7 @@ export async function createTeamKeyEscrow(
   };
 }
 
-// ─── Org Entry Encryption/Decryption ────────────────────────────
+// ─── Team Entry Encryption/Decryption ────────────────────────────
 
 /**
  * Encrypt org entry data (text) with org encryption key.

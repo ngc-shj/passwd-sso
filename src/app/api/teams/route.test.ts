@@ -35,7 +35,7 @@ describe("GET /api/teams", () => {
     mockPrismaOrgMember.findMany.mockResolvedValue([
       {
         role: TEAM_ROLE.OWNER,
-        org: { id: "team-1", name: "My Org", slug: "my-org", description: null, createdAt: now },
+        org: { id: "team-1", name: "My Team", slug: "my-org", description: null, createdAt: now },
       },
       {
         role: TEAM_ROLE.MEMBER,
@@ -66,7 +66,7 @@ describe("POST /api/teams (E2E-only)", () => {
   });
 
   const validE2EBody = {
-    name: "E2E Org",
+    name: "E2E Team",
     slug: "e2e-org",
     orgMemberKey: {
       encryptedOrgKey: "encrypted-org-key-data",
@@ -88,7 +88,7 @@ describe("POST /api/teams (E2E-only)", () => {
 
   it("returns 400 when orgMemberKey is missing", async () => {
     const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
-      body: { name: "My Org", slug: "my-org" },
+      body: { name: "My Team", slug: "my-org" },
     }));
     expect(res.status).toBe(400);
   });
@@ -114,7 +114,7 @@ describe("POST /api/teams (E2E-only)", () => {
     mockPrismaOrganization.findUnique.mockResolvedValue(null);
     mockPrismaOrganization.create.mockResolvedValue({
       id: "e2e-org-id",
-      name: "E2E Org",
+      name: "E2E Team",
       slug: "e2e-org",
       description: null,
       createdAt: now,
@@ -159,7 +159,7 @@ describe("POST /api/teams (E2E-only)", () => {
     mockPrismaOrganization.findUnique.mockResolvedValue(null);
     mockPrismaOrganization.create.mockResolvedValue({
       id: "e2e-org-id",
-      name: "E2E Org",
+      name: "E2E Team",
       slug: "e2e-org",
       description: null,
       createdAt: now,
@@ -184,7 +184,7 @@ describe("POST /api/teams (E2E-only)", () => {
 
   it("returns 400 when E2E body has invalid orgKeyIv", async () => {
     const invalidBody = {
-      name: "Bad Org",
+      name: "Bad Team",
       slug: "bad-org",
       orgMemberKey: {
         encryptedOrgKey: "data",

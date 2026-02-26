@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const org = await prisma.organization.create({
+  const team = await prisma.organization.create({
     data: {
       ...(clientId ? { id: clientId } : {}),
       tenant: {
@@ -108,12 +108,12 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(
     {
-      id: org.id,
-      name: org.name,
-      slug: org.slug,
-      description: org.description,
+      id: team.id,
+      name: team.name,
+      slug: team.slug,
+      description: team.description,
       role: TEAM_ROLE.OWNER,
-      createdAt: org.createdAt,
+      createdAt: team.createdAt,
     },
     { status: 201 }
   );

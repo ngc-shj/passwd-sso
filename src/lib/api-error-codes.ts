@@ -83,7 +83,7 @@ export const API_ERROR = {
   ENTRY_COUNT_MISMATCH: "ENTRY_COUNT_MISMATCH",
   ONLY_OWN_ENTRIES: "ONLY_OWN_ENTRIES",
   INVALID_DATE_RANGE: "INVALID_DATE_RANGE",
-  // ── Org Invitations ───────────────────────────────────────
+  // ── Team Invitations ───────────────────────────────────────
   TOKEN_REQUIRED: "TOKEN_REQUIRED",
   INVALID_INVITATION: "INVALID_INVITATION",
   INVITATION_ALREADY_USED: "INVITATION_ALREADY_USED",

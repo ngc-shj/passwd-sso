@@ -59,12 +59,12 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const org = await prisma.organization.findUnique({
+  const team = await prisma.organization.findUnique({
     where: { id: teamId },
     select: { orgKeyVersion: true },
   });
 
-  if (!org) {
+  if (!team) {
     return NextResponse.json({ error: API_ERROR.ORG_NOT_FOUND }, { status: 404 });
   }
 
@@ -86,9 +86,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { newOrgKeyVersion, entries, memberKeys } = parsed.data;
 
   // Validate version increment
-  if (newOrgKeyVersion !== org.orgKeyVersion + 1) {
+  if (newOrgKeyVersion !== team.orgKeyVersion + 1) {
     return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: { expected: org.orgKeyVersion + 1 } },
+      { error: API_ERROR.VALIDATION_ERROR, details: { expected: team.orgKeyVersion + 1 } },
       { status: 409 }
     );
   }
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         where: { id: teamId },
         select: { orgKeyVersion: true },
       });
-      if (!currentOrg || currentOrg.orgKeyVersion !== org.orgKeyVersion) {
+      if (!currentOrg || currentOrg.orgKeyVersion !== team.orgKeyVersion) {
         throw new Error("ORG_KEY_VERSION_CONFLICT");
       }
 
@@ -229,7 +229,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: teamId,
     metadata: {
-      fromVersion: org.orgKeyVersion,
+      fromVersion: team.orgKeyVersion,
       toVersion: newOrgKeyVersion,
       entriesRotated: entries.length,
       membersUpdated: memberKeys.length,

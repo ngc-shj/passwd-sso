@@ -107,11 +107,11 @@ export async function POST(req: NextRequest, { params }: Params) {
     ? new Date(Date.now() + parsed.data.expiresInDays * 24 * 60 * 60 * 1000)
     : null;
 
-  const org = await prisma.organization.findUnique({
+  const team = await prisma.organization.findUnique({
     where: { id: teamId },
     select: { tenantId: true },
   });
-  if (!org?.tenantId) {
+  if (!team?.tenantId) {
     return NextResponse.json(
       { error: API_ERROR.SCIM_TOKEN_INVALID },
       { status: 409 },
@@ -121,7 +121,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const token = await prisma.scimToken.create({
     data: {
       orgId: teamId,
-      tenantId: org.tenantId,
+      tenantId: team.tenantId,
       tokenHash,
       description: parsed.data.description ?? null,
       expiresAt,
