@@ -1,6 +1,6 @@
 export const TEAM_PERMISSION = {
-  ORG_DELETE: "org:delete",
-  ORG_UPDATE: "org:update",
+  TEAM_DELETE: "team:delete",
+  TEAM_UPDATE: "team:update",
   MEMBER_INVITE: "member:invite",
   MEMBER_REMOVE: "member:remove",
   MEMBER_CHANGE_ROLE: "member:changeRole",
@@ -14,6 +14,3 @@ export const TEAM_PERMISSION = {
 
 export type TeamPermissionValue =
   (typeof TEAM_PERMISSION)[keyof typeof TEAM_PERMISSION];
-
-export const ORG_PERMISSION = TEAM_PERMISSION;
-export type OrgPermissionValue = TeamPermissionValue;

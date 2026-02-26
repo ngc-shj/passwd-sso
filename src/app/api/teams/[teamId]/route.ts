@@ -64,7 +64,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.ORG_UPDATE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -117,7 +117,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.ORG_DELETE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_DELETE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

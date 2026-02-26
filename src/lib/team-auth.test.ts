@@ -39,8 +39,8 @@ const mockPrisma = prisma as unknown as MockPrisma;
 
 describe("hasTeamPermission", () => {
   it("OWNER has all permissions", () => {
-    expect(hasTeamPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.ORG_DELETE)).toBe(true);
-    expect(hasTeamPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.ORG_UPDATE)).toBe(true);
+    expect(hasTeamPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.TEAM_DELETE)).toBe(true);
+    expect(hasTeamPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.TEAM_UPDATE)).toBe(true);
     expect(hasTeamPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.MEMBER_INVITE)).toBe(true);
     expect(hasTeamPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.MEMBER_REMOVE)).toBe(true);
     expect(hasTeamPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.MEMBER_CHANGE_ROLE)).toBe(true);
@@ -52,11 +52,11 @@ describe("hasTeamPermission", () => {
   });
 
   it("ADMIN cannot delete team", () => {
-    expect(hasTeamPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.ORG_DELETE)).toBe(false);
+    expect(hasTeamPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.TEAM_DELETE)).toBe(false);
   });
 
   it("ADMIN has all permissions except team:delete", () => {
-    expect(hasTeamPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.ORG_UPDATE)).toBe(true);
+    expect(hasTeamPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.TEAM_UPDATE)).toBe(true);
     expect(hasTeamPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.MEMBER_INVITE)).toBe(true);
     expect(hasTeamPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.MEMBER_REMOVE)).toBe(true);
     expect(hasTeamPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.MEMBER_CHANGE_ROLE)).toBe(true);
@@ -76,8 +76,8 @@ describe("hasTeamPermission", () => {
 
   it("MEMBER cannot delete passwords or manage team/members", () => {
     expect(hasTeamPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.PASSWORD_DELETE)).toBe(false);
-    expect(hasTeamPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.ORG_DELETE)).toBe(false);
-    expect(hasTeamPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.ORG_UPDATE)).toBe(false);
+    expect(hasTeamPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.TEAM_DELETE)).toBe(false);
+    expect(hasTeamPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.TEAM_UPDATE)).toBe(false);
     expect(hasTeamPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.MEMBER_INVITE)).toBe(false);
     expect(hasTeamPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.MEMBER_REMOVE)).toBe(false);
     expect(hasTeamPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.MEMBER_CHANGE_ROLE)).toBe(false);
@@ -89,7 +89,7 @@ describe("hasTeamPermission", () => {
     expect(hasTeamPermission(TEAM_ROLE.VIEWER, TEAM_PERMISSION.PASSWORD_UPDATE)).toBe(false);
     expect(hasTeamPermission(TEAM_ROLE.VIEWER, TEAM_PERMISSION.PASSWORD_DELETE)).toBe(false);
     expect(hasTeamPermission(TEAM_ROLE.VIEWER, TEAM_PERMISSION.TAG_MANAGE)).toBe(false);
-    expect(hasTeamPermission(TEAM_ROLE.VIEWER, TEAM_PERMISSION.ORG_DELETE)).toBe(false);
+    expect(hasTeamPermission(TEAM_ROLE.VIEWER, TEAM_PERMISSION.TEAM_DELETE)).toBe(false);
   });
 });
 
@@ -175,7 +175,7 @@ describe("requireTeamPermission", () => {
     const membership = { id: "m-1", orgId: "team-1", userId: "u-1", role: TEAM_ROLE.OWNER };
     mockPrisma.orgMember.findFirst.mockResolvedValue(membership);
 
-    const result = await requireTeamPermission("u-1", "team-1", TEAM_PERMISSION.ORG_DELETE);
+    const result = await requireTeamPermission("u-1", "team-1", TEAM_PERMISSION.TEAM_DELETE);
     expect(result).toEqual(membership);
   });
 

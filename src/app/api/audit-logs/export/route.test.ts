@@ -123,7 +123,7 @@ describe("POST /api/audit-logs/export", () => {
     expect(mockRequireTeamPermission).toHaveBeenCalledWith(
       "user-1",
       "team-1",
-      TEAM_PERMISSION.ORG_UPDATE
+      TEAM_PERMISSION.TEAM_UPDATE
     );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -133,7 +133,7 @@ describe("POST /api/audit-logs/export", () => {
     );
   });
 
-  it("returns 403 when user lacks org:update permission", async () => {
+  it("returns 403 when user lacks team:update permission", async () => {
     mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const res = await POST(
       createRequest("POST", URL, {

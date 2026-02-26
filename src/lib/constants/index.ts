@@ -20,8 +20,8 @@ export {
   INVITE_ROLE_VALUES,
 } from "./team-role";
 export type { TeamRoleValue, OrgRoleValue } from "./team-role";
-export { TEAM_PERMISSION, ORG_PERMISSION } from "./team-permission";
-export type { TeamPermissionValue, OrgPermissionValue } from "./team-permission";
+export { TEAM_PERMISSION } from "./team-permission";
+export type { TeamPermissionValue } from "./team-permission";
 
 export { EA_STATUS } from "./emergency-access";
 export type { EaStatusValue } from "./emergency-access";
