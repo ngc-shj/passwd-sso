@@ -44,19 +44,19 @@ export function useSidebarNavigationState({
     const isWatchtower = cleanPath === "/dashboard/watchtower";
     const isAuditLog = cleanPath === "/dashboard/audit-logs" || cleanPath.endsWith("/audit-logs");
     const isPersonalAuditLog = cleanPath === "/dashboard/audit-logs";
-    const auditOrgMatch = cleanPath.match(/^\/dashboard\/orgs\/([^/]+)\/audit-logs$/);
+    const auditOrgMatch = cleanPath.match(/^\/dashboard\/(?:teams|orgs)\/([^/]+)\/audit-logs$/);
     const activeAuditOrgId = auditOrgMatch ? auditOrgMatch[1] : null;
     const tagMatch = cleanPath.match(/^\/dashboard\/tags\/([^/]+)/);
     const activeTagId = tagMatch ? tagMatch[1] : null;
     const folderMatch = cleanPath.match(/^\/dashboard\/folders\/([^/]+)/);
     const activeFolderId = folderMatch ? folderMatch[1] : null;
-    const orgMatch = cleanPath.match(/^\/dashboard\/orgs\/([^/]+)/);
+    const orgMatch = cleanPath.match(/^\/dashboard\/(?:teams|orgs)\/([^/]+)/);
     const activeOrgId = orgMatch && !isAuditLog ? orgMatch[1] : null;
     const activeOrgTagId = activeOrgId ? searchParams.get("tag") : null;
     const activeOrgFolderId = activeOrgId ? searchParams.get("folder") : null;
     const activeOrgTypeFilter = activeOrgId ? searchParams.get("type") : null;
     const activeOrgScope = activeOrgId ? searchParams.get("scope") : null;
-    const isOrgsManage = cleanPath === "/dashboard/teams";
+    const isOrgsManage = cleanPath === "/dashboard/teams" || cleanPath === "/dashboard/orgs";
     const isShareLinks = cleanPath === "/dashboard/share-links";
     const isEmergencyAccess =
       cleanPath === "/dashboard/emergency-access" ||
