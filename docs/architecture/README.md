@@ -9,4 +9,5 @@ Language policy: English-only (Class B). See `../policy/language-policy.md`.
 - `tenant-team-scim-spec.md`
 - `tenant-team-migration-phase1.md`
 - `tenant-team-migration-phase2.md`
+- `tenant-team-migration-phase5-rls.md`
 - `tenant-team-migration-plan.md`
