@@ -10,9 +10,9 @@ import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
 import { SearchBar } from "@/components/layout/search-bar";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { TeamPasswordForm } from "@/components/team/team-password-form";
-import { OrgArchivedList as TeamArchivedList } from "@/components/team/team-archived-list";
-import { OrgTrashList as TeamTrashList } from "@/components/team/team-trash-list";
-import { OrgRoleBadge as TeamRoleBadge } from "@/components/team/team-role-badge";
+import { TeamArchivedList } from "@/components/team/team-archived-list";
+import { TeamTrashList } from "@/components/team/team-trash-list";
+import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -76,7 +76,7 @@ export default function TeamDashboardPage({
   const t = useTranslations("Team");
   const tDash = useTranslations("Dashboard");
   const { getTeamEncryptionKey } = useTeamVault();
-  const [org, setOrg] = useState<TeamInfo | null>(null);
+  const [team, setTeam] = useState<TeamInfo | null>(null);
   const [passwords, setPasswords] = useState<TeamPasswordEntry[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -119,7 +119,7 @@ export default function TeamDashboardPage({
     credentialId?: string | null;
     creationDate?: string | null;
     deviceInfo?: string | null;
-    orgFolderId?: string | null;
+    teamFolderId?: string | null;
   } | null>(null);
   const isTeamArchive = activeScope === "archive";
   const isTeamTrash = activeScope === "trash";
@@ -130,16 +130,16 @@ export default function TeamDashboardPage({
     try {
       const res = await fetch(apiPath.teamById(teamId));
       if (!res.ok) {
-        setOrg(null);
+        setTeam(null);
         setLoadError(true);
         return false;
       }
       const data = await res.json();
-      setOrg(data);
+      setTeam(data);
       setLoadError(false);
       return true;
     } catch {
-      setOrg(null);
+      setTeam(null);
       setLoadError(true);
       return false;
     }
@@ -159,8 +159,8 @@ export default function TeamDashboardPage({
       const data = await res.json();
       if (!Array.isArray(data)) return;
 
-      const orgKey = await getTeamEncryptionKey(teamId);
-      if (!orgKey) {
+      const teamKey = await getTeamEncryptionKey(teamId);
+      if (!teamKey) {
         setKeyPending(true);
         setPasswords([]);
         return;
@@ -177,7 +177,7 @@ export default function TeamDashboardPage({
                 iv: entry.overviewIv as string,
                 authTag: entry.overviewAuthTag as string,
               },
-              orgKey,
+              teamKey,
               aad,
             );
             const overview = JSON.parse(json);
@@ -245,8 +245,8 @@ export default function TeamDashboardPage({
   }, [teamId, fetchPasswords, isTeamSpecialView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const canCreate =
-    org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN || org?.role === ORG_ROLE.MEMBER;
-  const canDeletePerm = org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN;
+    team?.role === ORG_ROLE.OWNER || team?.role === ORG_ROLE.ADMIN || team?.role === ORG_ROLE.MEMBER;
+  const canDeletePerm = team?.role === ORG_ROLE.OWNER || team?.role === ORG_ROLE.ADMIN;
   const canEditPerm = canCreate;
   const contextualEntryType = activeEntryType && Object.values(ENTRY_TYPE).includes(activeEntryType as EntryTypeValue)
     ? (activeEntryType as EntryTypeValue)
@@ -350,8 +350,8 @@ export default function TeamDashboardPage({
 
   const decryptFullBlob = useCallback(
     async (id: string, raw: Record<string, unknown>) => {
-      const orgKey = await getTeamEncryptionKey(teamId);
-      if (!orgKey) throw new Error("No org key");
+      const teamKey = await getTeamEncryptionKey(teamId);
+      if (!teamKey) throw new Error("No team key");
       const aad = buildOrgEntryAAD(teamId, id, "blob");
       const json = await decryptData(
         {
@@ -359,7 +359,7 @@ export default function TeamDashboardPage({
           iv: raw.blobIv as string,
           authTag: raw.blobAuthTag as string,
         },
-        orgKey,
+        teamKey,
         aad,
       );
       return JSON.parse(json) as Record<string, unknown>;
@@ -405,7 +405,7 @@ export default function TeamDashboardPage({
         credentialId: blob.credentialId as string | null | undefined,
         creationDate: blob.creationDate as string | null | undefined,
         deviceInfo: blob.deviceInfo as string | null | undefined,
-        orgFolderId: (raw.orgFolderId as string) ?? null,
+        teamFolderId: (raw.orgFolderId as string) ?? null,
       });
       setFormOpen(true);
     } catch {
@@ -527,10 +527,10 @@ export default function TeamDashboardPage({
       <div className="mx-auto max-w-4xl space-y-6">
         <EntryListHeader
           icon={headerIcon}
-          title={isPrimaryScopeLabel ? subtitle : (org?.name ?? "...")}
+          title={isPrimaryScopeLabel ? subtitle : (team?.name ?? "...")}
           subtitle={subtitle}
           showSubtitle={!isPrimaryScopeLabel}
-          titleExtra={!isPrimaryScopeLabel && org ? <TeamRoleBadge role={org.role} /> : null}
+          titleExtra={!isPrimaryScopeLabel && team ? <TeamRoleBadge role={team.role} /> : null}
           actions={
             <>
               {canCreate && !isTeamSpecialView && (

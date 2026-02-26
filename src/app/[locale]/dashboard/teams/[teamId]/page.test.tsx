@@ -40,13 +40,13 @@ vi.mock("@/components/team/team-password-form", () => ({
   TeamPasswordForm: () => null,
 }));
 vi.mock("@/components/team/team-archived-list", () => ({
-  OrgArchivedList: () => null,
+  TeamArchivedList: () => null,
 }));
 vi.mock("@/components/team/team-trash-list", () => ({
-  OrgTrashList: () => null,
+  TeamTrashList: () => null,
 }));
 vi.mock("@/components/team/team-role-badge", () => ({
-  OrgRoleBadge: () => <span>ROLE</span>,
+  TeamRoleBadge: () => <span>ROLE</span>,
 }));
 vi.mock("@/components/ui/button", () => ({
   Button: ({ children, asChild, ...rest }: React.ComponentProps<"button"> & { asChild?: boolean }) => {
@@ -69,7 +69,7 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-import OrgDashboardPage from "./page";
+import TeamDashboardPage from "./page";
 
 /* ---------- helpers ---------- */
 
@@ -105,7 +105,7 @@ function setupFetch(orgRes = makeOrgResponse(), passwords: unknown[] = []) {
 function renderPage() {
   return render(
     <React.Suspense fallback={<div>Loading...</div>}>
-      <OrgDashboardPage params={Promise.resolve({ orgId: "org-1" })} />
+      <TeamDashboardPage params={Promise.resolve({ teamId: "org-1" })} />
     </React.Suspense>,
   );
 }
@@ -158,7 +158,7 @@ vi.mock("@/lib/crypto-aad", () => ({
 
 /* ---------- tests ---------- */
 
-describe("OrgDashboardPage — folder query propagation", () => {
+describe("TeamDashboardPage — folder query propagation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Reset searchParams
@@ -218,7 +218,7 @@ describe("OrgDashboardPage — folder query propagation", () => {
   });
 });
 
-describe("OrgDashboardPage — scopes", () => {
+describe("TeamDashboardPage — scopes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     for (const key of [...mockSearchParams.keys()]) {
@@ -284,7 +284,7 @@ describe("OrgDashboardPage — scopes", () => {
   });
 });
 
-describe("OrgDashboardPage — role-based rendering", () => {
+describe("TeamDashboardPage — role-based rendering", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     for (const key of [...mockSearchParams.keys()]) {
@@ -327,7 +327,7 @@ describe("OrgDashboardPage — role-based rendering", () => {
   });
 });
 
-describe("OrgDashboardPage — error handling", () => {
+describe("TeamDashboardPage — error handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     for (const key of [...mockSearchParams.keys()]) {

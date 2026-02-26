@@ -6,7 +6,7 @@ import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { OrgCreateDialog as TeamCreateDialog } from "@/components/team/team-create-dialog";
-import { OrgRoleBadge as TeamRoleBadge } from "@/components/team/team-role-badge";
+import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Plus, Building2, Users, KeyRound } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
 

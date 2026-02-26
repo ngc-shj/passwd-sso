@@ -418,5 +418,3 @@ export function TeamArchivedList({
     </div>
   );
 }
-
-export const OrgArchivedList = TeamArchivedList;

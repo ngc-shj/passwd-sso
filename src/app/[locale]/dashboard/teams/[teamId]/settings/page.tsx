@@ -3,7 +3,7 @@
 import { useEffect, useState, use } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
-import { OrgRoleBadge as TeamRoleBadge } from "@/components/team/team-role-badge";
+import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";

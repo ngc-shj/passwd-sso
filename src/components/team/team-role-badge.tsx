@@ -11,7 +11,7 @@ const roleColors: Record<string, string> = {
   [ORG_ROLE.VIEWER]: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
 };
 
-export function OrgRoleBadge({ role }: { role: string }) {
+export function TeamRoleBadge({ role }: { role: string }) {
   const t = useTranslations("Team");
 
   const roleKeys: Record<string, string> = {

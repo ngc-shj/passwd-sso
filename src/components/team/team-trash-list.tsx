@@ -287,5 +287,3 @@ export function TeamTrashList({
     </div>
   );
 }
-
-export const OrgTrashList = TeamTrashList;
