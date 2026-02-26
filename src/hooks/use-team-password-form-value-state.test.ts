@@ -34,7 +34,7 @@ describe("useTeamPasswordFormValueState", () => {
     act(() => {
       result.current.setters.setTitle("Updated");
       result.current.setters.setPassword("updated-pass");
-      result.current.setters.setOrgFolderId("folder-2");
+      result.current.setters.setTeamFolderId("folder-2");
     });
 
     expect(result.current.values.title).toBe("Updated");

@@ -39,7 +39,7 @@ export function useTeamPasswordFormValueState(initial: TeamPasswordFormInitialVa
   const [credentialId, setCredentialId] = useState(initial.credentialId);
   const [creationDate, setCreationDate] = useState(initial.creationDate);
   const [deviceInfo, setDeviceInfo] = useState(initial.deviceInfo);
-  const [teamFolderId, setOrgFolderId] = useState<string | null>(initial.teamFolderId);
+  const [teamFolderId, setTeamFolderId] = useState<string | null>(initial.teamFolderId);
 
   return {
     values: {
@@ -114,7 +114,7 @@ export function useTeamPasswordFormValueState(initial: TeamPasswordFormInitialVa
       setCredentialId,
       setCreationDate,
       setDeviceInfo,
-      setOrgFolderId,
+      setTeamFolderId,
     },
   };
 }

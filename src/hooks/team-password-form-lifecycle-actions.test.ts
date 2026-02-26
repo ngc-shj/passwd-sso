@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyOrgEditDataToForm,
-  resetOrgFormForClose,
+  applyTeamEditDataToForm,
+  resetTeamFormForClose,
 } from "@/hooks/team-password-form-lifecycle-actions";
 import { createTeamPasswordFormLifecycleSettersMock } from "@/test-utils/team-password-form-setters";
 
@@ -9,11 +9,11 @@ function createSetters() {
   return createTeamPasswordFormLifecycleSettersMock();
 }
 
-describe("org-password-form-lifecycle-actions", () => {
-  it("applyOrgEditDataToForm applies incoming edit values", () => {
+describe("team-password-form-lifecycle-actions", () => {
+  it("applyTeamEditDataToForm applies incoming edit values", () => {
     const setters = createSetters();
 
-    applyOrgEditDataToForm(
+    applyTeamEditDataToForm(
       {
         id: "entry-1",
         title: "Title",
@@ -35,14 +35,14 @@ describe("org-password-form-lifecycle-actions", () => {
     expect(setters.setContent).toHaveBeenCalledWith("content");
     expect(setters.setBrand).toHaveBeenCalledWith("Visa");
     expect(setters.setBrandSource).toHaveBeenCalledWith("manual");
-    expect(setters.setOrgFolderId).toHaveBeenCalledWith("folder-1");
+    expect(setters.setTeamFolderId).toHaveBeenCalledWith("folder-1");
     expect(setters.setShowTotpInput).toHaveBeenCalledWith(false);
   });
 
-  it("resetOrgFormForClose resets all mutable UI states", () => {
+  it("resetTeamFormForClose resets all mutable UI states", () => {
     const setters = createSetters();
 
-    resetOrgFormForClose(setters);
+    resetTeamFormForClose(setters);
 
     expect(setters.setTitle).toHaveBeenCalledWith("");
     expect(setters.setUsername).toHaveBeenCalledWith("");
@@ -50,7 +50,7 @@ describe("org-password-form-lifecycle-actions", () => {
     expect(setters.setShowPassword).toHaveBeenCalledWith(false);
     expect(setters.setShowGenerator).toHaveBeenCalledWith(false);
     expect(setters.setBrandSource).toHaveBeenCalledWith("auto");
-    expect(setters.setOrgFolderId).toHaveBeenCalledWith(null);
+    expect(setters.setTeamFolderId).toHaveBeenCalledWith(null);
     expect(setters.setAttachments).toHaveBeenCalledWith([]);
     expect(setters.setSaving).toHaveBeenCalledWith(false);
   });

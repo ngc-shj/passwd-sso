@@ -14,7 +14,6 @@ type EntryActionBarProps = ComponentProps<typeof EntryActionBar>;
 
 interface UseTeamFormSectionsPropsArgs {
   teamId?: string;
-  orgId?: string;
   tagsTitle: string;
   tagsHint: string;
   folders: TeamFolderItem[];
@@ -34,7 +33,7 @@ interface UseTeamFormSectionsPropsArgs {
   >;
   setters: Pick<
     TeamPasswordFormState["setters"],
-    "setSelectedTags" | "setOrgFolderId" | "setCustomFields" | "setTotp" | "setShowTotpInput"
+    "setSelectedTags" | "setTeamFolderId" | "setCustomFields" | "setTotp" | "setShowTotpInput"
   >;
 }
 
@@ -46,7 +45,6 @@ interface TeamFormSectionsPropsResult {
 
 export function buildTeamFormSectionsProps({
   teamId,
-  orgId,
   tagsTitle,
   tagsHint,
   folders,
@@ -63,18 +61,17 @@ export function buildTeamFormSectionsProps({
   values,
   setters,
 }: UseTeamFormSectionsPropsArgs): TeamFormSectionsPropsResult {
-  const scopedTeamId = teamId ?? orgId ?? "";
+  const scopedTeamId = teamId ?? "";
   return {
     tagsAndFolderProps: {
       tagsTitle,
       tagsHint,
       teamId: scopedTeamId,
-      orgId: scopedTeamId,
       selectedTags: values.selectedTags,
       onTagsChange: setters.setSelectedTags,
       folders,
       folderId: values.teamFolderId,
-      onFolderChange: setters.setOrgFolderId,
+      onFolderChange: setters.setTeamFolderId,
       sectionCardClass,
     },
     customFieldsTotpProps: isLoginEntry

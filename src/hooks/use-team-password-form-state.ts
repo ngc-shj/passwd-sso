@@ -1,5 +1,5 @@
 import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
-import type { OrgAttachmentMeta } from "@/components/team/team-attachment-section";
+import type { TeamAttachmentMeta } from "@/components/team/team-attachment-section";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import { useTeamPasswordFormUiState } from "@/hooks/use-team-password-form-ui-state";
@@ -28,7 +28,7 @@ export type TeamPasswordFormState = ReturnType<typeof useTeamPasswordFormState>;
 export type TeamPasswordFormValues = TeamPasswordFormState["values"];
 export type TeamPasswordFormSettersState = TeamPasswordFormState["setters"];
 export type TeamPasswordFormLifecycleSetters = TeamPasswordFormSettersState & {
-  setAttachments: (value: OrgAttachmentMeta[]) => void;
+  setAttachments: (value: TeamAttachmentMeta[]) => void;
 };
 
 export interface TeamEntryFieldValues {

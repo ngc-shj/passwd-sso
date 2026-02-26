@@ -278,7 +278,7 @@ function createState(): {
       setCredentialId: vi.fn(),
       setCreationDate: vi.fn(),
       setDeviceInfo: vi.fn(),
-      setOrgFolderId: vi.fn(),
+      setTeamFolderId: vi.fn(),
     },
   };
 }

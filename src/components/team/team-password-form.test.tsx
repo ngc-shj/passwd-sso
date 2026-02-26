@@ -33,12 +33,12 @@ vi.mock("@/lib/team-vault-context", () => ({
 // Mock save entry helper to skip encryption (this is a UI test, not a crypto test)
 vi.mock("@/lib/org-entry-save", () => ({
   saveOrgEntry: vi.fn(async (params: Record<string, unknown>) => {
-    const orgId = params.orgId as string;
+    const teamId = params.teamId as string;
     const initialId = params.initialId as string | undefined;
     const mode = params.mode as string;
     const endpoint = mode === "create"
-      ? `/api/teams/${orgId}/passwords`
-      : `/api/teams/${orgId}/passwords/${initialId}`;
+      ? `/api/teams/${teamId}/passwords`
+      : `/api/teams/${teamId}/passwords/${initialId}`;
     return fetch(endpoint, {
       method: mode === "create" ? "POST" : "PUT",
       headers: { "Content-Type": "application/json" },
@@ -169,12 +169,11 @@ vi.mock("@/components/passwords/totp-field", () => ({
 }));
 
 vi.mock("@/components/team/team-tag-input", () => ({
-  TeamTagInput: () => <div data-testid="org-tag-input" />,
-  OrgTagInput: () => <div data-testid="org-tag-input" />,
+  TeamTagInput: () => <div data-testid="team-tag-input" />,
 }));
 
 vi.mock("@/components/team/team-attachment-section", () => ({
-  OrgAttachmentSection: () => null,
+  TeamAttachmentSection: () => null,
 }));
 
 vi.mock("@/components/passwords/entry-form-ui", () => ({
@@ -256,13 +255,13 @@ describe("TeamPasswordForm — folder selection", () => {
     globalThis.fetch = mockFetch as unknown as typeof fetch;
   });
 
-  it("fetches org folders when dialog opens", async () => {
+  it("fetches team folders when dialog opens", async () => {
     setupFetch();
 
     await act(async () => {
       render(
         <TeamPasswordForm
-          orgId="org-1"
+          teamId="team-1"
           open={true}
           onOpenChange={vi.fn()}
           onSaved={vi.fn()}
@@ -272,7 +271,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     await waitFor(() => {
       const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
-      expect(calls.some((u: string) => u.includes("/teams/org-1/folders"))).toBe(true);
+      expect(calls.some((u: string) => u.includes("/teams/team-1/folders"))).toBe(true);
     });
   });
 
@@ -282,7 +281,7 @@ describe("TeamPasswordForm — folder selection", () => {
     await act(async () => {
       render(
         <TeamPasswordForm
-          orgId="org-1"
+          teamId="team-1"
           open={true}
           onOpenChange={vi.fn()}
           onSaved={vi.fn()}
@@ -302,7 +301,7 @@ describe("TeamPasswordForm — folder selection", () => {
     await act(async () => {
       render(
         <TeamPasswordForm
-          orgId="org-1"
+          teamId="team-1"
           open={true}
           onOpenChange={vi.fn()}
           onSaved={vi.fn()}
@@ -330,7 +329,7 @@ describe("TeamPasswordForm — folder selection", () => {
     await act(async () => {
       render(
         <TeamPasswordForm
-          orgId="org-1"
+          teamId="team-1"
           open={true}
           onOpenChange={vi.fn()}
           onSaved={vi.fn()}
@@ -364,7 +363,7 @@ describe("TeamPasswordForm — folder selection", () => {
     await act(async () => {
       render(
         <TeamPasswordForm
-          orgId="org-1"
+          teamId="team-1"
           open={true}
           onOpenChange={vi.fn()}
           onSaved={onSaved}
@@ -408,7 +407,7 @@ describe("TeamPasswordForm — folder selection", () => {
     await act(async () => {
       render(
         <TeamPasswordForm
-          orgId="org-1"
+          teamId="team-1"
           open={true}
           onOpenChange={vi.fn()}
           onSaved={onSaved}
@@ -451,7 +450,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     const view = render(
       <TeamPasswordForm
-        orgId="org-1"
+        teamId="team-1"
         open={true}
         onOpenChange={onOpenChange}
         onSaved={vi.fn()}
@@ -473,7 +472,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     view.rerender(
       <TeamPasswordForm
-        orgId="org-1"
+        teamId="team-1"
         open={false}
         onOpenChange={onOpenChange}
         onSaved={vi.fn()}
@@ -491,7 +490,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     view.rerender(
       <TeamPasswordForm
-        orgId="org-1"
+        teamId="team-1"
         open={true}
         onOpenChange={onOpenChange}
         onSaved={vi.fn()}

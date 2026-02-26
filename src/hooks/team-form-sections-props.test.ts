@@ -6,7 +6,7 @@ describe("buildTeamFormSectionsProps", () => {
   it("maps tags/folders and action bar props", () => {
     const state = createState();
     const result = buildTeamFormSectionsProps({
-      orgId: "org-1",
+      teamId: "team-1",
       tagsTitle: "tags",
       tagsHint: "hint",
       folders: [],
@@ -24,7 +24,7 @@ describe("buildTeamFormSectionsProps", () => {
       setters: state.setters,
     });
 
-    expect(result.tagsAndFolderProps.orgId).toBe("org-1");
+    expect(result.tagsAndFolderProps.teamId).toBe("team-1");
     expect(result.tagsAndFolderProps.onTagsChange).toBe(state.setters.setSelectedTags);
     expect(result.actionBarProps.hasChanges).toBe(true);
     expect(result.actionBarProps.saveLabel).toBe("save");
@@ -34,7 +34,7 @@ describe("buildTeamFormSectionsProps", () => {
   it("omits custom fields/totp props when entry is not login", () => {
     const state = createState();
     const result = buildTeamFormSectionsProps({
-      orgId: "org-1",
+      teamId: "team-1",
       tagsTitle: "tags",
       tagsHint: "hint",
       folders: [],
@@ -69,7 +69,7 @@ function createState(): Pick<TeamPasswordFormState, "values" | "setters"> {
     } as TeamPasswordFormState["values"],
     setters: {
       setSelectedTags: vi.fn(),
-      setOrgFolderId: vi.fn(),
+      setTeamFolderId: vi.fn(),
       setCustomFields: vi.fn(),
       setTotp: vi.fn(),
       setShowTotpInput: vi.fn(),

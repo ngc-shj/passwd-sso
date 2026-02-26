@@ -11,7 +11,7 @@ import type { useTeamPasswordFormPresenter } from "@/hooks/use-team-password-for
 type TeamEntryValues = ReturnType<typeof useTeamPasswordFormPresenter>["entryValues"];
 
 interface BuildTeamSubmitArgsParams {
-  teamId: TeamPasswordFormProps["orgId"];
+  teamId: TeamPasswordFormProps["teamId"];
   teamEncryptionKey: CryptoKey;
   teamKeyVersion: number;
   onSaved: TeamPasswordFormProps["onSaved"];

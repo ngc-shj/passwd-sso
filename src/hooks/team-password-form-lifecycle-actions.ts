@@ -4,7 +4,7 @@ import type { TeamPasswordFormLifecycleSetters } from "@/hooks/use-team-password
 
 export type TeamPasswordFormSetters = TeamPasswordFormLifecycleSetters;
 
-export function applyOrgEditDataToForm(
+export function applyTeamEditDataToForm(
   data: TeamPasswordFormEditData,
   setters: TeamPasswordFormSetters,
 ): void {
@@ -39,10 +39,10 @@ export function applyOrgEditDataToForm(
   setters.setCredentialId(data.credentialId ?? "");
   setters.setCreationDate(data.creationDate ?? "");
   setters.setDeviceInfo(data.deviceInfo ?? "");
-  setters.setOrgFolderId(data.teamFolderId ?? null);
+  setters.setTeamFolderId(data.teamFolderId ?? null);
 }
 
-export function resetOrgFormForClose(setters: TeamPasswordFormSetters): void {
+export function resetTeamFormForClose(setters: TeamPasswordFormSetters): void {
   setters.setTitle("");
   setters.setUsername("");
   setters.setPassword("");
@@ -81,6 +81,6 @@ export function resetOrgFormForClose(setters: TeamPasswordFormSetters): void {
   setters.setDeviceInfo("");
   setters.setShowCredentialId(false);
   setters.setAttachments([]);
-  setters.setOrgFolderId(null);
+  setters.setTeamFolderId(null);
   setters.setSaving(false);
 }

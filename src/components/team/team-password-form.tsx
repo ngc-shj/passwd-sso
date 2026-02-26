@@ -9,7 +9,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
-import { OrgAttachmentSection } from "./team-attachment-section";
+import { TeamAttachmentSection } from "./team-attachment-section";
 import { TeamEntrySpecificFields } from "@/components/team/team-entry-specific-fields";
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
@@ -22,7 +22,6 @@ import { useTeamPasswordFormModel } from "@/hooks/use-team-password-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
 
 export function TeamPasswordForm({
-  orgId,
   teamId,
   open,
   onOpenChange,
@@ -30,8 +29,7 @@ export function TeamPasswordForm({
   entryType,
   editData,
 }: TeamPasswordFormProps) {
-  const scopedId = teamId ?? orgId;
-  if (!scopedId) return null;
+  const scopedId = teamId;
   const {
     t,
     tc,
@@ -40,7 +38,7 @@ export function TeamPasswordForm({
     formState,
     attachments,
     setAttachments,
-    orgFolders,
+    teamFolders,
     handleOpenChange,
     entryCopy,
     entrySpecificFieldsProps,
@@ -49,7 +47,6 @@ export function TeamPasswordForm({
     submitDisabled,
   } = useTeamPasswordFormModel({
     teamId: scopedId,
-    orgId: scopedId,
     open,
     onOpenChange,
     onSaved,
@@ -65,7 +62,7 @@ export function TeamPasswordForm({
     teamId: scopedId,
     tagsTitle: entryCopy.tagsTitle,
     tagsHint: t("tagsHint"),
-    folders: orgFolders,
+    folders: teamFolders,
     sectionCardClass: dialogSectionClass,
     isLoginEntry,
     hasChanges,
@@ -118,8 +115,8 @@ export function TeamPasswordForm({
 
         {isEdit && editData && (
           <div className="border-t pt-4">
-            <OrgAttachmentSection
-              orgId={scopedId}
+            <TeamAttachmentSection
+              teamId={scopedId}
               entryId={editData.id}
               attachments={attachments}
               onAttachmentsChange={setAttachments}

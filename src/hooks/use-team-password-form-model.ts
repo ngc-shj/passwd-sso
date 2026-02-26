@@ -18,16 +18,11 @@ import {
 
 type TeamPasswordFormModelBaseInput = Pick<
   TeamPasswordFormProps,
-  "orgId" | "open" | "onOpenChange" | "onSaved" | "entryType" | "editData"
+  "teamId" | "open" | "onOpenChange" | "onSaved" | "entryType" | "editData"
 >;
 
-type TeamPasswordFormModelInput = Omit<TeamPasswordFormModelBaseInput, "orgId"> & {
-  teamId?: TeamPasswordFormProps["orgId"];
-  orgId?: TeamPasswordFormProps["orgId"];
-};
-
 function useTeamPasswordFormModelInternal({
-  orgId,
+  teamId,
   open,
   onOpenChange,
   onSaved,
@@ -45,8 +40,8 @@ function useTeamPasswordFormModelInternal({
 
   const formState = useTeamPasswordFormState(editData);
 
-  const { attachments, setAttachments } = useTeamAttachments(open, orgId, editData?.id);
-  const { folders: teamFolders } = useTeamFolders(open, orgId);
+  const { attachments, setAttachments } = useTeamAttachments(open, teamId, editData?.id);
+  const { folders: teamFolders } = useTeamFolders(open, teamId);
 
   const formSetters: TeamPasswordFormLifecycleSetters = { ...formState.setters, setAttachments };
   const { handleOpenChange } = useTeamPasswordFormLifecycle({
@@ -58,7 +53,7 @@ function useTeamPasswordFormModelInternal({
 
   const { entryCopy, entrySpecificFieldsProps, handleSubmit, hasChanges, submitDisabled } =
     useTeamPasswordFormController({
-      orgId,
+      teamId,
       onSaved,
       isEdit,
       editData,
@@ -78,7 +73,7 @@ function useTeamPasswordFormModelInternal({
     formState,
     attachments,
     setAttachments,
-    orgFolders: teamFolders,
+    teamFolders,
     handleOpenChange,
     entryCopy,
     entrySpecificFieldsProps,
@@ -88,17 +83,6 @@ function useTeamPasswordFormModelInternal({
   };
 }
 
-export function useTeamPasswordFormModel({
-  teamId,
-  orgId,
-  ...rest
-}: TeamPasswordFormModelInput) {
-  const scopedTeamId = teamId ?? orgId;
-  if (!scopedTeamId) {
-    throw new Error("useTeamPasswordFormModel requires teamId or orgId");
-  }
-  return useTeamPasswordFormModelInternal({
-    orgId: scopedTeamId,
-    ...rest,
-  });
+export function useTeamPasswordFormModel(input: TeamPasswordFormModelBaseInput) {
+  return useTeamPasswordFormModelInternal(input);
 }

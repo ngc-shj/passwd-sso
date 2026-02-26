@@ -15,7 +15,7 @@ import { buildTeamSubmitArgs } from "@/hooks/team-password-form-submit-args";
 import { useTeamVault } from "@/lib/team-vault-context";
 
 export interface TeamPasswordFormControllerArgs {
-  teamId: TeamPasswordFormProps["orgId"];
+  teamId: TeamPasswordFormProps["teamId"];
   onSaved: TeamPasswordFormProps["onSaved"];
   isEdit: boolean;
   editData?: TeamPasswordFormProps["editData"];
@@ -26,10 +26,7 @@ export interface TeamPasswordFormControllerArgs {
   handleOpenChange: (open: boolean) => void;
 }
 
-export interface TeamPasswordFormControllerCompatArgs extends Omit<TeamPasswordFormControllerArgs, "teamId"> {
-  teamId?: TeamPasswordFormProps["orgId"];
-  orgId?: TeamPasswordFormProps["orgId"];
-}
+export interface TeamPasswordFormControllerCompatArgs extends TeamPasswordFormControllerArgs {}
 
 function useTeamPasswordFormControllerInternal({
   teamId,
@@ -94,17 +91,6 @@ function useTeamPasswordFormControllerInternal({
   };
 }
 
-export function useTeamPasswordFormController({
-  teamId,
-  orgId,
-  ...rest
-}: TeamPasswordFormControllerCompatArgs) {
-  const scopedTeamId = teamId ?? orgId;
-  if (!scopedTeamId) {
-    throw new Error("useTeamPasswordFormController requires teamId or orgId");
-  }
-  return useTeamPasswordFormControllerInternal({
-    teamId: scopedTeamId,
-    ...rest,
-  });
+export function useTeamPasswordFormController(input: TeamPasswordFormControllerCompatArgs) {
+  return useTeamPasswordFormControllerInternal(input);
 }

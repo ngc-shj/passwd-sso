@@ -405,7 +405,6 @@ export function TeamArchivedList({
       {editTeamId && (
         <TeamPasswordForm
           teamId={editTeamId}
-          orgId={editTeamId}
           open={formOpen}
           onOpenChange={setFormOpen}
           onSaved={() => {

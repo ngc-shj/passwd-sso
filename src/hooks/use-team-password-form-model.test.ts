@@ -59,7 +59,7 @@ describe("useTeamPasswordFormModel", () => {
         setCustomFields: vi.fn(),
         setTotp: vi.fn(),
         setShowTotpInput: vi.fn(),
-        setOrgFolderId: vi.fn(),
+        setTeamFolderId: vi.fn(),
       },
     });
     useTeamAttachmentsMock.mockReturnValue({ attachments: [], setAttachments: vi.fn() });
@@ -77,7 +77,7 @@ describe("useTeamPasswordFormModel", () => {
   it("wires dependencies and exposes model values", () => {
     const { result } = renderHook(() =>
       useTeamPasswordFormModel({
-        orgId: "org-1",
+        teamId: "team-1",
         open: true,
         onOpenChange: vi.fn(),
         onSaved: vi.fn(),
@@ -87,8 +87,8 @@ describe("useTeamPasswordFormModel", () => {
     );
 
     expect(useTeamPasswordFormStateMock).toHaveBeenCalledWith(null);
-    expect(useTeamAttachmentsMock).toHaveBeenCalledWith(true, "org-1", undefined);
-    expect(useTeamFoldersMock).toHaveBeenCalledWith(true, "org-1");
+    expect(useTeamAttachmentsMock).toHaveBeenCalledWith(true, "team-1", undefined);
+    expect(useTeamFoldersMock).toHaveBeenCalledWith(true, "team-1");
     expect(useTeamPasswordFormControllerMock).toHaveBeenCalledTimes(1);
     expect(result.current.formState.values.title).toBe("t");
     expect(result.current.entryCopy.dialogLabel).toBe("x");
@@ -101,7 +101,7 @@ describe("useTeamPasswordFormModel", () => {
 
     renderHook(() =>
       useTeamPasswordFormModel({
-        orgId: "org-1",
+        teamId: "team-1",
         open: true,
         onOpenChange: vi.fn(),
         onSaved: vi.fn(),
@@ -119,7 +119,7 @@ describe("useTeamPasswordFormModel", () => {
   it("prefers editData entryType and forwards derived kind flags to controller", () => {
     renderHook(() =>
       useTeamPasswordFormModel({
-        orgId: "org-1",
+        teamId: "team-1",
         open: true,
         onOpenChange: vi.fn(),
         onSaved: vi.fn(),

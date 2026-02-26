@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { apiPath } from "@/lib/constants";
-import type { OrgAttachmentMeta } from "@/components/team/team-attachment-section";
+import type { TeamAttachmentMeta } from "@/components/team/team-attachment-section";
 
 export function useTeamAttachments(open: boolean, teamId: string, entryId?: string) {
-  const [attachments, setAttachments] = useState<OrgAttachmentMeta[]>([]);
+  const [attachments, setAttachments] = useState<TeamAttachmentMeta[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -17,7 +17,7 @@ export function useTeamAttachments(open: boolean, teamId: string, entryId?: stri
         if (!res.ok) throw new Error(`${res.status}`);
         return res.json();
       })
-      .then((loaded: OrgAttachmentMeta[]) => {
+      .then((loaded: TeamAttachmentMeta[]) => {
         setAttachments(loaded);
         setFetchError(null);
       })

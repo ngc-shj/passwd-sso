@@ -693,7 +693,6 @@ export default function TeamDashboardPage({
       </div>
 
       <TeamPasswordForm
-        orgId={teamId}
         teamId={teamId}
         open={formOpen}
         onOpenChange={setFormOpen}

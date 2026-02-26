@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef } from "react";
 import type { TeamPasswordFormEditData, TeamPasswordFormProps } from "@/components/team/team-password-form-types";
 import type { TeamPasswordFormLifecycleSetters } from "@/hooks/use-team-password-form-state";
 import {
-  applyOrgEditDataToForm,
-  resetOrgFormForClose,
+  applyTeamEditDataToForm,
+  resetTeamFormForClose,
 } from "@/hooks/team-password-form-lifecycle-actions";
 
 export interface TeamPasswordFormLifecycleArgs {
@@ -28,11 +28,11 @@ export function useTeamPasswordFormLifecycle({
   }, [setters]);
 
   const applyEditData = useCallback((data: TeamPasswordFormEditData) => {
-    applyOrgEditDataToForm(data, settersRef.current);
+    applyTeamEditDataToForm(data, settersRef.current);
   }, []);
 
   const resetForm = useCallback(() => {
-    resetOrgFormForClose(settersRef.current);
+    resetTeamFormForClose(settersRef.current);
   }, []);
 
   useEffect(() => {
