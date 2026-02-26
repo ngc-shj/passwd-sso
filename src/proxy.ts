@@ -67,6 +67,22 @@ async function handleApiAuth(request: NextRequest) {
     return handlePreflight(request);
   }
 
+  // Legacy org API endpoints are deprecated in favor of /api/teams.
+  if (pathname === "/api/orgs" || pathname.startsWith("/api/orgs/")) {
+    const replacementPath = pathname.replace(/^\/api\/orgs/, API_PATH.TEAMS);
+    return applyCorsHeaders(
+      request,
+      NextResponse.json(
+        {
+          error: "ORG_API_DEPRECATED",
+          message: "Use /api/teams endpoints",
+          replacementPath,
+        },
+        { status: 410 },
+      ),
+    );
+  }
+
   // Routes that accept extension token (Bearer) as alternative auth.
   // Let the route handler validate the token instead of checking session.
   // IMPROVE(#39): harden allowlist matching — add edge-case tests for child paths

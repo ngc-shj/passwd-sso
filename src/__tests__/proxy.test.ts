@@ -160,6 +160,22 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(res.status).toBe(200);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it("returns 410 for legacy /api/orgs and suggests /api/teams replacement", async () => {
+    const res = await proxy(
+      createApiRequest("/api/orgs/org-1/passwords", {
+        Cookie: "authjs.session-token=sess-orgs",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(410);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body).toMatchObject({
+      error: "ORG_API_DEPRECATED",
+      replacementPath: "/api/teams/org-1/passwords",
+    });
+  });
 });
 
 describe("proxy — CORS preflight and headers", () => {
