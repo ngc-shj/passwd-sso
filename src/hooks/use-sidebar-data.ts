@@ -38,6 +38,21 @@ export interface SidebarOrgFolderGroup {
   folders: SidebarFolderItem[];
 }
 
+export type SidebarTeamItem = SidebarOrgItem;
+
+export interface SidebarTeamTagGroup {
+  teamId: string;
+  teamName: string;
+  tags: SidebarOrgTagGroup["tags"];
+}
+
+export interface SidebarTeamFolderGroup {
+  teamId: string;
+  teamName: string;
+  teamRole: string;
+  folders: SidebarOrgFolderGroup["folders"];
+}
+
 export interface SidebarOrganizeTagItem {
   id: string;
   name: string;
@@ -72,9 +87,9 @@ async function fetchArray<T>(
 export function useSidebarData(pathname: string) {
   const [tags, setTags] = useState<SidebarTagItem[]>([]);
   const [folders, setFolders] = useState<SidebarFolderItem[]>([]);
-  const [orgs, setOrgs] = useState<SidebarOrgItem[]>([]);
-  const [orgTagGroups, setOrgTagGroups] = useState<SidebarOrgTagGroup[]>([]);
-  const [orgFolderGroups, setOrgFolderGroups] = useState<SidebarOrgFolderGroup[]>([]);
+  const [teams, setTeams] = useState<SidebarTeamItem[]>([]);
+  const [teamTagGroups, setTeamTagGroups] = useState<SidebarTeamTagGroup[]>([]);
+  const [teamFolderGroups, setTeamFolderGroups] = useState<SidebarTeamFolderGroup[]>([]);
   const [lastError, setLastError] = useState<string | null>(null);
   const refreshSeqRef = useRef(0);
 
@@ -85,10 +100,10 @@ export function useSidebarData(pathname: string) {
       errors.push(message);
     };
 
-    const [nextTags, nextFolders, nextOrgs] = await Promise.all([
+    const [nextTags, nextFolders, nextTeams] = await Promise.all([
       fetchArray<SidebarTagItem>(API_PATH.TAGS, reportError),
       fetchArray<SidebarFolderItem>(API_PATH.FOLDERS, reportError),
-      fetchArray<SidebarOrgItem>(API_PATH.TEAMS, reportError),
+      fetchArray<SidebarTeamItem>(API_PATH.TEAMS, reportError),
     ]);
 
     if (seq !== refreshSeqRef.current) return;
@@ -96,51 +111,51 @@ export function useSidebarData(pathname: string) {
     if (nextTags) setTags(nextTags);
     if (nextFolders) setFolders(nextFolders);
 
-    if (!nextOrgs) {
-      setOrgs([]);
-      setOrgTagGroups([]);
-      setOrgFolderGroups([]);
+    if (!nextTeams) {
+      setTeams([]);
+      setTeamTagGroups([]);
+      setTeamFolderGroups([]);
       setLastError(errors[0] ?? `Failed to fetch ${API_PATH.TEAMS}`);
       return;
     }
 
-    setOrgs(nextOrgs);
+    setTeams(nextTeams);
 
-    const orgDetails = await Promise.all(
-      nextOrgs.map(async (org) => {
-        const [orgTags, orgFolders] = await Promise.all([
+    const teamDetails = await Promise.all(
+      nextTeams.map(async (team) => {
+        const [teamTags, teamFolders] = await Promise.all([
           fetchArray<{ id: string; name: string; color: string | null; count: number }>(
-            apiPath.teamTags(org.id),
+            apiPath.teamTags(team.id),
             reportError,
           ),
-          fetchArray<SidebarFolderItem>(apiPath.teamFolders(org.id), reportError),
+          fetchArray<SidebarFolderItem>(apiPath.teamFolders(team.id), reportError),
         ]);
-        return { org, orgTags, orgFolders };
+        return { team, teamTags, teamFolders };
       })
     );
 
     if (seq !== refreshSeqRef.current) return;
 
-    const tagGroups: SidebarOrgTagGroup[] = [];
-    const folderGroups: SidebarOrgFolderGroup[] = [];
-    for (const { org, orgTags, orgFolders } of orgDetails) {
-      if (orgTags && orgTags.length > 0) {
-        tagGroups.push({ orgId: org.id, orgName: org.name, tags: orgTags });
+    const tagGroups: SidebarTeamTagGroup[] = [];
+    const folderGroups: SidebarTeamFolderGroup[] = [];
+    for (const { team, teamTags, teamFolders } of teamDetails) {
+      if (teamTags && teamTags.length > 0) {
+        tagGroups.push({ teamId: team.id, teamName: team.name, tags: teamTags });
       }
-      if (orgFolders) {
-        const canManage = org.role === ORG_ROLE.OWNER || org.role === ORG_ROLE.ADMIN;
-        if (orgFolders.length > 0 || canManage) {
+      if (teamFolders) {
+        const canManage = team.role === ORG_ROLE.OWNER || team.role === ORG_ROLE.ADMIN;
+        if (teamFolders.length > 0 || canManage) {
           folderGroups.push({
-            orgId: org.id,
-            orgName: org.name,
-            orgRole: org.role,
-            folders: orgFolders,
+            teamId: team.id,
+            teamName: team.name,
+            teamRole: team.role,
+            folders: teamFolders,
           });
         }
       }
     }
-    setOrgTagGroups(tagGroups);
-    setOrgFolderGroups(folderGroups);
+    setTeamTagGroups(tagGroups);
+    setTeamFolderGroups(folderGroups);
     setLastError(errors[0] ?? null);
   }, []);
 
@@ -154,9 +169,11 @@ export function useSidebarData(pathname: string) {
     const handler = () => refreshData();
     window.addEventListener("vault-data-changed", handler);
     window.addEventListener("org-data-changed", handler);
+    window.addEventListener("team-data-changed", handler);
     return () => {
       window.removeEventListener("vault-data-changed", handler);
       window.removeEventListener("org-data-changed", handler);
+      window.removeEventListener("team-data-changed", handler);
     };
   }, [refreshData]);
 
@@ -167,9 +184,22 @@ export function useSidebarData(pathname: string) {
   return {
     tags,
     folders,
-    orgs,
-    orgTagGroups,
-    orgFolderGroups,
+    teams,
+    teamTagGroups,
+    teamFolderGroups,
+    // Backward-compatible aliases
+    orgs: teams,
+    orgTagGroups: teamTagGroups.map((group) => ({
+      orgId: group.teamId,
+      orgName: group.teamName,
+      tags: group.tags,
+    })),
+    orgFolderGroups: teamFolderGroups.map((group) => ({
+      orgId: group.teamId,
+      orgName: group.teamName,
+      orgRole: group.teamRole,
+      folders: group.folders,
+    })),
     lastError,
     refreshData,
     notifyDataChanged,

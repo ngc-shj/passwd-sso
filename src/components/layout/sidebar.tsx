@@ -44,7 +44,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { tags, folders, orgs, orgTagGroups, orgFolderGroups, refreshData } =
+  const { tags, folders, teams, teamTagGroups, teamFolderGroups, refreshData } =
     useSidebarData(pathname);
   const {
     folderDialogOpen,
@@ -60,7 +60,12 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     clearDeletingFolder,
   } = useSidebarFolderCrud({
     folders,
-    orgFolderGroups,
+    orgFolderGroups: teamFolderGroups.map((group) => ({
+      orgId: group.teamId,
+      orgName: group.teamName,
+      orgRole: group.teamRole,
+      folders: group.folders,
+    })),
     refreshData,
     tErrors,
   });
@@ -80,7 +85,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     tErrors,
   });
 
-  const vaultContext = useVaultContext(orgs);
+  const vaultContext = useVaultContext(teams);
   const setActiveVault = useSetActiveVault();
   useEffect(() => {
     setActiveVault(vaultContext);
@@ -108,11 +113,20 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     pathname,
     searchParams,
     vaultContext,
-    orgs,
+    orgs: teams,
     folders,
     tags,
-    orgFolderGroups,
-    orgTagGroups,
+    orgFolderGroups: teamFolderGroups.map((group) => ({
+      orgId: group.teamId,
+      orgName: group.teamName,
+      orgRole: group.teamRole,
+      folders: group.folders,
+    })),
+    orgTagGroups: teamTagGroups.map((group) => ({
+      orgId: group.teamId,
+      orgName: group.teamName,
+      tags: group.tags,
+    })),
   });
 
   const { isOpen, toggleSection } = useSidebarSectionsState({
@@ -132,7 +146,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     router,
     onOpenChange,
     vaultContext,
-    orgs,
+    orgs: teams,
     selectedOrg,
     selectedOrgCanManageFolders,
     selectedOrgCanManageTags,
