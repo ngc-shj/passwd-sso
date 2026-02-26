@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { TeamCreateDialog } from "@/components/team/team-create-dialog";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
-import { Plus, Building2, Users, KeyRound } from "lucide-react";
+import { Plus, Building2, CalendarClock } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
+import { formatDate } from "@/lib/format-datetime";
 
 interface TeamListItem {
   id: string;
@@ -17,10 +18,12 @@ interface TeamListItem {
   description: string | null;
   role: string;
   createdAt: string;
+  memberCount: number;
 }
 
 export default function TeamsPage() {
   const t = useTranslations("Team");
+  const locale = useLocale();
   const [teams, setTeams] = useState<TeamListItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -82,29 +85,32 @@ export default function TeamsPage() {
             </p>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="space-y-3">
             {teams.map((team) => (
               <Link
                 key={team.id}
                 href={`/dashboard/teams/${team.id}`}
                 className="group block rounded-xl border bg-card/80 p-4 transition-colors hover:bg-accent"
               >
-                <div className="mb-2 flex items-start justify-between gap-2">
-                  <h3 className="truncate font-semibold">{team.name}</h3>
-                  <TeamRoleBadge role={team.role} />
-                </div>
-                {team.description && (
-                  <p className="mb-3 line-clamp-2 text-sm text-muted-foreground">
-                    {team.description}
-                  </p>
-                )}
-                <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Users className="h-3 w-3" />
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <KeyRound className="h-3 w-3" />
-                  </span>
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto_auto] md:items-center">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-base font-semibold">{team.name}</h3>
+                    <p className="truncate text-sm text-muted-foreground">
+                      {team.description || "—"}
+                    </p>
+                  </div>
+                  <div className="min-w-0 text-sm text-muted-foreground">
+                    <span className="mr-2 font-medium text-foreground">{t("slug")}:</span>
+                    <span className="truncate font-mono">{team.slug}</span>
+                  </div>
+                  <div className="justify-self-start space-y-1 md:justify-self-center">
+                    <TeamRoleBadge role={team.role} />
+                    <p className="text-xs text-muted-foreground">{t("memberCount", { count: team.memberCount })}</p>
+                  </div>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <CalendarClock className="h-3 w-3" />
+                    <span>{t("createdAtLabel", { date: formatDate(team.createdAt, locale) })}</span>
+                  </div>
                 </div>
               </Link>
             ))}

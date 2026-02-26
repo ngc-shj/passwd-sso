@@ -20,6 +20,7 @@
   "members": "メンバー",
   "memberCount": "{count} 人のメンバー",
   "passwordCount": "{count} 件のパスワード",
+  "createdAtLabel": "作成日: {date}",
   "settings": "設定",
   "generalSettings": "一般",
   "teamSettings": "チーム設定",
