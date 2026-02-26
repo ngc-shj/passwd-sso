@@ -18,9 +18,12 @@ interface UseSidebarViewModelParams {
   vaultContext: VaultContext;
   teams?: SidebarOrgItem[];
   orgs?: SidebarOrgItem[];
-  selectedOrg: SidebarOrgItem | null;
-  selectedOrgCanManageFolders: boolean;
-  selectedOrgCanManageTags: boolean;
+  selectedTeam?: SidebarOrgItem | null;
+  selectedOrg?: SidebarOrgItem | null;
+  selectedTeamCanManageFolders?: boolean;
+  selectedOrgCanManageFolders?: boolean;
+  selectedTeamCanManageTags?: boolean;
+  selectedOrgCanManageTags?: boolean;
   selectedTypeFilter: string | null;
   selectedFolderId: string | null;
   selectedTagId: string | null;
@@ -32,7 +35,8 @@ interface UseSidebarViewModelParams {
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
   isPersonalAuditLog: boolean;
-  activeAuditOrgId: string | null;
+  activeAuditTeamId?: string | null;
+  activeAuditOrgId?: string | null;
   selectedFolders: SidebarFolderItem[];
   selectedTags: SidebarOrganizeTagItem[];
   isOpen: (key: SidebarSection) => boolean;
@@ -53,8 +57,11 @@ export function useSidebarViewModel({
   vaultContext,
   teams,
   orgs,
+  selectedTeam,
   selectedOrg,
+  selectedTeamCanManageFolders,
   selectedOrgCanManageFolders,
+  selectedTeamCanManageTags,
   selectedOrgCanManageTags,
   selectedTypeFilter,
   selectedFolderId,
@@ -67,6 +74,7 @@ export function useSidebarViewModel({
   isShareLinks,
   isEmergencyAccess,
   isPersonalAuditLog,
+  activeAuditTeamId,
   activeAuditOrgId,
   selectedFolders,
   selectedTags,
@@ -80,6 +88,10 @@ export function useSidebarViewModel({
   handleTagDeleteClick,
 }: UseSidebarViewModelParams): SidebarContentProps {
   const teamItems = teams ?? orgs ?? [];
+  const selectedTeamItem = selectedTeam ?? selectedOrg ?? null;
+  const canManageFolders = selectedTeamCanManageFolders ?? selectedOrgCanManageFolders ?? false;
+  const canManageTags = selectedTeamCanManageTags ?? selectedOrgCanManageTags ?? false;
+  const activeAuditTeam = activeAuditTeamId ?? activeAuditOrgId ?? null;
   const onNavigate = useCallback(() => {
     onOpenChange(false);
   }, [onOpenChange]);
@@ -102,9 +114,9 @@ export function useSidebarViewModel({
     tOrg,
     vaultContext,
     teams: teamItems,
-    selectedOrg,
-    selectedOrgCanManageFolders,
-    selectedOrgCanManageTags,
+    selectedOrg: selectedTeamItem,
+    selectedOrgCanManageFolders: canManageFolders,
+    selectedOrgCanManageTags: canManageTags,
     selectedTypeFilter,
     selectedFolderId,
     selectedTagId,
@@ -116,7 +128,7 @@ export function useSidebarViewModel({
     isShareLinks,
     isEmergencyAccess,
     isPersonalAuditLog,
-    activeAuditOrgId,
+    activeAuditOrgId: activeAuditTeam,
     selectedFolders,
     selectedTags,
     isOpen,
