@@ -44,7 +44,7 @@ async function handleGET(req: NextRequest) {
       secretKeyAuthTag: true,
       keyVersion: true,
       passphraseVerifierHmac: true,
-      // ECDH fields for org E2E (excluded for extension tokens)
+      // ECDH fields for team E2E (excluded for extension tokens)
       ...(!isExtensionToken && {
         ecdhPublicKey: true,
         encryptedEcdhPrivateKey: true,

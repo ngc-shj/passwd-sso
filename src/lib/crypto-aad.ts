@@ -1,7 +1,7 @@
 /**
  * AAD (Additional Authenticated Data) builders for AES-256-GCM encryption.
  *
- * AAD binds ciphertext to its context (entry ID, user ID, org ID, etc.)
+ * AAD binds ciphertext to its context (entry ID, user ID, team ID, etc.)
  * so that ciphertext cannot be transplanted between entries or users.
  *
  * Binary format (length-prefixed, big-endian):
@@ -116,7 +116,7 @@ export function buildTeamEntryAAD(
   return buildAADBytes(SCOPE_ORG, 3, [teamId, entryId, vaultType]);
 }
 
-// Backward-compatible alias for org naming.
+// Backward-compatible alias for team naming.
 export const buildOrgEntryAAD = buildTeamEntryAAD;
 
 /**

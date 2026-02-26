@@ -308,7 +308,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   // Update User.name if requested (team member attribute, not User table — per plan)
   // Note: name.formatted maps to User.name, but per plan we only update User table at first provision.
-  // For PATCH, we skip User.name updates to avoid multi-org side effects.
+  // For PATCH, we skip User.name updates to avoid multi-team side effects.
 
   logAudit({
     scope: AUDIT_SCOPE.ORG,

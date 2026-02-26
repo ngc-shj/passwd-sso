@@ -368,7 +368,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     );
   });
 
-  it("does not update User.name via PUT (multi-org safety)", async () => {
+  it("does not update User.name via PUT (multi-team safety)", async () => {
     mockOrgMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // role check
@@ -562,7 +562,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     );
   });
 
-  it("does not update User.name via PATCH (multi-org safety)", async () => {
+  it("does not update User.name via PATCH (multi-team safety)", async () => {
     mockOrgMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // member lookup
@@ -586,7 +586,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       makeParams("user-1"),
     );
     expect(res.status).toBe(200);
-    // User.update should NOT be called — PATCH skips User.name for multi-org safety
+    // User.update should NOT be called — PATCH skips User.name for multi-team safety
     expect(mockUser.update).not.toHaveBeenCalled();
   });
 });

@@ -90,7 +90,7 @@ export default async function SharePage({ params }: Props) {
     })
     .catch(() => {});
 
-  // E2E share (org entries): client-side decryption via URL fragment key
+  // E2E share (team entries): client-side decryption via URL fragment key
   if (share.masterKeyVersion === 0) {
     return (
       <ShareE2EEntryView

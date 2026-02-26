@@ -52,7 +52,7 @@ interface ShareDialogProps {
   orgPasswordEntryId?: string;
   /** Decrypted data to share (TOTP excluded by caller) */
   decryptedData?: Record<string, unknown>;
-  /** Entry type (required for org entries) */
+  /** Entry type (required for team entries) */
   entryType?: string;
 }
 

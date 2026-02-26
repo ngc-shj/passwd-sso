@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 describe("audit log target labels", () => {
-  it("uses parentAction and bulk trash/archive/unarchive/restore meta in personal/org pages", () => {
+  it("uses parentAction and bulk trash/archive/unarchive/restore meta in personal/team pages", () => {
     const personalPage = readFileSync(
       join(process.cwd(), "src/app/[locale]/dashboard/audit-logs/page.tsx"),
       "utf8"
     );
-    const orgPage = readFileSync(
+    const teamPage = readFileSync(
       join(
         process.cwd(),
         "src/app/[locale]/dashboard/teams/[teamId]/audit-logs/page.tsx"
@@ -16,7 +16,7 @@ describe("audit log target labels", () => {
       "utf8"
     );
 
-    for (const page of [personalPage, orgPage]) {
+    for (const page of [personalPage, teamPage]) {
       expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_TRASH");
       expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_EMPTY_TRASH");
       expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_ARCHIVE");
@@ -37,7 +37,7 @@ describe("audit log target labels", () => {
       join(process.cwd(), "src/app/[locale]/dashboard/audit-logs/page.tsx"),
       "utf8"
     );
-    const orgPage = readFileSync(
+    const teamPage = readFileSync(
       join(
         process.cwd(),
         "src/app/[locale]/dashboard/teams/[teamId]/audit-logs/page.tsx"
@@ -45,7 +45,7 @@ describe("audit log target labels", () => {
       "utf8"
     );
 
-    for (const page of [personalPage, orgPage]) {
+    for (const page of [personalPage, teamPage]) {
       expect(page).toContain("const key = normalizeAuditActionKey(String(action));");
       expect(page).toContain("return t.has(key as never) ? t(key as never) : String(action);");
     }

@@ -536,7 +536,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           ecdhPrivateKeyBytesRef.current = new Uint8Array(ecdhPrivDecrypted);
           ecdhPublicKeyJwkRef.current = vaultData.ecdhPublicKey ?? null;
         } catch {
-          // ECDH restoration failure is non-fatal — org features will be unavailable
+          // ECDH restoration failure is non-fatal — team features will be unavailable
         }
       }
 

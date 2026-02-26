@@ -42,7 +42,7 @@ const validBody = {
     iv: "e".repeat(24),
     authTag: "f".repeat(32),
   },
-  // ECDH key pair for org E2E
+  // ECDH key pair for team E2E
   ecdhPublicKey: '{"kty":"EC","crv":"P-256","x":"test","y":"test"}',
   encryptedEcdhPrivateKey: "encrypted-ecdh-private-key-data",
   ecdhPrivateKeyIv: "a".repeat(24),
