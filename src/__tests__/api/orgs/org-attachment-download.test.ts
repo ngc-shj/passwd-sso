@@ -52,7 +52,7 @@ vi.mock("@/lib/blob-store", () => ({
 }));
 
 import { NextRequest } from "next/server";
-import { GET, DELETE } from "@/app/api/teams/[orgId]/passwords/[id]/attachments/[attachmentId]/route";
+import { GET, DELETE } from "@/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/route";
 import { OrgAuthError } from "@/lib/org-auth";
 
 function makeParams(orgId: string, id: string, attachmentId: string) {
@@ -87,7 +87,7 @@ const ATTACHMENT = {
   aadVersion: 1,
 };
 
-describe("GET /api/teams/[orgId]/passwords/[id]/attachments/[attachmentId]", () => {
+describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {
@@ -151,7 +151,7 @@ describe("GET /api/teams/[orgId]/passwords/[id]/attachments/[attachmentId]", () 
   });
 });
 
-describe("DELETE /api/teams/[orgId]/passwords/[id]/attachments/[attachmentId]", () => {
+describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {

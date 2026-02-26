@@ -42,10 +42,10 @@ vi.mock("@/lib/audit", () => ({
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
 }));
 
-import { POST } from "@/app/api/teams/[orgId]/passwords/[id]/history/[historyId]/restore/route";
+import { POST } from "@/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route";
 import { OrgAuthError } from "@/lib/org-auth";
 
-describe("POST /api/teams/[orgId]/passwords/[id]/history/[historyId]/restore", () => {
+describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {

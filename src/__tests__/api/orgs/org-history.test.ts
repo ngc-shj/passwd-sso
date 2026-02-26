@@ -32,10 +32,10 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-import { GET } from "@/app/api/teams/[orgId]/passwords/[id]/history/route";
+import { GET } from "@/app/api/teams/[teamId]/passwords/[id]/history/route";
 import { OrgAuthError } from "@/lib/org-auth";
 
-describe("GET /api/teams/[orgId]/passwords/[id]/history", () => {
+describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {

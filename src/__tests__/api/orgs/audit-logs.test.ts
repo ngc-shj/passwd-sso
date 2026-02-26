@@ -38,12 +38,12 @@ vi.mock("@/lib/org-auth", () => ({
   OrgAuthError,
 }));
 
-import { GET } from "@/app/api/teams/[orgId]/audit-logs/route";
+import { GET } from "@/app/api/teams/[teamId]/audit-logs/route";
 import { AUDIT_ACTION, AUDIT_ACTION_GROUP, AUDIT_SCOPE, AUDIT_TARGET_TYPE, ORG_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-1";
 
-describe("GET /api/teams/[orgId]/audit-logs", () => {
+describe("GET /api/teams/[teamId]/audit-logs", () => {
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
 

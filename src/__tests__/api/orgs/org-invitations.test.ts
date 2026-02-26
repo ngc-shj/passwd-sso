@@ -50,10 +50,10 @@ vi.mock("node:crypto", () => ({
   randomBytes: () => Buffer.from("a".repeat(32)),
 }));
 
-import { GET, POST } from "@/app/api/teams/[orgId]/invitations/route";
+import { GET, POST } from "@/app/api/teams/[teamId]/invitations/route";
 import { OrgAuthError } from "@/lib/org-auth";
 
-describe("GET /api/teams/[orgId]/invitations", () => {
+describe("GET /api/teams/[teamId]/invitations", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {
@@ -97,7 +97,7 @@ describe("GET /api/teams/[orgId]/invitations", () => {
   });
 });
 
-describe("POST /api/teams/[orgId]/invitations", () => {
+describe("POST /api/teams/[teamId]/invitations", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {

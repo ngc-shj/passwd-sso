@@ -54,11 +54,11 @@ vi.mock("@/lib/folder-utils", () => ({
   validateFolderDepth: vi.fn(),
 }));
 
-import { GET, POST } from "@/app/api/teams/[orgId]/folders/route";
+import { GET, POST } from "@/app/api/teams/[teamId]/folders/route";
 import { OrgAuthError } from "@/lib/org-auth";
 import { validateParentFolder, validateFolderDepth } from "@/lib/folder-utils";
 
-describe("GET /api/teams/[orgId]/folders", () => {
+describe("GET /api/teams/[teamId]/folders", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {
@@ -101,7 +101,7 @@ describe("GET /api/teams/[orgId]/folders", () => {
   });
 });
 
-describe("POST /api/teams/[orgId]/folders", () => {
+describe("POST /api/teams/[teamId]/folders", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {

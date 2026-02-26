@@ -52,10 +52,10 @@ vi.mock("@/lib/folder-utils", () => ({
   checkCircularReference: vi.fn().mockResolvedValue(false),
 }));
 
-import { PUT, DELETE } from "@/app/api/teams/[orgId]/folders/[id]/route";
+import { PUT, DELETE } from "@/app/api/teams/[teamId]/folders/[id]/route";
 import { OrgAuthError } from "@/lib/org-auth";
 
-describe("PUT /api/teams/[orgId]/folders/[id]", () => {
+describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {
@@ -194,7 +194,7 @@ describe("PUT /api/teams/[orgId]/folders/[id]", () => {
   });
 });
 
-describe("DELETE /api/teams/[orgId]/folders/[id]", () => {
+describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
   let txOrgFolderUpdate: ReturnType<typeof vi.fn>;
   let txOrgFolderDelete: ReturnType<typeof vi.fn>;
   let txOrgEntryUpdateMany: ReturnType<typeof vi.fn>;
