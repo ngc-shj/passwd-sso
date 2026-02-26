@@ -14,6 +14,7 @@ interface OrgContextItem {
   name: string;
   role: string;
 }
+type TeamContextItem = OrgContextItem;
 
 const CROSS_VAULT_PATHS = [
   "/dashboard/watchtower",
@@ -38,7 +39,7 @@ function isCrossVaultPath(path: string): boolean {
   return CROSS_VAULT_PATHS.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
 }
 
-export function useVaultContext(orgs: OrgContextItem[]): VaultContext {
+export function useVaultContext(teams: TeamContextItem[]): VaultContext {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const cleanPath = stripLocalePrefix(pathname);
@@ -48,16 +49,16 @@ export function useVaultContext(orgs: OrgContextItem[]): VaultContext {
     if (cleanPath === "/dashboard/share-links") {
       const shareOrgId = searchParams.get("org");
       if (shareOrgId) {
-        const org = orgs.find((item) => item.id === shareOrgId);
+        const org = teams.find((item) => item.id === shareOrgId);
         if (org) {
           return { type: "org", orgId: org.id, orgName: org.name, orgRole: org.role };
         }
       }
     }
 
-    const orgMatch = cleanPath.match(/^\/dashboard\/orgs\/([^/]+)/);
+    const orgMatch = cleanPath.match(/^\/dashboard\/(?:teams|orgs)\/([^/]+)/);
     if (orgMatch) {
-      const org = orgs.find((item) => item.id === orgMatch[1]);
+      const org = teams.find((item) => item.id === orgMatch[1]);
       if (org) {
         return { type: "org", orgId: org.id, orgName: org.name, orgRole: org.role };
       }
@@ -68,14 +69,14 @@ export function useVaultContext(orgs: OrgContextItem[]): VaultContext {
     }
 
     if (isCrossVaultPath(cleanPath) && lastContext !== "personal") {
-      const org = orgs.find((item) => item.id === lastContext);
+      const org = teams.find((item) => item.id === lastContext);
       if (org) {
         return { type: "org", orgId: org.id, orgName: org.name, orgRole: org.role };
       }
     }
 
     return { type: "personal" };
-  }, [cleanPath, lastContext, orgs, searchParams]);
+  }, [cleanPath, lastContext, teams, searchParams]);
 
   useEffect(() => {
     if (resolved.type === "org" && lastContext !== resolved.orgId) {
