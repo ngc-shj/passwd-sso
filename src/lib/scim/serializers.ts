@@ -9,7 +9,7 @@ const SCIM_GROUP_NAMESPACE = "125b7a5b-23f9-495c-bd0a-369bae10337e";
  * Keeps the serializer decoupled from Prisma's generated types.
  */
 export interface ScimUserInput {
-  /** TeamMember.userId (stored in orgMember table for backward compatibility) */
+  /** TeamMember.userId (stored in legacy orgMember table for backward compatibility) */
   userId: string;
   email: string;
   name: string | null;

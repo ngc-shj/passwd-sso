@@ -326,7 +326,7 @@ describe("crypto-team", () => {
 
     it("derives same encryption key from unwrapped team key", async () => {
       const teamKey = generateTeamSymmetricKey();
-      const orgEncKey = await deriveTeamEncryptionKey(teamKey);
+      const teamEncKey = await deriveTeamEncryptionKey(teamKey);
 
       const memberKeyPair = await generateECDHKeyPair();
       const memberPubJwk = await exportPublicKey(memberKeyPair.publicKey);
@@ -355,7 +355,7 @@ describe("crypto-team", () => {
 
       // Encrypt with admin's key, decrypt with member's key
       const plaintext = "team-entry-secret-data";
-      const encrypted = await encryptOrgEntry(plaintext, orgEncKey);
+      const encrypted = await encryptOrgEntry(plaintext, teamEncKey);
       const decrypted = await decryptOrgEntry(encrypted, memberEncKey);
       expect(decrypted).toBe(plaintext);
     });
@@ -462,11 +462,11 @@ describe("crypto-team", () => {
     it("simulates complete flow: team creation → key distribution → encrypt/decrypt", async () => {
       // 1. Admin creates team → generates team symmetric key
       const teamKey = generateTeamSymmetricKey();
-      const orgEncKey = await deriveTeamEncryptionKey(teamKey);
+      const teamEncKey = await deriveTeamEncryptionKey(teamKey);
 
       // 2. Admin encrypts team data
       const entry = '{"title":"Team Secret","password":"team-pass-123"}';
-      const encryptedEntry = await encryptOrgEntry(entry, orgEncKey);
+      const encryptedEntry = await encryptOrgEntry(entry, teamEncKey);
 
       // 3. Member joins -> admin distributes team key
       const memberKeyPair = await generateECDHKeyPair();
@@ -508,7 +508,7 @@ describe("crypto-team", () => {
       const newEncrypted = await encryptOrgEntry(newEntry, memberEncKey);
 
       // 7. Admin can decrypt member's entry
-      const adminDecrypted = await decryptOrgEntry(newEncrypted, orgEncKey);
+      const adminDecrypted = await decryptOrgEntry(newEncrypted, teamEncKey);
       expect(adminDecrypted).toBe(newEntry);
     });
   });

@@ -73,7 +73,7 @@ function createDeleteRequest() {
   );
 }
 
-const ORG_ENTRY = { orgId: "o1" };
+const TEAM_ENTRY = { orgId: "o1" };
 
 const ATTACHMENT = {
   id: "a1",
@@ -122,7 +122,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
   it("returns 404 when attachment not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentFindUnique.mockResolvedValue(null);
     const res = await GET(createGetRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(404);
@@ -131,7 +131,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
   it("returns encrypted data as JSON for client-side decryption", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentFindUnique.mockResolvedValue(ATTACHMENT);
     mockGetObject.mockResolvedValue(Buffer.from("encrypted-data"));
 

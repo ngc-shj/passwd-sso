@@ -69,7 +69,7 @@ describe("POST /api/audit-logs/export", () => {
     expect(json.error).toBe("INVALID_BODY");
   });
 
-  it("logs personal export when no orgId", async () => {
+  it("logs personal export when no teamId (legacy orgId)", async () => {
     const res = await POST(
       createRequest("POST", URL, { body: { entryCount: 10, format: "csv" } })
     );
@@ -113,7 +113,7 @@ describe("POST /api/audit-logs/export", () => {
     );
   });
 
-  it("logs org export when orgId provided and user is member", async () => {
+  it("logs team export when orgId (legacy teamId) is provided and user is member", async () => {
     const res = await POST(
       createRequest("POST", URL, {
         body: { orgId: "team-1", entryCount: 3, format: "json" },
@@ -146,7 +146,7 @@ describe("POST /api/audit-logs/export", () => {
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
-  it("returns 404 when orgId specified but user is not a member", async () => {
+  it("returns 404 when teamId (legacy orgId) is specified but user is not a member", async () => {
     mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
     const res = await POST(
       createRequest("POST", URL, {

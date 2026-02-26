@@ -34,12 +34,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
   }
 
-  const { orgId, entryCount, format, filename, encrypted, includeOrgs } = result.data;
+  const { orgId: teamId, entryCount, format, filename, encrypted, includeOrgs } = result.data;
 
-  // Verify org membership when orgId is specified
-  if (orgId) {
+  // Verify team membership when teamId is specified
+  if (teamId) {
     try {
-      await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.TEAM_UPDATE);
+      await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
     } catch (e) {
       if (e instanceof TeamAuthError) {
         return NextResponse.json({ error: e.message }, { status: e.status });
@@ -49,10 +49,10 @@ export async function POST(req: NextRequest) {
   }
 
   logAudit({
-    scope: orgId ? AUDIT_SCOPE.ORG : AUDIT_SCOPE.PERSONAL,
+    scope: teamId ? AUDIT_SCOPE.ORG : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.ENTRY_EXPORT,
     userId: session.user.id,
-    orgId: orgId ?? undefined,
+    orgId: teamId ?? undefined,
     metadata: {
       entryCount,
       format,

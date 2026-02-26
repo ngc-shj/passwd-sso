@@ -3,7 +3,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 /**
  * SCIM-specific rate limiter.
  * 200 requests / 60 seconds per scope, keyed by `rl:scim:${scopeId}`.
- * Scope should be tenantId when available, otherwise orgId.
+ * Scope should be tenantId when available, otherwise teamId.
  */
 const limiter = createRateLimiter({ windowMs: 60_000, max: 200 });
 

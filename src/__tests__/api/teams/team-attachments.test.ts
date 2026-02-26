@@ -9,7 +9,7 @@ const {
   mockAttachmentFindMany,
   mockAttachmentCount,
   mockAttachmentCreate,
-  mockOrgFindUnique,
+  mockTeamFindUnique,
   mockPutObject,
   mockDeleteObject,
 } = vi.hoisted(() => ({
@@ -19,7 +19,7 @@ const {
   mockAttachmentFindMany: vi.fn(),
   mockAttachmentCount: vi.fn(),
   mockAttachmentCreate: vi.fn(),
-  mockOrgFindUnique: vi.fn(),
+  mockTeamFindUnique: vi.fn(),
   mockPutObject: vi.fn(),
   mockDeleteObject: vi.fn(),
 }));
@@ -43,7 +43,7 @@ vi.mock("@/lib/prisma", () => ({
       count: mockAttachmentCount,
       create: mockAttachmentCreate,
     },
-    organization: { findUnique: mockOrgFindUnique },
+    organization: { findUnique: mockTeamFindUnique },
   },
 }));
 vi.mock("@/lib/audit", () => ({
@@ -97,7 +97,7 @@ function validFormFields(): Record<string, string | Blob> {
   };
 }
 
-const ORG_ENTRY = { orgId: "o1" };
+const TEAM_ENTRY = { orgId: "o1" };
 
 describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -183,7 +183,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 400 when attachment limit exceeded", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(20);
     const req = createFormDataRequest(validFormFields());
     const res = await POST(req, makeParams("o1", "e1"));
@@ -195,7 +195,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 413 when content-length too large", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const req = createFormDataRequest(validFormFields(), {
       "content-length": String(100 * 1024 * 1024),
@@ -209,7 +209,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 400 when required fields are missing", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const req = createFormDataRequest({ file: new Blob(["x"]) });
     const res = await POST(req, makeParams("o1", "e1"));
@@ -221,7 +221,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 400 for extension not allowed", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.filename = "malware.exe";
@@ -235,7 +235,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 400 for content type not allowed", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.contentType = "application/x-executable";
@@ -249,7 +249,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 400 for invalid iv format", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), iv: "bad-iv" };
     const req = createFormDataRequest(fields);
@@ -262,7 +262,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 400 for invalid authTag format", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), authTag: "bad-tag" };
     const req = createFormDataRequest(fields);
@@ -275,7 +275,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 400 for filename with path traversal characters", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.filename = "../etc/passwd.pdf";
@@ -289,7 +289,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 400 for filename with CRLF characters", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.filename = "test\r\n.pdf";
@@ -303,7 +303,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 400 for Windows reserved device name", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.filename = "CON.pdf";
@@ -317,9 +317,9 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("uploads client-encrypted attachment successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
-    mockOrgFindUnique.mockResolvedValue({ orgKeyVersion: 1 });
+    mockTeamFindUnique.mockResolvedValue({ orgKeyVersion: 1 });
     mockPutObject.mockResolvedValue(Buffer.from("stored"));
     const created = {
       id: "a1",
