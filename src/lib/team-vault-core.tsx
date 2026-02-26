@@ -18,63 +18,45 @@ import { apiPath, API_PATH } from "@/lib/constants";
 
 // ─── Types ────────────────────────────────────────────────────
 
-interface CachedOrgKey {
+interface CachedTeamKey {
   key: CryptoKey;
   keyVersion: number;
   cachedAt: number;
 }
 
-export interface OrgKeyInfo {
+export interface TeamKeyInfo {
   key: CryptoKey;
   keyVersion: number;
 }
 
-export interface OrgVaultContextValue {
-  /** Get the org encryption key, fetching and unwrapping if not cached. */
-  getOrgEncryptionKey: (orgId: string) => Promise<CryptoKey | null>;
-  /** Team alias of getOrgEncryptionKey. */
+export interface TeamVaultContextValue {
+  /** Get the team encryption key, fetching and unwrapping if not cached. */
   getTeamEncryptionKey: (teamId: string) => Promise<CryptoKey | null>;
-  /** Get the org encryption key with its version number. */
-  getOrgKeyInfo: (orgId: string) => Promise<OrgKeyInfo | null>;
-  /** Team alias of getOrgKeyInfo. */
-  getTeamKeyInfo: (teamId: string) => Promise<OrgKeyInfo | null>;
-  /** Invalidate a cached org key (e.g. after key rotation). */
-  invalidateOrgKey: (orgId: string) => void;
-  /** Team alias of invalidateOrgKey. */
+  /** Get the team encryption key with its version number. */
+  getTeamKeyInfo: (teamId: string) => Promise<TeamKeyInfo | null>;
+  /** Invalidate a cached team key (e.g. after key rotation). */
   invalidateTeamKey: (teamId: string) => void;
-  /** Clear all cached org keys (e.g. on vault lock). */
+  /** Clear all cached team keys (e.g. on vault lock). */
   clearAll: () => void;
-  /** Distribute org key to pending members (called after vault unlock). */
+  /** Distribute team key to pending members (called after vault unlock). */
   distributePendingKeys: () => Promise<void>;
 }
 
 // ─── Context ──────────────────────────────────────────────────
 
-const OrgVaultContext = createContext<OrgVaultContextValue | null>(null);
+const TeamVaultContext = createContext<TeamVaultContextValue | null>(null);
 
-export function useOrgVault(): OrgVaultContextValue {
-  const ctx = useContext(OrgVaultContext);
+export function useTeamVault(): TeamVaultContextValue {
+  const ctx = useContext(TeamVaultContext);
   if (!ctx) {
-    throw new Error("useOrgVault must be used within an OrgVaultProvider");
+    throw new Error("useTeamVault must be used within a TeamVaultProvider");
   }
   return ctx;
 }
 
-/** Optional accessor — returns null if not inside an OrgVaultProvider. */
-export function useOrgVaultOptional(): OrgVaultContextValue | null {
-  return useContext(OrgVaultContext);
-}
-
-export type TeamKeyInfo = OrgKeyInfo;
-
-export type TeamVaultContextValue = OrgVaultContextValue;
-
-export function useTeamVault(): TeamVaultContextValue {
-  return useOrgVault();
-}
-
+/** Optional accessor — returns null if not inside a TeamVaultProvider. */
 export function useTeamVaultOptional(): TeamVaultContextValue | null {
-  return useOrgVaultOptional();
+  return useContext(TeamVaultContext);
 }
 
 // ─── Constants ────────────────────────────────────────────────
@@ -84,33 +66,33 @@ const KEY_DISTRIBUTE_INTERVAL_MS = 2 * 60 * 1000; // check pending distributions
 
 // ─── Provider ─────────────────────────────────────────────────
 
-interface OrgVaultProviderProps {
+interface TeamVaultProviderProps {
   children: ReactNode;
   getEcdhPrivateKeyBytes: () => Uint8Array | null;
   getUserId: () => string | null;
   vaultUnlocked: boolean;
 }
 
-export function OrgVaultProvider({
+export function TeamVaultProvider({
   children,
   getEcdhPrivateKeyBytes,
   getUserId,
   vaultUnlocked,
-}: OrgVaultProviderProps) {
-  const cacheRef = useRef<Map<string, CachedOrgKey>>(new Map());
+}: TeamVaultProviderProps) {
+  const cacheRef = useRef<Map<string, CachedTeamKey>>(new Map());
 
   const clearAll = useCallback(() => {
     cacheRef.current.clear();
   }, []);
 
-  const invalidateOrgKey = useCallback((orgId: string) => {
-    cacheRef.current.delete(orgId);
+  const invalidateTeamKey = useCallback((teamId: string) => {
+    cacheRef.current.delete(teamId);
   }, []);
 
-  const getOrgEncryptionKey = useCallback(
-    async (orgId: string): Promise<CryptoKey | null> => {
+  const getTeamEncryptionKey = useCallback(
+    async (teamId: string): Promise<CryptoKey | null> => {
       // Check cache
-      const cached = cacheRef.current.get(orgId);
+      const cached = cacheRef.current.get(teamId);
       if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
         return cached.key;
       }
@@ -124,7 +106,7 @@ export function OrgVaultProvider({
 
       try {
         // Fetch own OrgMemberKey
-        const res = await fetch(apiPath.teamMemberKey(orgId));
+        const res = await fetch(apiPath.teamMemberKey(teamId));
         if (!res.ok) {
           ecdhPrivateKeyBytes.fill(0);
           return null;
@@ -148,7 +130,7 @@ export function OrgVaultProvider({
 
         // Build AAD context for unwrapping
         const ctx: OrgKeyWrapContext = {
-          orgId,
+          orgId: teamId,
           toUserId: userId,
           keyVersion: memberKeyData.keyVersion,
           wrapVersion: memberKeyData.wrapVersion,
@@ -172,7 +154,7 @@ export function OrgVaultProvider({
         orgKeyBytes.fill(0);
 
         // Cache (always the latest key from server)
-        cacheRef.current.set(orgId, {
+        cacheRef.current.set(teamId, {
           key: encryptionKey,
           keyVersion: memberKeyData.keyVersion,
           cachedAt: Date.now(),
@@ -180,7 +162,7 @@ export function OrgVaultProvider({
 
         return encryptionKey;
       } catch (e) {
-        console.error("[getOrgEncryptionKey]", e instanceof Error ? e.message : "unknown");
+        console.error("[getTeamEncryptionKey]", e instanceof Error ? e.message : "unknown");
         ecdhPrivateKeyBytes.fill(0);
         return null;
       }
@@ -188,15 +170,15 @@ export function OrgVaultProvider({
     [getEcdhPrivateKeyBytes, getUserId]
   );
 
-  const getOrgKeyInfo = useCallback(
-    async (orgId: string): Promise<OrgKeyInfo | null> => {
-      const key = await getOrgEncryptionKey(orgId);
+  const getTeamKeyInfo = useCallback(
+    async (teamId: string): Promise<TeamKeyInfo | null> => {
+      const key = await getTeamEncryptionKey(teamId);
       if (!key) return null;
-      const cached = cacheRef.current.get(orgId);
+      const cached = cacheRef.current.get(teamId);
       if (!cached) return null;
       return { key, keyVersion: cached.keyVersion };
     },
-    [getOrgEncryptionKey]
+    [getTeamEncryptionKey]
   );
 
   const distributePendingKeys = useCallback(async () => {
@@ -352,22 +334,17 @@ export function OrgVaultProvider({
     };
   }, [vaultUnlocked, distributePendingKeys]);
 
-  const value: OrgVaultContextValue = {
-    getOrgEncryptionKey,
-    getTeamEncryptionKey: getOrgEncryptionKey,
-    getOrgKeyInfo,
-    getTeamKeyInfo: getOrgKeyInfo,
-    invalidateOrgKey,
-    invalidateTeamKey: invalidateOrgKey,
+  const value: TeamVaultContextValue = {
+    getTeamEncryptionKey,
+    getTeamKeyInfo,
+    invalidateTeamKey,
     clearAll,
     distributePendingKeys,
   };
 
   return (
-    <OrgVaultContext.Provider value={value}>
+    <TeamVaultContext.Provider value={value}>
       {children}
-    </OrgVaultContext.Provider>
+    </TeamVaultContext.Provider>
   );
 }
-
-export const TeamVaultProvider = OrgVaultProvider;

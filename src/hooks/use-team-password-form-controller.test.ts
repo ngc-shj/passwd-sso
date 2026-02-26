@@ -9,7 +9,7 @@ import type { TeamPasswordFormState } from "@/hooks/use-team-password-form-state
 const submitTeamPasswordFormMock = vi.fn();
 const useTeamPasswordFormDerivedMock = vi.fn();
 const useTeamPasswordFormPresenterMock = vi.fn();
-const mockGetOrgKeyInfo = vi.fn();
+const mockGetTeamKeyInfo = vi.fn();
 
 vi.mock("@/components/team/team-password-form-actions", () => ({
   submitTeamPasswordForm: (...args: unknown[]) => submitTeamPasswordFormMock(...args),
@@ -25,9 +25,9 @@ vi.mock("@/hooks/use-team-password-form-presenter", () => ({
 
 vi.mock("@/lib/team-vault-context", () => ({
   useTeamVault: () => ({
-    getTeamKeyInfo: mockGetOrgKeyInfo,
+    getTeamKeyInfo: mockGetTeamKeyInfo,
     getTeamEncryptionKey: vi.fn(),
-    invalidateOrgKey: vi.fn(),
+    invalidateTeamKey: vi.fn(),
     clearAll: vi.fn(),
     distributePendingKeys: vi.fn(),
   }),
@@ -38,8 +38,8 @@ describe("useTeamPasswordFormController", () => {
     submitTeamPasswordFormMock.mockReset();
     useTeamPasswordFormDerivedMock.mockReset();
     useTeamPasswordFormPresenterMock.mockReset();
-    mockGetOrgKeyInfo.mockReset();
-    mockGetOrgKeyInfo.mockResolvedValue({ key: {} as CryptoKey, keyVersion: 1 });
+    mockGetTeamKeyInfo.mockReset();
+    mockGetTeamKeyInfo.mockResolvedValue({ key: {} as CryptoKey, keyVersion: 1 });
 
     useTeamPasswordFormPresenterMock.mockReturnValue({
       entryValues: {

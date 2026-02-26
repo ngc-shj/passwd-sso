@@ -24,7 +24,7 @@ vi.mock("@/lib/team-vault-context", () => ({
   useTeamVault: () => ({
     getTeamKeyInfo: vi.fn().mockResolvedValue({ key: {} as CryptoKey, keyVersion: 1 }),
     getTeamEncryptionKey: vi.fn(),
-    invalidateOrgKey: vi.fn(),
+    invalidateTeamKey: vi.fn(),
     clearAll: vi.fn(),
     distributePendingKeys: vi.fn(),
   }),
