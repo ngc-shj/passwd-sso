@@ -2,17 +2,17 @@
 
 ## Objective
 
-Migrate from current `Organization`-centric model to:
+Migrate from current `Team`-centric model to:
 - `Tenant` = company/account boundary
-- `Team` = collaboration unit inside tenant (current Organization behavior)
+- `Team` = collaboration unit inside tenant (current Team behavior)
 
 without service interruption.
 
 ## Current State
 
 - Auth is IdP-driven (tenant/company contract boundary in practice)
-- App domain is `Organization`-scoped
-- SCIM is currently `org`-scoped
+- App domain is `Team`-scoped
+- SCIM is currently `team`-scoped
 
 ## Target State
 
@@ -57,8 +57,8 @@ Exit criteria:
 ### Phase 2: Backfill + Validation
 
 Deliverables:
-- backfill script: initial `1 organization -> 1 tenant`
-- populate `tenant_id` on organizations/scim tables
+- backfill script: initial `1 team -> 1 tenant`
+- populate `tenant_id` on teams/scim tables
 - validation SQL (null/orphan/duplicate checks)
 
 Exit criteria:
@@ -69,12 +69,12 @@ Exit criteria:
 
 Deliverables:
 - tenant context resolver in auth/API layer
-- SCIM context switched from org-scoped to tenant-scoped
-- compatibility layer for existing org-era data paths
+- SCIM context switched from team-scoped to tenant-scoped
+- compatibility layer for existing team-era data paths
 
 Exit criteria:
 - tenant-aware read/write paths stable in production
-- no elevated 4xx/5xx on SCIM and org/team APIs
+- no elevated 4xx/5xx on SCIM and team/team APIs
 
 ### Phase 4: Constraint Tightening
 
@@ -104,7 +104,7 @@ Exit criteria:
 ### Phase 6: Cleanup + Terminology Alignment
 
 Deliverables:
-- deprecate org-era naming in API/docs/UI where appropriate
+- deprecate team-era naming in API/docs/UI where appropriate
 - keep DB table rename as optional final step (not required for correctness)
 
 Exit criteria:
@@ -132,7 +132,7 @@ Per phase rollback strategy:
 - backfill changes reversible via recorded mapping table/snapshot
 
 3. Phase 3
-- feature flag rollback to org-era resolver paths
+- feature flag rollback to team-era resolver paths
 
 4. Phase 4+
 - perform during low-traffic window with verified backups

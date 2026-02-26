@@ -61,7 +61,7 @@ CREATE INDEX IF NOT EXISTS "tenant_members_user_id_idx"
   ON "tenant_members"("user_id");
 
 -- 4) additive tenant_id columns
-ALTER TABLE "organizations"
+ALTER TABLE "teams"
   ADD COLUMN IF NOT EXISTS "tenant_id" TEXT;
 
 ALTER TABLE "scim_tokens"
@@ -73,9 +73,9 @@ ALTER TABLE "scim_external_mappings"
 -- 5) foreign keys (set null for additive compatibility)
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'organizations_tenant_id_fkey') THEN
-    ALTER TABLE "organizations"
-      ADD CONSTRAINT "organizations_tenant_id_fkey"
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'teams_tenant_id_fkey') THEN
+    ALTER TABLE "teams"
+      ADD CONSTRAINT "teams_tenant_id_fkey"
       FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id")
       ON DELETE SET NULL ON UPDATE CASCADE;
   END IF;
@@ -105,8 +105,8 @@ END
 $$;
 
 -- 6) indexes
-CREATE INDEX IF NOT EXISTS "organizations_tenant_id_idx"
-  ON "organizations"("tenant_id");
+CREATE INDEX IF NOT EXISTS "teams_tenant_id_idx"
+  ON "teams"("tenant_id");
 
 CREATE INDEX IF NOT EXISTS "scim_tokens_tenant_id_revoked_at_idx"
   ON "scim_tokens"("tenant_id", "revoked_at");

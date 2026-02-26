@@ -3,7 +3,7 @@
 ## Goal
 
 Introduce `Tenant` as the top-level boundary while keeping current behavior intact.
-Current `Organization` is treated as `Team` in product terms, but DB table remains `organizations` during migration.
+Current `Team` is treated as `Team` in product terms, but DB table remains `teams` during migration.
 
 This phase is additive-only:
 - no destructive changes
@@ -15,7 +15,7 @@ This phase is additive-only:
 1. Add `tenants` table
 2. Add `tenant_members` table (tenant-level role)
 3. Add nullable `tenant_id` to tenant-scoped tables
-4. Keep existing `org_id`-based constraints for compatibility
+4. Keep existing `team_id`-based constraints for compatibility
 
 ## Prisma Draft (Phase 1)
 
@@ -38,7 +38,7 @@ model Tenant {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  organizations         Organization[]
+  teams         Team[]
   members               TenantMember[]
   scimTokens            ScimToken[]
   scimExternalMappings  ScimExternalMapping[]
@@ -64,13 +64,13 @@ model TenantMember {
 
 // Existing model updates (nullable in Phase 1)
 
-model Organization {
+model Team {
   // ...existing fields...
   tenantId String? @map("tenant_id")
   tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
-  @@map("organizations")
+  @@map("teams")
 }
 
 model ScimToken {
@@ -93,7 +93,7 @@ model ScimExternalMapping {
 ```
 
 Notes:
-- Keep current `org_id` unique constraints in `ScimExternalMapping` during Phase 1.
+- Keep current `team_id` unique constraints in `ScimExternalMapping` during Phase 1.
 - In later phases, switch constraints to tenant-aware keys after backfill and application cutover.
 
 ## SQL Draft (Phase 1 Additive)
@@ -104,12 +104,12 @@ A full SQL draft is provided in:
 
 ## Backfill Plan (next phase)
 
-1. Create one tenant per existing organization (initially 1 org = 1 tenant)
+1. Create one tenant per existing team (initially 1 team = 1 tenant)
 2. Backfill:
-   - `organizations.tenant_id`
+   - `teams.tenant_id`
    - `scim_tokens.tenant_id`
    - `scim_external_mappings.tenant_id`
-3. Backfill `tenant_members` from current org owners/admins (policy to be confirmed)
+3. Backfill `tenant_members` from current team owners/admins (policy to be confirmed)
 
 ## Validation Queries (after backfill)
 
@@ -122,4 +122,4 @@ A full SQL draft is provided in:
 - API path changes (`/tenants/:tenantId/...`)
 - RLS enablement
 - dropping old constraints/columns
-- renaming `organizations` table
+- renaming `teams` table

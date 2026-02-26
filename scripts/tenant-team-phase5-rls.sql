@@ -8,10 +8,10 @@
 --   COALESCE(current_setting('app.bypass_rls', true), '') = 'on'
 --   OR tenant_id = current_setting('app.tenant_id', true)
 
--- organizations
-ALTER TABLE "organizations" ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS organizations_tenant_isolation ON "organizations";
-CREATE POLICY organizations_tenant_isolation ON "organizations"
+-- teams
+ALTER TABLE "teams" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS teams_tenant_isolation ON "teams";
+CREATE POLICY teams_tenant_isolation ON "teams"
   USING (
     COALESCE(current_setting('app.bypass_rls', true), '') = 'on'
     OR "tenant_id" = current_setting('app.tenant_id', true)
@@ -61,7 +61,7 @@ CREATE POLICY scim_external_mappings_tenant_isolation ON "scim_external_mappings
   );
 
 -- Enable this only after staging verification:
--- ALTER TABLE "organizations" FORCE ROW LEVEL SECURITY;
+-- ALTER TABLE "teams" FORCE ROW LEVEL SECURITY;
 -- ALTER TABLE "tenant_members" FORCE ROW LEVEL SECURITY;
 -- ALTER TABLE "scim_tokens" FORCE ROW LEVEL SECURITY;
 -- ALTER TABLE "scim_external_mappings" FORCE ROW LEVEL SECURITY;

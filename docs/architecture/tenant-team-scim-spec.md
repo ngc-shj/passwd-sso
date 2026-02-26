@@ -4,7 +4,7 @@
 
 Define the target model where:
 - `Tenant` = company/account boundary
-- `Team` = department/group inside a tenant (current `Organization` concept)
+- `Team` = department/group inside a tenant (current `Team` concept)
 - SCIM is used to synchronize identity lifecycle and team membership from IdP
 
 ## Domain Model
@@ -96,11 +96,11 @@ Rules:
 - no breaking behavior change
 
 2. Phase 2 (Backfill)
-- initial mapping: 1 current org -> 1 tenant
+- initial mapping: 1 current team -> 1 tenant
 - populate tenant_id on team/scim records
 
 3. Phase 3 (Application Cutover)
-- shift SCIM context from org to tenant
+- shift SCIM context from team to tenant
 - route/permission checks become tenant-aware
 
 4. Phase 4 (Constraint Tightening)
@@ -111,7 +111,7 @@ Rules:
 ## Non-Goals (This Spec)
 
 - detailed UI design
-- final URL naming decision (`org` vs `team` path names)
+- final URL naming decision (`team` vs `team` path names)
 - billing/plan model
 
 ## Open Decisions

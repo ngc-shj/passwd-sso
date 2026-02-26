@@ -7,7 +7,7 @@ Add DB-enforced tenant isolation using PostgreSQL RLS after Phase 4 tenant const
 ## Scope
 
 1. Enable RLS on tenant-scoped tables:
-- `organizations`
+- `teams`
 - `tenant_members`
 - `scim_tokens`
 - `scim_external_mappings`
@@ -47,7 +47,7 @@ Without one of these, access is denied by policy.
 Disable on affected tables:
 
 ```sql
-ALTER TABLE "organizations" DISABLE ROW LEVEL SECURITY;
+ALTER TABLE "teams" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE "tenant_members" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE "scim_tokens" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE "scim_external_mappings" DISABLE ROW LEVEL SECURITY;

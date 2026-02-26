@@ -1,9 +1,9 @@
 -- Validation pack for tenant/team migration Phase 2 backfill.
 -- Expected: all result counts are 0.
 
--- 1) organizations without tenant_id
-SELECT COUNT(*) AS organizations_without_tenant
-FROM "organizations"
+-- 1) teams without tenant_id
+SELECT COUNT(*) AS teams_without_tenant
+FROM "teams"
 WHERE "tenant_id" IS NULL;
 
 -- 2) SCIM tables without tenant_id
@@ -16,8 +16,8 @@ FROM "scim_external_mappings"
 WHERE "tenant_id" IS NULL;
 
 -- 3) orphan tenant_id references
-SELECT COUNT(*) AS organizations_orphan_tenant
-FROM "organizations" o
+SELECT COUNT(*) AS teams_orphan_tenant
+FROM "teams" o
 LEFT JOIN "tenants" t ON t."id" = o."tenant_id"
 WHERE o."tenant_id" IS NOT NULL
   AND t."id" IS NULL;

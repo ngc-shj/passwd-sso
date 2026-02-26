@@ -10,19 +10,19 @@ This phase is data-migration only:
 
 ## Scope
 
-1. Create missing tenant rows from existing organizations
+1. Create missing tenant rows from existing teams
 2. Backfill `tenant_id` on:
-- `organizations`
+- `teams`
 - `scim_tokens`
 - `scim_external_mappings`
-3. Seed `tenant_members` from active `org_members`
+3. Seed `tenant_members` from active `team_members`
 4. Run validation SQL pack
 
 ## Initial Mapping Policy
 
-Current rollout policy is deterministic `1 organization = 1 tenant`:
-- `tenant.id = organization.id`
-- tenant slug = `tenant-{organization.slug}`
+Current rollout policy is deterministic `1 team = 1 tenant`:
+- `tenant.id = team.id`
+- tenant slug = `tenant-{team.slug}`
 
 This allows idempotent backfill and a clean rollback path.
 
