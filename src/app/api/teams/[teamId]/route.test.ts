@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 // All mocks must be created inside vi.hoisted() to avoid hoisting issues
-const { mockAuth, mockPrismaTeam, mockRequireTeamMember, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeam, mockPrismaTenant, mockRequireTeamMember, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -17,7 +17,9 @@ const { mockAuth, mockPrismaTeam, mockRequireTeamMember, mockRequireTeamPermissi
       findUnique: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+      count: vi.fn(),
     },
+    mockPrismaTenant: { delete: vi.fn() },
     mockRequireTeamMember: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
@@ -26,7 +28,7 @@ const { mockAuth, mockPrismaTeam, mockRequireTeamMember, mockRequireTeamPermissi
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { team: mockPrismaTeam },
+  prisma: { team: mockPrismaTeam, tenant: mockPrismaTenant },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
@@ -237,7 +239,10 @@ describe("DELETE /api/teams/[teamId]", () => {
   });
 
   it("deletes team successfully", async () => {
+    mockPrismaTeam.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockPrismaTeam.delete.mockResolvedValue({});
+    mockPrismaTeam.count.mockResolvedValue(0);
+    mockPrismaTenant.delete.mockResolvedValue({});
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}`),
       createParams({ teamId: TEAM_ID }),
@@ -246,5 +251,29 @@ describe("DELETE /api/teams/[teamId]", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockPrismaTeam.delete).toHaveBeenCalledWith({ where: { id: TEAM_ID } });
+    expect(mockPrismaTenant.delete).toHaveBeenCalledWith({ where: { id: "tenant-1" } });
+  });
+
+  it("keeps tenant when other teams still exist", async () => {
+    mockPrismaTeam.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockPrismaTeam.delete.mockResolvedValue({});
+    mockPrismaTeam.count.mockResolvedValue(1);
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrismaTenant.delete).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when team no longer exists", async () => {
+    mockPrismaTeam.findUnique.mockResolvedValue(null);
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(404);
   });
 });

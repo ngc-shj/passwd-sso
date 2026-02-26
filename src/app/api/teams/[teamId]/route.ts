@@ -125,7 +125,22 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
+  const team = await prisma.team.findUnique({
+    where: { id: teamId },
+    select: { tenantId: true },
+  });
+  if (!team) {
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+  }
+
   await prisma.team.delete({ where: { id: teamId } });
+
+  const remainingTeams = await prisma.team.count({
+    where: { tenantId: team.tenantId },
+  });
+  if (remainingTeams === 0) {
+    await prisma.tenant.delete({ where: { id: team.tenantId } });
+  }
 
   return NextResponse.json({ success: true });
 }

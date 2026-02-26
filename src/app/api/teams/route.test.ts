@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Prisma } from "@prisma/client";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaTeamMember, mockPrismaTeam } = vi.hoisted(() => ({
@@ -35,11 +36,25 @@ describe("GET /api/teams", () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([
       {
         role: TEAM_ROLE.OWNER,
-        team: { id: "team-1", name: "My Team", slug: "my-team", description: null, createdAt: now },
+        team: {
+          id: "team-1",
+          name: "My Team",
+          slug: "my-team",
+          description: null,
+          createdAt: now,
+          _count: { members: 3 },
+        },
       },
       {
         role: TEAM_ROLE.MEMBER,
-        team: { id: "team-2", name: "Other", slug: "other", description: "desc", createdAt: now },
+        team: {
+          id: "team-2",
+          name: "Other",
+          slug: "other",
+          description: "desc",
+          createdAt: now,
+          _count: { members: 8 },
+        },
       },
     ]);
 
@@ -48,7 +63,9 @@ describe("GET /api/teams", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(2);
     expect(json[0].role).toBe(TEAM_ROLE.OWNER);
+    expect(json[0].memberCount).toBe(3);
     expect(json[1].role).toBe(TEAM_ROLE.MEMBER);
+    expect(json[1].memberCount).toBe(8);
   });
 
   it("returns empty array when user has no teams", async () => {
@@ -102,6 +119,22 @@ describe("POST /api/teams (E2E-only)", () => {
 
   it("returns 409 when slug already taken", async () => {
     mockPrismaTeam.findUnique.mockResolvedValue({ id: "existing" });
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
+      body: validE2EBody,
+    }));
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("SLUG_ALREADY_TAKEN");
+  });
+
+  it("returns 409 on P2002 race condition during create", async () => {
+    mockPrismaTeam.findUnique.mockResolvedValue(null);
+    const p2002 = new Prisma.PrismaClientKnownRequestError(
+      "Unique constraint failed on the fields: (`slug`)",
+      { code: "P2002", clientVersion: "7.0.0", meta: { target: ["slug"] } },
+    );
+    mockPrismaTeam.create.mockRejectedValue(p2002);
+
     const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
       body: validE2EBody,
     }));

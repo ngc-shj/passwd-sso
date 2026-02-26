@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createTeamE2ESchema } from "@/lib/validations";
@@ -22,6 +23,9 @@ export async function GET() {
           slug: true,
           description: true,
           createdAt: true,
+          _count: {
+            select: { members: true },
+          },
         },
       },
     },
@@ -29,8 +33,13 @@ export async function GET() {
   });
 
   const teams = memberships.map((m) => ({
-    ...m.team,
+    id: m.team.id,
+    name: m.team.name,
+    slug: m.team.slug,
+    description: m.team.description,
+    createdAt: m.team.createdAt,
     role: m.role,
+    memberCount: m.team._count.members,
   }));
 
   return NextResponse.json(teams);
@@ -70,41 +79,52 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const team = await prisma.team.create({
-    data: {
-      ...(clientId ? { id: clientId } : {}),
-      tenant: {
-        create: {
-          name,
-          slug: `tenant-${slug}`,
-          description: description || null,
+  let team;
+  try {
+    team = await prisma.team.create({
+      data: {
+        ...(clientId ? { id: clientId } : {}),
+        tenant: {
+          create: {
+            name,
+            slug: `tenant-${slug}`,
+            description: description || null,
+          },
+        },
+        name,
+        slug,
+        description: description || null,
+        teamKeyVersion: 1,
+        members: {
+          create: {
+            userId: session.user.id,
+            role: TEAM_ROLE.OWNER,
+            keyDistributed: true,
+          },
+        },
+        memberKeys: {
+          create: {
+            userId: session.user.id,
+            encryptedTeamKey: teamMemberKey.encryptedTeamKey,
+            teamKeyIv: teamMemberKey.teamKeyIv,
+            teamKeyAuthTag: teamMemberKey.teamKeyAuthTag,
+            ephemeralPublicKey: teamMemberKey.ephemeralPublicKey,
+            hkdfSalt: teamMemberKey.hkdfSalt,
+            keyVersion: teamMemberKey.keyVersion,
+            wrapVersion: teamMemberKey.wrapVersion,
+          },
         },
       },
-      name,
-      slug,
-      description: description || null,
-      teamKeyVersion: 1,
-      members: {
-        create: {
-          userId: session.user.id,
-          role: TEAM_ROLE.OWNER,
-          keyDistributed: true,
-        },
-      },
-      memberKeys: {
-        create: {
-          userId: session.user.id,
-          encryptedTeamKey: teamMemberKey.encryptedTeamKey,
-          teamKeyIv: teamMemberKey.teamKeyIv,
-          teamKeyAuthTag: teamMemberKey.teamKeyAuthTag,
-          ephemeralPublicKey: teamMemberKey.ephemeralPublicKey,
-          hkdfSalt: teamMemberKey.hkdfSalt,
-          keyVersion: teamMemberKey.keyVersion,
-          wrapVersion: teamMemberKey.wrapVersion,
-        },
-      },
-    },
-  });
+    });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      return NextResponse.json(
+        { error: API_ERROR.SLUG_ALREADY_TAKEN },
+        { status: 409 }
+      );
+    }
+    throw e;
+  }
 
   return NextResponse.json(
     {
