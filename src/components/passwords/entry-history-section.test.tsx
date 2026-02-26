@@ -280,7 +280,7 @@ describe("EntryHistorySection", () => {
                   blobIv: "encrypted-iv",
                   blobAuthTag: "encrypted-tag",
                   aadVersion: 1,
-                  orgKeyVersion: 1,
+                  teamKeyVersion: 1,
                 }
               : HISTORY_ITEMS,
           ),
@@ -290,7 +290,7 @@ describe("EntryHistorySection", () => {
 
     await act(async () => {
       render(
-        <EntryHistorySection entryId="entry-1" orgId="org-1" />
+        <EntryHistorySection entryId="entry-1" teamId="org-1" />
       );
     });
 

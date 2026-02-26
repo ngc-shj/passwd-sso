@@ -42,7 +42,6 @@ interface HistoryEntry {
 interface EntryHistorySectionProps {
   entryId: string;
   teamId?: string;
-  orgId?: string;
   requireReprompt?: boolean;
   onRestore?: () => void;
 }
@@ -132,12 +131,10 @@ function ViewContent({ data }: { data: Record<string, unknown> }) {
 
 export function EntryHistorySection({
   entryId,
-  teamId,
-  orgId,
+  teamId: scopedTeamId,
   requireReprompt,
   onRestore,
 }: EntryHistorySectionProps) {
-  const scopedTeamId = teamId ?? orgId;
   const t = useTranslations("PasswordDetail");
   const locale = useLocale();
   const { encryptionKey, userId } = useVault();
@@ -194,8 +191,8 @@ export function EntryHistorySection({
     setViewLoading(true);
     try {
       if (scopedTeamId) {
-        // Org entries: fetch encrypted blob, then decrypt client-side.
-        // TODO: If h.orgKeyVersion !== current org version, fetch old key via
+        // Team entries: fetch encrypted blob, then decrypt client-side.
+        // TODO: If h.orgKeyVersion !== current team version, fetch old key via
         // GET /member-key?keyVersion=N for correct decryption.
         // Currently uses latest key only — history from before key rotation
         // will fail to decrypt until re-encryption is implemented.

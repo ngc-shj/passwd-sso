@@ -71,14 +71,12 @@ interface PasswordDetailInlineProps {
   data: InlineDetailData;
   onEdit?: () => void;
   onRefresh?: () => void;
-  orgId?: string;
   teamId?: string;
 }
 
 const REVEAL_TIMEOUT = 30_000;
 
-export function PasswordDetailInline({ data, onEdit, onRefresh, orgId, teamId }: PasswordDetailInlineProps) {
-  const scopedTeamId = teamId ?? orgId;
+export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTeamId }: PasswordDetailInlineProps) {
   const t = useTranslations("PasswordDetail");
   const tc = useTranslations("Common");
   const locale = useLocale();
@@ -714,7 +712,6 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, orgId, teamId }:
       <EntryHistorySection
         entryId={data.id}
         teamId={scopedTeamId}
-        orgId={scopedTeamId}
         requireReprompt={data.requireReprompt ?? false}
         onRestore={onRefresh}
       />

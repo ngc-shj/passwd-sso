@@ -78,7 +78,7 @@ describe("useImportExecution", () => {
       useImportExecution({
         t,
         onComplete,
-        isOrgImport: false,
+        isTeamImport: false,
         tagsPath: "/api/tags",
         passwordsPath: "/api/passwords",
         sourceFilename: "input.json",
@@ -100,7 +100,7 @@ describe("useImportExecution", () => {
     expect(result.current.result).toEqual({ success: 2, failed: 1 });
   });
 
-  it("does not send audit for org import", async () => {
+  it("does not send audit for team import", async () => {
     mockRunImportEntries.mockResolvedValue({ successCount: 1, failedCount: 0 });
     const onComplete = vi.fn();
 
@@ -108,14 +108,14 @@ describe("useImportExecution", () => {
       useImportExecution({
         t: (key: string) => key,
         onComplete,
-        isOrgImport: true,
+        isTeamImport: true,
         tagsPath: "/api/teams/o1/tags",
         passwordsPath: "/api/teams/o1/passwords",
-        sourceFilename: "org.csv",
+        sourceFilename: "team.csv",
         encryptedInput: false,
-        orgEncryptionKey: {} as CryptoKey,
-        orgKeyVersion: 1,
-        orgId: "o1",
+        teamEncryptionKey: {} as CryptoKey,
+        teamKeyVersion: 1,
+        teamId: "o1",
       })
     );
 
@@ -132,7 +132,7 @@ describe("useImportExecution", () => {
       useImportExecution({
         t: (key: string) => key,
         onComplete: vi.fn(),
-        isOrgImport: false,
+        isTeamImport: false,
         tagsPath: "/api/tags",
         passwordsPath: "/api/passwords",
         sourceFilename: "x.csv",
@@ -155,7 +155,7 @@ describe("useImportExecution", () => {
       useImportExecution({
         t: (key: string) => key,
         onComplete: vi.fn(),
-        isOrgImport: false,
+        isTeamImport: false,
         tagsPath: "/api/tags",
         passwordsPath: "/api/passwords",
         sourceFilename: "x.csv",

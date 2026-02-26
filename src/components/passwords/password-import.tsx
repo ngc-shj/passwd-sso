@@ -24,11 +24,9 @@ import { useImportExecution } from "@/components/passwords/use-import-execution"
 interface ImportPanelContentProps {
   onComplete: () => void;
   teamId?: string;
-  orgId?: string;
 }
 
-function ImportPanelContent({ onComplete, teamId, orgId }: ImportPanelContentProps) {
-  const scopedTeamId = teamId ?? orgId;
+function ImportPanelContent({ onComplete, teamId: scopedTeamId }: ImportPanelContentProps) {
   const t = useTranslations("Import");
   const { encryptionKey, userId } = useVault();
   const teamVault = useTeamVaultOptional();
@@ -77,16 +75,16 @@ function ImportPanelContent({ onComplete, teamId, orgId }: ImportPanelContentPro
   } = useImportExecution({
     t,
     onComplete,
-    isOrgImport: isTeamImport,
+    isTeamImport,
     tagsPath,
     passwordsPath,
     sourceFilename,
     encryptedInput,
     userId: userId ?? undefined,
     encryptionKey: encryptionKey ?? undefined,
-    orgEncryptionKey: teamEncryptionKey,
-    orgKeyVersion: teamKeyVersion,
-    orgId: scopedTeamId,
+    teamEncryptionKey,
+    teamKeyVersion,
+    teamId: scopedTeamId,
   });
 
   const reset = () => {
@@ -150,10 +148,9 @@ function ImportPanelContent({ onComplete, teamId, orgId }: ImportPanelContentPro
 interface ImportPagePanelProps {
   onComplete: () => void;
   teamId?: string;
-  orgId?: string;
 }
 
-export function ImportPagePanel({ onComplete, teamId, orgId }: ImportPagePanelProps) {
+export function ImportPagePanel({ onComplete, teamId }: ImportPagePanelProps) {
   const t = useTranslations("Import");
   return (
     <PagePane
@@ -165,19 +162,16 @@ export function ImportPagePanel({ onComplete, teamId, orgId }: ImportPagePanelPr
         />
       }
     >
-      <ImportPanelContent onComplete={onComplete} teamId={teamId} orgId={orgId} />
+      <ImportPanelContent onComplete={onComplete} teamId={teamId} />
     </PagePane>
   );
 }
 
 interface TeamImportPagePanelProps {
   teamId?: string;
-  orgId?: string;
   onComplete: () => void;
 }
 
-export function TeamImportPagePanel({ teamId, orgId, onComplete }: TeamImportPagePanelProps) {
-  return <ImportPagePanel onComplete={onComplete} teamId={teamId} orgId={orgId} />;
+export function TeamImportPagePanel({ teamId, onComplete }: TeamImportPagePanelProps) {
+  return <ImportPagePanel onComplete={onComplete} teamId={teamId} />;
 }
-
-export const OrgImportPagePanel = TeamImportPagePanel;

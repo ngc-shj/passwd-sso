@@ -2,9 +2,9 @@
 
 import { useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { OrgImportPagePanel } from "@/components/passwords/password-import";
+import { TeamImportPagePanel } from "@/components/passwords/password-import";
 
-export default function OrgImportPage() {
+export default function TeamImportPage() {
   const params = useParams<{ teamId: string }>();
   const router = useRouter();
 
@@ -14,7 +14,7 @@ export default function OrgImportPage() {
   }, [router]);
 
   return (
-    <OrgImportPagePanel
+    <TeamImportPagePanel
       teamId={params.teamId}
       onComplete={handleComplete}
     />
