@@ -17,7 +17,7 @@ describe("audit constants", () => {
     expect(new Set(valuesFromArray)).toEqual(new Set(valuesFromObject));
   });
 
-  it("has only valid actions in personal and org action groups", () => {
+  it("has only valid actions in personal and team action groups", () => {
     const valid = new Set(Object.values(AUDIT_ACTION));
     const grouped = [
       ...Object.values(AUDIT_ACTION_GROUPS_PERSONAL).flat(),

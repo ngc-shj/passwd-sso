@@ -129,7 +129,7 @@ async function handlePOST(request: NextRequest) {
         failedUnlockAttempts: 0,
         lastFailedUnlockAt: null,
         accountLockedUntil: null,
-        // ECDH key pair (org E2E)
+        // ECDH key pair (team E2E)
         ecdhPublicKey: null,
         encryptedEcdhPrivateKey: null,
         ecdhPrivateKeyIv: null,

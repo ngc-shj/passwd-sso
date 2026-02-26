@@ -316,7 +316,7 @@ describe("TeamDashboardPage — role-based rendering", () => {
     });
 
     await waitFor(() => {
-      // Wait for org data to load
+      // Wait for team data to load
       const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
       expect(calls.some((u: string) => u.includes("/api/teams/team-1"))).toBe(true);
     });
@@ -336,7 +336,7 @@ describe("TeamDashboardPage — error handling", () => {
     globalThis.fetch = mockFetch as unknown as typeof fetch;
   });
 
-  it("shows error state when org fetch fails", async () => {
+  it("shows error state when team fetch fails", async () => {
     mockFetch.mockImplementation((url: string) => {
       if (url.includes("/api/teams/team-1") && !url.includes("/passwords")) {
         return Promise.resolve({ ok: false, status: 403 });

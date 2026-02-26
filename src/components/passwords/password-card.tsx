@@ -86,11 +86,11 @@ interface PasswordCardProps {
   onDelete: (id: string) => void;
   onToggleExpand: (id: string) => void;
   onRefresh: () => void;
-  // Optional: data providers for org mode (skip E2E decryption)
+  // Optional: data providers for team mode (skip E2E decryption)
   getPassword?: () => Promise<string>;
   getDetail?: () => Promise<InlineDetailData>;
   getUrl?: () => Promise<string | null>;
-  // Optional: custom edit handler (e.g. org edit dialog)
+  // Optional: custom edit handler (e.g. team edit dialog)
   onEditClick?: () => void;
   // Optional: RBAC permission control
   canEdit?: boolean;

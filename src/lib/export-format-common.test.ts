@@ -101,7 +101,7 @@ describe("export-format-common", () => {
     expect(parsed.entries[0].passwdSso.requireReprompt).toBe(true);
   });
 
-  it("exports passkey type for org CSV", () => {
+  it("exports passkey type for team CSV", () => {
     const csv = formatExportCsv(
       [{ ...sampleLoginEntry, entryType: ENTRY_TYPE.PASSKEY }],
       "compatible",
@@ -111,7 +111,7 @@ describe("export-format-common", () => {
     expect(row.split(",")[2]).toBe("passkey");
   });
 
-  it("exports passwd-sso envelope for org JSON", () => {
+  it("exports passwd-sso envelope for team JSON", () => {
     const json = formatExportJson(
       [sampleLoginEntry],
       "passwd-sso",

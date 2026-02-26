@@ -4,7 +4,7 @@
  * Revokes share links encrypted with old master key versions.
  *
  * Note:
- * - Organization vault encryption is E2E-only; server-side org key re-wrap is removed.
+ * - Team vault encryption is E2E-only; server-side team key re-wrap is removed.
  * - This endpoint now validates the target master key version and optionally
  *   revokes old-version PasswordShare rows.
  * Authenticated via ADMIN_API_TOKEN bearer token (not session).

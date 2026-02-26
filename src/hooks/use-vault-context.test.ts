@@ -36,7 +36,7 @@ describe("useVaultContext", () => {
     expect(result.current).toEqual({ type: "personal" });
   });
 
-  it("returns team context for org dashboard path", () => {
+  it("returns team context for team dashboard path", () => {
     mockPathname = "/dashboard/teams/team-1";
 
     const { result } = renderHook(() =>

@@ -256,7 +256,7 @@ describe("GET /api/share-links/mine", () => {
     expect(mockRequireTeamMember).not.toHaveBeenCalled();
   });
 
-  it("requires org membership and filters by org when org query is provided", async () => {
+  it("requires team membership and filters by team when team query is provided", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindMany.mockResolvedValue([]);
 
@@ -280,7 +280,7 @@ describe("GET /api/share-links/mine", () => {
     );
   });
 
-  it("returns TeamAuthError status when org membership check fails", async () => {
+  it("returns TeamAuthError status when team membership check fails", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     const { TeamAuthError } = await import("@/lib/team-auth");
     mockRequireTeamMember.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
@@ -400,7 +400,7 @@ describe("GET /api/share-links/mine", () => {
     );
   });
 
-  it("returns empty for shareType=send with org context", async () => {
+  it("returns empty for shareType=send with team context", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
 
     const req = createRequest(

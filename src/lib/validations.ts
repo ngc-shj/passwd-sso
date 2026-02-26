@@ -304,10 +304,10 @@ export const createShareLinkSchema = z.object({
   { message: "data is required for personal entries" }
 ).refine(
   (d) => (d.orgPasswordEntryId ? !!d.encryptedShareData && !!d.entryType : true),
-  { message: "encryptedShareData and entryType are required for org entries" }
+  { message: "encryptedShareData and entryType are required for team entries" }
 ).refine(
   (d) => (d.orgPasswordEntryId ? !d.data : true),
-  { message: "data must not be present for org entries (use encryptedShareData)" }
+  { message: "data must not be present for team entries (use encryptedShareData)" }
 );
 
 // ─── Emergency Access Schemas ─────────────────────────────

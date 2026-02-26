@@ -51,11 +51,11 @@ describe("hasTeamPermission", () => {
     expect(hasTeamPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.TAG_MANAGE)).toBe(true);
   });
 
-  it("ADMIN cannot delete org", () => {
+  it("ADMIN cannot delete team", () => {
     expect(hasTeamPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.ORG_DELETE)).toBe(false);
   });
 
-  it("ADMIN has all permissions except org:delete", () => {
+  it("ADMIN has all permissions except team:delete", () => {
     expect(hasTeamPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.ORG_UPDATE)).toBe(true);
     expect(hasTeamPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.MEMBER_INVITE)).toBe(true);
     expect(hasTeamPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.MEMBER_REMOVE)).toBe(true);
@@ -74,7 +74,7 @@ describe("hasTeamPermission", () => {
     expect(hasTeamPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.TAG_MANAGE)).toBe(true);
   });
 
-  it("MEMBER cannot delete passwords or manage org/members", () => {
+  it("MEMBER cannot delete passwords or manage team/members", () => {
     expect(hasTeamPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.PASSWORD_DELETE)).toBe(false);
     expect(hasTeamPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.ORG_DELETE)).toBe(false);
     expect(hasTeamPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.ORG_UPDATE)).toBe(false);
