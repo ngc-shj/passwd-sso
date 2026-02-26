@@ -84,7 +84,7 @@ describe("GET /api/share-links/mine", () => {
     expect(json.items[0].id).toBe("share-1");
     expect(json.items[0].isActive).toBe(true);
     expect(json.items[0].hasPersonalEntry).toBe(true);
-    expect(json.items[0].orgName).toBeNull();
+    expect(json.items[0].teamName).toBeNull();
     expect(json.items[0].sharedBy).toBe("Alice");
     expect(json.items[0].canRevoke).toBe(true);
     expect(json.nextCursor).toBeNull();
@@ -129,7 +129,7 @@ describe("GET /api/share-links/mine", () => {
     expect(json.items[0].isActive).toBe(false);
   });
 
-  it("includes orgName from orgPasswordEntry", async () => {
+  it("includes teamName from orgPasswordEntry", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindMany.mockResolvedValue([
       makeShare({
@@ -145,7 +145,7 @@ describe("GET /api/share-links/mine", () => {
     const res = await GET(req as never);
     const { json } = await parseResponse(res);
 
-    expect(json.items[0].orgName).toBe("Acme Corp");
+    expect(json.items[0].teamName).toBe("Acme Corp");
     expect(json.items[0].hasPersonalEntry).toBe(false);
     expect(json.items[0].sharedBy).toBe("Bob");
     expect(json.items[0].canRevoke).toBe(false);

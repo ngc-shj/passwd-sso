@@ -52,7 +52,7 @@ interface ShareLinkItem {
   createdAt: string;
   passwordEntryId: string | null;
   orgPasswordEntryId: string | null;
-  orgName: string | null;
+  teamName: string | null;
   hasPersonalEntry: boolean;
   sharedBy: string | null;
   canRevoke: boolean;
