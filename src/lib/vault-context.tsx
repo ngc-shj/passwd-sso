@@ -26,7 +26,7 @@ import {
   decryptBinary,
 } from "./crypto-client";
 import { createKeyEscrow } from "./crypto-emergency";
-import { OrgVaultProvider } from "./org-vault-context";
+import { TeamVaultProvider } from "./team-vault-context";
 import {
   generateECDHKeyPair,
   exportPublicKey,
@@ -668,13 +668,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         getEcdhPublicKeyJwk,
       }}
     >
-      <OrgVaultProvider
+      <TeamVaultProvider
         getEcdhPrivateKeyBytes={getEcdhPrivateKeyBytes}
         getUserId={getUserId}
         vaultUnlocked={vaultStatus === VAULT_STATUS.UNLOCKED}
       >
         {children}
-      </OrgVaultProvider>
+      </TeamVaultProvider>
     </VaultContext.Provider>
   );
 }

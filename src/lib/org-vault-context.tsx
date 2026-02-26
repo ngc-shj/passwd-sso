@@ -32,10 +32,16 @@ export interface OrgKeyInfo {
 export interface OrgVaultContextValue {
   /** Get the org encryption key, fetching and unwrapping if not cached. */
   getOrgEncryptionKey: (orgId: string) => Promise<CryptoKey | null>;
+  /** Team alias of getOrgEncryptionKey. */
+  getTeamEncryptionKey: (teamId: string) => Promise<CryptoKey | null>;
   /** Get the org encryption key with its version number. */
   getOrgKeyInfo: (orgId: string) => Promise<OrgKeyInfo | null>;
+  /** Team alias of getOrgKeyInfo. */
+  getTeamKeyInfo: (teamId: string) => Promise<OrgKeyInfo | null>;
   /** Invalidate a cached org key (e.g. after key rotation). */
   invalidateOrgKey: (orgId: string) => void;
+  /** Team alias of invalidateOrgKey. */
+  invalidateTeamKey: (teamId: string) => void;
   /** Clear all cached org keys (e.g. on vault lock). */
   clearAll: () => void;
   /** Distribute org key to pending members (called after vault unlock). */
@@ -57,6 +63,18 @@ export function useOrgVault(): OrgVaultContextValue {
 /** Optional accessor — returns null if not inside an OrgVaultProvider. */
 export function useOrgVaultOptional(): OrgVaultContextValue | null {
   return useContext(OrgVaultContext);
+}
+
+export type TeamKeyInfo = OrgKeyInfo;
+
+export type TeamVaultContextValue = OrgVaultContextValue;
+
+export function useTeamVault(): TeamVaultContextValue {
+  return useOrgVault();
+}
+
+export function useTeamVaultOptional(): TeamVaultContextValue | null {
+  return useOrgVaultOptional();
 }
 
 // ─── Constants ────────────────────────────────────────────────
@@ -336,8 +354,11 @@ export function OrgVaultProvider({
 
   const value: OrgVaultContextValue = {
     getOrgEncryptionKey,
+    getTeamEncryptionKey: getOrgEncryptionKey,
     getOrgKeyInfo,
+    getTeamKeyInfo: getOrgKeyInfo,
     invalidateOrgKey,
+    invalidateTeamKey: invalidateOrgKey,
     clearAll,
     distributePendingKeys,
   };
@@ -348,3 +369,5 @@ export function OrgVaultProvider({
     </OrgVaultContext.Provider>
   );
 }
+
+export const TeamVaultProvider = OrgVaultProvider;
