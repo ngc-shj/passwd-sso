@@ -36,7 +36,6 @@ import { CopyButton } from "@/components/passwords/copy-button";
 import { Link } from "@/i18n/navigation";
 import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
-import { ScimTokenManager } from "@/components/team/team-scim-token-manager";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 
@@ -598,9 +597,16 @@ export default function TeamSettingsPage({
           </>
         )}
 
-        {/* SCIM Provisioning — OWNER/ADMIN only */}
+        {/* SCIM is tenant-scoped, not team-scoped */}
         {(isOwner || team.role === TEAM_ROLE.ADMIN) && (
-          <ScimTokenManager teamId={teamId} locale={locale} />
+          <Card className="rounded-xl border bg-card/80 p-4">
+            <section className="space-y-2">
+              <h2 className="text-lg font-semibold">{t("scimTitle")}</h2>
+              <p className="text-sm text-muted-foreground">
+                SCIM provisioning is managed at Tenant Settings, not Team Settings.
+              </p>
+            </section>
+          </Card>
         )}
 
         {/* Delete team */}
