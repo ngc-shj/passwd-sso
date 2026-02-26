@@ -151,7 +151,7 @@ model ExtensionToken {
 
 model ScimToken {
   id          String    @id @default(cuid())
-  orgId       String    @map("org_id")
+  orgId       String    @map("team_id")
   tenantId    String    @map("tenant_id")
   tokenHash   String    @unique @map("token_hash") @db.VarChar(64)
   description String?   @db.VarChar(255)
@@ -172,7 +172,7 @@ model ScimToken {
 
 model ScimExternalMapping {
   id           String   @id @default(cuid())
-  orgId        String   @map("org_id")
+  orgId        String   @map("team_id")
   tenantId     String   @map("tenant_id")
   externalId   String   @map("external_id")
   resourceType String   @map("resource_type") @db.VarChar(20)
@@ -354,7 +354,7 @@ model TenantMember {
 
 model OrgMember {
   id             String    @id @default(cuid())
-  orgId          String    @map("org_id")
+  orgId          String    @map("team_id")
   userId         String    @map("user_id")
   role           OrgRole   @default(MEMBER)
   keyDistributed Boolean   @default(false) @map("key_distributed")
@@ -373,7 +373,7 @@ model OrgMember {
 
 model OrgMemberKey {
   id                 String   @id @default(cuid())
-  orgId              String   @map("org_id")
+  orgId              String   @map("team_id")
   userId             String   @map("user_id")
   encryptedOrgKey    String   @map("encrypted_org_key") @db.Text
   orgKeyIv           String   @map("org_key_iv") @db.VarChar(24)
@@ -413,7 +413,7 @@ model OrgPasswordEntry {
   expiresAt  DateTime? @map("expires_at")
   deletedAt  DateTime? @map("deleted_at")
 
-  orgId       String  @map("org_id")
+  orgId       String  @map("team_id")
   createdById String  @map("created_by_id")
   updatedById String  @map("updated_by_id")
   orgFolderId String? @map("org_folder_id")
@@ -440,7 +440,7 @@ model OrgTag {
   name  String
   color String?
 
-  orgId String @map("org_id")
+  orgId String @map("team_id")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -468,7 +468,7 @@ model OrgPasswordFavorite {
 
 model OrgInvitation {
   id        String           @id @default(cuid())
-  orgId     String           @map("org_id")
+  orgId     String           @map("team_id")
   email     String
   role      OrgRole          @default(MEMBER)
   status    InvitationStatus @default(PENDING)
@@ -617,7 +617,7 @@ model AuditLog {
   scope      AuditScope
   action     AuditAction
   userId     String      @map("user_id")
-  orgId      String?     @map("org_id")
+  orgId      String?     @map("team_id")
   targetType String?     @map("target_type")
   targetId   String?     @map("target_id")
   metadata   Json?
@@ -744,7 +744,7 @@ model OrgFolder {
   id        String   @id @default(cuid())
   name      String   @db.VarChar(100)
   parentId  String?  @map("parent_id")
-  orgId     String   @map("org_id")
+  orgId     String   @map("team_id")
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
