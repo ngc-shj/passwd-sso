@@ -217,7 +217,7 @@ describe("teamMemberKeySchema", () => {
     keyVersion: 1,
   };
 
-  it("accepts valid org member key", () => {
+  it("accepts valid team member key", () => {
     expect(teamMemberKeySchema.safeParse(validKey).success).toBe(true);
   });
 
@@ -253,7 +253,7 @@ describe("teamMemberKeySchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejects invalid orgKeyIv format", () => {
+  it("rejects invalid teamKeyIv format", () => {
     const result = teamMemberKeySchema.safeParse({
       ...validKey,
       orgKeyIv: "not-hex-24",

@@ -23,10 +23,10 @@ import {
 } from "./crypto-team";
 import { deriveEncryptionKey } from "./crypto-client";
 
-const TEST_ORG_ID = "team-test-001";
+const TEST_TEAM_ID = "team-test-001";
 
 const TEST_CTX: TeamKeyWrapContext = {
-  orgId: TEST_ORG_ID,
+  orgId: TEST_TEAM_ID,
   toUserId: "member-user-002",
   keyVersion: 1,
   wrapVersion: CURRENT_ORG_WRAP_VERSION,
@@ -52,18 +52,18 @@ describe("crypto-team", () => {
   });
 
   describe("deriveTeamEncryptionKey", () => {
-    it("derives an AES-256-GCM key from org symmetric key", async () => {
-      const orgKey = generateTeamSymmetricKey();
-      const encKey = await deriveTeamEncryptionKey(orgKey);
+    it("derives an AES-256-GCM key from team symmetric key", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const encKey = await deriveTeamEncryptionKey(teamKey);
       expect(encKey.algorithm).toMatchObject({ name: "AES-GCM", length: 256 });
       expect(encKey.usages).toContain("encrypt");
       expect(encKey.usages).toContain("decrypt");
     });
 
     it("produces deterministic output for same input", async () => {
-      const orgKey = generateTeamSymmetricKey();
-      const key1 = await deriveTeamEncryptionKey(orgKey);
-      const key2 = await deriveTeamEncryptionKey(orgKey);
+      const teamKey = generateTeamSymmetricKey();
+      const key1 = await deriveTeamEncryptionKey(teamKey);
+      const key2 = await deriveTeamEncryptionKey(teamKey);
 
       // Encrypt with key1, decrypt with key2
       const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -74,11 +74,11 @@ describe("crypto-team", () => {
       expect(new TextDecoder().decode(decrypted)).toBe("test-data");
     });
 
-    it("different org keys produce different encryption keys", async () => {
-      const orgKey1 = generateTeamSymmetricKey();
-      const orgKey2 = generateTeamSymmetricKey();
-      const encKey1 = await deriveTeamEncryptionKey(orgKey1);
-      const encKey2 = await deriveTeamEncryptionKey(orgKey2);
+    it("different team keys produce different encryption keys", async () => {
+      const teamKey1 = generateTeamSymmetricKey();
+      const teamKey2 = generateTeamSymmetricKey();
+      const encKey1 = await deriveTeamEncryptionKey(teamKey1);
+      const encKey2 = await deriveTeamEncryptionKey(teamKey2);
 
       const iv = crypto.getRandomValues(new Uint8Array(12));
       const ivBuf = iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength) as ArrayBuffer;
@@ -158,8 +158,8 @@ describe("crypto-team", () => {
   });
 
   describe("wrapTeamKeyForMember + unwrapTeamKey (round-trip)", () => {
-    it("admin wraps org key, member unwraps it", async () => {
-      const orgKey = generateTeamSymmetricKey();
+    it("admin wraps team key, member unwraps it", async () => {
+      const teamKey = generateTeamSymmetricKey();
       const salt = crypto.getRandomValues(new Uint8Array(32));
       const saltHex = hexEncode(salt);
 
@@ -170,9 +170,9 @@ describe("crypto-team", () => {
       // Member has their own ECDH key pair
       const memberKeyPair = await generateECDHKeyPair();
 
-      // Admin wraps org key for member
+      // Admin wraps team key for member
       const encrypted = await wrapTeamKeyForMember(
-        orgKey,
+        teamKey,
         ephemeralKeyPair.privateKey,
         memberKeyPair.publicKey,
         salt,
@@ -182,7 +182,7 @@ describe("crypto-team", () => {
       expect(encrypted.iv).toHaveLength(24); // 12 bytes hex
       expect(encrypted.authTag).toHaveLength(32); // 16 bytes hex
 
-      // Member unwraps org key
+      // Member unwraps team key
       const unwrapped = await unwrapTeamKey(
         encrypted,
         ephemeralPubJwk,
@@ -191,11 +191,11 @@ describe("crypto-team", () => {
         TEST_CTX,
       );
 
-      expect(unwrapped).toEqual(orgKey);
+      expect(unwrapped).toEqual(teamKey);
     });
 
     it("fails with wrong member private key", async () => {
-      const orgKey = generateTeamSymmetricKey();
+      const teamKey = generateTeamSymmetricKey();
       const salt = crypto.getRandomValues(new Uint8Array(32));
       const saltHex = hexEncode(salt);
       const ephemeralKeyPair = await generateECDHKeyPair();
@@ -204,7 +204,7 @@ describe("crypto-team", () => {
       const wrongKeyPair = await generateECDHKeyPair();
 
       const encrypted = await wrapTeamKeyForMember(
-        orgKey,
+        teamKey,
         ephemeralKeyPair.privateKey,
         memberKeyPair.publicKey,
         salt,
@@ -216,8 +216,8 @@ describe("crypto-team", () => {
       ).rejects.toThrow();
     });
 
-    it("fails with wrong AAD (different orgId)", async () => {
-      const orgKey = generateTeamSymmetricKey();
+    it("fails with wrong AAD (different teamId)", async () => {
+      const teamKey = generateTeamSymmetricKey();
       const salt = crypto.getRandomValues(new Uint8Array(32));
       const saltHex = hexEncode(salt);
       const ephemeralKeyPair = await generateECDHKeyPair();
@@ -225,7 +225,7 @@ describe("crypto-team", () => {
       const memberKeyPair = await generateECDHKeyPair();
 
       const encrypted = await wrapTeamKeyForMember(
-        orgKey,
+        teamKey,
         ephemeralKeyPair.privateKey,
         memberKeyPair.publicKey,
         salt,
@@ -244,7 +244,7 @@ describe("crypto-team", () => {
     });
 
     it("fails with different HKDF salt", async () => {
-      const orgKey = generateTeamSymmetricKey();
+      const teamKey = generateTeamSymmetricKey();
       const salt = crypto.getRandomValues(new Uint8Array(32));
       const wrongSalt = crypto.getRandomValues(new Uint8Array(32));
       const wrongSaltHex = hexEncode(wrongSalt);
@@ -253,7 +253,7 @@ describe("crypto-team", () => {
       const memberKeyPair = await generateECDHKeyPair();
 
       const encrypted = await wrapTeamKeyForMember(
-        orgKey,
+        teamKey,
         ephemeralKeyPair.privateKey,
         memberKeyPair.publicKey,
         salt,
@@ -275,14 +275,14 @@ describe("crypto-team", () => {
 
   describe("createTeamKeyEscrow (one-shot wrap)", () => {
     it("creates escrow result with all required fields", async () => {
-      const orgKey = generateTeamSymmetricKey();
+      const teamKey = generateTeamSymmetricKey();
       const memberKeyPair = await generateECDHKeyPair();
       const memberPubJwk = await exportPublicKey(memberKeyPair.publicKey);
 
       const result = await createTeamKeyEscrow(
-        orgKey,
+        teamKey,
         memberPubJwk,
-        TEST_ORG_ID,
+        TEST_TEAM_ID,
         TEST_CTX.toUserId,
         TEST_CTX.keyVersion,
       );
@@ -297,14 +297,14 @@ describe("crypto-team", () => {
     });
 
     it("member can unwrap org key from escrow result", async () => {
-      const orgKey = generateTeamSymmetricKey();
+      const teamKey = generateTeamSymmetricKey();
       const memberKeyPair = await generateECDHKeyPair();
       const memberPubJwk = await exportPublicKey(memberKeyPair.publicKey);
 
       const escrow = await createTeamKeyEscrow(
-        orgKey,
+        teamKey,
         memberPubJwk,
-        TEST_ORG_ID,
+        TEST_TEAM_ID,
         TEST_CTX.toUserId,
         TEST_CTX.keyVersion,
       );
@@ -321,20 +321,20 @@ describe("crypto-team", () => {
         TEST_CTX,
       );
 
-      expect(unwrapped).toEqual(orgKey);
+      expect(unwrapped).toEqual(teamKey);
     });
 
     it("derives same encryption key from unwrapped org key", async () => {
-      const orgKey = generateTeamSymmetricKey();
-      const orgEncKey = await deriveTeamEncryptionKey(orgKey);
+      const teamKey = generateTeamSymmetricKey();
+      const orgEncKey = await deriveTeamEncryptionKey(teamKey);
 
       const memberKeyPair = await generateECDHKeyPair();
       const memberPubJwk = await exportPublicKey(memberKeyPair.publicKey);
 
       const escrow = await createTeamKeyEscrow(
-        orgKey,
+        teamKey,
         memberPubJwk,
-        TEST_ORG_ID,
+        TEST_TEAM_ID,
         TEST_CTX.toUserId,
         TEST_CTX.keyVersion,
       );
@@ -363,8 +363,8 @@ describe("crypto-team", () => {
 
   describe("encryptOrgEntry + decryptOrgEntry", () => {
     it("encrypts and decrypts text data", async () => {
-      const orgKey = generateTeamSymmetricKey();
-      const encKey = await deriveTeamEncryptionKey(orgKey);
+      const teamKey = generateTeamSymmetricKey();
+      const encKey = await deriveTeamEncryptionKey(teamKey);
       const plaintext = '{"title":"My Login","password":"secret123"}';
 
       const encrypted = await encryptOrgEntry(plaintext, encKey);
@@ -377,8 +377,8 @@ describe("crypto-team", () => {
     });
 
     it("supports AAD binding", async () => {
-      const orgKey = generateTeamSymmetricKey();
-      const encKey = await deriveTeamEncryptionKey(orgKey);
+      const teamKey = generateTeamSymmetricKey();
+      const encKey = await deriveTeamEncryptionKey(teamKey);
       const plaintext = "aad-bound-data";
       const aad = new TextEncoder().encode("entry-id-123");
 
@@ -392,10 +392,10 @@ describe("crypto-team", () => {
     });
 
     it("fails with wrong key", async () => {
-      const orgKey1 = generateTeamSymmetricKey();
-      const orgKey2 = generateTeamSymmetricKey();
-      const encKey1 = await deriveTeamEncryptionKey(orgKey1);
-      const encKey2 = await deriveTeamEncryptionKey(orgKey2);
+      const teamKey1 = generateTeamSymmetricKey();
+      const teamKey2 = generateTeamSymmetricKey();
+      const encKey1 = await deriveTeamEncryptionKey(teamKey1);
+      const encKey2 = await deriveTeamEncryptionKey(teamKey2);
 
       const encrypted = await encryptOrgEntry("test", encKey1);
       await expect(decryptOrgEntry(encrypted, encKey2)).rejects.toThrow();
@@ -404,8 +404,8 @@ describe("crypto-team", () => {
 
   describe("encryptOrgAttachment + decryptOrgAttachment", () => {
     it("encrypts and decrypts binary data", async () => {
-      const orgKey = generateTeamSymmetricKey();
-      const encKey = await deriveTeamEncryptionKey(orgKey);
+      const teamKey = generateTeamSymmetricKey();
+      const encKey = await deriveTeamEncryptionKey(teamKey);
       const data = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG header
       const dataBuf = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
 
@@ -458,13 +458,13 @@ describe("crypto-team", () => {
     });
   });
 
-  describe("full org E2E flow", () => {
-    it("simulates complete flow: org creation → key distribution → encrypt/decrypt", async () => {
-      // 1. Admin creates org → generates org symmetric key
-      const orgKey = generateTeamSymmetricKey();
-      const orgEncKey = await deriveTeamEncryptionKey(orgKey);
+  describe("full team E2E flow", () => {
+    it("simulates complete flow: team creation → key distribution → encrypt/decrypt", async () => {
+      // 1. Admin creates team → generates team symmetric key
+      const teamKey = generateTeamSymmetricKey();
+      const orgEncKey = await deriveTeamEncryptionKey(teamKey);
 
-      // 2. Admin encrypts org data
+      // 2. Admin encrypts team data
       const entry = '{"title":"Team Secret","password":"team-pass-123"}';
       const encryptedEntry = await encryptOrgEntry(entry, orgEncKey);
 
@@ -473,14 +473,14 @@ describe("crypto-team", () => {
       const memberPubJwk = await exportPublicKey(memberKeyPair.publicKey);
 
       const escrow = await createTeamKeyEscrow(
-        orgKey,
+        teamKey,
         memberPubJwk,
-        TEST_ORG_ID,
+        TEST_TEAM_ID,
         "member-001",
         1,
       );
 
-      // 4. Member unwraps org key
+      // 4. Member unwraps team key
       const unwrapped = await unwrapTeamKey(
         {
           ciphertext: escrow.encryptedOrgKey,
@@ -491,7 +491,7 @@ describe("crypto-team", () => {
         memberKeyPair.privateKey,
         escrow.hkdfSalt,
         {
-          orgId: TEST_ORG_ID,
+          orgId: TEST_TEAM_ID,
           toUserId: "member-001",
           keyVersion: 1,
           wrapVersion: escrow.wrapVersion,
