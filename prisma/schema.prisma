@@ -317,7 +317,7 @@ model Organization {
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
-  @@map("organizations")
+  @@map("teams")
 }
 
 model Tenant {
