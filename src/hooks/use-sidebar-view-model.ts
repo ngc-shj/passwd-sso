@@ -16,7 +16,8 @@ interface UseSidebarViewModelParams {
   router: { push: (href: string) => void };
   onOpenChange: (open: boolean) => void;
   vaultContext: VaultContext;
-  orgs: SidebarOrgItem[];
+  teams?: SidebarOrgItem[];
+  orgs?: SidebarOrgItem[];
   selectedOrg: SidebarOrgItem | null;
   selectedOrgCanManageFolders: boolean;
   selectedOrgCanManageTags: boolean;
@@ -50,6 +51,7 @@ export function useSidebarViewModel({
   router,
   onOpenChange,
   vaultContext,
+  teams,
   orgs,
   selectedOrg,
   selectedOrgCanManageFolders,
@@ -77,6 +79,7 @@ export function useSidebarViewModel({
   handleTagEdit,
   handleTagDeleteClick,
 }: UseSidebarViewModelParams): SidebarContentProps {
+  const teamItems = teams ?? orgs ?? [];
   const onNavigate = useCallback(() => {
     onOpenChange(false);
   }, [onOpenChange]);
@@ -98,7 +101,7 @@ export function useSidebarViewModel({
     t,
     tOrg,
     vaultContext,
-    orgs,
+    teams: teamItems,
     selectedOrg,
     selectedOrgCanManageFolders,
     selectedOrgCanManageTags,

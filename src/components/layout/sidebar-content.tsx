@@ -21,7 +21,8 @@ export interface SidebarContentProps {
   t: (key: string) => string;
   tOrg: (key: string) => string;
   vaultContext: VaultContext;
-  orgs: SidebarOrgItem[];
+  teams?: SidebarOrgItem[];
+  orgs?: SidebarOrgItem[];
   selectedOrg: SidebarOrgItem | null;
   selectedOrgCanManageFolders: boolean;
   selectedOrgCanManageTags: boolean;
@@ -55,6 +56,7 @@ export function SidebarContent({
   t,
   tOrg,
   vaultContext,
+  teams,
   orgs,
   selectedOrg,
   selectedOrgCanManageFolders,
@@ -84,11 +86,12 @@ export function SidebarContent({
   onDeleteTag,
   onNavigate,
 }: SidebarContentProps) {
+  const teamItems = teams ?? orgs ?? [];
   return (
     <nav className="space-y-4 p-4">
       <VaultSelector
         value={vaultContext.type === "org" ? vaultContext.orgId : "personal"}
-        orgs={orgs}
+        teams={teamItems}
         onValueChange={onVaultChange}
       />
 
