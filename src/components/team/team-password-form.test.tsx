@@ -169,6 +169,7 @@ vi.mock("@/components/passwords/totp-field", () => ({
 }));
 
 vi.mock("@/components/team/team-tag-input", () => ({
+  TeamTagInput: () => <div data-testid="org-tag-input" />,
   OrgTagInput: () => <div data-testid="org-tag-input" />,
 }));
 
@@ -271,7 +272,7 @@ describe("OrgPasswordForm — folder selection", () => {
 
     await waitFor(() => {
       const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
-      expect(calls.some((u: string) => u.includes("/orgs/org-1/folders"))).toBe(true);
+      expect(calls.some((u: string) => u.includes("/teams/org-1/folders"))).toBe(true);
     });
   });
 
