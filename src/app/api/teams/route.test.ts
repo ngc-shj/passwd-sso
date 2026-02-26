@@ -1,15 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgMember, mockPrismaOrganization } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamMember, mockPrismaOrganization } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockPrismaOrgMember: { findMany: vi.fn() },
+  mockPrismaTeamMember: { findMany: vi.fn() },
   mockPrismaOrganization: { findUnique: vi.fn(), create: vi.fn() },
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockPrismaOrgMember,
+    orgMember: mockPrismaTeamMember,
     organization: mockPrismaOrganization,
   },
 }));
@@ -32,7 +32,7 @@ describe("GET /api/teams", () => {
   });
 
   it("returns list of orgs with role", async () => {
-    mockPrismaOrgMember.findMany.mockResolvedValue([
+    mockPrismaTeamMember.findMany.mockResolvedValue([
       {
         role: TEAM_ROLE.OWNER,
         org: { id: "team-1", name: "My Team", slug: "my-team", description: null, createdAt: now },
@@ -52,7 +52,7 @@ describe("GET /api/teams", () => {
   });
 
   it("returns empty array when user has no orgs", async () => {
-    mockPrismaOrgMember.findMany.mockResolvedValue([]);
+    mockPrismaTeamMember.findMany.mockResolvedValue([]);
     const res = await GET();
     const json = await res.json();
     expect(json).toEqual([]);
@@ -155,7 +155,7 @@ describe("POST /api/teams (E2E-only)", () => {
     expect(json.error).toBe("INVALID_JSON");
   });
 
-  it("saves wrapVersion to OrgMemberKey (S-26/F-24)", async () => {
+  it("saves wrapVersion to TeamMemberKey (S-26/F-24)", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue(null);
     mockPrismaOrganization.create.mockResolvedValue({
       id: "e2e-team-id",

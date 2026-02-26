@@ -242,7 +242,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(mockTransaction).toHaveBeenCalled();
     expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: "ORG_KEY_ROTATION",
+        action: "TEAM_KEY_ROTATION",
         orgId: "team-1",
         metadata: expect.objectContaining({
           fromVersion: 1,
@@ -285,7 +285,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(json.error).toBe("ENTRY_COUNT_MISMATCH");
   });
 
-  it("passes wrapVersion to OrgMemberKey create (F-19)", async () => {
+  it("passes wrapVersion to TeamMemberKey create (F-19)", async () => {
     const res = await POST(
       createRequest({
         newOrgKeyVersion: 2,

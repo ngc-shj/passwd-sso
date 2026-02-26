@@ -4,12 +4,12 @@ import { NextRequest } from "next/server";
 const {
   mockValidateScimToken,
   mockCheckScimRateLimit,
-  mockOrgMember,
+  mockTeamMember,
   mockScimExternalMapping,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
-  mockOrgMember: { findMany: vi.fn() },
+  mockTeamMember: { findMany: vi.fn() },
   mockScimExternalMapping: { findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn(), upsert: vi.fn() },
 }));
 
@@ -25,7 +25,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockOrgMember,
+    orgMember: mockTeamMember,
     scimExternalMapping: mockScimExternalMapping,
   },
 }));
@@ -62,7 +62,7 @@ describe("GET /api/scim/v2/Groups", () => {
   });
 
   it("returns 3 role-based groups (ADMIN, MEMBER, VIEWER)", async () => {
-    mockOrgMember.findMany.mockResolvedValue([]);
+    mockTeamMember.findMany.mockResolvedValue([]);
 
     const res = await GET(makeReq());
     expect(res.status).toBe(200);
@@ -75,7 +75,7 @@ describe("GET /api/scim/v2/Groups", () => {
   });
 
   it("filters groups by displayName", async () => {
-    mockOrgMember.findMany.mockResolvedValue([]);
+    mockTeamMember.findMany.mockResolvedValue([]);
 
     const res = await GET(
       makeReq({ searchParams: { filter: 'displayName eq "ADMIN"' } }),
@@ -87,7 +87,7 @@ describe("GET /api/scim/v2/Groups", () => {
   });
 
   it("returns 400 for unsupported filter", async () => {
-    mockOrgMember.findMany.mockResolvedValue([]);
+    mockTeamMember.findMany.mockResolvedValue([]);
 
     const res = await GET(
       makeReq({ searchParams: { filter: 'userName eq "test"' } }),
@@ -98,7 +98,7 @@ describe("GET /api/scim/v2/Groups", () => {
   });
 
   it("includes members in group response", async () => {
-    mockOrgMember.findMany.mockResolvedValue([
+    mockTeamMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
         role: "ADMIN",
@@ -127,7 +127,7 @@ describe("POST /api/scim/v2/Groups", () => {
   it("registers external mapping for valid role and returns 201", async () => {
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
     mockScimExternalMapping.create.mockResolvedValue({});
-    mockOrgMember.findMany.mockResolvedValue([]);
+    mockTeamMember.findMany.mockResolvedValue([]);
 
     const res = await POST(
       makeReq({

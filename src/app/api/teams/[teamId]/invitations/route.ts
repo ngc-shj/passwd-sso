@@ -143,10 +143,10 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   logAudit({
     scope: AUDIT_SCOPE.ORG,
-    action: AUDIT_ACTION.ORG_MEMBER_INVITE,
+    action: AUDIT_ACTION.TEAM_MEMBER_INVITE,
     userId: session.user.id,
     orgId: teamId,
-    targetType: AUDIT_TARGET_TYPE.ORG_INVITATION,
+    targetType: AUDIT_TARGET_TYPE.TEAM_INVITATION,
     targetId: invitation.id,
     metadata: { email, role },
     ...extractRequestMeta(req),

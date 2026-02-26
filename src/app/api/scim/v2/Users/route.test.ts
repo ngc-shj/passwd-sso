@@ -5,7 +5,7 @@ const {
   mockValidateScimToken,
   mockCheckScimRateLimit,
   mockLogAudit,
-  mockOrgMember,
+  mockTeamMember,
   mockUser,
   mockScimExternalMapping,
   mockTransaction,
@@ -13,7 +13,7 @@ const {
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
   mockLogAudit: vi.fn(),
-  mockOrgMember: { findMany: vi.fn(), count: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
+  mockTeamMember: { findMany: vi.fn(), count: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
   mockUser: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
   mockScimExternalMapping: { findFirst: vi.fn(), findMany: vi.fn(), upsert: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
@@ -31,7 +31,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockOrgMember,
+    orgMember: mockTeamMember,
     user: mockUser,
     scimExternalMapping: mockScimExternalMapping,
     $transaction: mockTransaction,
@@ -76,7 +76,7 @@ describe("GET /api/scim/v2/Users", () => {
   });
 
   it("returns list of users with correct SCIM structure", async () => {
-    mockOrgMember.findMany.mockResolvedValue([
+    mockTeamMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
         orgId: "team-1",
@@ -84,7 +84,7 @@ describe("GET /api/scim/v2/Users", () => {
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       },
     ]);
-    mockOrgMember.count.mockResolvedValue(1);
+    mockTeamMember.count.mockResolvedValue(1);
     mockScimExternalMapping.findMany.mockResolvedValue([]);
 
     const res = await GET(makeReq());
@@ -96,21 +96,21 @@ describe("GET /api/scim/v2/Users", () => {
   });
 
   it("filters out null-email users at query level for consistent totalResults", async () => {
-    mockOrgMember.findMany.mockResolvedValue([]);
-    mockOrgMember.count.mockResolvedValue(0);
+    mockTeamMember.findMany.mockResolvedValue([]);
+    mockTeamMember.count.mockResolvedValue(0);
     mockScimExternalMapping.findMany.mockResolvedValue([]);
 
     await GET(makeReq());
 
     // Verify the where clause includes user.email filter
-    expect(mockOrgMember.findMany).toHaveBeenCalledWith(
+    expect(mockTeamMember.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           user: { email: { not: null } },
         }),
       }),
     );
-    expect(mockOrgMember.count).toHaveBeenCalledWith(
+    expect(mockTeamMember.count).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           user: { email: { not: null } },
@@ -120,13 +120,13 @@ describe("GET /api/scim/v2/Users", () => {
   });
 
   it("passes pagination params correctly", async () => {
-    mockOrgMember.findMany.mockResolvedValue([]);
-    mockOrgMember.count.mockResolvedValue(0);
+    mockTeamMember.findMany.mockResolvedValue([]);
+    mockTeamMember.count.mockResolvedValue(0);
     mockScimExternalMapping.findMany.mockResolvedValue([]);
 
     await GET(makeReq({ searchParams: { startIndex: "5", count: "10" } }));
 
-    expect(mockOrgMember.findMany).toHaveBeenCalledWith(
+    expect(mockTeamMember.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ skip: 4, take: 10 }),
     );
   });
@@ -139,8 +139,8 @@ describe("GET /api/scim/v2/Users", () => {
   });
 
   it("applies compound AND filter correctly", async () => {
-    mockOrgMember.findMany.mockResolvedValue([]);
-    mockOrgMember.count.mockResolvedValue(0);
+    mockTeamMember.findMany.mockResolvedValue([]);
+    mockTeamMember.count.mockResolvedValue(0);
     mockScimExternalMapping.findMany.mockResolvedValue([]);
 
     await GET(
@@ -149,15 +149,15 @@ describe("GET /api/scim/v2/Users", () => {
       }),
     );
 
-    const callArgs = mockOrgMember.findMany.mock.calls[0][0];
+    const callArgs = mockTeamMember.findMany.mock.calls[0][0];
     // No default deactivatedAt — active filter is inside AND
     expect(callArgs.where.deactivatedAt).toBeUndefined();
     expect(callArgs.where.AND).toBeDefined();
   });
 
   it("applies compound OR filter correctly", async () => {
-    mockOrgMember.findMany.mockResolvedValue([]);
-    mockOrgMember.count.mockResolvedValue(0);
+    mockTeamMember.findMany.mockResolvedValue([]);
+    mockTeamMember.count.mockResolvedValue(0);
     mockScimExternalMapping.findMany.mockResolvedValue([]);
 
     await GET(
@@ -166,13 +166,13 @@ describe("GET /api/scim/v2/Users", () => {
       }),
     );
 
-    const callArgs = mockOrgMember.findMany.mock.calls[0][0];
+    const callArgs = mockTeamMember.findMany.mock.calls[0][0];
     expect(callArgs.where.deactivatedAt).toBeUndefined();
     expect(callArgs.where.OR).toBeDefined();
   });
 
   it("returns correct pagination metadata (startIndex, itemsPerPage)", async () => {
-    mockOrgMember.findMany.mockResolvedValue([
+    mockTeamMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
         orgId: "team-1",
@@ -180,7 +180,7 @@ describe("GET /api/scim/v2/Users", () => {
         user: { id: "user-1", email: "a@example.com", name: "A" },
       },
     ]);
-    mockOrgMember.count.mockResolvedValue(25);
+    mockTeamMember.count.mockResolvedValue(25);
     mockScimExternalMapping.findMany.mockResolvedValue([]);
 
     const res = await GET(
@@ -226,7 +226,7 @@ describe("GET /api/scim/v2/Users", () => {
     mockScimExternalMapping.findFirst.mockResolvedValue({
       internalId: "user-1",
     });
-    mockOrgMember.findMany.mockResolvedValue([
+    mockTeamMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
         orgId: "team-1",
@@ -234,7 +234,7 @@ describe("GET /api/scim/v2/Users", () => {
         user: { id: "user-1", email: "ext@example.com", name: "Ext" },
       },
     ]);
-    mockOrgMember.count.mockResolvedValue(1);
+    mockTeamMember.count.mockResolvedValue(1);
     mockScimExternalMapping.findMany.mockResolvedValue([
       { internalId: "user-1", externalId: "ext-1" },
     ]);

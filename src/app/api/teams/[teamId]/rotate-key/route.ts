@@ -173,7 +173,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         }
       }));
 
-      // Create new OrgMemberKey for each member (old keys kept for history)
+      // Create new TeamMemberKey for each member (old keys kept for history)
       // No filter needed: member validation above guarantees exact 1:1 match
       await Promise.all(
         memberKeys.map((k) =>
@@ -223,10 +223,10 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   logAudit({
     scope: AUDIT_SCOPE.ORG,
-    action: AUDIT_ACTION.ORG_KEY_ROTATION,
+    action: AUDIT_ACTION.TEAM_KEY_ROTATION,
     userId: session.user.id,
     orgId: teamId,
-    targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
+    targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: teamId,
     metadata: {
       fromVersion: team.orgKeyVersion,

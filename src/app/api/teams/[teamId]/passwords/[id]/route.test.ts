@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 const {
-  mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockPrismaOrganization, mockAuditLogCreate,
+  mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaOrganization, mockAuditLogCreate,
   mockRequireTeamPermission,
   mockRequireTeamMember, mockHasTeamPermission, TeamAuthError,
   mockPrismaTransaction,
@@ -17,12 +17,12 @@ const {
   }
   return {
     mockAuth: vi.fn(),
-    mockPrismaOrgPasswordEntry: {
+    mockPrismaTeamPasswordEntry: {
       findUnique: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
     },
-    mockPrismaOrgFolder: { findUnique: vi.fn() },
+    mockPrismaTeamFolder: { findUnique: vi.fn() },
     mockPrismaOrganization: { findUnique: vi.fn() },
     mockAuditLogCreate: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
@@ -36,8 +36,8 @@ const {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgPasswordEntry: mockPrismaOrgPasswordEntry,
-    orgFolder: mockPrismaOrgFolder,
+    orgPasswordEntry: mockPrismaTeamPasswordEntry,
+    orgFolder: mockPrismaTeamFolder,
     organization: mockPrismaOrganization,
     auditLog: { create: mockAuditLogCreate },
     $transaction: mockPrismaTransaction,
@@ -139,7 +139,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns 404 when entry not found", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(null);
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(null);
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`),
       createParams({ teamId: TEAM_ID, id: PW_ID }),
@@ -148,7 +148,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns encrypted blobs as-is (E2E mode)", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(
       makeEntryForGET({ tags: [{ id: "tag-1", name: "Work", color: "#ff0000" }] }),
     );
 
@@ -175,7 +175,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns 404 when entry belongs to a different team (Q-6 IDOR)", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(
       makeEntryForGET({ orgId: "other-team-999" }),
     );
     const res = await GET(
@@ -189,7 +189,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
 
   it("returns orgFolderId in GET response when entry has a folder", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(
       makeEntryForGET({ orgFolderId: FOLDER_CUID }),
     );
 
@@ -269,7 +269,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns 404 when entry not found for PUT", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(null);
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(null);
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
         body: validE2EBody,
@@ -280,7 +280,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns 404 when entry belongs to a different team (Q-7 IDOR)", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(
       makeEntryForPUT({ orgId: "other-team-999" }),
     );
     const res = await PUT(
@@ -296,7 +296,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
 
   it("returns 403 when user lacks PASSWORD_UPDATE permission", async () => {
     mockHasTeamPermission.mockReturnValue(false);
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
         body: validE2EBody,
@@ -307,7 +307,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns 409 when orgKeyVersion does not match team's current version (F-13)", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 }); // team is at v2
 
     const res = await PUT(
@@ -323,7 +323,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
 
   it("returns 403 when MEMBER tries to update another's entry", async () => {
     mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.MEMBER, userId: "test-user-id" });
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(
       makeEntryForPUT({ createdById: "other-user" }),
     );
     const res = await PUT(
@@ -336,7 +336,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns 400 on malformed JSON for PUT", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     const { NextRequest } = await import("next/server");
     const req = new NextRequest(`http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
       method: "PUT",
@@ -350,7 +350,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns 400 when E2E body has partial encryption fields", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     // encryptedBlob present but encryptedOverview missing → refine fails
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
@@ -362,7 +362,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns 400 when tagIds contains invalid CUID", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
         body: { ...validE2EBody, tagIds: ["not-a-cuid"] },
@@ -373,7 +373,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("updates entry with full E2E blob replacement (200)", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
@@ -419,8 +419,8 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
 
   it("updates entry with orgFolderId when folder belongs to same team", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
-    mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: TEAM_ID });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockPrismaTeamFolder.findUnique.mockResolvedValue({ orgId: TEAM_ID });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
@@ -438,8 +438,8 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
 
   it("returns 400 when orgFolderId belongs to a different team in PUT", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
-    mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: "other-team-999" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockPrismaTeamFolder.findUnique.mockResolvedValue({ orgId: "other-team-999" });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
@@ -454,8 +454,8 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
 
   it("returns 400 when orgFolderId does not exist in PUT", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
-    mockPrismaOrgFolder.findUnique.mockResolvedValue(null);
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockPrismaTeamFolder.findUnique.mockResolvedValue(null);
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
@@ -469,7 +469,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("updates metadata only without history snapshot (Q-8)", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
 
     const TAG_CUID = "cm1234567890abcdefghijkl0";
     const res = await PUT(
@@ -493,7 +493,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("clears orgFolderId when set to null in PUT", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
@@ -502,7 +502,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     expect(res.status).toBe(200);
-    expect(mockPrismaOrgFolder.findUnique).not.toHaveBeenCalled();
+    expect(mockPrismaTeamFolder.findUnique).not.toHaveBeenCalled();
     expect(txMock.orgPasswordEntry.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ orgFolderId: null }),
@@ -548,7 +548,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns 404 when entry not found", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(null);
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(null);
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`),
       createParams({ teamId: TEAM_ID, id: PW_ID }),
@@ -557,7 +557,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns 404 when entry belongs to a different team (R-1 IDOR)", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, orgId: "other-team-999" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, orgId: "other-team-999" });
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`),
       createParams({ teamId: TEAM_ID, id: PW_ID }),
@@ -568,8 +568,8 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("soft deletes by default", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, orgId: TEAM_ID });
-    mockPrismaOrgPasswordEntry.update.mockResolvedValue({});
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, orgId: TEAM_ID });
+    mockPrismaTeamPasswordEntry.update.mockResolvedValue({});
 
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`),
@@ -578,12 +578,12 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(mockPrismaOrgPasswordEntry.update).toHaveBeenCalled();
+    expect(mockPrismaTeamPasswordEntry.update).toHaveBeenCalled();
   });
 
   it("permanently deletes when permanent=true", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, orgId: TEAM_ID });
-    mockPrismaOrgPasswordEntry.delete.mockResolvedValue({});
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, orgId: TEAM_ID });
+    mockPrismaTeamPasswordEntry.delete.mockResolvedValue({});
 
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
@@ -592,6 +592,6 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     expect(res.status).toBe(200);
-    expect(mockPrismaOrgPasswordEntry.delete).toHaveBeenCalled();
+    expect(mockPrismaTeamPasswordEntry.delete).toHaveBeenCalled();
   });
 });

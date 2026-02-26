@@ -96,7 +96,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const entryIds = [
     ...new Set(
       items
-        .filter((l) => l.targetType === AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY && l.targetId)
+        .filter((l) => l.targetType === AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY && l.targetId)
         .map((l) => l.targetId as string)
     ),
   ];

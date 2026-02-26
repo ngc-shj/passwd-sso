@@ -51,7 +51,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     action: AUDIT_ACTION.ENTRY_RESTORE,
     userId: session.user.id,
     orgId: teamId,
-    targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
+    targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: id,
     ...extractRequestMeta(req),
   });

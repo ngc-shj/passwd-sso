@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgFolder, mockRequireTeamMember, mockRequireTeamPermission, TeamAuthError, mockLogAudit } =
+const { mockAuth, mockPrismaTeamFolder, mockRequireTeamMember, mockRequireTeamPermission, TeamAuthError, mockLogAudit } =
   vi.hoisted(() => {
     class _TeamAuthError extends Error {
       status: number;
@@ -13,7 +13,7 @@ const { mockAuth, mockPrismaOrgFolder, mockRequireTeamMember, mockRequireTeamPer
     }
     return {
       mockAuth: vi.fn(),
-      mockPrismaOrgFolder: {
+      mockPrismaTeamFolder: {
         findMany: vi.fn(),
         findUnique: vi.fn(),
         findFirst: vi.fn(),
@@ -28,7 +28,7 @@ const { mockAuth, mockPrismaOrgFolder, mockRequireTeamMember, mockRequireTeamPer
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { orgFolder: mockPrismaOrgFolder },
+  prisma: { orgFolder: mockPrismaTeamFolder },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
@@ -82,7 +82,7 @@ describe("GET /api/teams/[teamId]/folders", () => {
   });
 
   it("returns team folders with entry count", async () => {
-    mockPrismaOrgFolder.findMany.mockResolvedValue([
+    mockPrismaTeamFolder.findMany.mockResolvedValue([
       {
         id: "f1",
         name: "Engineering",
@@ -180,7 +180,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
   });
 
   it("returns 409 when root folder name already exists", async () => {
-    mockPrismaOrgFolder.findFirst.mockResolvedValue({ id: "existing" });
+    mockPrismaTeamFolder.findFirst.mockResolvedValue({ id: "existing" });
 
     const res = await POST(
       createRequest("POST", BASE, { body: { name: "Engineering" } }),
@@ -192,7 +192,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
   });
 
   it("returns 409 when child folder name already exists", async () => {
-    mockPrismaOrgFolder.findUnique.mockResolvedValue({ id: "existing" });
+    mockPrismaTeamFolder.findUnique.mockResolvedValue({ id: "existing" });
 
     const res = await POST(
       createRequest("POST", BASE, {
@@ -206,8 +206,8 @@ describe("POST /api/teams/[teamId]/folders", () => {
   });
 
   it("creates team folder successfully (201)", async () => {
-    mockPrismaOrgFolder.findFirst.mockResolvedValue(null);
-    mockPrismaOrgFolder.create.mockResolvedValue({
+    mockPrismaTeamFolder.findFirst.mockResolvedValue(null);
+    mockPrismaTeamFolder.create.mockResolvedValue({
       id: "new-folder-id",
       name: "Finance",
       parentId: null,

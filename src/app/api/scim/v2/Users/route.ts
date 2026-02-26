@@ -147,7 +147,7 @@ export async function POST(req: NextRequest) {
 
   const { userName, name, externalId, active } = parsed.data;
 
-  // Transaction: find/create user + create OrgMember + create ScimExternalMapping
+  // Transaction: find/create user + create TeamMember + create ScimExternalMapping
   try {
     const created = await prisma.$transaction(async (tx) => {
       // Find or create User by email
@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // Check for existing OrgMember
+      // Check for existing TeamMember
       const existingMember = await tx.orgMember.findUnique({
         where: { orgId_userId: { orgId: scopedTeamId, userId: user.id } },
       });
@@ -181,7 +181,7 @@ export async function POST(req: NextRequest) {
           throw new Error("SCIM_RESOURCE_EXISTS");
         }
       } else {
-        // Create new OrgMember
+        // Create new TeamMember
         await tx.orgMember.create({
           data: {
             orgId: scopedTeamId,
@@ -240,7 +240,7 @@ export async function POST(req: NextRequest) {
       action: created.reactivated ? AUDIT_ACTION.SCIM_USER_REACTIVATE : AUDIT_ACTION.SCIM_USER_CREATE,
       userId: auditUserId,
       orgId: scopedTeamId,
-      targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
+      targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
       targetId: created.user.id,
       metadata: { email: userName, externalId },
       ...extractRequestMeta(req),

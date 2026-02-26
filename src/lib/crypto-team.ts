@@ -44,7 +44,7 @@ export const HKDF_ECDH_WRAP_INFO = "passwd-sso-ecdh-v1";
 
 export const CURRENT_TEAM_WRAP_VERSION = 1;
 
-/** AAD scope for OrgMemberKey wrapping */
+/** AAD scope for TeamMemberKey wrapping */
 const AAD_SCOPE_ORG_KEY = "OK";
 
 /** AAD version for team key wrapping */
@@ -113,7 +113,7 @@ export async function deriveTeamEncryptionKey(
  * Derive AES-256-GCM wrapping key from ECDH shared secret.
  * HKDF(sharedBits, info="passwd-sso-org-v1", salt=random per-escrow salt)
  *
- * The random salt is generated per key-wrapping operation and stored in OrgMemberKey.
+ * The random salt is generated per key-wrapping operation and stored in TeamMemberKey.
  * Team-level domain separation is enforced via AAD (which includes teamId).
  */
 async function deriveTeamWrappingKey(
@@ -181,7 +181,7 @@ export async function deriveEcdhWrappingKey(
   );
 }
 
-// ─── AAD for OrgMemberKey Wrapping ──────────────────────────────
+// ─── AAD for TeamMemberKey Wrapping ──────────────────────────────
 
 export interface TeamKeyWrapContext {
   teamId: string;
@@ -191,7 +191,7 @@ export interface TeamKeyWrapContext {
 }
 
 /**
- * Build AAD for OrgMemberKey wrapping.
+ * Build AAD for TeamMemberKey wrapping.
  * Binary format (same as crypto-aad.ts buildAADBytes):
  *   [scope: 2B "OK"] [aadVersion: 1B] [nFields: 1B=4]
  *   [field_len: 2B BE] [field: N bytes] × 4
@@ -291,7 +291,7 @@ export async function wrapTeamKeyForMember(
  * Unwrap team symmetric key as a member.
  * Member uses their ECDH private key + admin's ephemeral public key → AES-GCM unwrap.
  *
- * @param hkdfSalt - Hex-encoded HKDF salt (stored in OrgMemberKey.hkdfSalt)
+ * @param hkdfSalt - Hex-encoded HKDF salt (stored in TeamMemberKey.hkdfSalt)
  */
 export async function unwrapTeamKey(
   encrypted: EncryptedData,
@@ -364,7 +364,7 @@ export async function createTeamKeyEscrow(
   const ephemeralKeyPair = await generateECDHKeyPair();
   const memberPublicKey = await importPublicKey(memberPublicKeyJwk);
 
-  // Random HKDF salt — used in ECDH wrapping key derivation, stored in OrgMemberKey
+  // Random HKDF salt — used in ECDH wrapping key derivation, stored in TeamMemberKey
   const salt = crypto.getRandomValues(new Uint8Array(HKDF_SALT_LENGTH));
 
   const ctx: TeamKeyWrapContext = {

@@ -1,17 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockAuth, mockPrismaOrgMember, mockPrismaOrgPasswordEntry, mockHasTeamPermission } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeamPasswordEntry, mockHasTeamPermission } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockPrismaOrgMember: { findMany: vi.fn() },
-  mockPrismaOrgPasswordEntry: { findMany: vi.fn() },
+  mockPrismaTeamMember: { findMany: vi.fn() },
+  mockPrismaTeamPasswordEntry: { findMany: vi.fn() },
   mockHasTeamPermission: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockPrismaOrgMember,
-    orgPasswordEntry: mockPrismaOrgPasswordEntry,
+    orgMember: mockPrismaTeamMember,
+    orgPasswordEntry: mockPrismaTeamPasswordEntry,
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
@@ -35,7 +35,7 @@ describe("GET /api/teams/archived", () => {
   });
 
   it("returns empty array when no readable teams", async () => {
-    mockPrismaOrgMember.findMany.mockResolvedValue([]);
+    mockPrismaTeamMember.findMany.mockResolvedValue([]);
     const res = await GET();
     const json = await res.json();
     expect(json).toEqual([]);
@@ -43,10 +43,10 @@ describe("GET /api/teams/archived", () => {
 
   it("returns archived entries with encrypted overviews (E2E mode)", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
-    mockPrismaOrgMember.findMany.mockResolvedValue([
+    mockPrismaTeamMember.findMany.mockResolvedValue([
       { orgId: "team-1", role: TEAM_ROLE.MEMBER },
     ]);
-    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([
       {
         id: "pw-1",
         orgId: "team-1",

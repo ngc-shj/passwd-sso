@@ -222,8 +222,8 @@ export function parseScimFilter(filter: string): ScimFilterExpression {
 /**
  * SCIM attribute → Prisma field mapping.
  *
- * `userName` → User.email (joined via OrgMember → User).
- * `active`  → OrgMember.deactivatedAt presence check.
+ * `userName` → User.email (joined via TeamMember → User).
+ * `active`  → TeamMember.deactivatedAt presence check.
  * `externalId` → ScimExternalMapping.externalId.
  */
 

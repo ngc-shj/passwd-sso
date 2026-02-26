@@ -6,14 +6,14 @@ const {
   mockValidateScimToken,
   mockCheckScimRateLimit,
   mockLogAudit,
-  mockOrgMember,
+  mockTeamMember,
   mockScimExternalMapping,
   mockTransaction,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
   mockLogAudit: vi.fn(),
-  mockOrgMember: { findMany: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+  mockTeamMember: { findMany: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   mockScimExternalMapping: { findFirst: vi.fn() },
   mockTransaction: vi.fn(),
 }));
@@ -30,7 +30,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockOrgMember,
+    orgMember: mockTeamMember,
     scimExternalMapping: mockScimExternalMapping,
     $transaction: mockTransaction,
   },
@@ -75,7 +75,7 @@ describe("GET /api/scim/v2/Groups/[id]", () => {
   });
 
   it("returns group with members", async () => {
-    mockOrgMember.findMany.mockResolvedValue([
+    mockTeamMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
         role: "ADMIN",
@@ -105,17 +105,17 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     mockCheckScimRateLimit.mockResolvedValue(true);
     // Transaction executes callback with same mock objects
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
-      fn({ orgMember: mockOrgMember }),
+      fn({ orgMember: mockTeamMember }),
     );
   });
 
   it("adds a member to the group", async () => {
-    mockOrgMember.findUnique.mockResolvedValue({
+    mockTeamMember.findUnique.mockResolvedValue({
       id: "m1",
       role: "MEMBER",
     });
-    mockOrgMember.update.mockResolvedValue({});
-    mockOrgMember.findMany.mockResolvedValue([]);
+    mockTeamMember.update.mockResolvedValue({});
+    mockTeamMember.findMany.mockResolvedValue([]);
 
     const res = await PATCH(
       makeReq({
@@ -134,7 +134,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
       makeParams(ADMIN_GROUP_ID),
     );
     expect(res.status).toBe(200);
-    expect(mockOrgMember.update).toHaveBeenCalledWith(
+    expect(mockTeamMember.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: { role: "ADMIN" },
       }),
@@ -142,7 +142,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
   });
 
   it("blocks PATCH on OWNER member", async () => {
-    mockOrgMember.findUnique.mockResolvedValue({
+    mockTeamMember.findUnique.mockResolvedValue({
       id: "m1",
       role: "OWNER",
     });
@@ -167,12 +167,12 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
   });
 
   it("removes a member from the group (defaults to MEMBER)", async () => {
-    mockOrgMember.findUnique.mockResolvedValue({
+    mockTeamMember.findUnique.mockResolvedValue({
       id: "m1",
       role: "ADMIN",
     });
-    mockOrgMember.update.mockResolvedValue({});
-    mockOrgMember.findMany.mockResolvedValue([]);
+    mockTeamMember.update.mockResolvedValue({});
+    mockTeamMember.findMany.mockResolvedValue([]);
 
     const res = await PATCH(
       makeReq({
@@ -191,7 +191,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
       makeParams(ADMIN_GROUP_ID),
     );
     expect(res.status).toBe(200);
-    expect(mockOrgMember.update).toHaveBeenCalledWith(
+    expect(mockTeamMember.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: { role: "MEMBER" },
       }),
@@ -199,7 +199,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
   });
 
   it("returns 400 for non-existent member", async () => {
-    mockOrgMember.findUnique.mockResolvedValue(null);
+    mockTeamMember.findUnique.mockResolvedValue(null);
 
     const res = await PATCH(
       makeReq({
@@ -234,11 +234,11 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
   });
 
   it("handles multiple operations in a single PATCH", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER" })   // user-1
       .mockResolvedValueOnce({ id: "m2", role: "ADMIN" });    // user-2
-    mockOrgMember.update.mockResolvedValue({});
-    mockOrgMember.findMany.mockResolvedValue([]);
+    mockTeamMember.update.mockResolvedValue({});
+    mockTeamMember.findMany.mockResolvedValue([]);
 
     const res = await PATCH(
       makeReq({
@@ -262,7 +262,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
       makeParams(ADMIN_GROUP_ID),
     );
     expect(res.status).toBe(200);
-    expect(mockOrgMember.update).toHaveBeenCalledTimes(2);
+    expect(mockTeamMember.update).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -273,19 +273,19 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     mockCheckScimRateLimit.mockResolvedValue(true);
     // Transaction executes callback with same mock objects
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
-      fn({ orgMember: mockOrgMember }),
+      fn({ orgMember: mockTeamMember }),
     );
   });
 
   it("replaces group members", async () => {
     // Current members: user-1 (ADMIN)
-    mockOrgMember.findMany
+    mockTeamMember.findMany
       .mockResolvedValueOnce([{ id: "m1", userId: "user-1", role: "ADMIN" }]) // current members
       .mockResolvedValueOnce([]); // buildGroupResource
 
     // user-2 will be added; OWNER check for user-1 removal returns non-OWNER
-    mockOrgMember.findUnique.mockResolvedValue({ id: "m2", role: "MEMBER" });
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.findUnique.mockResolvedValue({ id: "m2", role: "MEMBER" });
+    mockTeamMember.update.mockResolvedValue({});
 
     const res = await PUT(
       makeReq({
@@ -302,11 +302,11 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
   });
 
   it("blocks PUT when removing OWNER member", async () => {
-    mockOrgMember.findMany.mockResolvedValue([
+    mockTeamMember.findMany.mockResolvedValue([
       { id: "m1", userId: "owner-1", role: "ADMIN" },
     ]);
     // OWNER protection check
-    mockOrgMember.findUnique.mockResolvedValue({ role: "OWNER" });
+    mockTeamMember.findUnique.mockResolvedValue({ role: "OWNER" });
 
     const res = await PUT(
       makeReq({
@@ -323,12 +323,12 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
   });
 
   it("returns 400 when adding non-existent member", async () => {
-    mockOrgMember.findMany
+    mockTeamMember.findMany
       .mockResolvedValueOnce([]) // current members (none)
       .mockResolvedValueOnce([]); // buildGroupResource
 
     // Inside tx: member not found
-    mockOrgMember.findUnique.mockResolvedValue(null);
+    mockTeamMember.findUnique.mockResolvedValue(null);
 
     const res = await PUT(
       makeReq({
@@ -387,12 +387,12 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
   });
 
   it("skips demotion when member's role was changed concurrently", async () => {
-    mockOrgMember.findMany
+    mockTeamMember.findMany
       .mockResolvedValueOnce([{ id: "m1", userId: "user-1", role: "ADMIN" }])
       .mockResolvedValueOnce([]); // buildGroupResource
     // tx re-check: role changed to VIEWER concurrently
-    mockOrgMember.findUnique.mockResolvedValue({ role: "VIEWER" });
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.findUnique.mockResolvedValue({ role: "VIEWER" });
+    mockTeamMember.update.mockResolvedValue({});
 
     const res = await PUT(
       makeReq({
@@ -407,14 +407,14 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     );
     expect(res.status).toBe(200);
     // Member's role is VIEWER (not ADMIN), so no demotion should occur
-    expect(mockOrgMember.update).not.toHaveBeenCalled();
+    expect(mockTeamMember.update).not.toHaveBeenCalled();
   });
 
   it("resolves group via ScimExternalMapping fallback", async () => {
     mockScimExternalMapping.findFirst.mockResolvedValue({
       internalId: ADMIN_GROUP_ID,
     });
-    mockOrgMember.findMany.mockResolvedValue([]);
+    mockTeamMember.findMany.mockResolvedValue([]);
 
     const res = await GET(makeReq(), makeParams("ext-group-id-from-idp"));
     expect(res.status).toBe(200);

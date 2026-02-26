@@ -92,9 +92,9 @@ const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
   [AUDIT_ACTION.ENTRY_EXPORT]: <Download className="h-4 w-4" />,
   [AUDIT_ACTION.ATTACHMENT_UPLOAD]: <Upload className="h-4 w-4" />,
   [AUDIT_ACTION.ATTACHMENT_DELETE]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.ORG_MEMBER_INVITE]: <UserPlus className="h-4 w-4" />,
-  [AUDIT_ACTION.ORG_MEMBER_REMOVE]: <UserMinus className="h-4 w-4" />,
-  [AUDIT_ACTION.ORG_ROLE_UPDATE]: <ShieldCheck className="h-4 w-4" />,
+  [AUDIT_ACTION.TEAM_MEMBER_INVITE]: <UserPlus className="h-4 w-4" />,
+  [AUDIT_ACTION.TEAM_MEMBER_REMOVE]: <UserMinus className="h-4 w-4" />,
+  [AUDIT_ACTION.TEAM_ROLE_UPDATE]: <ShieldCheck className="h-4 w-4" />,
   [AUDIT_ACTION.SHARE_CREATE]: <LinkIcon className="h-4 w-4" />,
   [AUDIT_ACTION.SHARE_REVOKE]: <Link2Off className="h-4 w-4" />,
   [AUDIT_ACTION.EMERGENCY_GRANT_CREATE]: <HeartPulse className="h-4 w-4" />,
@@ -417,7 +417,7 @@ export default function AuditLogsPage() {
     }
 
     // Role updates: show role change
-    if (log.action === AUDIT_ACTION.ORG_ROLE_UPDATE && meta?.previousRole && meta?.newRole) {
+    if (log.action === AUDIT_ACTION.TEAM_ROLE_UPDATE && meta?.previousRole && meta?.newRole) {
       return t("roleChange", {
         from: String(meta.previousRole),
         to: String(meta.newRole),

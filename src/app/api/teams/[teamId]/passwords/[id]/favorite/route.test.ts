@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgPasswordFavorite, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaOrgPasswordFavorite, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -12,7 +12,7 @@ const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgPasswordFavorite, moc
   }
   return {
     mockAuth: vi.fn(),
-    mockPrismaOrgPasswordEntry: { findUnique: vi.fn() },
+    mockPrismaTeamPasswordEntry: { findUnique: vi.fn() },
     mockPrismaOrgPasswordFavorite: {
       findUnique: vi.fn(),
       create: vi.fn(),
@@ -26,7 +26,7 @@ const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgPasswordFavorite, moc
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgPasswordEntry: mockPrismaOrgPasswordEntry,
+    orgPasswordEntry: mockPrismaTeamPasswordEntry,
     orgPasswordFavorite: mockPrismaOrgPasswordFavorite,
   },
 }));
@@ -79,7 +79,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/favorite", () => {
   });
 
   it("returns 404 when entry not found", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(null);
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(null);
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}/favorite`),
       createParams({ teamId: TEAM_ID, id: PW_ID }),
@@ -88,7 +88,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/favorite", () => {
   });
 
   it("adds favorite when not yet favorited", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: TEAM_ID });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: TEAM_ID });
     mockPrismaOrgPasswordFavorite.findUnique.mockResolvedValue(null);
     mockPrismaOrgPasswordFavorite.create.mockResolvedValue({});
 
@@ -102,7 +102,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/favorite", () => {
   });
 
   it("removes favorite when already favorited", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: TEAM_ID });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: TEAM_ID });
     mockPrismaOrgPasswordFavorite.findUnique.mockResolvedValue({ id: "fav-1" });
     mockPrismaOrgPasswordFavorite.delete.mockResolvedValue({});
 

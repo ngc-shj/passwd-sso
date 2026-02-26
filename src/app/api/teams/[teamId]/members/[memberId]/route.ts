@@ -84,10 +84,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
     logAudit({
       scope: AUDIT_SCOPE.ORG,
-      action: AUDIT_ACTION.ORG_ROLE_UPDATE,
+      action: AUDIT_ACTION.TEAM_ROLE_UPDATE,
       userId: session.user.id,
       orgId: teamId,
-      targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
+      targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
       targetId: memberId,
       metadata: { newRole: TEAM_ROLE.OWNER, previousRole: target.role, transfer: true },
       ...extractRequestMeta(req),
@@ -132,10 +132,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   logAudit({
     scope: AUDIT_SCOPE.ORG,
-    action: AUDIT_ACTION.ORG_ROLE_UPDATE,
+    action: AUDIT_ACTION.TEAM_ROLE_UPDATE,
     userId: session.user.id,
     orgId: teamId,
-    targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
+    targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: memberId,
     metadata: { newRole: parsed.data.role, previousRole: target.role },
     ...extractRequestMeta(req),
@@ -209,10 +209,10 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   logAudit({
     scope: AUDIT_SCOPE.ORG,
-    action: AUDIT_ACTION.ORG_MEMBER_REMOVE,
+    action: AUDIT_ACTION.TEAM_MEMBER_REMOVE,
     userId: session.user.id,
     orgId: teamId,
-    targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
+    targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: memberId,
     metadata: { removedUserId: target.userId, removedRole: target.role },
     ...extractRequestMeta(req),

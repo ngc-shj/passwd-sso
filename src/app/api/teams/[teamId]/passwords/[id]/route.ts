@@ -225,7 +225,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     action: AUDIT_ACTION.ENTRY_UPDATE,
     userId: session.user.id,
     orgId: teamId,
-    targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
+    targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: id,
     ...extractRequestMeta(req),
   });
@@ -281,7 +281,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     action: AUDIT_ACTION.ENTRY_DELETE,
     userId: session.user.id,
     orgId: teamId,
-    targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
+    targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: id,
     metadata: { permanent },
     ...extractRequestMeta(req),

@@ -3,8 +3,8 @@ import { createRequest, createParams } from "@/__tests__/helpers/request-builder
 
 const {
   mockAuth,
-  mockPrismaOrgFolder,
-  mockPrismaOrgPasswordEntry,
+  mockPrismaTeamFolder,
+  mockPrismaTeamPasswordEntry,
   mockPrismaTransaction,
   mockRequireTeamPermission,
   TeamAuthError,
@@ -20,7 +20,7 @@ const {
   }
   return {
     mockAuth: vi.fn(),
-    mockPrismaOrgFolder: {
+    mockPrismaTeamFolder: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
       findMany: vi.fn(),
@@ -28,7 +28,7 @@ const {
       updateMany: vi.fn(),
       delete: vi.fn(),
     },
-    mockPrismaOrgPasswordEntry: {
+    mockPrismaTeamPasswordEntry: {
       updateMany: vi.fn(),
     },
     mockPrismaTransaction: vi.fn(),
@@ -41,8 +41,8 @@ const {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgFolder: mockPrismaOrgFolder,
-    orgPasswordEntry: mockPrismaOrgPasswordEntry,
+    orgFolder: mockPrismaTeamFolder,
+    orgPasswordEntry: mockPrismaTeamPasswordEntry,
     $transaction: mockPrismaTransaction,
   },
 }));
@@ -108,7 +108,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   });
 
   it("returns 404 when folder not found", async () => {
-    mockPrismaOrgFolder.findUnique.mockResolvedValue(null);
+    mockPrismaTeamFolder.findUnique.mockResolvedValue(null);
     const res = await PUT(
       createRequest("PUT", BASE, { body: { name: "Updated" } }),
       createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
@@ -117,7 +117,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   });
 
   it("returns 404 when folder belongs to another team", async () => {
-    mockPrismaOrgFolder.findUnique.mockResolvedValue({
+    mockPrismaTeamFolder.findUnique.mockResolvedValue({
       ...ownedFolder,
       orgId: "other-team",
     });
@@ -129,9 +129,9 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   });
 
   it("updates folder name successfully", async () => {
-    mockPrismaOrgFolder.findUnique.mockResolvedValue(ownedFolder);
-    mockPrismaOrgFolder.findFirst.mockResolvedValue(null);
-    mockPrismaOrgFolder.update.mockResolvedValue({
+    mockPrismaTeamFolder.findUnique.mockResolvedValue(ownedFolder);
+    mockPrismaTeamFolder.findFirst.mockResolvedValue(null);
+    mockPrismaTeamFolder.update.mockResolvedValue({
       ...ownedFolder,
       name: "Updated",
     });
@@ -146,7 +146,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   });
 
   it("returns 404 when parentId belongs to another team or does not exist", async () => {
-    mockPrismaOrgFolder.findUnique.mockResolvedValue(ownedFolder);
+    mockPrismaTeamFolder.findUnique.mockResolvedValue(ownedFolder);
     vi.mocked(validateParentFolder).mockRejectedValueOnce(
       new Error("PARENT_NOT_FOUND"),
     );
@@ -163,7 +163,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   });
 
   it("returns 400 when parentId creates circular reference", async () => {
-    mockPrismaOrgFolder.findUnique.mockResolvedValue(ownedFolder);
+    mockPrismaTeamFolder.findUnique.mockResolvedValue(ownedFolder);
     vi.mocked(checkCircularReference).mockResolvedValueOnce(true);
 
     const res = await PUT(
@@ -178,7 +178,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   });
 
   it("returns 400 when setting parentId to self", async () => {
-    mockPrismaOrgFolder.findUnique.mockResolvedValue(ownedFolder);
+    mockPrismaTeamFolder.findUnique.mockResolvedValue(ownedFolder);
 
     const res = await PUT(
       createRequest("PUT", BASE, { body: { parentId: FOLDER_ID } }),
@@ -190,7 +190,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   });
 
   it("returns 400 when parentId exceeds max depth", async () => {
-    mockPrismaOrgFolder.findUnique.mockResolvedValue(ownedFolder);
+    mockPrismaTeamFolder.findUnique.mockResolvedValue(ownedFolder);
     vi.mocked(validateFolderDepth).mockRejectedValueOnce(
       new Error("FOLDER_MAX_DEPTH_EXCEEDED"),
     );
@@ -207,8 +207,8 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   });
 
   it("returns 409 when renamed folder duplicates sibling name", async () => {
-    mockPrismaOrgFolder.findUnique.mockResolvedValue(ownedFolder);
-    mockPrismaOrgFolder.findFirst.mockResolvedValue({ id: "other-folder" });
+    mockPrismaTeamFolder.findUnique.mockResolvedValue(ownedFolder);
+    mockPrismaTeamFolder.findFirst.mockResolvedValue({ id: "other-folder" });
 
     const res = await PUT(
       createRequest("PUT", BASE, { body: { name: "Duplicate" } }),
@@ -246,7 +246,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
   });
 
   it("returns 404 when folder not found", async () => {
-    mockPrismaOrgFolder.findUnique.mockResolvedValue(null);
+    mockPrismaTeamFolder.findUnique.mockResolvedValue(null);
     const res = await DELETE(
       createRequest("DELETE", BASE),
       createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
@@ -255,14 +255,14 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
   });
 
   it("deletes folder and promotes children", async () => {
-    mockPrismaOrgFolder.findUnique.mockResolvedValue(ownedFolder);
-    mockPrismaOrgFolder.findMany
+    mockPrismaTeamFolder.findUnique.mockResolvedValue(ownedFolder);
+    mockPrismaTeamFolder.findMany
       .mockResolvedValueOnce([]) // no children
       .mockResolvedValueOnce([]); // no siblings at target
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
       await fn({
-        orgFolder: mockPrismaOrgFolder,
-        orgPasswordEntry: mockPrismaOrgPasswordEntry,
+        orgFolder: mockPrismaTeamFolder,
+        orgPasswordEntry: mockPrismaTeamPasswordEntry,
       });
     });
 
@@ -284,10 +284,10 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
 
   it("renames children that would conflict at the target parent level", async () => {
     const parentFolder = { ...ownedFolder, name: "テスト" };
-    mockPrismaOrgFolder.findUnique.mockResolvedValue(parentFolder);
+    mockPrismaTeamFolder.findUnique.mockResolvedValue(parentFolder);
 
     const childId = "cm000000000000000child01";
-    mockPrismaOrgFolder.findMany
+    mockPrismaTeamFolder.findMany
       .mockResolvedValueOnce([{ id: childId, name: "テスト" }])
       .mockResolvedValueOnce([{ id: FOLDER_ID, name: "テスト" }]);
 

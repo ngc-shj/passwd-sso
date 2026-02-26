@@ -74,9 +74,9 @@ const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
   [AUDIT_ACTION.ENTRY_EXPORT]: <Download className="h-4 w-4" />,
   [AUDIT_ACTION.ATTACHMENT_UPLOAD]: <Upload className="h-4 w-4" />,
   [AUDIT_ACTION.ATTACHMENT_DELETE]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.ORG_MEMBER_INVITE]: <UserPlus className="h-4 w-4" />,
-  [AUDIT_ACTION.ORG_MEMBER_REMOVE]: <UserMinus className="h-4 w-4" />,
-  [AUDIT_ACTION.ORG_ROLE_UPDATE]: <ShieldCheck className="h-4 w-4" />,
+  [AUDIT_ACTION.TEAM_MEMBER_INVITE]: <UserPlus className="h-4 w-4" />,
+  [AUDIT_ACTION.TEAM_MEMBER_REMOVE]: <UserMinus className="h-4 w-4" />,
+  [AUDIT_ACTION.TEAM_ROLE_UPDATE]: <ShieldCheck className="h-4 w-4" />,
   [AUDIT_ACTION.SHARE_CREATE]: <LinkIcon className="h-4 w-4" />,
   [AUDIT_ACTION.SHARE_REVOKE]: <Link2Off className="h-4 w-4" />,
 };
@@ -284,7 +284,7 @@ export default function TeamAuditLogsPage({
     }
 
     // Entry operations: show resolved entry name
-    if (log.targetType === AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY && log.targetId) {
+    if (log.targetType === AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY && log.targetId) {
       const name = entryNames[log.targetId];
       if (name) {
         if (
@@ -309,14 +309,14 @@ export default function TeamAuditLogsPage({
 
     // Member operations: show email
     if (
-      (log.action === AUDIT_ACTION.ORG_MEMBER_INVITE || log.action === AUDIT_ACTION.ORG_MEMBER_REMOVE) &&
+      (log.action === AUDIT_ACTION.TEAM_MEMBER_INVITE || log.action === AUDIT_ACTION.TEAM_MEMBER_REMOVE) &&
       meta?.email
     ) {
       return String(meta.email);
     }
 
     // Role updates: show role change
-    if (log.action === AUDIT_ACTION.ORG_ROLE_UPDATE && meta?.previousRole && meta?.newRole) {
+    if (log.action === AUDIT_ACTION.TEAM_ROLE_UPDATE && meta?.previousRole && meta?.newRole) {
       return t("roleChange", {
         from: String(meta.previousRole),
         to: String(meta.newRole),

@@ -5,19 +5,19 @@ const {
   mockValidateScimToken,
   mockCheckScimRateLimit,
   mockLogAudit,
-  mockOrgMember,
+  mockTeamMember,
   mockUser,
   mockScimExternalMapping,
-  mockOrgMemberKey,
+  mockTeamMemberKey,
   mockTransaction,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
   mockLogAudit: vi.fn(),
-  mockOrgMember: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  mockTeamMember: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), delete: vi.fn() },
   mockUser: { update: vi.fn() },
   mockScimExternalMapping: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
-  mockOrgMemberKey: { deleteMany: vi.fn() },
+  mockTeamMemberKey: { deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
 }));
 
@@ -33,10 +33,10 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockOrgMember,
+    orgMember: mockTeamMember,
     user: mockUser,
     scimExternalMapping: mockScimExternalMapping,
-    orgMemberKey: mockOrgMemberKey,
+    orgMemberKey: mockTeamMemberKey,
     $transaction: mockTransaction,
   },
 }));
@@ -69,7 +69,7 @@ describe("GET /api/scim/v2/Users/[id]", () => {
   });
 
   it("returns 404 when user not found", async () => {
-    mockOrgMember.findUnique.mockResolvedValue(null);
+    mockTeamMember.findUnique.mockResolvedValue(null);
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
     const res = await GET(makeReq(), makeParams("unknown"));
@@ -78,7 +78,7 @@ describe("GET /api/scim/v2/Users/[id]", () => {
 
   it("resolves user via externalId in ScimExternalMapping", async () => {
     // First call: direct userId lookup → not found
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce(null) // resolveUserId direct lookup
       .mockResolvedValueOnce({ // fetchUserResource
         userId: "internal-1",
@@ -110,7 +110,7 @@ describe("GET /api/scim/v2/Users/[id]", () => {
   });
 
   it("returns user resource when found via direct userId", async () => {
-    mockOrgMember.findUnique.mockResolvedValue({
+    mockTeamMember.findUnique.mockResolvedValue({
       userId: "user-1",
       orgId: "team-1",
       deactivatedAt: null,
@@ -135,7 +135,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     // PUT uses $transaction — execute callback with mock tx objects
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
-        orgMember: mockOrgMember,
+        orgMember: mockTeamMember,
         user: mockUser,
         scimExternalMapping: mockScimExternalMapping,
       }),
@@ -143,7 +143,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
   });
 
   it("returns 403 when trying to deactivate OWNER", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "owner-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "OWNER", deactivatedAt: null }); // OWNER check
 
@@ -162,10 +162,10 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
   });
 
   it("returns 409 when externalId is already mapped to a different user", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }); // role check
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue({
       internalId: "other-user",
       externalId: "ext-1",
@@ -194,10 +194,10 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       "Unique constraint failed",
       { code: "P2002", clientVersion: "7.0.0", meta: { modelName: "ScimExternalMapping" } },
     );
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }); // role check
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
     mockScimExternalMapping.create.mockRejectedValue(p2002);
 
@@ -224,10 +224,10 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       "Unique constraint failed",
       { code: "P2002", clientVersion: "7.0.0", meta: { modelName: "User" } },
     );
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null });
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
     mockScimExternalMapping.create.mockRejectedValue(p2002);
 
@@ -247,8 +247,8 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     ).rejects.toBe(p2002);
   });
 
-  it("updates OrgMember atomically via $transaction", async () => {
-    mockOrgMember.findUnique
+  it("updates TeamMember atomically via $transaction", async () => {
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // role check
       .mockResolvedValueOnce({ // fetchUserResource
@@ -257,7 +257,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
         deactivatedAt: new Date(),
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
     const res = await PUT(
@@ -274,7 +274,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     expect(res.status).toBe(200);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
     // T3-1: Verify scimManaged is always set in PUT
-    expect(mockOrgMember.update).toHaveBeenCalledWith(
+    expect(mockTeamMember.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ scimManaged: true }),
       }),
@@ -283,14 +283,14 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
   });
 
   it("logs SCIM_USER_DEACTIVATE when deactivating active user via PUT", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // active → deactivate
       .mockResolvedValueOnce({ // fetchUserResource
         userId: "user-1", orgId: "team-1", deactivatedAt: new Date(),
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
     await PUT(
@@ -310,14 +310,14 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
   });
 
   it("logs SCIM_USER_REACTIVATE when reactivating deactivated user via PUT", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: new Date("2024-01-01") }) // deactivated → reactivate
       .mockResolvedValueOnce({ // fetchUserResource
         userId: "user-1", orgId: "team-1", deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
     await PUT(
@@ -337,7 +337,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
   });
 
   it("reactivates a deactivated user via PUT active:true", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: new Date("2024-01-01"), userId: "user-1" }) // role check
       .mockResolvedValueOnce({ // fetchUserResource
@@ -346,7 +346,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
         deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
     const res = await PUT(
@@ -361,7 +361,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       makeParams("user-1"),
     );
     expect(res.status).toBe(200);
-    expect(mockOrgMember.update).toHaveBeenCalledWith(
+    expect(mockTeamMember.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ deactivatedAt: null }),
       }),
@@ -369,7 +369,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
   });
 
   it("does not update User.name via PUT (multi-team safety)", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // role check
       .mockResolvedValueOnce({ // fetchUserResource
@@ -378,7 +378,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
         deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Old Name" },
       });
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
     const res = await PUT(
@@ -398,7 +398,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
   });
 
   it("returns 400 for invalid JSON body", async () => {
-    mockOrgMember.findUnique.mockResolvedValueOnce({ userId: "user-1" }); // resolveUserId
+    mockTeamMember.findUnique.mockResolvedValueOnce({ userId: "user-1" }); // resolveUserId
 
     const req = new NextRequest("http://localhost/api/scim/v2/Users/user-1", {
       method: "PUT",
@@ -412,7 +412,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
   });
 
   it("clears externalId mapping when externalId is omitted in PUT", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // role check
       .mockResolvedValueOnce({ // fetchUserResource
@@ -421,7 +421,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
         deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.update.mockResolvedValue({});
     mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 1 });
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
@@ -458,7 +458,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
   });
 
   it("deactivates a user via PATCH active=false", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // member lookup
       .mockResolvedValueOnce({ // fetchUserResource
@@ -467,7 +467,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
         deactivatedAt: new Date(),
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
     const res = await PATCH(
@@ -481,7 +481,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       makeParams("user-1"),
     );
     expect(res.status).toBe(200);
-    expect(mockOrgMember.update).toHaveBeenCalledWith(
+    expect(mockTeamMember.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           deactivatedAt: expect.any(Date),
@@ -492,7 +492,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
   });
 
   it("blocks PATCH active=false on OWNER", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "owner-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "OWNER", deactivatedAt: null }); // member lookup
 
@@ -510,7 +510,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
   });
 
   it("returns 400 for unsupported patch op", async () => {
-    mockOrgMember.findUnique.mockResolvedValueOnce({ userId: "user-1" }); // resolveUserId
+    mockTeamMember.findUnique.mockResolvedValueOnce({ userId: "user-1" }); // resolveUserId
 
     const res = await PATCH(
       makeReq({
@@ -526,7 +526,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
   });
 
   it("reactivates a deactivated user via PATCH active=true", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: new Date("2024-01-01") }) // member lookup
       .mockResolvedValueOnce({ // fetchUserResource
@@ -535,7 +535,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
         deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
     const res = await PATCH(
@@ -549,7 +549,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       makeParams("user-1"),
     );
     expect(res.status).toBe(200);
-    expect(mockOrgMember.update).toHaveBeenCalledWith(
+    expect(mockTeamMember.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           deactivatedAt: null,
@@ -563,7 +563,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
   });
 
   it("does not update User.name via PATCH (multi-team safety)", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // member lookup
       .mockResolvedValueOnce({ // fetchUserResource
@@ -572,7 +572,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
         deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
     const res = await PATCH(
@@ -598,8 +598,8 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     mockCheckScimRateLimit.mockResolvedValue(true);
   });
 
-  it("deletes OrgMember, OrgMemberKey, and ScimExternalMapping atomically", async () => {
-    mockOrgMember.findUnique
+  it("deletes TeamMember, TeamMemberKey, and ScimExternalMapping atomically", async () => {
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ // member lookup (includes user for email)
         id: "m1",
@@ -625,7 +625,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
   });
 
   it("blocks DELETE on OWNER", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "owner-1" }) // resolveUserId
       .mockResolvedValueOnce({
         id: "m1",
@@ -639,7 +639,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
   });
 
   it("returns 404 for unknown user", async () => {
-    mockOrgMember.findUnique.mockResolvedValue(null);
+    mockTeamMember.findUnique.mockResolvedValue(null);
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("unknown"));
@@ -652,7 +652,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
       "Foreign key constraint failed",
       { code: "P2003", clientVersion: "7.0.0", meta: {} },
     );
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({
         id: "m1",
@@ -673,7 +673,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     const res = await GET(makeReq(), makeParams(longId));
     expect(res.status).toBe(404);
     // resolveUserId should short-circuit, no DB calls
-    expect(mockOrgMember.findUnique).not.toHaveBeenCalled();
+    expect(mockTeamMember.findUnique).not.toHaveBeenCalled();
   });
 });
 
@@ -685,7 +685,7 @@ describe("PATCH /api/scim/v2/Users/[id] — additional edge cases", () => {
   });
 
   it("returns 400 for invalid JSON body", async () => {
-    mockOrgMember.findUnique.mockResolvedValueOnce({ userId: "user-1" }); // resolveUserId
+    mockTeamMember.findUnique.mockResolvedValueOnce({ userId: "user-1" }); // resolveUserId
 
     const req = new NextRequest("http://localhost/api/scim/v2/Users/user-1", {
       method: "PATCH",
@@ -699,7 +699,7 @@ describe("PATCH /api/scim/v2/Users/[id] — additional edge cases", () => {
   });
 
   it("returns 400 for missing PatchOp schema URN", async () => {
-    mockOrgMember.findUnique.mockResolvedValueOnce({ userId: "user-1" }); // resolveUserId
+    mockTeamMember.findUnique.mockResolvedValueOnce({ userId: "user-1" }); // resolveUserId
 
     const res = await PATCH(
       makeReq({
@@ -724,7 +724,7 @@ describe("PUT /api/scim/v2/Users/[id] — externalId change", () => {
     mockCheckScimRateLimit.mockResolvedValue(true);
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
-        orgMember: mockOrgMember,
+        orgMember: mockTeamMember,
         user: mockUser,
         scimExternalMapping: mockScimExternalMapping,
       }),
@@ -732,14 +732,14 @@ describe("PUT /api/scim/v2/Users/[id] — externalId change", () => {
   });
 
   it("deletes stale mapping before creating new one when externalId changes", async () => {
-    mockOrgMember.findUnique
+    mockTeamMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" }) // resolveUserId
       .mockResolvedValueOnce({ id: "m1", role: "MEMBER", deactivatedAt: null }) // role check
       .mockResolvedValueOnce({ // fetchUserResource
         userId: "user-1", orgId: "team-1", deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       });
-    mockOrgMember.update.mockResolvedValue({});
+    mockTeamMember.update.mockResolvedValue({});
     // New externalId "ext-B" doesn't exist yet
     mockScimExternalMapping.findFirst
       .mockResolvedValueOnce(null) // uniqueness check

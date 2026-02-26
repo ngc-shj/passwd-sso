@@ -71,7 +71,7 @@ export function makeOrg(overrides: Record<string, unknown> = {}) {
   };
 }
 
-export function makeOrgMember(overrides: Record<string, unknown> = {}) {
+export function makeTeamMember(overrides: Record<string, unknown> = {}) {
   return {
     id: "member-1",
     orgId: "org-1",
@@ -89,7 +89,7 @@ export function makeOrgMember(overrides: Record<string, unknown> = {}) {
   };
 }
 
-export function makeOrgPasswordEntry(overrides: Record<string, unknown> = {}) {
+export function makeTeamPasswordEntry(overrides: Record<string, unknown> = {}) {
   return {
     id: "org-pwd-1",
     encryptedBlob: "org-blob-cipher",
@@ -114,7 +114,7 @@ export function makeOrgPasswordEntry(overrides: Record<string, unknown> = {}) {
   };
 }
 
-export function makeOrgInvitation(overrides: Record<string, unknown> = {}) {
+export function makeTeamInvitation(overrides: Record<string, unknown> = {}) {
   return {
     id: "inv-1",
     orgId: "org-1",

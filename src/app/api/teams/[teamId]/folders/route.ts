@@ -157,7 +157,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     action: AUDIT_ACTION.FOLDER_CREATE,
     userId: session.user.id,
     orgId: teamId,
-    targetType: AUDIT_TARGET_TYPE.ORG_FOLDER,
+    targetType: AUDIT_TARGET_TYPE.TEAM_FOLDER,
     targetId: folder.id,
     ...extractRequestMeta(req),
   });

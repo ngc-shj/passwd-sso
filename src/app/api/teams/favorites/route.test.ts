@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockAuth, mockPrismaOrgMember, mockPrismaOrgPasswordFavorite, mockHasTeamPermission } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamMember, mockPrismaOrgPasswordFavorite, mockHasTeamPermission } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockPrismaOrgMember: { findMany: vi.fn() },
+  mockPrismaTeamMember: { findMany: vi.fn() },
   mockPrismaOrgPasswordFavorite: { findMany: vi.fn() },
   mockHasTeamPermission: vi.fn(),
 }));
@@ -10,7 +10,7 @@ const { mockAuth, mockPrismaOrgMember, mockPrismaOrgPasswordFavorite, mockHasTea
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockPrismaOrgMember,
+    orgMember: mockPrismaTeamMember,
     orgPasswordFavorite: mockPrismaOrgPasswordFavorite,
   },
 }));
@@ -35,7 +35,7 @@ describe("GET /api/teams/favorites", () => {
   });
 
   it("returns empty array when no memberships", async () => {
-    mockPrismaOrgMember.findMany.mockResolvedValue([]);
+    mockPrismaTeamMember.findMany.mockResolvedValue([]);
     mockPrismaOrgPasswordFavorite.findMany.mockResolvedValue([]);
     const res = await GET();
     const json = await res.json();
@@ -44,7 +44,7 @@ describe("GET /api/teams/favorites", () => {
 
   it("returns favorited entries with encrypted overviews (E2E mode)", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
-    mockPrismaOrgMember.findMany.mockResolvedValue([
+    mockPrismaTeamMember.findMany.mockResolvedValue([
       { orgId: "team-1", role: TEAM_ROLE.MEMBER },
     ]);
     mockPrismaOrgPasswordFavorite.findMany.mockResolvedValue([
@@ -88,7 +88,7 @@ describe("GET /api/teams/favorites", () => {
 
   it("filters out deleted and archived entries", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
-    mockPrismaOrgMember.findMany.mockResolvedValue([
+    mockPrismaTeamMember.findMany.mockResolvedValue([
       { orgId: "team-1", role: TEAM_ROLE.MEMBER },
     ]);
     mockPrismaOrgPasswordFavorite.findMany.mockResolvedValue([

@@ -4,14 +4,14 @@ import { NextRequest } from "next/server";
 const {
   mockAuth,
   mockRequireTeamPermission,
-  mockPrismaOrgPasswordEntry,
+  mockPrismaTeamPasswordEntry,
   mockPrismaAttachment,
   mockPrismaOrganization,
   MockTeamAuthError,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
-  mockPrismaOrgPasswordEntry: {
+  mockPrismaTeamPasswordEntry: {
     findUnique: vi.fn(),
   },
   mockPrismaAttachment: {
@@ -38,7 +38,7 @@ vi.mock("@/lib/team-auth", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgPasswordEntry: mockPrismaOrgPasswordEntry,
+    orgPasswordEntry: mockPrismaTeamPasswordEntry,
     attachment: mockPrismaAttachment,
     organization: mockPrismaOrganization,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
@@ -86,7 +86,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   });
 
   it("returns 404 when entry does not belong to team", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
       orgId: "other-team",
     });
     const res = await GET(
@@ -110,7 +110,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   });
 
   it("returns attachment metadata list", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
     mockPrismaAttachment.findMany.mockResolvedValue([
       {
         id: "att-1",
@@ -136,7 +136,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
     mockPrismaAttachment.count.mockResolvedValue(0);
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
   });
@@ -178,7 +178,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   });
 
   it("returns 404 when entry does not belong to team", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
     const res = await POST(
       createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),

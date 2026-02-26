@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgMember, mockRequireTeamMember, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamMember, mockRequireTeamMember, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -12,7 +12,7 @@ const { mockAuth, mockPrismaOrgMember, mockRequireTeamMember, TeamAuthError } = 
   }
   return {
     mockAuth: vi.fn(),
-    mockPrismaOrgMember: { findMany: vi.fn() },
+    mockPrismaTeamMember: { findMany: vi.fn() },
     mockRequireTeamMember: vi.fn(),
     TeamAuthError: _TeamAuthError,
   };
@@ -20,7 +20,7 @@ const { mockAuth, mockPrismaOrgMember, mockRequireTeamMember, TeamAuthError } = 
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { orgMember: mockPrismaOrgMember },
+  prisma: { orgMember: mockPrismaTeamMember },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
@@ -59,7 +59,7 @@ describe("GET /api/teams/[teamId]/members", () => {
   });
 
   it("returns list of members", async () => {
-    mockPrismaOrgMember.findMany.mockResolvedValue([
+    mockPrismaTeamMember.findMany.mockResolvedValue([
       {
         id: "m1",
         userId: "u1",

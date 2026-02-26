@@ -149,7 +149,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     action: AUDIT_ACTION.FOLDER_UPDATE,
     userId: session.user.id,
     orgId: teamId,
-    targetType: AUDIT_TARGET_TYPE.ORG_FOLDER,
+    targetType: AUDIT_TARGET_TYPE.TEAM_FOLDER,
     targetId: id,
     ...extractRequestMeta(req),
   });
@@ -246,7 +246,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     action: AUDIT_ACTION.FOLDER_DELETE,
     userId: session.user.id,
     orgId: teamId,
-    targetType: AUDIT_TARGET_TYPE.ORG_FOLDER,
+    targetType: AUDIT_TARGET_TYPE.TEAM_FOLDER,
     targetId: id,
     ...extractRequestMeta(req),
   });

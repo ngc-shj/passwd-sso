@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockPrismaOrganization, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaOrganization, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -12,12 +12,12 @@ const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockPrismaOrg
   }
   return {
     mockAuth: vi.fn(),
-    mockPrismaOrgPasswordEntry: {
+    mockPrismaTeamPasswordEntry: {
       findMany: vi.fn(),
       create: vi.fn(),
       deleteMany: vi.fn(),
     },
-    mockPrismaOrgFolder: { findUnique: vi.fn() },
+    mockPrismaTeamFolder: { findUnique: vi.fn() },
     mockPrismaOrganization: { findUnique: vi.fn() },
     mockAuditLogCreate: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
@@ -28,8 +28,8 @@ const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockPrismaOrg
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgPasswordEntry: mockPrismaOrgPasswordEntry,
-    orgFolder: mockPrismaOrgFolder,
+    orgPasswordEntry: mockPrismaTeamPasswordEntry,
+    orgFolder: mockPrismaTeamFolder,
     organization: mockPrismaOrganization,
     auditLog: { create: mockAuditLogCreate },
   },
@@ -51,7 +51,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
     mockAuditLogCreate.mockResolvedValue({});
-    mockPrismaOrgPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
+    mockPrismaTeamPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -85,7 +85,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
   });
 
   it("returns encrypted overviews as-is (E2E mode)", async () => {
-    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([
       {
         id: "pw-1",
         entryType: ENTRY_TYPE.LOGIN,
@@ -123,7 +123,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
   });
 
   it("filters by entryType when type query param is provided", async () => {
-    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
@@ -131,7 +131,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
       }),
       createParams({ teamId: TEAM_ID }),
     );
-    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+    expect(mockPrismaTeamPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ entryType: "SECURE_NOTE" }),
       })
@@ -139,18 +139,18 @@ describe("GET /api/teams/[teamId]/passwords", () => {
   });
 
   it("does not filter by entryType when type param is absent", async () => {
-    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
       createParams({ teamId: TEAM_ID }),
     );
-    const call = mockPrismaOrgPasswordEntry.findMany.mock.calls[0][0];
+    const call = mockPrismaTeamPasswordEntry.findMany.mock.calls[0][0];
     expect(call.where).not.toHaveProperty("entryType");
   });
 
   it("filters by trash when trash=true", async () => {
-    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
@@ -158,7 +158,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
       }),
       createParams({ teamId: TEAM_ID }),
     );
-    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+    expect(mockPrismaTeamPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ deletedAt: { not: null } }),
       })
@@ -166,13 +166,13 @@ describe("GET /api/teams/[teamId]/passwords", () => {
   });
 
   it("excludes deleted items by default", async () => {
-    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
       createParams({ teamId: TEAM_ID }),
     );
-    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+    expect(mockPrismaTeamPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ deletedAt: null }),
       })
@@ -180,7 +180,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
   });
 
   it("filters by archived when archived=true", async () => {
-    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
@@ -188,7 +188,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
       }),
       createParams({ teamId: TEAM_ID }),
     );
-    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+    expect(mockPrismaTeamPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ isArchived: true }),
       })
@@ -196,13 +196,13 @@ describe("GET /api/teams/[teamId]/passwords", () => {
   });
 
   it("excludes archived items by default", async () => {
-    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
       createParams({ teamId: TEAM_ID }),
     );
-    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+    expect(mockPrismaTeamPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ isArchived: false }),
       })
@@ -210,7 +210,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
   });
 
   it("filters by favorites when favorites=true", async () => {
-    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
@@ -218,7 +218,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
       }),
       createParams({ teamId: TEAM_ID }),
     );
-    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+    expect(mockPrismaTeamPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           favorites: { some: { userId: "test-user-id" } },
@@ -228,7 +228,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
   });
 
   it("filters by tag when tag param is provided", async () => {
-    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
@@ -236,7 +236,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
       }),
       createParams({ teamId: TEAM_ID }),
     );
-    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+    expect(mockPrismaTeamPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           tags: { some: { id: "tag-456" } },
@@ -246,7 +246,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
   });
 
   it("filters by folder when folder param is provided", async () => {
-    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
@@ -254,7 +254,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
       }),
       createParams({ teamId: TEAM_ID }),
     );
-    expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
+    expect(mockPrismaTeamPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           orgFolderId: "folder-789",
@@ -264,13 +264,13 @@ describe("GET /api/teams/[teamId]/passwords", () => {
   });
 
   it("does not filter by folder when folder param is absent", async () => {
-    mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
       createParams({ teamId: TEAM_ID }),
     );
-    const call = mockPrismaOrgPasswordEntry.findMany.mock.calls[0][0];
+    const call = mockPrismaTeamPasswordEntry.findMany.mock.calls[0][0];
     expect(call.where).not.toHaveProperty("orgFolderId");
   });
 });
@@ -372,7 +372,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
   });
 
   it("creates E2E entry with pre-encrypted blobs (201)", async () => {
-    mockPrismaOrgPasswordEntry.create.mockResolvedValue({
+    mockPrismaTeamPasswordEntry.create.mockResolvedValue({
       id: "new-pw",
       entryType: "LOGIN",
       tags: [],
@@ -387,7 +387,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     expect(res.status).toBe(201);
     expect(json.id).toBe("new-pw");
     expect(json.entryType).toBe("LOGIN");
-    expect(mockPrismaOrgPasswordEntry.create).toHaveBeenCalledWith(
+    expect(mockPrismaTeamPasswordEntry.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           encryptedBlob: "enc-blob",
@@ -409,7 +409,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
 
   it("creates entry with tags connected", async () => {
     const TAG_CUID = "cm1234567890abcdefghijkl0";
-    mockPrismaOrgPasswordEntry.create.mockResolvedValue({
+    mockPrismaTeamPasswordEntry.create.mockResolvedValue({
       id: "new-pw",
       entryType: "LOGIN",
       tags: [{ id: TAG_CUID, name: "Work", color: "#ff0000" }],
@@ -423,7 +423,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
       createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(201);
-    expect(mockPrismaOrgPasswordEntry.create).toHaveBeenCalledWith(
+    expect(mockPrismaTeamPasswordEntry.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           tags: { connect: [{ id: TAG_CUID }] },
@@ -434,8 +434,8 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
 
   it("creates entry with orgFolderId when folder belongs to same team", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
-    mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: TEAM_ID });
-    mockPrismaOrgPasswordEntry.create.mockResolvedValue({
+    mockPrismaTeamFolder.findUnique.mockResolvedValue({ orgId: TEAM_ID });
+    mockPrismaTeamPasswordEntry.create.mockResolvedValue({
       id: "new-pw",
       entryType: "LOGIN",
       tags: [],
@@ -449,7 +449,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
       createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(201);
-    expect(mockPrismaOrgPasswordEntry.create).toHaveBeenCalledWith(
+    expect(mockPrismaTeamPasswordEntry.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ orgFolderId: FOLDER_CUID }),
       }),
@@ -458,7 +458,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
 
   it("returns 400 when orgFolderId belongs to a different team", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
-    mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: "other-team-999" });
+    mockPrismaTeamFolder.findUnique.mockResolvedValue({ orgId: "other-team-999" });
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
@@ -473,7 +473,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
 
   it("returns 400 when orgFolderId does not exist", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
-    mockPrismaOrgFolder.findUnique.mockResolvedValue(null);
+    mockPrismaTeamFolder.findUnique.mockResolvedValue(null);
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
@@ -487,7 +487,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
   });
 
   it("creates entry without folder validation when orgFolderId is not provided", async () => {
-    mockPrismaOrgPasswordEntry.create.mockResolvedValue({
+    mockPrismaTeamPasswordEntry.create.mockResolvedValue({
       id: "new-pw",
       entryType: "LOGIN",
       tags: [],
@@ -499,6 +499,6 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
       createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(201);
-    expect(mockPrismaOrgFolder.findUnique).not.toHaveBeenCalled();
+    expect(mockPrismaTeamFolder.findUnique).not.toHaveBeenCalled();
   });
 });

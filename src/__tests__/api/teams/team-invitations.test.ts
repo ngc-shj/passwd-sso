@@ -9,7 +9,7 @@ const {
   mockInvitationFindFirst,
   mockInvitationCreate,
   mockUserFindUnique,
-  mockOrgMemberFindUnique,
+  mockTeamMemberFindUnique,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
@@ -17,7 +17,7 @@ const {
   mockInvitationFindFirst: vi.fn(),
   mockInvitationCreate: vi.fn(),
   mockUserFindUnique: vi.fn(),
-  mockOrgMemberFindUnique: vi.fn(),
+  mockTeamMemberFindUnique: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -39,7 +39,7 @@ vi.mock("@/lib/prisma", () => ({
       create: mockInvitationCreate,
     },
     user: { findUnique: mockUserFindUnique },
-    orgMember: { findUnique: mockOrgMemberFindUnique },
+    orgMember: { findUnique: mockTeamMemberFindUnique },
   },
 }));
 vi.mock("@/lib/audit", () => ({
@@ -146,7 +146,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockUserFindUnique.mockResolvedValue({ id: "u2", email: "existing@test.com" });
-    mockOrgMemberFindUnique.mockResolvedValue({ id: "m1", deactivatedAt: null });
+    mockTeamMemberFindUnique.mockResolvedValue({ id: "m1", deactivatedAt: null });
     const req = createRequest("POST", undefined, { body: { email: "existing@test.com", role: "MEMBER" } });
     const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
@@ -191,7 +191,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockUserFindUnique.mockResolvedValue({ id: "u2", email: "nonmember@test.com" });
-    mockOrgMemberFindUnique.mockResolvedValue(null);
+    mockTeamMemberFindUnique.mockResolvedValue(null);
     mockInvitationFindFirst.mockResolvedValue(null);
     const created = {
       id: "inv-2",

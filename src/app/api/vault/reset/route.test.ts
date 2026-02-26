@@ -3,7 +3,7 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag,
-  mockPrismaEmergencyGrant, mockPrismaOrgMemberKey, mockPrismaOrgMember,
+  mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
   mockPrismaTransaction, mockRateLimiter, mockLogAudit,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -14,8 +14,8 @@ const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaVaultKey: { deleteMany: vi.fn() },
   mockPrismaTag: { deleteMany: vi.fn() },
   mockPrismaEmergencyGrant: { updateMany: vi.fn() },
-  mockPrismaOrgMemberKey: { deleteMany: vi.fn() },
-  mockPrismaOrgMember: { updateMany: vi.fn() },
+  mockPrismaTeamMemberKey: { deleteMany: vi.fn() },
+  mockPrismaTeamMember: { updateMany: vi.fn() },
   mockPrismaTransaction: vi.fn(),
   mockRateLimiter: { check: vi.fn() },
   mockLogAudit: vi.fn(),
@@ -31,8 +31,8 @@ vi.mock("@/lib/prisma", () => ({
     vaultKey: mockPrismaVaultKey,
     tag: mockPrismaTag,
     emergencyAccessGrant: mockPrismaEmergencyGrant,
-    orgMemberKey: mockPrismaOrgMemberKey,
-    orgMember: mockPrismaOrgMember,
+    orgMemberKey: mockPrismaTeamMemberKey,
+    orgMember: mockPrismaTeamMember,
     $transaction: mockPrismaTransaction,
   },
 }));
@@ -119,22 +119,22 @@ describe("POST /api/vault/reset", () => {
     expect(res.status).toBe(400);
   });
 
-  it("includes ECDH cleanup, OrgMemberKey deletion, and keyDistributed reset in transaction", async () => {
+  it("includes ECDH cleanup, TeamMemberKey deletion, and keyDistributed reset in transaction", async () => {
     const res = await POST(createRequest("POST", URL, {
       body: { confirmation: "DELETE MY VAULT" },
     }));
     expect(res.status).toBe(200);
 
-    // Transaction includes OrgMemberKey deleteMany and OrgMember updateMany
+    // Transaction includes TeamMemberKey deleteMany and TeamMember updateMany
     const txArray = mockPrismaTransaction.mock.calls[0][0];
 
-    // Verify OrgMemberKey.deleteMany was included
-    expect(mockPrismaOrgMemberKey.deleteMany).toHaveBeenCalledWith({
+    // Verify TeamMemberKey.deleteMany was included
+    expect(mockPrismaTeamMemberKey.deleteMany).toHaveBeenCalledWith({
       where: { userId: "user-1" },
     });
 
-    // Verify OrgMember.updateMany was included (reset keyDistributed)
-    expect(mockPrismaOrgMember.updateMany).toHaveBeenCalledWith({
+    // Verify TeamMember.updateMany was included (reset keyDistributed)
+    expect(mockPrismaTeamMember.updateMany).toHaveBeenCalledWith({
       where: { userId: "user-1" },
       data: { keyDistributed: false },
     });

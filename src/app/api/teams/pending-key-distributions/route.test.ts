@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockAuth, mockPrismaOrgMember } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamMember } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockPrismaOrgMember: { findMany: vi.fn() },
+  mockPrismaTeamMember: { findMany: vi.fn() },
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockPrismaOrgMember,
+    orgMember: mockPrismaTeamMember,
   },
 }));
 
@@ -27,7 +27,7 @@ describe("GET /api/teams/pending-key-distributions", () => {
   });
 
   it("returns empty array when user is not admin of any E2E team", async () => {
-    mockPrismaOrgMember.findMany.mockResolvedValueOnce([]); // admin memberships
+    mockPrismaTeamMember.findMany.mockResolvedValueOnce([]); // admin memberships
     const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -36,12 +36,12 @@ describe("GET /api/teams/pending-key-distributions", () => {
 
   it("returns pending members for admin teams", async () => {
     // First call: admin memberships
-    mockPrismaOrgMember.findMany.mockResolvedValueOnce([
+    mockPrismaTeamMember.findMany.mockResolvedValueOnce([
       { orgId: "team-1" },
       { orgId: "team-2" },
     ]);
     // Second call: pending members
-    mockPrismaOrgMember.findMany.mockResolvedValueOnce([
+    mockPrismaTeamMember.findMany.mockResolvedValueOnce([
       {
         id: "member-1",
         orgId: "team-1",
@@ -68,14 +68,14 @@ describe("GET /api/teams/pending-key-distributions", () => {
   });
 
   it("queries for pending members with correct filters", async () => {
-    mockPrismaOrgMember.findMany
+    mockPrismaTeamMember.findMany
       .mockResolvedValueOnce([{ orgId: "team-1" }])
       .mockResolvedValueOnce([]);
 
     await GET();
 
     // Second findMany call should filter by keyDistributed: false and ecdhPublicKey not null
-    expect(mockPrismaOrgMember.findMany).toHaveBeenNthCalledWith(2,
+    expect(mockPrismaTeamMember.findMany).toHaveBeenNthCalledWith(2,
       expect.objectContaining({
         where: expect.objectContaining({
           keyDistributed: false,

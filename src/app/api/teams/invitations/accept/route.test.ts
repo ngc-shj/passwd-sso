@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgInvitation, mockPrismaOrgMember, mockPrismaUser, mockTransaction, mockRateLimiter } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser, mockTransaction, mockRateLimiter } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockPrismaOrgInvitation: {
+  mockPrismaTeamInvitation: {
     findUnique: vi.fn(),
     update: vi.fn(),
   },
-  mockPrismaOrgMember: {
+  mockPrismaTeamMember: {
     findUnique: vi.fn(),
     create: vi.fn(),
     upsert: vi.fn(),
@@ -20,8 +20,8 @@ const { mockAuth, mockPrismaOrgInvitation, mockPrismaOrgMember, mockPrismaUser, 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgInvitation: mockPrismaOrgInvitation,
-    orgMember: mockPrismaOrgMember,
+    orgInvitation: mockPrismaTeamInvitation,
+    orgMember: mockPrismaTeamMember,
     user: mockPrismaUser,
     $transaction: mockTransaction,
   },
@@ -70,7 +70,7 @@ describe("POST /api/teams/invitations/accept", () => {
   });
 
   it("returns 404 when token is invalid", async () => {
-    mockPrismaOrgInvitation.findUnique.mockResolvedValue(null);
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(null);
     const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "invalid" },
     }));
@@ -78,7 +78,7 @@ describe("POST /api/teams/invitations/accept", () => {
   });
 
   it("returns 410 when invitation already used", async () => {
-    mockPrismaOrgInvitation.findUnique.mockResolvedValue({
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue({
       ...validInvitation,
       status: INVITATION_STATUS.ACCEPTED,
     });
@@ -89,7 +89,7 @@ describe("POST /api/teams/invitations/accept", () => {
   });
 
   it("returns 410 when invitation expired", async () => {
-    mockPrismaOrgInvitation.findUnique.mockResolvedValue({
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue({
       ...validInvitation,
       expiresAt: new Date("2020-01-01"),
     });
@@ -101,7 +101,7 @@ describe("POST /api/teams/invitations/accept", () => {
 
   it("returns 403 when email doesn't match", async () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id", email: "other@test.com" } });
-    mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
     const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "valid-token" },
     }));
@@ -109,8 +109,8 @@ describe("POST /api/teams/invitations/accept", () => {
   });
 
   it("handles already-member case gracefully", async () => {
-    mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
-    mockPrismaOrgMember.findUnique.mockResolvedValue({
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: "existing-member",
       deactivatedAt: null,
     });
@@ -124,8 +124,8 @@ describe("POST /api/teams/invitations/accept", () => {
   });
 
   it("returns 409 for deactivated scimManaged member", async () => {
-    mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
-    mockPrismaOrgMember.findUnique.mockResolvedValue({
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: "deactivated-member",
       deactivatedAt: new Date("2024-01-01"),
       scimManaged: true,
@@ -140,8 +140,8 @@ describe("POST /api/teams/invitations/accept", () => {
   });
 
   it("re-activates deactivated non-scimManaged member", async () => {
-    mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
-    mockPrismaOrgMember.findUnique.mockResolvedValue({
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: "deactivated-member",
       deactivatedAt: new Date("2024-01-01"),
       scimManaged: false,
@@ -158,8 +158,8 @@ describe("POST /api/teams/invitations/accept", () => {
   });
 
   it("accepts invitation and creates membership", async () => {
-    mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
-    mockPrismaOrgMember.findUnique.mockResolvedValue(null);
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaTeamMember.findUnique.mockResolvedValue(null);
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key-jwk" });
 
     const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
@@ -174,8 +174,8 @@ describe("POST /api/teams/invitations/accept", () => {
   });
 
   it("returns needsKeyDistribution for team accept", async () => {
-    mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
-    mockPrismaOrgMember.findUnique.mockResolvedValue(null);
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaTeamMember.findUnique.mockResolvedValue(null);
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key-jwk" });
 
     const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
@@ -188,8 +188,8 @@ describe("POST /api/teams/invitations/accept", () => {
   });
 
   it("returns vaultSetupRequired when user lacks ECDH key", async () => {
-    mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
-    mockPrismaOrgMember.findUnique.mockResolvedValue(null);
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaTeamMember.findUnique.mockResolvedValue(null);
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: null });
 
     const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {

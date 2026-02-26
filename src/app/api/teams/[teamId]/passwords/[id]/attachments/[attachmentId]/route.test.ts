@@ -4,13 +4,13 @@ import { NextRequest } from "next/server";
 const {
   mockAuth,
   mockRequireTeamPermission,
-  mockPrismaOrgPasswordEntry,
+  mockPrismaTeamPasswordEntry,
   mockPrismaAttachment,
   MockTeamAuthError,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
-  mockPrismaOrgPasswordEntry: {
+  mockPrismaTeamPasswordEntry: {
     findUnique: vi.fn(),
   },
   mockPrismaAttachment: {
@@ -33,7 +33,7 @@ vi.mock("@/lib/team-auth", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgPasswordEntry: mockPrismaOrgPasswordEntry,
+    orgPasswordEntry: mockPrismaTeamPasswordEntry,
     attachment: mockPrismaAttachment,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
@@ -54,7 +54,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -86,7 +86,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
   });
 
   it("returns 404 when entry does not belong to team", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
     const res = await GET(
       createRequest(
         "GET",
@@ -146,7 +146,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -178,7 +178,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
   });
 
   it("returns 404 when entry does not belong to team", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
     const res = await DELETE(
       createRequest(
         "DELETE",

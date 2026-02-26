@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const {
-  mockAuth, mockRequireTeamMember, mockPrismaOrgMember,
-  mockPrismaOrgMemberKey, TeamAuthError,
+  mockAuth, mockRequireTeamMember, mockPrismaTeamMember,
+  mockPrismaTeamMemberKey, TeamAuthError,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
@@ -15,8 +15,8 @@ const {
   return {
     mockAuth: vi.fn(),
     mockRequireTeamMember: vi.fn(),
-    mockPrismaOrgMember: { findUnique: vi.fn(), findFirst: vi.fn() },
-    mockPrismaOrgMemberKey: { findUnique: vi.fn(), findFirst: vi.fn() },
+    mockPrismaTeamMember: { findUnique: vi.fn(), findFirst: vi.fn() },
+    mockPrismaTeamMemberKey: { findUnique: vi.fn(), findFirst: vi.fn() },
     TeamAuthError: _TeamAuthError,
   };
 });
@@ -28,8 +28,8 @@ vi.mock("@/lib/team-auth", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockPrismaOrgMember,
-    orgMemberKey: mockPrismaOrgMemberKey,
+    orgMember: mockPrismaTeamMember,
+    orgMemberKey: mockPrismaTeamMemberKey,
   },
 }));
 
@@ -75,7 +75,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
   });
 
   it("returns 403 when key not distributed", async () => {
-    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: false });
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ keyDistributed: false });
     const res = await GET(
       createRequest("GET", URL),
       { params: Promise.resolve({ teamId: "team-1" }) },
@@ -86,8 +86,8 @@ describe("GET /api/teams/[teamId]/member-key", () => {
   });
 
   it("returns latest key when no keyVersion param", async () => {
-    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: true });
-    mockPrismaOrgMemberKey.findFirst.mockResolvedValue({
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ keyDistributed: true });
+    mockPrismaTeamMemberKey.findFirst.mockResolvedValue({
       encryptedOrgKey: "enc-key",
       orgKeyIv: "iv-hex",
       orgKeyAuthTag: "tag-hex",
@@ -106,15 +106,15 @@ describe("GET /api/teams/[teamId]/member-key", () => {
     expect(json.encryptedOrgKey).toBe("enc-key");
     expect(json.keyVersion).toBe(2);
     expect(json.wrapVersion).toBe(1);
-    expect(mockPrismaOrgMemberKey.findFirst).toHaveBeenCalledWith({
+    expect(mockPrismaTeamMemberKey.findFirst).toHaveBeenCalledWith({
       where: { orgId: "team-1", userId: "user-1" },
       orderBy: { keyVersion: "desc" },
     });
   });
 
   it("returns specific key version when param provided", async () => {
-    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: true });
-    mockPrismaOrgMemberKey.findUnique.mockResolvedValue({
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ keyDistributed: true });
+    mockPrismaTeamMemberKey.findUnique.mockResolvedValue({
       encryptedOrgKey: "enc-key-v1",
       orgKeyIv: "iv",
       orgKeyAuthTag: "tag",
@@ -135,7 +135,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
   });
 
   it("returns 400 on invalid keyVersion param", async () => {
-    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: true });
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ keyDistributed: true });
 
     const res = await GET(
       createRequest("GET", `${URL}?keyVersion=abc`),
@@ -145,7 +145,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
   });
 
   it("returns 400 when keyVersion=0 (boundary)", async () => {
-    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: true });
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ keyDistributed: true });
 
     const res = await GET(
       createRequest("GET", `${URL}?keyVersion=0`),
@@ -155,7 +155,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
   });
 
   it("returns 400 when keyVersion exceeds upper bound (S-30)", async () => {
-    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: true });
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ keyDistributed: true });
 
     const res = await GET(
       createRequest("GET", `${URL}?keyVersion=10001`),
@@ -165,8 +165,8 @@ describe("GET /api/teams/[teamId]/member-key", () => {
   });
 
   it("returns 404 when member key not found", async () => {
-    mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: true });
-    mockPrismaOrgMemberKey.findFirst.mockResolvedValue(null);
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ keyDistributed: true });
+    mockPrismaTeamMemberKey.findFirst.mockResolvedValue(null);
 
     const res = await GET(
       createRequest("GET", URL),

@@ -6,18 +6,18 @@ const {
   mockAuth,
   mockRequireTeamMember,
   mockRequireTeamPermission,
-  mockOrgFolderFindMany,
-  mockOrgFolderFindUnique,
-  mockOrgFolderFindFirst,
-  mockOrgFolderCreate,
+  mockTeamFolderFindMany,
+  mockTeamFolderFindUnique,
+  mockTeamFolderFindFirst,
+  mockTeamFolderCreate,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamMember: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
-  mockOrgFolderFindMany: vi.fn(),
-  mockOrgFolderFindUnique: vi.fn(),
-  mockOrgFolderFindFirst: vi.fn(),
-  mockOrgFolderCreate: vi.fn(),
+  mockTeamFolderFindMany: vi.fn(),
+  mockTeamFolderFindUnique: vi.fn(),
+  mockTeamFolderFindFirst: vi.fn(),
+  mockTeamFolderCreate: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -38,10 +38,10 @@ vi.mock("@/lib/team-auth", () => {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgFolder: {
-      findMany: mockOrgFolderFindMany,
-      findUnique: mockOrgFolderFindUnique,
-      findFirst: mockOrgFolderFindFirst,
-      create: mockOrgFolderCreate,
+      findMany: mockTeamFolderFindMany,
+      findUnique: mockTeamFolderFindUnique,
+      findFirst: mockTeamFolderFindFirst,
+      create: mockTeamFolderCreate,
     },
   },
 }));
@@ -81,7 +81,7 @@ describe("GET /api/teams/[teamId]/folders", () => {
   it("returns folder list with entry counts", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamMember.mockResolvedValue(undefined);
-    mockOrgFolderFindMany.mockResolvedValue([
+    mockTeamFolderFindMany.mockResolvedValue([
       {
         id: "f1",
         name: "Folder",
@@ -149,7 +149,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
   it("returns 409 for duplicate name at root", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockOrgFolderFindFirst.mockResolvedValue({ id: "existing" });
+    mockTeamFolderFindFirst.mockResolvedValue({ id: "existing" });
     const req = createRequest("POST", undefined, { body: { name: "Dup" } });
     const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
@@ -161,7 +161,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     const parentCuid = "cm1234567890abcdefghijklmn";
-    mockOrgFolderFindUnique.mockResolvedValue({ id: "existing" });
+    mockTeamFolderFindUnique.mockResolvedValue({ id: "existing" });
     const req = createRequest("POST", undefined, { body: { name: "Dup", parentId: parentCuid } });
     const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
@@ -195,7 +195,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     vi.mocked(validateFolderDepth).mockResolvedValue(undefined);
-    mockOrgFolderFindFirst.mockResolvedValue(null);
+    mockTeamFolderFindFirst.mockResolvedValue(null);
     const created = {
       id: "f1",
       name: "New",
@@ -204,7 +204,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    mockOrgFolderCreate.mockResolvedValue(created);
+    mockTeamFolderCreate.mockResolvedValue(created);
     const req = createRequest("POST", undefined, { body: { name: "New" } });
     const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);

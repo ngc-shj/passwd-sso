@@ -86,7 +86,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       {
         id: "log-1",
         action: AUDIT_ACTION.ENTRY_CREATE,
-        targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
+        targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
         targetId: "entry-1",
         metadata: null,
         ip: "10.0.0.1",
@@ -137,7 +137,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${TEAM_ID}/audit-logs?action=${AUDIT_ACTION.ORG_MEMBER_INVITE}`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs?action=${AUDIT_ACTION.TEAM_MEMBER_INVITE}`
     );
 
     await GET(req, createParams({ teamId: TEAM_ID }));
@@ -145,7 +145,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          action: AUDIT_ACTION.ORG_MEMBER_INVITE,
+          action: AUDIT_ACTION.TEAM_MEMBER_INVITE,
         }),
       })
     );
@@ -369,7 +369,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       {
         id: "log-1",
         action: AUDIT_ACTION.ENTRY_CREATE,
-        targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
+        targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
         targetId: "entry-1",
         metadata: null,
         ip: null,
@@ -417,7 +417,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     const logs = [
       {
         id: "log-1",
-        action: AUDIT_ACTION.ORG_MEMBER_INVITE,
+        action: AUDIT_ACTION.TEAM_MEMBER_INVITE,
         targetType: null,
         targetId: null,
         metadata: null,

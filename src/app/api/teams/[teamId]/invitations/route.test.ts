@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgInvitation, mockPrismaUser, mockPrismaOrgMember, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeamMember, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -12,13 +12,13 @@ const { mockAuth, mockPrismaOrgInvitation, mockPrismaUser, mockPrismaOrgMember, 
   }
   return {
     mockAuth: vi.fn(),
-    mockPrismaOrgInvitation: {
+    mockPrismaTeamInvitation: {
       findMany: vi.fn(),
       findFirst: vi.fn(),
       create: vi.fn(),
     },
     mockPrismaUser: { findUnique: vi.fn() },
-    mockPrismaOrgMember: { findUnique: vi.fn() },
+    mockPrismaTeamMember: { findUnique: vi.fn() },
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
   };
@@ -27,9 +27,9 @@ const { mockAuth, mockPrismaOrgInvitation, mockPrismaUser, mockPrismaOrgMember, 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgInvitation: mockPrismaOrgInvitation,
+    orgInvitation: mockPrismaTeamInvitation,
     user: mockPrismaUser,
-    orgMember: mockPrismaOrgMember,
+    orgMember: mockPrismaTeamMember,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
@@ -70,7 +70,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
   });
 
   it("returns list of pending invitations", async () => {
-    mockPrismaOrgInvitation.findMany.mockResolvedValue([
+    mockPrismaTeamInvitation.findMany.mockResolvedValue([
       {
         id: "inv-1",
         email: "user@test.com",
@@ -100,7 +100,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     mockPrismaUser.findUnique.mockResolvedValue(null);
-    mockPrismaOrgInvitation.findFirst.mockResolvedValue(null);
+    mockPrismaTeamInvitation.findFirst.mockResolvedValue(null);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -126,7 +126,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
   it("returns 409 when user is already a member", async () => {
     mockPrismaUser.findUnique.mockResolvedValue({ id: "existing-user" });
-    mockPrismaOrgMember.findUnique.mockResolvedValue({ id: "existing-member", deactivatedAt: null });
+    mockPrismaTeamMember.findUnique.mockResolvedValue({ id: "existing-member", deactivatedAt: null });
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
@@ -140,7 +140,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   });
 
   it("returns 409 when invitation already pending", async () => {
-    mockPrismaOrgInvitation.findFirst.mockResolvedValue({ id: "existing-inv" });
+    mockPrismaTeamInvitation.findFirst.mockResolvedValue({ id: "existing-inv" });
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
@@ -154,7 +154,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   });
 
   it("creates invitation successfully (201)", async () => {
-    mockPrismaOrgInvitation.create.mockResolvedValue({
+    mockPrismaTeamInvitation.create.mockResolvedValue({
       id: "new-inv",
       email: "new@test.com",
       role: TEAM_ROLE.MEMBER,
