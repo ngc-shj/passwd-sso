@@ -26,6 +26,11 @@ export interface OrgPasswordFormControllerArgs {
   handleOpenChange: (open: boolean) => void;
 }
 
+export interface TeamPasswordFormControllerArgs extends Omit<OrgPasswordFormControllerArgs, "orgId"> {
+  teamId?: OrgPasswordFormProps["orgId"];
+  orgId?: OrgPasswordFormProps["orgId"];
+}
+
 export function useOrgPasswordFormController({
   orgId,
   onSaved,
@@ -87,4 +92,19 @@ export function useOrgPasswordFormController({
     hasChanges,
     submitDisabled,
   };
+}
+
+export function useTeamPasswordFormController({
+  teamId,
+  orgId,
+  ...rest
+}: TeamPasswordFormControllerArgs) {
+  const scopedTeamId = teamId ?? orgId;
+  if (!scopedTeamId) {
+    throw new Error("useTeamPasswordFormController requires teamId or orgId");
+  }
+  return useOrgPasswordFormController({
+    orgId: scopedTeamId,
+    ...rest,
+  });
 }

@@ -21,6 +21,11 @@ type OrgPasswordFormModelInput = Pick<
   "orgId" | "open" | "onOpenChange" | "onSaved" | "entryType" | "editData"
 >;
 
+type TeamPasswordFormModelInput = Omit<OrgPasswordFormModelInput, "orgId"> & {
+  teamId?: OrgPasswordFormProps["orgId"];
+  orgId?: OrgPasswordFormProps["orgId"];
+};
+
 export function useOrgPasswordFormModel({
   orgId,
   open,
@@ -81,4 +86,19 @@ export function useOrgPasswordFormModel({
     hasChanges,
     submitDisabled,
   };
+}
+
+export function useTeamPasswordFormModel({
+  teamId,
+  orgId,
+  ...rest
+}: TeamPasswordFormModelInput) {
+  const scopedTeamId = teamId ?? orgId;
+  if (!scopedTeamId) {
+    throw new Error("useTeamPasswordFormModel requires teamId or orgId");
+  }
+  return useOrgPasswordFormModel({
+    orgId: scopedTeamId,
+    ...rest,
+  });
 }
