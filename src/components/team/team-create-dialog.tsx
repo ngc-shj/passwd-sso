@@ -94,10 +94,10 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
           name: name.trim(),
           slug: slug.trim(),
           description: description.trim() || undefined,
-          orgMemberKey: {
+          teamMemberKey: {
             encryptedOrgKey: escrow.encryptedOrgKey,
-            orgKeyIv: escrow.orgKeyIv,
-            orgKeyAuthTag: escrow.orgKeyAuthTag,
+            teamKeyIv: escrow.teamKeyIv,
+            teamKeyAuthTag: escrow.teamKeyAuthTag,
             ephemeralPublicKey: escrow.ephemeralPublicKey,
             hkdfSalt: escrow.hkdfSalt,
             keyVersion: escrow.keyVersion,

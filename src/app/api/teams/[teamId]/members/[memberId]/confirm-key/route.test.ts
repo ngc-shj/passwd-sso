@@ -36,8 +36,8 @@ const URL = "http://localhost/api/teams/team-1/members/member-1/confirm-key";
 
 const validBody = {
   encryptedOrgKey: "encrypted-team-key-data",
-  orgKeyIv: "a".repeat(24),
-  orgKeyAuthTag: "b".repeat(32),
+  teamKeyIv: "a".repeat(24),
+  teamKeyAuthTag: "b".repeat(32),
   ephemeralPublicKey: '{"kty":"EC","crv":"P-256","x":"test","y":"test"}',
   hkdfSalt: "c".repeat(64),
   keyVersion: 1,

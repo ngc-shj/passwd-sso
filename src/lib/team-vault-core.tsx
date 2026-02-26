@@ -140,8 +140,8 @@ export function TeamVaultProvider({
         const teamKeyBytes = await unwrapTeamKey(
           {
             ciphertext: memberKeyData.encryptedOrgKey,
-            iv: memberKeyData.orgKeyIv,
-            authTag: memberKeyData.orgKeyAuthTag,
+            iv: memberKeyData.teamKeyIv,
+            authTag: memberKeyData.teamKeyAuthTag,
           },
           memberKeyData.ephemeralPublicKey,
           ecdhPrivateKey,
@@ -246,8 +246,8 @@ export function TeamVaultProvider({
           teamKeyBytes = await unwrapTeamKey(
             {
               ciphertext: ownKeyData.encryptedOrgKey,
-              iv: ownKeyData.orgKeyIv,
-              authTag: ownKeyData.orgKeyAuthTag,
+              iv: ownKeyData.teamKeyIv,
+              authTag: ownKeyData.teamKeyAuthTag,
             },
             ownKeyData.ephemeralPublicKey,
             ecdhPrivateKey,
@@ -276,8 +276,8 @@ export function TeamVaultProvider({
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
                     encryptedOrgKey: escrow.encryptedOrgKey,
-                    orgKeyIv: escrow.orgKeyIv,
-                    orgKeyAuthTag: escrow.orgKeyAuthTag,
+                    teamKeyIv: escrow.teamKeyIv,
+                    teamKeyAuthTag: escrow.teamKeyAuthTag,
                     ephemeralPublicKey: escrow.ephemeralPublicKey,
                     hkdfSalt: escrow.hkdfSalt,
                     keyVersion: escrow.keyVersion,

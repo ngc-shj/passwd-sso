@@ -68,10 +68,10 @@ describe("POST /api/teams (E2E-only)", () => {
   const validE2EBody = {
     name: "E2E Team",
     slug: "e2e-team",
-    orgMemberKey: {
+    teamMemberKey: {
       encryptedOrgKey: "encrypted-team-key-data",
-      orgKeyIv: "a".repeat(24),
-      orgKeyAuthTag: "b".repeat(32),
+      teamKeyIv: "a".repeat(24),
+      teamKeyAuthTag: "b".repeat(32),
       ephemeralPublicKey: '{"kty":"EC","crv":"P-256","x":"test","y":"test"}',
       hkdfSalt: "c".repeat(64),
       keyVersion: 1,
@@ -86,7 +86,7 @@ describe("POST /api/teams (E2E-only)", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 400 when orgMemberKey is missing", async () => {
+  it("returns 400 when teamMemberKey is missing", async () => {
     const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
       body: { name: "My Team", slug: "my-team" },
     }));
@@ -166,7 +166,7 @@ describe("POST /api/teams (E2E-only)", () => {
     });
 
     const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
-      body: { ...validE2EBody, orgMemberKey: { ...validE2EBody.orgMemberKey, wrapVersion: 1 } },
+      body: { ...validE2EBody, teamMemberKey: { ...validE2EBody.teamMemberKey, wrapVersion: 1 } },
     }));
     expect(res.status).toBe(201);
     expect(mockPrismaOrganization.create).toHaveBeenCalledWith(
@@ -182,14 +182,14 @@ describe("POST /api/teams (E2E-only)", () => {
     );
   });
 
-  it("returns 400 when E2E body has invalid orgKeyIv", async () => {
+  it("returns 400 when E2E body has invalid teamKeyIv", async () => {
     const invalidBody = {
       name: "Bad Team",
       slug: "bad-team",
-      orgMemberKey: {
+      teamMemberKey: {
         encryptedOrgKey: "data",
-        orgKeyIv: "short",
-        orgKeyAuthTag: "b".repeat(32),
+        teamKeyIv: "short",
+        teamKeyAuthTag: "b".repeat(32),
         ephemeralPublicKey: "pubkey",
         hkdfSalt: "c".repeat(64),
         keyVersion: 1,

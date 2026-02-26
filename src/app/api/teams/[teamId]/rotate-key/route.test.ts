@@ -72,8 +72,8 @@ function validMemberKey(userId: string) {
   return {
     userId,
     encryptedOrgKey: "enc-key",
-    orgKeyIv: "a".repeat(24),
-    orgKeyAuthTag: "b".repeat(32),
+    teamKeyIv: "a".repeat(24),
+    teamKeyAuthTag: "b".repeat(32),
     ephemeralPublicKey: "pub-key",
     hkdfSalt: "c".repeat(64),
     keyVersion: 2,
@@ -243,7 +243,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "TEAM_KEY_ROTATION",
-        orgId: "team-1",
+        teamId: "team-1",
         metadata: expect.objectContaining({
           fromVersion: 1,
           toVersion: 2,

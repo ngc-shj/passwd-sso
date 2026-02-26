@@ -337,8 +337,8 @@ export async function unwrapTeamKey(
 export interface TeamKeyEscrowResult {
   ephemeralPublicKey: string;
   encryptedOrgKey: string;
-  orgKeyIv: string;
-  orgKeyAuthTag: string;
+  teamKeyIv: string;
+  teamKeyAuthTag: string;
   hkdfSalt: string;
   wrapVersion: number;
   keyVersion: number;
@@ -389,8 +389,8 @@ export async function createTeamKeyEscrow(
   return {
     ephemeralPublicKey: ephemeralPublicKeyJwk,
     encryptedOrgKey: encrypted.ciphertext,
-    orgKeyIv: encrypted.iv,
-    orgKeyAuthTag: encrypted.authTag,
+    teamKeyIv: encrypted.iv,
+    teamKeyAuthTag: encrypted.authTag,
     hkdfSalt: hexEncode(salt),
     wrapVersion: CURRENT_TEAM_WRAP_VERSION,
     keyVersion,

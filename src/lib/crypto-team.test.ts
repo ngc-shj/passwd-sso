@@ -289,8 +289,8 @@ describe("crypto-team", () => {
 
       expect(result.ephemeralPublicKey).toBeTruthy();
       expect(result.encryptedOrgKey).toBeTruthy();
-      expect(result.orgKeyIv).toHaveLength(24);
-      expect(result.orgKeyAuthTag).toHaveLength(32);
+      expect(result.teamKeyIv).toHaveLength(24);
+      expect(result.teamKeyAuthTag).toHaveLength(32);
       expect(result.hkdfSalt).toHaveLength(64);
       expect(result.wrapVersion).toBe(CURRENT_TEAM_WRAP_VERSION);
       expect(result.keyVersion).toBe(1);
@@ -312,8 +312,8 @@ describe("crypto-team", () => {
       const unwrapped = await unwrapTeamKey(
         {
           ciphertext: escrow.encryptedOrgKey,
-          iv: escrow.orgKeyIv,
-          authTag: escrow.orgKeyAuthTag,
+          iv: escrow.teamKeyIv,
+          authTag: escrow.teamKeyAuthTag,
         },
         escrow.ephemeralPublicKey,
         memberKeyPair.privateKey,
@@ -342,8 +342,8 @@ describe("crypto-team", () => {
       const unwrapped = await unwrapTeamKey(
         {
           ciphertext: escrow.encryptedOrgKey,
-          iv: escrow.orgKeyIv,
-          authTag: escrow.orgKeyAuthTag,
+          iv: escrow.teamKeyIv,
+          authTag: escrow.teamKeyAuthTag,
         },
         escrow.ephemeralPublicKey,
         memberKeyPair.privateKey,
@@ -484,8 +484,8 @@ describe("crypto-team", () => {
       const unwrapped = await unwrapTeamKey(
         {
           ciphertext: escrow.encryptedOrgKey,
-          iv: escrow.orgKeyIv,
-          authTag: escrow.orgKeyAuthTag,
+          iv: escrow.teamKeyIv,
+          authTag: escrow.teamKeyAuthTag,
         },
         escrow.ephemeralPublicKey,
         memberKeyPair.privateKey,

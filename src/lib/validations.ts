@@ -125,8 +125,8 @@ export const createTeamSchema = z.object({
 /** Schema for E2E team creation — includes client-encrypted TeamMemberKey for owner */
 export const teamMemberKeySchema = z.object({
   encryptedOrgKey: z.string().min(1).max(1000),
-  orgKeyIv: z.string().regex(/^[0-9a-f]{24}$/),
-  orgKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/),
+  teamKeyIv: z.string().regex(/^[0-9a-f]{24}$/),
+  teamKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/),
   ephemeralPublicKey: z.string().min(1).max(500),
   hkdfSalt: z.string().regex(/^[0-9a-f]{64}$/),
   keyVersion: z.number().int().min(1),
@@ -135,7 +135,7 @@ export const teamMemberKeySchema = z.object({
 
 export const createTeamE2ESchema = createTeamSchema.extend({
   id: z.string().uuid().optional(),
-  orgMemberKey: teamMemberKeySchema,
+  teamMemberKey: teamMemberKeySchema,
 });
 
 /** Schema for E2E team password creation — client sends pre-encrypted blobs */

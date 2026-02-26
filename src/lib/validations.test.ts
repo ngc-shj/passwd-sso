@@ -210,8 +210,8 @@ describe("createShareLinkSchema – passkey fields", () => {
 describe("teamMemberKeySchema", () => {
   const validKey = {
     encryptedOrgKey: "enc-key-data",
-    orgKeyIv: "a".repeat(24),
-    orgKeyAuthTag: "b".repeat(32),
+    teamKeyIv: "a".repeat(24),
+    teamKeyAuthTag: "b".repeat(32),
     ephemeralPublicKey: '{"kty":"EC"}',
     hkdfSalt: "c".repeat(64),
     keyVersion: 1,
@@ -256,7 +256,7 @@ describe("teamMemberKeySchema", () => {
   it("rejects invalid teamKeyIv format", () => {
     const result = teamMemberKeySchema.safeParse({
       ...validKey,
-      orgKeyIv: "not-hex-24",
+      teamKeyIv: "not-hex-24",
     });
     expect(result.success).toBe(false);
   });

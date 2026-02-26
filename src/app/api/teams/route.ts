@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  const { id: clientId, name, slug, description, orgMemberKey } = parsed.data;
+  const { id: clientId, name, slug, description, teamMemberKey } = parsed.data;
 
   // Check slug uniqueness
   const existing = await prisma.organization.findUnique({
@@ -94,13 +94,13 @@ export async function POST(req: NextRequest) {
       memberKeys: {
         create: {
           userId: session.user.id,
-          encryptedOrgKey: orgMemberKey.encryptedOrgKey,
-          orgKeyIv: orgMemberKey.orgKeyIv,
-          orgKeyAuthTag: orgMemberKey.orgKeyAuthTag,
-          ephemeralPublicKey: orgMemberKey.ephemeralPublicKey,
-          hkdfSalt: orgMemberKey.hkdfSalt,
-          keyVersion: orgMemberKey.keyVersion,
-          wrapVersion: orgMemberKey.wrapVersion,
+          encryptedOrgKey: teamMemberKey.encryptedOrgKey,
+          orgKeyIv: teamMemberKey.teamKeyIv,
+          orgKeyAuthTag: teamMemberKey.teamKeyAuthTag,
+          ephemeralPublicKey: teamMemberKey.ephemeralPublicKey,
+          hkdfSalt: teamMemberKey.hkdfSalt,
+          keyVersion: teamMemberKey.keyVersion,
+          wrapVersion: teamMemberKey.wrapVersion,
         },
       },
     },

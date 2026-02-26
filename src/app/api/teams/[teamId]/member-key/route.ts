@@ -76,8 +76,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({
     encryptedOrgKey: memberKey.encryptedOrgKey,
-    orgKeyIv: memberKey.orgKeyIv,
-    orgKeyAuthTag: memberKey.orgKeyAuthTag,
+    teamKeyIv: memberKey.orgKeyIv,
+    teamKeyAuthTag: memberKey.orgKeyAuthTag,
     ephemeralPublicKey: memberKey.ephemeralPublicKey,
     hkdfSalt: memberKey.hkdfSalt,
     keyVersion: memberKey.keyVersion,
