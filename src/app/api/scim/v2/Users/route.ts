@@ -18,7 +18,7 @@ import {
 import { scimUserSchema } from "@/lib/scim/validations";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { TEAM_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 
 // GET /api/scim/v2/Users — List/filter users in the team
@@ -186,7 +186,7 @@ export async function POST(req: NextRequest) {
           data: {
             orgId: scopedTeamId,
             userId: user.id,
-            role: ORG_ROLE.MEMBER,
+            role: TEAM_ROLE.MEMBER,
             scimManaged: true,
             keyDistributed: false,
             deactivatedAt: active === false ? new Date() : null,

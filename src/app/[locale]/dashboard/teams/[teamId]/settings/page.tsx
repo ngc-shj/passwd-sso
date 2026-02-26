@@ -37,7 +37,7 @@ import { Link } from "@/i18n/navigation";
 import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { ScimTokenManager } from "@/components/team/team-scim-token-manager";
-import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
+import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 
 interface TeamInfo {
@@ -87,7 +87,7 @@ export default function TeamSettingsPage({
 
   // Invite form
   const [invEmail, setInvEmail] = useState("");
-  const [invRole, setInvRole] = useState<string>(ORG_ROLE.MEMBER);
+  const [invRole, setInvRole] = useState<string>(TEAM_ROLE.MEMBER);
   const [inviting, setInviting] = useState(false);
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -137,8 +137,8 @@ export default function TeamSettingsPage({
     fetchAll();
   }, [teamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const isOwner = team?.role === ORG_ROLE.OWNER;
-  const isAdmin = team?.role === ORG_ROLE.ADMIN || isOwner;
+  const isOwner = team?.role === TEAM_ROLE.OWNER;
+  const isAdmin = team?.role === TEAM_ROLE.ADMIN || isOwner;
 
   const handleUpdateTeam = async () => {
     setSaving(true);
@@ -236,7 +236,7 @@ export default function TeamSettingsPage({
       const res = await fetch(apiPath.teamMemberById(teamId, memberId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: ORG_ROLE.OWNER }),
+        body: JSON.stringify({ role: TEAM_ROLE.OWNER }),
       });
       if (!res.ok) throw new Error("Failed");
       toast.success(t("ownershipTransferred"));
@@ -382,7 +382,7 @@ export default function TeamSettingsPage({
                   )}
                 </div>
 
-                {isAdmin && m.role !== ORG_ROLE.OWNER && m.userId !== currentUserId ? (
+                {isAdmin && m.role !== TEAM_ROLE.OWNER && m.userId !== currentUserId ? (
                   <div className="flex items-center gap-2">
                     <Select
                       value={m.role}
@@ -392,13 +392,13 @@ export default function TeamSettingsPage({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={ORG_ROLE.ADMIN}>
+                        <SelectItem value={TEAM_ROLE.ADMIN}>
                           {t("roleAdmin")}
                         </SelectItem>
-                        <SelectItem value={ORG_ROLE.MEMBER}>
+                        <SelectItem value={TEAM_ROLE.MEMBER}>
                           {t("roleMember")}
                         </SelectItem>
-                        <SelectItem value={ORG_ROLE.VIEWER}>
+                        <SelectItem value={TEAM_ROLE.VIEWER}>
                           {t("roleViewer")}
                         </SelectItem>
                       </SelectContent>
@@ -441,7 +441,7 @@ export default function TeamSettingsPage({
         </Card>
 
         {/* Transfer Ownership */}
-        {isOwner && members.filter((m) => m.role !== ORG_ROLE.OWNER).length > 0 && (
+        {isOwner && members.filter((m) => m.role !== TEAM_ROLE.OWNER).length > 0 && (
           <Card className="rounded-xl border bg-card/80 p-4">
             <section className="space-y-4">
               <h2 className="text-lg font-semibold flex items-center gap-2">
@@ -453,7 +453,7 @@ export default function TeamSettingsPage({
               </p>
               <div className="space-y-2">
                 {members
-                  .filter((m) => m.role !== ORG_ROLE.OWNER)
+                  .filter((m) => m.role !== TEAM_ROLE.OWNER)
                   .map((m) => (
                     <div
                       key={m.id}
@@ -534,9 +534,9 @@ export default function TeamSettingsPage({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={ORG_ROLE.ADMIN}>{t("roleAdmin")}</SelectItem>
-                      <SelectItem value={ORG_ROLE.MEMBER}>{t("roleMember")}</SelectItem>
-                      <SelectItem value={ORG_ROLE.VIEWER}>{t("roleViewer")}</SelectItem>
+                      <SelectItem value={TEAM_ROLE.ADMIN}>{t("roleAdmin")}</SelectItem>
+                      <SelectItem value={TEAM_ROLE.MEMBER}>{t("roleMember")}</SelectItem>
+                      <SelectItem value={TEAM_ROLE.VIEWER}>{t("roleViewer")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -599,7 +599,7 @@ export default function TeamSettingsPage({
         )}
 
         {/* SCIM Provisioning — OWNER/ADMIN only */}
-        {(isOwner || team.role === ORG_ROLE.ADMIN) && (
+        {(isOwner || team.role === TEAM_ROLE.ADMIN) && (
           <ScimTokenManager teamId={teamId} locale={locale} />
         )}
 

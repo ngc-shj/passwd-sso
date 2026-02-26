@@ -5,7 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
-import { AUDIT_TARGET_TYPE, ORG_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -33,7 +33,7 @@ export async function GET(
   const { teamId: orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_READ);
+    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -78,7 +78,7 @@ export async function POST(
   const { teamId: orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_UPDATE);
+    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_UPDATE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

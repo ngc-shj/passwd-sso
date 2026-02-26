@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 
 // GET /api/teams/pending-key-distributions
 // Returns all pending key distributions across all orgs where the user is OWNER/ADMIN.
@@ -17,7 +17,7 @@ export async function GET() {
   const adminMemberships = await prisma.orgMember.findMany({
     where: {
       userId: session.user.id,
-      role: { in: [ORG_ROLE.OWNER, ORG_ROLE.ADMIN] },
+      role: { in: [TEAM_ROLE.OWNER, TEAM_ROLE.ADMIN] },
       deactivatedAt: null,
     },
     select: { orgId: true },

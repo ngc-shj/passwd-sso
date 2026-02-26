@@ -16,14 +16,14 @@ import {
 import { scimGroupSchema } from "@/lib/scim/validations";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 
 /** Non-OWNER roles exposed as SCIM Groups. */
 const SCIM_GROUP_ROLES: OrgRole[] = [
-  ORG_ROLE.ADMIN,
-  ORG_ROLE.MEMBER,
-  ORG_ROLE.VIEWER,
+  TEAM_ROLE.ADMIN,
+  TEAM_ROLE.MEMBER,
+  TEAM_ROLE.VIEWER,
 ];
 
 // GET /api/scim/v2/Groups — List all role-based groups

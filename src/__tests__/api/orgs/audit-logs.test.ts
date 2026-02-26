@@ -39,7 +39,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { GET } from "@/app/api/teams/[teamId]/audit-logs/route";
-import { AUDIT_ACTION, AUDIT_ACTION_GROUP, AUDIT_SCOPE, AUDIT_TARGET_TYPE, ORG_ROLE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_ACTION_GROUP, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TEAM_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-1";
 
@@ -79,7 +79,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("returns org audit logs for ADMIN/OWNER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
 
     const now = new Date();
     const logs = [
@@ -132,7 +132,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies action filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.OWNER });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
@@ -153,7 +153,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies actions filter with multiple values", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.OWNER });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
@@ -174,7 +174,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies ENTRY_BULK_TRASH action filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.OWNER });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
@@ -195,7 +195,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies ENTRY_BULK_ARCHIVE action filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.OWNER });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
@@ -216,7 +216,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies ENTRY_BULK_UNARCHIVE action filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.OWNER });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
@@ -237,7 +237,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies ENTRY_BULK_RESTORE action filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.OWNER });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
@@ -258,7 +258,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("returns 400 for invalid actions filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.OWNER });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
 
     const req = createRequest(
       "GET",
@@ -276,7 +276,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies date range filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
@@ -300,7 +300,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("supports cursor-based pagination", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
 
     // Return limit+1 items to trigger hasMore
     const logs = Array.from({ length: 6 }, (_, i) => ({
@@ -332,7 +332,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("returns 400 for invalid cursor", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     mockFindMany.mockRejectedValue(new Error("Invalid cursor"));
 
     const req = createRequest(
@@ -363,7 +363,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("returns entryOverviews with encrypted overview data for entry targets", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
 
     const logs = [
       {
@@ -412,7 +412,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("returns empty entryOverviews when no entry targets", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
 
     const logs = [
       {
@@ -442,7 +442,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies action group filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.OWNER });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(

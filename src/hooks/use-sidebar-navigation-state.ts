@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 import { stripLocalePrefix } from "@/i18n/locale-utils";
 import type {
   SidebarFolderItem,
@@ -75,10 +75,10 @@ export function useSidebarNavigationState({
       : null;
 
     const selectedTeamCanManageFolders = selectedTeam
-      ? selectedTeam.role !== ORG_ROLE.VIEWER
+      ? selectedTeam.role !== TEAM_ROLE.VIEWER
       : false;
     const selectedTeamCanManageTags = selectedTeam
-      ? selectedTeam.role !== ORG_ROLE.VIEWER
+      ? selectedTeam.role !== TEAM_ROLE.VIEWER
       : false;
 
     const selectedTeamTypeFilter =

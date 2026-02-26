@@ -39,7 +39,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { GET, POST } from "./route";
-import { ORG_ROLE, INVITATION_STATUS } from "@/lib/constants";
+import { TEAM_ROLE, INVITATION_STATUS } from "@/lib/constants";
 
 const ORG_ID = "org-123";
 const now = new Date("2025-01-01T00:00:00Z");
@@ -48,7 +48,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -74,7 +74,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
       {
         id: "inv-1",
         email: "user@test.com",
-        role: ORG_ROLE.MEMBER,
+        role: TEAM_ROLE.MEMBER,
         token: "abc123",
         status: INVITATION_STATUS.PENDING,
         expiresAt: now,
@@ -98,7 +98,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     mockPrismaUser.findUnique.mockResolvedValue(null);
     mockPrismaOrgInvitation.findFirst.mockResolvedValue(null);
   });
@@ -107,7 +107,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
-        body: { email: "new@test.com", role: ORG_ROLE.MEMBER },
+        body: { email: "new@test.com", role: TEAM_ROLE.MEMBER },
       }),
       createParams({ teamId: ORG_ID }),
     );
@@ -130,7 +130,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
-        body: { email: "existing@test.com", role: ORG_ROLE.MEMBER },
+        body: { email: "existing@test.com", role: TEAM_ROLE.MEMBER },
       }),
       createParams({ teamId: ORG_ID }),
     );
@@ -144,7 +144,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
-        body: { email: "pending@test.com", role: ORG_ROLE.MEMBER },
+        body: { email: "pending@test.com", role: TEAM_ROLE.MEMBER },
       }),
       createParams({ teamId: ORG_ID }),
     );
@@ -157,7 +157,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockPrismaOrgInvitation.create.mockResolvedValue({
       id: "new-inv",
       email: "new@test.com",
-      role: ORG_ROLE.MEMBER,
+      role: TEAM_ROLE.MEMBER,
       token: "generated-token",
       expiresAt: now,
       createdAt: now,
@@ -165,7 +165,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
-        body: { email: "new@test.com", role: ORG_ROLE.MEMBER },
+        body: { email: "new@test.com", role: TEAM_ROLE.MEMBER },
       }),
       createParams({ teamId: ORG_ID }),
     );

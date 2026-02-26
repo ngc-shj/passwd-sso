@@ -50,7 +50,7 @@ vi.mock("@/lib/folder-utils", async (importOriginal) => {
 
 import { GET, POST } from "./route";
 import { validateParentFolder, validateFolderDepth } from "@/lib/folder-utils";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-1";
 const BASE = `http://localhost:3000/api/teams/${ORG_ID}/folders`;
@@ -60,7 +60,7 @@ describe("GET /api/teams/[teamId]/folders", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgMember.mockResolvedValue({ role: ORG_ROLE.MEMBER });
+    mockRequireOrgMember.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -118,7 +118,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
   });
 
   it("returns 401 when unauthenticated", async () => {

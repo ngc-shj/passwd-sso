@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createOrgE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 
 // GET /api/teams — List organizations the user belongs to
 export async function GET() {
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
       members: {
         create: {
           userId: session.user.id,
-          role: ORG_ROLE.OWNER,
+          role: TEAM_ROLE.OWNER,
           keyDistributed: true,
         },
       },
@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
       name: org.name,
       slug: org.slug,
       description: org.description,
-      role: ORG_ROLE.OWNER,
+      role: TEAM_ROLE.OWNER,
       createdAt: org.createdAt,
     },
     { status: 201 }

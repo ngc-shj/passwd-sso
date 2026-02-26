@@ -11,10 +11,17 @@ export type { TotpAlgorithm } from "./totp";
 export { CUSTOM_FIELD_TYPE, CUSTOM_FIELD_TYPE_VALUES } from "./custom-field";
 export type { CustomFieldType } from "./custom-field";
 
-export { ORG_ROLE, ORG_ROLE_VALUES, INVITE_ROLE_VALUES } from "./org";
-export type { OrgRoleValue } from "./org";
-export { ORG_PERMISSION } from "./org-permission";
-export type { OrgPermissionValue } from "./org-permission";
+export {
+  TEAM_ROLE,
+  TEAM_ROLE_VALUES,
+  TEAM_INVITE_ROLE_VALUES,
+  ORG_ROLE,
+  ORG_ROLE_VALUES,
+  INVITE_ROLE_VALUES,
+} from "./org";
+export type { TeamRoleValue, OrgRoleValue } from "./org";
+export { TEAM_PERMISSION, ORG_PERMISSION } from "./org-permission";
+export type { TeamPermissionValue, OrgPermissionValue } from "./org-permission";
 
 export { EA_STATUS } from "./emergency-access";
 export type { EaStatusValue } from "./emergency-access";

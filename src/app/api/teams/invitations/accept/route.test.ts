@@ -31,7 +31,7 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 import { POST } from "./route";
-import { ORG_ROLE, INVITATION_STATUS } from "@/lib/constants";
+import { TEAM_ROLE, INVITATION_STATUS } from "@/lib/constants";
 
 const futureDate = new Date("2099-01-01T00:00:00Z");
 
@@ -39,7 +39,7 @@ const validInvitation = {
   id: "inv-1",
   orgId: "org-1",
   email: "user@test.com",
-  role: ORG_ROLE.MEMBER,
+  role: TEAM_ROLE.MEMBER,
   token: "valid-token",
   status: INVITATION_STATUS.PENDING,
   expiresAt: futureDate,
@@ -168,7 +168,7 @@ describe("POST /api/teams/invitations/accept", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.alreadyMember).toBe(false);
-    expect(json.role).toBe(ORG_ROLE.MEMBER);
+    expect(json.role).toBe(TEAM_ROLE.MEMBER);
     expect(json.org.name).toBe("My Org");
     expect(mockTransaction).toHaveBeenCalledTimes(1);
   });

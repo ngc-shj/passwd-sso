@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ teamId: string; tokenId: string }> };
 
@@ -18,7 +18,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const { teamId: orgId, tokenId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.SCIM_MANAGE);
+    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.SCIM_MANAGE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Building2, Trash2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
 import { toast } from "sonner";
-import { ORG_ROLE, ENTRY_TYPE, API_PATH, apiPath } from "@/lib/constants";
+import { TEAM_ROLE, ENTRY_TYPE, API_PATH, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import {
   compareEntriesByDeletedAt,
@@ -241,7 +241,7 @@ export function TeamTrashList({
                   </span>
                 </div>
               </div>
-              {(entry.role === ORG_ROLE.OWNER || entry.role === ORG_ROLE.ADMIN) && (
+              {(entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN) && (
                 <div className="flex gap-2 shrink-0">
                   <Button
                     variant="outline"

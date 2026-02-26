@@ -3,7 +3,7 @@
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 import { CollapsibleSectionHeader } from "@/components/layout/sidebar-shared";
 import {
   Download,
@@ -99,7 +99,7 @@ export function UtilitiesSection({
       <CollapsibleContent>
         <div className="space-y-1">
           {scopedTeam &&
-            (scopedTeam.role === ORG_ROLE.OWNER || scopedTeam.role === ORG_ROLE.ADMIN) ? (
+            (scopedTeam.role === TEAM_ROLE.OWNER || scopedTeam.role === TEAM_ROLE.ADMIN) ? (
             <Button variant="ghost" className="w-full justify-start gap-2" asChild>
               <Link href={`/dashboard/teams/${scopedTeam.id}/settings`} onClick={onNavigate}>
                 <Settings className="h-4 w-4" />

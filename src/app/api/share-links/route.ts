@@ -12,7 +12,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import {
-  ORG_PERMISSION,
+  TEAM_PERMISSION,
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
   AUDIT_SCOPE,
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
       await requireOrgPermission(
         session.user.id,
         orgEntry.orgId,
-        ORG_PERMISSION.PASSWORD_READ
+        TEAM_PERMISSION.PASSWORD_READ
       );
     } catch (e) {
       if (e instanceof OrgAuthError) {

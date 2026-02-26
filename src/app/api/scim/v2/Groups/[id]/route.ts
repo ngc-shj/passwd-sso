@@ -13,14 +13,14 @@ import { scimPatchOpSchema, scimGroupSchema } from "@/lib/scim/validations";
 import { parseGroupPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { TEAM_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ id: string }> };
 
 const SCIM_GROUP_ROLES: OrgRole[] = [
-  ORG_ROLE.ADMIN,
-  ORG_ROLE.MEMBER,
-  ORG_ROLE.VIEWER,
+  TEAM_ROLE.ADMIN,
+  TEAM_ROLE.MEMBER,
+  TEAM_ROLE.VIEWER,
 ];
 
 /** Resolve a SCIM Group ID back to (teamId, role). Falls back to ScimExternalMapping. */
@@ -139,7 +139,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // Block adding members to OWNER role (OWNER role is not a SCIM group, but guard anyway)
   // Note: SCIM_GROUP_ROLES excludes OWNER, so this shouldn't happen, but defensive check
-  if (role === ORG_ROLE.OWNER) {
+  if (role === TEAM_ROLE.OWNER) {
     return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
   }
 
@@ -154,7 +154,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
         if (!member) {
           throw new Error(`SCIM_NO_SUCH_MEMBER:${userId}`);
         }
-        if (member.role === ORG_ROLE.OWNER) {
+        if (member.role === TEAM_ROLE.OWNER) {
           throw new Error("SCIM_OWNER_PROTECTED");
         }
         await tx.orgMember.update({
@@ -169,14 +169,14 @@ export async function PUT(req: NextRequest, { params }: Params) {
           where: { id: m.id },
           select: { role: true },
         });
-        if (fresh?.role === ORG_ROLE.OWNER) {
+        if (fresh?.role === TEAM_ROLE.OWNER) {
           throw new Error("SCIM_OWNER_PROTECTED");
         }
         // Only demote if member is still in the target role (avoids overwriting concurrent changes)
         if (fresh?.role === role) {
           await tx.orgMember.update({
             where: { id: m.id },
-            data: { role: ORG_ROLE.MEMBER },
+            data: { role: TEAM_ROLE.MEMBER },
           });
         }
       }
@@ -261,7 +261,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         }
 
         // OWNER protection
-        if (member.role === ORG_ROLE.OWNER) {
+        if (member.role === TEAM_ROLE.OWNER) {
           throw new Error("SCIM_OWNER_PROTECTED");
         }
 
@@ -275,7 +275,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           if (member.role === role) {
             await tx.orgMember.update({
               where: { id: member.id },
-              data: { role: ORG_ROLE.MEMBER },
+              data: { role: TEAM_ROLE.MEMBER },
             });
           }
         }

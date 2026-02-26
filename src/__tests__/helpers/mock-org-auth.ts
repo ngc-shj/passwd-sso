@@ -1,12 +1,12 @@
 import { vi } from "vitest";
-import { ORG_ROLE } from "@/lib/constants";
-import type { OrgRoleValue } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
+import type { TeamRoleValue } from "@/lib/constants";
 
 export interface MockMembership {
   id: string;
   orgId: string;
   userId: string;
-  role: OrgRoleValue;
+  role: TeamRoleValue;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -18,7 +18,7 @@ export function createMockMembership(
     id: "member-1",
     orgId: "org-1",
     userId: "test-user-id",
-    role: ORG_ROLE.OWNER,
+    role: TEAM_ROLE.OWNER,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

@@ -66,7 +66,7 @@ vi.mock("@/lib/folder-utils", async (importOriginal) => {
 
 import { PUT, DELETE } from "./route";
 import { validateParentFolder, validateFolderDepth, checkCircularReference } from "@/lib/folder-utils";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-1";
 const FOLDER_ID = "cm000000000000000folder1";
@@ -86,7 +86,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -224,7 +224,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
   });
 
   it("returns 401 when unauthenticated", async () => {

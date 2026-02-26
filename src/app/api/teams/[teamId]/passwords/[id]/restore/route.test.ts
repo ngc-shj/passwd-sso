@@ -31,7 +31,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { POST } from "./route";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-123";
 const PW_ID = "pw-456";
@@ -40,7 +40,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/restore", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
   });
 
   it("returns OrgAuthError status when permission denied", async () => {

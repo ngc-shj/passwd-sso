@@ -34,7 +34,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { GET, POST } from "./route";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-123";
 
@@ -42,7 +42,7 @@ describe("GET /api/teams/[teamId]/tags", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgMember.mockResolvedValue({ role: ORG_ROLE.MEMBER });
+    mockRequireOrgMember.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -119,7 +119,7 @@ describe("POST /api/teams/[teamId]/tags", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.MEMBER });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
   });
 
   it("returns 401 when unauthenticated", async () => {

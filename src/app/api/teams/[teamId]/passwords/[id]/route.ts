@@ -10,7 +10,7 @@ import {
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION, ORG_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -24,7 +24,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId: orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_READ);
+    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -108,11 +108,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   // MEMBER can only update their own entries
-  if (!hasOrgPermission(membership.role, ORG_PERMISSION.PASSWORD_UPDATE)) {
+  if (!hasOrgPermission(membership.role, TEAM_PERMISSION.PASSWORD_UPDATE)) {
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
   if (
-    membership.role === ORG_ROLE.MEMBER &&
+    membership.role === TEAM_ROLE.MEMBER &&
     entry.createdById !== session.user.id
   ) {
     return NextResponse.json(
@@ -248,7 +248,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const { teamId: orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_DELETE);
+    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_DELETE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

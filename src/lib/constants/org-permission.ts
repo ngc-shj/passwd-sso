@@ -1,4 +1,4 @@
-export const ORG_PERMISSION = {
+export const TEAM_PERMISSION = {
   ORG_DELETE: "org:delete",
   ORG_UPDATE: "org:update",
   MEMBER_INVITE: "member:invite",
@@ -12,5 +12,8 @@ export const ORG_PERMISSION = {
   SCIM_MANAGE: "scim:manage",
 } as const;
 
-export type OrgPermissionValue =
-  (typeof ORG_PERMISSION)[keyof typeof ORG_PERMISSION];
+export type TeamPermissionValue =
+  (typeof TEAM_PERMISSION)[keyof typeof TEAM_PERMISSION];
+
+export const ORG_PERMISSION = TEAM_PERMISSION;
+export type OrgPermissionValue = TeamPermissionValue;

@@ -4,7 +4,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { z } from "zod/v4";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 const bodySchema = z.object({
   orgId: z.string().optional(),
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
   // Verify org membership when orgId is specified
   if (orgId) {
     try {
-      await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.ORG_UPDATE);
+      await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.ORG_UPDATE);
     } catch (e) {
       if (e instanceof OrgAuthError) {
         return NextResponse.json({ error: e.message }, { status: e.status });

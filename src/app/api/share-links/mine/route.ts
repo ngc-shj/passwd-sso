@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { requireOrgMember, OrgAuthError } from "@/lib/org-auth";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 
 // GET /api/share-links/mine
 // - Personal context (no `team`/`org`): links created by current user, personal entries only
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     }
     where.orgPasswordEntry = { orgId: teamId };
     // VIEWER can only see links they created. Higher roles can view team-wide links.
-    if (membershipRole === ORG_ROLE.VIEWER) {
+    if (membershipRole === TEAM_ROLE.VIEWER) {
       where.createdById = session.user.id;
     }
   } else {

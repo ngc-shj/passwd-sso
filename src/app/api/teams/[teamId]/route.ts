@@ -8,7 +8,7 @@ import {
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION } from "@/lib/constants";
+import { TEAM_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -64,7 +64,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { teamId: orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.ORG_UPDATE);
+    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.ORG_UPDATE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -117,7 +117,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const { teamId: orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.ORG_DELETE);
+    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.ORG_DELETE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

@@ -51,7 +51,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { GET, PUT, DELETE } from "./route";
-import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
+import { ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-123";
 const PW_ID = "pw-456";
@@ -106,7 +106,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.MEMBER });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
     mockAuditLogCreate.mockResolvedValue({});
   });
 
@@ -218,7 +218,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.ADMIN, userId: "test-user-id" });
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.ADMIN, userId: "test-user-id" });
     mockHasOrgPermission.mockReturnValue(true);
     mockAuditLogCreate.mockResolvedValue({});
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
@@ -322,7 +322,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns 403 when MEMBER tries to update another's entry", async () => {
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.MEMBER, userId: "test-user-id" });
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.MEMBER, userId: "test-user-id" });
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(
       makeEntryForPUT({ createdById: "other-user" }),
     );
@@ -515,7 +515,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.ADMIN });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     mockAuditLogCreate.mockResolvedValue({});
   });
 

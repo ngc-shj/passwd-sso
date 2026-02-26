@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock } from "lucide-react";
 import { toast } from "sonner";
-import { ORG_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-sort";
@@ -245,8 +245,8 @@ export default function TeamDashboardPage({
   }, [teamId, fetchPasswords, isTeamSpecialView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const canCreate =
-    team?.role === ORG_ROLE.OWNER || team?.role === ORG_ROLE.ADMIN || team?.role === ORG_ROLE.MEMBER;
-  const canDeletePerm = team?.role === ORG_ROLE.OWNER || team?.role === ORG_ROLE.ADMIN;
+    team?.role === TEAM_ROLE.OWNER || team?.role === TEAM_ROLE.ADMIN || team?.role === TEAM_ROLE.MEMBER;
+  const canDeletePerm = team?.role === TEAM_ROLE.OWNER || team?.role === TEAM_ROLE.ADMIN;
   const canEditPerm = canCreate;
   const contextualEntryType = activeEntryType && Object.values(ENTRY_TYPE).includes(activeEntryType as EntryTypeValue)
     ? (activeEntryType as EntryTypeValue)

@@ -40,7 +40,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { GET, POST } from "./route";
-import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
+import { ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-123";
 const now = new Date("2025-01-01T00:00:00Z");
@@ -49,7 +49,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.MEMBER });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
     mockAuditLogCreate.mockResolvedValue({});
     mockPrismaOrgPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
   });
@@ -279,7 +279,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.MEMBER });
+    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
     mockAuditLogCreate.mockResolvedValue({});
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
   });

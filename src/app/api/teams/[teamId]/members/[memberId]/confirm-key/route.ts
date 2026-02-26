@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { orgMemberKeySchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION } from "@/lib/constants";
+import { TEAM_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     await requireOrgPermission(
       session.user.id,
       orgId,
-      ORG_PERMISSION.MEMBER_INVITE
+      TEAM_PERMISSION.MEMBER_INVITE
     );
   } catch (e) {
     if (e instanceof OrgAuthError) {

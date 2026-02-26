@@ -19,7 +19,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { GET } from "./route";
-import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
+import { ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
 
 describe("GET /api/teams/trash", () => {
   beforeEach(() => {
@@ -45,7 +45,7 @@ describe("GET /api/teams/trash", () => {
     const now = new Date("2025-01-01T00:00:00Z");
     const deletedAt = new Date("2025-01-02T00:00:00Z");
     mockPrismaOrgMember.findMany.mockResolvedValue([
-      { orgId: "org-1", role: ORG_ROLE.ADMIN },
+      { orgId: "org-1", role: TEAM_ROLE.ADMIN },
     ]);
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {

@@ -11,7 +11,7 @@ import {
   checkCircularReference,
   type ParentNode,
 } from "@/lib/folder-utils";
-import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, ORG_PERMISSION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -31,7 +31,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { teamId: orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.TAG_MANAGE);
+    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -174,7 +174,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const { teamId: orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.TAG_MANAGE);
+    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

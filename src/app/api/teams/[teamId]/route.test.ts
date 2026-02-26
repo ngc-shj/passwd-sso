@@ -35,7 +35,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { GET, PUT, DELETE } from "./route";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-123";
 const now = new Date("2025-01-01T00:00:00Z");
@@ -44,7 +44,7 @@ const ownerMembership = {
   id: "member-1",
   orgId: ORG_ID,
   userId: "test-user-id",
-  role: ORG_ROLE.OWNER,
+  role: TEAM_ROLE.OWNER,
   createdAt: now,
   updatedAt: now,
 };
@@ -91,7 +91,7 @@ describe("GET /api/teams/[teamId]", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.role).toBe(ORG_ROLE.OWNER);
+    expect(json.role).toBe(TEAM_ROLE.OWNER);
     expect(json.memberCount).toBe(5);
     expect(json.passwordCount).toBe(10);
   });

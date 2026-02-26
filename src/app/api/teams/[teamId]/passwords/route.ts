@@ -6,7 +6,7 @@ import { createOrgE2EPasswordSchema } from "@/lib/validations";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { EntryType } from "@prisma/client";
-import { ENTRY_TYPE_VALUES, ORG_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { teamId: orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_READ);
+    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { teamId: orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_CREATE);
+    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_CREATE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

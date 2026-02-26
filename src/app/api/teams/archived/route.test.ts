@@ -19,7 +19,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { GET } from "./route";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 
 describe("GET /api/teams/archived", () => {
   beforeEach(() => {
@@ -44,7 +44,7 @@ describe("GET /api/teams/archived", () => {
   it("returns archived entries with encrypted overviews (E2E mode)", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
     mockPrismaOrgMember.findMany.mockResolvedValue([
-      { orgId: "org-1", role: ORG_ROLE.MEMBER },
+      { orgId: "org-1", role: TEAM_ROLE.MEMBER },
     ]);
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {

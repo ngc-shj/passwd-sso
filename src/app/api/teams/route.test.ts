@@ -15,7 +15,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { GET, POST } from "./route";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 
 const now = new Date("2025-01-01T00:00:00Z");
 
@@ -34,11 +34,11 @@ describe("GET /api/teams", () => {
   it("returns list of orgs with role", async () => {
     mockPrismaOrgMember.findMany.mockResolvedValue([
       {
-        role: ORG_ROLE.OWNER,
+        role: TEAM_ROLE.OWNER,
         org: { id: "org-1", name: "My Org", slug: "my-org", description: null, createdAt: now },
       },
       {
-        role: ORG_ROLE.MEMBER,
+        role: TEAM_ROLE.MEMBER,
         org: { id: "org-2", name: "Other", slug: "other", description: "desc", createdAt: now },
       },
     ]);
@@ -47,8 +47,8 @@ describe("GET /api/teams", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toHaveLength(2);
-    expect(json[0].role).toBe(ORG_ROLE.OWNER);
-    expect(json[1].role).toBe(ORG_ROLE.MEMBER);
+    expect(json[0].role).toBe(TEAM_ROLE.OWNER);
+    expect(json[1].role).toBe(TEAM_ROLE.MEMBER);
   });
 
   it("returns empty array when user has no orgs", async () => {
@@ -126,7 +126,7 @@ describe("POST /api/teams (E2E-only)", () => {
     const json = await res.json();
     expect(res.status).toBe(201);
     expect(json.id).toBe("e2e-org-id");
-    expect(json.role).toBe(ORG_ROLE.OWNER);
+    expect(json.role).toBe(TEAM_ROLE.OWNER);
     expect(mockPrismaOrganization.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

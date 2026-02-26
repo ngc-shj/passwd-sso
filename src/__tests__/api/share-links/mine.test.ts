@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
-import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
+import { ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
 
 const { mockAuth, mockFindMany } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -56,7 +56,7 @@ function makeShare(overrides: Record<string, unknown> = {}) {
 describe("GET /api/share-links/mine", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.ADMIN });
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.ADMIN });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -296,7 +296,7 @@ describe("GET /api/share-links/mine", () => {
 
   it("limits org scoped list to self-created links for VIEWER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.VIEWER });
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.VIEWER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest("GET", "http://localhost/api/share-links/mine?team=org-1");
@@ -314,7 +314,7 @@ describe("GET /api/share-links/mine", () => {
 
   it("does not limit org scoped list to self-created links for MEMBER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.MEMBER });
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.MEMBER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest("GET", "http://localhost/api/share-links/mine?team=org-1");
@@ -338,7 +338,7 @@ describe("GET /api/share-links/mine", () => {
 
   it("does not limit org scoped list to self-created links for OWNER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.OWNER });
+    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest("GET", "http://localhost/api/share-links/mine?team=org-1");

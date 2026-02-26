@@ -28,7 +28,7 @@ vi.mock("@/lib/org-auth", () => ({
 }));
 
 import { GET } from "./route";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 
 const ORG_ID = "org-123";
 const now = new Date("2025-01-01T00:00:00Z");
@@ -37,7 +37,7 @@ describe("GET /api/teams/[teamId]/members", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgMember.mockResolvedValue({ role: ORG_ROLE.OWNER });
+    mockRequireOrgMember.mockResolvedValue({ role: TEAM_ROLE.OWNER });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -63,14 +63,14 @@ describe("GET /api/teams/[teamId]/members", () => {
       {
         id: "m1",
         userId: "u1",
-        role: ORG_ROLE.OWNER,
+        role: TEAM_ROLE.OWNER,
         createdAt: now,
         user: { id: "u1", name: "Owner", email: "owner@test.com", image: null },
       },
       {
         id: "m2",
         userId: "u2",
-        role: ORG_ROLE.MEMBER,
+        role: TEAM_ROLE.MEMBER,
         createdAt: now,
         user: { id: "u2", name: "Member", email: "member@test.com", image: null },
       },
@@ -83,7 +83,7 @@ describe("GET /api/teams/[teamId]/members", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toHaveLength(2);
-    expect(json[0].role).toBe(ORG_ROLE.OWNER);
-    expect(json[1].role).toBe(ORG_ROLE.MEMBER);
+    expect(json[0].role).toBe(TEAM_ROLE.OWNER);
+    expect(json[1].role).toBe(TEAM_ROLE.MEMBER);
   });
 });

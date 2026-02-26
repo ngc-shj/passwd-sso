@@ -2,7 +2,7 @@
  * SCIM PATCH operation parser (RFC 7644 §3.5.2).
  *
  * Pure function — no Prisma / DB dependencies.
- * Depends only on ORG_ROLE_VALUES constant for group membership validation.
+ * Depends only on TEAM_ROLE_VALUES constant for group membership validation.
  */
 
 // ── Types ─────────────────────────────────────────────────────

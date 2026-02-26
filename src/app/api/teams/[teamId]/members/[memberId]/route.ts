@@ -9,7 +9,7 @@ import {
   OrgAuthError,
 } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION, ORG_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -27,7 +27,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     actorMembership = await requireOrgPermission(
       session.user.id,
       orgId,
-      ORG_PERMISSION.MEMBER_CHANGE_ROLE
+      TEAM_PERMISSION.MEMBER_CHANGE_ROLE
     );
   } catch (e) {
     if (e instanceof OrgAuthError) {
@@ -60,8 +60,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   // Owner transfer: only OWNER can promote someone to OWNER
-  if (parsed.data.role === ORG_ROLE.OWNER) {
-    if (actorMembership.role !== ORG_ROLE.OWNER) {
+  if (parsed.data.role === TEAM_ROLE.OWNER) {
+    if (actorMembership.role !== TEAM_ROLE.OWNER) {
       return NextResponse.json(
         { error: API_ERROR.OWNER_ONLY },
         { status: 403 }
@@ -71,12 +71,12 @@ export async function PUT(req: NextRequest, { params }: Params) {
     // Transfer: promote target to OWNER, demote self to ADMIN
     await prisma.orgMember.update({
       where: { id: actorMembership.id },
-      data: { role: ORG_ROLE.ADMIN },
+      data: { role: TEAM_ROLE.ADMIN },
     });
 
     const updated = await prisma.orgMember.update({
       where: { id: memberId },
-      data: { role: ORG_ROLE.OWNER },
+      data: { role: TEAM_ROLE.OWNER },
       include: {
         user: { select: { id: true, name: true, email: true, image: true } },
       },
@@ -89,7 +89,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       orgId,
       targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
       targetId: memberId,
-      metadata: { newRole: ORG_ROLE.OWNER, previousRole: target.role, transfer: true },
+      metadata: { newRole: TEAM_ROLE.OWNER, previousRole: target.role, transfer: true },
       ...extractRequestMeta(req),
     });
 
@@ -104,7 +104,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   // Cannot change OWNER role (unless transferring ownership above)
-  if (target.role === ORG_ROLE.OWNER) {
+  if (target.role === TEAM_ROLE.OWNER) {
     return NextResponse.json(
       { error: API_ERROR.CANNOT_CHANGE_OWNER_ROLE },
       { status: 403 }
@@ -113,7 +113,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // Cannot change role of someone at or above your level (except OWNER can do anything)
   if (
-    actorMembership.role !== ORG_ROLE.OWNER &&
+    actorMembership.role !== TEAM_ROLE.OWNER &&
     !isRoleAbove(actorMembership.role, target.role)
   ) {
     return NextResponse.json(
@@ -165,7 +165,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     actorMembership = await requireOrgPermission(
       session.user.id,
       orgId,
-      ORG_PERMISSION.MEMBER_REMOVE
+      TEAM_PERMISSION.MEMBER_REMOVE
     );
   } catch (e) {
     if (e instanceof OrgAuthError) {
@@ -182,7 +182,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
   }
 
-  if (target.role === ORG_ROLE.OWNER) {
+  if (target.role === TEAM_ROLE.OWNER) {
     return NextResponse.json(
       { error: API_ERROR.CANNOT_REMOVE_OWNER },
       { status: 403 }
@@ -190,7 +190,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   if (
-    actorMembership.role !== ORG_ROLE.OWNER &&
+    actorMembership.role !== TEAM_ROLE.OWNER &&
     !isRoleAbove(actorMembership.role, target.role)
   ) {
     return NextResponse.json(

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
+import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 
 export interface SidebarTagItem {
   id: string;
@@ -128,7 +128,7 @@ export function useSidebarData(pathname: string) {
         tagGroups.push({ teamId: team.id, teamName: team.name, tags: teamTags });
       }
       if (teamFolders) {
-        const canManage = team.role === ORG_ROLE.OWNER || team.role === ORG_ROLE.ADMIN;
+        const canManage = team.role === TEAM_ROLE.OWNER || team.role === TEAM_ROLE.ADMIN;
         if (teamFolders.length > 0 || canManage) {
           folderGroups.push({
             teamId: team.id,

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
-import { INVITE_ROLE_VALUES, ORG_ROLE, ORG_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, CUSTOM_FIELD_TYPE_VALUES } from "@/lib/constants";
+import { TEAM_INVITE_ROLE_VALUES, TEAM_ROLE, TEAM_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, CUSTOM_FIELD_TYPE_VALUES } from "@/lib/constants";
 
 export const generatePasswordSchema = z.object({
   length: z.number().int().min(8).max(128).default(16),
@@ -179,11 +179,11 @@ export const updateOrgSchema = z.object({
 
 export const inviteSchema = z.object({
   email: z.string().email(),
-  role: z.enum(INVITE_ROLE_VALUES).default(ORG_ROLE.MEMBER),
+  role: z.enum(TEAM_INVITE_ROLE_VALUES).default(TEAM_ROLE.MEMBER),
 });
 
 export const updateMemberRoleSchema = z.object({
-  role: z.enum(ORG_ROLE_VALUES),
+  role: z.enum(TEAM_ROLE_VALUES),
 });
 
 export const createOrgTagSchema = z.object({

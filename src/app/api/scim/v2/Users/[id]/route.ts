@@ -10,7 +10,7 @@ import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { AuditAction } from "@prisma/client";
-import { ORG_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { TEAM_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 
 type Params = { params: Promise<{ id: string }> };
@@ -141,7 +141,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!member) {
     return scimError(404, "User not found");
   }
-  if (member.role === ORG_ROLE.OWNER && active === false) {
+  if (member.role === TEAM_ROLE.OWNER && active === false) {
     return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
   }
 
@@ -275,7 +275,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   // OWNER protection
-  if (member.role === ORG_ROLE.OWNER && patchResult.active === false) {
+  if (member.role === TEAM_ROLE.OWNER && patchResult.active === false) {
     return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
   }
 
@@ -353,7 +353,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   // OWNER protection
-  if (member.role === ORG_ROLE.OWNER) {
+  if (member.role === TEAM_ROLE.OWNER) {
     return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
   }
 

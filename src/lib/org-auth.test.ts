@@ -25,7 +25,7 @@ vi.mock("@/lib/prisma", () => {
 });
 
 import { prisma } from "@/lib/prisma";
-import { ORG_PERMISSION, ORG_ROLE } from "@/lib/constants";
+import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 import {
   hasOrgPermission,
   isRoleAbove,
@@ -39,81 +39,81 @@ const mockPrisma = prisma as unknown as MockPrisma;
 
 describe("hasOrgPermission", () => {
   it("OWNER has all permissions", () => {
-    expect(hasOrgPermission(ORG_ROLE.OWNER, ORG_PERMISSION.ORG_DELETE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.OWNER, ORG_PERMISSION.ORG_UPDATE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.OWNER, ORG_PERMISSION.MEMBER_INVITE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.OWNER, ORG_PERMISSION.MEMBER_REMOVE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.OWNER, ORG_PERMISSION.MEMBER_CHANGE_ROLE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.OWNER, ORG_PERMISSION.PASSWORD_CREATE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.OWNER, ORG_PERMISSION.PASSWORD_READ)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.OWNER, ORG_PERMISSION.PASSWORD_UPDATE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.OWNER, ORG_PERMISSION.PASSWORD_DELETE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.OWNER, ORG_PERMISSION.TAG_MANAGE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.ORG_DELETE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.ORG_UPDATE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.MEMBER_INVITE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.MEMBER_REMOVE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.MEMBER_CHANGE_ROLE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.PASSWORD_CREATE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.PASSWORD_READ)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.PASSWORD_UPDATE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.PASSWORD_DELETE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.TAG_MANAGE)).toBe(true);
   });
 
   it("ADMIN cannot delete org", () => {
-    expect(hasOrgPermission(ORG_ROLE.ADMIN, ORG_PERMISSION.ORG_DELETE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.ORG_DELETE)).toBe(false);
   });
 
   it("ADMIN has all permissions except org:delete", () => {
-    expect(hasOrgPermission(ORG_ROLE.ADMIN, ORG_PERMISSION.ORG_UPDATE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.ADMIN, ORG_PERMISSION.MEMBER_INVITE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.ADMIN, ORG_PERMISSION.MEMBER_REMOVE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.ADMIN, ORG_PERMISSION.MEMBER_CHANGE_ROLE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.ADMIN, ORG_PERMISSION.PASSWORD_CREATE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.ADMIN, ORG_PERMISSION.PASSWORD_READ)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.ADMIN, ORG_PERMISSION.PASSWORD_UPDATE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.ADMIN, ORG_PERMISSION.PASSWORD_DELETE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.ADMIN, ORG_PERMISSION.TAG_MANAGE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.ORG_UPDATE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.MEMBER_INVITE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.MEMBER_REMOVE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.MEMBER_CHANGE_ROLE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.PASSWORD_CREATE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.PASSWORD_READ)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.PASSWORD_UPDATE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.PASSWORD_DELETE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.TAG_MANAGE)).toBe(true);
   });
 
   it("MEMBER has password:create, read, update and tag:manage", () => {
-    expect(hasOrgPermission(ORG_ROLE.MEMBER, ORG_PERMISSION.PASSWORD_CREATE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.MEMBER, ORG_PERMISSION.PASSWORD_READ)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.MEMBER, ORG_PERMISSION.PASSWORD_UPDATE)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.MEMBER, ORG_PERMISSION.TAG_MANAGE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.PASSWORD_CREATE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.PASSWORD_READ)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.PASSWORD_UPDATE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.TAG_MANAGE)).toBe(true);
   });
 
   it("MEMBER cannot delete passwords or manage org/members", () => {
-    expect(hasOrgPermission(ORG_ROLE.MEMBER, ORG_PERMISSION.PASSWORD_DELETE)).toBe(false);
-    expect(hasOrgPermission(ORG_ROLE.MEMBER, ORG_PERMISSION.ORG_DELETE)).toBe(false);
-    expect(hasOrgPermission(ORG_ROLE.MEMBER, ORG_PERMISSION.ORG_UPDATE)).toBe(false);
-    expect(hasOrgPermission(ORG_ROLE.MEMBER, ORG_PERMISSION.MEMBER_INVITE)).toBe(false);
-    expect(hasOrgPermission(ORG_ROLE.MEMBER, ORG_PERMISSION.MEMBER_REMOVE)).toBe(false);
-    expect(hasOrgPermission(ORG_ROLE.MEMBER, ORG_PERMISSION.MEMBER_CHANGE_ROLE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.PASSWORD_DELETE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.ORG_DELETE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.ORG_UPDATE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.MEMBER_INVITE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.MEMBER_REMOVE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.MEMBER_CHANGE_ROLE)).toBe(false);
   });
 
   it("VIEWER has only password:read", () => {
-    expect(hasOrgPermission(ORG_ROLE.VIEWER, ORG_PERMISSION.PASSWORD_READ)).toBe(true);
-    expect(hasOrgPermission(ORG_ROLE.VIEWER, ORG_PERMISSION.PASSWORD_CREATE)).toBe(false);
-    expect(hasOrgPermission(ORG_ROLE.VIEWER, ORG_PERMISSION.PASSWORD_UPDATE)).toBe(false);
-    expect(hasOrgPermission(ORG_ROLE.VIEWER, ORG_PERMISSION.PASSWORD_DELETE)).toBe(false);
-    expect(hasOrgPermission(ORG_ROLE.VIEWER, ORG_PERMISSION.TAG_MANAGE)).toBe(false);
-    expect(hasOrgPermission(ORG_ROLE.VIEWER, ORG_PERMISSION.ORG_DELETE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.VIEWER, TEAM_PERMISSION.PASSWORD_READ)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.VIEWER, TEAM_PERMISSION.PASSWORD_CREATE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.VIEWER, TEAM_PERMISSION.PASSWORD_UPDATE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.VIEWER, TEAM_PERMISSION.PASSWORD_DELETE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.VIEWER, TEAM_PERMISSION.TAG_MANAGE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.VIEWER, TEAM_PERMISSION.ORG_DELETE)).toBe(false);
   });
 });
 
 describe("isRoleAbove", () => {
   it("OWNER is above ADMIN", () => {
-    expect(isRoleAbove(ORG_ROLE.OWNER, ORG_ROLE.ADMIN)).toBe(true);
+    expect(isRoleAbove(TEAM_ROLE.OWNER, TEAM_ROLE.ADMIN)).toBe(true);
   });
 
   it("ADMIN is above MEMBER", () => {
-    expect(isRoleAbove(ORG_ROLE.ADMIN, ORG_ROLE.MEMBER)).toBe(true);
+    expect(isRoleAbove(TEAM_ROLE.ADMIN, TEAM_ROLE.MEMBER)).toBe(true);
   });
 
   it("MEMBER is above VIEWER", () => {
-    expect(isRoleAbove(ORG_ROLE.MEMBER, ORG_ROLE.VIEWER)).toBe(true);
+    expect(isRoleAbove(TEAM_ROLE.MEMBER, TEAM_ROLE.VIEWER)).toBe(true);
   });
 
   it("same role is not above itself", () => {
-    expect(isRoleAbove(ORG_ROLE.ADMIN, ORG_ROLE.ADMIN)).toBe(false);
-    expect(isRoleAbove(ORG_ROLE.OWNER, ORG_ROLE.OWNER)).toBe(false);
+    expect(isRoleAbove(TEAM_ROLE.ADMIN, TEAM_ROLE.ADMIN)).toBe(false);
+    expect(isRoleAbove(TEAM_ROLE.OWNER, TEAM_ROLE.OWNER)).toBe(false);
   });
 
   it("lower role is not above higher role", () => {
-    expect(isRoleAbove(ORG_ROLE.MEMBER, ORG_ROLE.ADMIN)).toBe(false);
-    expect(isRoleAbove(ORG_ROLE.VIEWER, ORG_ROLE.OWNER)).toBe(false);
+    expect(isRoleAbove(TEAM_ROLE.MEMBER, TEAM_ROLE.ADMIN)).toBe(false);
+    expect(isRoleAbove(TEAM_ROLE.VIEWER, TEAM_ROLE.OWNER)).toBe(false);
   });
 });
 
@@ -123,7 +123,7 @@ describe("getOrgMembership", () => {
   });
 
   it("returns membership when found (active member)", async () => {
-    const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: ORG_ROLE.MEMBER };
+    const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: TEAM_ROLE.MEMBER };
     mockPrisma.orgMember.findFirst.mockResolvedValue(membership);
 
     const result = await getOrgMembership("u-1", "org-1");
@@ -146,7 +146,7 @@ describe("requireOrgMember", () => {
   });
 
   it("returns membership when found", async () => {
-    const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: ORG_ROLE.OWNER };
+    const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: TEAM_ROLE.OWNER };
     mockPrisma.orgMember.findFirst.mockResolvedValue(membership);
 
     const result = await requireOrgMember("u-1", "org-1");
@@ -172,23 +172,23 @@ describe("requireOrgPermission", () => {
   });
 
   it("returns membership when permission is granted", async () => {
-    const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: ORG_ROLE.OWNER };
+    const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: TEAM_ROLE.OWNER };
     mockPrisma.orgMember.findFirst.mockResolvedValue(membership);
 
-    const result = await requireOrgPermission("u-1", "org-1", ORG_PERMISSION.ORG_DELETE);
+    const result = await requireOrgPermission("u-1", "org-1", TEAM_PERMISSION.ORG_DELETE);
     expect(result).toEqual(membership);
   });
 
   it("throws OrgAuthError(403) when permission is denied", async () => {
-    const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: ORG_ROLE.VIEWER };
+    const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: TEAM_ROLE.VIEWER };
     mockPrisma.orgMember.findFirst.mockResolvedValue(membership);
 
     await expect(
-      requireOrgPermission("u-1", "org-1", ORG_PERMISSION.PASSWORD_CREATE)
+      requireOrgPermission("u-1", "org-1", TEAM_PERMISSION.PASSWORD_CREATE)
     ).rejects.toThrow(OrgAuthError);
 
     try {
-      await requireOrgPermission("u-1", "org-1", ORG_PERMISSION.PASSWORD_CREATE);
+      await requireOrgPermission("u-1", "org-1", TEAM_PERMISSION.PASSWORD_CREATE);
     } catch (err) {
       expect((err as OrgAuthError).status).toBe(403);
     }
@@ -198,7 +198,7 @@ describe("requireOrgPermission", () => {
     mockPrisma.orgMember.findFirst.mockResolvedValue(null);
 
     try {
-      await requireOrgPermission("u-1", "org-1", ORG_PERMISSION.PASSWORD_READ);
+      await requireOrgPermission("u-1", "org-1", TEAM_PERMISSION.PASSWORD_READ);
     } catch (err) {
       expect((err as OrgAuthError).status).toBe(404);
     }
@@ -207,18 +207,18 @@ describe("requireOrgPermission", () => {
 
 describe("SCIM_MANAGE permission", () => {
   it("OWNER has SCIM_MANAGE permission", () => {
-    expect(hasOrgPermission(ORG_ROLE.OWNER, ORG_PERMISSION.SCIM_MANAGE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.SCIM_MANAGE)).toBe(true);
   });
 
   it("ADMIN has SCIM_MANAGE permission", () => {
-    expect(hasOrgPermission(ORG_ROLE.ADMIN, ORG_PERMISSION.SCIM_MANAGE)).toBe(true);
+    expect(hasOrgPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.SCIM_MANAGE)).toBe(true);
   });
 
   it("MEMBER does not have SCIM_MANAGE permission", () => {
-    expect(hasOrgPermission(ORG_ROLE.MEMBER, ORG_PERMISSION.SCIM_MANAGE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.SCIM_MANAGE)).toBe(false);
   });
 
   it("VIEWER does not have SCIM_MANAGE permission", () => {
-    expect(hasOrgPermission(ORG_ROLE.VIEWER, ORG_PERMISSION.SCIM_MANAGE)).toBe(false);
+    expect(hasOrgPermission(TEAM_ROLE.VIEWER, TEAM_PERMISSION.SCIM_MANAGE)).toBe(false);
   });
 });

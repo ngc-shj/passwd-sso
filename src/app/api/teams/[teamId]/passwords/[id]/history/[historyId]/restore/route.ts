@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY, ORG_PERMISSION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY, TEAM_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ teamId: string; id: string; historyId: string }> };
 
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { teamId: orgId, id, historyId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.PASSWORD_UPDATE);
+    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_UPDATE);
   } catch (e) {
     if (e instanceof OrgAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

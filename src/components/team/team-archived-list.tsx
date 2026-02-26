@@ -6,7 +6,7 @@ import { PasswordCard } from "@/components/passwords/password-card";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { TeamPasswordForm } from "@/components/team/team-password-form";
 import { Building2 } from "lucide-react";
-import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
+import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import {
@@ -391,8 +391,8 @@ export function TeamArchivedList({
             getDetail={createDetailFetcher(entry)}
             getUrl={createUrlFetcher(entry)}
             onEditClick={() => handleEdit(entry.id)}
-            canEdit={entry.role === ORG_ROLE.OWNER || entry.role === ORG_ROLE.ADMIN || entry.role === ORG_ROLE.MEMBER}
-            canDelete={entry.role === ORG_ROLE.OWNER || entry.role === ORG_ROLE.ADMIN}
+            canEdit={entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN || entry.role === TEAM_ROLE.MEMBER}
+            canDelete={entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN}
             createdBy={entry.teamName}
             teamId={entry.teamId}
           />
