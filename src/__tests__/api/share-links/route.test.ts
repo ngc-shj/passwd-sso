@@ -30,7 +30,7 @@ vi.mock("@/lib/crypto-server", () => ({
     masterKeyVersion: 1,
   }),
 }));
-vi.mock("@/lib/org-auth", () => ({
+vi.mock("@/lib/team-auth", () => ({
   requireOrgPermission: vi.fn(),
   OrgAuthError: class extends Error {
     status: number;
@@ -262,8 +262,8 @@ describe("POST /api/share-links", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValueOnce({ orgId: "org-123" });
 
-    const { requireOrgPermission } = await import("@/lib/org-auth");
-    const { OrgAuthError: RealOrgAuthError } = await import("@/lib/org-auth");
+    const { requireOrgPermission } = await import("@/lib/team-auth");
+    const { OrgAuthError: RealOrgAuthError } = await import("@/lib/team-auth");
     vi.mocked(requireOrgPermission).mockRejectedValueOnce(
       new RealOrgAuthError("INSUFFICIENT_PERMISSION", 403)
     );

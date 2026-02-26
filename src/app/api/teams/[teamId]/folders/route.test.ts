@@ -30,7 +30,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { orgFolder: mockPrismaOrgFolder },
 }));
-vi.mock("@/lib/org-auth", () => ({
+vi.mock("@/lib/team-auth", () => ({
   requireOrgMember: mockRequireOrgMember,
   requireOrgPermission: mockRequireOrgPermission,
   OrgAuthError,

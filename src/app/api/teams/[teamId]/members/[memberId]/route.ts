@@ -7,7 +7,7 @@ import {
   requireOrgPermission,
   isRoleAbove,
   OrgAuthError,
-} from "@/lib/org-auth";
+} from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 

@@ -12,7 +12,7 @@ const { mockAuth, mockRequireOrgMember, mockEntryFindUnique, mockHistoryFindMany
 );
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/org-auth", () => {
+vi.mock("@/lib/team-auth", () => {
   class OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -33,7 +33,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { GET } from "@/app/api/teams/[teamId]/passwords/[id]/history/route";
-import { OrgAuthError } from "@/lib/org-auth";
+import { OrgAuthError } from "@/lib/team-auth";
 
 describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
   beforeEach(() => vi.clearAllMocks());

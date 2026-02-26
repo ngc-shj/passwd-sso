@@ -27,7 +27,7 @@ export function createMockMembership(
 
 /**
  * Creates mock implementations of all org-auth exports.
- * Use with: vi.mock("@/lib/org-auth", () => createOrgAuthMocks(...))
+ * Use with: vi.mock("@/lib/team-auth", () => createOrgAuthMocks(...))
  */
 export function createOrgAuthMocks(
   membership: MockMembership | null = createMockMembership()

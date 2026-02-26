@@ -34,7 +34,7 @@ vi.mock("@/lib/prisma", () => ({
     auditLog: { create: mockAuditLogCreate },
   },
 }));
-vi.mock("@/lib/org-auth", () => ({
+vi.mock("@/lib/team-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,
   OrgAuthError,
 }));

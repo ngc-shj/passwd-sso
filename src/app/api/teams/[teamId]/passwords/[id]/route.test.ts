@@ -43,7 +43,7 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockPrismaTransaction,
   },
 }));
-vi.mock("@/lib/org-auth", () => ({
+vi.mock("@/lib/team-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,
   requireOrgMember: mockRequireOrgMember,
   hasOrgPermission: mockHasOrgPermission,

@@ -6,7 +6,7 @@ import {
   requireOrgMember,
   requireOrgPermission,
   OrgAuthError,
-} from "@/lib/org-auth";
+} from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 

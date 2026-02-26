@@ -40,7 +40,7 @@ vi.mock("@/lib/prisma", () => ({
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
-vi.mock("@/lib/org-auth", () => ({
+vi.mock("@/lib/team-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,
   isRoleAbove: mockIsRoleAbove,
   OrgAuthError,

@@ -32,7 +32,7 @@ vi.mock("@/lib/prisma", () => ({
     orgPasswordEntryHistory: mockPrismaOrgPasswordEntryHistory,
   },
 }));
-vi.mock("@/lib/org-auth", () => ({
+vi.mock("@/lib/team-auth", () => ({
   requireOrgMember: mockRequireOrgMember,
   OrgAuthError,
 }));

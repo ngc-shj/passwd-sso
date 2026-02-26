@@ -25,7 +25,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/org-auth", () => {
+vi.mock("@/lib/team-auth", () => {
   class OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -59,7 +59,7 @@ vi.mock("@/lib/blob-store", () => ({
 
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/teams/[teamId]/passwords/[id]/attachments/route";
-import { OrgAuthError } from "@/lib/org-auth";
+import { OrgAuthError } from "@/lib/team-auth";
 
 function makeParams(orgId: string, id: string) {
   return createParams({ orgId, id });

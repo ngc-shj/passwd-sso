@@ -7,7 +7,7 @@ import {
   requireOrgMember,
   requireOrgPermission,
   OrgAuthError,
-} from "@/lib/org-auth";
+} from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";

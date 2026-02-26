@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
+import { requireOrgPermission, OrgAuthError } from "@/lib/team-auth";
 import { z } from "zod/v4";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";

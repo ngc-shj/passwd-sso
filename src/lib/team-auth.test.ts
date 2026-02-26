@@ -33,7 +33,7 @@ import {
   requireOrgMember,
   requireOrgPermission,
   OrgAuthError,
-} from "./org-auth";
+} from "./team-auth";
 
 const mockPrisma = prisma as unknown as MockPrisma;
 

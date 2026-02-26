@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { requireOrgMember, OrgAuthError } from "@/lib/org-auth";
+import { requireOrgMember, OrgAuthError } from "@/lib/team-auth";
 import { TEAM_ROLE } from "@/lib/constants";
 
 // GET /api/share-links/mine

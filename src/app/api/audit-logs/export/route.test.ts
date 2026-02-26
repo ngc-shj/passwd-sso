@@ -19,7 +19,7 @@ const { mockAuth, mockRequireOrgPermission, OrgAuthError, mockLogAudit } = vi.ho
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/org-auth", () => ({
+vi.mock("@/lib/team-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,
   OrgAuthError,
 }));

@@ -30,7 +30,7 @@ vi.mock("@/lib/prisma", () => ({
     orgPasswordFavorite: mockPrismaOrgPasswordFavorite,
   },
 }));
-vi.mock("@/lib/org-auth", () => ({
+vi.mock("@/lib/team-auth", () => ({
   requireOrgPermission: mockRequireOrgPermission,
   OrgAuthError,
 }));

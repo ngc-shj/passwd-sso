@@ -7,7 +7,7 @@ import {
   hashToken,
   encryptShareData,
 } from "@/lib/crypto-server";
-import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
+import { requireOrgPermission, OrgAuthError } from "@/lib/team-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";

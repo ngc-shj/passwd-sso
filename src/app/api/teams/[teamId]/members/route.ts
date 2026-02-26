@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireOrgMember, OrgAuthError } from "@/lib/org-auth";
+import { requireOrgMember, OrgAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 
 type Params = { params: Promise<{ teamId: string }> };

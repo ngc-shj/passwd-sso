@@ -14,7 +14,7 @@ vi.mock("@/lib/prisma", () => ({
     orgPasswordEntry: mockPrismaOrgPasswordEntry,
   },
 }));
-vi.mock("@/lib/org-auth", () => ({
+vi.mock("@/lib/team-auth", () => ({
   hasOrgPermission: mockHasOrgPermission,
 }));
 

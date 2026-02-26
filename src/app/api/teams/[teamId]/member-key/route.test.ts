@@ -22,7 +22,7 @@ const {
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/org-auth", () => ({
+vi.mock("@/lib/team-auth", () => ({
   requireOrgMember: mockRequireOrgMember,
   OrgAuthError,
 }));

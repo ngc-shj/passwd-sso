@@ -17,7 +17,7 @@ vi.mock("@/lib/prisma", () => ({
     passwordShare: { findMany: mockFindMany },
   },
 }));
-vi.mock("@/lib/org-auth", () => ({
+vi.mock("@/lib/team-auth", () => ({
   requireOrgMember: mockRequireOrgMember,
   OrgAuthError: class extends Error {
     status: number;
@@ -282,7 +282,7 @@ describe("GET /api/share-links/mine", () => {
 
   it("returns OrgAuthError status when org membership check fails", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    const { OrgAuthError } = await import("@/lib/org-auth");
+    const { OrgAuthError } = await import("@/lib/team-auth");
     mockRequireOrgMember.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
 
     const req = createRequest("GET", "http://localhost/api/share-links/mine?team=org-1");

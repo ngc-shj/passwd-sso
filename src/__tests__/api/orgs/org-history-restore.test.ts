@@ -17,7 +17,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/org-auth", () => {
+vi.mock("@/lib/team-auth", () => {
   class OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -43,7 +43,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 import { POST } from "@/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route";
-import { OrgAuthError } from "@/lib/org-auth";
+import { OrgAuthError } from "@/lib/team-auth";
 
 describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", () => {
   beforeEach(() => vi.clearAllMocks());

@@ -21,7 +21,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/org-auth", () => {
+vi.mock("@/lib/team-auth", () => {
   class OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -53,7 +53,7 @@ vi.mock("@/lib/folder-utils", () => ({
 }));
 
 import { PUT, DELETE } from "@/app/api/teams/[teamId]/folders/[id]/route";
-import { OrgAuthError } from "@/lib/org-auth";
+import { OrgAuthError } from "@/lib/team-auth";
 
 describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   beforeEach(() => vi.clearAllMocks());
