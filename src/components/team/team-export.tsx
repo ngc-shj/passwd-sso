@@ -13,7 +13,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import {
   type ExportFormat,
   type ExportEntry,
-  ORG_EXPORT_OPTIONS,
+  TEAM_EXPORT_OPTIONS,
   type ExportProfile,
   formatExportContent as formatExportContentShared,
   formatExportDate,
@@ -137,7 +137,7 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
         entries,
         format,
         exportProfile,
-        ORG_EXPORT_OPTIONS
+        TEAM_EXPORT_OPTIONS
       );
 
       let blob: Blob;
