@@ -10,17 +10,17 @@ export interface EntryLocaleCopy {
   tagsTitle: string;
 }
 
-interface BuildOrgEntryCopyArgs {
+interface BuildTeamEntryCopyArgs {
   isEdit: boolean;
   entryKind: TeamEntryKind;
   copyByKind: Record<TeamEntryKind, EntryLocaleCopy>;
 }
 
-export function buildOrgEntryCopy({
+export function buildTeamEntryCopy({
   isEdit,
   entryKind,
   copyByKind,
-}: BuildOrgEntryCopyArgs) {
+}: BuildTeamEntryCopyArgs) {
   const selected = copyByKind[entryKind];
   return {
     dialogLabel: isEdit ? selected.edit : selected.create,

@@ -3,19 +3,19 @@
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-interface OrgSecureNoteFieldsProps {
+interface TeamSecureNoteFieldsProps {
   content: string;
   onContentChange: (value: string) => void;
   contentLabel: string;
   contentPlaceholder: string;
 }
 
-export function OrgSecureNoteFields({
+export function TeamSecureNoteFields({
   content,
   onContentChange,
   contentLabel,
   contentPlaceholder,
-}: OrgSecureNoteFieldsProps) {
+}: TeamSecureNoteFieldsProps) {
   return (
     <div className="space-y-2">
       <Label>{contentLabel}</Label>

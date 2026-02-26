@@ -4,7 +4,7 @@ import {
   getMaxLength,
 } from "@/lib/credit-card";
 
-interface OrgCardValidationState {
+interface TeamCardValidationState {
   cardValidation: ReturnType<typeof getCardNumberValidation>;
   lengthHint: string;
   maxInputLength: number;
@@ -14,10 +14,10 @@ interface OrgCardValidationState {
   hasBrandHint: boolean;
 }
 
-export function getOrgCardValidationState(
+export function getTeamCardValidationState(
   cardNumber: string,
   brand: string,
-): OrgCardValidationState {
+): TeamCardValidationState {
   const cardValidation = getCardNumberValidation(cardNumber, brand);
   const allowedLengths = getAllowedLengths(cardValidation.effectiveBrand);
   const lengthHint = allowedLengths ? allowedLengths.join("/") : "12-19";

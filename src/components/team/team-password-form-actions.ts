@@ -9,7 +9,7 @@ import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 
-interface HandleOrgCardNumberChangeArgs {
+interface HandleTeamCardNumberChangeArgs {
   value: string;
   brand: string;
   brandSource: "auto" | "manual";
@@ -17,13 +17,13 @@ interface HandleOrgCardNumberChangeArgs {
   setBrand: (value: string) => void;
 }
 
-export function handleOrgCardNumberChange({
+export function handleTeamCardNumberChange({
   value,
   brand,
   brandSource,
   setCardNumber,
   setBrand,
-}: HandleOrgCardNumberChangeArgs): void {
+}: HandleTeamCardNumberChangeArgs): void {
   const digits = normalizeCardNumber(value);
   const detected = detectCardBrand(digits);
   const nextBrand = brandSource === "manual" ? brand : (detected || "");

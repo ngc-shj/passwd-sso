@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildOrgEntryCopy } from "@/components/team/team-entry-copy";
+import { buildTeamEntryCopy } from "@/components/team/team-entry-copy";
 
-describe("buildOrgEntryCopy", () => {
+describe("buildTeamEntryCopy", () => {
   const copyByKind = {
     password: {
       edit: "Edit password",
@@ -51,7 +51,7 @@ describe("buildOrgEntryCopy", () => {
   } as const;
 
   it("returns edit labels for edit mode", () => {
-    const result = buildOrgEntryCopy({
+    const result = buildTeamEntryCopy({
       isEdit: true,
       entryKind: "identity",
       copyByKind,
@@ -63,7 +63,7 @@ describe("buildOrgEntryCopy", () => {
   });
 
   it("returns create labels for create mode", () => {
-    const result = buildOrgEntryCopy({
+    const result = buildTeamEntryCopy({
       isEdit: false,
       entryKind: "passkey",
       copyByKind,

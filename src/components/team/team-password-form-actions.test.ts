@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
 import {
-  handleOrgCardNumberChange,
+  handleTeamCardNumberChange,
   submitTeamPasswordForm,
 } from "@/components/team/team-password-form-actions";
 
@@ -20,7 +20,7 @@ describe("org-password-form-actions", () => {
     const setCardNumber = vi.fn();
     const setBrand = vi.fn();
 
-    handleOrgCardNumberChange({
+    handleTeamCardNumberChange({
       value: "4242424242424242",
       brand: "",
       brandSource: "auto",
@@ -36,7 +36,7 @@ describe("org-password-form-actions", () => {
     const setCardNumber = vi.fn();
     const setBrand = vi.fn();
 
-    handleOrgCardNumberChange({
+    handleTeamCardNumberChange({
       value: "4242424242424242",
       brand: "mastercard",
       brandSource: "manual",

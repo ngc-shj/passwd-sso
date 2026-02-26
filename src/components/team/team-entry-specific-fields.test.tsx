@@ -7,19 +7,19 @@ import { describe, expect, it, vi } from "vitest";
 import { TeamEntrySpecificFields } from "@/components/team/team-entry-specific-fields";
 
 vi.mock("@/components/passwords/entry-login-main-fields", () => ({
-  EntryLoginMainFields: () => <div data-testid="org-login-fields" />,
+  EntryLoginMainFields: () => <div data-testid="team-login-fields" />,
 }));
 vi.mock("@/components/team/team-secure-note-fields", () => ({
-  OrgSecureNoteFields: () => <div data-testid="org-secure-note-fields" />,
+  TeamSecureNoteFields: () => <div data-testid="team-secure-note-fields" />,
 }));
 vi.mock("@/components/team/team-credit-card-fields", () => ({
-  OrgCreditCardFields: () => <div data-testid="org-credit-card-fields" />,
+  TeamCreditCardFields: () => <div data-testid="team-credit-card-fields" />,
 }));
 vi.mock("@/components/team/team-identity-fields", () => ({
-  OrgIdentityFields: () => <div data-testid="org-identity-fields" />,
+  TeamIdentityFields: () => <div data-testid="team-identity-fields" />,
 }));
 vi.mock("@/components/team/team-passkey-fields", () => ({
-  OrgPasskeyFields: () => <div data-testid="org-passkey-fields" />,
+  TeamPasskeyFields: () => <div data-testid="team-passkey-fields" />,
 }));
 
 const baseGeneratorSettings: GeneratorSettings = {
@@ -169,11 +169,11 @@ function renderSubject(entryKind: "password" | "secureNote" | "creditCard" | "id
 describe("TeamEntrySpecificFields", () => {
   it("renders login fields for password kind", () => {
     renderSubject("password");
-    expect(screen.getByTestId("org-login-fields")).toBeTruthy();
+    expect(screen.getByTestId("team-login-fields")).toBeTruthy();
   });
 
   it("renders passkey fields for passkey kind", () => {
     renderSubject("passkey");
-    expect(screen.getByTestId("org-passkey-fields")).toBeTruthy();
+    expect(screen.getByTestId("team-passkey-fields")).toBeTruthy();
   });
 });

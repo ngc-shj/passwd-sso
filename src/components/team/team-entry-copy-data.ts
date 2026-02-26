@@ -8,7 +8,7 @@ import type {
   SecureNoteFormTranslator,
 } from "@/lib/translation-types";
 
-interface BuildOrgEntryCopyDataArgs {
+interface BuildTeamEntryCopyDataArgs {
   t: PasswordFormTranslator;
   tn: SecureNoteFormTranslator;
   tcc: CreditCardFormTranslator;
@@ -16,13 +16,13 @@ interface BuildOrgEntryCopyDataArgs {
   tpk: PasskeyFormTranslator;
 }
 
-export function buildOrgEntryCopyData({
+export function buildTeamEntryCopyData({
   t,
   tn,
   tcc,
   ti,
   tpk,
-}: BuildOrgEntryCopyDataArgs): Record<TeamEntryKind, EntryLocaleCopy> {
+}: BuildTeamEntryCopyDataArgs): Record<TeamEntryKind, EntryLocaleCopy> {
   return {
     passkey: {
       edit: tpk("editPasskey"),

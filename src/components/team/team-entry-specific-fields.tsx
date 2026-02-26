@@ -2,10 +2,10 @@
 
 import { CARD_BRANDS } from "@/lib/credit-card";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
-import { OrgCreditCardFields } from "@/components/team/team-credit-card-fields";
-import { OrgIdentityFields } from "@/components/team/team-identity-fields";
-import { OrgPasskeyFields } from "@/components/team/team-passkey-fields";
-import { OrgSecureNoteFields } from "@/components/team/team-secure-note-fields";
+import { TeamCreditCardFields } from "@/components/team/team-credit-card-fields";
+import { TeamIdentityFields } from "@/components/team/team-identity-fields";
+import { TeamPasskeyFields } from "@/components/team/team-passkey-fields";
+import { TeamSecureNoteFields } from "@/components/team/team-secure-note-fields";
 import type { TeamEntryKind } from "@/components/team/team-password-form-types";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 
@@ -267,7 +267,7 @@ export function TeamEntrySpecificFields({
   switch (entryKind) {
     case "passkey":
       return (
-        <OrgPasskeyFields
+        <TeamPasskeyFields
           relyingPartyId={relyingPartyId}
           onRelyingPartyIdChange={onRelyingPartyIdChange}
           relyingPartyIdPlaceholder={relyingPartyIdPlaceholder}
@@ -296,7 +296,7 @@ export function TeamEntrySpecificFields({
       );
     case "identity":
       return (
-        <OrgIdentityFields
+        <TeamIdentityFields
           fullName={fullName}
           onFullNameChange={onFullNameChange}
           fullNamePlaceholder={fullNamePlaceholder}
@@ -334,7 +334,7 @@ export function TeamEntrySpecificFields({
       );
     case "creditCard":
       return (
-        <OrgCreditCardFields
+        <TeamCreditCardFields
           cardholderName={cardholderName}
           onCardholderNameChange={onCardholderNameChange}
           cardholderNamePlaceholder={cardholderNamePlaceholder}
@@ -376,7 +376,7 @@ export function TeamEntrySpecificFields({
       );
     case "secureNote":
       return (
-        <OrgSecureNoteFields
+        <TeamSecureNoteFields
           content={content}
           onContentChange={onContentChange}
           contentLabel={contentLabel}
@@ -387,7 +387,7 @@ export function TeamEntrySpecificFields({
     default:
       return (
         <EntryLoginMainFields
-          idPrefix="org-"
+          idPrefix="team-"
           hideTitle
           title={title}
           onTitleChange={onTitleChange}

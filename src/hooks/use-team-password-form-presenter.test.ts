@@ -6,16 +6,16 @@ import type { TeamPasswordFormTranslations } from "@/hooks/entry-form-translatio
 import { useTeamPasswordFormPresenter } from "@/hooks/use-team-password-form-presenter";
 import type { TeamPasswordFormState } from "@/hooks/use-team-password-form-state";
 
-const getOrgCardValidationStateMock = vi.fn();
-const handleOrgCardNumberChangeMock = vi.fn();
+const getTeamCardValidationStateMock = vi.fn();
+const handleTeamCardNumberChangeMock = vi.fn();
 const buildTeamEntrySpecificFieldsPropsFromStateMock = vi.fn();
 
 vi.mock("@/components/team/team-credit-card-validation", () => ({
-  getOrgCardValidationState: (...args: unknown[]) => getOrgCardValidationStateMock(...args),
+  getTeamCardValidationState: (...args: unknown[]) => getTeamCardValidationStateMock(...args),
 }));
 
 vi.mock("@/components/team/team-password-form-actions", () => ({
-  handleOrgCardNumberChange: (...args: unknown[]) => handleOrgCardNumberChangeMock(...args),
+  handleTeamCardNumberChange: (...args: unknown[]) => handleTeamCardNumberChangeMock(...args),
 }));
 
 vi.mock("@/hooks/team-entry-specific-fields-props", () => ({
@@ -25,11 +25,11 @@ vi.mock("@/hooks/team-entry-specific-fields-props", () => ({
 
 describe("useTeamPasswordFormPresenter", () => {
   beforeEach(() => {
-    getOrgCardValidationStateMock.mockReset();
-    handleOrgCardNumberChangeMock.mockReset();
+    getTeamCardValidationStateMock.mockReset();
+    handleTeamCardNumberChangeMock.mockReset();
     buildTeamEntrySpecificFieldsPropsFromStateMock.mockReset();
 
-    getOrgCardValidationStateMock.mockReturnValue({
+    getTeamCardValidationStateMock.mockReturnValue({
       cardValidation: { detectedBrand: "Visa", digits: "4242" },
       lengthHint: "16",
       maxInputLength: 19,
@@ -74,8 +74,8 @@ describe("useTeamPasswordFormPresenter", () => {
     expect(presenterArgs?.onCardNumberChange).toBeTypeOf("function");
     presenterArgs?.onCardNumberChange?.("4111 1111 1111 1111");
 
-    expect(handleOrgCardNumberChangeMock).toHaveBeenCalledTimes(1);
-    expect(handleOrgCardNumberChangeMock).toHaveBeenCalledWith(
+    expect(handleTeamCardNumberChangeMock).toHaveBeenCalledTimes(1);
+    expect(handleTeamCardNumberChangeMock).toHaveBeenCalledWith(
       expect.objectContaining({
         value: "4111 1111 1111 1111",
         brand: "visa",

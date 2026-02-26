@@ -1,6 +1,6 @@
 "use client";
 
-import { handleOrgCardNumberChange } from "@/components/team/team-password-form-actions";
+import { handleTeamCardNumberChange } from "@/components/team/team-password-form-actions";
 import type { TeamPasswordFormValues, TeamPasswordFormSettersState } from "@/hooks/use-team-password-form-state";
 import type { CreditCardFormTranslator } from "@/lib/translation-types";
 
@@ -9,7 +9,7 @@ export function buildTeamCardNumberChangeCallback(
   setters: Pick<TeamPasswordFormSettersState, "setCardNumber" | "setBrand">,
 ): (value: string) => void {
   return (value: string) => {
-    handleOrgCardNumberChange({
+    handleTeamCardNumberChange({
       value,
       brand: values.brand,
       brandSource: values.brandSource,

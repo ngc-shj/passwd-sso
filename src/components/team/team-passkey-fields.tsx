@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/team/team-form-fields";
 
-interface OrgPasskeyFieldsProps {
+interface TeamPasskeyFieldsProps {
   relyingPartyId: string;
   onRelyingPartyIdChange: (value: string) => void;
   relyingPartyIdPlaceholder: string;
@@ -38,7 +38,7 @@ interface OrgPasskeyFieldsProps {
   };
 }
 
-export function OrgPasskeyFields({
+export function TeamPasskeyFields({
   relyingPartyId,
   onRelyingPartyIdChange,
   relyingPartyIdPlaceholder,
@@ -63,7 +63,7 @@ export function OrgPasskeyFields({
   onNotesChange,
   notesPlaceholder,
   labels,
-}: OrgPasskeyFieldsProps) {
+}: TeamPasskeyFieldsProps) {
   return (
     <>
       <div className="space-y-2">

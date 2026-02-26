@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CreditCardFormTranslator } from "@/lib/translation-types";
 
-const handleOrgCardNumberChangeMock = vi.fn();
+const handleTeamCardNumberChangeMock = vi.fn();
 
 vi.mock("@/components/team/team-password-form-actions", () => ({
-  handleOrgCardNumberChange: (...args: unknown[]) => handleOrgCardNumberChangeMock(...args),
+  handleTeamCardNumberChange: (...args: unknown[]) => handleTeamCardNumberChangeMock(...args),
 }));
 
 import {
@@ -13,8 +13,8 @@ import {
 } from "@/hooks/team-password-form-presenter-card";
 
 describe("buildTeamCardNumberChangeCallback", () => {
-  it("delegates to handleOrgCardNumberChange with values and setters", () => {
-    handleOrgCardNumberChangeMock.mockReset();
+  it("delegates to handleTeamCardNumberChange with values and setters", () => {
+    handleTeamCardNumberChangeMock.mockReset();
     const setCardNumber = vi.fn();
     const setBrand = vi.fn();
 
@@ -24,8 +24,8 @@ describe("buildTeamCardNumberChangeCallback", () => {
     );
     callback("4111 1111 1111 1111");
 
-    expect(handleOrgCardNumberChangeMock).toHaveBeenCalledOnce();
-    expect(handleOrgCardNumberChangeMock).toHaveBeenCalledWith({
+    expect(handleTeamCardNumberChangeMock).toHaveBeenCalledOnce();
+    expect(handleTeamCardNumberChangeMock).toHaveBeenCalledWith({
       value: "4111 1111 1111 1111",
       brand: "visa",
       brandSource: "manual",

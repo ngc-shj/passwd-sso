@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/team/team-form-fields";
 
-interface OrgCreditCardFieldsProps {
+interface TeamCreditCardFieldsProps {
   cardholderName: string;
   onCardholderNameChange: (value: string) => void;
   cardholderNamePlaceholder: string;
@@ -57,7 +57,7 @@ interface OrgCreditCardFieldsProps {
   };
 }
 
-export function OrgCreditCardFields({
+export function TeamCreditCardFields({
   cardholderName,
   onCardholderNameChange,
   cardholderNamePlaceholder,
@@ -95,7 +95,7 @@ export function OrgCreditCardFields({
   onNotesChange,
   notesPlaceholder,
   labels,
-}: OrgCreditCardFieldsProps) {
+}: TeamCreditCardFieldsProps) {
   return (
     <>
       <div className="space-y-2">

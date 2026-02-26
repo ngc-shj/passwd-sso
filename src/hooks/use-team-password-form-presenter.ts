@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { getOrgCardValidationState } from "@/components/team/team-credit-card-validation";
-import { buildOrgEntryCopy } from "@/components/team/team-entry-copy";
-import { buildOrgEntryCopyData } from "@/components/team/team-entry-copy-data";
+import { getTeamCardValidationState } from "@/components/team/team-credit-card-validation";
+import { buildTeamEntryCopy } from "@/components/team/team-entry-copy";
+import { buildTeamEntryCopyData } from "@/components/team/team-entry-copy-data";
 import type { TeamEntryKindState } from "@/components/team/team-entry-kind";
 import { buildTeamEntrySpecificFieldsPropsFromState } from "@/hooks/team-entry-specific-fields-props";
 import {
@@ -41,7 +41,7 @@ export function useTeamPasswordFormPresenter({
     showLuhnError,
     cardNumberValid,
     hasBrandHint,
-  } = getOrgCardValidationState(values.cardNumber, values.brand);
+  } = getTeamCardValidationState(values.cardNumber, values.brand);
 
   const handleCardNumberChange = buildTeamCardNumberChangeCallback(values, setters);
 
@@ -56,10 +56,10 @@ export function useTeamPasswordFormPresenter({
 
   const entryCopy = useMemo(
     () =>
-      buildOrgEntryCopy({
+      buildTeamEntryCopy({
         isEdit,
         entryKind,
-        copyByKind: buildOrgEntryCopyData({ t, tn, tcc, ti, tpk }),
+        copyByKind: buildTeamEntryCopyData({ t, tn, tcc, ti, tpk }),
       }),
     [isEdit, entryKind, t, tn, tcc, ti, tpk],
   );

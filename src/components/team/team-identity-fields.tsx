@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/team/team-form-fields";
 
-interface OrgIdentityFieldsProps {
+interface TeamIdentityFieldsProps {
   fullName: string;
   onFullNameChange: (value: string) => void;
   fullNamePlaceholder: string;
@@ -51,7 +51,7 @@ interface OrgIdentityFieldsProps {
   };
 }
 
-export function OrgIdentityFields({
+export function TeamIdentityFields({
   fullName,
   onFullNameChange,
   fullNamePlaceholder,
@@ -85,7 +85,7 @@ export function OrgIdentityFields({
   onNotesChange,
   notesPlaceholder,
   labels,
-}: OrgIdentityFieldsProps) {
+}: TeamIdentityFieldsProps) {
   return (
     <>
       <div className="space-y-2">
