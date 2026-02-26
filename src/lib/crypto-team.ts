@@ -403,7 +403,7 @@ export async function createTeamKeyEscrow(
  * Encrypt team entry data (text) with team encryption key.
  * Uses AES-256-GCM with AAD from crypto-aad.ts (buildTeamEntryAAD).
  */
-export async function encryptOrgEntry(
+export async function encryptTeamEntry(
   plaintext: string,
   teamEncryptionKey: CryptoKey,
   aad?: Uint8Array
@@ -414,7 +414,7 @@ export async function encryptOrgEntry(
 /**
  * Decrypt team entry data (text) with team encryption key.
  */
-export async function decryptOrgEntry(
+export async function decryptTeamEntry(
   encrypted: EncryptedData,
   teamEncryptionKey: CryptoKey,
   aad?: Uint8Array
@@ -425,7 +425,7 @@ export async function decryptOrgEntry(
 /**
  * Encrypt team attachment (binary) with team encryption key.
  */
-export async function encryptOrgAttachment(
+export async function encryptTeamAttachment(
   data: ArrayBuffer,
   teamEncryptionKey: CryptoKey,
   aad?: Uint8Array
@@ -436,7 +436,7 @@ export async function encryptOrgAttachment(
 /**
  * Decrypt team attachment (binary) with team encryption key.
  */
-export async function decryptOrgAttachment(
+export async function decryptTeamAttachment(
   encrypted: EncryptedBinary,
   teamEncryptionKey: CryptoKey,
   aad?: Uint8Array

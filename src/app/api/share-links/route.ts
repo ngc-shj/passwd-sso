@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
   let dataAuthTag: string;
   let masterKeyVersion: number;
   let entryType: EntryTypeValue;
-  let orgId: string | undefined;
+  let teamId: string | undefined;
 
   if (passwordEntryId) {
     // Personal entry — verify ownership
@@ -90,18 +90,18 @@ export async function POST(req: NextRequest) {
     masterKeyVersion = encrypted.masterKeyVersion;
   } else {
     // Team entry — E2E: client sends pre-encrypted share data
-    const orgEntry = await prisma.orgPasswordEntry.findUnique({
+    const teamEntry = await prisma.orgPasswordEntry.findUnique({
       where: { id: orgPasswordEntryId! },
       select: { orgId: true, entryType: true },
     });
-    if (!orgEntry) {
+    if (!teamEntry) {
       return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
     }
 
     try {
       await requireTeamPermission(
         session.user.id,
-        orgEntry.orgId,
+        teamEntry.orgId,
         TEAM_PERMISSION.PASSWORD_READ
       );
     } catch (e) {
@@ -116,8 +116,8 @@ export async function POST(req: NextRequest) {
     dataIv = encryptedShareData!.iv;
     dataAuthTag = encryptedShareData!.authTag;
     masterKeyVersion = 0;
-    entryType = orgEntry.entryType as EntryTypeValue;
-    orgId = orgEntry.orgId;
+    entryType = teamEntry.entryType as EntryTypeValue;
+    teamId = teamEntry.orgId;
   }
 
   // Generate token
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
     scope: orgPasswordEntryId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.SHARE_CREATE,
     userId: session.user.id,
-    teamId: orgId,
+    teamId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
     metadata: { expiresIn, maxViews: maxViews ?? null },

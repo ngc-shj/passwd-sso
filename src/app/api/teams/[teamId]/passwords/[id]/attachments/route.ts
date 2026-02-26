@@ -212,7 +212,7 @@ export async function POST(
 
   const blobStore = getAttachmentBlobStore();
   const attachmentId = clientId ?? crypto.randomUUID();
-  const blobContext = { attachmentId, entryId: id, orgId: teamId };
+  const blobContext = { attachmentId, entryId: id, teamId };
   const storedBlob = await blobStore.putObject(buffer, blobContext);
 
   let attachment;

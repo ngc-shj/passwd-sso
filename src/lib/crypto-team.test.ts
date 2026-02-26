@@ -6,10 +6,10 @@ import {
   wrapTeamKeyForMember,
   unwrapTeamKey,
   createTeamKeyEscrow,
-  encryptOrgEntry,
-  decryptOrgEntry,
-  encryptOrgAttachment,
-  decryptOrgAttachment,
+  encryptTeamEntry,
+  decryptTeamEntry,
+  encryptTeamAttachment,
+  decryptTeamAttachment,
   buildTeamKeyWrapAAD,
   CURRENT_TEAM_WRAP_VERSION,
   HKDF_ECDH_WRAP_INFO,
@@ -355,24 +355,24 @@ describe("crypto-team", () => {
 
       // Encrypt with admin's key, decrypt with member's key
       const plaintext = "team-entry-secret-data";
-      const encrypted = await encryptOrgEntry(plaintext, teamEncKey);
-      const decrypted = await decryptOrgEntry(encrypted, memberEncKey);
+      const encrypted = await encryptTeamEntry(plaintext, teamEncKey);
+      const decrypted = await decryptTeamEntry(encrypted, memberEncKey);
       expect(decrypted).toBe(plaintext);
     });
   });
 
-  describe("encryptOrgEntry + decryptOrgEntry", () => {
+  describe("encryptTeamEntry + decryptTeamEntry", () => {
     it("encrypts and decrypts text data", async () => {
       const teamKey = generateTeamSymmetricKey();
       const encKey = await deriveTeamEncryptionKey(teamKey);
       const plaintext = '{"title":"My Login","password":"secret123"}';
 
-      const encrypted = await encryptOrgEntry(plaintext, encKey);
+      const encrypted = await encryptTeamEntry(plaintext, encKey);
       expect(encrypted.ciphertext).toBeTruthy();
       expect(encrypted.iv).toHaveLength(24);
       expect(encrypted.authTag).toHaveLength(32);
 
-      const decrypted = await decryptOrgEntry(encrypted, encKey);
+      const decrypted = await decryptTeamEntry(encrypted, encKey);
       expect(decrypted).toBe(plaintext);
     });
 
@@ -382,13 +382,13 @@ describe("crypto-team", () => {
       const plaintext = "aad-bound-data";
       const aad = new TextEncoder().encode("entry-id-123");
 
-      const encrypted = await encryptOrgEntry(plaintext, encKey, aad);
-      const decrypted = await decryptOrgEntry(encrypted, encKey, aad);
+      const encrypted = await encryptTeamEntry(plaintext, encKey, aad);
+      const decrypted = await decryptTeamEntry(encrypted, encKey, aad);
       expect(decrypted).toBe(plaintext);
 
       // Fails with wrong AAD
       const wrongAad = new TextEncoder().encode("wrong-entry-id");
-      await expect(decryptOrgEntry(encrypted, encKey, wrongAad)).rejects.toThrow();
+      await expect(decryptTeamEntry(encrypted, encKey, wrongAad)).rejects.toThrow();
     });
 
     it("fails with wrong key", async () => {
@@ -397,24 +397,24 @@ describe("crypto-team", () => {
       const encKey1 = await deriveTeamEncryptionKey(teamKey1);
       const encKey2 = await deriveTeamEncryptionKey(teamKey2);
 
-      const encrypted = await encryptOrgEntry("test", encKey1);
-      await expect(decryptOrgEntry(encrypted, encKey2)).rejects.toThrow();
+      const encrypted = await encryptTeamEntry("test", encKey1);
+      await expect(decryptTeamEntry(encrypted, encKey2)).rejects.toThrow();
     });
   });
 
-  describe("encryptOrgAttachment + decryptOrgAttachment", () => {
+  describe("encryptTeamAttachment + decryptTeamAttachment", () => {
     it("encrypts and decrypts binary data", async () => {
       const teamKey = generateTeamSymmetricKey();
       const encKey = await deriveTeamEncryptionKey(teamKey);
       const data = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG header
       const dataBuf = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
 
-      const encrypted = await encryptOrgAttachment(dataBuf, encKey);
+      const encrypted = await encryptTeamAttachment(dataBuf, encKey);
       expect(encrypted.ciphertext).toBeInstanceOf(Uint8Array);
       expect(encrypted.iv).toHaveLength(24);
       expect(encrypted.authTag).toHaveLength(32);
 
-      const decrypted = await decryptOrgAttachment(encrypted, encKey);
+      const decrypted = await decryptTeamAttachment(encrypted, encKey);
       expect(new Uint8Array(decrypted)).toEqual(data);
     });
   });
@@ -466,7 +466,7 @@ describe("crypto-team", () => {
 
       // 2. Admin encrypts team data
       const entry = '{"title":"Team Secret","password":"team-pass-123"}';
-      const encryptedEntry = await encryptOrgEntry(entry, teamEncKey);
+      const encryptedEntry = await encryptTeamEntry(entry, teamEncKey);
 
       // 3. Member joins -> admin distributes team key
       const memberKeyPair = await generateECDHKeyPair();
@@ -500,15 +500,15 @@ describe("crypto-team", () => {
 
       // 5. Member derives encryption key and decrypts data
       const memberEncKey = await deriveTeamEncryptionKey(unwrapped);
-      const decrypted = await decryptOrgEntry(encryptedEntry, memberEncKey);
+      const decrypted = await decryptTeamEntry(encryptedEntry, memberEncKey);
       expect(decrypted).toBe(entry);
 
       // 6. Member creates new entry
       const newEntry = '{"title":"Member Entry","password":"new-pass"}';
-      const newEncrypted = await encryptOrgEntry(newEntry, memberEncKey);
+      const newEncrypted = await encryptTeamEntry(newEntry, memberEncKey);
 
       // 7. Admin can decrypt member's entry
-      const adminDecrypted = await decryptOrgEntry(newEncrypted, teamEncKey);
+      const adminDecrypted = await decryptTeamEntry(newEncrypted, teamEncKey);
       expect(adminDecrypted).toBe(newEntry);
     });
   });

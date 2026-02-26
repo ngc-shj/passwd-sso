@@ -54,7 +54,7 @@ export async function GET(
   const encryptedBuffer = await blobStore.getObject(attachment.encryptedData, {
     attachmentId,
     entryId: id,
-    orgId: teamId,
+    teamId,
   });
 
   return NextResponse.json({
@@ -113,7 +113,7 @@ export async function DELETE(
   await blobStore.deleteObject(attachment.encryptedData, {
     attachmentId,
     entryId: id,
-    orgId: teamId,
+    teamId,
   });
 
   await prisma.attachment.delete({

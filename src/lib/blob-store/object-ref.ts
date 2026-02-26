@@ -29,9 +29,8 @@ export function decodeObjectRef(stored: Uint8Array): BlobObjectRef | null {
 export function buildObjectKey(context: AttachmentBlobContext): string {
   const rawPrefix = process.env.BLOB_OBJECT_PREFIX?.trim() ?? "";
   const prefix = rawPrefix ? `${rawPrefix.replace(/\/+$/, "")}/` : "";
-  const scopedTeamId = context.teamId ?? context.orgId;
-  const scope = scopedTeamId
-    ? `${BLOB_OBJECT_SCOPE.TEAM}/${scopedTeamId}`
+  const scope = context.teamId
+    ? `${BLOB_OBJECT_SCOPE.TEAM}/${context.teamId}`
     : BLOB_OBJECT_SCOPE.PERSONAL;
   return `${prefix}${scope}/${context.entryId}/${context.attachmentId}.bin`;
 }
