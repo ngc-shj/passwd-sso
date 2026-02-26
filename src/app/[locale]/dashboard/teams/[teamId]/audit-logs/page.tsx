@@ -44,7 +44,7 @@ import {
 import { formatDateTime } from "@/lib/format-datetime";
 import { normalizeAuditActionKey } from "@/lib/audit-action-key";
 
-interface OrgAuditLogItem {
+interface TeamAuditLogItem {
   id: string;
   action: string;
   targetType: string | null;
@@ -98,12 +98,12 @@ const ACTION_GROUPS = [
     actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.TRANSFER],
   },
   { label: "groupAttachment", value: AUDIT_ACTION_GROUP.ATTACHMENT, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.ATTACHMENT] },
-  { label: "groupOrg", value: AUDIT_ACTION_GROUP.ORG, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.ORG] },
+  { label: "groupTeam", value: AUDIT_ACTION_GROUP.ORG, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.ORG] },
   { label: "groupShare", value: AUDIT_ACTION_GROUP.SHARE, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.SHARE] },
   { label: "groupAdmin", value: AUDIT_ACTION_GROUP.ADMIN, actions: AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.ADMIN] },
 ] as const;
 
-export default function OrgAuditLogsPage({
+export default function TeamAuditLogsPage({
   params,
 }: {
   params: Promise<{ teamId: string }>;
@@ -111,7 +111,7 @@ export default function OrgAuditLogsPage({
   const { teamId } = use(params);
   const t = useTranslations("AuditLog");
   const locale = useLocale();
-  const [logs, setLogs] = useState<OrgAuditLogItem[]>([]);
+  const [logs, setLogs] = useState<TeamAuditLogItem[]>([]);
   const [entryNames, setEntryNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -175,7 +175,7 @@ export default function OrgAuditLogsPage({
 
   const formatDate = (iso: string) => formatDateTime(iso, locale);
 
-  const getTargetLabel = (log: OrgAuditLogItem): string | null => {
+  const getTargetLabel = (log: TeamAuditLogItem): string | null => {
     const meta =
       log.metadata && typeof log.metadata === "object"
         ? (log.metadata as Record<string, unknown>)
@@ -261,7 +261,7 @@ export default function OrgAuditLogsPage({
       const encrypted = meta.encrypted === true;
       const format = typeof meta.format === "string" ? meta.format : "-";
       const entryCount = typeof meta.entryCount === "number" ? meta.entryCount : 0;
-      return t("exportMetaOrg", {
+      return t("exportMetaTeam", {
         filename: filename ?? "-",
         format,
         entryCount,
@@ -330,7 +330,7 @@ export default function OrgAuditLogsPage({
     const key = normalizeAuditActionKey(String(action));
     return t.has(key as never) ? t(key as never) : String(action);
   };
-  const getActionLabel = (log: OrgAuditLogItem) =>
+  const getActionLabel = (log: TeamAuditLogItem) =>
     log.action === AUDIT_ACTION.ENTRY_BULK_TRASH
       ? t("ENTRY_BULK_TRASH")
       : log.action === AUDIT_ACTION.ENTRY_EMPTY_TRASH

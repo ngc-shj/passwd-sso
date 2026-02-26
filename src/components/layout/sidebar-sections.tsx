@@ -50,20 +50,20 @@ export function VaultSection({
   isSelectedVaultFavorites,
   onNavigate,
 }: VaultSectionProps) {
-  const isOrg = vaultContext.type === "team";
-  const scopedTeamId = isOrg ? (vaultContext.teamId) : "";
+  const isTeam = vaultContext.type === "team";
+  const scopedTeamId = isTeam ? (vaultContext.teamId) : "";
 
   return (
     <div className="space-y-1">
       <Button variant={isSelectedVaultAll ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-        <Link href={isOrg ? `/dashboard/teams/${scopedTeamId}` : "/dashboard"} onClick={onNavigate}>
+        <Link href={isTeam ? `/dashboard/teams/${scopedTeamId}` : "/dashboard"} onClick={onNavigate}>
           <KeyRound className="h-4 w-4" />
           {t("passwords")}
         </Link>
       </Button>
       <Button variant={isSelectedVaultFavorites ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
         <Link
-          href={isOrg ? `/dashboard/teams/${scopedTeamId}?scope=favorites` : "/dashboard/favorites"}
+          href={isTeam ? `/dashboard/teams/${scopedTeamId}?scope=favorites` : "/dashboard/favorites"}
           onClick={onNavigate}
         >
           <Star className="h-4 w-4" />
@@ -310,15 +310,15 @@ export function VaultManagementSection({
   activeAuditTeamId,
   onNavigate,
 }: VaultManagementSectionProps) {
-  const isOrg = vaultContext.type === "team";
-  const scopedTeamId = isOrg ? (vaultContext.teamId) : "";
-  const shareLinksHref = isOrg
+  const isTeam = vaultContext.type === "team";
+  const scopedTeamId = isTeam ? (vaultContext.teamId) : "";
+  const shareLinksHref = isTeam
     ? `/dashboard/share-links?team=${encodeURIComponent(scopedTeamId)}`
     : "/dashboard/share-links";
-  const auditLogHref = isOrg
+  const auditLogHref = isTeam
     ? `/dashboard/teams/${scopedTeamId}/audit-logs`
     : "/dashboard/audit-logs";
-  const isAuditActive = isOrg
+  const isAuditActive = isTeam
     ? activeAuditTeamId === scopedTeamId
     : isPersonalAuditLog;
 
@@ -330,7 +330,7 @@ export function VaultManagementSection({
         asChild
       >
         <Link
-          href={isOrg ? `/dashboard/teams/${scopedTeamId}?scope=archive` : "/dashboard/archive"}
+          href={isTeam ? `/dashboard/teams/${scopedTeamId}?scope=archive` : "/dashboard/archive"}
           onClick={onNavigate}
         >
           <Archive className="h-4 w-4" />
@@ -343,7 +343,7 @@ export function VaultManagementSection({
         asChild
       >
         <Link
-          href={isOrg ? `/dashboard/teams/${scopedTeamId}?scope=trash` : "/dashboard/trash"}
+          href={isTeam ? `/dashboard/teams/${scopedTeamId}?scope=trash` : "/dashboard/trash"}
           onClick={onNavigate}
         >
           <Trash2 className="h-4 w-4" />

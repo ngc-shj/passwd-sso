@@ -508,7 +508,7 @@ export default function TeamDashboardPage({
             <div className="flex flex-col items-start gap-3">
             <h1 className="text-xl font-semibold">{t("forbidden")}</h1>
             <p className="text-sm text-muted-foreground">
-              {t("noOrgsDesc")}
+              {t("noTeamsDesc")}
             </p>
             <Button variant="ghost" asChild>
               <Link href="/dashboard/teams">

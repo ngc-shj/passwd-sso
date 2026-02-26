@@ -64,8 +64,8 @@
   "ORG_E2E_MIGRATION": "組織 E2E 移行",
   "ORG_KEY_ROTATION": "組織キーローテーション",
   "ORG_MEMBER_KEY_DISTRIBUTE": "メンバー鍵を配布",
-  "orgAuditLog": "監査ログ — {orgName}",
-  "orgAuditLogDesc": "{orgName} のアクティビティを表示",
+  "teamAuditLog": "監査ログ — {teamName}",
+  "teamAuditLogDesc": "{teamName} のアクティビティを表示",
   "deletedEntry": "削除済みエントリー",
   "bulkDeleteTarget": "{count} 件をごみ箱へ移動",
   "bulkDeleteMeta": "選択: {requestedCount} 件 / 移動: {movedCount} 件 / 未移動: {notMovedCount} 件",
@@ -94,7 +94,7 @@
   "groupAttachment": "添付ファイル",
   "groupFolder": "フォルダ",
   "groupHistory": "履歴",
-  "groupOrg": "組織",
+  "groupTeam": "チーム",
   "groupShare": "共有リンク",
   "groupSend": "Send",
   "groupEmergency": "緊急アクセス",
@@ -113,6 +113,6 @@
   "included": "含む",
   "notIncluded": "含まない",
   "exportMeta": "ファイル: {filename} / 件数: {entryCount} / 形式: {format} / 暗号化: {encrypted} / 組織: {orgs}",
-  "exportMetaOrg": "ファイル: {filename} / 件数: {entryCount} / 形式: {format} / 暗号化: {encrypted}",
+  "exportMetaTeam": "ファイル: {filename} / 件数: {entryCount} / 形式: {format} / 暗号化: {encrypted}",
   "importMeta": "ファイル: {filename} / 形式: {format} / 暗号化: {encrypted} / 成功: {successCount} / 失敗: {failedCount} / 合計: {requestedCount}"
 }

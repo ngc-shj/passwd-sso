@@ -103,7 +103,7 @@ export function UtilitiesSection({
             <Button variant="ghost" className="w-full justify-start gap-2" asChild>
               <Link href={`/dashboard/teams/${scopedTeam.id}/settings`} onClick={onNavigate}>
                 <Settings className="h-4 w-4" />
-                {tTeam("orgSettings")}
+                {tTeam("teamSettings")}
               </Link>
             </Button>
           ) : !scopedTeam && (
@@ -117,7 +117,7 @@ export function UtilitiesSection({
               <Button variant="ghost" className="w-full justify-start gap-2" asChild>
                 <Link href="/dashboard/teams" onClick={onNavigate}>
                   <Settings className="h-4 w-4" />
-                  {tTeam("orgSettings")}
+                  {tTeam("teamSettings")}
                 </Link>
               </Button>
             </>

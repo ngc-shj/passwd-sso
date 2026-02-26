@@ -61,7 +61,7 @@ export default function TeamsPage() {
               trigger={
                 <Button>
                   <Plus className="mr-2 h-4 w-4" />
-                  {t("createOrg")}
+                  {t("createTeam")}
                 </Button>
               }
               onCreated={handleCreated}
@@ -76,9 +76,9 @@ export default function TeamsPage() {
         ) : teams.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
             <Building2 className="mb-4 h-12 w-12 text-muted-foreground" />
-            <p className="text-muted-foreground">{t("noOrgs")}</p>
+            <p className="text-muted-foreground">{t("noTeams")}</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {t("noOrgsDesc")}
+              {t("noTeamsDesc")}
             </p>
           </div>
         ) : (

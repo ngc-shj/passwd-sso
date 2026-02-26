@@ -138,20 +138,20 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Building2 className="h-4 w-4" />
-            {t("createOrg")}
+            {t("createTeam")}
           </DialogTitle>
-          <DialogDescription>{t("createOrgDescription")}</DialogDescription>
+          <DialogDescription>{t("createTeamDescription")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="team-name">{t("orgName")}</Label>
+              <Label htmlFor="team-name">{t("teamName")}</Label>
               <Input
                 id="team-name"
                 value={name}
                 onChange={(e) => handleNameChange(e.target.value)}
-                placeholder={t("orgNamePlaceholder")}
+                placeholder={t("teamNamePlaceholder")}
               />
             </div>
 

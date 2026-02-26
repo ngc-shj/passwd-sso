@@ -57,7 +57,7 @@ describe("UtilitiesSection", () => {
       />
     );
 
-    expect(screen.getByRole("link", { name: "orgSettings" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "teamSettings" })).toHaveAttribute(
       "href",
       "/dashboard/teams/team-1/settings"
     );
@@ -75,7 +75,7 @@ describe("UtilitiesSection", () => {
       />
     );
 
-    expect(screen.queryByRole("link", { name: "orgSettings" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "teamSettings" })).toBeNull();
   });
 
   it("shows settings and team settings links in personal context", () => {
@@ -94,7 +94,7 @@ describe("UtilitiesSection", () => {
       "href",
       "/dashboard/settings"
     );
-    expect(screen.getByRole("link", { name: "orgSettings" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "teamSettings" })).toHaveAttribute(
       "href",
       "/dashboard/teams"
     );

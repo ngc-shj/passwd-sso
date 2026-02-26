@@ -269,7 +269,7 @@ export default function TeamSettingsPage({
               <div className="flex flex-col items-start gap-3">
                 <h1 className="text-xl font-semibold">{t("forbidden")}</h1>
                 <p className="text-sm text-muted-foreground">
-                  {t("noOrgsDesc")}
+                  {t("noTeamsDesc")}
                 </p>
                 <Button variant="ghost" asChild>
                   <Link href="/dashboard/teams">
@@ -295,7 +295,7 @@ export default function TeamSettingsPage({
         <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
           <div className="flex flex-col items-start gap-2 min-w-0">
             <h1 className="truncate text-2xl font-bold">
-              {t("orgSettings")}
+              {t("teamSettings")}
             </h1>
           </div>
         </Card>
@@ -310,7 +310,7 @@ export default function TeamSettingsPage({
               </h2>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>{t("orgName")}</Label>
+                  <Label>{t("teamName")}</Label>
                   <Input value={name} onChange={(e) => setName(e.target.value)} />
                 </div>
                 <div className="space-y-2">
@@ -339,7 +339,7 @@ export default function TeamSettingsPage({
                     disabled={saving || !name.trim()}
                   >
                     {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                    {t("updateOrg")}
+                    {t("updateTeam")}
                   </Button>
                 </div>
               )}
@@ -603,29 +603,29 @@ export default function TeamSettingsPage({
           <ScimTokenManager teamId={teamId} locale={locale} />
         )}
 
-        {/* Delete org */}
+        {/* Delete team */}
         {isOwner && (
           <Card className="rounded-xl border border-destructive/30 p-4">
             <section className="space-y-4">
               <h2 className="flex items-center gap-2 text-lg font-semibold text-destructive">
                 <ShieldAlert className="h-5 w-5" />
-                {t("deleteOrg")}
+                {t("deleteTeam")}
               </h2>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button variant="destructive">{t("deleteOrg")}</Button>
+                  <Button variant="destructive">{t("deleteTeam")}</Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>{t("deleteOrg")}</AlertDialogTitle>
+                    <AlertDialogTitle>{t("deleteTeam")}</AlertDialogTitle>
                     <AlertDialogDescription>
-                      {t("deleteOrgConfirm", { name: team.name })}
+                      {t("deleteTeamConfirm", { name: team.name })}
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
                     <AlertDialogAction onClick={handleDeleteTeam}>
-                      {t("deleteOrg")}
+                      {t("deleteTeam")}
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
