@@ -485,22 +485,22 @@ describe("Sidebar org folder CRUD integration", () => {
     vi.clearAllMocks();
     capturedFolderDialogProps = null;
     mockUseVaultContext.mockReturnValue({
-      type: "org",
-      orgId: "org-1",
-      orgName: "Acme Corp",
-      orgRole: "OWNER",
+      type: "team",
+      teamId: "team-1",
+      teamName: "Acme Corp",
+      teamRole: "OWNER",
     });
   });
 
   /** Open org submenu by clicking the toggle button, then wait for folders. */
-  async function openOrgSubmenu(sidebar: ReturnType<typeof within>, orgId: string) {
-    const toggle = sidebar.queryByRole("button", { name: `toggle-${orgId}` });
+  async function openOrgSubmenu(sidebar: ReturnType<typeof within>, teamId: string) {
+    const toggle = sidebar.queryByRole("button", { name: `toggle-${teamId}` });
     if (toggle) fireEvent.click(toggle);
   }
 
   it("shows org folder create button for OWNER role", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
+      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
       orgFoldersData: ORG_FOLDERS_DATA,
     });
     globalThis.fetch = fetchMock;
@@ -510,7 +510,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
-    await openOrgSubmenu(sidebar, "org-1");
+    await openOrgSubmenu(sidebar, "team-1");
 
     // Wait for org folder to appear inside the submenu
     await waitFor(() => {
@@ -524,7 +524,7 @@ describe("Sidebar org folder CRUD integration", () => {
 
   it("shows org folder create button for ADMIN role", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "ADMIN" }],
+      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "ADMIN" }],
       orgFoldersData: ORG_FOLDERS_DATA,
     });
     globalThis.fetch = fetchMock;
@@ -534,7 +534,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
-    await openOrgSubmenu(sidebar, "org-1");
+    await openOrgSubmenu(sidebar, "team-1");
 
     await waitFor(() => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
@@ -546,7 +546,7 @@ describe("Sidebar org folder CRUD integration", () => {
 
   it("shows enabled org folder create button for MEMBER role", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
+      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
       orgFoldersData: ORG_FOLDERS_DATA,
     });
     globalThis.fetch = fetchMock;
@@ -556,7 +556,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
-    await openOrgSubmenu(sidebar, "org-1");
+    await openOrgSubmenu(sidebar, "team-1");
 
     await waitFor(() => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
@@ -568,7 +568,7 @@ describe("Sidebar org folder CRUD integration", () => {
 
   it("shows edit/delete menu for org folders when role is MEMBER", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
+      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
       orgFoldersData: ORG_FOLDERS_DATA,
     });
     globalThis.fetch = fetchMock;
@@ -578,7 +578,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
-    await openOrgSubmenu(sidebar, "org-1");
+    await openOrgSubmenu(sidebar, "team-1");
 
     await waitFor(() => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
@@ -590,7 +590,7 @@ describe("Sidebar org folder CRUD integration", () => {
 
   it("shows edit/delete menu for org folders when role is OWNER", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
+      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
       orgFoldersData: ORG_FOLDERS_DATA,
     });
     globalThis.fetch = fetchMock;
@@ -600,7 +600,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
-    await openOrgSubmenu(sidebar, "org-1");
+    await openOrgSubmenu(sidebar, "team-1");
 
     await waitFor(() => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
@@ -612,7 +612,7 @@ describe("Sidebar org folder CRUD integration", () => {
 
   it("calls org API endpoint when creating org folder", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
+      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
       orgFoldersData: ORG_FOLDERS_DATA,
     });
     globalThis.fetch = fetchMock;
@@ -622,7 +622,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
-    await openOrgSubmenu(sidebar, "org-1");
+    await openOrgSubmenu(sidebar, "team-1");
 
     await waitFor(() => {
       expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
@@ -655,12 +655,12 @@ describe("Sidebar org folder CRUD integration", () => {
       (c: [string, RequestInit?]) => c[1]?.method === "POST",
     );
     expect(postCalls.length).toBe(1);
-    expect(postCalls[0][0]).toContain("/api/teams/org-1/folders");
+    expect(postCalls[0][0]).toContain("/api/teams/team-1/folders");
   });
 
   it("shows org folder create button even when org has zero folders (OWNER)", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
+      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
       orgFoldersData: [], // No folders yet
     });
     globalThis.fetch = fetchMock;
@@ -670,7 +670,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
-    await openOrgSubmenu(sidebar, "org-1");
+    await openOrgSubmenu(sidebar, "team-1");
 
     // Even with zero org folders, OWNER should see the create button inside org submenu
     await waitFor(() => {
@@ -680,7 +680,7 @@ describe("Sidebar org folder CRUD integration", () => {
 
   it("shows enabled org folder create button when MEMBER and org has zero folders", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "org-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
+      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
       orgFoldersData: [], // No folders
     });
     globalThis.fetch = fetchMock;
@@ -690,7 +690,7 @@ describe("Sidebar org folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
-    await openOrgSubmenu(sidebar, "org-1");
+    await openOrgSubmenu(sidebar, "team-1");
 
     // Give time for async fetch to resolve
     await act(async () => {

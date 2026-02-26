@@ -37,7 +37,7 @@ export default function TeamsPage() {
 
   const handleCreated = () => {
     fetchTeams();
-    window.dispatchEvent(new CustomEvent("org-data-changed"));
+    window.dispatchEvent(new CustomEvent("team-data-changed"));
   };
 
   useEffect(() => {

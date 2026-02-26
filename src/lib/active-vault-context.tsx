@@ -26,7 +26,7 @@ export function ActiveVaultProvider({ children }: { children: ReactNode }) {
     setVaultState((prev) => {
       if (prev?.type === v.type) {
         if (v.type === "personal") return prev;
-        if (v.type === "org" && prev.type === "org" && prev.orgId === v.orgId)
+        if (v.type === "team" && prev.type === "team" && prev.teamId === v.teamId)
           return prev;
       }
       return v;

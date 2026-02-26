@@ -57,7 +57,7 @@ describe("useSidebarNavigationState", () => {
       useSidebarNavigationState({
         pathname: "/ja/dashboard/teams/team-1",
         searchParams: new URLSearchParams("scope=favorites&type=LOGIN&tag=ot1&folder=of1"),
-        vaultContext: { type: "org", orgId: "team-1" },
+        vaultContext: { type: "team", teamId: "team-1" },
         teams,
         folders,
         tags,
@@ -85,7 +85,7 @@ describe("useSidebarNavigationState", () => {
       useSidebarNavigationState({
         pathname: "/ja/dashboard/teams/team-1/audit-logs",
         searchParams: new URLSearchParams(),
-        vaultContext: { type: "org", orgId: "team-1" },
+        vaultContext: { type: "team", teamId: "team-1" },
         teams,
         folders,
         tags,
@@ -104,7 +104,7 @@ describe("useSidebarNavigationState", () => {
       useSidebarNavigationState({
         pathname: "/ja/dashboard/teams/team-1",
         searchParams: new URLSearchParams(),
-        vaultContext: { type: "org", orgId: "team-1" },
+        vaultContext: { type: "team", teamId: "team-1" },
         teams: [{ id: "team-1", name: "Acme", slug: "acme", role: "MEMBER" }],
         folders,
         tags,
@@ -122,7 +122,7 @@ describe("useSidebarNavigationState", () => {
       useSidebarNavigationState({
         pathname: "/ja/dashboard/teams/team-1",
         searchParams: new URLSearchParams(),
-        vaultContext: { type: "org", orgId: "team-1" },
+        vaultContext: { type: "team", teamId: "team-1" },
         teams,
         folders,
         tags,

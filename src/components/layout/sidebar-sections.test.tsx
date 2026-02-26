@@ -69,7 +69,7 @@ describe("VaultSection", () => {
     render(
       <VaultSection
         t={(k) => k}
-        vaultContext={{ type: "org", orgId: "team-1" }}
+        vaultContext={{ type: "team", teamId: "team-1" }}
         isSelectedVaultAll={false}
         isSelectedVaultFavorites
         onNavigate={() => {}}
@@ -110,7 +110,7 @@ describe("CategoriesSection", () => {
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        vaultContext={{ type: "org", orgId: "team-1" }}
+        vaultContext={{ type: "team", teamId: "team-1" }}
         selectedTypeFilter={null}
         onNavigate={() => {}}
       />
@@ -148,7 +148,7 @@ describe("VaultManagementSection", () => {
     render(
       <VaultManagementSection
         t={(k) => k}
-        vaultContext={{ type: "org", orgId: "team-1" }}
+        vaultContext={{ type: "team", teamId: "team-1" }}
         isSelectedVaultArchive={false}
         isSelectedVaultTrash={false}
         isShareLinks={false}

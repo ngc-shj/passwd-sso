@@ -89,7 +89,7 @@ describe("SidebarContent", () => {
   });
 
   it("calls onCreateFolder with teamId in team context", () => {
-    const props = baseProps({ vaultContext: { type: "org", teamId: "team-1" } });
+    const props = baseProps({ vaultContext: { type: "team", teamId: "team-1" } });
     render(<SidebarContent {...props} />);
 
     fireEvent.click(screen.getByRole("button", { name: "create-folder" }));
@@ -107,7 +107,7 @@ describe("SidebarContent", () => {
   });
 
   it("calls onCreateTag with teamId in team context", () => {
-    const props = baseProps({ vaultContext: { type: "org", teamId: "team-1" } });
+    const props = baseProps({ vaultContext: { type: "team", teamId: "team-1" } });
     render(<SidebarContent {...props} />);
 
     fireEvent.click(screen.getByRole("button", { name: "create-tag" }));

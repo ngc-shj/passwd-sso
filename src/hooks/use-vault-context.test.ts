@@ -30,98 +30,98 @@ describe("useVaultContext", () => {
     mockPathname = "/dashboard/favorites";
 
     const { result } = renderHook(() =>
-      useVaultContext([{ id: "org-1", name: "Security", role: "ADMIN" }])
+      useVaultContext([{ id: "team-1", name: "Security", role: "ADMIN" }])
     );
 
     expect(result.current).toEqual({ type: "personal" });
   });
 
-  it("returns org context for org dashboard path", () => {
-    mockPathname = "/dashboard/teams/org-1";
+  it("returns team context for org dashboard path", () => {
+    mockPathname = "/dashboard/teams/team-1";
 
     const { result } = renderHook(() =>
-      useVaultContext([{ id: "org-1", name: "Security", role: "ADMIN" }])
+      useVaultContext([{ id: "team-1", name: "Security", role: "ADMIN" }])
     );
 
     expect(result.current).toEqual({
-      type: "org",
-      orgId: "org-1",
-      orgName: "Security",
-      orgRole: "ADMIN",
+      type: "team",
+      teamId: "team-1",
+      teamName: "Security",
+      teamRole: "ADMIN",
     });
   });
 
-  it("uses last org context on cross-vault pages", () => {
+  it("uses last team context on cross-vault pages", () => {
     mockPathname = "/dashboard/watchtower";
-    mockLastContext = "org-1";
+    mockLastContext = "team-1";
 
     const { result } = renderHook(() =>
-      useVaultContext([{ id: "org-1", name: "Security", role: "ADMIN" }])
+      useVaultContext([{ id: "team-1", name: "Security", role: "ADMIN" }])
     );
 
     expect(result.current).toEqual({
-      type: "org",
-      orgId: "org-1",
-      orgName: "Security",
-      orgRole: "ADMIN",
+      type: "team",
+      teamId: "team-1",
+      teamName: "Security",
+      teamRole: "ADMIN",
     });
   });
 
-  it("falls back to personal when last org context no longer exists", () => {
+  it("falls back to personal when last team context no longer exists", () => {
     mockPathname = "/dashboard/share-links";
-    mockLastContext = "missing-org";
+    mockLastContext = "missing-team";
 
     const { result } = renderHook(() =>
-      useVaultContext([{ id: "org-1", name: "Security", role: "ADMIN" }])
+      useVaultContext([{ id: "team-1", name: "Security", role: "ADMIN" }])
     );
 
     expect(result.current).toEqual({ type: "personal" });
   });
 
-  it("resolves org context from share-links org query", () => {
+  it("resolves team context from share-links team query", () => {
     mockPathname = "/dashboard/share-links";
-    mockSearch = "org=org-1";
+    mockSearch = "team=team-1";
 
     const { result } = renderHook(() =>
-      useVaultContext([{ id: "org-1", name: "Security", role: "ADMIN" }])
+      useVaultContext([{ id: "team-1", name: "Security", role: "ADMIN" }])
     );
 
     expect(result.current).toEqual({
-      type: "org",
-      orgId: "org-1",
-      orgName: "Security",
-      orgRole: "ADMIN",
+      type: "team",
+      teamId: "team-1",
+      teamName: "Security",
+      teamRole: "ADMIN",
     });
   });
 
-  it("falls back to personal for share-links with invalid org query", () => {
+  it("falls back to personal for share-links with invalid team query", () => {
     mockPathname = "/dashboard/share-links";
-    mockSearch = "org=invalid";
+    mockSearch = "team=invalid";
 
     const { result } = renderHook(() =>
-      useVaultContext([{ id: "org-1", name: "Security", role: "ADMIN" }])
+      useVaultContext([{ id: "team-1", name: "Security", role: "ADMIN" }])
     );
 
     expect(result.current).toEqual({ type: "personal" });
   });
 
-  it("persists org context when visiting org page", () => {
-    mockPathname = "/dashboard/teams/org-2";
+  it("persists team context when visiting team page", () => {
+    mockPathname = "/dashboard/teams/team-2";
     mockLastContext = "personal";
 
     renderHook(() =>
-      useVaultContext([{ id: "org-2", name: "Team", role: "MEMBER" }])
+      useVaultContext([{ id: "team-2", name: "Team", role: "MEMBER" }])
     );
 
-    expect(mockSetLastContext).toHaveBeenCalledWith("org-2");
+    expect(mockSetLastContext).toHaveBeenCalledWith("team-2");
   });
 
   it("persists personal context when returning to personal pages", () => {
     mockPathname = "/dashboard/archive";
-    mockLastContext = "org-1";
+    mockLastContext = "team-1";
 
     renderHook(() =>
-      useVaultContext([{ id: "org-1", name: "Security", role: "ADMIN" }])
+      useVaultContext([{ id: "team-1", name: "Security", role: "ADMIN" }])
     );
 
     expect(mockSetLastContext).toHaveBeenCalledWith("personal");

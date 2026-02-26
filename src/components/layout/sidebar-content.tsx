@@ -86,11 +86,11 @@ export function SidebarContent({
 }: SidebarContentProps) {
   const teamItems = teams;
   const scopedTeamId =
-    vaultContext.type === "org" ? (vaultContext.teamId ?? vaultContext.orgId) : "";
+    vaultContext.type === "team" ? (vaultContext.teamId) : "";
   return (
     <nav className="space-y-4 p-4">
       <VaultSelector
-        value={vaultContext.type === "org" ? scopedTeamId : "personal"}
+        value={vaultContext.type === "team" ? scopedTeamId : "personal"}
         teams={teamItems}
         onValueChange={onVaultChange}
       />
@@ -118,54 +118,54 @@ export function SidebarContent({
         isOpen={isOpen("organize")}
         onOpenChange={toggleSection("organize")}
         t={t}
-        canCreateFolder={vaultContext.type !== "org" || selectedTeamCanManageFolders}
+        canCreateFolder={vaultContext.type !== "team" || selectedTeamCanManageFolders}
         folders={selectedFolders}
         activeFolderId={selectedFolderId}
         linkHref={(id) =>
-          vaultContext.type === "org"
+          vaultContext.type === "team"
             ? `/dashboard/teams/${scopedTeamId}?folder=${id}`
             : `/dashboard/folders/${id}`
         }
-        showFolderMenu={vaultContext.type === "org" ? selectedTeamCanManageFolders : true}
+        showFolderMenu={vaultContext.type === "team" ? selectedTeamCanManageFolders : true}
         tags={selectedTags}
         activeTagId={selectedTagId}
         tagHref={(id) =>
-          vaultContext.type === "org"
+          vaultContext.type === "team"
             ? `/dashboard/teams/${scopedTeamId}?tag=${id}`
             : `/dashboard/tags/${id}`
         }
         onCreateFolder={() =>
-          vaultContext.type === "org"
+          vaultContext.type === "team"
             ? onCreateFolder(scopedTeamId)
             : onCreateFolder()
         }
         onCreateTag={() =>
-          vaultContext.type === "org"
+          vaultContext.type === "team"
             ? onCreateTag(scopedTeamId)
             : onCreateTag()
         }
-        canCreateTag={vaultContext.type !== "org" || selectedTeamCanManageTags}
+        canCreateTag={vaultContext.type !== "team" || selectedTeamCanManageTags}
         onEditFolder={(f) =>
-          vaultContext.type === "org"
+          vaultContext.type === "team"
             ? onEditFolder(f, scopedTeamId)
             : onEditFolder(f)
         }
         onDeleteFolder={(f) =>
-          vaultContext.type === "org"
+          vaultContext.type === "team"
             ? onDeleteFolder(f, scopedTeamId)
             : onDeleteFolder(f)
         }
         onEditTag={(tag) =>
-          vaultContext.type === "org"
+          vaultContext.type === "team"
             ? onEditTag(tag, scopedTeamId)
             : onEditTag(tag)
         }
         onDeleteTag={(tag) =>
-          vaultContext.type === "org"
+          vaultContext.type === "team"
             ? onDeleteTag(tag, scopedTeamId)
             : onDeleteTag(tag)
         }
-        showTagMenu={vaultContext.type !== "org" || selectedTeamCanManageTags}
+        showTagMenu={vaultContext.type !== "team" || selectedTeamCanManageTags}
         onNavigate={onNavigate}
       />
 

@@ -6,14 +6,10 @@ import { stripLocalePrefix } from "@/i18n/locale-utils";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 
 export type TeamScopedVaultContext = {
-  type: "org";
+  type: "team";
   teamId: string;
   teamName?: string;
   teamRole?: string;
-  // Compatibility aliases
-  orgId: string;
-  orgName?: string;
-  orgRole?: string;
 };
 
 export type VaultContext =
@@ -53,14 +49,11 @@ function isCrossVaultPath(path: string): boolean {
 
 function createTeamScopedContext(team: TeamContextItem): TeamScopedVaultContext {
   return {
-    type: "org",
+    type: "team",
     teamId: team.id,
     teamName: team.name,
     teamRole: team.role,
-    orgId: team.id,
-    orgName: team.name,
-    orgRole: team.role,
-  };
+      };
 }
 
 export function useVaultContext(teams: TeamContextItem[]): VaultContext {
@@ -71,7 +64,7 @@ export function useVaultContext(teams: TeamContextItem[]): VaultContext {
 
   const resolved = useMemo<VaultContext>(() => {
     if (cleanPath === "/dashboard/share-links") {
-      const shareTeamId = searchParams.get("team") ?? searchParams.get("org");
+      const shareTeamId = searchParams.get("team");
       if (shareTeamId) {
         const team = teams.find((item) => item.id === shareTeamId);
         if (team) {
@@ -80,7 +73,7 @@ export function useVaultContext(teams: TeamContextItem[]): VaultContext {
       }
     }
 
-    const teamMatch = cleanPath.match(/^\/dashboard\/(?:teams|orgs)\/([^/]+)/);
+    const teamMatch = cleanPath.match(/^\/dashboard\/(?:teams)\/([^/]+)/);
     if (teamMatch) {
       const team = teams.find((item) => item.id === teamMatch[1]);
       if (team) {
@@ -103,8 +96,8 @@ export function useVaultContext(teams: TeamContextItem[]): VaultContext {
   }, [cleanPath, lastContext, teams, searchParams]);
 
   useEffect(() => {
-    if (resolved.type === "org" && lastContext !== resolved.orgId) {
-      setLastContext(resolved.orgId);
+    if (resolved.type === "team" && lastContext !== resolved.teamId) {
+      setLastContext(resolved.teamId);
       return;
     }
     if (resolved.type === "personal" && isPersonalVaultPath(cleanPath) && lastContext !== "personal") {

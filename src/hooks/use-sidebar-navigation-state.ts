@@ -65,7 +65,7 @@ export function useSidebarNavigationState({
       cleanPath === "/dashboard/emergency-access" ||
       cleanPath.startsWith("/dashboard/emergency-access/");
 
-    const selectedTeamId = vaultContext.type === "org" ? vaultContext.orgId : null;
+    const selectedTeamId = vaultContext.type === "team" ? vaultContext.teamId : null;
     const selectedTeam = selectedTeamId ? teamItems.find((team) => team.id === selectedTeamId) ?? null : null;
     const selectedTeamFolderGroup = selectedTeamId
       ? scopedFolderGroups.find((group) => group.teamId === selectedTeamId)
@@ -89,13 +89,13 @@ export function useSidebarNavigationState({
     const selectedTeamTagId = selectedTeamId && activeTeamId === selectedTeamId ? activeTeamTagId : null;
 
     const selectedTypeFilter =
-      vaultContext.type === "org" ? selectedTeamTypeFilter : activeTypeFilter;
+      vaultContext.type === "team" ? selectedTeamTypeFilter : activeTypeFilter;
     const selectedFolderId =
-      vaultContext.type === "org" ? selectedTeamFolderId : activeFolderId;
-    const selectedTagId = vaultContext.type === "org" ? selectedTeamTagId : activeTagId;
+      vaultContext.type === "team" ? selectedTeamFolderId : activeFolderId;
+    const selectedTagId = vaultContext.type === "team" ? selectedTeamTagId : activeTagId;
 
     const isSelectedVaultAll =
-      vaultContext.type === "org"
+      vaultContext.type === "team"
         ? activeTeamId === selectedTeamId &&
           !selectedTeamTypeFilter &&
           !selectedTeamScope &&
@@ -104,25 +104,25 @@ export function useSidebarNavigationState({
         : isVaultAll;
 
     const isSelectedVaultFavorites =
-      vaultContext.type === "org"
+      vaultContext.type === "team"
         ? activeTeamId === selectedTeamId && selectedTeamScope === "favorites"
         : isVaultFavorites;
 
     const isSelectedVaultArchive =
-      vaultContext.type === "org"
+      vaultContext.type === "team"
         ? activeTeamId === selectedTeamId && selectedTeamScope === "archive"
         : isVaultArchive;
 
     const isSelectedVaultTrash =
-      vaultContext.type === "org"
+      vaultContext.type === "team"
         ? activeTeamId === selectedTeamId && selectedTeamScope === "trash"
         : isVaultTrash;
 
     const selectedFolders =
-      vaultContext.type === "org" ? selectedTeamFolderGroup?.folders ?? [] : folders;
+      vaultContext.type === "team" ? selectedTeamFolderGroup?.folders ?? [] : folders;
 
     const selectedTags =
-      vaultContext.type === "org"
+      vaultContext.type === "team"
         ? selectedTeamTagGroup?.tags.map((tag) => ({
             id: tag.id,
             name: tag.name,

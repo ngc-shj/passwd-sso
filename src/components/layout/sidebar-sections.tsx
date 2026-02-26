@@ -50,8 +50,8 @@ export function VaultSection({
   isSelectedVaultFavorites,
   onNavigate,
 }: VaultSectionProps) {
-  const isOrg = vaultContext.type === "org";
-  const scopedTeamId = isOrg ? (vaultContext.teamId ?? vaultContext.orgId) : "";
+  const isOrg = vaultContext.type === "team";
+  const scopedTeamId = isOrg ? (vaultContext.teamId) : "";
 
   return (
     <div className="space-y-1">
@@ -92,7 +92,7 @@ export function CategoriesSection({
   onNavigate,
 }: CategoriesSectionProps) {
   const scopedTeamId =
-    vaultContext.type === "org" ? (vaultContext.teamId ?? vaultContext.orgId) : "";
+    vaultContext.type === "team" ? (vaultContext.teamId) : "";
   const categories = [
     { type: ENTRY_TYPE.LOGIN, labelKey: "catLogin", icon: KeyRound },
     { type: ENTRY_TYPE.SECURE_NOTE, labelKey: "catSecureNote", icon: FileText },
@@ -109,7 +109,7 @@ export function CategoriesSection({
           {categories.map((category) => {
             const Icon = category.icon;
             const href =
-              vaultContext.type === "org"
+              vaultContext.type === "team"
                 ? `/dashboard/teams/${scopedTeamId}?type=${category.type}`
                 : `/dashboard?type=${category.type}`;
             return (
@@ -310,8 +310,8 @@ export function VaultManagementSection({
   activeAuditTeamId,
   onNavigate,
 }: VaultManagementSectionProps) {
-  const isOrg = vaultContext.type === "org";
-  const scopedTeamId = isOrg ? (vaultContext.teamId ?? vaultContext.orgId) : "";
+  const isOrg = vaultContext.type === "team";
+  const scopedTeamId = isOrg ? (vaultContext.teamId) : "";
   const shareLinksHref = isOrg
     ? `/dashboard/share-links?team=${encodeURIComponent(scopedTeamId)}`
     : "/dashboard/share-links";

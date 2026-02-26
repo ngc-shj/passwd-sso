@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { API_PATH } from "@/lib/constants";
 
 interface InviteInfo {
-  org: { id: string; name: string; slug: string };
+  team: { id: string; name: string; slug: string };
   role: string;
   alreadyMember: boolean;
 }
@@ -53,7 +53,7 @@ export default function AcceptInvitePage({
 
       const data: InviteInfo = await res.json();
       setResult(data);
-      window.dispatchEvent(new CustomEvent("org-data-changed"));
+      window.dispatchEvent(new CustomEvent("team-data-changed"));
       toast.success(t("accepted"));
     } catch {
       setError(t("networkError"));
@@ -74,12 +74,12 @@ export default function AcceptInvitePage({
         <h1 className="text-2xl font-bold mb-2">{t("accepted")}</h1>
         <p className="text-muted-foreground mb-6">
           {t("acceptInviteDesc", {
-            orgName: result.org.name,
+            teamName: result.team.name,
             role: result.role,
           })}
         </p>
-        <Button onClick={() => router.push(`/dashboard/teams/${result.org.id}`)}>
-          {result.org.name}
+        <Button onClick={() => router.push(`/dashboard/teams/${result.team.id}`)}>
+          {result.team.name}
         </Button>
       </div>
     );

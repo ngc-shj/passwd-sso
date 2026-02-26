@@ -65,7 +65,7 @@ export function Header({ onMenuToggle }: HeaderProps) {
               <>
                 <Building2 className="h-4 w-4 shrink-0" />
                 <span className="truncate max-w-[8rem]">
-                  {activeVault.orgName}
+                  {activeVault.teamName}
                 </span>
               </>
             )}

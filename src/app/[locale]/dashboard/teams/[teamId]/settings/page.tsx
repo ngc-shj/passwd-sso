@@ -150,7 +150,7 @@ export default function TeamSettingsPage({
       });
       if (!res.ok) throw new Error("Failed");
       toast.success(t("updated"));
-      window.dispatchEvent(new CustomEvent("org-data-changed"));
+      window.dispatchEvent(new CustomEvent("team-data-changed"));
       fetchAll();
     } catch {
       toast.error(t("updateFailed"));
@@ -164,7 +164,7 @@ export default function TeamSettingsPage({
       const res = await fetch(apiPath.teamById(teamId), { method: "DELETE" });
       if (!res.ok) throw new Error("Failed");
       toast.success(t("deleted"));
-      window.dispatchEvent(new CustomEvent("org-data-changed"));
+      window.dispatchEvent(new CustomEvent("team-data-changed"));
       router.push("/dashboard/teams");
     } catch {
       toast.error(t("deleteFailed"));
@@ -240,7 +240,7 @@ export default function TeamSettingsPage({
       });
       if (!res.ok) throw new Error("Failed");
       toast.success(t("ownershipTransferred"));
-      window.dispatchEvent(new CustomEvent("org-data-changed"));
+      window.dispatchEvent(new CustomEvent("team-data-changed"));
       fetchAll();
     } catch {
       toast.error(t("networkError"));
