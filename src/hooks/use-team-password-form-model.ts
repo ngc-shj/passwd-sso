@@ -1,6 +1,93 @@
 "use client";
 
-export {
-  useOrgPasswordFormModel,
-  useTeamPasswordFormModel,
-} from "@/hooks/use-org-password-form-model";
+import { ENTRY_TYPE } from "@/lib/constants";
+import { getOrgEntryKindState } from "@/components/team/team-entry-kind";
+import type { OrgPasswordFormProps } from "@/components/team/team-password-form-types";
+import { useTeamAttachments } from "@/hooks/use-team-attachments";
+import { useTeamFolders } from "@/hooks/use-team-folders";
+import { useTeamPasswordFormController } from "@/hooks/use-team-password-form-controller";
+import { useOrgPasswordFormLifecycle } from "@/hooks/use-org-password-form-lifecycle";
+import {
+  toOrgPasswordFormTranslations,
+  useEntryFormTranslations,
+} from "@/hooks/use-entry-form-translations";
+import {
+  type OrgPasswordFormLifecycleSetters,
+  useOrgPasswordFormState,
+} from "@/hooks/use-org-password-form-state";
+
+type TeamPasswordFormModelInput = Omit<
+  Pick<OrgPasswordFormProps, "orgId" | "open" | "onOpenChange" | "onSaved" | "entryType" | "editData">,
+  "orgId"
+> & {
+  teamId?: OrgPasswordFormProps["orgId"];
+  orgId?: OrgPasswordFormProps["orgId"];
+};
+
+export function useTeamPasswordFormModel({
+  teamId,
+  orgId,
+  open,
+  onOpenChange,
+  onSaved,
+  entryType: entryTypeProp = ENTRY_TYPE.LOGIN,
+  editData,
+}: TeamPasswordFormModelInput) {
+  const scopedTeamId = teamId ?? orgId;
+  if (!scopedTeamId) {
+    throw new Error("useTeamPasswordFormModel requires teamId or orgId");
+  }
+
+  const translationBundle = useEntryFormTranslations();
+  const { t, tc } = translationBundle;
+  const translations = toOrgPasswordFormTranslations(translationBundle);
+
+  const effectiveEntryType = editData?.entryType ?? entryTypeProp;
+  const entryKindState = getOrgEntryKindState(effectiveEntryType);
+  const { isLoginEntry } = entryKindState;
+  const isEdit = !!editData;
+
+  const formState = useOrgPasswordFormState(editData);
+  const { attachments, setAttachments } = useTeamAttachments(open, scopedTeamId, editData?.id);
+  const { folders: orgFolders } = useTeamFolders(open, scopedTeamId);
+
+  const formSetters: OrgPasswordFormLifecycleSetters = { ...formState.setters, setAttachments };
+  const { handleOpenChange } = useOrgPasswordFormLifecycle({
+    open,
+    editData,
+    onOpenChange,
+    setters: formSetters,
+  });
+
+  const { entryCopy, entrySpecificFieldsProps, handleSubmit, hasChanges, submitDisabled } =
+    useTeamPasswordFormController({
+      teamId: scopedTeamId,
+      orgId: scopedTeamId,
+      onSaved,
+      isEdit,
+      editData,
+      effectiveEntryType,
+      entryKindState,
+      translations,
+      formState,
+      handleOpenChange,
+    });
+
+  return {
+    t,
+    tc,
+    isEdit,
+    isLoginEntry,
+    editData,
+    formState,
+    attachments,
+    setAttachments,
+    orgFolders,
+    handleOpenChange,
+    entryCopy,
+    entrySpecificFieldsProps,
+    handleSubmit,
+    hasChanges,
+    submitDisabled,
+  };
+}
