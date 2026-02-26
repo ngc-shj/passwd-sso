@@ -20,7 +20,7 @@ import {
   hexEncode,
   hexDecode,
   type OrgKeyWrapContext,
-} from "./crypto-org";
+} from "./crypto-team";
 import { deriveEncryptionKey } from "./crypto-client";
 
 const TEST_ORG_ID = "org-test-001";
@@ -36,7 +36,7 @@ function makeCtx(overrides?: Partial<OrgKeyWrapContext>): OrgKeyWrapContext {
   return { ...TEST_CTX, ...overrides };
 }
 
-describe("crypto-org", () => {
+describe("crypto-team", () => {
   describe("generateOrgSymmetricKey", () => {
     it("generates a 32-byte (256-bit) random key", () => {
       const key = generateOrgSymmetricKey();

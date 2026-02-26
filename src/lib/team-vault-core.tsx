@@ -13,7 +13,7 @@ import {
   deriveOrgEncryptionKey,
   createOrgKeyEscrow,
   type OrgKeyWrapContext,
-} from "./crypto-org";
+} from "./crypto-team";
 import { apiPath, API_PATH } from "@/lib/constants";
 
 // ─── Types ────────────────────────────────────────────────────

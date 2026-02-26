@@ -32,7 +32,7 @@ import {
   exportPublicKey,
   exportPrivateKey,
   deriveEcdhWrappingKey,
-} from "./crypto-org";
+} from "./crypto-team";
 import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 

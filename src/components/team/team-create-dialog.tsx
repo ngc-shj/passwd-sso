@@ -19,7 +19,7 @@ import { Building2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH } from "@/lib/constants";
 import { useVault } from "@/lib/vault-context";
-import { generateOrgSymmetricKey, createOrgKeyEscrow } from "@/lib/crypto-org";
+import { generateOrgSymmetricKey, createOrgKeyEscrow } from "@/lib/crypto-team";
 
 interface TeamCreateDialogProps {
   trigger: React.ReactNode;
