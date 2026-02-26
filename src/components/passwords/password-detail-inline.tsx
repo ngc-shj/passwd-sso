@@ -72,11 +72,13 @@ interface PasswordDetailInlineProps {
   onEdit?: () => void;
   onRefresh?: () => void;
   orgId?: string;
+  teamId?: string;
 }
 
 const REVEAL_TIMEOUT = 30_000;
 
-export function PasswordDetailInline({ data, onEdit, onRefresh, orgId }: PasswordDetailInlineProps) {
+export function PasswordDetailInline({ data, onEdit, onRefresh, orgId, teamId }: PasswordDetailInlineProps) {
+  const scopedId = teamId ?? orgId;
   const t = useTranslations("PasswordDetail");
   const tc = useTranslations("Common");
   const locale = useLocale();
@@ -103,13 +105,13 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, orgId }: Passwor
     let cancelled = false;
     async function loadAttachments() {
       try {
-        const url = orgId
-          ? apiPath.teamPasswordAttachments(orgId, data.id)
+        const url = scopedId
+          ? apiPath.teamPasswordAttachments(scopedId, data.id)
           : apiPath.passwordAttachments(data.id);
         const res = await fetch(url);
         if (res.ok && !cancelled) {
           const loaded = await res.json();
-          if (orgId) {
+          if (scopedId) {
             setOrgAttachments(loaded);
           } else {
             setAttachments(loaded);
@@ -121,7 +123,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, orgId }: Passwor
     }
     loadAttachments();
     return () => { cancelled = true; };
-  }, [data.id, orgId]);
+  }, [data.id, scopedId]);
 
   const handleReveal = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
@@ -709,12 +711,17 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, orgId }: Passwor
       )}
 
       {/* Entry History (full blob snapshots) */}
-      <EntryHistorySection entryId={data.id} orgId={orgId} requireReprompt={data.requireReprompt ?? false} onRestore={onRefresh} />
+      <EntryHistorySection
+        entryId={data.id}
+        orgId={scopedId}
+        requireReprompt={data.requireReprompt ?? false}
+        onRestore={onRefresh}
+      />
 
       {/* Attachments */}
-      {orgId ? (
+      {scopedId ? (
         <OrgAttachmentSection
-          orgId={orgId}
+          orgId={scopedId}
           entryId={data.id}
           attachments={orgAttachments}
           onAttachmentsChange={setOrgAttachments}

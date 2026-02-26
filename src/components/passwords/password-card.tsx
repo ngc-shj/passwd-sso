@@ -99,6 +99,8 @@ interface PasswordCardProps {
   createdBy?: string | null;
   // Optional: org context for share dialog
   orgId?: string;
+  // Optional: team context (alias of orgId for migration compatibility)
+  teamId?: string;
   // Optional: reprompt indicator
   requireReprompt?: boolean;
   // Optional: expiration date
@@ -189,9 +191,11 @@ export function PasswordCard({
   canDelete = true,
   createdBy,
   orgId,
+  teamId,
   requireReprompt = false,
   expiresAt,
 }: PasswordCardProps) {
+  const scopedId = teamId ?? orgId;
   const isOrgMode = !!getPasswordProp;
   const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
   const isCreditCard = entryType === ENTRY_TYPE.CREDIT_CARD;
@@ -746,7 +750,8 @@ export function PasswordCard({
                   setDetailData(null);
                   onRefresh();
                 }}
-                orgId={orgId}
+                orgId={scopedId}
+                teamId={teamId}
               />
             </div>
           ) : null
