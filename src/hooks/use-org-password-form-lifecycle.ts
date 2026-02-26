@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import type { OrgPasswordFormEditData, OrgPasswordFormProps } from "@/components/org/org-password-form-types";
+import type { OrgPasswordFormEditData, OrgPasswordFormProps } from "@/components/team/team-password-form-types";
 import type { OrgPasswordFormLifecycleSetters } from "@/hooks/use-org-password-form-state";
 import {
   applyOrgEditDataToForm,

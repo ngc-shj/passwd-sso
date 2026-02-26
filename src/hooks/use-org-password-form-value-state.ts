@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { OrgTagData } from "@/components/org/org-tag-input";
+import type { OrgTagData } from "@/components/team/team-tag-input";
 import type { OrgPasswordFormInitialValues } from "@/hooks/org-password-form-initial-values";
 
 export function useOrgPasswordFormValueState(initial: OrgPasswordFormInitialValues) {

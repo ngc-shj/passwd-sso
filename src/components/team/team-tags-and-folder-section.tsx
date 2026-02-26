@@ -1,9 +1,9 @@
 "use client";
 
 import { EntryTagsAndFolderLayout } from "@/components/passwords/entry-tags-and-folder-layout";
-import { OrgTagInput } from "@/components/org/org-tag-input";
-import type { OrgFolderItem } from "@/components/org/org-password-form-types";
-import type { OrgTagData } from "@/components/org/org-tag-input";
+import { OrgTagInput } from "@/components/team/team-tag-input";
+import type { OrgFolderItem } from "@/components/team/team-password-form-types";
+import type { OrgTagData } from "@/components/team/team-tag-input";
 
 interface OrgTagsAndFolderSectionProps {
   tagsTitle: string;

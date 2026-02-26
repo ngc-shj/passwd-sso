@@ -4,21 +4,21 @@ import { render, screen } from "@testing-library/react";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import { describe, expect, it, vi } from "vitest";
-import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
+import { OrgEntrySpecificFields } from "@/components/team/team-entry-specific-fields";
 
 vi.mock("@/components/passwords/entry-login-main-fields", () => ({
   EntryLoginMainFields: () => <div data-testid="org-login-fields" />,
 }));
-vi.mock("@/components/org/org-secure-note-fields", () => ({
+vi.mock("@/components/team/team-secure-note-fields", () => ({
   OrgSecureNoteFields: () => <div data-testid="org-secure-note-fields" />,
 }));
-vi.mock("@/components/org/org-credit-card-fields", () => ({
+vi.mock("@/components/team/team-credit-card-fields", () => ({
   OrgCreditCardFields: () => <div data-testid="org-credit-card-fields" />,
 }));
-vi.mock("@/components/org/org-identity-fields", () => ({
+vi.mock("@/components/team/team-identity-fields", () => ({
   OrgIdentityFields: () => <div data-testid="org-identity-fields" />,
 }));
-vi.mock("@/components/org/org-passkey-fields", () => ({
+vi.mock("@/components/team/team-passkey-fields", () => ({
   OrgPasskeyFields: () => <div data-testid="org-passkey-fields" />,
 }));
 

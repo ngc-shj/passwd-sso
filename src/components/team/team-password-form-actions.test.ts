@@ -3,11 +3,11 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import {
   handleOrgCardNumberChange,
   submitOrgPasswordForm,
-} from "@/components/org/org-password-form-actions";
+} from "@/components/team/team-password-form-actions";
 
 const executeOrgEntrySubmitMock = vi.fn();
 
-vi.mock("@/components/org/org-entry-submit", () => ({
+vi.mock("@/components/team/team-entry-submit", () => ({
   executeOrgEntrySubmit: (...args: unknown[]) => executeOrgEntrySubmitMock(...args),
 }));
 

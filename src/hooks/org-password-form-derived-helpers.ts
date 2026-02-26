@@ -1,6 +1,6 @@
 import { formatCardNumber } from "@/lib/credit-card";
-import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
-import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
+import type { OrgPasswordFormProps } from "@/components/team/team-password-form-types";
+import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
 import type { OrgEntryFieldValues } from "@/hooks/use-org-password-form-state";
 import type { EntryTypeValue } from "@/lib/constants";
 

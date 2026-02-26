@@ -168,11 +168,11 @@ vi.mock("@/components/passwords/totp-field", () => ({
   TOTPField: () => null,
 }));
 
-vi.mock("@/components/org/org-tag-input", () => ({
+vi.mock("@/components/team/team-tag-input", () => ({
   OrgTagInput: () => <div data-testid="org-tag-input" />,
 }));
 
-vi.mock("@/components/org/org-attachment-section", () => ({
+vi.mock("@/components/team/team-attachment-section", () => ({
   OrgAttachmentSection: () => null,
 }));
 
@@ -211,7 +211,7 @@ vi.mock("@/components/passwords/entry-form-ui", () => ({
   ),
 }));
 
-import { OrgPasswordForm } from "./org-password-form";
+import { OrgPasswordForm } from "./team-password-form";
 
 /* ---------- helpers ---------- */
 

@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import { getOrgCardValidationState } from "@/components/org/org-credit-card-validation";
-import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
-import { buildOrgEntryCopyData } from "@/components/org/org-entry-copy-data";
-import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
+import { getOrgCardValidationState } from "@/components/team/team-credit-card-validation";
+import { buildOrgEntryCopy } from "@/components/team/team-entry-copy";
+import { buildOrgEntryCopyData } from "@/components/team/team-entry-copy-data";
+import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
 import { buildOrgEntrySpecificFieldsPropsFromState } from "@/hooks/org-entry-specific-fields-props";
 import {
   buildOrgCardNumberChangeCallback,

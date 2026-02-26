@@ -1,9 +1,9 @@
-import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
+import type { OrgPasswordFormEditData } from "@/components/team/team-password-form-types";
 import { formatCardNumber } from "@/lib/credit-card";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { OrgTagData } from "@/components/org/org-tag-input";
+import type { OrgTagData } from "@/components/team/team-tag-input";
 
 export interface OrgPasswordFormInitialValues {
   title: string;

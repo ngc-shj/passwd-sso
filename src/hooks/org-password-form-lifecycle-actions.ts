@@ -1,5 +1,5 @@
 import { formatCardNumber } from "@/lib/credit-card";
-import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
+import type { OrgPasswordFormEditData } from "@/components/team/team-password-form-types";
 import type { OrgPasswordFormLifecycleSetters } from "@/hooks/use-org-password-form-state";
 
 export type OrgPasswordFormSetters = OrgPasswordFormLifecycleSetters;

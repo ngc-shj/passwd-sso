@@ -3,7 +3,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/org/org-form-fields";
+import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/team/team-form-fields";
 
 interface OrgIdentityFieldsProps {
   fullName: string;

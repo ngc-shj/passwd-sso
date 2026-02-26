@@ -1,8 +1,8 @@
 "use client";
 
 import { ENTRY_TYPE } from "@/lib/constants";
-import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
-import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
+import { getOrgEntryKindState } from "@/components/team/team-entry-kind";
+import type { OrgPasswordFormProps } from "@/components/team/team-password-form-types";
 import { useOrgAttachments } from "@/hooks/use-org-attachments";
 import { useOrgFolders } from "@/hooks/use-org-folders";
 import { useOrgPasswordFormController } from "@/hooks/use-org-password-form-controller";

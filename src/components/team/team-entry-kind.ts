@@ -1,6 +1,6 @@
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { OrgEntryKind } from "@/components/org/org-password-form-types";
+import type { OrgEntryKind } from "@/components/team/team-password-form-types";
 
 export interface OrgEntryKindState {
   entryKind: OrgEntryKind;

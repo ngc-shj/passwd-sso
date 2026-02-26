@@ -1,9 +1,9 @@
 "use client";
 
 import { toast } from "sonner";
-import { submitOrgPasswordForm } from "@/components/org/org-password-form-actions";
-import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
-import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
+import { submitOrgPasswordForm } from "@/components/team/team-password-form-actions";
+import type { OrgPasswordFormProps } from "@/components/team/team-password-form-types";
+import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { OrgPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import {

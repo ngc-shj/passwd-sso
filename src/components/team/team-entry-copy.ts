@@ -1,4 +1,4 @@
-import type { OrgEntryKind } from "@/components/org/org-password-form-types";
+import type { OrgEntryKind } from "@/components/team/team-password-form-types";
 
 export interface EntryLocaleCopy {
   edit: string;

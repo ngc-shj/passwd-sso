@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { PasswordCard } from "@/components/passwords/password-card";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
-import { OrgPasswordForm } from "@/components/org/org-password-form";
+import { OrgPasswordForm } from "@/components/team/team-password-form";
 import { Building2 } from "lucide-react";
 import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";

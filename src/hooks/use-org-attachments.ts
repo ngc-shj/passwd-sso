@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiPath } from "@/lib/constants";
-import type { OrgAttachmentMeta } from "@/components/org/org-attachment-section";
+import type { OrgAttachmentMeta } from "@/components/team/team-attachment-section";
 
 export function useOrgAttachments(open: boolean, teamId: string, entryId?: string) {
   const [attachments, setAttachments] = useState<OrgAttachmentMeta[]>([]);

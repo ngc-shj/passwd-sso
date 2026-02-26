@@ -1,7 +1,7 @@
-import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
-import type { OrgAttachmentMeta } from "@/components/org/org-attachment-section";
+import type { OrgPasswordFormEditData } from "@/components/team/team-password-form-types";
+import type { OrgAttachmentMeta } from "@/components/team/team-attachment-section";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { OrgTagData } from "@/components/org/org-tag-input";
+import type { OrgTagData } from "@/components/team/team-tag-input";
 import { useOrgPasswordFormUiState } from "@/hooks/use-org-password-form-ui-state";
 import { useOrgPasswordFormValueState } from "@/hooks/use-org-password-form-value-state";
 import { buildOrgPasswordFormInitialValues } from "@/hooks/org-password-form-initial-values";

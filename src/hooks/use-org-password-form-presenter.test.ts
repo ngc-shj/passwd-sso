@@ -10,11 +10,11 @@ const getOrgCardValidationStateMock = vi.fn();
 const handleOrgCardNumberChangeMock = vi.fn();
 const buildOrgEntrySpecificFieldsPropsFromStateMock = vi.fn();
 
-vi.mock("@/components/org/org-credit-card-validation", () => ({
+vi.mock("@/components/team/team-credit-card-validation", () => ({
   getOrgCardValidationState: (...args: unknown[]) => getOrgCardValidationStateMock(...args),
 }));
 
-vi.mock("@/components/org/org-password-form-actions", () => ({
+vi.mock("@/components/team/team-password-form-actions", () => ({
   handleOrgCardNumberChange: (...args: unknown[]) => handleOrgCardNumberChangeMock(...args),
 }));
 

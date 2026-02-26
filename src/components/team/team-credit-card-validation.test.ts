@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getOrgCardValidationState } from "./org-credit-card-validation";
+import { getOrgCardValidationState } from "./team-credit-card-validation";
 
 describe("getOrgCardValidationState", () => {
   it("returns cardNumberValid=true for empty card number", () => {

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { buildOrgSubmitDisabled } from "@/hooks/org-password-form-derived-helpers";
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
-import type { OrgEntryKindState } from "@/components/org/org-entry-kind";
+import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
 import type { OrgEntryFieldValues } from "@/hooks/use-org-password-form-state";
 
 function baseEntryKindState(): OrgEntryKindState {

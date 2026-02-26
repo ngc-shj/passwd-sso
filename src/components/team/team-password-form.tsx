@@ -9,10 +9,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
-import { OrgAttachmentSection } from "./org-attachment-section";
-import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
-import { OrgTagsAndFolderSection } from "@/components/org/org-tags-and-folder-section";
-import type { OrgPasswordFormProps } from "@/components/org/org-password-form-types";
+import { OrgAttachmentSection } from "./team-attachment-section";
+import { OrgEntrySpecificFields } from "@/components/team/team-entry-specific-fields";
+import { OrgTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
+import type { OrgPasswordFormProps } from "@/components/team/team-password-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   EntryActionBar,

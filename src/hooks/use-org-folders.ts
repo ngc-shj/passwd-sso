@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiPath } from "@/lib/constants";
-import type { OrgFolderItem } from "@/components/org/org-password-form-types";
+import type { OrgFolderItem } from "@/components/team/team-password-form-types";
 
 export function useOrgFolders(open: boolean, teamId: string) {
   const [folders, setFolders] = useState<OrgFolderItem[]>([]);

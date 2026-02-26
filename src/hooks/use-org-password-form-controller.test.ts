@@ -11,7 +11,7 @@ const useOrgPasswordFormDerivedMock = vi.fn();
 const useOrgPasswordFormPresenterMock = vi.fn();
 const mockGetOrgKeyInfo = vi.fn();
 
-vi.mock("@/components/org/org-password-form-actions", () => ({
+vi.mock("@/components/team/team-password-form-actions", () => ({
   submitOrgPasswordForm: (...args: unknown[]) => submitOrgPasswordFormMock(...args),
 }));
 

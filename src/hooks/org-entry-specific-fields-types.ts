@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps } from "react";
-import { OrgEntrySpecificFields } from "@/components/org/org-entry-specific-fields";
+import { OrgEntrySpecificFields } from "@/components/team/team-entry-specific-fields";
 import type { OrgPasswordFormTranslations } from "@/hooks/entry-form-translations";
 
 export type OrgEntrySpecificFieldsProps = ComponentProps<typeof OrgEntrySpecificFields>;

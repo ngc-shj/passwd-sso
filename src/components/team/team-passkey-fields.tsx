@@ -2,7 +2,7 @@
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/org/org-form-fields";
+import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/team/team-form-fields";
 
 interface OrgPasskeyFieldsProps {
   relyingPartyId: string;

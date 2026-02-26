@@ -1,5 +1,5 @@
-import type { EntryLocaleCopy } from "@/components/org/org-entry-copy";
-import type { OrgEntryKind } from "@/components/org/org-password-form-types";
+import type { EntryLocaleCopy } from "@/components/team/team-entry-copy";
+import type { OrgEntryKind } from "@/components/team/team-password-form-types";
 import type {
   CreditCardFormTranslator,
   IdentityFormTranslator,

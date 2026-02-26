@@ -2,11 +2,11 @@ import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
 import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
 import { extractTagIds } from "@/lib/entry-form-helpers";
 import { detectCardBrand, formatCardNumber, normalizeCardBrand, normalizeCardNumber } from "@/lib/credit-card";
-import { executeOrgEntrySubmit } from "@/components/org/org-entry-submit";
+import { executeOrgEntrySubmit } from "@/components/team/team-entry-submit";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
+import type { OrgPasswordFormEditData } from "@/components/team/team-password-form-types";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { OrgTagData } from "@/components/org/org-tag-input";
+import type { OrgTagData } from "@/components/team/team-tag-input";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 interface HandleOrgCardNumberChangeArgs {

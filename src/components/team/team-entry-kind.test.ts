@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { getOrgEntryKindState } from "@/components/org/org-entry-kind";
+import { getOrgEntryKindState } from "@/components/team/team-entry-kind";
 
 describe("getOrgEntryKindState", () => {
   it("maps LOGIN to password kind", () => {

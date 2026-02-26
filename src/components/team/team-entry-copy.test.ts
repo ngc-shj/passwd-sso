@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrgEntryCopy } from "@/components/org/org-entry-copy";
+import { buildOrgEntryCopy } from "@/components/team/team-entry-copy";
 
 describe("buildOrgEntryCopy", () => {
   const copyByKind = {

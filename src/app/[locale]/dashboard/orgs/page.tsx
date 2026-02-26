@@ -5,8 +5,8 @@ import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { OrgCreateDialog } from "@/components/org/org-create-dialog";
-import { OrgRoleBadge } from "@/components/org/org-role-badge";
+import { OrgCreateDialog } from "@/components/team/team-create-dialog";
+import { OrgRoleBadge } from "@/components/team/team-role-badge";
 import { Plus, Building2, Users, KeyRound } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
 

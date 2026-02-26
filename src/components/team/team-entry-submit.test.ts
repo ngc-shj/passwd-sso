@@ -18,7 +18,7 @@ vi.mock("@/lib/org-entry-save", () => ({
   saveOrgEntry: mockSaveOrgEntry,
 }));
 
-import { executeOrgEntrySubmit } from "@/components/org/org-entry-submit";
+import { executeOrgEntrySubmit } from "@/components/team/team-entry-submit";
 
 const dummyKey = {} as CryptoKey;
 

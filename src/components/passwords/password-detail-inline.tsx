@@ -8,7 +8,7 @@ import { CopyButton } from "./copy-button";
 import { Favicon } from "./favicon";
 import { TOTPField, type TOTPEntry } from "./totp-field";
 import { AttachmentSection, type AttachmentMeta } from "./attachment-section";
-import { OrgAttachmentSection, type OrgAttachmentMeta } from "@/components/org/org-attachment-section";
+import { OrgAttachmentSection, type OrgAttachmentMeta } from "@/components/team/team-attachment-section";
 import { EntryHistorySection } from "./entry-history-section";
 import { formatCardNumber } from "@/lib/credit-card";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";

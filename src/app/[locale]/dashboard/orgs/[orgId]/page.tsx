@@ -9,10 +9,10 @@ import { EntryListHeader } from "@/components/passwords/entry-list-header";
 import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
 import { SearchBar } from "@/components/layout/search-bar";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
-import { OrgPasswordForm } from "@/components/org/org-password-form";
-import { OrgArchivedList } from "@/components/org/org-archived-list";
-import { OrgTrashList } from "@/components/org/org-trash-list";
-import { OrgRoleBadge } from "@/components/org/org-role-badge";
+import { OrgPasswordForm } from "@/components/team/team-password-form";
+import { OrgArchivedList } from "@/components/team/team-archived-list";
+import { OrgTrashList } from "@/components/team/team-trash-list";
+import { OrgRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {

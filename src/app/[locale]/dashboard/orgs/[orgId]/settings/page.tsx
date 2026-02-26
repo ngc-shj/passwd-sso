@@ -3,7 +3,7 @@
 import { useEffect, useState, use } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
-import { OrgRoleBadge } from "@/components/org/org-role-badge";
+import { OrgRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -36,7 +36,7 @@ import { CopyButton } from "@/components/passwords/copy-button";
 import { Link } from "@/i18n/navigation";
 import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
-import { ScimTokenManager } from "@/components/org/scim-token-manager";
+import { ScimTokenManager } from "@/components/team/team-scim-token-manager";
 import { ORG_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 

@@ -3,7 +3,7 @@ import type { CreditCardFormTranslator } from "@/lib/translation-types";
 
 const handleOrgCardNumberChangeMock = vi.fn();
 
-vi.mock("@/components/org/org-password-form-actions", () => ({
+vi.mock("@/components/team/team-password-form-actions", () => ({
   handleOrgCardNumberChange: (...args: unknown[]) => handleOrgCardNumberChangeMock(...args),
 }));
 

@@ -1,6 +1,6 @@
 import { toast } from "sonner";
 import { saveOrgEntry } from "@/lib/org-entry-save";
-import type { OrgPasswordFormEditData } from "@/components/org/org-password-form-types";
+import type { OrgPasswordFormEditData } from "@/components/team/team-password-form-types";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 

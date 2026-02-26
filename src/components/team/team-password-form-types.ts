@@ -1,6 +1,6 @@
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { OrgTagData } from "@/components/org/org-tag-input";
+import type { OrgTagData } from "@/components/team/team-tag-input";
 
 export type OrgEntryKind =
   | "password"

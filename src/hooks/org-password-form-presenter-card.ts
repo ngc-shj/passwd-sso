@@ -1,6 +1,6 @@
 "use client";
 
-import { handleOrgCardNumberChange } from "@/components/org/org-password-form-actions";
+import { handleOrgCardNumberChange } from "@/components/team/team-password-form-actions";
 import type { OrgPasswordFormValues, OrgPasswordFormSettersState } from "@/hooks/use-org-password-form-state";
 import type { CreditCardFormTranslator } from "@/lib/translation-types";
 

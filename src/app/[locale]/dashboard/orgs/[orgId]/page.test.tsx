@@ -36,16 +36,16 @@ vi.mock("sonner", () => ({
 vi.mock("@/components/passwords/password-card", () => ({
   PasswordCard: () => <div data-testid="password-card" />,
 }));
-vi.mock("@/components/org/org-password-form", () => ({
+vi.mock("@/components/team/team-password-form", () => ({
   OrgPasswordForm: () => null,
 }));
-vi.mock("@/components/org/org-archived-list", () => ({
+vi.mock("@/components/team/team-archived-list", () => ({
   OrgArchivedList: () => null,
 }));
-vi.mock("@/components/org/org-trash-list", () => ({
+vi.mock("@/components/team/team-trash-list", () => ({
   OrgTrashList: () => null,
 }));
-vi.mock("@/components/org/org-role-badge", () => ({
+vi.mock("@/components/team/team-role-badge", () => ({
   OrgRoleBadge: () => <span>ROLE</span>,
 }));
 vi.mock("@/components/ui/button", () => ({
@@ -134,7 +134,7 @@ vi.mock("@/components/passwords/entry-sort-menu", () => ({
   EntrySortMenu: () => null,
 }));
 
-vi.mock("@/components/org/org-favorites-list", () => ({
+vi.mock("@/components/team/team-favorites-list", () => ({
   OrgFavoritesList: () => null,
 }));
 

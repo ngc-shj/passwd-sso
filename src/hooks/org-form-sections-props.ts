@@ -3,8 +3,8 @@
 import type { ComponentProps } from "react";
 import { EntryActionBar } from "@/components/passwords/entry-form-ui";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
-import { OrgTagsAndFolderSection } from "@/components/org/org-tags-and-folder-section";
-import type { OrgFolderItem } from "@/components/org/org-password-form-types";
+import { OrgTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
+import type { OrgFolderItem } from "@/components/team/team-password-form-types";
 import type { OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";
 
