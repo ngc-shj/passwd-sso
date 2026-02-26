@@ -54,14 +54,14 @@ describe("GET /api/teams/[teamId]/member-key", () => {
   });
 
   it("returns TeamAuthError status when not a member", async () => {
-    mockRequireTeamMember.mockRejectedValue(new TeamAuthError("NOT_ORG_MEMBER", 404));
+    mockRequireTeamMember.mockRejectedValue(new TeamAuthError("NOT_TEAM_MEMBER", 404));
     const res = await GET(
       createRequest("GET", URL),
       { params: Promise.resolve({ teamId: "team-1" }) },
     );
     expect(res.status).toBe(404);
     const json = await res.json();
-    expect(json.error).toBe("NOT_ORG_MEMBER");
+    expect(json.error).toBe("NOT_TEAM_MEMBER");
   });
 
   it("rethrows non-TeamAuthError", async () => {

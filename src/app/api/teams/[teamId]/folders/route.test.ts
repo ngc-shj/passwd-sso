@@ -73,7 +73,7 @@ describe("GET /api/teams/[teamId]/folders", () => {
   });
 
   it("returns 403 when not a member", async () => {
-    mockRequireTeamMember.mockRejectedValue(new TeamAuthError("NOT_ORG_MEMBER", 403));
+    mockRequireTeamMember.mockRejectedValue(new TeamAuthError("NOT_TEAM_MEMBER", 403));
     const res = await GET(
       createRequest("GET", BASE),
       createParams({ teamId: TEAM_ID }),

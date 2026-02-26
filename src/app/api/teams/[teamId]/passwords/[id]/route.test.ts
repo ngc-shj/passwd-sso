@@ -246,7 +246,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns TeamAuthError status when not a member", async () => {
-    mockRequireTeamMember.mockRejectedValue(new TeamAuthError("NOT_ORG_MEMBER", 403));
+    mockRequireTeamMember.mockRejectedValue(new TeamAuthError("NOT_TEAM_MEMBER", 403));
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
         body: validE2EBody,
