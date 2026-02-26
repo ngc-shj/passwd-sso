@@ -55,8 +55,8 @@ import { NextRequest } from "next/server";
 import { GET, DELETE } from "@/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/route";
 import { TeamAuthError } from "@/lib/team-auth";
 
-function makeParams(orgId: string, id: string, attachmentId: string) {
-  return createParams({ teamId: orgId, id, attachmentId });
+function makeParams(teamId: string, id: string, attachmentId: string) {
+  return createParams({ teamId: teamId, id, attachmentId });
 }
 
 function createGetRequest() {

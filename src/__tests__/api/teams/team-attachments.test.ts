@@ -61,8 +61,8 @@ import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/teams/[teamId]/passwords/[id]/attachments/route";
 import { TeamAuthError } from "@/lib/team-auth";
 
-function makeParams(orgId: string, id: string) {
-  return createParams({ teamId: orgId, id });
+function makeParams(teamId: string, id: string) {
+  return createParams({ teamId: teamId, id });
 }
 
 function createGetRequest() {

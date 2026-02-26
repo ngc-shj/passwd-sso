@@ -52,8 +52,8 @@ vi.mock("@/lib/scim/token-utils", () => ({
 
 import { GET, POST } from "./route";
 
-function makeParams(orgId: string) {
-  return { params: Promise.resolve({ orgId }) };
+function makeParams(teamId: string) {
+  return { params: Promise.resolve({ teamId }) };
 }
 
 function makeReq(options: { body?: unknown } = {}) {

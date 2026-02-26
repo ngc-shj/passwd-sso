@@ -47,8 +47,8 @@ vi.mock("@/lib/prisma", () => ({
 
 import { GET, POST } from "./route";
 
-function createParams(orgId: string, id: string) {
-  return { params: Promise.resolve({ teamId: orgId, id }) };
+function createParams(teamId: string, id: string) {
+  return { params: Promise.resolve({ teamId: teamId, id }) };
 }
 
 function createRequest(method: string, url: string) {
