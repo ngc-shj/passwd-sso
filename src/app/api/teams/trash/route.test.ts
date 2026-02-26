@@ -15,7 +15,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  hasOrgPermission: mockHasOrgPermission,
+  hasTeamPermission: mockHasOrgPermission,
 }));
 
 import { GET } from "./route";

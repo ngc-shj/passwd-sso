@@ -27,33 +27,33 @@ export function createMockMembership(
 
 /**
  * Creates mock implementations of all org-auth exports.
- * Use with: vi.mock("@/lib/team-auth", () => createOrgAuthMocks(...))
+ * Use with: vi.mock("@/lib/team-auth", () => createTeamAuthMocks(...))
  */
-export function createOrgAuthMocks(
+export function createTeamAuthMocks(
   membership: MockMembership | null = createMockMembership()
 ) {
-  // Keep the real OrgAuthError class for instanceof checks
-  class OrgAuthError extends Error {
+  // Keep the real TeamAuthError class for instanceof checks
+  class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
-      this.name = "OrgAuthError";
+      this.name = "TeamAuthError";
       this.status = status;
     }
   }
 
   return {
-    requireOrgMember: vi.fn(async () => {
-      if (!membership) throw new OrgAuthError("NOT_FOUND", 404);
+    requireTeamMember: vi.fn(async () => {
+      if (!membership) throw new TeamAuthError("NOT_FOUND", 404);
       return membership;
     }),
-    requireOrgPermission: vi.fn(async () => {
-      if (!membership) throw new OrgAuthError("NOT_FOUND", 404);
+    requireTeamPermission: vi.fn(async () => {
+      if (!membership) throw new TeamAuthError("NOT_FOUND", 404);
       return membership;
     }),
-    hasOrgPermission: vi.fn(() => !!membership),
-    getOrgMembership: vi.fn(async () => membership),
+    hasTeamPermission: vi.fn(() => !!membership),
+    getTeamMembership: vi.fn(async () => membership),
     isRoleAbove: vi.fn(() => true),
-    OrgAuthError,
+    TeamAuthError,
   };
 }

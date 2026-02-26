@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireOrgPermission, OrgAuthError } from "@/lib/team-auth";
+import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 
@@ -17,9 +17,9 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const { teamId: orgId, invId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.MEMBER_INVITE);
+    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.MEMBER_INVITE);
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;

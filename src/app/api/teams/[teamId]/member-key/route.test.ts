@@ -3,7 +3,7 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const {
   mockAuth, mockRequireOrgMember, mockPrismaOrgMember,
-  mockPrismaOrgMemberKey, OrgAuthError,
+  mockPrismaOrgMemberKey, TeamAuthError,
 } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
@@ -17,14 +17,14 @@ const {
     mockRequireOrgMember: vi.fn(),
     mockPrismaOrgMember: { findUnique: vi.fn(), findFirst: vi.fn() },
     mockPrismaOrgMemberKey: { findUnique: vi.fn(), findFirst: vi.fn() },
-    OrgAuthError: _OrgAuthError,
+    TeamAuthError: _OrgAuthError,
   };
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgMember: mockRequireOrgMember,
-  OrgAuthError,
+  requireTeamMember: mockRequireOrgMember,
+  TeamAuthError,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -53,8 +53,8 @@ describe("GET /api/teams/[teamId]/member-key", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns OrgAuthError status when not a member", async () => {
-    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("NOT_ORG_MEMBER", 404));
+  it("returns TeamAuthError status when not a member", async () => {
+    mockRequireOrgMember.mockRejectedValue(new TeamAuthError("NOT_ORG_MEMBER", 404));
     const res = await GET(
       createRequest("GET", URL),
       { params: Promise.resolve({ teamId: "org-1" }) },
@@ -64,7 +64,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
     expect(json.error).toBe("NOT_ORG_MEMBER");
   });
 
-  it("rethrows non-OrgAuthError", async () => {
+  it("rethrows non-TeamAuthError", async () => {
     mockRequireOrgMember.mockRejectedValue(new Error("unexpected"));
     await expect(
       GET(

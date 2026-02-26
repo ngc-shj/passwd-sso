@@ -13,7 +13,7 @@ const { mockAuth, mockRequireOrgMember, mockEntryFindUnique, mockHistoryFindMany
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => {
-  class OrgAuthError extends Error {
+  class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
@@ -21,8 +21,8 @@ vi.mock("@/lib/team-auth", () => {
     }
   }
   return {
-    requireOrgMember: mockRequireOrgMember,
-    OrgAuthError,
+    requireTeamMember: mockRequireOrgMember,
+    TeamAuthError,
   };
 });
 vi.mock("@/lib/prisma", () => ({
@@ -33,7 +33,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { GET } from "@/app/api/teams/[teamId]/passwords/[id]/history/route";
-import { OrgAuthError } from "@/lib/team-auth";
+import { TeamAuthError } from "@/lib/team-auth";
 
 describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -49,7 +49,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
 
   it("returns 403 when not org member", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    mockRequireOrgMember.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const req = createRequest("GET");
     const res = await GET(req, createParams({ teamId: "o1", id: "p1" }));
     const { status, json } = await parseResponse(res);

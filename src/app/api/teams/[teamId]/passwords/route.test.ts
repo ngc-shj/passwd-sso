@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockPrismaOrganization, mockAuditLogCreate, mockRequireOrgPermission, OrgAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockPrismaOrganization, mockAuditLogCreate, mockRequireOrgPermission, TeamAuthError } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
-      this.name = "OrgAuthError";
+      this.name = "TeamAuthError";
       this.status = status;
     }
   }
@@ -21,7 +21,7 @@ const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockPrismaOrg
     mockPrismaOrganization: { findUnique: vi.fn() },
     mockAuditLogCreate: vi.fn(),
     mockRequireOrgPermission: vi.fn(),
-    OrgAuthError: _OrgAuthError,
+    TeamAuthError: _OrgAuthError,
   };
 });
 
@@ -35,8 +35,8 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgPermission: mockRequireOrgPermission,
-  OrgAuthError,
+  requireTeamPermission: mockRequireOrgPermission,
+  TeamAuthError,
 }));
 
 import { GET, POST } from "./route";
@@ -65,7 +65,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
 
   it("returns 403 when user lacks permission", async () => {
     mockRequireOrgPermission.mockRejectedValue(
-      new OrgAuthError("FORBIDDEN", 403)
+      new TeamAuthError("FORBIDDEN", 403)
     );
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
@@ -74,7 +74,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     expect(res.status).toBe(403);
   });
 
-  it("rethrows non-OrgAuthError from GET", async () => {
+  it("rethrows non-TeamAuthError from GET", async () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       GET(
@@ -301,8 +301,8 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns OrgAuthError status when POST permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
+  it("returns TeamAuthError status when POST permission denied", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, { body: validE2EBody }),
       createParams({ teamId: ORG_ID }),
@@ -312,7 +312,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     expect(json.error).toBe("INSUFFICIENT_PERMISSION");
   });
 
-  it("rethrows non-OrgAuthError from POST", async () => {
+  it("rethrows non-TeamAuthError from POST", async () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       POST(

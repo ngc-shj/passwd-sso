@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgFolder, mockRequireOrgMember, mockRequireOrgPermission, OrgAuthError, mockLogAudit } =
+const { mockAuth, mockPrismaOrgFolder, mockRequireOrgMember, mockRequireOrgPermission, TeamAuthError, mockLogAudit } =
   vi.hoisted(() => {
     class _OrgAuthError extends Error {
       status: number;
       constructor(message: string, status: number) {
         super(message);
-        this.name = "OrgAuthError";
+        this.name = "TeamAuthError";
         this.status = status;
       }
     }
@@ -21,7 +21,7 @@ const { mockAuth, mockPrismaOrgFolder, mockRequireOrgMember, mockRequireOrgPermi
       },
       mockRequireOrgMember: vi.fn(),
       mockRequireOrgPermission: vi.fn(),
-      OrgAuthError: _OrgAuthError,
+      TeamAuthError: _OrgAuthError,
       mockLogAudit: vi.fn(),
     };
   });
@@ -31,9 +31,9 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { orgFolder: mockPrismaOrgFolder },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgMember: mockRequireOrgMember,
-  requireOrgPermission: mockRequireOrgPermission,
-  OrgAuthError,
+  requireTeamMember: mockRequireOrgMember,
+  requireTeamPermission: mockRequireOrgPermission,
+  TeamAuthError,
 }));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
@@ -73,7 +73,7 @@ describe("GET /api/teams/[teamId]/folders", () => {
   });
 
   it("returns 403 when not a member", async () => {
-    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("NOT_ORG_MEMBER", 403));
+    mockRequireOrgMember.mockRejectedValue(new TeamAuthError("NOT_ORG_MEMBER", 403));
     const res = await GET(
       createRequest("GET", BASE),
       createParams({ teamId: ORG_ID }),
@@ -131,7 +131,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
   });
 
   it("returns 403 when permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await POST(
       createRequest("POST", BASE, { body: { name: "Test" } }),
       createParams({ teamId: ORG_ID }),

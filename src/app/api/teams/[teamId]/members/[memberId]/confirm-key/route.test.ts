@@ -62,7 +62,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 404 when admin is not a member", async () => {
-    mockPrismaOrgMember.findFirst.mockResolvedValueOnce(null); // getOrgMembership (findFirst)
+    mockPrismaOrgMember.findFirst.mockResolvedValueOnce(null); // getTeamMembership (findFirst)
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
       { params: Promise.resolve({ teamId: "org-1", memberId: "member-1" }) },
@@ -108,7 +108,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   });
 
   it("distributes key successfully", async () => {
-    mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }); // getOrgMembership (findFirst)
+    mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }); // getTeamMembership (findFirst)
     mockPrismaOrgMember.findUnique
       .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: false, deactivatedAt: null }) // target check
       .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null }); // re-check inside tx
@@ -191,7 +191,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 409 when key already distributed (TOCTOU race)", async () => {
-    mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }); // getOrgMembership (findFirst)
+    mockPrismaOrgMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "org-1" }); // getTeamMembership (findFirst)
     mockPrismaOrgMember.findUnique
       .mockResolvedValueOnce({ id: "member-1", orgId: "org-1", userId: "target-user", keyDistributed: false, deactivatedAt: null }) // target check (passes)
       .mockResolvedValueOnce({ keyDistributed: true, deactivatedAt: null }); // re-check inside tx (race: another admin distributed first)

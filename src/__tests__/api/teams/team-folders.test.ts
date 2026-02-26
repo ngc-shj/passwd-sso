@@ -22,7 +22,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => {
-  class OrgAuthError extends Error {
+  class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
@@ -30,9 +30,9 @@ vi.mock("@/lib/team-auth", () => {
     }
   }
   return {
-    requireOrgMember: mockRequireOrgMember,
-    requireOrgPermission: mockRequireOrgPermission,
-    OrgAuthError,
+    requireTeamMember: mockRequireOrgMember,
+    requireTeamPermission: mockRequireOrgPermission,
+    TeamAuthError,
   };
 });
 vi.mock("@/lib/prisma", () => ({
@@ -55,7 +55,7 @@ vi.mock("@/lib/folder-utils", () => ({
 }));
 
 import { GET, POST } from "@/app/api/teams/[teamId]/folders/route";
-import { OrgAuthError } from "@/lib/team-auth";
+import { TeamAuthError } from "@/lib/team-auth";
 import { validateParentFolder, validateFolderDepth } from "@/lib/folder-utils";
 
 describe("GET /api/teams/[teamId]/folders", () => {
@@ -71,7 +71,7 @@ describe("GET /api/teams/[teamId]/folders", () => {
 
   it("returns 403 when not org member", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    mockRequireOrgMember.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const req = createRequest("GET");
     const res = await GET(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
@@ -114,7 +114,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
 
   it("returns 403 when lacking permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const req = createRequest("POST", undefined, { body: { name: "F" } });
     const res = await POST(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);

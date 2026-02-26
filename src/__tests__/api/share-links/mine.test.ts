@@ -18,8 +18,8 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgMember: mockRequireOrgMember,
-  OrgAuthError: class extends Error {
+  requireTeamMember: mockRequireOrgMember,
+  TeamAuthError: class extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
@@ -280,10 +280,10 @@ describe("GET /api/share-links/mine", () => {
     );
   });
 
-  it("returns OrgAuthError status when org membership check fails", async () => {
+  it("returns TeamAuthError status when org membership check fails", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    const { OrgAuthError } = await import("@/lib/team-auth");
-    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    const { TeamAuthError } = await import("@/lib/team-auth");
+    mockRequireOrgMember.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
 
     const req = createRequest("GET", "http://localhost/api/share-links/mine?team=org-1");
     const res = await GET(req as never);

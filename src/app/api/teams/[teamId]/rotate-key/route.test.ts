@@ -30,8 +30,8 @@ const txMock = {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgPermission: mockRequireOrgPermission,
-  OrgAuthError: MockOrgAuthError,
+  requireTeamPermission: mockRequireOrgPermission,
+  TeamAuthError: MockOrgAuthError,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {

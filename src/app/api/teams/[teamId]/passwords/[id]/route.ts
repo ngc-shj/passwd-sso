@@ -4,10 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateOrgE2EPasswordSchema } from "@/lib/validations";
 import {
-  requireOrgPermission,
-  requireOrgMember,
-  hasOrgPermission,
-  OrgAuthError,
+  requireTeamPermission,
+  requireTeamMember,
+  hasTeamPermission,
+  TeamAuthError,
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -24,9 +24,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId: orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_READ);
+    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
@@ -82,9 +82,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   let membership;
   try {
-    membership = await requireOrgMember(session.user.id, orgId);
+    membership = await requireTeamMember(session.user.id, orgId);
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
@@ -108,7 +108,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   // MEMBER can only update their own entries
-  if (!hasOrgPermission(membership.role, TEAM_PERMISSION.PASSWORD_UPDATE)) {
+  if (!hasTeamPermission(membership.role, TEAM_PERMISSION.PASSWORD_UPDATE)) {
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
   if (
@@ -248,9 +248,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const { teamId: orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_DELETE);
+    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_DELETE);
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;

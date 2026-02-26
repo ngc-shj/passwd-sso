@@ -7,7 +7,7 @@ import {
   hashToken,
   encryptShareData,
 } from "@/lib/crypto-server";
-import { requireOrgPermission, OrgAuthError } from "@/lib/team-auth";
+import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -99,13 +99,13 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      await requireOrgPermission(
+      await requireTeamPermission(
         session.user.id,
         orgEntry.orgId,
         TEAM_PERMISSION.PASSWORD_READ
       );
     } catch (e) {
-      if (e instanceof OrgAuthError) {
+      if (e instanceof TeamAuthError) {
         return NextResponse.json({ error: e.message }, { status: e.status });
       }
       throw e;

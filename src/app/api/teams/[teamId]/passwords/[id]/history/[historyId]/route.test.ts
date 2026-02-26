@@ -6,13 +6,13 @@ const {
   mockPrismaOrgPasswordEntry,
   mockPrismaOrgPasswordEntryHistory,
   mockRequireOrgMember,
-  OrgAuthError,
+  TeamAuthError,
 } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
-      this.name = "OrgAuthError";
+      this.name = "TeamAuthError";
       this.status = status;
     }
   }
@@ -21,7 +21,7 @@ const {
     mockPrismaOrgPasswordEntry: { findUnique: vi.fn() },
     mockPrismaOrgPasswordEntryHistory: { findUnique: vi.fn() },
     mockRequireOrgMember: vi.fn(),
-    OrgAuthError: _OrgAuthError,
+    TeamAuthError: _OrgAuthError,
   };
 });
 
@@ -33,8 +33,8 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgMember: mockRequireOrgMember,
-  OrgAuthError,
+  requireTeamMember: mockRequireOrgMember,
+  TeamAuthError,
 }));
 
 import { GET } from "./route";
@@ -66,13 +66,13 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
 
   it("returns 403 when not org member", async () => {
     mockRequireOrgMember.mockRejectedValue(
-      new OrgAuthError("NOT_A_MEMBER", 403),
+      new TeamAuthError("NOT_A_MEMBER", 403),
     );
     const res = await GET(createRequest("GET", makeUrl()), makeParams());
     expect(res.status).toBe(403);
   });
 
-  it("rethrows non-OrgAuthError", async () => {
+  it("rethrows non-TeamAuthError", async () => {
     mockRequireOrgMember.mockRejectedValue(new Error("unexpected"));
     await expect(
       GET(createRequest("GET", makeUrl()), makeParams()),

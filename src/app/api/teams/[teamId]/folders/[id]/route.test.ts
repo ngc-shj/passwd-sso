@@ -7,14 +7,14 @@ const {
   mockPrismaOrgPasswordEntry,
   mockPrismaTransaction,
   mockRequireOrgPermission,
-  OrgAuthError,
+  TeamAuthError,
   mockLogAudit,
 } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
-      this.name = "OrgAuthError";
+      this.name = "TeamAuthError";
       this.status = status;
     }
   }
@@ -33,7 +33,7 @@ const {
     },
     mockPrismaTransaction: vi.fn(),
     mockRequireOrgPermission: vi.fn(),
-    OrgAuthError: _OrgAuthError,
+    TeamAuthError: _OrgAuthError,
     mockLogAudit: vi.fn(),
   };
 });
@@ -47,8 +47,8 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgPermission: mockRequireOrgPermission,
-  OrgAuthError,
+  requireTeamPermission: mockRequireOrgPermission,
+  TeamAuthError,
 }));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
@@ -99,7 +99,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   });
 
   it("returns 403 when permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await PUT(
       createRequest("PUT", BASE, { body: { name: "Updated" } }),
       createParams({ teamId: ORG_ID, id: FOLDER_ID }),
@@ -237,7 +237,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
   });
 
   it("returns 403 when permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await DELETE(
       createRequest("DELETE", BASE),
       createParams({ teamId: ORG_ID, id: FOLDER_ID }),

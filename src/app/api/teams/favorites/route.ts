@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasOrgPermission } from "@/lib/team-auth";
+import { hasTeamPermission } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 
@@ -38,7 +38,7 @@ export async function GET() {
     const entry = f.orgPasswordEntry;
     if (entry.deletedAt || entry.isArchived) return false;
     const role = roleMap.get(entry.orgId);
-    return role && hasOrgPermission(role, TEAM_PERMISSION.PASSWORD_READ);
+    return role && hasTeamPermission(role, TEAM_PERMISSION.PASSWORD_READ);
   });
 
   const entries = active.map((f) => {

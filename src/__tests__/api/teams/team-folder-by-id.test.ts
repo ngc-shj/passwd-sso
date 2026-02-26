@@ -22,14 +22,14 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => {
-  class OrgAuthError extends Error {
+  class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
       this.status = status;
     }
   }
-  return { requireOrgPermission: mockRequireOrgPermission, OrgAuthError };
+  return { requireTeamPermission: mockRequireOrgPermission, TeamAuthError };
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -53,7 +53,7 @@ vi.mock("@/lib/folder-utils", () => ({
 }));
 
 import { PUT, DELETE } from "@/app/api/teams/[teamId]/folders/[id]/route";
-import { OrgAuthError } from "@/lib/team-auth";
+import { TeamAuthError } from "@/lib/team-auth";
 
 describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -68,7 +68,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
 
   it("returns 403 when lacking permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: "x" } });
     const res = await PUT(req, createParams({ teamId: "o1", id: "f1" }));
     const { status } = await parseResponse(res);
@@ -170,7 +170,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
     expect(json.error).toBe("FOLDER_ALREADY_EXISTS");
   });
 
-  it("re-throws non-OrgAuthError from PUT", async () => {
+  it("re-throws non-TeamAuthError from PUT", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockRejectedValue(new Error("Unexpected"));
     const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: "x" } });
@@ -212,7 +212,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
     });
   });
 
-  it("re-throws non-OrgAuthError from DELETE", async () => {
+  it("re-throws non-TeamAuthError from DELETE", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockRejectedValue(new Error("Unexpected"));
     const req = createRequest("DELETE");
@@ -229,7 +229,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
 
   it("returns 403 when lacking permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const req = createRequest("DELETE");
     const res = await DELETE(req, createParams({ teamId: "o1", id: "f1" }));
     const { status } = await parseResponse(res);

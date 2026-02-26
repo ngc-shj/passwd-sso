@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgInvitation, mockPrismaUser, mockPrismaOrgMember, mockRequireOrgPermission, OrgAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgInvitation, mockPrismaUser, mockPrismaOrgMember, mockRequireOrgPermission, TeamAuthError } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
-      this.name = "OrgAuthError";
+      this.name = "TeamAuthError";
       this.status = status;
     }
   }
@@ -20,7 +20,7 @@ const { mockAuth, mockPrismaOrgInvitation, mockPrismaUser, mockPrismaOrgMember, 
     mockPrismaUser: { findUnique: vi.fn() },
     mockPrismaOrgMember: { findUnique: vi.fn() },
     mockRequireOrgPermission: vi.fn(),
-    OrgAuthError: _OrgAuthError,
+    TeamAuthError: _OrgAuthError,
   };
 });
 
@@ -34,8 +34,8 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgPermission: mockRequireOrgPermission,
-  OrgAuthError,
+  requireTeamPermission: mockRequireOrgPermission,
+  TeamAuthError,
 }));
 
 import { GET, POST } from "./route";
@@ -61,7 +61,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
   });
 
   it("returns 403 when lacking invite permission", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/invitations`),
       createParams({ teamId: ORG_ID }),

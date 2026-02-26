@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { inviteSchema } from "@/lib/validations";
-import { requireOrgPermission, OrgAuthError } from "@/lib/team-auth";
+import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { INVITATION_STATUS, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
@@ -20,9 +20,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId: orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.MEMBER_INVITE);
+    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.MEMBER_INVITE);
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
@@ -62,9 +62,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { teamId: orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.MEMBER_INVITE);
+    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.MEMBER_INVITE);
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;

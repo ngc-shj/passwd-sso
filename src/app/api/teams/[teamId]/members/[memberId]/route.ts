@@ -4,9 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateMemberRoleSchema } from "@/lib/validations";
 import {
-  requireOrgPermission,
+  requireTeamPermission,
   isRoleAbove,
-  OrgAuthError,
+  TeamAuthError,
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -24,13 +24,13 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   let actorMembership;
   try {
-    actorMembership = await requireOrgPermission(
+    actorMembership = await requireTeamPermission(
       session.user.id,
       orgId,
       TEAM_PERMISSION.MEMBER_CHANGE_ROLE
     );
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
@@ -162,13 +162,13 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   let actorMembership;
   try {
-    actorMembership = await requireOrgPermission(
+    actorMembership = await requireTeamPermission(
       session.user.id,
       orgId,
       TEAM_PERMISSION.MEMBER_REMOVE
     );
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;

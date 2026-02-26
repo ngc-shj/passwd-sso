@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireOrgPermission, OrgAuthError } from "@/lib/team-auth";
+import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { orgMemberKeySchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
@@ -20,13 +20,13 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // Only OWNER/ADMIN can distribute keys (mapped to MEMBER_INVITE permission)
   try {
-    await requireOrgPermission(
+    await requireTeamPermission(
       session.user.id,
       orgId,
       TEAM_PERMISSION.MEMBER_INVITE
     );
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;

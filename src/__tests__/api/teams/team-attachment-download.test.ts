@@ -22,14 +22,14 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => {
-  class OrgAuthError extends Error {
+  class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
       this.status = status;
     }
   }
-  return { requireOrgPermission: mockRequireOrgPermission, OrgAuthError };
+  return { requireTeamPermission: mockRequireOrgPermission, TeamAuthError };
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -53,7 +53,7 @@ vi.mock("@/lib/blob-store", () => ({
 
 import { NextRequest } from "next/server";
 import { GET, DELETE } from "@/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/route";
-import { OrgAuthError } from "@/lib/team-auth";
+import { TeamAuthError } from "@/lib/team-auth";
 
 function makeParams(orgId: string, id: string, attachmentId: string) {
   return createParams({ teamId: orgId, id, attachmentId });
@@ -98,7 +98,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
 
   it("returns 403 when lacking permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const res = await GET(createGetRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(403);
   });
@@ -162,7 +162,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
 
   it("returns 403 when lacking permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const res = await DELETE(createDeleteRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(403);
   });

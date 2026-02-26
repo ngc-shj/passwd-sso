@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasOrgPermission } from "@/lib/team-auth";
+import { hasTeamPermission } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 
@@ -20,7 +20,7 @@ export async function GET() {
 
   // Only include orgs where user has password:read permission
   const readable = memberships.filter((m) =>
-    hasOrgPermission(m.role, TEAM_PERMISSION.PASSWORD_READ)
+    hasTeamPermission(m.role, TEAM_PERMISSION.PASSWORD_READ)
   );
   const orgIds = readable.map((m) => m.orgId);
   const roleMap = new Map(readable.map((m) => [m.orgId, m.role]));

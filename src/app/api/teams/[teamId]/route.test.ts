@@ -2,12 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 // All mocks must be created inside vi.hoisted() to avoid hoisting issues
-const { mockAuth, mockPrismaOrganization, mockRequireOrgMember, mockRequireOrgPermission, OrgAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrganization, mockRequireOrgMember, mockRequireOrgPermission, TeamAuthError } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
-      this.name = "OrgAuthError";
+      this.name = "TeamAuthError";
       this.status = status;
     }
   }
@@ -20,7 +20,7 @@ const { mockAuth, mockPrismaOrganization, mockRequireOrgMember, mockRequireOrgPe
     },
     mockRequireOrgMember: vi.fn(),
     mockRequireOrgPermission: vi.fn(),
-    OrgAuthError: _OrgAuthError,
+    TeamAuthError: _OrgAuthError,
   };
 });
 
@@ -29,9 +29,9 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { organization: mockPrismaOrganization },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgMember: mockRequireOrgMember,
-  requireOrgPermission: mockRequireOrgPermission,
-  OrgAuthError,
+  requireTeamMember: mockRequireOrgMember,
+  requireTeamPermission: mockRequireOrgPermission,
+  TeamAuthError,
 }));
 
 import { GET, PUT, DELETE } from "./route";
@@ -66,7 +66,7 @@ describe("GET /api/teams/[teamId]", () => {
   });
 
   it("returns 404 when not a member", async () => {
-    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("NOT_FOUND", 404));
+    mockRequireOrgMember.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}`),
       createParams({ teamId: ORG_ID }),
@@ -123,7 +123,7 @@ describe("PUT /api/teams/[teamId]", () => {
   });
 
   it("returns 403 when lacking permission", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}`, { body: { name: "New" } }),
       createParams({ teamId: ORG_ID }),
@@ -228,7 +228,7 @@ describe("DELETE /api/teams/[teamId]", () => {
   });
 
   it("returns 403 when not OWNER", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}`),
       createParams({ teamId: ORG_ID }),

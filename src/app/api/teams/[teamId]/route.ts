@@ -3,9 +3,9 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { updateOrgSchema } from "@/lib/validations";
 import {
-  requireOrgMember,
-  requireOrgPermission,
-  OrgAuthError,
+  requireTeamMember,
+  requireTeamPermission,
+  TeamAuthError,
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
@@ -22,7 +22,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId: orgId } = await params;
 
   try {
-    const membership = await requireOrgMember(session.user.id, orgId);
+    const membership = await requireTeamMember(session.user.id, orgId);
     const org = await prisma.organization.findUnique({
       where: { id: orgId },
       select: {
@@ -47,7 +47,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       passwordCount: org._count.passwords,
     });
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
@@ -64,9 +64,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { teamId: orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.ORG_UPDATE);
+    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.ORG_UPDATE);
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
@@ -117,9 +117,9 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const { teamId: orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.ORG_DELETE);
+    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.ORG_DELETE);
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;

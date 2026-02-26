@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgPasswordFavorite, mockRequireOrgPermission, OrgAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgPasswordFavorite, mockRequireOrgPermission, TeamAuthError } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
-      this.name = "OrgAuthError";
+      this.name = "TeamAuthError";
       this.status = status;
     }
   }
@@ -19,7 +19,7 @@ const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgPasswordFavorite, moc
       delete: vi.fn(),
     },
     mockRequireOrgPermission: vi.fn(),
-    OrgAuthError: _OrgAuthError,
+    TeamAuthError: _OrgAuthError,
   };
 });
 
@@ -31,8 +31,8 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgPermission: mockRequireOrgPermission,
-  OrgAuthError,
+  requireTeamPermission: mockRequireOrgPermission,
+  TeamAuthError,
 }));
 
 import { POST } from "./route";
@@ -48,8 +48,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/favorite", () => {
     mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
   });
 
-  it("returns OrgAuthError status when permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
+  it("returns TeamAuthError status when permission denied", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}/favorite`),
       createParams({ teamId: ORG_ID, id: PW_ID }),
@@ -59,7 +59,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/favorite", () => {
     expect(json.error).toBe("INSUFFICIENT_PERMISSION");
   });
 
-  it("rethrows non-OrgAuthError", async () => {
+  it("rethrows non-TeamAuthError", async () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       POST(

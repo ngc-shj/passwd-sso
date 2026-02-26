@@ -31,8 +31,8 @@ vi.mock("@/lib/crypto-server", () => ({
   }),
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgPermission: vi.fn(),
-  OrgAuthError: class extends Error {
+  requireTeamPermission: vi.fn(),
+  TeamAuthError: class extends Error {
     status: number;
     constructor(msg: string, status: number) {
       super(msg);
@@ -258,13 +258,13 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("NOT_FOUND");
   });
 
-  it("returns OrgAuthError status for org entry permission denied", async () => {
+  it("returns TeamAuthError status for org entry permission denied", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValueOnce({ orgId: "org-123" });
 
-    const { requireOrgPermission } = await import("@/lib/team-auth");
-    const { OrgAuthError: RealOrgAuthError } = await import("@/lib/team-auth");
-    vi.mocked(requireOrgPermission).mockRejectedValueOnce(
+    const { requireTeamPermission } = await import("@/lib/team-auth");
+    const { TeamAuthError: RealOrgAuthError } = await import("@/lib/team-auth");
+    vi.mocked(requireTeamPermission).mockRejectedValueOnce(
       new RealOrgAuthError("INSUFFICIENT_PERMISSION", 403)
     );
 

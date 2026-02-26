@@ -7,13 +7,13 @@ const {
   mockFindMany,
   mockRequireOrgPermission,
   mockOrgEntryFindMany,
-  OrgAuthError,
+  TeamAuthError,
 } = vi.hoisted(() => {
-    class OrgAuthError extends Error {
+    class TeamAuthError extends Error {
       status: number;
       constructor(message: string, status: number) {
         super(message);
-        this.name = "OrgAuthError";
+        this.name = "TeamAuthError";
         this.status = status;
       }
     }
@@ -22,7 +22,7 @@ const {
       mockFindMany: vi.fn(),
       mockRequireOrgPermission: vi.fn(),
       mockOrgEntryFindMany: vi.fn(),
-      OrgAuthError,
+      TeamAuthError,
     };
   });
 
@@ -34,8 +34,8 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgPermission: mockRequireOrgPermission,
-  OrgAuthError,
+  requireTeamPermission: mockRequireOrgPermission,
+  TeamAuthError,
 }));
 
 import { GET } from "@/app/api/teams/[teamId]/audit-logs/route";
@@ -62,7 +62,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
   it("returns 403 when user lacks org:update permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockRejectedValue(
-      new OrgAuthError("FORBIDDEN", 403)
+      new TeamAuthError("FORBIDDEN", 403)
     );
 
     const req = createRequest(
@@ -347,7 +347,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     expect(json.error).toBe("INVALID_CURSOR");
   });
 
-  it("re-throws non-OrgAuthError", async () => {
+  it("re-throws non-TeamAuthError", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockRejectedValue(new Error("Unexpected"));
 

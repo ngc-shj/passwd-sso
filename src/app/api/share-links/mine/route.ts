@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { requireOrgMember, OrgAuthError } from "@/lib/team-auth";
+import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { TEAM_ROLE } from "@/lib/constants";
 
 // GET /api/share-links/mine
@@ -25,10 +25,10 @@ export async function GET(req: NextRequest) {
   if (teamId) {
     let membershipRole: string | undefined;
     try {
-      const membership = await requireOrgMember(session.user.id, teamId);
+      const membership = await requireTeamMember(session.user.id, teamId);
       membershipRole = membership.role;
     } catch (e) {
-      if (e instanceof OrgAuthError) {
+      if (e instanceof TeamAuthError) {
         return NextResponse.json({ error: e.message }, { status: e.status });
       }
       throw e;

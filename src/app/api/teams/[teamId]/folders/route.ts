@@ -4,9 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createFolderSchema } from "@/lib/validations";
 import {
-  requireOrgMember,
-  requireOrgPermission,
-  OrgAuthError,
+  requireTeamMember,
+  requireTeamPermission,
+  TeamAuthError,
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
@@ -30,9 +30,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId: orgId } = await params;
 
   try {
-    await requireOrgMember(session.user.id, orgId);
+    await requireTeamMember(session.user.id, orgId);
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
@@ -75,9 +75,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { teamId: orgId } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
+    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;

@@ -1,27 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockRequireOrgPermission, OrgAuthError, mockLogAudit } = vi.hoisted(() => {
+const { mockAuth, mockRequireOrgPermission, TeamAuthError, mockLogAudit } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
-      this.name = "OrgAuthError";
+      this.name = "TeamAuthError";
       this.status = status;
     }
   }
   return {
     mockAuth: vi.fn(),
     mockRequireOrgPermission: vi.fn(),
-    OrgAuthError: _OrgAuthError,
+    TeamAuthError: _OrgAuthError,
     mockLogAudit: vi.fn(),
   };
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgPermission: mockRequireOrgPermission,
-  OrgAuthError,
+  requireTeamPermission: mockRequireOrgPermission,
+  TeamAuthError,
 }));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
@@ -134,7 +134,7 @@ describe("POST /api/audit-logs/export", () => {
   });
 
   it("returns 403 when user lacks org:update permission", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const res = await POST(
       createRequest("POST", URL, {
         body: { orgId: "org-1", entryCount: 1, format: "csv" },
@@ -147,7 +147,7 @@ describe("POST /api/audit-logs/export", () => {
   });
 
   it("returns 404 when orgId specified but user is not a member", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("NOT_FOUND", 404));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
     const res = await POST(
       createRequest("POST", URL, {
         body: { orgId: "org-other", entryCount: 1, format: "csv" },

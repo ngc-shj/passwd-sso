@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateFolderSchema } from "@/lib/validations";
-import { requireOrgPermission, OrgAuthError } from "@/lib/team-auth";
+import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import {
   validateParentFolder,
@@ -31,9 +31,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { teamId: orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
+    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
@@ -174,9 +174,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const { teamId: orgId, id } = await params;
 
   try {
-    await requireOrgPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
+    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;

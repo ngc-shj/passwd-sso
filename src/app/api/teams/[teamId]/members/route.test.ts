@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgMember, mockRequireOrgMember, OrgAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgMember, mockRequireOrgMember, TeamAuthError } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
-      this.name = "OrgAuthError";
+      this.name = "TeamAuthError";
       this.status = status;
     }
   }
@@ -14,7 +14,7 @@ const { mockAuth, mockPrismaOrgMember, mockRequireOrgMember, OrgAuthError } = vi
     mockAuth: vi.fn(),
     mockPrismaOrgMember: { findMany: vi.fn() },
     mockRequireOrgMember: vi.fn(),
-    OrgAuthError: _OrgAuthError,
+    TeamAuthError: _OrgAuthError,
   };
 });
 
@@ -23,8 +23,8 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { orgMember: mockPrismaOrgMember },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgMember: mockRequireOrgMember,
-  OrgAuthError,
+  requireTeamMember: mockRequireOrgMember,
+  TeamAuthError,
 }));
 
 import { GET } from "./route";
@@ -50,7 +50,7 @@ describe("GET /api/teams/[teamId]/members", () => {
   });
 
   it("returns 404 when not a member", async () => {
-    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("NOT_FOUND", 404));
+    mockRequireOrgMember.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/members`),
       createParams({ teamId: ORG_ID }),

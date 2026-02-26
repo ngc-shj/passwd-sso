@@ -18,7 +18,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => {
-  class OrgAuthError extends Error {
+  class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
@@ -26,8 +26,8 @@ vi.mock("@/lib/team-auth", () => {
     }
   }
   return {
-    requireOrgPermission: mockRequireOrgPermission,
-    OrgAuthError,
+    requireTeamPermission: mockRequireOrgPermission,
+    TeamAuthError,
   };
 });
 vi.mock("@/lib/prisma", () => ({
@@ -43,7 +43,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 import { POST } from "@/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route";
-import { OrgAuthError } from "@/lib/team-auth";
+import { TeamAuthError } from "@/lib/team-auth";
 
 describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -59,7 +59,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   it("returns 403 when lacking permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status } = await parseResponse(res);

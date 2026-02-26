@@ -1,20 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockAuth, mockRequireOrgPermission, OrgAuthError, mockLogAudit, mockScimToken } = vi.hoisted(
+const { mockAuth, mockRequireOrgPermission, TeamAuthError, mockLogAudit, mockScimToken } = vi.hoisted(
   () => {
     class _OrgAuthError extends Error {
       status: number;
       constructor(message: string, status: number) {
         super(message);
-        this.name = "OrgAuthError";
+        this.name = "TeamAuthError";
         this.status = status;
       }
     }
     return {
       mockAuth: vi.fn(),
       mockRequireOrgPermission: vi.fn(),
-      OrgAuthError: _OrgAuthError,
+      TeamAuthError: _OrgAuthError,
       mockLogAudit: vi.fn(),
       mockScimToken: { findUnique: vi.fn(), update: vi.fn() },
     };
@@ -23,8 +23,8 @@ const { mockAuth, mockRequireOrgPermission, OrgAuthError, mockLogAudit, mockScim
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgPermission: mockRequireOrgPermission,
-  OrgAuthError,
+  requireTeamPermission: mockRequireOrgPermission,
+  TeamAuthError,
 }));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
@@ -55,7 +55,7 @@ describe("DELETE /api/teams/[teamId]/scim-tokens/[tokenId]", () => {
 
   it("returns 403 if no SCIM_MANAGE permission", async () => {
     mockRequireOrgPermission.mockRejectedValue(
-      new OrgAuthError("FORBIDDEN", 403),
+      new TeamAuthError("FORBIDDEN", 403),
     );
     const res = await DELETE(makeReq(), makeParams("org-1", "t1"));
     expect(res.status).toBe(403);

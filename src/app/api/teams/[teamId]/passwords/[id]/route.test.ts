@@ -4,14 +4,14 @@ import { createRequest, createParams } from "@/__tests__/helpers/request-builder
 const {
   mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockPrismaOrganization, mockAuditLogCreate,
   mockRequireOrgPermission,
-  mockRequireOrgMember, mockHasOrgPermission, OrgAuthError,
+  mockRequireOrgMember, mockHasOrgPermission, TeamAuthError,
   mockPrismaTransaction,
 } = vi.hoisted(() => {
   class _OrgAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
-      this.name = "OrgAuthError";
+      this.name = "TeamAuthError";
       this.status = status;
     }
   }
@@ -28,7 +28,7 @@ const {
     mockRequireOrgPermission: vi.fn(),
     mockRequireOrgMember: vi.fn(),
     mockHasOrgPermission: vi.fn(),
-    OrgAuthError: _OrgAuthError,
+    TeamAuthError: _OrgAuthError,
     mockPrismaTransaction: vi.fn(),
   };
 });
@@ -44,10 +44,10 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireOrgPermission: mockRequireOrgPermission,
-  requireOrgMember: mockRequireOrgMember,
-  hasOrgPermission: mockHasOrgPermission,
-  OrgAuthError,
+  requireTeamPermission: mockRequireOrgPermission,
+  requireTeamMember: mockRequireOrgMember,
+  hasTeamPermission: mockHasOrgPermission,
+  TeamAuthError,
 }));
 
 import { GET, PUT, DELETE } from "./route";
@@ -119,8 +119,8 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns OrgAuthError status when permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
+  it("returns TeamAuthError status when permission denied", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
       createParams({ teamId: ORG_ID, id: PW_ID }),
@@ -128,7 +128,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
     expect(res.status).toBe(403);
   });
 
-  it("rethrows non-OrgAuthError from GET", async () => {
+  it("rethrows non-TeamAuthError from GET", async () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       GET(
@@ -245,8 +245,8 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns OrgAuthError status when not a member", async () => {
-    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("NOT_ORG_MEMBER", 403));
+  it("returns TeamAuthError status when not a member", async () => {
+    mockRequireOrgMember.mockRejectedValue(new TeamAuthError("NOT_ORG_MEMBER", 403));
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`, {
         body: validE2EBody,
@@ -256,7 +256,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     expect(res.status).toBe(403);
   });
 
-  it("rethrows non-OrgAuthError from PUT", async () => {
+  it("rethrows non-TeamAuthError from PUT", async () => {
     mockRequireOrgMember.mockRejectedValue(new Error("unexpected"));
     await expect(
       PUT(
@@ -528,8 +528,8 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns OrgAuthError status when permission denied for DELETE", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("INSUFFICIENT_PERMISSION", 403));
+  it("returns TeamAuthError status when permission denied for DELETE", async () => {
+    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}`),
       createParams({ teamId: ORG_ID, id: PW_ID }),
@@ -537,7 +537,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
     expect(res.status).toBe(403);
   });
 
-  it("rethrows non-OrgAuthError from DELETE", async () => {
+  it("rethrows non-TeamAuthError from DELETE", async () => {
     mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       DELETE(

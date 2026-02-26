@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireOrgMember, OrgAuthError } from "@/lib/team-auth";
+import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 
 type Params = { params: Promise<{ teamId: string; id: string; historyId: string }> };
@@ -16,9 +16,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId: orgId, id, historyId } = await params;
 
   try {
-    await requireOrgMember(session.user.id, orgId);
+    await requireTeamMember(session.user.id, orgId);
   } catch (e) {
-    if (e instanceof OrgAuthError) {
+    if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;

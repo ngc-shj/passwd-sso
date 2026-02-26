@@ -1,9 +1,9 @@
 /**
- * Organization authorization helpers (RBAC).
+ * Team authorization helpers (RBAC).
  *
- * Permissions are derived from OrgRole:
+ * Permissions are derived from team role:
  *   OWNER  — full control
- *   ADMIN  — manage members, passwords, tags (cannot delete org)
+ *   ADMIN  — manage members, passwords, tags (cannot delete team)
  *   MEMBER — create passwords, manage own, manage tags
  *   VIEWER — read-only access to passwords
  */
@@ -15,10 +15,10 @@ import type { OrgRole } from "@prisma/client";
 
 // ─── Permission Definitions ─────────────────────────────────────
 
-export type OrgPermission =
+export type TeamPermission =
   (typeof TEAM_PERMISSION)[keyof typeof TEAM_PERMISSION];
 
-const ROLE_PERMISSIONS: Record<OrgRole, Set<OrgPermission>> = {
+const ROLE_PERMISSIONS: Record<OrgRole, Set<TeamPermission>> = {
   [TEAM_ROLE.OWNER]: new Set([
     TEAM_PERMISSION.ORG_DELETE,
     TEAM_PERMISSION.ORG_UPDATE,
@@ -56,9 +56,9 @@ const ROLE_PERMISSIONS: Record<OrgRole, Set<OrgPermission>> = {
 // ─── Helpers ────────────────────────────────────────────────────
 
 /** Check if a role has a specific permission. */
-export function hasOrgPermission(
+export function hasTeamPermission(
   role: OrgRole,
-  permission: OrgPermission
+  permission: TeamPermission
 ): boolean {
   return ROLE_PERMISSIONS[role]?.has(permission) ?? false;
 }
@@ -77,56 +77,56 @@ export function isRoleAbove(actorRole: OrgRole, targetRole: OrgRole): boolean {
 }
 
 /**
- * Get the membership record for a user in an org.
+ * Get the membership record for a user in a team.
  * Returns null if the user is not a member (or is deactivated).
  *
  * Uses findFirst instead of findUnique because Prisma's findUnique
  * cannot include non-unique-index fields (deactivatedAt) in the where clause.
- * The @@unique([orgId, userId]) constraint ensures at most one row per org+user.
+ * The @@unique([orgId, userId]) constraint ensures at most one row per team+user.
  */
-export async function getOrgMembership(userId: string, orgId: string) {
+export async function getTeamMembership(userId: string, teamId: string) {
   return prisma.orgMember.findFirst({
-    where: { orgId, userId, deactivatedAt: null },
+    where: { orgId: teamId, userId, deactivatedAt: null },
   });
 }
 
 /**
- * Require that the user is a member of the org.
+ * Require that the user is a member of the team.
  * Returns the membership record, or throws a structured error.
  */
-export async function requireOrgMember(userId: string, orgId: string) {
-  const membership = await getOrgMembership(userId, orgId);
+export async function requireTeamMember(userId: string, teamId: string) {
+  const membership = await getTeamMembership(userId, teamId);
   if (!membership) {
-    // Hide org existence from non-members
-    throw new OrgAuthError(API_ERROR.NOT_FOUND, 404);
+    // Hide team existence from non-members
+    throw new TeamAuthError(API_ERROR.NOT_FOUND, 404);
   }
   return membership;
 }
 
 /**
- * Require that the user has a specific permission in the org.
+ * Require that the user has a specific permission in the team.
  * Returns the membership record, or throws a structured error.
  */
-export async function requireOrgPermission(
+export async function requireTeamPermission(
   userId: string,
-  orgId: string,
-  permission: OrgPermission
+  teamId: string,
+  permission: TeamPermission
 ) {
-  const membership = await requireOrgMember(userId, orgId);
-  if (!hasOrgPermission(membership.role, permission)) {
-    throw new OrgAuthError(API_ERROR.FORBIDDEN, 403);
+  const membership = await requireTeamMember(userId, teamId);
+  if (!hasTeamPermission(membership.role, permission)) {
+    throw new TeamAuthError(API_ERROR.FORBIDDEN, 403);
   }
   return membership;
 }
 
 // ─── Error Class ────────────────────────────────────────────────
 
-export class OrgAuthError extends Error {
+export class TeamAuthError extends Error {
   status: number;
 
   constructor(message: string, status: number) {
     super(message);
-    this.name = "OrgAuthError";
+    this.name = "TeamAuthError";
     this.status = status;
   }
 }
