@@ -14,7 +14,7 @@ export interface PersonalPasswordFormTranslations {
   tc: CommonTranslator;
 }
 
-export interface OrgPasswordFormTranslations {
+export interface TeamPasswordFormTranslations {
   t: PasswordFormTranslator;
   tGen: PasswordGeneratorTranslator;
   tn: SecureNoteFormTranslator;
@@ -22,7 +22,6 @@ export interface OrgPasswordFormTranslations {
   ti: IdentityFormTranslator;
   tpk: PasskeyFormTranslator;
 }
-export type TeamPasswordFormTranslations = OrgPasswordFormTranslations;
 
 export interface EntryFormTranslationsBundle {
   t: PasswordFormTranslator;
@@ -44,9 +43,9 @@ export function toPersonalPasswordFormTranslations(
   };
 }
 
-export function toOrgPasswordFormTranslations(
+export function toTeamPasswordFormTranslations(
   translations: EntryFormTranslationsBundle,
-): OrgPasswordFormTranslations {
+): TeamPasswordFormTranslations {
   return {
     t: translations.t,
     tGen: translations.tGen,
@@ -56,5 +55,3 @@ export function toOrgPasswordFormTranslations(
     tpk: translations.tpk,
   };
 }
-
-export const toTeamPasswordFormTranslations = toOrgPasswordFormTranslations;
