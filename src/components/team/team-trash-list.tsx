@@ -23,7 +23,7 @@ import {
 } from "@/lib/entry-sort";
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
-import { buildOrgEntryAAD } from "@/lib/crypto-aad";
+import { buildTeamEntryAAD } from "@/lib/crypto-aad";
 
 interface TeamTrashEntry {
   id: string;
@@ -74,7 +74,7 @@ export function TeamTrashList({
             const entryTeamId = entry.orgId as string;
             const teamKey = await getTeamEncryptionKey(entryTeamId);
             if (!teamKey) throw new Error("No team key");
-            const aad = buildOrgEntryAAD(entryTeamId, entry.id as string, "overview");
+            const aad = buildTeamEntryAAD(entryTeamId, entry.id as string, "overview");
             const json = await decryptData(
               {
                 ciphertext: entry.encryptedOverview as string,

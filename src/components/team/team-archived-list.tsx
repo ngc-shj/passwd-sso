@@ -15,7 +15,7 @@ import {
 } from "@/lib/entry-sort";
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
-import { buildOrgEntryAAD } from "@/lib/crypto-aad";
+import { buildTeamEntryAAD } from "@/lib/crypto-aad";
 
 interface TeamArchivedEntry {
   id: string;
@@ -88,7 +88,7 @@ export function TeamArchivedList({
             const entryTeamId = entry.orgId as string;
             const teamKey = await getTeamEncryptionKey(entryTeamId);
             if (!teamKey) throw new Error("No team key");
-            const aad = buildOrgEntryAAD(entryTeamId, entry.id as string, "overview");
+            const aad = buildTeamEntryAAD(entryTeamId, entry.id as string, "overview");
             const json = await decryptData(
               {
                 ciphertext: entry.encryptedOverview as string,
@@ -213,7 +213,7 @@ export function TeamArchivedList({
     async (entryTeamId: string, id: string, raw: Record<string, unknown>) => {
       const teamKey = await getTeamEncryptionKey(entryTeamId);
       if (!teamKey) throw new Error("No team key");
-      const aad = buildOrgEntryAAD(entryTeamId, id, "blob");
+      const aad = buildTeamEntryAAD(entryTeamId, id, "blob");
       const json = await decryptData(
         {
           ciphertext: raw.encryptedBlob as string,

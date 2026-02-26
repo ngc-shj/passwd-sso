@@ -103,18 +103,21 @@ export function buildPersonalEntryAAD(
 }
 
 /**
- * Build AAD for Org Vault entry encryption.
+ * Build AAD for Team Vault entry encryption.
  *
- * Binds ciphertext to specific org + entry + vault type.
+ * Binds ciphertext to specific team + entry + vault type.
  * vaultType distinguishes "blob" vs "overview" to prevent cross-field replay.
  */
-export function buildOrgEntryAAD(
-  orgId: string,
+export function buildTeamEntryAAD(
+  teamId: string,
   entryId: string,
   vaultType: "blob" | "overview" = "blob"
 ): Uint8Array {
-  return buildAADBytes(SCOPE_ORG, 3, [orgId, entryId, vaultType]);
+  return buildAADBytes(SCOPE_ORG, 3, [teamId, entryId, vaultType]);
 }
+
+// Backward-compatible alias for org naming.
+export const buildOrgEntryAAD = buildTeamEntryAAD;
 
 /**
  * Build AAD for attachment encryption.

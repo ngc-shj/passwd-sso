@@ -9,7 +9,7 @@ import { apiPath } from "@/lib/constants";
 import { useVault } from "@/lib/vault-context";
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD, buildOrgEntryAAD } from "@/lib/crypto-aad";
+import { buildPersonalEntryAAD, buildTeamEntryAAD } from "@/lib/crypto-aad";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -205,7 +205,7 @@ export function EntryHistorySection({
         const teamKey = await getTeamEncryptionKey(scopedTeamId);
         if (!teamKey) return;
         const aad = data.aadVersion >= 1
-          ? buildOrgEntryAAD(scopedTeamId, entryId, "blob")
+          ? buildTeamEntryAAD(scopedTeamId, entryId, "blob")
           : undefined;
         const plaintext = await decryptData(
           {

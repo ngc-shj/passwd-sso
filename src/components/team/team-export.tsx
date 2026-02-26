@@ -20,7 +20,7 @@ import {
 } from "@/lib/export-format-common";
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
-import { buildOrgEntryAAD } from "@/lib/crypto-aad";
+import { buildTeamEntryAAD } from "@/lib/crypto-aad";
 
 interface TeamExportPanelContentProps {
   teamId?: string;
@@ -86,7 +86,7 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
           const raw = await res.json();
 
           // Decrypt the blob
-          const aad = buildOrgEntryAAD(scopedTeamId, raw.id, "blob");
+          const aad = buildTeamEntryAAD(scopedTeamId, raw.id, "blob");
           const json = await decryptData(
             {
               ciphertext: raw.encryptedBlob,

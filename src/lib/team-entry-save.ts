@@ -1,5 +1,5 @@
 import { encryptData } from "@/lib/crypto-client";
-import { buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
+import { buildTeamEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
@@ -34,8 +34,8 @@ export async function saveTeamEntry({
 
   const entryId = mode === "create" ? crypto.randomUUID() : initialId!;
 
-  const blobAAD = buildOrgEntryAAD(teamId, entryId, "blob");
-  const overviewAAD = buildOrgEntryAAD(teamId, entryId, "overview");
+  const blobAAD = buildTeamEntryAAD(teamId, entryId, "blob");
+  const overviewAAD = buildTeamEntryAAD(teamId, entryId, "overview");
 
   const encryptedBlob = await encryptData(fullBlob, teamEncryptionKey, blobAAD);
   const encryptedOverview = await encryptData(overviewBlob, teamEncryptionKey, overviewAAD);

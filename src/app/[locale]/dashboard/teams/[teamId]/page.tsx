@@ -29,7 +29,7 @@ import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-sort";
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
-import { buildOrgEntryAAD } from "@/lib/crypto-aad";
+import { buildTeamEntryAAD } from "@/lib/crypto-aad";
 
 interface TeamInfo {
   id: string;
@@ -170,7 +170,7 @@ export default function TeamDashboardPage({
       const decrypted = await Promise.all(
         data.map(async (entry: Record<string, unknown>) => {
           try {
-            const aad = buildOrgEntryAAD(teamId, entry.id as string, "overview");
+            const aad = buildTeamEntryAAD(teamId, entry.id as string, "overview");
             const json = await decryptData(
               {
                 ciphertext: entry.encryptedOverview as string,
@@ -352,7 +352,7 @@ export default function TeamDashboardPage({
     async (id: string, raw: Record<string, unknown>) => {
       const teamKey = await getTeamEncryptionKey(teamId);
       if (!teamKey) throw new Error("No team key");
-      const aad = buildOrgEntryAAD(teamId, id, "blob");
+      const aad = buildTeamEntryAAD(teamId, id, "blob");
       const json = await decryptData(
         {
           ciphertext: raw.encryptedBlob as string,

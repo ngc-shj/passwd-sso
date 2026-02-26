@@ -153,7 +153,7 @@ vi.mock("@/lib/crypto-client", () => ({
 }));
 
 vi.mock("@/lib/crypto-aad", () => ({
-  buildOrgEntryAAD: vi.fn().mockReturnValue(new Uint8Array()),
+  buildTeamEntryAAD: vi.fn().mockReturnValue(new Uint8Array()),
 }));
 
 /* ---------- tests ---------- */

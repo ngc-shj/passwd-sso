@@ -49,7 +49,7 @@ vi.mock("@/lib/team-vault-context", () => ({
 
 vi.mock("@/lib/crypto-aad", () => ({
   buildPersonalEntryAAD: vi.fn().mockReturnValue("test-aad"),
-  buildOrgEntryAAD: vi.fn().mockReturnValue("test-org-aad"),
+  buildTeamEntryAAD: vi.fn().mockReturnValue("test-org-aad"),
 }));
 
 vi.mock("sonner", () => ({
@@ -264,7 +264,7 @@ describe("EntryHistorySection", () => {
     );
   });
 
-  it("fetches from orgPasswordHistoryById for org entries on View", async () => {
+  it("fetches from teamPasswordHistoryById for team entries on View", async () => {
     mockDecryptData.mockResolvedValue(
       JSON.stringify({ title: "Org PW", password: "secret" }),
     );
@@ -306,10 +306,10 @@ describe("EntryHistorySection", () => {
     });
 
     await waitFor(() => {
-      // Verify fetch was called with org history detail URL
+      // Verify fetch was called with team history detail URL
       const calls = (fetchMock as ReturnType<typeof vi.fn>).mock.calls;
       const viewCall = calls.find(
-        (c: [string]) => c[0].includes("/orgs/org-1/passwords/entry-1/history/h1"),
+        (c: [string]) => c[0].includes("/teams/org-1/passwords/entry-1/history/h1"),
       );
       expect(viewCall).toBeDefined();
       // Verify client-side decryption was called
