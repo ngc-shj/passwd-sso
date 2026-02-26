@@ -38,7 +38,7 @@ export function useOrgPasswordFormController({
   handleOpenChange,
 }: OrgPasswordFormControllerArgs) {
   const { setters } = formState;
-  const { getOrgKeyInfo } = useTeamVault();
+  const { getTeamKeyInfo } = useTeamVault();
   const { entryValues, cardNumberValid, entryCopy, entrySpecificFieldsProps } =
     useOrgPasswordFormPresenter({
     isEdit,
@@ -56,7 +56,7 @@ export function useOrgPasswordFormController({
   });
 
   const handleSubmit = async () => {
-    const keyInfo = await getOrgKeyInfo(orgId);
+    const keyInfo = await getTeamKeyInfo(orgId);
     if (!keyInfo) {
       toast.error(translations.t("failedToSave"));
       return;

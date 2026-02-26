@@ -75,7 +75,7 @@ export default function TeamDashboardPage({
   const activeScope = searchParams.get("scope");
   const t = useTranslations("Team");
   const tDash = useTranslations("Dashboard");
-  const { getOrgEncryptionKey } = useTeamVault();
+  const { getTeamEncryptionKey } = useTeamVault();
   const [org, setOrg] = useState<TeamInfo | null>(null);
   const [passwords, setPasswords] = useState<TeamPasswordEntry[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -159,7 +159,7 @@ export default function TeamDashboardPage({
       const data = await res.json();
       if (!Array.isArray(data)) return;
 
-      const orgKey = await getOrgEncryptionKey(teamId);
+      const orgKey = await getTeamEncryptionKey(teamId);
       if (!orgKey) {
         setKeyPending(true);
         setPasswords([]);
@@ -233,7 +233,7 @@ export default function TeamDashboardPage({
     } finally {
       setLoading(false);
     }
-  }, [teamId, activeTagId, activeFolderId, activeEntryType, isTeamFavorites, getOrgEncryptionKey]);
+  }, [teamId, activeTagId, activeFolderId, activeEntryType, isTeamFavorites, getTeamEncryptionKey]);
 
   useEffect(() => {
     setLoadError(false);
@@ -350,7 +350,7 @@ export default function TeamDashboardPage({
 
   const decryptFullBlob = useCallback(
     async (id: string, raw: Record<string, unknown>) => {
-      const orgKey = await getOrgEncryptionKey(teamId);
+      const orgKey = await getTeamEncryptionKey(teamId);
       if (!orgKey) throw new Error("No org key");
       const aad = buildOrgEntryAAD(teamId, id, "blob");
       const json = await decryptData(
@@ -364,7 +364,7 @@ export default function TeamDashboardPage({
       );
       return JSON.parse(json) as Record<string, unknown>;
     },
-    [teamId, getOrgEncryptionKey],
+    [teamId, getTeamEncryptionKey],
   );
 
   const handleEdit = async (id: string) => {

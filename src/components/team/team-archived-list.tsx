@@ -58,7 +58,7 @@ export function OrgArchivedList({
 }: OrgArchivedListProps) {
   const scopedId = _teamId ?? _orgId;
   const t = useTranslations("Team");
-  const { getOrgEncryptionKey } = useTeamVault();
+  const { getTeamEncryptionKey } = useTeamVault();
   const [entries, setEntries] = useState<OrgArchivedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -89,7 +89,7 @@ export function OrgArchivedList({
         data.map(async (entry: Record<string, unknown>) => {
           try {
             const entryOrgId = entry.orgId as string;
-            const orgKey = await getOrgEncryptionKey(entryOrgId);
+            const orgKey = await getTeamEncryptionKey(entryOrgId);
             if (!orgKey) throw new Error("No org key");
             const aad = buildOrgEntryAAD(entryOrgId, entry.id as string, "overview");
             const json = await decryptData(
@@ -158,7 +158,7 @@ export function OrgArchivedList({
     } finally {
       setLoading(false);
     }
-  }, [getOrgEncryptionKey]);
+  }, [getTeamEncryptionKey]);
 
   useEffect(() => {
     fetchArchived();
@@ -214,7 +214,7 @@ export function OrgArchivedList({
 
   const decryptFullBlob = useCallback(
     async (entryOrgId: string, id: string, raw: Record<string, unknown>) => {
-      const orgKey = await getOrgEncryptionKey(entryOrgId);
+      const orgKey = await getTeamEncryptionKey(entryOrgId);
       if (!orgKey) throw new Error("No org key");
       const aad = buildOrgEntryAAD(entryOrgId, id, "blob");
       const json = await decryptData(
@@ -228,7 +228,7 @@ export function OrgArchivedList({
       );
       return JSON.parse(json) as Record<string, unknown>;
     },
-    [getOrgEncryptionKey],
+    [getTeamEncryptionKey],
   );
 
   const handleEdit = async (id: string) => {

@@ -140,8 +140,8 @@ vi.mock("@/components/team/team-favorites-list", () => ({
 
 vi.mock("@/lib/team-vault-context", () => ({
   useTeamVault: () => ({
-    getOrgEncryptionKey: mockGetOrgEncryptionKey,
-    getOrgKeyInfo: vi.fn().mockResolvedValue(null),
+    getTeamEncryptionKey: mockGetOrgEncryptionKey,
+    getTeamKeyInfo: vi.fn().mockResolvedValue(null),
     invalidateOrgKey: vi.fn(),
     clearAll: vi.fn(),
     distributePendingKeys: vi.fn(),

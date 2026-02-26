@@ -59,7 +59,7 @@ export function OrgTrashList({
   const scopedId = _teamId ?? _orgId;
   const t = useTranslations("Trash");
   const tOrg = useTranslations("Team");
-  const { getOrgEncryptionKey } = useTeamVault();
+  const { getTeamEncryptionKey } = useTeamVault();
   const [entries, setEntries] = useState<OrgTrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -75,7 +75,7 @@ export function OrgTrashList({
         data.map(async (entry: Record<string, unknown>) => {
           try {
             const entryOrgId = entry.orgId as string;
-            const orgKey = await getOrgEncryptionKey(entryOrgId);
+            const orgKey = await getTeamEncryptionKey(entryOrgId);
             if (!orgKey) throw new Error("No org key");
             const aad = buildOrgEntryAAD(entryOrgId, entry.id as string, "overview");
             const json = await decryptData(
@@ -128,7 +128,7 @@ export function OrgTrashList({
     } finally {
       setLoading(false);
     }
-  }, [getOrgEncryptionKey]);
+  }, [getTeamEncryptionKey]);
 
   useEffect(() => {
     fetchTrash();

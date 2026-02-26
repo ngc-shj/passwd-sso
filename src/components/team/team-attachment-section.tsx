@@ -87,7 +87,7 @@ export function TeamAttachmentSection({
   const t = useTranslations("Attachments");
   const tApi = useTranslations("ApiErrors");
   const tc = useTranslations("Common");
-  const { getOrgEncryptionKey, getOrgKeyInfo } = useTeamVault();
+  const { getTeamEncryptionKey, getTeamKeyInfo } = useTeamVault();
   const [uploading, setUploading] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TeamAttachmentMeta | null>(null);
@@ -124,7 +124,7 @@ export function TeamAttachmentSection({
       return;
     }
 
-    const keyInfo = await getOrgKeyInfo(scopedId);
+    const keyInfo = await getTeamKeyInfo(scopedId);
     if (!keyInfo) {
       toast.error(t("uploadError"));
       return;
@@ -178,7 +178,7 @@ export function TeamAttachmentSection({
   const handleDownload = async (attachment: TeamAttachmentMeta) => {
     setDownloading(attachment.id);
     try {
-      const orgKey = await getOrgEncryptionKey(scopedId);
+      const orgKey = await getTeamEncryptionKey(scopedId);
       if (!orgKey) throw new Error("No org key");
 
       const res = await fetch(

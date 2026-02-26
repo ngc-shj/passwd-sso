@@ -31,7 +31,7 @@ function OrgExportPanelContent({ orgId, teamId }: OrgExportPanelContentProps) {
   const scopedId = teamId ?? orgId;
   if (!scopedId) return null;
   const t = useTranslations("Export");
-  const { getOrgEncryptionKey } = useTeamVault();
+  const { getTeamEncryptionKey } = useTeamVault();
   const [exporting, setExporting] = useState(false);
   const [passwordProtect, setPasswordProtect] = useState(true);
   const [exportPassword, setExportPassword] = useState("");
@@ -72,7 +72,7 @@ function OrgExportPanelContent({ orgId, teamId }: OrgExportPanelContentProps) {
       const list: { id: string; entryType: string }[] = await listRes.json();
 
       // Get org encryption key for decryption
-      const orgKey = await getOrgEncryptionKey(scopedId);
+      const orgKey = await getTeamEncryptionKey(scopedId);
       if (!orgKey) throw new Error("No org key");
 
       // Fetch full details for each entry and decrypt

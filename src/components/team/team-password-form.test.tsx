@@ -22,8 +22,8 @@ vi.mock("@/lib/ime-guard", () => ({
 
 vi.mock("@/lib/team-vault-context", () => ({
   useTeamVault: () => ({
-    getOrgKeyInfo: vi.fn().mockResolvedValue({ key: {} as CryptoKey, keyVersion: 1 }),
-    getOrgEncryptionKey: vi.fn(),
+    getTeamKeyInfo: vi.fn().mockResolvedValue({ key: {} as CryptoKey, keyVersion: 1 }),
+    getTeamEncryptionKey: vi.fn(),
     invalidateOrgKey: vi.fn(),
     clearAll: vi.fn(),
     distributePendingKeys: vi.fn(),

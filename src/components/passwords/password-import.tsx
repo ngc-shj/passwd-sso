@@ -41,7 +41,7 @@ function ImportPanelContent({ onComplete, orgId, teamId }: ImportPanelContentPro
   const [orgKeyVersion, setOrgKeyVersion] = useState<number | undefined>();
   useEffect(() => {
     if (!isOrgImport || !scopedId || !orgVault) return;
-    orgVault.getOrgKeyInfo(scopedId).then((info) => {
+    orgVault.getTeamKeyInfo(scopedId).then((info) => {
       if (info) {
         setOrgEncryptionKey(info.key);
         setOrgKeyVersion(info.keyVersion);

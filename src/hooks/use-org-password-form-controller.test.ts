@@ -25,8 +25,8 @@ vi.mock("@/hooks/use-org-password-form-presenter", () => ({
 
 vi.mock("@/lib/team-vault-context", () => ({
   useTeamVault: () => ({
-    getOrgKeyInfo: mockGetOrgKeyInfo,
-    getOrgEncryptionKey: vi.fn(),
+    getTeamKeyInfo: mockGetOrgKeyInfo,
+    getTeamEncryptionKey: vi.fn(),
     invalidateOrgKey: vi.fn(),
     clearAll: vi.fn(),
     distributePendingKeys: vi.fn(),

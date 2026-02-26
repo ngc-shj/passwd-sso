@@ -133,7 +133,7 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
   const t = useTranslations("PasswordDetail");
   const locale = useLocale();
   const { encryptionKey, userId } = useVault();
-  const { getOrgEncryptionKey } = useTeamVault();
+  const { getTeamEncryptionKey } = useTeamVault();
   const { requireVerification, repromptDialog } = useReprompt();
   const [expanded, setExpanded] = useState(false);
   const [histories, setHistories] = useState<HistoryEntry[]>([]);
@@ -194,7 +194,7 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
         const res = await fetch(apiPath.teamPasswordHistoryById(orgId, entryId, h.id));
         if (!res.ok) return;
         const data = await res.json();
-        const orgKey = await getOrgEncryptionKey(orgId);
+        const orgKey = await getTeamEncryptionKey(orgId);
         if (!orgKey) return;
         const aad = data.aadVersion >= 1
           ? buildOrgEntryAAD(orgId, entryId, "blob")
