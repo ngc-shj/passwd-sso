@@ -26,35 +26,35 @@ export async function POST(_req: NextRequest, { params }: Params) {
   }
 
   // Verify the password belongs to this team
-  const entry = await prisma.orgPasswordEntry.findUnique({
+  const entry = await prisma.teamPasswordEntry.findUnique({
     where: { id },
-    select: { orgId: true },
+    select: { teamId: true },
   });
 
-  if (!entry || entry.orgId !== teamId) {
+  if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   // Toggle: if exists, remove; if not, create
-  const existing = await prisma.orgPasswordFavorite.findUnique({
+  const existing = await prisma.teamPasswordFavorite.findUnique({
     where: {
-      userId_orgPasswordEntryId: {
+      userId_teamPasswordEntryId: {
         userId: session.user.id,
-        orgPasswordEntryId: id,
+        teamPasswordEntryId: id,
       },
     },
   });
 
   if (existing) {
-    await prisma.orgPasswordFavorite.delete({
+    await prisma.teamPasswordFavorite.delete({
       where: { id: existing.id },
     });
     return NextResponse.json({ isFavorite: false });
   } else {
-    await prisma.orgPasswordFavorite.create({
+    await prisma.teamPasswordFavorite.create({
       data: {
         userId: session.user.id,
-        orgPasswordEntryId: id,
+        teamPasswordEntryId: id,
       },
     });
     return NextResponse.json({ isFavorite: true });

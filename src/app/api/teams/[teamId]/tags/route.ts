@@ -30,8 +30,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const tags = await prisma.orgTag.findMany({
-    where: { orgId: teamId },
+  const tags = await prisma.teamTag.findMany({
+    where: { teamId: teamId },
     orderBy: { name: "asc" },
     include: {
       _count: {
@@ -89,8 +89,8 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const { name, color } = parsed.data;
 
-  const existing = await prisma.orgTag.findUnique({
-    where: { name_orgId: { name, orgId: teamId } },
+  const existing = await prisma.teamTag.findUnique({
+    where: { name_teamId: { name, teamId: teamId } },
   });
   if (existing) {
     return NextResponse.json(
@@ -99,11 +99,11 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  const tag = await prisma.orgTag.create({
+  const tag = await prisma.teamTag.create({
     data: {
       name,
       color: color || null,
-      orgId: teamId,
+      teamId: teamId,
     },
   });
 

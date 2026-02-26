@@ -23,7 +23,7 @@ const { mockAuth, mockPrismaTeamPasswordEntry, mockRequireTeamPermission, TeamAu
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { orgPasswordEntry: mockPrismaTeamPasswordEntry, auditLog: { create: vi.fn().mockResolvedValue({}) } },
+  prisma: { teamPasswordEntry: mockPrismaTeamPasswordEntry, auditLog: { create: vi.fn().mockResolvedValue({}) } },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
@@ -85,7 +85,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/restore", () => {
   it("returns 400 when entry is not in trash", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       deletedAt: null,
     });
     const res = await POST(
@@ -98,7 +98,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/restore", () => {
   it("restores entry from trash", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       deletedAt: new Date(),
     });
     mockPrismaTeamPasswordEntry.update.mockResolvedValue({});

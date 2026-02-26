@@ -97,13 +97,13 @@ model User {
   tags      Tag[]
   vaultKeys VaultKey[]
 
-  // Organization relations
-  orgMemberships       OrgMember[]
+  // Team relations
+  teamMemberships       TeamMember[]
   tenantMemberships    TenantMember[]
-  orgInvitations       OrgInvitation[]
-  createdOrgPasswords  OrgPasswordEntry[]    @relation("orgPasswordCreator")
-  updatedOrgPasswords  OrgPasswordEntry[]    @relation("orgPasswordUpdater")
-  orgPasswordFavorites OrgPasswordFavorite[]
+  teamInvitations TeamInvitation[]
+  createdTeamPasswords  TeamPasswordEntry[]    @relation("teamPasswordCreator")
+  updatedTeamPasswords  TeamPasswordEntry[]    @relation("teamPasswordUpdater")
+  teamPasswordFavorites TeamPasswordFavorite[]
   auditLogs            AuditLog[]
   passwordShares       PasswordShare[]
   attachments          Attachment[]
@@ -126,8 +126,8 @@ model User {
 
   // Folder relations
   folders              Folder[]
-  orgPasswordHistories OrgPasswordEntryHistory[]
-  orgMemberKeys        OrgMemberKey[]
+  teamPasswordHistories TeamPasswordEntryHistory[]
+  teamMemberKeys        TeamMemberKey[]
 
   @@map("users")
 }
@@ -151,7 +151,7 @@ model ExtensionToken {
 
 model ScimToken {
   id          String    @id @default(cuid())
-  orgId       String    @map("team_id")
+  teamId       String    @map("team_id")
   tenantId    String    @map("tenant_id")
   tokenHash   String    @unique @map("token_hash") @db.VarChar(64)
   description String?   @db.VarChar(255)
@@ -161,18 +161,18 @@ model ScimToken {
   lastUsedAt  DateTime? @map("last_used_at")
   createdById String?   @map("created_by_id")
 
-  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
   tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   createdBy User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
-  @@index([orgId, revokedAt])
+  @@index([teamId, revokedAt])
   @@index([tenantId, revokedAt])
   @@map("scim_tokens")
 }
 
 model ScimExternalMapping {
   id           String   @id @default(cuid())
-  orgId        String   @map("team_id")
+  teamId        String   @map("team_id")
   tenantId     String   @map("tenant_id")
   externalId   String   @map("external_id")
   resourceType String   @map("resource_type") @db.VarChar(20)
@@ -180,7 +180,7 @@ model ScimExternalMapping {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
   tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@unique([tenantId, externalId, resourceType])
@@ -256,7 +256,7 @@ model PasswordEntry {
   @@map("password_entries")
 }
 
-// ─── Organization Models ────────────────────────────────────────
+// ─── Team Models ────────────────────────────────────────
 
 enum EntryType {
   LOGIN
@@ -272,7 +272,7 @@ enum ShareType {
   FILE
 }
 
-enum OrgRole {
+enum TeamRole {
   OWNER
   ADMIN
   MEMBER
@@ -292,7 +292,7 @@ enum InvitationStatus {
   EXPIRED
 }
 
-model Organization {
+model Team {
   id          String  @id @default(cuid())
   tenantId    String  @map("tenant_id")
   name        String
@@ -300,18 +300,18 @@ model Organization {
   description String? @db.Text
 
   // E2E encryption (ECDH-P256)
-  orgKeyVersion Int @default(1) @map("org_key_version")
+  teamKeyVersion Int @default(1) @map("org_key_version")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  members              OrgMember[]
-  passwords            OrgPasswordEntry[]
-  tags                 OrgTag[]
-  folders              OrgFolder[]
-  invitations          OrgInvitation[]
+  members              TeamMember[]
+  passwords            TeamPasswordEntry[]
+  tags                 TeamTag[]
+  folders              TeamFolder[]
+  invitations          TeamInvitation[]
   auditLogs            AuditLog[]
-  memberKeys           OrgMemberKey[]
+  memberKeys           TeamMemberKey[]
   scimTokens           ScimToken[]
   scimExternalMappings ScimExternalMapping[]
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -328,7 +328,7 @@ model Tenant {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  organizations        Organization[]
+  teams Team[]
   members              TenantMember[]
   scimTokens           ScimToken[]
   scimExternalMappings ScimExternalMapping[]
@@ -352,11 +352,11 @@ model TenantMember {
   @@map("tenant_members")
 }
 
-model OrgMember {
+model TeamMember {
   id             String    @id @default(cuid())
-  orgId          String    @map("team_id")
+  teamId          String    @map("team_id")
   userId         String    @map("user_id")
-  role           OrgRole   @default(MEMBER)
+  role           TeamRole   @default(MEMBER)
   keyDistributed Boolean   @default(false) @map("key_distributed")
   deactivatedAt  DateTime? @map("deactivated_at")
   scimManaged    Boolean   @default(false) @map("scim_managed")
@@ -364,20 +364,20 @@ model OrgMember {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
   user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([orgId, userId])
+  @@unique([teamId, userId])
   @@map("team_members")
 }
 
-model OrgMemberKey {
+model TeamMemberKey {
   id                 String   @id @default(cuid())
-  orgId              String   @map("team_id")
+  teamId              String   @map("team_id")
   userId             String   @map("user_id")
-  encryptedOrgKey    String   @map("encrypted_org_key") @db.Text
-  orgKeyIv           String   @map("org_key_iv") @db.VarChar(24)
-  orgKeyAuthTag      String   @map("org_key_auth_tag") @db.VarChar(32)
+  encryptedTeamKey   String   @map("encrypted_org_key") @db.Text
+  teamKeyIv           String   @map("org_key_iv") @db.VarChar(24)
+  teamKeyAuthTag      String   @map("org_key_auth_tag") @db.VarChar(32)
   ephemeralPublicKey String   @map("ephemeral_public_key") @db.Text
   hkdfSalt           String   @map("hkdf_salt") @db.VarChar(64)
   wrapVersion        Int      @default(1) @map("wrap_version")
@@ -385,18 +385,18 @@ model OrgMemberKey {
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
-  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
   user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([orgId, userId, keyVersion])
+  @@unique([teamId, userId, keyVersion])
   @@index([userId])
   @@map("team_member_keys")
 }
 
-model OrgPasswordEntry {
+model TeamPasswordEntry {
   id String @id @default(cuid())
 
-  // Server-side encrypted fields (encrypted with per-org key)
+  // Server-side encrypted fields (encrypted with per-team key)
   encryptedBlob String @map("encrypted_blob") @db.Text
   blobIv        String @map("blob_iv") @db.VarChar(24)
   blobAuthTag   String @map("blob_auth_tag") @db.VarChar(32)
@@ -405,7 +405,7 @@ model OrgPasswordEntry {
   overviewIv        String    @map("overview_iv") @db.VarChar(24)
   overviewAuthTag   String    @map("overview_auth_tag") @db.VarChar(32)
   aadVersion        Int       @default(0) @map("aad_version")
-  orgKeyVersion     Int       @default(0) @map("org_key_version")
+  teamKeyVersion     Int       @default(0) @map("org_key_version")
   entryType         EntryType @default(LOGIN) @map("entry_type")
 
   // Metadata (unencrypted)
@@ -413,64 +413,64 @@ model OrgPasswordEntry {
   expiresAt  DateTime? @map("expires_at")
   deletedAt  DateTime? @map("deleted_at")
 
-  orgId       String  @map("team_id")
+  teamId       String  @map("team_id")
   createdById String  @map("created_by_id")
   updatedById String  @map("updated_by_id")
-  orgFolderId String? @map("team_folder_id")
+  teamFolderId String? @map("team_folder_id")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  org         Organization              @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  createdBy   User                      @relation("orgPasswordCreator", fields: [createdById], references: [id])
-  updatedBy   User                      @relation("orgPasswordUpdater", fields: [updatedById], references: [id])
-  orgFolder   OrgFolder?                @relation(fields: [orgFolderId], references: [id], onDelete: SetNull)
-  tags        OrgTag[]
-  favorites   OrgPasswordFavorite[]
-  shares      PasswordShare[]           @relation("orgShares")
+  team Team              @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdBy   User                      @relation("teamPasswordCreator", fields: [createdById], references: [id])
+  updatedBy   User                      @relation("teamPasswordUpdater", fields: [updatedById], references: [id])
+  teamFolder   TeamFolder?                @relation(fields: [teamFolderId], references: [id], onDelete: SetNull)
+  tags        TeamTag[]
+  favorites   TeamPasswordFavorite[]
+  shares      PasswordShare[]           @relation("teamShares")
   attachments Attachment[]
-  histories   OrgPasswordEntryHistory[]
+  histories   TeamPasswordEntryHistory[]
 
-  @@index([orgId])
+  @@index([teamId])
   @@map("team_password_entries")
 }
 
-model OrgTag {
+model TeamTag {
   id    String  @id @default(cuid())
   name  String
   color String?
 
-  orgId String @map("team_id")
+  teamId String @map("team_id")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  org       Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  passwords OrgPasswordEntry[]
+  team Team       @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  passwords TeamPasswordEntry[]
 
-  @@unique([name, orgId])
+  @@unique([name, teamId])
   @@map("team_tags")
 }
 
-model OrgPasswordFavorite {
+model TeamPasswordFavorite {
   id                 String @id @default(cuid())
   userId             String @map("user_id")
-  orgPasswordEntryId String @map("team_password_entry_id")
+  teamPasswordEntryId String @map("team_password_entry_id")
 
   createdAt DateTime @default(now()) @map("created_at")
 
   user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  orgPasswordEntry OrgPasswordEntry @relation(fields: [orgPasswordEntryId], references: [id], onDelete: Cascade)
+  teamPasswordEntry TeamPasswordEntry @relation(fields: [teamPasswordEntryId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, orgPasswordEntryId])
+  @@unique([userId, teamPasswordEntryId])
   @@map("team_password_favorites")
 }
 
-model OrgInvitation {
+model TeamInvitation {
   id        String           @id @default(cuid())
-  orgId     String           @map("team_id")
+  teamId     String           @map("team_id")
   email     String
-  role      OrgRole          @default(MEMBER)
+  role      TeamRole          @default(MEMBER)
   status    InvitationStatus @default(PENDING)
   token     String           @unique
   expiresAt DateTime         @map("expires_at")
@@ -480,7 +480,7 @@ model OrgInvitation {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
   invitedBy User         @relation(fields: [invitedById], references: [id])
 
   @@map("team_invitations")
@@ -505,7 +505,7 @@ model PasswordShare {
 
   // Entry share relations
   passwordEntryId    String? @map("password_entry_id")
-  orgPasswordEntryId String? @map("team_password_entry_id")
+  teamPasswordEntryId String? @map("team_password_entry_id")
 
   // Send-specific fields
   sendName        String? @map("send_name") @db.VarChar(200)
@@ -521,11 +521,11 @@ model PasswordShare {
 
   createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
   passwordEntry    PasswordEntry?    @relation("personalShares", fields: [passwordEntryId], references: [id], onDelete: SetNull)
-  orgPasswordEntry OrgPasswordEntry? @relation("orgShares", fields: [orgPasswordEntryId], references: [id], onDelete: SetNull)
+  teamPasswordEntry TeamPasswordEntry? @relation("teamShares", fields: [teamPasswordEntryId], references: [id], onDelete: SetNull)
   accessLogs       ShareAccessLog[]
 
   @@index([passwordEntryId])
-  @@index([orgPasswordEntryId])
+  @@index([teamPasswordEntryId])
   @@index([expiresAt])
   @@index([shareType])
   @@index([createdById])
@@ -617,7 +617,7 @@ model AuditLog {
   scope      AuditScope
   action     AuditAction
   userId     String      @map("user_id")
-  orgId      String?     @map("team_id")
+  teamId      String?     @map("team_id")
   targetType String?     @map("target_type")
   targetId   String?     @map("target_id")
   metadata   Json?
@@ -626,10 +626,10 @@ model AuditLog {
   createdAt  DateTime    @default(now()) @map("created_at")
 
   user User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  org  Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  team Team? @relation(fields: [teamId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
-  @@index([orgId, createdAt])
+  @@index([teamId, createdAt])
   @@index([action])
   @@map("audit_logs")
 }
@@ -648,16 +648,16 @@ model Attachment {
   aadVersion    Int    @default(0) @map("aad_version")
 
   passwordEntryId    String?  @map("password_entry_id")
-  orgPasswordEntryId String?  @map("team_password_entry_id")
+  teamPasswordEntryId String?  @map("team_password_entry_id")
   createdById        String   @map("created_by_id")
   createdAt          DateTime @default(now()) @map("created_at")
 
   passwordEntry    PasswordEntry?    @relation(fields: [passwordEntryId], references: [id], onDelete: Cascade)
-  orgPasswordEntry OrgPasswordEntry? @relation(fields: [orgPasswordEntryId], references: [id], onDelete: Cascade)
+  teamPasswordEntry TeamPasswordEntry? @relation(fields: [teamPasswordEntryId], references: [id], onDelete: Cascade)
   createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
 
   @@index([passwordEntryId])
-  @@index([orgPasswordEntryId])
+  @@index([teamPasswordEntryId])
   @@map("attachments")
 }
 
@@ -740,22 +740,22 @@ model Folder {
   @@map("folders")
 }
 
-model OrgFolder {
+model TeamFolder {
   id        String   @id @default(cuid())
   name      String   @db.VarChar(100)
   parentId  String?  @map("parent_id")
-  orgId     String   @map("team_id")
+  teamId     String   @map("team_id")
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  org      Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  parent   OrgFolder?         @relation("OrgFolderHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  children OrgFolder[]        @relation("OrgFolderHierarchy")
-  entries  OrgPasswordEntry[]
+  team Team       @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  parent   TeamFolder?         @relation("TeamFolderHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children TeamFolder[]        @relation("TeamFolderHierarchy")
+  entries  TeamPasswordEntry[]
 
-  @@unique([name, parentId, orgId])
-  @@index([orgId])
+  @@unique([name, parentId, teamId])
+  @@index([teamId])
   @@map("team_folders")
 }
 
@@ -777,18 +777,18 @@ model PasswordEntryHistory {
   @@map("password_entry_histories")
 }
 
-model OrgPasswordEntryHistory {
+model TeamPasswordEntryHistory {
   id            String   @id @default(cuid())
   entryId       String   @map("entry_id")
   encryptedBlob String   @map("encrypted_blob") @db.Text
   blobIv        String   @map("blob_iv") @db.VarChar(24)
   blobAuthTag   String   @map("blob_auth_tag") @db.VarChar(32)
   aadVersion    Int      @default(0) @map("aad_version")
-  orgKeyVersion Int      @default(0) @map("org_key_version")
+  teamKeyVersion Int      @default(0) @map("org_key_version")
   changedById   String   @map("changed_by_id")
   changedAt     DateTime @default(now()) @map("changed_at")
 
-  entry     OrgPasswordEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  entry     TeamPasswordEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
   changedBy User             @relation(fields: [changedById], references: [id])
 
   @@index([entryId, changedAt])

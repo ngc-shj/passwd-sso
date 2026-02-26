@@ -6,7 +6,7 @@ const {
   mockRequireTeamPermission,
   mockPrismaTeamPasswordEntry,
   mockPrismaAttachment,
-  mockPrismaOrganization,
+  mockPrismaTeam,
   MockTeamAuthError,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -19,7 +19,7 @@ const {
     count: vi.fn(),
     create: vi.fn(),
   },
-  mockPrismaOrganization: {
+  mockPrismaTeam: {
     findUnique: vi.fn(),
   },
   MockTeamAuthError: class MockTeamAuthError extends Error {
@@ -38,9 +38,9 @@ vi.mock("@/lib/team-auth", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgPasswordEntry: mockPrismaTeamPasswordEntry,
+    teamPasswordEntry: mockPrismaTeamPasswordEntry,
     attachment: mockPrismaAttachment,
-    organization: mockPrismaOrganization,
+    team: mockPrismaTeam,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
@@ -87,7 +87,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 404 when entry does not belong to team", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
-      orgId: "other-team",
+      teamId: "other-team",
     });
     const res = await GET(
       createRequest("GET", "http://localhost/api/teams/team-1/passwords/pw-1/attachments"),
@@ -110,7 +110,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   });
 
   it("returns attachment metadata list", async () => {
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "team-1" });
     mockPrismaAttachment.findMany.mockResolvedValue([
       {
         id: "att-1",
@@ -136,9 +136,9 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "team-1" });
     mockPrismaAttachment.count.mockResolvedValue(0);
-    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
+    mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 1 });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -178,7 +178,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   });
 
   it("returns 404 when entry does not belong to team", async () => {
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "other-team" });
     const res = await POST(
       createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
@@ -355,7 +355,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         iv: VALID_IV,
         authTag: VALID_AUTH_TAG,
         sizeBytes: "3",
-        orgKeyVersion: "1",
+        teamKeyVersion: "1",
         aadVersion: "1",
       }),
       createParams("team-1", "pw-1"),
@@ -369,14 +369,14 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
           sizeBytes: 3,
           keyVersion: 1,
           aadVersion: 1,
-          orgPasswordEntryId: "pw-1",
+          teamPasswordEntryId: "pw-1",
         }),
       }),
     );
   });
 
-  it("returns 409 when orgKeyVersion does not match (S-20)", async () => {
-    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 });
+  it("returns 409 when teamKeyVersion does not match (S-20)", async () => {
+    mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 2 });
     const res = await POST(
       createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
@@ -385,7 +385,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         iv: VALID_IV,
         authTag: VALID_AUTH_TAG,
         sizeBytes: "3",
-        orgKeyVersion: "1",
+        teamKeyVersion: "1",
       }),
       createParams("team-1", "pw-1"),
     );

@@ -41,8 +41,8 @@ const {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgFolder: mockPrismaTeamFolder,
-    orgPasswordEntry: mockPrismaTeamPasswordEntry,
+    teamFolder: mockPrismaTeamFolder,
+    teamPasswordEntry: mockPrismaTeamPasswordEntry,
     $transaction: mockPrismaTransaction,
   },
 }));
@@ -76,7 +76,7 @@ const ownedFolder = {
   id: FOLDER_ID,
   name: "Engineering",
   parentId: null,
-  orgId: TEAM_ID,
+  teamId: TEAM_ID,
   sortOrder: 0,
   createdAt: now,
   updatedAt: now,
@@ -119,7 +119,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   it("returns 404 when folder belongs to another team", async () => {
     mockPrismaTeamFolder.findUnique.mockResolvedValue({
       ...ownedFolder,
-      orgId: "other-team",
+      teamId: "other-team",
     });
     const res = await PUT(
       createRequest("PUT", BASE, { body: { name: "Updated" } }),
@@ -261,8 +261,8 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
       .mockResolvedValueOnce([]); // no siblings at target
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
       await fn({
-        orgFolder: mockPrismaTeamFolder,
-        orgPasswordEntry: mockPrismaTeamPasswordEntry,
+        teamFolder: mockPrismaTeamFolder,
+        teamPasswordEntry: mockPrismaTeamPasswordEntry,
       });
     });
 
@@ -277,7 +277,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "FOLDER_DELETE",
-        orgId: TEAM_ID,
+        teamId: TEAM_ID,
       }),
     );
   });
@@ -294,14 +294,14 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
     const txUpdates: Array<{ where: unknown; data: unknown }> = [];
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
       await fn({
-        orgFolder: {
+        teamFolder: {
           update: vi.fn(({ where, data }: { where: unknown; data: unknown }) => {
             txUpdates.push({ where, data });
             return Promise.resolve({});
           }),
           delete: vi.fn().mockResolvedValue({}),
         },
-        orgPasswordEntry: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+        teamPasswordEntry: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       });
     });
 

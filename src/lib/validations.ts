@@ -124,7 +124,7 @@ export const createTeamSchema = z.object({
 
 /** Schema for E2E team creation — includes client-encrypted TeamMemberKey for owner */
 export const teamMemberKeySchema = z.object({
-  encryptedOrgKey: z.string().min(1).max(1000),
+  encryptedTeamKey: z.string().min(1).max(1000),
   teamKeyIv: z.string().regex(/^[0-9a-f]{24}$/),
   teamKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/),
   ephemeralPublicKey: z.string().min(1).max(500),

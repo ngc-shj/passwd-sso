@@ -90,9 +90,9 @@ export async function POST(req: NextRequest) {
     masterKeyVersion = encrypted.masterKeyVersion;
   } else {
     // Team entry — E2E: client sends pre-encrypted share data
-    const teamEntry = await prisma.orgPasswordEntry.findUnique({
+    const teamEntry = await prisma.teamPasswordEntry.findUnique({
       where: { id: teamPasswordEntryId! },
-      select: { orgId: true, entryType: true },
+      select: { teamId: true, entryType: true },
     });
     if (!teamEntry) {
       return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
     try {
       await requireTeamPermission(
         session.user.id,
-        teamEntry.orgId,
+        teamEntry.teamId,
         TEAM_PERMISSION.PASSWORD_READ
       );
     } catch (e) {
@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
     dataAuthTag = encryptedShareData!.authTag;
     masterKeyVersion = 0;
     entryType = teamEntry.entryType as EntryTypeValue;
-    teamId = teamEntry.orgId;
+    teamId = teamEntry.teamId;
   }
 
   // Generate token
@@ -138,7 +138,7 @@ export async function POST(req: NextRequest) {
       maxViews: maxViews ?? null,
       createdById: session.user.id,
       passwordEntryId: passwordEntryId ?? null,
-      orgPasswordEntryId: teamPasswordEntryId ?? null,
+      teamPasswordEntryId: teamPasswordEntryId ?? null,
     },
   });
 
@@ -186,7 +186,7 @@ export async function GET(req: NextRequest) {
     createdById: session.user.id,
   };
   if (passwordEntryId) where.passwordEntryId = passwordEntryId;
-  if (teamPasswordEntryId) where.orgPasswordEntryId = teamPasswordEntryId;
+  if (teamPasswordEntryId) where.teamPasswordEntryId = teamPasswordEntryId;
 
   const shares = await prisma.passwordShare.findMany({
     where,

@@ -27,9 +27,9 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeamMember
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgInvitation: mockPrismaTeamInvitation,
+    teamInvitation: mockPrismaTeamInvitation,
     user: mockPrismaUser,
-    orgMember: mockPrismaTeamMember,
+    teamMember: mockPrismaTeamMember,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));

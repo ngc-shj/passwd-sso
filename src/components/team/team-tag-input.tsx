@@ -231,4 +231,4 @@ export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputPro
   );
 }
 
-export const OrgTagInput = TeamTagInput;
+export const TeamTagInputAlias = TeamTagInput;

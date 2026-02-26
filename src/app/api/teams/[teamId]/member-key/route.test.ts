@@ -28,8 +28,8 @@ vi.mock("@/lib/team-auth", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockPrismaTeamMember,
-    orgMemberKey: mockPrismaTeamMemberKey,
+    teamMember: mockPrismaTeamMember,
+    teamMemberKey: mockPrismaTeamMemberKey,
   },
 }));
 
@@ -88,9 +88,9 @@ describe("GET /api/teams/[teamId]/member-key", () => {
   it("returns latest key when no keyVersion param", async () => {
     mockPrismaTeamMember.findFirst.mockResolvedValue({ keyDistributed: true });
     mockPrismaTeamMemberKey.findFirst.mockResolvedValue({
-      encryptedOrgKey: "enc-key",
-      orgKeyIv: "iv-hex",
-      orgKeyAuthTag: "tag-hex",
+      encryptedTeamKey: "enc-key",
+      teamKeyIv: "iv-hex",
+      teamKeyAuthTag: "tag-hex",
       ephemeralPublicKey: "eph-pub",
       hkdfSalt: "salt-hex",
       keyVersion: 2,
@@ -103,11 +103,11 @@ describe("GET /api/teams/[teamId]/member-key", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.encryptedOrgKey).toBe("enc-key");
+    expect(json.encryptedTeamKey).toBe("enc-key");
     expect(json.keyVersion).toBe(2);
     expect(json.wrapVersion).toBe(1);
     expect(mockPrismaTeamMemberKey.findFirst).toHaveBeenCalledWith({
-      where: { orgId: "team-1", userId: "user-1" },
+      where: { teamId: "team-1", userId: "user-1" },
       orderBy: { keyVersion: "desc" },
     });
   });
@@ -115,9 +115,9 @@ describe("GET /api/teams/[teamId]/member-key", () => {
   it("returns specific key version when param provided", async () => {
     mockPrismaTeamMember.findFirst.mockResolvedValue({ keyDistributed: true });
     mockPrismaTeamMemberKey.findUnique.mockResolvedValue({
-      encryptedOrgKey: "enc-key-v1",
-      orgKeyIv: "iv",
-      orgKeyAuthTag: "tag",
+      encryptedTeamKey: "enc-key-v1",
+      teamKeyIv: "iv",
+      teamKeyAuthTag: "tag",
       ephemeralPublicKey: "eph",
       hkdfSalt: "salt",
       keyVersion: 1,

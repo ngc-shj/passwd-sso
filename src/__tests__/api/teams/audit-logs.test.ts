@@ -6,7 +6,7 @@ const {
   mockAuth,
   mockFindMany,
   mockRequireTeamPermission,
-  mockOrgEntryFindMany,
+  mockTeamEntryFindMany,
   TeamAuthError,
 } = vi.hoisted(() => {
     class TeamAuthError extends Error {
@@ -21,7 +21,7 @@ const {
       mockAuth: vi.fn(),
       mockFindMany: vi.fn(),
       mockRequireTeamPermission: vi.fn(),
-      mockOrgEntryFindMany: vi.fn(),
+      mockTeamEntryFindMany: vi.fn(),
       TeamAuthError,
     };
   });
@@ -29,7 +29,7 @@ const {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     auditLog: { findMany: mockFindMany },
-    orgPasswordEntry: { findMany: mockOrgEntryFindMany },
+    teamPasswordEntry: { findMany: mockTeamEntryFindMany },
   },
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -97,7 +97,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     ];
 
     mockFindMany.mockResolvedValue(logs);
-    mockOrgEntryFindMany.mockResolvedValue([]);
+    mockTeamEntryFindMany.mockResolvedValue([]);
 
     const req = createRequest(
       "GET",
@@ -119,7 +119,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          orgId: TEAM_ID,
+          teamId: TEAM_ID,
           scope: AUDIT_SCOPE.TEAM,
         },
         include: {
@@ -380,14 +380,14 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     ];
     mockFindMany.mockResolvedValue(logs);
 
-    mockOrgEntryFindMany.mockResolvedValue([
+    mockTeamEntryFindMany.mockResolvedValue([
       {
         id: "entry-1",
         encryptedOverview: "enc-ov",
         overviewIv: "a".repeat(24),
         overviewAuthTag: "b".repeat(32),
         aadVersion: 1,
-        orgKeyVersion: 1,
+        teamKeyVersion: 1,
       },
     ]);
 
@@ -405,7 +405,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
         overviewIv: "a".repeat(24),
         overviewAuthTag: "b".repeat(32),
         aadVersion: 1,
-        orgKeyVersion: 1,
+        teamKeyVersion: 1,
       },
     });
   });

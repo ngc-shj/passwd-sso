@@ -192,7 +192,7 @@ export function EntryHistorySection({
     try {
       if (scopedTeamId) {
         // Team entries: fetch encrypted blob, then decrypt client-side.
-        // TODO: If h.orgKeyVersion !== current team version, fetch old key via
+        // TODO: If h.teamKeyVersion !== current team version, fetch old key via
         // GET /member-key?keyVersion=N for correct decryption.
         // Currently uses latest key only — history from before key rotation
         // will fail to decrypt until re-encryption is implemented.

@@ -28,7 +28,7 @@ const { mockAuth, mockPrismaTeamFolder, mockRequireTeamMember, mockRequireTeamPe
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { orgFolder: mockPrismaTeamFolder },
+  prisma: { teamFolder: mockPrismaTeamFolder },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
@@ -226,7 +226,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "FOLDER_CREATE",
-        orgId: TEAM_ID,
+        teamId: TEAM_ID,
       }),
     );
   });

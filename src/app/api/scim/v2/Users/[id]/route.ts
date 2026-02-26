@@ -23,9 +23,9 @@ async function resolveUserId(
 ): Promise<string | null> {
   if (scimId.length > 255) return null;
 
-  // First try as direct userId (TeamMember.userId / orgMember table)
-  const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId: teamId, userId: scimId } },
+  // First try as direct userId (TeamMember.userId / teamMember table)
+  const member = await prisma.teamMember.findUnique({
+    where: { teamId_userId: { teamId: teamId, userId: scimId } },
     select: { userId: true },
   });
   if (member) return member.userId;
@@ -48,8 +48,8 @@ async function fetchUserResource(
   userId: string,
   baseUrl: string,
 ) {
-  const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId: teamId, userId } },
+  const member = await prisma.teamMember.findUnique({
+    where: { teamId_userId: { teamId: teamId, userId } },
     include: { user: { select: { id: true, email: true, name: true } } },
   });
   if (!member || !member.user.email) return null;
@@ -134,8 +134,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { active, externalId, name } = parsed.data;
 
   // OWNER protection
-  const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId: scopedTeamId, userId } },
+  const member = await prisma.teamMember.findUnique({
+    where: { teamId_userId: { teamId: scopedTeamId, userId } },
     select: { id: true, role: true, deactivatedAt: true, userId: true },
   });
   if (!member) {
@@ -157,7 +157,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   try {
     await prisma.$transaction(async (tx) => {
       // Update team member attributes
-      await tx.orgMember.update({
+      await tx.teamMember.update({
         where: { id: member.id },
         data: {
           deactivatedAt: active === false ? (member.deactivatedAt ?? new Date()) : null,
@@ -187,7 +187,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
             },
           });
           await tx.scimExternalMapping.create({
-            data: { orgId: scopedTeamId, tenantId, externalId, resourceType: "User", internalId: userId },
+            data: { teamId: scopedTeamId, tenantId, externalId, resourceType: "User", internalId: userId },
           });
         }
       } else {
@@ -267,8 +267,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId: scopedTeamId, userId } },
+  const member = await prisma.teamMember.findUnique({
+    where: { teamId_userId: { teamId: scopedTeamId, userId } },
   });
   if (!member) {
     return scimError(404, "User not found");
@@ -301,7 +301,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   // Always mark as SCIM-managed when touched via PATCH
   updateData.scimManaged = true;
 
-  await prisma.orgMember.update({
+  await prisma.teamMember.update({
     where: { id: member.id },
     data: updateData,
   });
@@ -344,8 +344,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return scimError(404, "User not found");
   }
 
-  const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId: scopedTeamId, userId } },
+  const member = await prisma.teamMember.findUnique({
+    where: { teamId_userId: { teamId: scopedTeamId, userId } },
     include: { user: { select: { email: true } } },
   });
   if (!member) {
@@ -360,7 +360,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   // Atomic delete: member keys + external mapping + team member
   try {
     await prisma.$transaction([
-      prisma.orgMemberKey.deleteMany({ where: { orgId: scopedTeamId, userId } }),
+      prisma.teamMemberKey.deleteMany({ where: { teamId: scopedTeamId, userId } }),
       prisma.scimExternalMapping.deleteMany({
         where: {
           tenantId,
@@ -368,7 +368,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
           resourceType: "User",
         },
       }),
-      prisma.orgMember.delete({ where: { id: member.id } }),
+      prisma.teamMember.delete({ where: { id: member.id } }),
     ]);
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {

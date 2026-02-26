@@ -37,7 +37,7 @@ vi.mock("@/lib/team-auth", () => {
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgFolder: {
+    teamFolder: {
       findMany: mockTeamFolderFindMany,
       findUnique: mockTeamFolderFindUnique,
       findFirst: mockTeamFolderFindFirst,

@@ -24,16 +24,16 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await prisma.orgPasswordEntry.findUnique({
+  const entry = await prisma.teamPasswordEntry.findUnique({
     where: { id },
-    select: { orgId: true },
+    select: { teamId: true },
   });
 
-  if (!entry || entry.orgId !== teamId) {
+  if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const histories = await prisma.orgPasswordEntryHistory.findMany({
+  const histories = await prisma.teamPasswordEntryHistory.findMany({
     where: { entryId: id },
     orderBy: { changedAt: "desc" },
     include: { changedBy: { select: { id: true, name: true, email: true } } },
@@ -49,7 +49,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
         authTag: h.blobAuthTag,
       },
       aadVersion: h.aadVersion,
-      orgKeyVersion: h.orgKeyVersion,
+      teamKeyVersion: h.teamKeyVersion,
       changedAt: h.changedAt,
       changedBy: h.changedBy,
     })),

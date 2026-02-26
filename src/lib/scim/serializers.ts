@@ -1,4 +1,4 @@
-import type { OrgRole } from "@prisma/client";
+import type { TeamRole } from "@prisma/client";
 import { v5 as uuid5 } from "uuid";
 
 // App-specific UUID v5 namespace for SCIM Group IDs — do NOT change once deployed
@@ -9,7 +9,7 @@ const SCIM_GROUP_NAMESPACE = "125b7a5b-23f9-495c-bd0a-369bae10337e";
  * Keeps the serializer decoupled from Prisma's generated types.
  */
 export interface ScimUserInput {
-  /** TeamMember.userId (stored in legacy orgMember table for backward compatibility) */
+  /** TeamMember.userId (stored in legacy teamMember table for backward compatibility) */
   userId: string;
   email: string;
   name: string | null;
@@ -84,7 +84,7 @@ export interface ScimGroupResource {
  * Deterministic UUID for a (teamId, roleName) pair.
  * IdP expects stable Group IDs across requests.
  */
-export function roleGroupId(teamId: string, role: OrgRole): string {
+export function roleGroupId(teamId: string, role: TeamRole): string {
   return uuid5(`${teamId}:${role}`, SCIM_GROUP_NAMESPACE);
 }
 
@@ -99,7 +99,7 @@ export interface ScimGroupMemberInput {
  */
 export function roleToScimGroup(
   teamId: string,
-  role: OrgRole,
+  role: TeamRole,
   members: ScimGroupMemberInput[],
   baseUrl: string,
 ): ScimGroupResource {

@@ -44,7 +44,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const limit = Math.min(Math.max(parseInt(limitParam ?? "50", 10) || 50, 1), 100);
 
   const where: Record<string, unknown> = {
-    orgId: teamId,
+    teamId: teamId,
     scope: AUDIT_SCOPE.TEAM,
   };
 
@@ -106,11 +106,11 @@ export async function GET(req: NextRequest, { params }: Params) {
     overviewIv: string;
     overviewAuthTag: string;
     aadVersion: number;
-    orgKeyVersion: number;
+    teamKeyVersion: number;
   }> = {};
 
   if (entryIds.length > 0) {
-    const entries = await prisma.orgPasswordEntry.findMany({
+    const entries = await prisma.teamPasswordEntry.findMany({
       where: { id: { in: entryIds } },
       select: {
         id: true,
@@ -118,7 +118,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         overviewIv: true,
         overviewAuthTag: true,
         aadVersion: true,
-        orgKeyVersion: true,
+        teamKeyVersion: true,
       },
     });
 
@@ -128,7 +128,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         overviewIv: e.overviewIv,
         overviewAuthTag: e.overviewAuthTag,
         aadVersion: e.aadVersion,
-        orgKeyVersion: e.orgKeyVersion,
+        teamKeyVersion: e.teamKeyVersion,
       };
     }
   }

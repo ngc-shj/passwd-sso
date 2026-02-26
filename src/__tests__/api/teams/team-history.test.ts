@@ -27,8 +27,8 @@ vi.mock("@/lib/team-auth", () => {
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgPasswordEntry: { findUnique: mockEntryFindUnique },
-    orgPasswordEntryHistory: { findMany: mockHistoryFindMany },
+    teamPasswordEntry: { findUnique: mockEntryFindUnique },
+    teamPasswordEntryHistory: { findMany: mockHistoryFindMany },
   },
 }));
 
@@ -71,7 +71,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
   it("returns 404 when entry belongs to different team", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamMember.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ orgId: "other-team" });
+    mockEntryFindUnique.mockResolvedValue({ teamId: "other-team" });
     const req = createRequest("GET");
     const res = await GET(req, createParams({ teamId: "o1", id: "p1" }));
     const { status } = await parseResponse(res);
@@ -81,7 +81,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
   it("returns history entries with user info", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamMember.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ orgId: "o1" });
+    mockEntryFindUnique.mockResolvedValue({ teamId: "o1" });
     const changedAt = new Date("2025-06-01");
     mockHistoryFindMany.mockResolvedValue([
       {
@@ -91,7 +91,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
         blobIv: "iv",
         blobAuthTag: "tag",
         aadVersion: 1,
-        orgKeyVersion: 2,
+        teamKeyVersion: 2,
         changedAt,
         changedBy: { id: "u1", name: "Admin", email: "admin@test.com" },
       },
@@ -104,7 +104,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
     expect(status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].encryptedBlob).toEqual({ ciphertext: "cipher", iv: "iv", authTag: "tag" });
-    expect(json[0].orgKeyVersion).toBe(2);
+    expect(json[0].teamKeyVersion).toBe(2);
     expect(json[0].changedBy.name).toBe("Admin");
   });
 });

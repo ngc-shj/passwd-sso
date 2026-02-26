@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgTag, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamTag, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -12,7 +12,7 @@ const { mockAuth, mockPrismaOrgTag, mockRequireTeamPermission, TeamAuthError } =
   }
   return {
     mockAuth: vi.fn(),
-    mockPrismaOrgTag: {
+    mockPrismaTeamTag: {
       findUnique: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
@@ -24,7 +24,7 @@ const { mockAuth, mockPrismaOrgTag, mockRequireTeamPermission, TeamAuthError } =
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { orgTag: mockPrismaOrgTag },
+  prisma: { teamTag: mockPrismaTeamTag },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
@@ -75,7 +75,7 @@ describe("PUT /api/teams/[teamId]/tags/[id]", () => {
   });
 
   it("returns 404 when tag not found", async () => {
-    mockPrismaOrgTag.findUnique.mockResolvedValue(null);
+    mockPrismaTeamTag.findUnique.mockResolvedValue(null);
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`, { body: { name: "New" } }),
       createParams({ teamId: TEAM_ID, id: TAG_ID }),
@@ -84,7 +84,7 @@ describe("PUT /api/teams/[teamId]/tags/[id]", () => {
   });
 
   it("returns 400 on malformed JSON", async () => {
-    mockPrismaOrgTag.findUnique.mockResolvedValue({ id: TAG_ID, orgId: TEAM_ID });
+    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID });
     const { NextRequest } = await import("next/server");
     const req = new NextRequest(`http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`, {
       method: "PUT",
@@ -98,7 +98,7 @@ describe("PUT /api/teams/[teamId]/tags/[id]", () => {
   });
 
   it("returns 400 on validation error", async () => {
-    mockPrismaOrgTag.findUnique.mockResolvedValue({ id: TAG_ID, orgId: TEAM_ID });
+    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID });
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`, { body: {} }),
       createParams({ teamId: TEAM_ID, id: TAG_ID }),
@@ -109,8 +109,8 @@ describe("PUT /api/teams/[teamId]/tags/[id]", () => {
   });
 
   it("updates tag successfully", async () => {
-    mockPrismaOrgTag.findUnique.mockResolvedValue({ id: TAG_ID, orgId: TEAM_ID });
-    mockPrismaOrgTag.update.mockResolvedValue({ id: TAG_ID, name: "Updated", color: "#00ff00" });
+    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID });
+    mockPrismaTeamTag.update.mockResolvedValue({ id: TAG_ID, name: "Updated", color: "#00ff00" });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`, {
@@ -124,8 +124,8 @@ describe("PUT /api/teams/[teamId]/tags/[id]", () => {
   });
 
   it("accepts color: null to clear the tag color", async () => {
-    mockPrismaOrgTag.findUnique.mockResolvedValue({ id: TAG_ID, orgId: TEAM_ID });
-    mockPrismaOrgTag.update.mockResolvedValue({ id: TAG_ID, name: "Ops", color: null });
+    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID });
+    mockPrismaTeamTag.update.mockResolvedValue({ id: TAG_ID, name: "Ops", color: null });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`, {
@@ -177,7 +177,7 @@ describe("DELETE /api/teams/[teamId]/tags/[id]", () => {
   });
 
   it("returns 404 when tag not found", async () => {
-    mockPrismaOrgTag.findUnique.mockResolvedValue(null);
+    mockPrismaTeamTag.findUnique.mockResolvedValue(null);
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`),
       createParams({ teamId: TEAM_ID, id: TAG_ID }),
@@ -186,8 +186,8 @@ describe("DELETE /api/teams/[teamId]/tags/[id]", () => {
   });
 
   it("deletes tag successfully", async () => {
-    mockPrismaOrgTag.findUnique.mockResolvedValue({ id: TAG_ID, orgId: TEAM_ID });
-    mockPrismaOrgTag.delete.mockResolvedValue({});
+    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID });
+    mockPrismaTeamTag.delete.mockResolvedValue({});
 
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`),

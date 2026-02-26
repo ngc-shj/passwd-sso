@@ -8,7 +8,7 @@ const { mockAuth, mockPrismaTeamMember } = vi.hoisted(() => ({
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockPrismaTeamMember,
+    teamMember: mockPrismaTeamMember,
   },
 }));
 
@@ -37,17 +37,17 @@ describe("GET /api/teams/pending-key-distributions", () => {
   it("returns pending members for admin teams", async () => {
     // First call: admin memberships
     mockPrismaTeamMember.findMany.mockResolvedValueOnce([
-      { orgId: "team-1" },
-      { orgId: "team-2" },
+      { teamId: "team-1" },
+      { teamId: "team-2" },
     ]);
     // Second call: pending members
     mockPrismaTeamMember.findMany.mockResolvedValueOnce([
       {
         id: "member-1",
-        orgId: "team-1",
+        teamId: "team-1",
         userId: "pending-user",
         user: { ecdhPublicKey: "pub-key", name: "Test User", email: "test@test.com" },
-        org: { orgKeyVersion: 1 },
+        team: { teamKeyVersion: 1 },
       },
     ]);
 
@@ -60,7 +60,7 @@ describe("GET /api/teams/pending-key-distributions", () => {
       teamId: "team-1",
       userId: "pending-user",
       ecdhPublicKey: "pub-key",
-      orgKeyVersion: 1,
+      teamKeyVersion: 1,
     });
     // PII (name, email) must NOT be included in response (S-16)
     expect(json[0]).not.toHaveProperty("name");
@@ -69,7 +69,7 @@ describe("GET /api/teams/pending-key-distributions", () => {
 
   it("queries for pending members with correct filters", async () => {
     mockPrismaTeamMember.findMany
-      .mockResolvedValueOnce([{ orgId: "team-1" }])
+      .mockResolvedValueOnce([{ teamId: "team-1" }])
       .mockResolvedValueOnce([]);
 
     await GET();

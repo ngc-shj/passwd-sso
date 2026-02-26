@@ -30,7 +30,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockTeamMember,
+    teamMember: mockTeamMember,
     scimExternalMapping: mockScimExternalMapping,
     $transaction: mockTransaction,
   },
@@ -105,7 +105,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     mockCheckScimRateLimit.mockResolvedValue(true);
     // Transaction executes callback with same mock objects
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
-      fn({ orgMember: mockTeamMember }),
+      fn({ teamMember: mockTeamMember }),
     );
   });
 
@@ -273,7 +273,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     mockCheckScimRateLimit.mockResolvedValue(true);
     // Transaction executes callback with same mock objects
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
-      fn({ orgMember: mockTeamMember }),
+      fn({ teamMember: mockTeamMember }),
     );
   });
 

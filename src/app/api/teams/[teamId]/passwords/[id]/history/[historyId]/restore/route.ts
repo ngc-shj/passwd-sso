@@ -26,15 +26,15 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await prisma.orgPasswordEntry.findUnique({
+  const entry = await prisma.teamPasswordEntry.findUnique({
     where: { id },
   });
 
-  if (!entry || entry.orgId !== teamId) {
+  if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const history = await prisma.orgPasswordEntryHistory.findUnique({
+  const history = await prisma.teamPasswordEntryHistory.findUnique({
     where: { id: historyId },
   });
 
@@ -44,42 +44,42 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   await prisma.$transaction(async (tx) => {
     // Snapshot current
-    await tx.orgPasswordEntryHistory.create({
+    await tx.teamPasswordEntryHistory.create({
       data: {
         entryId: id,
         encryptedBlob: entry.encryptedBlob,
         blobIv: entry.blobIv,
         blobAuthTag: entry.blobAuthTag,
         aadVersion: entry.aadVersion,
-        orgKeyVersion: entry.orgKeyVersion,
+        teamKeyVersion: entry.teamKeyVersion,
         changedById: session.user.id,
       },
     });
 
     // Trim to max 20
-    const all = await tx.orgPasswordEntryHistory.findMany({
+    const all = await tx.teamPasswordEntryHistory.findMany({
       where: { entryId: id },
       orderBy: [{ changedAt: "asc" }, { id: "asc" }],
       select: { id: true },
     });
     if (all.length > 20) {
-      await tx.orgPasswordEntryHistory.deleteMany({
+      await tx.teamPasswordEntryHistory.deleteMany({
         where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
       });
     }
 
-    // Restore: writes back history blob with its original orgKeyVersion.
-    // If history.orgKeyVersion !== team.orgKeyVersion (e.g. after key rotation),
+    // Restore: writes back history blob with its original teamKeyVersion.
+    // If history.teamKeyVersion !== team.teamKeyVersion (e.g. after key rotation),
     // the client must detect the mismatch, decrypt with the old key via
     // GET /member-key?keyVersion=N, re-encrypt with the current key, and PUT.
-    await tx.orgPasswordEntry.update({
+    await tx.teamPasswordEntry.update({
       where: { id },
       data: {
         encryptedBlob: history.encryptedBlob,
         blobIv: history.blobIv,
         blobAuthTag: history.blobAuthTag,
         aadVersion: history.aadVersion,
-        orgKeyVersion: history.orgKeyVersion,
+        teamKeyVersion: history.teamKeyVersion,
         updatedById: session.user.id,
       },
     });

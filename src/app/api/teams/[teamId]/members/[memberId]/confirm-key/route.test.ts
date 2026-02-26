@@ -2,13 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaTeamMember, mockPrismaUser,
-  mockPrismaTeamMemberKey, mockPrismaOrganization, mockTransaction,
+  mockPrismaTeamMemberKey, mockPrismaTeam, mockTransaction,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamMember: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   mockPrismaUser: { findUnique: vi.fn() },
   mockPrismaTeamMemberKey: { upsert: vi.fn() },
-  mockPrismaOrganization: { findUnique: vi.fn() },
+  mockPrismaTeam: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
 }));
 
@@ -16,16 +16,16 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 // Build a tx proxy that delegates to the same mocks
 const txProxy = {
-  orgMember: mockPrismaTeamMember,
-  orgMemberKey: mockPrismaTeamMemberKey,
-  organization: mockPrismaOrganization,
+  teamMember: mockPrismaTeamMember,
+  teamMemberKey: mockPrismaTeamMemberKey,
+  team: mockPrismaTeam,
 };
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockPrismaTeamMember,
+    teamMember: mockPrismaTeamMember,
     user: mockPrismaUser,
-    orgMemberKey: mockPrismaTeamMemberKey,
+    teamMemberKey: mockPrismaTeamMemberKey,
     $transaction: mockTransaction,
   },
 }));
@@ -35,7 +35,7 @@ import { POST } from "./route";
 const URL = "http://localhost/api/teams/team-1/members/member-1/confirm-key";
 
 const validBody = {
-  encryptedOrgKey: "encrypted-team-key-data",
+  encryptedTeamKey: "encrypted-team-key-data",
   teamKeyIv: "a".repeat(24),
   teamKeyAuthTag: "b".repeat(32),
   ephemeralPublicKey: '{"kty":"EC","crv":"P-256","x":"test","y":"test"}',
@@ -47,7 +47,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "admin-user" } });
-    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
+    mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 1 });
     // Interactive transaction: call the callback with tx proxy
     mockTransaction.mockImplementation(async (fn: (tx: typeof txProxy) => unknown) => fn(txProxy));
   });
@@ -71,7 +71,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 404 when target member not found", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "team-1" }); // admin (findFirst)
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" }); // admin (findFirst)
     mockPrismaTeamMember.findUnique.mockResolvedValueOnce(null); // target member
 
     const res = await POST(
@@ -82,8 +82,8 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 409 when target user has no ECDH public key", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "team-1" });
-    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ orgId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" });
+    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: null });
 
     const res = await POST(
@@ -96,21 +96,21 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 400 on invalid body", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "team-1" });
-    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ orgId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" });
+    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
     const res = await POST(
-      createRequest("POST", URL, { body: { encryptedOrgKey: "data" } }),
+      createRequest("POST", URL, { body: { encryptedTeamKey: "data" } }),
       { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
     );
     expect(res.status).toBe(400);
   });
 
   it("distributes key successfully", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "team-1" }); // getTeamMembership (findFirst)
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" }); // getTeamMembership (findFirst)
     mockPrismaTeamMember.findUnique
-      .mockResolvedValueOnce({ id: "member-1", orgId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null }) // target check
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null }) // target check
       .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null }); // re-check inside tx
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
@@ -125,8 +125,8 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 404 when target member belongs to a different team (Q-1 IDOR)", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "team-1" }); // admin (findFirst)
-    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ orgId: "team-OTHER", userId: "target-user", keyDistributed: false, deactivatedAt: null }); // target belongs to different team
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" }); // admin (findFirst)
+    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ teamId: "team-OTHER", userId: "target-user", keyDistributed: false, deactivatedAt: null }); // target belongs to different team
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
@@ -138,8 +138,8 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 409 when key already distributed (pre-check, Q-2)", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "team-1" }); // admin (findFirst)
-    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ id: "member-1", orgId: "team-1", userId: "target-user", keyDistributed: true, deactivatedAt: null }); // already distributed
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" }); // admin (findFirst)
+    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: true, deactivatedAt: null }); // already distributed
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
     const res = await POST(
@@ -154,8 +154,8 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 400 on malformed JSON (Q-3)", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "team-1" });
-    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ orgId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" });
+    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
     const { NextRequest } = await import("next/server");
@@ -174,12 +174,12 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 409 when keyVersion does not match team's current version (F-16)", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "team-1" }); // admin (findFirst)
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" }); // admin (findFirst)
     mockPrismaTeamMember.findUnique
-      .mockResolvedValueOnce({ id: "member-1", orgId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
       .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null }); // re-check passes
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
-    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 }); // team rotated to v2
+    mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 2 }); // team rotated to v2
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }), // keyVersion: 1 (stale)
@@ -191,9 +191,9 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 409 when key already distributed (TOCTOU race)", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", orgId: "team-1" }); // getTeamMembership (findFirst)
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" }); // getTeamMembership (findFirst)
     mockPrismaTeamMember.findUnique
-      .mockResolvedValueOnce({ id: "member-1", orgId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null }) // target check (passes)
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null }) // target check (passes)
       .mockResolvedValueOnce({ keyDistributed: true, deactivatedAt: null }); // re-check inside tx (race: another admin distributed first)
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 

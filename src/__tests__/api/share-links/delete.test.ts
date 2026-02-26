@@ -12,7 +12,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { findUnique: mockFindUnique, update: mockUpdate },
-    orgPasswordEntry: { findUnique: vi.fn() },
+    teamPasswordEntry: { findUnique: vi.fn() },
   },
 }));
 vi.mock("@/lib/audit", () => ({
@@ -57,7 +57,7 @@ describe("DELETE /api/share-links/[id]", () => {
       shareType: "ENTRY_SHARE",
       createdById: "other-user",
       revokedAt: null,
-      orgPasswordEntryId: null,
+      teamPasswordEntryId: null,
     });
 
     const req = createRequest("DELETE", "http://localhost/api/share-links/s1");
@@ -75,7 +75,7 @@ describe("DELETE /api/share-links/[id]", () => {
       shareType: "ENTRY_SHARE",
       createdById: DEFAULT_SESSION.user.id,
       revokedAt: new Date(),
-      orgPasswordEntryId: null,
+      teamPasswordEntryId: null,
     });
 
     const req = createRequest("DELETE", "http://localhost/api/share-links/s1");
@@ -93,7 +93,7 @@ describe("DELETE /api/share-links/[id]", () => {
       shareType: "ENTRY_SHARE",
       createdById: DEFAULT_SESSION.user.id,
       revokedAt: null,
-      orgPasswordEntryId: null,
+      teamPasswordEntryId: null,
     });
     mockUpdate.mockResolvedValue({});
 
@@ -116,7 +116,7 @@ describe("DELETE /api/share-links/[id]", () => {
       shareType: "TEXT",
       createdById: DEFAULT_SESSION.user.id,
       revokedAt: null,
-      orgPasswordEntryId: null,
+      teamPasswordEntryId: null,
     });
     mockUpdate.mockResolvedValue({});
 
@@ -140,7 +140,7 @@ describe("DELETE /api/share-links/[id]", () => {
       shareType: "FILE",
       createdById: DEFAULT_SESSION.user.id,
       revokedAt: null,
-      orgPasswordEntryId: null,
+      teamPasswordEntryId: null,
     });
     mockUpdate.mockResolvedValue({});
 

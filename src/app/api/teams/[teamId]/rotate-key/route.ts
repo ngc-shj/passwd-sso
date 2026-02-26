@@ -25,7 +25,7 @@ const encryptedFieldSchema = z.object({
 });
 
 const rotateKeySchema = z.object({
-  newOrgKeyVersion: z.number().int().min(2).max(10_000),
+  newTeamKeyVersion: z.number().int().min(2).max(10_000),
   entries: z.array(
     z.object({
       id: z.string().min(1),
@@ -59,9 +59,9 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const team = await prisma.organization.findUnique({
+  const team = await prisma.team.findUnique({
     where: { id: teamId },
-    select: { orgKeyVersion: true },
+    select: { teamKeyVersion: true },
   });
 
   if (!team) {
@@ -83,32 +83,32 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  const { newOrgKeyVersion, entries, memberKeys } = parsed.data;
+  const { newTeamKeyVersion, entries, memberKeys } = parsed.data;
 
   // Validate version increment
-  if (newOrgKeyVersion !== team.orgKeyVersion + 1) {
+  if (newTeamKeyVersion !== team.teamKeyVersion + 1) {
     return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: { expected: team.orgKeyVersion + 1 } },
+      { error: API_ERROR.VALIDATION_ERROR, details: { expected: team.teamKeyVersion + 1 } },
       { status: 409 }
     );
   }
 
-  // Interactive transaction with optimistic lock on orgKeyVersion (S-17)
+  // Interactive transaction with optimistic lock on teamKeyVersion (S-17)
   // Member list verification is inside transaction to prevent TOCTOU (F-26)
   try {
     await prisma.$transaction(async (tx) => {
-      // Re-verify orgKeyVersion hasn't changed since pre-read
-      const currentOrg = await tx.organization.findUnique({
+      // Re-verify teamKeyVersion hasn't changed since pre-read
+      const currentOrg = await tx.team.findUnique({
         where: { id: teamId },
-        select: { orgKeyVersion: true },
+        select: { teamKeyVersion: true },
       });
-      if (!currentOrg || currentOrg.orgKeyVersion !== team.orgKeyVersion) {
+      if (!currentOrg || currentOrg.teamKeyVersion !== team.teamKeyVersion) {
         throw new Error("ORG_KEY_VERSION_CONFLICT");
       }
 
       // Verify all active members have a key in the payload (F-26: inside tx)
-      const members = await tx.orgMember.findMany({
-        where: { orgId: teamId, deactivatedAt: null },
+      const members = await tx.teamMember.findMany({
+        where: { teamId: teamId, deactivatedAt: null },
         select: { userId: true },
       });
       const memberUserIds = new Set(members.map((m) => m.userId));
@@ -125,8 +125,8 @@ export async function POST(req: NextRequest, { params }: Params) {
       }
 
       // Verify submitted entries exactly match ALL team entries (including trash)
-      const allEntries = await tx.orgPasswordEntry.findMany({
-        where: { orgId: teamId },
+      const allEntries = await tx.teamPasswordEntry.findMany({
+        where: { teamId: teamId },
         select: { id: true },
       });
       if (entries.length !== allEntries.length) {
@@ -147,15 +147,15 @@ export async function POST(req: NextRequest, { params }: Params) {
       }
 
       // Re-encrypt all entries with new key.
-      // updateMany + orgId scope prevents out-of-team updates.
-      // orgKeyVersion is NOT in where: entries restored from history may have
+      // updateMany + teamId scope prevents out-of-team updates.
+      // teamKeyVersion is NOT in where: entries restored from history may have
       // a stale version, but the ID set verification above guarantees completeness (F-29).
       // Note: Prisma interactive transaction auto-rolls back on any thrown error.
       await Promise.all(entries.map(async (entry) => {
-        const result = await tx.orgPasswordEntry.updateMany({
+        const result = await tx.teamPasswordEntry.updateMany({
           where: {
             id: entry.id,
-            orgId: teamId,
+            teamId: teamId,
           },
           data: {
             encryptedBlob: entry.encryptedBlob.ciphertext,
@@ -165,7 +165,7 @@ export async function POST(req: NextRequest, { params }: Params) {
             overviewIv: entry.encryptedOverview.iv,
             overviewAuthTag: entry.encryptedOverview.authTag,
             aadVersion: entry.aadVersion,
-            orgKeyVersion: newOrgKeyVersion,
+            teamKeyVersion: newTeamKeyVersion,
           },
         });
         if (result.count !== 1) {
@@ -177,16 +177,16 @@ export async function POST(req: NextRequest, { params }: Params) {
       // No filter needed: member validation above guarantees exact 1:1 match
       await Promise.all(
         memberKeys.map((k) =>
-            tx.orgMemberKey.create({
+            tx.teamMemberKey.create({
               data: {
-                orgId: teamId,
+                teamId: teamId,
                 userId: k.userId,
-                encryptedOrgKey: k.encryptedOrgKey,
-                orgKeyIv: k.teamKeyIv,
-                orgKeyAuthTag: k.teamKeyAuthTag,
+                encryptedTeamKey: k.encryptedTeamKey,
+                teamKeyIv: k.teamKeyIv,
+                teamKeyAuthTag: k.teamKeyAuthTag,
                 ephemeralPublicKey: k.ephemeralPublicKey,
                 hkdfSalt: k.hkdfSalt,
-                keyVersion: newOrgKeyVersion,
+                keyVersion: newTeamKeyVersion,
                 wrapVersion: k.wrapVersion,
               },
             })
@@ -194,9 +194,9 @@ export async function POST(req: NextRequest, { params }: Params) {
       );
 
       // Bump team key version
-      await tx.organization.update({
+      await tx.team.update({
         where: { id: teamId },
-        data: { orgKeyVersion: newOrgKeyVersion },
+        data: { teamKeyVersion: newTeamKeyVersion },
       });
     }, { timeout: 60_000 });
   } catch (e) {
@@ -229,8 +229,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: teamId,
     metadata: {
-      fromVersion: team.orgKeyVersion,
-      toVersion: newOrgKeyVersion,
+      fromVersion: team.teamKeyVersion,
+      toVersion: newTeamKeyVersion,
       entriesRotated: entries.length,
       membersUpdated: memberKeys.length,
     },
@@ -239,6 +239,6 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({
     success: true,
-    orgKeyVersion: newOrgKeyVersion,
+    teamKeyVersion: newTeamKeyVersion,
   });
 }

@@ -11,14 +11,14 @@
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
-import type { OrgRole } from "@prisma/client";
+import type { TeamRole } from "@prisma/client";
 
 // ─── Permission Definitions ─────────────────────────────────────
 
 export type TeamPermission =
   (typeof TEAM_PERMISSION)[keyof typeof TEAM_PERMISSION];
 
-const ROLE_PERMISSIONS: Record<OrgRole, Set<TeamPermission>> = {
+const ROLE_PERMISSIONS: Record<TeamRole, Set<TeamPermission>> = {
   [TEAM_ROLE.OWNER]: new Set([
     TEAM_PERMISSION.TEAM_DELETE,
     TEAM_PERMISSION.TEAM_UPDATE,
@@ -57,14 +57,14 @@ const ROLE_PERMISSIONS: Record<OrgRole, Set<TeamPermission>> = {
 
 /** Check if a role has a specific permission. */
 export function hasTeamPermission(
-  role: OrgRole,
+  role: TeamRole,
   permission: TeamPermission
 ): boolean {
   return ROLE_PERMISSIONS[role]?.has(permission) ?? false;
 }
 
 /** Role hierarchy for comparison (higher = more privileged). */
-const ROLE_LEVEL: Record<OrgRole, number> = {
+const ROLE_LEVEL: Record<TeamRole, number> = {
   [TEAM_ROLE.OWNER]: 4,
   [TEAM_ROLE.ADMIN]: 3,
   [TEAM_ROLE.MEMBER]: 2,
@@ -72,7 +72,7 @@ const ROLE_LEVEL: Record<OrgRole, number> = {
 };
 
 /** Check if actorRole is strictly higher than targetRole. */
-export function isRoleAbove(actorRole: OrgRole, targetRole: OrgRole): boolean {
+export function isRoleAbove(actorRole: TeamRole, targetRole: TeamRole): boolean {
   return ROLE_LEVEL[actorRole] > ROLE_LEVEL[targetRole];
 }
 
@@ -82,11 +82,11 @@ export function isRoleAbove(actorRole: OrgRole, targetRole: OrgRole): boolean {
  *
  * Uses findFirst instead of findUnique because Prisma's findUnique
  * cannot include non-unique-index fields (deactivatedAt) in the where clause.
- * The @@unique([orgId, userId]) constraint ensures at most one row per team+user.
+ * The @@unique([teamId, userId]) constraint ensures at most one row per team+user.
  */
 export async function getTeamMembership(userId: string, teamId: string) {
-  return prisma.orgMember.findFirst({
-    where: { orgId: teamId, userId, deactivatedAt: null },
+  return prisma.teamMember.findFirst({
+    where: { teamId: teamId, userId, deactivatedAt: null },
   });
 }
 

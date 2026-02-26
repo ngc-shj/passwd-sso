@@ -25,18 +25,18 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const invitation = await prisma.orgInvitation.findUnique({
+  const invitation = await prisma.teamInvitation.findUnique({
     where: { id: invId },
   });
 
-  if (!invitation || invitation.orgId !== teamId) {
+  if (!invitation || invitation.teamId !== teamId) {
     return NextResponse.json(
       { error: API_ERROR.INVITATION_NOT_FOUND },
       { status: 404 }
     );
   }
 
-  await prisma.orgInvitation.delete({ where: { id: invId } });
+  await prisma.teamInvitation.delete({ where: { id: invId } });
 
   return NextResponse.json({ success: true });
 }

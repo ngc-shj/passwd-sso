@@ -13,30 +13,30 @@ export async function GET() {
   }
 
   // Find all teams the user is a member of (with role for permission check)
-  const memberships = await prisma.orgMember.findMany({
+  const memberships = await prisma.teamMember.findMany({
     where: { userId: session.user.id, deactivatedAt: null },
-    select: { orgId: true, role: true },
+    select: { teamId: true, role: true },
   });
 
   // Only include teams where user has password:read permission
   const readable = memberships.filter((m) =>
     hasTeamPermission(m.role, TEAM_PERMISSION.PASSWORD_READ)
   );
-  const teamIds = readable.map((m) => m.orgId);
-  const roleMap = new Map(readable.map((m) => [m.orgId, m.role]));
+  const teamIds = readable.map((m) => m.teamId);
+  const roleMap = new Map(readable.map((m) => [m.teamId, m.role]));
 
   if (teamIds.length === 0) {
     return NextResponse.json([]);
   }
 
   // Find all trashed team password entries (deletedAt is set)
-  const trashedEntries = await prisma.orgPasswordEntry.findMany({
+  const trashedEntries = await prisma.teamPasswordEntry.findMany({
     where: {
-      orgId: { in: teamIds },
+      teamId: { in: teamIds },
       deletedAt: { not: null },
     },
     include: {
-      org: {
+      team: {
         select: {
           id: true,
           name: true,
@@ -55,9 +55,9 @@ export async function GET() {
   const entries = trashedEntries.map((entry) => ({
     id: entry.id,
     entryType: entry.entryType,
-    teamId: entry.org.id,
-    teamName: entry.org.name,
-    role: roleMap.get(entry.orgId),
+    teamId: entry.team.id,
+    teamName: entry.team.name,
+    role: roleMap.get(entry.teamId),
     isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,
     deletedAt: entry.deletedAt,
@@ -70,7 +70,7 @@ export async function GET() {
     overviewIv: entry.overviewIv,
     overviewAuthTag: entry.overviewAuthTag,
     aadVersion: entry.aadVersion,
-    orgKeyVersion: entry.orgKeyVersion,
+    teamKeyVersion: entry.teamKeyVersion,
   }));
 
   // Sort by deletedAt desc (most recently trashed first)

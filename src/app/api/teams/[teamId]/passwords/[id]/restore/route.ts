@@ -26,11 +26,11 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const existing = await prisma.orgPasswordEntry.findUnique({
+  const existing = await prisma.teamPasswordEntry.findUnique({
     where: { id },
   });
 
-  if (!existing || existing.orgId !== teamId) {
+  if (!existing || existing.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  await prisma.orgPasswordEntry.update({
+  await prisma.teamPasswordEntry.update({
     where: { id },
     data: { deletedAt: null },
   });

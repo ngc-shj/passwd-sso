@@ -209,7 +209,7 @@ describe("createShareLinkSchema – passkey fields", () => {
 
 describe("teamMemberKeySchema", () => {
   const validKey = {
-    encryptedOrgKey: "enc-key-data",
+    encryptedTeamKey: "enc-key-data",
     teamKeyIv: "a".repeat(24),
     teamKeyAuthTag: "b".repeat(32),
     ephemeralPublicKey: '{"kty":"EC"}',
@@ -221,18 +221,18 @@ describe("teamMemberKeySchema", () => {
     expect(teamMemberKeySchema.safeParse(validKey).success).toBe(true);
   });
 
-  it("rejects encryptedOrgKey exceeding max length (1000)", () => {
+  it("rejects encryptedTeamKey exceeding max length (1000)", () => {
     const result = teamMemberKeySchema.safeParse({
       ...validKey,
-      encryptedOrgKey: "x".repeat(1001),
+      encryptedTeamKey: "x".repeat(1001),
     });
     expect(result.success).toBe(false);
   });
 
-  it("accepts encryptedOrgKey at max length (1000)", () => {
+  it("accepts encryptedTeamKey at max length (1000)", () => {
     const result = teamMemberKeySchema.safeParse({
       ...validKey,
-      encryptedOrgKey: "x".repeat(1000),
+      encryptedTeamKey: "x".repeat(1000),
     });
     expect(result.success).toBe(true);
   });

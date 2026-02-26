@@ -41,17 +41,17 @@ export async function GET(
     throw e;
   }
 
-  const entry = await prisma.orgPasswordEntry.findUnique({
+  const entry = await prisma.teamPasswordEntry.findUnique({
     where: { id },
-    select: { orgId: true },
+    select: { teamId: true },
   });
 
-  if (!entry || entry.orgId !== teamId) {
+  if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   const attachments = await prisma.attachment.findMany({
-    where: { orgPasswordEntryId: id },
+    where: { teamPasswordEntryId: id },
     select: {
       id: true,
       filename: true,
@@ -86,18 +86,18 @@ export async function POST(
     throw e;
   }
 
-  const entry = await prisma.orgPasswordEntry.findUnique({
+  const entry = await prisma.teamPasswordEntry.findUnique({
     where: { id },
-    select: { orgId: true },
+    select: { teamId: true },
   });
 
-  if (!entry || entry.orgId !== teamId) {
+  if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   // Check attachment count limit
   const count = await prisma.attachment.count({
-    where: { orgPasswordEntryId: id },
+    where: { teamPasswordEntryId: id },
   });
   if (count >= MAX_ATTACHMENTS_PER_ENTRY) {
     return NextResponse.json(
@@ -133,7 +133,7 @@ export async function POST(
   const filename = formData.get("filename") as string | null;
   const contentType = formData.get("contentType") as string | null;
   const sizeBytes = formData.get("sizeBytes") as string | null;
-  const orgKeyVersionStr = formData.get("orgKeyVersion") as string | null;
+  const teamKeyVersionStr = formData.get("teamKeyVersion") as string | null;
   const aadVersionStr = formData.get("aadVersion") as string | null;
 
   if (!file || !iv || !authTag || !filename || !contentType || !sizeBytes) {
@@ -196,14 +196,14 @@ export async function POST(
   }
 
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 1;
-  const orgKeyVersion = orgKeyVersionStr ? parseInt(orgKeyVersionStr, 10) : 1;
+  const teamKeyVersion = teamKeyVersionStr ? parseInt(teamKeyVersionStr, 10) : 1;
 
-  // Validate orgKeyVersion matches current team key version (S-20/F-23)
-  const team = await prisma.organization.findUnique({
+  // Validate teamKeyVersion matches current team key version (S-20/F-23)
+  const team = await prisma.team.findUnique({
     where: { id: teamId },
-    select: { orgKeyVersion: true },
+    select: { teamKeyVersion: true },
   });
-  if (!team || orgKeyVersion !== team.orgKeyVersion) {
+  if (!team || teamKeyVersion !== team.teamKeyVersion) {
     return NextResponse.json(
       { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
       { status: 409 }
@@ -227,8 +227,8 @@ export async function POST(
         iv,
         authTag,
         aadVersion,
-        keyVersion: orgKeyVersion,
-        orgPasswordEntryId: id,
+        keyVersion: teamKeyVersion,
+        teamPasswordEntryId: id,
         createdById: session.user.id,
       },
       select: {

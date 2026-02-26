@@ -14,25 +14,25 @@ export async function GET() {
   }
 
   // Find teams where the user is OWNER or ADMIN and team is E2E-enabled
-  const adminMemberships = await prisma.orgMember.findMany({
+  const adminMemberships = await prisma.teamMember.findMany({
     where: {
       userId: session.user.id,
       role: { in: [TEAM_ROLE.OWNER, TEAM_ROLE.ADMIN] },
       deactivatedAt: null,
     },
-    select: { orgId: true },
+    select: { teamId: true },
   });
 
   if (adminMemberships.length === 0) {
     return NextResponse.json([]);
   }
 
-  const teamIds = adminMemberships.map((m) => m.orgId);
+  const teamIds = adminMemberships.map((m) => m.teamId);
 
   // Find members who need key distribution
-  const pendingMembers = await prisma.orgMember.findMany({
+  const pendingMembers = await prisma.teamMember.findMany({
     where: {
-      orgId: { in: teamIds },
+      teamId: { in: teamIds },
       keyDistributed: false,
       deactivatedAt: null,
       user: {
@@ -41,16 +41,16 @@ export async function GET() {
     },
     select: {
       id: true,
-      orgId: true,
+      teamId: true,
       userId: true,
       user: {
         select: {
           ecdhPublicKey: true,
         },
       },
-      org: {
+      team: {
         select: {
-          orgKeyVersion: true,
+          teamKeyVersion: true,
         },
       },
     },
@@ -58,10 +58,10 @@ export async function GET() {
 
   const result = pendingMembers.map((m) => ({
     memberId: m.id,
-    teamId: m.orgId,
+    teamId: m.teamId,
     userId: m.userId,
     ecdhPublicKey: m.user.ecdhPublicKey,
-    orgKeyVersion: m.org.orgKeyVersion,
+    teamKeyVersion: m.team.teamKeyVersion,
   }));
 
   return NextResponse.json(result);

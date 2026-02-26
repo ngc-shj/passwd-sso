@@ -28,8 +28,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const invitations = await prisma.orgInvitation.findMany({
-    where: { orgId: teamId, status: INVITATION_STATUS.PENDING },
+  const invitations = await prisma.teamInvitation.findMany({
+    where: { teamId: teamId, status: INVITATION_STATUS.PENDING },
     include: {
       invitedBy: {
         select: { id: true, name: true, email: true },
@@ -92,9 +92,9 @@ export async function POST(req: NextRequest, { params }: Params) {
     where: { email },
   });
   if (existingUser) {
-    const existingMember = await prisma.orgMember.findUnique({
+    const existingMember = await prisma.teamMember.findUnique({
       where: {
-        orgId_userId: { orgId: teamId, userId: existingUser.id },
+        teamId_userId: { teamId: teamId, userId: existingUser.id },
       },
     });
     if (existingMember) {
@@ -117,8 +117,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   // Check for existing pending invitation
-  const existingInv = await prisma.orgInvitation.findFirst({
-    where: { orgId: teamId, email, status: INVITATION_STATUS.PENDING },
+  const existingInv = await prisma.teamInvitation.findFirst({
+    where: { teamId: teamId, email, status: INVITATION_STATUS.PENDING },
   });
   if (existingInv) {
     return NextResponse.json(
@@ -130,9 +130,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-  const invitation = await prisma.orgInvitation.create({
+  const invitation = await prisma.teamInvitation.create({
     data: {
-      orgId: teamId,
+      teamId: teamId,
       email,
       role,
       token,

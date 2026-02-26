@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import type { OrgRole } from "@prisma/client";
+import type { TeamRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { validateScimToken } from "@/lib/scim-token";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
@@ -17,7 +17,7 @@ import { TEAM_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/c
 
 type Params = { params: Promise<{ id: string }> };
 
-const SCIM_GROUP_ROLES: OrgRole[] = [
+const SCIM_GROUP_ROLES: TeamRole[] = [
   TEAM_ROLE.ADMIN,
   TEAM_ROLE.MEMBER,
   TEAM_ROLE.VIEWER,
@@ -28,7 +28,7 @@ async function resolveGroupRole(
   teamId: string,
   tenantId: string,
   scimId: string,
-): Promise<OrgRole | null> {
+): Promise<TeamRole | null> {
   // First try computed group IDs
   for (const role of SCIM_GROUP_ROLES) {
     if (roleGroupId(teamId, role) === scimId) return role;
@@ -54,11 +54,11 @@ async function resolveGroupRole(
 
 async function buildGroupResource(
   teamId: string,
-  role: OrgRole,
+  role: TeamRole,
   baseUrl: string,
 ) {
-  const members = await prisma.orgMember.findMany({
-    where: { orgId: teamId, role, deactivatedAt: null },
+  const members = await prisma.teamMember.findMany({
+    where: { teamId: teamId, role, deactivatedAt: null },
     include: { user: { select: { id: true, email: true } } },
   });
   const memberInputs: ScimGroupMemberInput[] = members
@@ -126,8 +126,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const requestedUserIds = new Set(parsed.data.members.map((m) => m.value));
 
   // Get current members in this role
-  const currentMembers = await prisma.orgMember.findMany({
-    where: { orgId: scopedTeamId, role, deactivatedAt: null },
+  const currentMembers = await prisma.teamMember.findMany({
+    where: { teamId: scopedTeamId, role, deactivatedAt: null },
     select: { id: true, userId: true, role: true },
   });
   const currentUserIds = new Set(currentMembers.map((m) => m.userId));
@@ -147,8 +147,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
   try {
     await prisma.$transaction(async (tx) => {
       for (const userId of toAdd) {
-        const member = await tx.orgMember.findUnique({
-          where: { orgId_userId: { orgId: scopedTeamId, userId } },
+        const member = await tx.teamMember.findUnique({
+          where: { teamId_userId: { teamId: scopedTeamId, userId } },
           select: { id: true, role: true },
         });
         if (!member) {
@@ -157,7 +157,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
         if (member.role === TEAM_ROLE.OWNER) {
           throw new Error("SCIM_OWNER_PROTECTED");
         }
-        await tx.orgMember.update({
+        await tx.teamMember.update({
           where: { id: member.id },
           data: { role },
         });
@@ -165,7 +165,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
       for (const m of toRemove) {
         // Re-check role inside tx to avoid TOCTOU
-        const fresh = await tx.orgMember.findUnique({
+        const fresh = await tx.teamMember.findUnique({
           where: { id: m.id },
           select: { role: true },
         });
@@ -174,7 +174,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
         }
         // Only demote if member is still in the target role (avoids overwriting concurrent changes)
         if (fresh?.role === role) {
-          await tx.orgMember.update({
+          await tx.teamMember.update({
             where: { id: m.id },
             data: { role: TEAM_ROLE.MEMBER },
           });
@@ -252,8 +252,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   try {
     await prisma.$transaction(async (tx) => {
       for (const action of actions) {
-        const member = await tx.orgMember.findUnique({
-          where: { orgId_userId: { orgId: scopedTeamId, userId: action.userId } },
+        const member = await tx.teamMember.findUnique({
+          where: { teamId_userId: { teamId: scopedTeamId, userId: action.userId } },
           select: { id: true, role: true },
         });
         if (!member) {
@@ -266,14 +266,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         }
 
         if (action.op === "add") {
-          await tx.orgMember.update({
+          await tx.teamMember.update({
             where: { id: member.id },
             data: { role },
           });
         } else if (action.op === "remove") {
           // When removed from a group, default to MEMBER
           if (member.role === role) {
-            await tx.orgMember.update({
+            await tx.teamMember.update({
               where: { id: member.id },
               data: { role: TEAM_ROLE.MEMBER },
             });

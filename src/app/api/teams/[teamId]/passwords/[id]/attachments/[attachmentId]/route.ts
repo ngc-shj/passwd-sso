@@ -32,17 +32,17 @@ export async function GET(
     throw e;
   }
 
-  const entry = await prisma.orgPasswordEntry.findUnique({
+  const entry = await prisma.teamPasswordEntry.findUnique({
     where: { id },
-    select: { orgId: true },
+    select: { teamId: true },
   });
 
-  if (!entry || entry.orgId !== teamId) {
+  if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   const attachment = await prisma.attachment.findUnique({
-    where: { id: attachmentId, orgPasswordEntryId: id },
+    where: { id: attachmentId, teamPasswordEntryId: id },
   });
 
   if (!attachment) {
@@ -91,17 +91,17 @@ export async function DELETE(
     throw e;
   }
 
-  const entry = await prisma.orgPasswordEntry.findUnique({
+  const entry = await prisma.teamPasswordEntry.findUnique({
     where: { id },
-    select: { orgId: true },
+    select: { teamId: true },
   });
 
-  if (!entry || entry.orgId !== teamId) {
+  if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   const attachment = await prisma.attachment.findUnique({
-    where: { id: attachmentId, orgPasswordEntryId: id },
+    where: { id: attachmentId, teamPasswordEntryId: id },
     select: { id: true, filename: true, encryptedData: true },
   });
 

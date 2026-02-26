@@ -82,8 +82,8 @@ vi.mock("@/lib/dynamic-styles", () => ({
 }));
 
 vi.mock("@/hooks/use-vault-context", () => ({
-  useVaultContext: (orgs: unknown[]) => mockUseVaultContext(orgs),
-  useTeamVaultContext: (orgs: unknown[]) => mockUseVaultContext(orgs),
+  useVaultContext: (teams: unknown[]) => mockUseVaultContext(teams),
+  useTeamVaultContext: (teams: unknown[]) => mockUseVaultContext(teams),
 }));
 
 // Stub heavy UI components
@@ -194,10 +194,10 @@ const FOLDERS_DATA = [
 ];
 
 const ORG_FOLDERS_DATA = [
-  { id: "of1", name: "OrgWork", parentId: null, sortOrder: 0, entryCount: 3 },
+  { id: "of1", name: "TeamWork", parentId: null, sortOrder: 0, entryCount: 3 },
 ];
 
-/** Mock fetch for initial data loads returning folders and empty tags/orgs. */
+/** Mock fetch for initial data loads returning folders and empty tags/teams. */
 function mockFetchSuccess(overrides?: {
   foldersData?: unknown[];
   teamsData?: unknown[];
@@ -515,7 +515,7 @@ describe("Sidebar team folder CRUD integration", () => {
 
     // Wait for team folder to appear inside the submenu
     await waitFor(() => {
-      expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
+      expect(sidebar.getByText("TeamWork")).toBeInTheDocument();
     });
 
     // Team folder create button with team-specific aria-label
@@ -538,7 +538,7 @@ describe("Sidebar team folder CRUD integration", () => {
     await openTeamSubmenu(sidebar, "team-1");
 
     await waitFor(() => {
-      expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
+      expect(sidebar.getByText("TeamWork")).toBeInTheDocument();
     });
 
     const teamCreateBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
@@ -560,7 +560,7 @@ describe("Sidebar team folder CRUD integration", () => {
     await openTeamSubmenu(sidebar, "team-1");
 
     await waitFor(() => {
-      expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
+      expect(sidebar.getByText("TeamWork")).toBeInTheDocument();
     });
 
     const teamCreateBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
@@ -582,10 +582,10 @@ describe("Sidebar team folder CRUD integration", () => {
     await openTeamSubmenu(sidebar, "team-1");
 
     await waitFor(() => {
-      expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
+      expect(sidebar.getByText("TeamWork")).toBeInTheDocument();
     });
 
-    const teamMenuButton = sidebar.getByRole("button", { name: "OrgWork menu" });
+    const teamMenuButton = sidebar.getByRole("button", { name: "TeamWork menu" });
     expect(teamMenuButton).toBeInTheDocument();
   });
 
@@ -604,10 +604,10 @@ describe("Sidebar team folder CRUD integration", () => {
     await openTeamSubmenu(sidebar, "team-1");
 
     await waitFor(() => {
-      expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
+      expect(sidebar.getByText("TeamWork")).toBeInTheDocument();
     });
 
-    const teamMenuButton = sidebar.getByRole("button", { name: "OrgWork menu" });
+    const teamMenuButton = sidebar.getByRole("button", { name: "TeamWork menu" });
     expect(teamMenuButton).toBeInTheDocument();
   });
 
@@ -626,7 +626,7 @@ describe("Sidebar team folder CRUD integration", () => {
     await openTeamSubmenu(sidebar, "team-1");
 
     await waitFor(() => {
-      expect(sidebar.getByText("OrgWork")).toBeInTheDocument();
+      expect(sidebar.getByText("TeamWork")).toBeInTheDocument();
     });
 
     // Click the team folder create button

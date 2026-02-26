@@ -33,13 +33,13 @@ vi.mock("@/lib/team-auth", () => {
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgInvitation: {
+    teamInvitation: {
       findMany: mockInvitationFindMany,
       findFirst: mockInvitationFindFirst,
       create: mockInvitationCreate,
     },
     user: { findUnique: mockUserFindUnique },
-    orgMember: { findUnique: mockTeamMemberFindUnique },
+    teamMember: { findUnique: mockTeamMemberFindUnique },
   },
 }));
 vi.mock("@/lib/audit", () => ({

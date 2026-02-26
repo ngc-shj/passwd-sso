@@ -26,8 +26,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const tag = await prisma.orgTag.findUnique({ where: { id } });
-  if (!tag || tag.orgId !== teamId) {
+  const tag = await prisma.teamTag.findUnique({ where: { id } });
+  if (!tag || tag.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -46,7 +46,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     );
   }
 
-  const updated = await prisma.orgTag.update({
+  const updated = await prisma.teamTag.update({
     where: { id },
     data: {
       name: parsed.data.name,
@@ -79,12 +79,12 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const tag = await prisma.orgTag.findUnique({ where: { id } });
-  if (!tag || tag.orgId !== teamId) {
+  const tag = await prisma.teamTag.findUnique({ where: { id } });
+  if (!tag || tag.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  await prisma.orgTag.delete({ where: { id } });
+  await prisma.teamTag.delete({ where: { id } });
 
   return NextResponse.json({ success: true });
 }

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 // All mocks must be created inside vi.hoisted() to avoid hoisting issues
-const { mockAuth, mockPrismaOrganization, mockRequireTeamMember, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeam, mockRequireTeamMember, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -13,7 +13,7 @@ const { mockAuth, mockPrismaOrganization, mockRequireTeamMember, mockRequireTeam
   }
   return {
     mockAuth: vi.fn(),
-    mockPrismaOrganization: {
+    mockPrismaTeam: {
       findUnique: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
@@ -26,7 +26,7 @@ const { mockAuth, mockPrismaOrganization, mockRequireTeamMember, mockRequireTeam
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { organization: mockPrismaOrganization },
+  prisma: { team: mockPrismaTeam },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
@@ -42,7 +42,7 @@ const now = new Date("2025-01-01T00:00:00Z");
 
 const ownerMembership = {
   id: "member-1",
-  orgId: TEAM_ID,
+  teamId: TEAM_ID,
   userId: "test-user-id",
   role: TEAM_ROLE.OWNER,
   createdAt: now,
@@ -75,7 +75,7 @@ describe("GET /api/teams/[teamId]", () => {
   });
 
   it("returns team details with counts", async () => {
-    mockPrismaOrganization.findUnique.mockResolvedValue({
+    mockPrismaTeam.findUnique.mockResolvedValue({
       id: TEAM_ID,
       name: "My Team",
       slug: "my-team",
@@ -97,7 +97,7 @@ describe("GET /api/teams/[teamId]", () => {
   });
 
   it("returns 404 when team not found", async () => {
-    mockPrismaOrganization.findUnique.mockResolvedValue(null);
+    mockPrismaTeam.findUnique.mockResolvedValue(null);
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}`),
       createParams({ teamId: TEAM_ID }),
@@ -132,7 +132,7 @@ describe("PUT /api/teams/[teamId]", () => {
   });
 
   it("updates team name successfully", async () => {
-    mockPrismaOrganization.update.mockResolvedValue({
+    mockPrismaTeam.update.mockResolvedValue({
       id: TEAM_ID,
       name: "Updated Team",
       slug: "my-team",
@@ -173,7 +173,7 @@ describe("PUT /api/teams/[teamId]", () => {
   });
 
   it("sets description to null when empty string", async () => {
-    mockPrismaOrganization.update.mockResolvedValue({
+    mockPrismaTeam.update.mockResolvedValue({
       id: TEAM_ID,
       name: "Team",
       slug: "team",
@@ -185,14 +185,14 @@ describe("PUT /api/teams/[teamId]", () => {
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}`, { body: { description: "" } }),
       createParams({ teamId: TEAM_ID }),
     );
-    expect(mockPrismaOrganization.update).toHaveBeenCalledWith({
+    expect(mockPrismaTeam.update).toHaveBeenCalledWith({
       where: { id: TEAM_ID },
       data: { description: null },
     });
   });
 
   it("sets description to value when non-empty", async () => {
-    mockPrismaOrganization.update.mockResolvedValue({
+    mockPrismaTeam.update.mockResolvedValue({
       id: TEAM_ID,
       name: "Team",
       slug: "team",
@@ -204,7 +204,7 @@ describe("PUT /api/teams/[teamId]", () => {
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}`, { body: { description: "Hello" } }),
       createParams({ teamId: TEAM_ID }),
     );
-    expect(mockPrismaOrganization.update).toHaveBeenCalledWith({
+    expect(mockPrismaTeam.update).toHaveBeenCalledWith({
       where: { id: TEAM_ID },
       data: { description: "Hello" },
     });
@@ -237,7 +237,7 @@ describe("DELETE /api/teams/[teamId]", () => {
   });
 
   it("deletes team successfully", async () => {
-    mockPrismaOrganization.delete.mockResolvedValue({});
+    mockPrismaTeam.delete.mockResolvedValue({});
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}`),
       createParams({ teamId: TEAM_ID }),
@@ -245,6 +245,6 @@ describe("DELETE /api/teams/[teamId]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(mockPrismaOrganization.delete).toHaveBeenCalledWith({ where: { id: TEAM_ID } });
+    expect(mockPrismaTeam.delete).toHaveBeenCalledWith({ where: { id: TEAM_ID } });
   });
 });

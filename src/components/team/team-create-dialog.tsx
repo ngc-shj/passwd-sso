@@ -95,7 +95,7 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
           slug: slug.trim(),
           description: description.trim() || undefined,
           teamMemberKey: {
-            encryptedOrgKey: escrow.encryptedOrgKey,
+            encryptedTeamKey: escrow.encryptedTeamKey,
             teamKeyIv: escrow.teamKeyIv,
             teamKeyAuthTag: escrow.teamKeyAuthTag,
             ephemeralPublicKey: escrow.ephemeralPublicKey,

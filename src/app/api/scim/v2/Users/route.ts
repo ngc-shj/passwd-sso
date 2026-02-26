@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
   // No deactivatedAt filter by default — RFC 7644 §3.4.2 requires unfiltered
   // GET to return all resources. The `active` field distinguishes state.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let prismaWhere: Record<string, any> = { orgId: scopedTeamId, user: { email: { not: null } } };
+  let prismaWhere: Record<string, any> = { teamId: scopedTeamId, user: { email: { not: null } } };
 
   if (filterParam) {
     try {
@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
   }
 
   const [members, totalResults] = await Promise.all([
-    prisma.orgMember.findMany({
+    prisma.teamMember.findMany({
       where: prismaWhere,
       include: {
         user: { select: { id: true, email: true, name: true } },
@@ -90,7 +90,7 @@ export async function GET(req: NextRequest) {
       take: count,
       orderBy: { createdAt: "asc" },
     }),
-    prisma.orgMember.count({ where: prismaWhere }),
+    prisma.teamMember.count({ where: prismaWhere }),
   ]);
 
   const baseUrl = getScimBaseUrl();
@@ -162,14 +162,14 @@ export async function POST(req: NextRequest) {
       }
 
       // Check for existing TeamMember
-      const existingMember = await tx.orgMember.findUnique({
-        where: { orgId_userId: { orgId: scopedTeamId, userId: user.id } },
+      const existingMember = await tx.teamMember.findUnique({
+        where: { teamId_userId: { teamId: scopedTeamId, userId: user.id } },
       });
 
       if (existingMember) {
         if (existingMember.deactivatedAt !== null) {
           // Re-activate deactivated member
-          await tx.orgMember.update({
+          await tx.teamMember.update({
             where: { id: existingMember.id },
             data: {
               deactivatedAt: active === false ? new Date() : null,
@@ -182,9 +182,9 @@ export async function POST(req: NextRequest) {
         }
       } else {
         // Create new TeamMember
-        await tx.orgMember.create({
+        await tx.teamMember.create({
           data: {
-            orgId: scopedTeamId,
+            teamId: scopedTeamId,
             userId: user.id,
             role: TEAM_ROLE.MEMBER,
             scimManaged: true,
@@ -217,7 +217,7 @@ export async function POST(req: NextRequest) {
           });
           await tx.scimExternalMapping.create({
             data: {
-              orgId: scopedTeamId,
+              teamId: scopedTeamId,
               tenantId,
               externalId,
               resourceType: "User",
@@ -228,8 +228,8 @@ export async function POST(req: NextRequest) {
       }
 
       // Re-fetch to get latest state
-      const member = await tx.orgMember.findUnique({
-        where: { orgId_userId: { orgId: scopedTeamId, userId: user.id } },
+      const member = await tx.teamMember.findUnique({
+        where: { teamId_userId: { teamId: scopedTeamId, userId: user.id } },
       });
 
       return { user, member: member!, externalId, reactivated: !!existingMember };

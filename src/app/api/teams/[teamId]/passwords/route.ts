@@ -39,9 +39,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   const trashOnly = searchParams.get("trash") === "true";
   const archivedOnly = searchParams.get("archived") === "true";
 
-  const passwords = await prisma.orgPasswordEntry.findMany({
+  const passwords = await prisma.teamPasswordEntry.findMany({
     where: {
-      orgId: teamId,
+      teamId: teamId,
       ...(trashOnly
         ? { deletedAt: { not: null } }
         : { deletedAt: null }),
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         ? { favorites: { some: { userId: session.user.id } } }
         : {}),
       ...(tagId ? { tags: { some: { id: tagId } } } : {}),
-      ...(folderId ? { orgFolderId: folderId } : {}),
+      ...(folderId ? { teamFolderId: folderId } : {}),
       ...(entryType ? { entryType } : {}),
     },
     include: {
@@ -70,9 +70,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   // Auto-purge items deleted more than 30 days ago (fire-and-forget, F-20)
   if (!trashOnly) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    prisma.orgPasswordEntry.deleteMany({
+    prisma.teamPasswordEntry.deleteMany({
       where: {
-        orgId: teamId,
+        teamId: teamId,
         deletedAt: { lt: thirtyDaysAgo },
       },
     }).catch(() => {});
@@ -85,7 +85,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     overviewIv: entry.overviewIv,
     overviewAuthTag: entry.overviewAuthTag,
     aadVersion: entry.aadVersion,
-    teamKeyVersion: entry.orgKeyVersion,
+    teamKeyVersion: entry.teamKeyVersion,
     isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,
     tags: entry.tags,
@@ -141,11 +141,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, entryType, tagIds, teamFolderId } = parsed.data;
 
   // Validate teamKeyVersion matches current team key version
-  const team = await prisma.organization.findUnique({
+  const team = await prisma.team.findUnique({
     where: { id: teamId },
-    select: { orgKeyVersion: true },
+    select: { teamKeyVersion: true },
   });
-  if (!team || teamKeyVersion !== team.orgKeyVersion) {
+  if (!team || teamKeyVersion !== team.teamKeyVersion) {
     return NextResponse.json(
       { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
       { status: 409 }
@@ -154,11 +154,11 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // Validate teamFolderId belongs to this team
   if (teamFolderId) {
-    const folder = await prisma.orgFolder.findUnique({
+    const folder = await prisma.teamFolder.findUnique({
       where: { id: teamFolderId },
-      select: { orgId: true },
+      select: { teamId: true },
     });
-    if (!folder || folder.orgId !== teamId) {
+    if (!folder || folder.teamId !== teamId) {
       return NextResponse.json({ error: API_ERROR.FOLDER_NOT_FOUND }, { status: 400 });
     }
   }
@@ -166,7 +166,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Use client-provided ID (bound into AAD during encryption) or generate one
   const entryId = clientId ?? crypto.randomUUID();
 
-  const entry = await prisma.orgPasswordEntry.create({
+  const entry = await prisma.teamPasswordEntry.create({
     data: {
       id: entryId,
       encryptedBlob: encryptedBlob.ciphertext,
@@ -176,12 +176,12 @@ export async function POST(req: NextRequest, { params }: Params) {
       overviewIv: encryptedOverview.iv,
       overviewAuthTag: encryptedOverview.authTag,
       aadVersion,
-      orgKeyVersion: teamKeyVersion,
+      teamKeyVersion: teamKeyVersion,
       entryType,
-      orgId: teamId,
+      teamId: teamId,
       createdById: session.user.id,
       updatedById: session.user.id,
-      ...(teamFolderId ? { orgFolderId: teamFolderId } : {}),
+      ...(teamFolderId ? { teamFolderId: teamFolderId } : {}),
       ...(tagIds?.length
         ? { tags: { connect: tagIds.map((id) => ({ id })) } }
         : {}),

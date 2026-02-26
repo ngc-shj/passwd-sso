@@ -4,13 +4,13 @@ import { NextRequest } from "next/server";
 const {
   mockAuth,
   mockRequireTeamPermission,
-  mockOrgFindUnique,
+  mockTeamFindUnique,
   mockTransaction,
   MockTeamAuthError,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
-  mockOrgFindUnique: vi.fn(),
+  mockTeamFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
   MockTeamAuthError: class MockTeamAuthError extends Error {
     status: number;
@@ -22,10 +22,10 @@ const {
 }));
 
 const txMock = {
-  organization: { findUnique: vi.fn(), update: vi.fn() },
-  orgMember: { findMany: vi.fn() },
-  orgPasswordEntry: { updateMany: vi.fn(), findMany: vi.fn() },
-  orgMemberKey: { create: vi.fn() },
+  team: { findUnique: vi.fn(), update: vi.fn() },
+  teamMember: { findMany: vi.fn() },
+  teamPasswordEntry: { updateMany: vi.fn(), findMany: vi.fn() },
+  teamMemberKey: { create: vi.fn() },
 };
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -35,7 +35,7 @@ vi.mock("@/lib/team-auth", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    organization: { findUnique: mockOrgFindUnique },
+    team: { findUnique: mockTeamFindUnique },
     $transaction: mockTransaction,
   },
 }));
@@ -71,7 +71,7 @@ function validEntry(id: string) {
 function validMemberKey(userId: string) {
   return {
     userId,
-    encryptedOrgKey: "enc-key",
+    encryptedTeamKey: "enc-key",
     teamKeyIv: "a".repeat(24),
     teamKeyAuthTag: "b".repeat(32),
     ephemeralPublicKey: "pub-key",
@@ -85,16 +85,16 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockOrgFindUnique.mockResolvedValue({
-      orgKeyVersion: 1,
+    mockTeamFindUnique.mockResolvedValue({
+      teamKeyVersion: 1,
     });
     // Interactive transaction: call the callback with tx proxy
-    txMock.organization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
-    txMock.organization.update.mockResolvedValue({});
-    txMock.orgMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
-    txMock.orgPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
-    txMock.orgPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }]);
-    txMock.orgMemberKey.create.mockResolvedValue({});
+    txMock.team.findUnique.mockResolvedValue({ teamKeyVersion: 1 });
+    txMock.team.update.mockResolvedValue({});
+    txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
+    txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
+    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }]);
+    txMock.teamMemberKey.create.mockResolvedValue({});
     mockTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
   });
 
@@ -102,7 +102,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
@@ -114,7 +114,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   it("returns 409 when version mismatch", async () => {
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 5, // should be 2
+        newTeamKeyVersion: 5, // should be 2
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
@@ -126,10 +126,10 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   });
 
   it("returns 400 when member key missing (F-26: checked inside tx)", async () => {
-    txMock.orgMember.findMany.mockResolvedValue([{ userId: "user-1" }, { userId: "user-2" }]);
+    txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }, { userId: "user-2" }]);
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")], // missing user-2
       }),
@@ -141,10 +141,10 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   });
 
   it("returns 404 when team not found", async () => {
-    mockOrgFindUnique.mockResolvedValue(null);
+    mockTeamFindUnique.mockResolvedValue(null);
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
@@ -161,7 +161,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     );
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
@@ -174,7 +174,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const tooManyEntries = Array.from({ length: 1001 }, (_, i) => validEntry(`e${i}`));
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: tooManyEntries,
         memberKeys: [validMemberKey("user-1")],
       }),
@@ -196,10 +196,10 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   });
 
   it("returns 400 when memberKeys contain non-member userId (F-18/S-22, F-26: inside tx)", async () => {
-    txMock.orgMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
+    txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1"), validMemberKey("non-member-user")],
       }),
@@ -210,12 +210,12 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(json.details.unknownUserId).toBe("non-member-user");
   });
 
-  it("returns 409 when orgKeyVersion changed concurrently (S-17 optimistic lock)", async () => {
+  it("returns 409 when teamKeyVersion changed concurrently (S-17 optimistic lock)", async () => {
     // Pre-read returns version 1, but inside tx it's already been bumped to 2
-    txMock.organization.findUnique.mockResolvedValue({ orgKeyVersion: 2 });
+    txMock.team.findUnique.mockResolvedValue({ teamKeyVersion: 2 });
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
@@ -229,7 +229,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   it("rotates key successfully and logs audit (S-2)", async () => {
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
@@ -238,7 +238,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(json.orgKeyVersion).toBe(2);
+    expect(json.teamKeyVersion).toBe(2);
     expect(mockTransaction).toHaveBeenCalled();
     expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -256,10 +256,10 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
 
   it("returns 400 when entry count does not match team entries (F-17)", async () => {
     // Team has 3 entries but client submits only 1
-    txMock.orgPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e2" }, { id: "e3" }]);
+    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e2" }, { id: "e3" }]);
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
@@ -271,10 +271,10 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   });
 
   it("returns 400 when submitted entry IDs do not exactly match team entries", async () => {
-    txMock.orgPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }]);
+    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }]);
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: [validEntry("deleted-or-foreign-id")],
         memberKeys: [validMemberKey("user-1")],
       }),
@@ -288,24 +288,24 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   it("passes wrapVersion to TeamMemberKey create (F-19)", async () => {
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: [validEntry("e1")],
         memberKeys: [{ ...validMemberKey("user-1"), wrapVersion: 1 }],
       }),
       createParams("team-1"),
     );
     expect(res.status).toBe(200);
-    expect(txMock.orgMemberKey.create).toHaveBeenCalledWith(
+    expect(txMock.teamMemberKey.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ wrapVersion: 1 }),
       }),
     );
   });
 
-  it("uses newOrgKeyVersion for memberKey creation regardless of payload keyVersion (S-3)", async () => {
+  it("uses newTeamKeyVersion for memberKey creation regardless of payload keyVersion (S-3)", async () => {
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: [validEntry("e1")],
         memberKeys: [{
           ...validMemberKey("user-1"),
@@ -315,7 +315,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createParams("team-1"),
     );
     expect(res.status).toBe(200);
-    expect(txMock.orgMemberKey.create).toHaveBeenCalledWith(
+    expect(txMock.teamMemberKey.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ keyVersion: 2 }), // server forces correct version
       }),
@@ -325,41 +325,41 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   it("includes trashed entries in rotation (all-entries policy)", async () => {
     // Team has 2 entries: one active (e1), one trashed (e-trash).
     // rotate-key must cover ALL entries including trash.
-    txMock.orgPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e-trash" }]);
-    txMock.orgPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
-    txMock.orgMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
+    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e-trash" }]);
+    txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
+    txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: [validEntry("e1"), validEntry("e-trash")],
         memberKeys: [validMemberKey("user-1")],
       }),
       createParams("team-1"),
     );
     expect(res.status).toBe(200);
-    expect(txMock.orgPasswordEntry.updateMany).toHaveBeenCalledTimes(2);
+    expect(txMock.teamPasswordEntry.updateMany).toHaveBeenCalledTimes(2);
     // Verify findMany was called without deletedAt filter
-    expect(txMock.orgPasswordEntry.findMany).toHaveBeenCalledWith({
-      where: { orgId: "team-1" },
+    expect(txMock.teamPasswordEntry.findMany).toHaveBeenCalledWith({
+      where: { teamId: "team-1" },
       select: { id: true },
     });
   });
 
-  it("succeeds with entries having mixed orgKeyVersions after history restore (F-29)", async () => {
-    // Two entries exist — one may have been restored from history with a stale orgKeyVersion.
-    // rotate-key should update all entries regardless of their current orgKeyVersion.
-    txMock.orgPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e2" }]);
-    txMock.orgPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
-    txMock.orgMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
+  it("succeeds with entries having mixed teamKeyVersions after history restore (F-29)", async () => {
+    // Two entries exist — one may have been restored from history with a stale teamKeyVersion.
+    // rotate-key should update all entries regardless of their current teamKeyVersion.
+    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e2" }]);
+    txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
+    txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
     const res = await POST(
       createRequest({
-        newOrgKeyVersion: 2,
+        newTeamKeyVersion: 2,
         entries: [validEntry("e1"), validEntry("e2")],
         memberKeys: [validMemberKey("user-1")],
       }),
       createParams("team-1"),
     );
     expect(res.status).toBe(200);
-    expect(txMock.orgPasswordEntry.updateMany).toHaveBeenCalledTimes(2);
+    expect(txMock.teamPasswordEntry.updateMany).toHaveBeenCalledTimes(2);
   });
 });

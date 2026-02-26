@@ -16,7 +16,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: { findUnique: mockFindUnique },
-    orgPasswordEntry: { findUnique: mockFindUnique },
+    teamPasswordEntry: { findUnique: mockFindUnique },
     passwordShare: { create: mockCreate, findMany: mockFindMany },
   },
 }));
@@ -185,7 +185,7 @@ describe("POST /api/share-links", () => {
 
   it("creates E2E team share link with client-encrypted data", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockFindUnique.mockResolvedValue({ orgId: "team-123" });
+    mockFindUnique.mockResolvedValue({ teamId: "team-123" });
     mockCreate.mockResolvedValue({
       id: "share-e2e",
       expiresAt: new Date(Date.now() + 86400000),
@@ -260,7 +260,7 @@ describe("POST /api/share-links", () => {
 
   it("returns TeamAuthError status for team entry permission denied", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockFindUnique.mockResolvedValueOnce({ orgId: "team-123" });
+    mockFindUnique.mockResolvedValueOnce({ teamId: "team-123" });
 
     const { requireTeamPermission } = await import("@/lib/team-auth");
     const { TeamAuthError: RealTeamAuthError } = await import("@/lib/team-auth");

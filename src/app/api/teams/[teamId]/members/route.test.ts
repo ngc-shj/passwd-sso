@@ -20,7 +20,7 @@ const { mockAuth, mockPrismaTeamMember, mockRequireTeamMember, TeamAuthError } =
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { orgMember: mockPrismaTeamMember },
+  prisma: { teamMember: mockPrismaTeamMember },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,

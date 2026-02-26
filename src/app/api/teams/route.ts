@@ -5,17 +5,17 @@ import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
 
-// GET /api/teams — List organizations the user belongs to
+// GET /api/teams — List teams the user belongs to
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const memberships = await prisma.orgMember.findMany({
+  const memberships = await prisma.teamMember.findMany({
     where: { userId: session.user.id, deactivatedAt: null },
     include: {
-      org: {
+      team: {
         select: {
           id: true,
           name: true,
@@ -25,18 +25,18 @@ export async function GET() {
         },
       },
     },
-    orderBy: { org: { name: "asc" } },
+    orderBy: { team: { name: "asc" } },
   });
 
-  const orgs = memberships.map((m) => ({
-    ...m.org,
+  const teams = memberships.map((m) => ({
+    ...m.team,
     role: m.role,
   }));
 
-  return NextResponse.json(orgs);
+  return NextResponse.json(teams);
 }
 
-// POST /api/teams — Create a new E2E-enabled organization
+// POST /api/teams — Create a new E2E-enabled team
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
   const { id: clientId, name, slug, description, teamMemberKey } = parsed.data;
 
   // Check slug uniqueness
-  const existing = await prisma.organization.findUnique({
+  const existing = await prisma.team.findUnique({
     where: { slug },
   });
   if (existing) {
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const team = await prisma.organization.create({
+  const team = await prisma.team.create({
     data: {
       ...(clientId ? { id: clientId } : {}),
       tenant: {
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
       name,
       slug,
       description: description || null,
-      orgKeyVersion: 1,
+      teamKeyVersion: 1,
       members: {
         create: {
           userId: session.user.id,
@@ -94,9 +94,9 @@ export async function POST(req: NextRequest) {
       memberKeys: {
         create: {
           userId: session.user.id,
-          encryptedOrgKey: teamMemberKey.encryptedOrgKey,
-          orgKeyIv: teamMemberKey.teamKeyIv,
-          orgKeyAuthTag: teamMemberKey.teamKeyAuthTag,
+          encryptedTeamKey: teamMemberKey.encryptedTeamKey,
+          teamKeyIv: teamMemberKey.teamKeyIv,
+          teamKeyAuthTag: teamMemberKey.teamKeyAuthTag,
           ephemeralPublicKey: teamMemberKey.ephemeralPublicKey,
           hkdfSalt: teamMemberKey.hkdfSalt,
           keyVersion: teamMemberKey.keyVersion,

@@ -33,7 +33,7 @@ vi.mock("@/lib/team-auth", () => {
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgPasswordEntry: { findUnique: mockEntryFindUnique },
+    teamPasswordEntry: { findUnique: mockEntryFindUnique },
     attachment: {
       findUnique: mockAttachmentFindUnique,
       delete: mockAttachmentDelete,
@@ -73,7 +73,7 @@ function createDeleteRequest() {
   );
 }
 
-const TEAM_ENTRY = { orgId: "o1" };
+const TEAM_ENTRY = { teamId: "o1" };
 
 const ATTACHMENT = {
   id: "a1",
@@ -114,7 +114,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
   it("returns 404 when entry belongs to different team", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ orgId: "other-team" });
+    mockEntryFindUnique.mockResolvedValue({ teamId: "other-team" });
     const res = await GET(createGetRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(404);
   });
@@ -178,7 +178,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
   it("returns 404 when entry belongs to different team", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ orgId: "other-team" });
+    mockEntryFindUnique.mockResolvedValue({ teamId: "other-team" });
     const res = await DELETE(createDeleteRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(404);
   });
@@ -186,7 +186,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
   it("returns 404 when attachment not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ orgId: "o1" });
+    mockEntryFindUnique.mockResolvedValue({ teamId: "o1" });
     mockAttachmentFindUnique.mockResolvedValue(null);
     const res = await DELETE(createDeleteRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(404);
@@ -195,7 +195,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
   it("deletes attachment successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ orgId: "o1" });
+    mockEntryFindUnique.mockResolvedValue({ teamId: "o1" });
     mockAttachmentFindUnique.mockResolvedValue({
       id: "a1",
       filename: "test.pdf",

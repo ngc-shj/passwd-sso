@@ -371,7 +371,7 @@ export default function AuditLogsPage() {
         format,
         entryCount,
         encrypted: encrypted ? t("yes") : t("no"),
-        orgs: includeTeams ? t("included") : t("notIncluded"),
+        teams: includeTeams ? t("included") : t("notIncluded"),
       });
     }
 

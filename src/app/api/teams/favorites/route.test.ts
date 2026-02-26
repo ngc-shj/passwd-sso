@@ -1,17 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaOrgPasswordFavorite, mockHasTeamPermission } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeamPasswordFavorite, mockHasTeamPermission } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamMember: { findMany: vi.fn() },
-  mockPrismaOrgPasswordFavorite: { findMany: vi.fn() },
+  mockPrismaTeamPasswordFavorite: { findMany: vi.fn() },
   mockHasTeamPermission: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockPrismaTeamMember,
-    orgPasswordFavorite: mockPrismaOrgPasswordFavorite,
+    teamMember: mockPrismaTeamMember,
+    teamPasswordFavorite: mockPrismaTeamPasswordFavorite,
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
@@ -36,7 +36,7 @@ describe("GET /api/teams/favorites", () => {
 
   it("returns empty array when no memberships", async () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([]);
-    mockPrismaOrgPasswordFavorite.findMany.mockResolvedValue([]);
+    mockPrismaTeamPasswordFavorite.findMany.mockResolvedValue([]);
     const res = await GET();
     const json = await res.json();
     expect(json).toEqual([]);
@@ -45,13 +45,13 @@ describe("GET /api/teams/favorites", () => {
   it("returns favorited entries with encrypted overviews (E2E mode)", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
     mockPrismaTeamMember.findMany.mockResolvedValue([
-      { orgId: "team-1", role: TEAM_ROLE.MEMBER },
+      { teamId: "team-1", role: TEAM_ROLE.MEMBER },
     ]);
-    mockPrismaOrgPasswordFavorite.findMany.mockResolvedValue([
+    mockPrismaTeamPasswordFavorite.findMany.mockResolvedValue([
       {
-        orgPasswordEntry: {
+        teamPasswordEntry: {
           id: "pw-1",
-          orgId: "team-1",
+          teamId: "team-1",
           entryType: ENTRY_TYPE.LOGIN,
           deletedAt: null,
           isArchived: false,
@@ -59,8 +59,8 @@ describe("GET /api/teams/favorites", () => {
           overviewIv: "a".repeat(24),
           overviewAuthTag: "b".repeat(32),
           aadVersion: 1,
-          orgKeyVersion: 1,
-          org: { id: "team-1", name: "My Team" },
+          teamKeyVersion: 1,
+          team: { id: "team-1", name: "My Team" },
           tags: [],
           createdBy: { id: "u1", name: "User", image: null },
           updatedBy: { id: "u1", name: "User" },
@@ -79,7 +79,7 @@ describe("GET /api/teams/favorites", () => {
     expect(json[0].overviewIv).toBe("a".repeat(24));
     expect(json[0].overviewAuthTag).toBe("b".repeat(32));
     expect(json[0].aadVersion).toBe(1);
-    expect(json[0].orgKeyVersion).toBe(1);
+    expect(json[0].teamKeyVersion).toBe(1);
     expect(json[0].entryType).toBe(ENTRY_TYPE.LOGIN);
     expect(json[0].isFavorite).toBe(true);
     // No decrypted title/username fields
@@ -89,13 +89,13 @@ describe("GET /api/teams/favorites", () => {
   it("filters out deleted and archived entries", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
     mockPrismaTeamMember.findMany.mockResolvedValue([
-      { orgId: "team-1", role: TEAM_ROLE.MEMBER },
+      { teamId: "team-1", role: TEAM_ROLE.MEMBER },
     ]);
-    mockPrismaOrgPasswordFavorite.findMany.mockResolvedValue([
+    mockPrismaTeamPasswordFavorite.findMany.mockResolvedValue([
       {
-        orgPasswordEntry: {
+        teamPasswordEntry: {
           id: "pw-del",
-          orgId: "team-1",
+          teamId: "team-1",
           entryType: ENTRY_TYPE.LOGIN,
           deletedAt: now,
           isArchived: false,
@@ -103,8 +103,8 @@ describe("GET /api/teams/favorites", () => {
           overviewIv: "a".repeat(24),
           overviewAuthTag: "b".repeat(32),
           aadVersion: 1,
-          orgKeyVersion: 1,
-          org: { id: "team-1", name: "My Team" },
+          teamKeyVersion: 1,
+          team: { id: "team-1", name: "My Team" },
           tags: [],
           createdBy: { id: "u1", name: "User", image: null },
           updatedBy: null,
@@ -113,9 +113,9 @@ describe("GET /api/teams/favorites", () => {
         },
       },
       {
-        orgPasswordEntry: {
+        teamPasswordEntry: {
           id: "pw-arch",
-          orgId: "team-1",
+          teamId: "team-1",
           entryType: ENTRY_TYPE.LOGIN,
           deletedAt: null,
           isArchived: true,
@@ -123,8 +123,8 @@ describe("GET /api/teams/favorites", () => {
           overviewIv: "a".repeat(24),
           overviewAuthTag: "b".repeat(32),
           aadVersion: 1,
-          orgKeyVersion: 1,
-          org: { id: "team-1", name: "My Team" },
+          teamKeyVersion: 1,
+          team: { id: "team-1", name: "My Team" },
           tags: [],
           createdBy: { id: "u1", name: "User", image: null },
           updatedBy: null,

@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     if (shareType === "send") {
       return NextResponse.json({ items: [], nextCursor: null });
     }
-    where.orgPasswordEntry = { orgId: teamId };
+    where.teamPasswordEntry = { teamId: teamId };
     // VIEWER can only see links they created. Higher roles can view team-wide links.
     if (membershipRole === TEAM_ROLE.VIEWER) {
       where.createdById = session.user.id;
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
     }
     // "all" or null: personal entries + sends, exclude team shares (shown in team context)
     if (!shareType || (shareType !== "entry" && shareType !== "send")) {
-      where.orgPasswordEntryId = null;
+      where.teamPasswordEntryId = null;
     }
   }
 
@@ -81,8 +81,8 @@ export async function GET(req: NextRequest) {
         passwordEntry: {
           select: { id: true },
         },
-        orgPasswordEntry: {
-          select: { id: true, org: { select: { name: true } } },
+        teamPasswordEntry: {
+          select: { id: true, team: { select: { name: true } } },
         },
       },
     });
@@ -108,8 +108,8 @@ export async function GET(req: NextRequest) {
       revokedAt: s.revokedAt,
       createdAt: s.createdAt,
       passwordEntryId: s.passwordEntryId,
-      teamPasswordEntryId: s.orgPasswordEntryId,
-      teamName: s.orgPasswordEntry?.org?.name ?? null,
+      teamPasswordEntryId: s.teamPasswordEntryId,
+      teamName: s.teamPasswordEntry?.team?.name ?? null,
       hasPersonalEntry: !!s.passwordEntry,
       sharedBy:
         s.createdBy.name?.trim() ||

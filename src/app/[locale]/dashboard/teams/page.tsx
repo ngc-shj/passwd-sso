@@ -53,7 +53,7 @@ export default function TeamsPage() {
             <div className="min-w-0 space-y-1">
               <div className="flex items-center gap-3">
                 <Building2 className="h-6 w-6" />
-                <h1 className="text-2xl font-bold">{t("organizations")}</h1>
+                <h1 className="text-2xl font-bold">{t("teams")}</h1>
               </div>
               <p className="text-sm text-muted-foreground">{t("manage")}</p>
             </div>

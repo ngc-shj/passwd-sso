@@ -20,8 +20,8 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgInvitation: mockPrismaTeamInvitation,
-    orgMember: mockPrismaTeamMember,
+    teamInvitation: mockPrismaTeamInvitation,
+    teamMember: mockPrismaTeamMember,
     user: mockPrismaUser,
     $transaction: mockTransaction,
   },
@@ -37,13 +37,13 @@ const futureDate = new Date("2099-01-01T00:00:00Z");
 
 const validInvitation = {
   id: "inv-1",
-  orgId: "team-1",
+  teamId: "team-1",
   email: "user@test.com",
   role: TEAM_ROLE.MEMBER,
   token: "valid-token",
   status: INVITATION_STATUS.PENDING,
   expiresAt: futureDate,
-  org: { id: "team-1", name: "My Team", slug: "my-org" },
+  team: { id: "team-1", name: "My Team", slug: "my-team" },
 };
 
 describe("POST /api/teams/invitations/accept", () => {
@@ -169,7 +169,7 @@ describe("POST /api/teams/invitations/accept", () => {
     expect(res.status).toBe(200);
     expect(json.alreadyMember).toBe(false);
     expect(json.role).toBe(TEAM_ROLE.MEMBER);
-    expect(json.org.name).toBe("My Team");
+    expect(json.team.name).toBe("My Team");
     expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
 

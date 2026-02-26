@@ -135,7 +135,7 @@ vi.mock("@/components/passwords/entry-sort-menu", () => ({
 }));
 
 vi.mock("@/components/team/team-favorites-list", () => ({
-  OrgFavoritesList: () => null,
+  TeamFavoritesList: () => null,
 }));
 
 vi.mock("@/lib/team-vault-context", () => ({

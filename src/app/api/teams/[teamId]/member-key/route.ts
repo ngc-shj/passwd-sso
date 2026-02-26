@@ -26,8 +26,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   // Check if key has been distributed to this member
-  const membership = await prisma.orgMember.findFirst({
-    where: { orgId: teamId, userId: session.user.id, deactivatedAt: null },
+  const membership = await prisma.teamMember.findFirst({
+    where: { teamId: teamId, userId: session.user.id, deactivatedAt: null },
     select: { keyDistributed: true },
   });
 
@@ -50,10 +50,10 @@ export async function GET(req: NextRequest, { params }: Params) {
         { status: 400 }
       );
     }
-    memberKey = await prisma.orgMemberKey.findUnique({
+    memberKey = await prisma.teamMemberKey.findUnique({
       where: {
-        orgId_userId_keyVersion: {
-          orgId: teamId,
+        teamId_userId_keyVersion: {
+          teamId: teamId,
           userId: session.user.id,
           keyVersion,
         },
@@ -61,8 +61,8 @@ export async function GET(req: NextRequest, { params }: Params) {
     });
   } else {
     // Get the latest key version
-    memberKey = await prisma.orgMemberKey.findFirst({
-      where: { orgId: teamId, userId: session.user.id },
+    memberKey = await prisma.teamMemberKey.findFirst({
+      where: { teamId: teamId, userId: session.user.id },
       orderBy: { keyVersion: "desc" },
     });
   }
@@ -75,9 +75,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   return NextResponse.json({
-    encryptedOrgKey: memberKey.encryptedOrgKey,
-    teamKeyIv: memberKey.orgKeyIv,
-    teamKeyAuthTag: memberKey.orgKeyAuthTag,
+    encryptedTeamKey: memberKey.encryptedTeamKey,
+    teamKeyIv: memberKey.teamKeyIv,
+    teamKeyAuthTag: memberKey.teamKeyAuthTag,
     ephemeralPublicKey: memberKey.ephemeralPublicKey,
     hkdfSalt: memberKey.hkdfSalt,
     keyVersion: memberKey.keyVersion,

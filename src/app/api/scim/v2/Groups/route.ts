@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import type { OrgRole } from "@prisma/client";
+import type { TeamRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { validateScimToken } from "@/lib/scim-token";
 import {
@@ -20,7 +20,7 @@ import { TEAM_ROLE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 
 /** Non-OWNER roles exposed as SCIM Groups. */
-const SCIM_GROUP_ROLES: OrgRole[] = [
+const SCIM_GROUP_ROLES: TeamRole[] = [
   TEAM_ROLE.ADMIN,
   TEAM_ROLE.MEMBER,
   TEAM_ROLE.VIEWER,
@@ -41,12 +41,12 @@ export async function GET(req: NextRequest) {
   const baseUrl = getScimBaseUrl();
 
   // Fetch all active members grouped by role
-  const members = await prisma.orgMember.findMany({
-    where: { orgId: scopedTeamId, deactivatedAt: null },
+  const members = await prisma.teamMember.findMany({
+    where: { teamId: scopedTeamId, deactivatedAt: null },
     include: { user: { select: { id: true, email: true } } },
   });
 
-  const membersByRole = new Map<OrgRole, ScimGroupMemberInput[]>();
+  const membersByRole = new Map<TeamRole, ScimGroupMemberInput[]>();
   for (const role of SCIM_GROUP_ROLES) {
     membersByRole.set(role, []);
   }
@@ -140,7 +140,7 @@ export async function POST(req: NextRequest) {
           },
         });
         await prisma.scimExternalMapping.create({
-          data: { orgId: scopedTeamId, tenantId, externalId, resourceType: "Group", internalId: groupId },
+          data: { teamId: scopedTeamId, tenantId, externalId, resourceType: "Group", internalId: groupId },
         });
       } catch (e) {
         if (isScimExternalMappingUniqueViolation(e)) {
@@ -154,8 +154,8 @@ export async function POST(req: NextRequest) {
   const baseUrl = getScimBaseUrl();
 
   // Fetch current members for this role
-  const members = await prisma.orgMember.findMany({
-    where: { orgId: scopedTeamId, role: matchedRole, deactivatedAt: null },
+  const members = await prisma.teamMember.findMany({
+    where: { teamId: scopedTeamId, role: matchedRole, deactivatedAt: null },
     include: { user: { select: { id: true, email: true } } },
   });
 

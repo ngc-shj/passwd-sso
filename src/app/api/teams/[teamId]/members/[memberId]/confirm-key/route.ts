@@ -33,12 +33,12 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   // Verify target member exists, belongs to this team, and is active
-  const targetMember = await prisma.orgMember.findUnique({
+  const targetMember = await prisma.teamMember.findUnique({
     where: { id: memberId },
-    select: { orgId: true, userId: true, keyDistributed: true, deactivatedAt: true },
+    select: { teamId: true, userId: true, keyDistributed: true, deactivatedAt: true },
   });
 
-  if (!targetMember || targetMember.orgId !== teamId || targetMember.deactivatedAt !== null) {
+  if (!targetMember || targetMember.teamId !== teamId || targetMember.deactivatedAt !== null) {
     return NextResponse.json(
       { error: API_ERROR.MEMBER_NOT_FOUND },
       { status: 404 }
@@ -83,9 +83,9 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const data = parsed.data;
 
-  // Atomic check-and-set: re-verify keyDistributed + deactivatedAt + orgKeyVersion inside transaction (S-12/F-16/S-24)
+  // Atomic check-and-set: re-verify keyDistributed + deactivatedAt + teamKeyVersion inside transaction (S-12/F-16/S-24)
   const distributed = await prisma.$transaction(async (tx) => {
-    const member = await tx.orgMember.findUnique({
+    const member = await tx.teamMember.findUnique({
       where: { id: memberId },
       select: { keyDistributed: true, deactivatedAt: true },
     });
@@ -93,44 +93,44 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (member.keyDistributed) return "already_distributed" as const;
 
     // Verify keyVersion matches current team key version (F-16)
-    const team = await tx.organization.findUnique({
+    const team = await tx.team.findUnique({
       where: { id: teamId },
-      select: { orgKeyVersion: true },
+      select: { teamKeyVersion: true },
     });
-    if (!team || data.keyVersion !== team.orgKeyVersion) {
+    if (!team || data.keyVersion !== team.teamKeyVersion) {
       return "version_mismatch" as const;
     }
 
-    await tx.orgMemberKey.upsert({
+    await tx.teamMemberKey.upsert({
       where: {
-        orgId_userId_keyVersion: {
-          orgId: teamId,
+        teamId_userId_keyVersion: {
+          teamId: teamId,
           userId: targetMember.userId,
           keyVersion: data.keyVersion,
         },
       },
       create: {
-        orgId: teamId,
+        teamId: teamId,
         userId: targetMember.userId,
-        encryptedOrgKey: data.encryptedOrgKey,
-        orgKeyIv: data.teamKeyIv,
-        orgKeyAuthTag: data.teamKeyAuthTag,
+        encryptedTeamKey: data.encryptedTeamKey,
+        teamKeyIv: data.teamKeyIv,
+        teamKeyAuthTag: data.teamKeyAuthTag,
         ephemeralPublicKey: data.ephemeralPublicKey,
         hkdfSalt: data.hkdfSalt,
         keyVersion: data.keyVersion,
         wrapVersion: data.wrapVersion,
       },
       update: {
-        encryptedOrgKey: data.encryptedOrgKey,
-        orgKeyIv: data.teamKeyIv,
-        orgKeyAuthTag: data.teamKeyAuthTag,
+        encryptedTeamKey: data.encryptedTeamKey,
+        teamKeyIv: data.teamKeyIv,
+        teamKeyAuthTag: data.teamKeyAuthTag,
         ephemeralPublicKey: data.ephemeralPublicKey,
         hkdfSalt: data.hkdfSalt,
         wrapVersion: data.wrapVersion,
       },
     });
 
-    await tx.orgMember.update({
+    await tx.teamMember.update({
       where: { id: memberId },
       data: { keyDistributed: true },
     });

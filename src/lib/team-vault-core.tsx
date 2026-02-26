@@ -139,7 +139,7 @@ export function TeamVaultProvider({
         // Unwrap team key
         const teamKeyBytes = await unwrapTeamKey(
           {
-            ciphertext: memberKeyData.encryptedOrgKey,
+            ciphertext: memberKeyData.encryptedTeamKey,
             iv: memberKeyData.teamKeyIv,
             authTag: memberKeyData.teamKeyAuthTag,
           },
@@ -216,7 +216,7 @@ export function TeamVaultProvider({
           teamId: string;
           userId: string;
           ecdhPublicKey: string | null;
-          orgKeyVersion: number;
+          teamKeyVersion: number;
         }>
       >();
       for (const member of pendingMembers) {
@@ -245,7 +245,7 @@ export function TeamVaultProvider({
           // Unwrap team key
           teamKeyBytes = await unwrapTeamKey(
             {
-              ciphertext: ownKeyData.encryptedOrgKey,
+              ciphertext: ownKeyData.encryptedTeamKey,
               iv: ownKeyData.teamKeyIv,
               authTag: ownKeyData.teamKeyAuthTag,
             },
@@ -265,7 +265,7 @@ export function TeamVaultProvider({
                 member.ecdhPublicKey,
                 teamId,
                 member.userId,
-                member.orgKeyVersion
+                member.teamKeyVersion
               );
 
               // Send to confirm-key endpoint
@@ -275,7 +275,7 @@ export function TeamVaultProvider({
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
-                    encryptedOrgKey: escrow.encryptedOrgKey,
+                    encryptedTeamKey: escrow.encryptedTeamKey,
                     teamKeyIv: escrow.teamKeyIv,
                     teamKeyAuthTag: escrow.teamKeyAuthTag,
                     ephemeralPublicKey: escrow.ephemeralPublicKey,

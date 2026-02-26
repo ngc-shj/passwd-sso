@@ -32,8 +32,8 @@ vi.mock("@/lib/team-auth", () => {
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgPasswordEntry: { findUnique: mockEntryFindUnique },
-    orgPasswordEntryHistory: { findUnique: mockHistoryFindUnique },
+    teamPasswordEntry: { findUnique: mockEntryFindUnique },
+    teamPasswordEntryHistory: { findUnique: mockHistoryFindUnique },
     $transaction: mockTransaction,
   },
 }));
@@ -80,7 +80,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
   it("returns 404 when entry belongs to different team", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ id: "p1", orgId: "other-team" });
+    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "other-team" });
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status } = await parseResponse(res);
@@ -90,7 +90,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
   it("returns 404 when history not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ id: "p1", orgId: "o1" });
+    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "o1" });
     mockHistoryFindUnique.mockResolvedValue(null);
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
@@ -102,7 +102,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
   it("returns 404 when history belongs to different entry", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ id: "p1", orgId: "o1" });
+    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "o1" });
     mockHistoryFindUnique.mockResolvedValue({ id: "h1", entryId: "other-entry" });
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
@@ -115,12 +115,12 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({
       id: "p1",
-      orgId: "o1",
+      teamId: "o1",
       encryptedBlob: "cur",
       blobIv: "curIv",
       blobAuthTag: "curTag",
       aadVersion: 1,
-      orgKeyVersion: 3,
+      teamKeyVersion: 3,
     });
     mockHistoryFindUnique.mockResolvedValue({
       id: "h1",
@@ -129,17 +129,17 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
       blobIv: "oldIv",
       blobAuthTag: "oldTag",
       aadVersion: 0,
-      orgKeyVersion: 2,
+      teamKeyVersion: 2,
       changedAt: new Date("2025-01-01"),
     });
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
       await fn({
-        orgPasswordEntryHistory: {
+        teamPasswordEntryHistory: {
           create: vi.fn(),
           findMany: vi.fn().mockResolvedValue([]),
           deleteMany: vi.fn(),
         },
-        orgPasswordEntry: { update: vi.fn() },
+        teamPasswordEntry: { update: vi.fn() },
       });
     });
 

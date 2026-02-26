@@ -98,9 +98,9 @@ async function handlePOST(request: NextRequest) {
       data: { status: "REVOKED", revokedAt: new Date() },
     }),
     // Team E2E: delete all TeamMemberKey records for this user
-    prisma.orgMemberKey.deleteMany({ where: { userId } }),
+    prisma.teamMemberKey.deleteMany({ where: { userId } }),
     // Team E2E: reset keyDistributed on all TeamMember records for this user
-    prisma.orgMember.updateMany({
+    prisma.teamMember.updateMany({
       where: { userId },
       data: { keyDistributed: false },
     }),

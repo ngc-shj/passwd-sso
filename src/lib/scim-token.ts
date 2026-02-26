@@ -72,13 +72,13 @@ export async function validateScimToken(
     where: { tokenHash },
     select: {
       id: true,
-      orgId: true,
+      teamId: true,
       tenantId: true,
       createdById: true,
       revokedAt: true,
       expiresAt: true,
       lastUsedAt: true,
-      org: {
+      team: {
         select: { tenantId: true },
       },
     },
@@ -93,7 +93,7 @@ export async function validateScimToken(
   if (token.expiresAt && token.expiresAt.getTime() <= Date.now()) {
     return { ok: false, error: "SCIM_TOKEN_EXPIRED" };
   }
-  const tenantId = token.tenantId ?? token.org?.tenantId;
+  const tenantId = token.tenantId ?? token.team?.tenantId;
   if (!tenantId) {
     return { ok: false, error: "SCIM_TOKEN_INVALID" };
   }
@@ -116,7 +116,7 @@ export async function validateScimToken(
     ok: true,
     data: {
       tokenId: token.id,
-      teamId: token.orgId,
+      teamId: token.teamId,
       tenantId,
       createdById: token.createdById,
       auditUserId: token.createdById ?? SCIM_SYSTEM_USER_ID,

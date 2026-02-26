@@ -10,8 +10,8 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamPasswordEntry, mockHasTeam
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockPrismaTeamMember,
-    orgPasswordEntry: mockPrismaTeamPasswordEntry,
+    teamMember: mockPrismaTeamMember,
+    teamPasswordEntry: mockPrismaTeamPasswordEntry,
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
@@ -45,12 +45,12 @@ describe("GET /api/teams/trash", () => {
     const now = new Date("2025-01-01T00:00:00Z");
     const deletedAt = new Date("2025-01-02T00:00:00Z");
     mockPrismaTeamMember.findMany.mockResolvedValue([
-      { orgId: "team-1", role: TEAM_ROLE.ADMIN },
+      { teamId: "team-1", role: TEAM_ROLE.ADMIN },
     ]);
     mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([
       {
         id: "pw-1",
-        orgId: "team-1",
+        teamId: "team-1",
         entryType: ENTRY_TYPE.LOGIN,
         isArchived: false,
         deletedAt,
@@ -58,8 +58,8 @@ describe("GET /api/teams/trash", () => {
         overviewIv: "aabbccddee001122",
         overviewAuthTag: "aabbccddee0011223344556677889900",
         aadVersion: 1,
-        orgKeyVersion: 1,
-        org: { id: "team-1", name: "My Team" },
+        teamKeyVersion: 1,
+        team: { id: "team-1", name: "My Team" },
         tags: [],
         createdBy: { id: "u1", name: "User", image: null },
         updatedBy: { id: "u1", name: "User" },
@@ -76,7 +76,7 @@ describe("GET /api/teams/trash", () => {
     expect(json[0].encryptedOverview).toBe("encrypted-overview");
     expect(json[0].entryType).toBe(ENTRY_TYPE.LOGIN);
     expect(json[0].deletedAt).toBeDefined();
-    expect(json[0].orgKeyVersion).toBe(1);
+    expect(json[0].teamKeyVersion).toBe(1);
     // Should NOT contain decrypted fields
     expect(json[0].title).toBeUndefined();
   });

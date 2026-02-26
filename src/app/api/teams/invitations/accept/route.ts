@@ -33,9 +33,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.TOKEN_REQUIRED }, { status: 400 });
   }
 
-  const invitation = await prisma.orgInvitation.findUnique({
+  const invitation = await prisma.teamInvitation.findUnique({
     where: { token },
-    include: { org: { select: { id: true, name: true, slug: true } } },
+    include: { team: { select: { id: true, name: true, slug: true } } },
   });
 
   if (!invitation) {
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (invitation.expiresAt < new Date()) {
-    await prisma.orgInvitation.update({
+    await prisma.teamInvitation.update({
       where: { id: invitation.id },
       data: { status: INVITATION_STATUS.EXPIRED },
     });
@@ -72,10 +72,10 @@ export async function POST(req: NextRequest) {
   }
 
   // Check if already a member (active or deactivated)
-  const existingMember = await prisma.orgMember.findUnique({
+  const existingMember = await prisma.teamMember.findUnique({
     where: {
-      orgId_userId: {
-        orgId: invitation.orgId,
+      teamId_userId: {
+        teamId: invitation.teamId,
         userId: session.user.id,
       },
     },
@@ -84,12 +84,12 @@ export async function POST(req: NextRequest) {
   if (existingMember) {
     // Active member → already a member
     if (existingMember.deactivatedAt === null) {
-      await prisma.orgInvitation.update({
+      await prisma.teamInvitation.update({
         where: { id: invitation.id },
         data: { status: INVITATION_STATUS.ACCEPTED },
       });
       return NextResponse.json({
-        org: invitation.org,
+        team: invitation.team,
         alreadyMember: true,
       });
     }
@@ -116,15 +116,15 @@ export async function POST(req: NextRequest) {
   // Create membership (or re-activate if previously deactivated) and mark invitation as accepted.
   // keyDistributed starts as false (admin must distribute team key).
   await prisma.$transaction([
-    prisma.orgMember.upsert({
+    prisma.teamMember.upsert({
       where: {
-        orgId_userId: {
-          orgId: invitation.orgId,
+        teamId_userId: {
+          teamId: invitation.teamId,
           userId: session.user.id,
         },
       },
       create: {
-        orgId: invitation.orgId,
+        teamId: invitation.teamId,
         userId: session.user.id,
         role: invitation.role,
         keyDistributed: false,
@@ -136,14 +136,14 @@ export async function POST(req: NextRequest) {
         scimManaged: false,
       },
     }),
-    prisma.orgInvitation.update({
+    prisma.teamInvitation.update({
       where: { id: invitation.id },
       data: { status: INVITATION_STATUS.ACCEPTED },
     }),
   ]);
 
   return NextResponse.json({
-    org: invitation.org,
+    team: invitation.team,
     role: invitation.role,
     alreadyMember: false,
     needsKeyDistribution: true,

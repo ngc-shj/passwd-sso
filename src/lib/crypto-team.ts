@@ -1,12 +1,12 @@
 /**
  * Team E2E Encryption (ECDH-P256)
  *
- * Provides client-side encryption for organization vault entries using
+ * Provides client-side encryption for team vault entries using
  * ECDH key exchange for per-member team key distribution.
  *
  * Key derivation chain:
- *   ECDH(ephemeral, member) → HKDF("passwd-sso-org-v1", random salt) → AES-256-GCM wrapping key
- *   teamKey → HKDF("passwd-sso-org-enc-v1", empty) → AES-256-GCM encryption key
+ *   ECDH(ephemeral, member) → HKDF("passwd-sso-team-v1", random salt) → AES-256-GCM wrapping key
+ *   teamKey → HKDF("passwd-sso-team-enc-v1", empty) → AES-256-GCM encryption key
  *
  * Reuses patterns from crypto-emergency.ts (ECDH) and crypto-client.ts (AES-GCM).
  */
@@ -34,10 +34,10 @@ const IV_LENGTH = 12;
 const HKDF_SALT_LENGTH = 32;
 
 /** HKDF info for team key wrapping (ECDH → AES key) */
-const HKDF_TEAM_WRAP_INFO = "passwd-sso-org-v1";
+const HKDF_TEAM_WRAP_INFO = "passwd-sso-team-v1";
 
 /** HKDF info for team entry encryption (teamKey → AES key) */
-const HKDF_TEAM_ENC_INFO = "passwd-sso-org-enc-v1";
+const HKDF_TEAM_ENC_INFO = "passwd-sso-team-enc-v1";
 
 /** HKDF info for ECDH private key wrapping (secretKey → ecdhWrappingKey) */
 export const HKDF_ECDH_WRAP_INFO = "passwd-sso-ecdh-v1";
@@ -78,7 +78,7 @@ export function generateTeamSymmetricKey(): Uint8Array {
 
 /**
  * Derive AES-256-GCM encryption key from team symmetric key.
- * HKDF(teamKey, info="passwd-sso-org-enc-v1", salt=empty)
+ * HKDF(teamKey, info="passwd-sso-team-enc-v1", salt=empty)
  *
  * Salt is empty because teamKey itself is unique per team (256-bit random).
  */
@@ -111,7 +111,7 @@ export async function deriveTeamEncryptionKey(
 
 /**
  * Derive AES-256-GCM wrapping key from ECDH shared secret.
- * HKDF(sharedBits, info="passwd-sso-org-v1", salt=random per-escrow salt)
+ * HKDF(sharedBits, info="passwd-sso-team-v1", salt=random per-escrow salt)
  *
  * The random salt is generated per key-wrapping operation and stored in TeamMemberKey.
  * Team-level domain separation is enforced via AAD (which includes teamId).
@@ -336,7 +336,7 @@ export async function unwrapTeamKey(
 
 export interface TeamKeyEscrowResult {
   ephemeralPublicKey: string;
-  encryptedOrgKey: string;
+  encryptedTeamKey: string;
   teamKeyIv: string;
   teamKeyAuthTag: string;
   hkdfSalt: string;
@@ -350,7 +350,7 @@ export interface TeamKeyEscrowResult {
  *
  * @param teamKey - Plaintext team symmetric key
  * @param memberPublicKeyJwk - Member's ECDH public key (JWK string)
- * @param teamId - Organization ID
+ * @param teamId - Team ID
  * @param toUserId - Member user ID
  * @param keyVersion - Team key version
  */
@@ -388,7 +388,7 @@ export async function createTeamKeyEscrow(
 
   return {
     ephemeralPublicKey: ephemeralPublicKeyJwk,
-    encryptedOrgKey: encrypted.ciphertext,
+    encryptedTeamKey: encrypted.ciphertext,
     teamKeyIv: encrypted.iv,
     teamKeyAuthTag: encrypted.authTag,
     hkdfSalt: hexEncode(salt),

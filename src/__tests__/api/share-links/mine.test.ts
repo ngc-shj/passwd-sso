@@ -46,9 +46,9 @@ function makeShare(overrides: Record<string, unknown> = {}) {
     createdById: DEFAULT_SESSION.user.id,
     createdBy: { id: DEFAULT_SESSION.user.id, name: "Alice", email: "alice@example.com" },
     passwordEntryId: "pe-1",
-    orgPasswordEntryId: null,
+    teamPasswordEntryId: null,
     passwordEntry: { id: "pe-1" },
-    orgPasswordEntry: null,
+    teamPasswordEntry: null,
     ...overrides,
   };
 }
@@ -134,10 +134,10 @@ describe("GET /api/share-links/mine", () => {
     mockFindMany.mockResolvedValue([
       makeShare({
         passwordEntryId: null,
-        orgPasswordEntryId: "ope-1",
+        teamPasswordEntryId: "ope-1",
         createdBy: { id: "user-2", name: "Bob", email: "bob@example.com" },
         passwordEntry: null,
-        orgPasswordEntry: { id: "ope-1", org: { name: "Acme Corp" } },
+        teamPasswordEntry: { id: "ope-1", team: { name: "Acme Corp" } },
       }),
     ]);
 
@@ -249,7 +249,7 @@ describe("GET /api/share-links/mine", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           createdById: DEFAULT_SESSION.user.id,
-          orgPasswordEntryId: null,
+          teamPasswordEntryId: null,
         }),
       })
     );
@@ -267,7 +267,7 @@ describe("GET /api/share-links/mine", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          orgPasswordEntry: { orgId: "team-1" },
+          teamPasswordEntry: { teamId: "team-1" },
         }),
       })
     );
@@ -305,7 +305,7 @@ describe("GET /api/share-links/mine", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          orgPasswordEntry: { orgId: "team-1" },
+          teamPasswordEntry: { teamId: "team-1" },
           createdById: DEFAULT_SESSION.user.id,
         }),
       })
@@ -323,7 +323,7 @@ describe("GET /api/share-links/mine", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          orgPasswordEntry: { orgId: "team-1" },
+          teamPasswordEntry: { teamId: "team-1" },
         }),
       })
     );
@@ -347,7 +347,7 @@ describe("GET /api/share-links/mine", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          orgPasswordEntry: { orgId: "team-1" },
+          teamPasswordEntry: { teamId: "team-1" },
         }),
       })
     );

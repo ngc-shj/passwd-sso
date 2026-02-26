@@ -31,7 +31,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockTeamMember,
+    teamMember: mockTeamMember,
     user: mockUser,
     scimExternalMapping: mockScimExternalMapping,
     $transaction: mockTransaction,
@@ -79,7 +79,7 @@ describe("GET /api/scim/v2/Users", () => {
     mockTeamMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
-        orgId: "team-1",
+        teamId: "team-1",
         deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       },
@@ -175,7 +175,7 @@ describe("GET /api/scim/v2/Users", () => {
     mockTeamMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
-        orgId: "team-1",
+        teamId: "team-1",
         deactivatedAt: null,
         user: { id: "user-1", email: "a@example.com", name: "A" },
       },
@@ -229,7 +229,7 @@ describe("GET /api/scim/v2/Users", () => {
     mockTeamMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
-        orgId: "team-1",
+        teamId: "team-1",
         deactivatedAt: null,
         user: { id: "user-1", email: "ext@example.com", name: "Ext" },
       },
@@ -265,7 +265,7 @@ describe("POST /api/scim/v2/Users", () => {
             name: "New User",
           }),
         },
-        orgMember: { findUnique: vi
+        teamMember: { findUnique: vi
             .fn()
             .mockResolvedValueOnce(null) // existence check
             .mockResolvedValueOnce({
@@ -309,7 +309,7 @@ describe("POST /api/scim/v2/Users", () => {
       });
       const tx = {
         user: { findUnique: mockUserFindUnique, create: mockUserCreate },
-        orgMember: { findUnique: vi
+        teamMember: { findUnique: vi
             .fn()
             .mockResolvedValueOnce(null)
             .mockResolvedValueOnce({ userId: "new-user", deactivatedAt: null }),
@@ -345,7 +345,7 @@ describe("POST /api/scim/v2/Users", () => {
       const tx = {
         user: { findUnique: vi.fn().mockResolvedValue({ id: "existing-user", email: "dup@example.com" }),
         },
-        orgMember: { findUnique: vi.fn().mockResolvedValue({
+        teamMember: { findUnique: vi.fn().mockResolvedValue({
             id: "m1",
             deactivatedAt: null, // active
           }),
@@ -371,7 +371,7 @@ describe("POST /api/scim/v2/Users", () => {
       const tx = {
         user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", email: "re@example.com" }),
         },
-        orgMember: { findUnique: vi
+        teamMember: { findUnique: vi
             .fn()
             .mockResolvedValueOnce({
               id: "m1",
@@ -409,7 +409,7 @@ describe("POST /api/scim/v2/Users", () => {
       const tx = {
         user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", email: "re@example.com" }),
         },
-        orgMember: { findUnique: vi
+        teamMember: { findUnique: vi
             .fn()
             .mockResolvedValueOnce({
               id: "m1",
@@ -485,7 +485,7 @@ describe("POST /api/scim/v2/Users", () => {
             name: null,
           }),
         },
-        orgMember: { findUnique: vi.fn().mockResolvedValueOnce(null),
+        teamMember: { findUnique: vi.fn().mockResolvedValueOnce(null),
           create: vi.fn().mockResolvedValue({}),
         },
         scimExternalMapping: {
@@ -527,7 +527,7 @@ describe("POST /api/scim/v2/Users", () => {
             name: null,
           }),
         },
-        orgMember: { findUnique: vi
+        teamMember: { findUnique: vi
             .fn()
             .mockResolvedValueOnce(null)
             .mockResolvedValueOnce({ userId: "new-user", deactivatedAt: null }),

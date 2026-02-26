@@ -58,13 +58,13 @@ export function makeTag(overrides: Record<string, unknown> = {}) {
 
 export function makeOrg(overrides: Record<string, unknown> = {}) {
   return {
-    id: "org-1",
+    id: "team-1",
     name: "Test Team",
-    slug: "test-org",
-    description: "A test organization",
-    encryptedOrgKey: "encrypted-key",
-    orgKeyIv: "e".repeat(24),
-    orgKeyAuthTag: "f".repeat(32),
+    slug: "test-team",
+    description: "A test team",
+    encryptedTeamKey: "encrypted-key",
+    teamKeyIv: "e".repeat(24),
+    teamKeyAuthTag: "f".repeat(32),
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -74,7 +74,7 @@ export function makeOrg(overrides: Record<string, unknown> = {}) {
 export function makeTeamMember(overrides: Record<string, unknown> = {}) {
   return {
     id: "member-1",
-    orgId: "org-1",
+    teamId: "team-1",
     userId: "test-user-id",
     role: TEAM_ROLE.OWNER,
     createdAt: new Date(),
@@ -91,17 +91,17 @@ export function makeTeamMember(overrides: Record<string, unknown> = {}) {
 
 export function makeTeamPasswordEntry(overrides: Record<string, unknown> = {}) {
   return {
-    id: "org-pwd-1",
-    encryptedBlob: "org-blob-cipher",
+    id: "team-pwd-1",
+    encryptedBlob: "team-blob-cipher",
     blobIv: "a".repeat(24),
     blobAuthTag: "b".repeat(32),
-    encryptedOverview: "org-overview-cipher",
+    encryptedOverview: "team-overview-cipher",
     overviewIv: "c".repeat(24),
     overviewAuthTag: "d".repeat(32),
     isFavorite: false,
     isArchived: false,
     deletedAt: null as Date | null,
-    orgId: "org-1",
+    teamId: "team-1",
     createdById: "test-user-id",
     updatedById: "test-user-id",
     createdAt: new Date("2025-01-01"),
@@ -117,7 +117,7 @@ export function makeTeamPasswordEntry(overrides: Record<string, unknown> = {}) {
 export function makeTeamInvitation(overrides: Record<string, unknown> = {}) {
   return {
     id: "inv-1",
-    orgId: "org-1",
+    teamId: "team-1",
     email: "invited@example.com",
     role: TEAM_ROLE.MEMBER,
     status: INVITATION_STATUS.PENDING,
@@ -132,10 +132,10 @@ export function makeTeamInvitation(overrides: Record<string, unknown> = {}) {
 
 export function makeOrgTag(overrides: Record<string, unknown> = {}) {
   return {
-    id: "org-tag-1",
+    id: "team-tag-1",
     name: "Production",
     color: "#00ff00",
-    orgId: "org-1",
+    teamId: "team-1",
     createdAt: new Date(),
     updatedAt: new Date(),
     _count: { passwords: 3 },

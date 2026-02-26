@@ -32,7 +32,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await prisma.orgPasswordEntry.findUnique({
+  const entry = await prisma.teamPasswordEntry.findUnique({
     where: { id },
     include: {
       tags: { select: { id: true, name: true, color: true } },
@@ -45,7 +45,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     },
   });
 
-  if (!entry || entry.orgId !== teamId) {
+  if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -54,7 +54,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     entryType: entry.entryType,
     isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,
-    teamFolderId: entry.orgFolderId,
+    teamFolderId: entry.teamFolderId,
     tags: entry.tags,
     createdBy: entry.createdBy,
     updatedBy: entry.updatedBy,
@@ -67,7 +67,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     overviewIv: entry.overviewIv,
     overviewAuthTag: entry.overviewAuthTag,
     aadVersion: entry.aadVersion,
-    teamKeyVersion: entry.orgKeyVersion,
+    teamKeyVersion: entry.teamKeyVersion,
   });
 }
 
@@ -90,20 +90,20 @@ export async function PUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await prisma.orgPasswordEntry.findUnique({
+  const entry = await prisma.teamPasswordEntry.findUnique({
     where: { id },
     select: {
-      orgId: true,
+      teamId: true,
       createdById: true,
       encryptedBlob: true,
       blobIv: true,
       blobAuthTag: true,
       aadVersion: true,
-      orgKeyVersion: true,
+      teamKeyVersion: true,
     },
   });
 
-  if (!entry || entry.orgId !== teamId) {
+  if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -141,11 +141,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // Validate teamKeyVersion matches current team key version (F-13)
   if (isFullUpdate) {
-    const team = await prisma.organization.findUnique({
+    const team = await prisma.team.findUnique({
       where: { id: teamId },
-      select: { orgKeyVersion: true },
+      select: { teamKeyVersion: true },
     });
-    if (!team || teamKeyVersion !== team.orgKeyVersion) {
+    if (!team || teamKeyVersion !== team.teamKeyVersion) {
       return NextResponse.json(
         { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
         { status: 409 }
@@ -155,11 +155,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // Validate teamFolderId belongs to this team
   if (teamFolderId) {
-    const folder = await prisma.orgFolder.findUnique({
+    const folder = await prisma.teamFolder.findUnique({
       where: { id: teamFolderId },
-      select: { orgId: true },
+      select: { teamId: true },
     });
-    if (!folder || folder.orgId !== teamId) {
+    if (!folder || folder.teamId !== teamId) {
       return NextResponse.json({ error: API_ERROR.FOLDER_NOT_FOUND }, { status: 400 });
     }
   }
@@ -176,10 +176,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updateData.overviewIv = encryptedOverview!.iv;
     updateData.overviewAuthTag = encryptedOverview!.authTag;
     updateData.aadVersion = aadVersion;
-    updateData.orgKeyVersion = teamKeyVersion;
+    updateData.teamKeyVersion = teamKeyVersion;
   }
 
-  if (teamFolderId !== undefined) updateData.orgFolderId = teamFolderId;
+  if (teamFolderId !== undefined) updateData.teamFolderId = teamFolderId;
   if (isArchived !== undefined) updateData.isArchived = isArchived;
   if (tagIds !== undefined) {
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
@@ -188,31 +188,31 @@ export async function PUT(req: NextRequest, { params }: Params) {
   // Snapshot + update in a single transaction for atomicity (F-9)
   const updated = await prisma.$transaction(async (tx) => {
     if (isFullUpdate) {
-      await tx.orgPasswordEntryHistory.create({
+      await tx.teamPasswordEntryHistory.create({
         data: {
           entryId: id,
           encryptedBlob: entry.encryptedBlob,
           blobIv: entry.blobIv,
           blobAuthTag: entry.blobAuthTag,
           aadVersion: entry.aadVersion,
-          orgKeyVersion: entry.orgKeyVersion,
+          teamKeyVersion: entry.teamKeyVersion,
           changedById: session.user.id,
         },
       });
-      const all = await tx.orgPasswordEntryHistory.findMany({
+      const all = await tx.teamPasswordEntryHistory.findMany({
         where: { entryId: id },
         orderBy: [{ changedAt: "asc" }, { id: "asc" }],
         select: { id: true },
       });
       if (all.length > 20) {
-        await tx.orgPasswordEntryHistory.deleteMany({
+        await tx.teamPasswordEntryHistory.deleteMany({
           where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
         });
       }
     }
 
-    return tx.orgPasswordEntry.update({
-      where: { id, orgId: teamId },
+    return tx.teamPasswordEntry.update({
+      where: { id, teamId: teamId },
       data: updateData,
       include: {
         tags: { select: { id: true, name: true, color: true } },
@@ -256,11 +256,11 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const existing = await prisma.orgPasswordEntry.findUnique({
+  const existing = await prisma.teamPasswordEntry.findUnique({
     where: { id },
   });
 
-  if (!existing || existing.orgId !== teamId) {
+  if (!existing || existing.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -268,9 +268,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const permanent = searchParams.get("permanent") === "true";
 
   if (permanent) {
-    await prisma.orgPasswordEntry.delete({ where: { id } });
+    await prisma.teamPasswordEntry.delete({ where: { id } });
   } else {
-    await prisma.orgPasswordEntry.update({
+    await prisma.teamPasswordEntry.update({
       where: { id },
       data: { deletedAt: new Date() },
     });

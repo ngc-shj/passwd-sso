@@ -15,9 +15,9 @@ import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@
 type Params = { params: Promise<{ teamId: string }> };
 
 function getTeamParent(id: string): Promise<ParentNode | null> {
-  return prisma.orgFolder
-    .findUnique({ where: { id }, select: { parentId: true, orgId: true } })
-    .then((f) => (f ? { parentId: f.parentId, ownerId: f.orgId } : null));
+  return prisma.teamFolder
+    .findUnique({ where: { id }, select: { parentId: true, teamId: true } })
+    .then((f) => (f ? { parentId: f.parentId, ownerId: f.teamId } : null));
 }
 
 // GET /api/teams/[teamId]/folders - List team folders with entry count
@@ -38,8 +38,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const folders = await prisma.orgFolder.findMany({
-    where: { orgId: teamId },
+  const folders = await prisma.teamFolder.findMany({
+    where: { teamId: teamId },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     include: {
       _count: {
@@ -122,8 +122,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   if (parentId) {
-    const dup = await prisma.orgFolder.findUnique({
-      where: { name_parentId_orgId: { name, parentId, orgId: teamId } },
+    const dup = await prisma.teamFolder.findUnique({
+      where: { name_parentId_teamId: { name, parentId, teamId: teamId } },
     });
     if (dup) {
       return NextResponse.json(
@@ -132,8 +132,8 @@ export async function POST(req: NextRequest, { params }: Params) {
       );
     }
   } else {
-    const rootDup = await prisma.orgFolder.findFirst({
-      where: { name, parentId: null, orgId: teamId },
+    const rootDup = await prisma.teamFolder.findFirst({
+      where: { name, parentId: null, teamId: teamId },
     });
     if (rootDup) {
       return NextResponse.json(
@@ -143,11 +143,11 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
   }
 
-  const folder = await prisma.orgFolder.create({
+  const folder = await prisma.teamFolder.create({
     data: {
       name,
       parentId: parentId ?? null,
-      orgId: teamId,
+      teamId: teamId,
       sortOrder: sortOrder ?? 0,
     },
   });

@@ -33,8 +33,8 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockPrismaTeamMember,
-    orgMemberKey: mockPrismaTeamMemberKey,
+    teamMember: mockPrismaTeamMember,
+    teamMemberKey: mockPrismaTeamMemberKey,
     scimExternalMapping: mockPrismaScimExternalMapping,
     $transaction: mockTransaction,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
@@ -52,7 +52,7 @@ import { TEAM_ROLE } from "@/lib/constants";
 const TEAM_ID = "team-123";
 const MEMBER_ID = "member-target";
 
-const ownerMembership = { id: "member-owner", orgId: TEAM_ID, userId: "test-user-id", role: TEAM_ROLE.OWNER };
+const ownerMembership = { id: "member-owner", teamId: TEAM_ID, userId: "test-user-id", role: TEAM_ROLE.OWNER };
 
 describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
   beforeEach(() => {
@@ -105,7 +105,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     });
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       userId: "target-user",
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
@@ -119,7 +119,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
   it("returns 400 on validation error", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       userId: "target-user",
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
@@ -149,7 +149,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
   it("changes member role (OWNER changes MEMBER to ADMIN)", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       userId: "target-user",
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
@@ -175,7 +175,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
   it("transfers ownership: promotes target to OWNER, demotes self to ADMIN", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       userId: "target-user",
       role: TEAM_ROLE.ADMIN,
       deactivatedAt: null,
@@ -206,7 +206,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     mockRequireTeamPermission.mockResolvedValue({ ...ownerMembership, role: TEAM_ROLE.ADMIN });
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       userId: "target-user",
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
@@ -224,7 +224,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
   it("returns 403 when trying to change OWNER's role", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       userId: "owner-user",
       role: TEAM_ROLE.OWNER,
       deactivatedAt: null,
@@ -244,7 +244,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     mockIsRoleAbove.mockReturnValue(false);
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       userId: "other-admin",
       role: TEAM_ROLE.ADMIN,
       deactivatedAt: null,
@@ -294,7 +294,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     mockIsRoleAbove.mockReturnValue(false);
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       userId: "other-admin",
       role: TEAM_ROLE.ADMIN,
       deactivatedAt: null,
@@ -329,7 +329,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
   it("returns 403 when trying to remove OWNER", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       role: TEAM_ROLE.OWNER,
       deactivatedAt: null,
     });
@@ -343,7 +343,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
   it("removes member successfully and deletes TeamMemberKeys", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       userId: "target-user",
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
@@ -358,8 +358,8 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockTransaction).toHaveBeenCalledWith([
-      mockPrismaTeamMemberKey.deleteMany({ where: { orgId: TEAM_ID, userId: "target-user" } }),
-      mockPrismaScimExternalMapping.deleteMany({ where: { orgId: TEAM_ID, internalId: "target-user", resourceType: "User" } }),
+      mockPrismaTeamMemberKey.deleteMany({ where: { teamId: TEAM_ID, userId: "target-user" } }),
+      mockPrismaScimExternalMapping.deleteMany({ where: { teamId: TEAM_ID, internalId: "target-user", resourceType: "User" } }),
       mockPrismaTeamMember.delete({ where: { id: MEMBER_ID } }),
     ]);
   });

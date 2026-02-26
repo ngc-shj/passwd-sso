@@ -12,7 +12,7 @@ import { TEAM_PERMISSION } from "@/lib/constants";
 
 type Params = { params: Promise<{ teamId: string }> };
 
-// GET /api/teams/[teamId] — Get organization details
+// GET /api/teams/[teamId] — Get team details
 export async function GET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -23,7 +23,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
   try {
     const membership = await requireTeamMember(session.user.id, teamId);
-    const team = await prisma.organization.findUnique({
+    const team = await prisma.team.findUnique({
       where: { id: teamId },
       select: {
         id: true,
@@ -54,7 +54,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 }
 
-// PUT /api/teams/[teamId] — Update organization
+// PUT /api/teams/[teamId] — Update team
 export async function PUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -93,7 +93,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updateData.description = parsed.data.description || null;
   }
 
-  const team = await prisma.organization.update({
+  const team = await prisma.team.update({
     where: { id: teamId },
     data: updateData,
   });
@@ -107,7 +107,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 }
 
-// DELETE /api/teams/[teamId] — Delete organization (OWNER only)
+// DELETE /api/teams/[teamId] — Delete team (OWNER only)
 export async function DELETE(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -125,7 +125,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  await prisma.organization.delete({ where: { id: teamId } });
+  await prisma.team.delete({ where: { id: teamId } });
 
   return NextResponse.json({ success: true });
 }

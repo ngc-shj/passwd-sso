@@ -10,8 +10,8 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamPasswordEntry, mockHasTeam
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockPrismaTeamMember,
-    orgPasswordEntry: mockPrismaTeamPasswordEntry,
+    teamMember: mockPrismaTeamMember,
+    teamPasswordEntry: mockPrismaTeamPasswordEntry,
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
@@ -44,12 +44,12 @@ describe("GET /api/teams/archived", () => {
   it("returns archived entries with encrypted overviews (E2E mode)", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
     mockPrismaTeamMember.findMany.mockResolvedValue([
-      { orgId: "team-1", role: TEAM_ROLE.MEMBER },
+      { teamId: "team-1", role: TEAM_ROLE.MEMBER },
     ]);
     mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([
       {
         id: "pw-1",
-        orgId: "team-1",
+        teamId: "team-1",
         entryType: "LOGIN",
         isArchived: true,
         deletedAt: null,
@@ -57,8 +57,8 @@ describe("GET /api/teams/archived", () => {
         overviewIv: "aabbccddee001122",
         overviewAuthTag: "aabbccddee0011223344556677889900",
         aadVersion: 1,
-        orgKeyVersion: 1,
-        org: { id: "team-1", name: "My Team" },
+        teamKeyVersion: 1,
+        team: { id: "team-1", name: "My Team" },
         tags: [],
         createdBy: { id: "u1", name: "User", image: null },
         updatedBy: { id: "u1", name: "User" },
@@ -76,7 +76,7 @@ describe("GET /api/teams/archived", () => {
     expect(json[0].overviewIv).toBe("aabbccddee001122");
     expect(json[0].overviewAuthTag).toBe("aabbccddee0011223344556677889900");
     expect(json[0].aadVersion).toBe(1);
-    expect(json[0].orgKeyVersion).toBe(1);
+    expect(json[0].teamKeyVersion).toBe(1);
     expect(json[0].isArchived).toBe(true);
     expect(json[0].teamId).toBe("team-1");
     expect(json[0].teamName).toBe("My Team");

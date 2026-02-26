@@ -23,7 +23,7 @@ const { mockAuth, mockPrismaTeamInvitation, mockRequireTeamPermission, TeamAuthE
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { orgInvitation: mockPrismaTeamInvitation },
+  prisma: { teamInvitation: mockPrismaTeamInvitation },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
@@ -83,7 +83,7 @@ describe("DELETE /api/teams/[teamId]/invitations/[invId]", () => {
   });
 
   it("returns 404 when invitation belongs to different team", async () => {
-    mockPrismaTeamInvitation.findUnique.mockResolvedValue({ id: INV_ID, orgId: "other-team" });
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue({ id: INV_ID, teamId: "other-team" });
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/invitations/${INV_ID}`),
       createParams({ teamId: TEAM_ID, invId: INV_ID }),
@@ -92,7 +92,7 @@ describe("DELETE /api/teams/[teamId]/invitations/[invId]", () => {
   });
 
   it("deletes invitation successfully", async () => {
-    mockPrismaTeamInvitation.findUnique.mockResolvedValue({ id: INV_ID, orgId: TEAM_ID });
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue({ id: INV_ID, teamId: TEAM_ID });
     mockPrismaTeamInvitation.delete.mockResolvedValue({});
 
     const res = await DELETE(

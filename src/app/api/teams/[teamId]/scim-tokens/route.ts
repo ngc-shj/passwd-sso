@@ -36,7 +36,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   const tokens = await prisma.scimToken.findMany({
-    where: { orgId: teamId },
+    where: { teamId: teamId },
     select: {
       id: true,
       description: true,
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Limit active (non-revoked, non-expired) tokens per team (max 10)
   const tokenCount = await prisma.scimToken.count({
     where: {
-      orgId: teamId,
+      teamId: teamId,
       revokedAt: null,
       OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     },
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     ? new Date(Date.now() + parsed.data.expiresInDays * 24 * 60 * 60 * 1000)
     : null;
 
-  const team = await prisma.organization.findUnique({
+  const team = await prisma.team.findUnique({
     where: { id: teamId },
     select: { tenantId: true },
   });
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const token = await prisma.scimToken.create({
     data: {
-      orgId: teamId,
+      teamId: teamId,
       tenantId: team.tenantId,
       tokenHash,
       description: parsed.data.description ?? null,

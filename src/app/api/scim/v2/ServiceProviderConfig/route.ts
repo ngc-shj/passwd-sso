@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
 
   return scimResponse({
     schemas: ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
-    documentationUri: "https://tools.ietf.org/html/rfc7644",
+    documentationUri: "https://tools.ietf.team/html/rfc7644",
     patch: { supported: true },
     bulk: { supported: false, maxOperations: 0, maxPayloadSize: 0 },
     filter: { supported: true, maxResults: 200 },
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
         type: "oauthbearertoken",
         name: "OAuth Bearer Token",
         description: "Authentication scheme using the OAuth Bearer Token Standard",
-        specUri: "https://tools.ietf.org/html/rfc6750",
+        specUri: "https://tools.ietf.team/html/rfc6750",
       },
     ],
   });

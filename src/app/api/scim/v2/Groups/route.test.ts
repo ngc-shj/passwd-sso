@@ -25,7 +25,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: mockTeamMember,
+    teamMember: mockTeamMember,
     scimExternalMapping: mockScimExternalMapping,
   },
 }));

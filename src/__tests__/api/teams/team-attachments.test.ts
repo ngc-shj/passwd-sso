@@ -37,13 +37,13 @@ vi.mock("@/lib/team-auth", () => {
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgPasswordEntry: { findUnique: mockEntryFindUnique },
+    teamPasswordEntry: { findUnique: mockEntryFindUnique },
     attachment: {
       findMany: mockAttachmentFindMany,
       count: mockAttachmentCount,
       create: mockAttachmentCreate,
     },
-    organization: { findUnique: mockTeamFindUnique },
+    team: { findUnique: mockTeamFindUnique },
   },
 }));
 vi.mock("@/lib/audit", () => ({
@@ -97,7 +97,7 @@ function validFormFields(): Record<string, string | Blob> {
   };
 }
 
-const TEAM_ENTRY = { orgId: "o1" };
+const TEAM_ENTRY = { teamId: "o1" };
 
 describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -129,7 +129,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 404 when entry belongs to different team", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ orgId: "other-team" });
+    mockEntryFindUnique.mockResolvedValue({ teamId: "other-team" });
     const res = await GET(createGetRequest(), makeParams("o1", "e1"));
     const { status } = await parseResponse(res);
     expect(status).toBe(404);
@@ -138,7 +138,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns attachments list", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ orgId: "o1" });
+    mockEntryFindUnique.mockResolvedValue({ teamId: "o1" });
     mockAttachmentFindMany.mockResolvedValue([
       { id: "a1", filename: "test.pdf", contentType: "application/pdf", sizeBytes: 100, createdAt: new Date() },
     ]);
@@ -319,7 +319,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
-    mockTeamFindUnique.mockResolvedValue({ orgKeyVersion: 1 });
+    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 1 });
     mockPutObject.mockResolvedValue(Buffer.from("stored"));
     const created = {
       id: "a1",

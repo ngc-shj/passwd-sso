@@ -81,7 +81,7 @@ export function logAudit(params: AuditLogParams): void {
         scope,
         action,
         userId,
-        orgId: teamId ?? null,
+        teamId: teamId ?? null,
         targetType: targetType ?? null,
         targetId: targetId ?? null,
         metadata: safeMetadata as never ?? undefined,

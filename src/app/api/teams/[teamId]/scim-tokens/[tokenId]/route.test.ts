@@ -73,10 +73,10 @@ describe("DELETE /api/teams/[teamId]/scim-tokens/[tokenId]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 404 for orgId mismatch (IDOR prevention)", async () => {
+  it("returns 404 for teamId mismatch (IDOR prevention)", async () => {
     mockScimToken.findUnique.mockResolvedValue({
       id: "t1",
-      orgId: "other-team", // different team
+      teamId: "other-team", // different team
       revokedAt: null,
     });
     const res = await DELETE(makeReq(), makeParams("team-1", "t1"));
@@ -86,7 +86,7 @@ describe("DELETE /api/teams/[teamId]/scim-tokens/[tokenId]", () => {
   it("returns 409 when token already revoked", async () => {
     mockScimToken.findUnique.mockResolvedValue({
       id: "t1",
-      orgId: "team-1",
+      teamId: "team-1",
       revokedAt: new Date(),
     });
     const res = await DELETE(makeReq(), makeParams("team-1", "t1"));
@@ -96,7 +96,7 @@ describe("DELETE /api/teams/[teamId]/scim-tokens/[tokenId]", () => {
   it("revokes token and returns success", async () => {
     mockScimToken.findUnique.mockResolvedValue({
       id: "t1",
-      orgId: "team-1",
+      teamId: "team-1",
       revokedAt: null,
     });
     mockScimToken.update.mockResolvedValue({});

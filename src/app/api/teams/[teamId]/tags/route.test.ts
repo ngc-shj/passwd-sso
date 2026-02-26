@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgTag, mockRequireTeamMember, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamTag, mockRequireTeamMember, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -12,7 +12,7 @@ const { mockAuth, mockPrismaOrgTag, mockRequireTeamMember, mockRequireTeamPermis
   }
   return {
     mockAuth: vi.fn(),
-    mockPrismaOrgTag: {
+    mockPrismaTeamTag: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
       create: vi.fn(),
@@ -25,7 +25,7 @@ const { mockAuth, mockPrismaOrgTag, mockRequireTeamMember, mockRequireTeamPermis
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { orgTag: mockPrismaOrgTag },
+  prisma: { teamTag: mockPrismaTeamTag },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
@@ -55,7 +55,7 @@ describe("GET /api/teams/[teamId]/tags", () => {
   });
 
   it("returns team tags with counts", async () => {
-    mockPrismaOrgTag.findMany.mockResolvedValue([
+    mockPrismaTeamTag.findMany.mockResolvedValue([
       { id: "t1", name: "Work", color: "#ff0000", _count: { passwords: 5 } },
     ]);
 
@@ -90,7 +90,7 @@ describe("GET /api/teams/[teamId]/tags", () => {
   });
 
   it("excludes archived and deleted entries from count", async () => {
-    mockPrismaOrgTag.findMany.mockResolvedValue([
+    mockPrismaTeamTag.findMany.mockResolvedValue([
       { id: "t1", name: "Work", color: null, _count: { passwords: 3 } },
     ]);
 
@@ -99,7 +99,7 @@ describe("GET /api/teams/[teamId]/tags", () => {
       createParams({ teamId: TEAM_ID }),
     );
 
-    expect(mockPrismaOrgTag.findMany).toHaveBeenCalledWith(
+    expect(mockPrismaTeamTag.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         include: {
           _count: {
@@ -176,7 +176,7 @@ describe("POST /api/teams/[teamId]/tags", () => {
   });
 
   it("returns 409 when tag already exists", async () => {
-    mockPrismaOrgTag.findUnique.mockResolvedValue({ id: "existing" });
+    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: "existing" });
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/tags`, { body: { name: "Work" } }),
       createParams({ teamId: TEAM_ID }),
@@ -185,8 +185,8 @@ describe("POST /api/teams/[teamId]/tags", () => {
   });
 
   it("creates team tag (201)", async () => {
-    mockPrismaOrgTag.findUnique.mockResolvedValue(null);
-    mockPrismaOrgTag.create.mockResolvedValue({ id: "new-tag", name: "Finance", color: null });
+    mockPrismaTeamTag.findUnique.mockResolvedValue(null);
+    mockPrismaTeamTag.create.mockResolvedValue({ id: "new-tag", name: "Finance", color: null });
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/tags`, { body: { name: "Finance" } }),

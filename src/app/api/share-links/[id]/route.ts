@@ -23,7 +23,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       shareType: true,
       createdById: true,
       revokedAt: true,
-      orgPasswordEntryId: true,
+      teamPasswordEntryId: true,
     },
   });
 
@@ -35,7 +35,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.ALREADY_REVOKED }, { status: 409 });
   }
 
-  const teamPasswordEntryId = share.orgPasswordEntryId;
+  const teamPasswordEntryId = share.teamPasswordEntryId;
 
   await prisma.passwordShare.update({
     where: { id },
@@ -52,11 +52,11 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     userId: session.user.id,
     teamId: teamPasswordEntryId
       ? (
-          await prisma.orgPasswordEntry.findUnique({
+          await prisma.teamPasswordEntry.findUnique({
             where: { id: teamPasswordEntryId },
-            select: { orgId: true },
+            select: { teamId: true },
           })
-        )?.orgId
+        )?.teamId
       : undefined,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,

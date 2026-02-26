@@ -94,7 +94,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     const res = await proxy(
       createApiRequest("/api/teams", {
         Authorization: "Bearer tok123",
-        Cookie: "authjs.session-token=sess-orgs",
+        Cookie: "authjs.session-token=sess-teams",
       }),
       dummyOptions,
     );

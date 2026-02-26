@@ -31,8 +31,8 @@ vi.mock("@/lib/prisma", () => ({
     vaultKey: mockPrismaVaultKey,
     tag: mockPrismaTag,
     emergencyAccessGrant: mockPrismaEmergencyGrant,
-    orgMemberKey: mockPrismaTeamMemberKey,
-    orgMember: mockPrismaTeamMember,
+    teamMemberKey: mockPrismaTeamMemberKey,
+    teamMember: mockPrismaTeamMember,
     $transaction: mockPrismaTransaction,
   },
 }));

@@ -33,7 +33,7 @@ vi.mock("@/lib/team-auth", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgPasswordEntry: mockPrismaTeamPasswordEntry,
+    teamPasswordEntry: mockPrismaTeamPasswordEntry,
     attachment: mockPrismaAttachment,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
@@ -54,7 +54,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "team-1" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -86,7 +86,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
   });
 
   it("returns 404 when entry does not belong to team", async () => {
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "other-team" });
     const res = await GET(
       createRequest(
         "GET",
@@ -146,7 +146,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "team-1" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -178,7 +178,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
   });
 
   it("returns 404 when entry does not belong to team", async () => {
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "other-team" });
     const res = await DELETE(
       createRequest(
         "DELETE",

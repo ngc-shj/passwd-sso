@@ -28,8 +28,8 @@ const {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgPasswordEntry: mockPrismaTeamPasswordEntry,
-    orgPasswordEntryHistory: mockPrismaTeamPasswordEntryHistory,
+    teamPasswordEntry: mockPrismaTeamPasswordEntry,
+    teamPasswordEntryHistory: mockPrismaTeamPasswordEntryHistory,
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
@@ -87,7 +87,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
 
   it("returns 404 when entry teamId does not match", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
-      orgId: "other-team",
+      teamId: "other-team",
       entryType: "LOGIN",
     });
     const res = await GET(createRequest("GET", makeUrl()), makeParams());
@@ -96,7 +96,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
 
   it("returns 404 when history not found", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       entryType: "LOGIN",
     });
     mockPrismaTeamPasswordEntryHistory.findUnique.mockResolvedValue(null);
@@ -106,7 +106,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
 
   it("returns 404 when history entryId does not match", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       entryType: "LOGIN",
     });
     mockPrismaTeamPasswordEntryHistory.findUnique.mockResolvedValue({
@@ -120,7 +120,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
   it("returns encrypted history blob as-is (E2E mode)", async () => {
     const changedAt = new Date("2025-01-01");
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
-      orgId: TEAM_ID,
+      teamId: TEAM_ID,
       entryType: "LOGIN",
     });
     mockPrismaTeamPasswordEntryHistory.findUnique.mockResolvedValue({
@@ -130,7 +130,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
       blobIv: "aabbccddee001122",
       blobAuthTag: "aabbccddee0011223344556677889900",
       aadVersion: 1,
-      orgKeyVersion: 1,
+      teamKeyVersion: 1,
       changedAt,
     });
 
@@ -144,7 +144,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
     expect(json.blobIv).toBe("aabbccddee001122");
     expect(json.blobAuthTag).toBe("aabbccddee0011223344556677889900");
     expect(json.aadVersion).toBe(1);
-    expect(json.orgKeyVersion).toBe(1);
+    expect(json.teamKeyVersion).toBe(1);
     // Should NOT contain decrypted fields
     expect(json.title).toBeUndefined();
     expect(json.password).toBeUndefined();

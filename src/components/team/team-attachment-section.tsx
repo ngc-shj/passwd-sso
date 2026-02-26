@@ -147,7 +147,7 @@ export function TeamAttachmentSection({
       formData.append("contentType", file.type);
       formData.append("sizeBytes", file.size.toString());
       formData.append("aadVersion", String(AAD_VERSION));
-      formData.append("orgKeyVersion", keyInfo.keyVersion.toString());
+      formData.append("teamKeyVersion", keyInfo.keyVersion.toString());
 
       const res = await fetch(
         apiPath.teamPasswordAttachments(scopedId, entryId),

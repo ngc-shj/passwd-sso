@@ -36,13 +36,13 @@ function bearerRequest(token: string): NextRequest {
 function makeToken(overrides: Record<string, unknown> = {}) {
   return {
     id: "tok-1",
-    orgId: "team-1",
+    teamId: "team-1",
     tenantId: "tenant-1",
     createdById: "user-1",
     revokedAt: null,
     expiresAt: null,
     lastUsedAt: null,
-    org: { tenantId: "tenant-1" },
+    team: { tenantId: "tenant-1" },
     ...overrides,
   };
 }
@@ -225,21 +225,21 @@ describe("validateScimToken", () => {
       where: { tokenHash: "hashed:scim_abc123" },
       select: {
         id: true,
-        orgId: true,
+        teamId: true,
         tenantId: true,
         createdById: true,
         revokedAt: true,
         expiresAt: true,
         lastUsedAt: true,
-        org: {
+        team: {
           select: { tenantId: true },
         },
       },
     });
   });
 
-  it("falls back to organization.tenantId when token.tenantId is null", async () => {
-    mockFindUnique.mockResolvedValue(makeToken({ tenantId: null, org: { tenantId: "tenant-1" } }));
+  it("falls back to team.tenantId when token.tenantId is null", async () => {
+    mockFindUnique.mockResolvedValue(makeToken({ tenantId: null, team: { tenantId: "tenant-1" } }));
 
     const result = await validateScimToken(bearerRequest("scim_abc123"));
 
@@ -253,7 +253,7 @@ describe("validateScimToken", () => {
   });
 
   it("rejects token when tenant context is missing", async () => {
-    mockFindUnique.mockResolvedValue(makeToken({ tenantId: null, org: { tenantId: null } }));
+    mockFindUnique.mockResolvedValue(makeToken({ tenantId: null, team: { tenantId: null } }));
 
     const result = await validateScimToken(bearerRequest("scim_abc123"));
 

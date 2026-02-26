@@ -33,7 +33,7 @@ vi.mock("@/lib/team-auth", () => {
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgFolder: {
+    teamFolder: {
       findUnique: mockTeamFolderFindUnique,
       findFirst: mockTeamFolderFindFirst,
       findMany: mockTeamFolderFindMany,
@@ -88,7 +88,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   it("returns 404 when folder belongs to different team", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", orgId: "other-team", parentId: null, name: "Old" });
+    mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", teamId: "other-team", parentId: null, name: "Old" });
     const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: "x" } });
     const res = await PUT(req, createParams({ teamId: "o1", id: "f1" }));
     const { status } = await parseResponse(res);
@@ -98,7 +98,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   it("renames folder successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    const existing = { id: "f1", orgId: "o1", parentId: null, name: "Old" };
+    const existing = { id: "f1", teamId: "o1", parentId: null, name: "Old" };
     mockTeamFolderFindUnique.mockResolvedValueOnce(existing);
     mockTeamFolderFindFirst.mockResolvedValue(null);
     const updated = { ...existing, name: "New", sortOrder: 0, createdAt: new Date(), updatedAt: new Date() };
@@ -114,7 +114,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   it("returns 409 for duplicate name at root level", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    const existing = { id: "f1", orgId: "o1", parentId: null, name: "Old" };
+    const existing = { id: "f1", teamId: "o1", parentId: null, name: "Old" };
     mockTeamFolderFindUnique.mockResolvedValueOnce(existing);
     mockTeamFolderFindFirst.mockResolvedValue({ id: "f2", name: "Dup" }); // dup
 
@@ -128,7 +128,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   it("returns 400 for Zod validation failure", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", orgId: "o1", parentId: null, name: "Old" });
+    mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", teamId: "o1", parentId: null, name: "Old" });
     const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: 123 } });
     const res = await PUT(req, createParams({ teamId: "o1", id: "f1" }));
     const { status, json } = await parseResponse(res);
@@ -140,7 +140,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     const parentCuid = "cm1234567890abcdefghijklmn";
-    const existing = { id: "f1", orgId: "o1", parentId: null, name: "Folder" };
+    const existing = { id: "f1", teamId: "o1", parentId: null, name: "Folder" };
     mockTeamFolderFindUnique
       .mockResolvedValueOnce(existing) // find existing
       .mockResolvedValueOnce(null); // dup check under new parent
@@ -158,7 +158,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     const parentCuid = "cm1234567890abcdefghijklmn";
-    const existing = { id: "f1", orgId: "o1", parentId: parentCuid, name: "Old" };
+    const existing = { id: "f1", teamId: "o1", parentId: parentCuid, name: "Old" };
     mockTeamFolderFindUnique
       .mockResolvedValueOnce(existing) // find existing
       .mockResolvedValueOnce({ id: "f2", name: "Dup" }); // dup under parent
@@ -180,7 +180,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   it("returns 400 for invalid JSON body", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", orgId: "o1", parentId: null, name: "F" });
+    mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", teamId: "o1", parentId: null, name: "F" });
     const { NextRequest } = await import("next/server");
     const req = new NextRequest("http://localhost/api/teams/o1/folders/f1", {
       method: "PUT",
@@ -206,8 +206,8 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
     txOrgEntryUpdateMany = vi.fn();
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
       await fn({
-        orgFolder: { update: txTeamFolderUpdate, delete: txTeamFolderDelete },
-        orgPasswordEntry: { updateMany: txOrgEntryUpdateMany },
+        teamFolder: { update: txTeamFolderUpdate, delete: txTeamFolderDelete },
+        teamPasswordEntry: { updateMany: txOrgEntryUpdateMany },
       });
     });
   });
@@ -249,7 +249,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
   it("promotes child without rename when no conflict", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", orgId: "o1", parentId: null, name: "Parent" });
+    mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", teamId: "o1", parentId: null, name: "Parent" });
     mockTeamFolderFindMany
       .mockResolvedValueOnce([{ id: "c1", name: "Unique" }])
       .mockResolvedValueOnce([{ id: "s1", name: "Sibling" }]);
@@ -264,7 +264,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
   it("increments suffix when (2) is taken", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", orgId: "o1", parentId: null, name: "Parent" });
+    mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", teamId: "o1", parentId: null, name: "Parent" });
     mockTeamFolderFindMany
       .mockResolvedValueOnce([{ id: "c1", name: "Parent" }])
       .mockResolvedValueOnce([{ id: "s1", name: "Parent (2)" }]);
@@ -279,7 +279,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
   it("deletes folder, promotes children, renames on conflict", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", orgId: "o1", parentId: null, name: "Parent" });
+    mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", teamId: "o1", parentId: null, name: "Parent" });
     mockTeamFolderFindMany
       .mockResolvedValueOnce([{ id: "c1", name: "Parent" }])
       .mockResolvedValueOnce([]);

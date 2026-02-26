@@ -28,10 +28,10 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   const token = await prisma.scimToken.findUnique({
     where: { id: tokenId },
-    select: { id: true, orgId: true, revokedAt: true },
+    select: { id: true, teamId: true, revokedAt: true },
   });
 
-  if (!token || token.orgId !== teamId) {
+  if (!token || token.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 

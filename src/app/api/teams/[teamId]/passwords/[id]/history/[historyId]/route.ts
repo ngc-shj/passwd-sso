@@ -24,16 +24,16 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await prisma.orgPasswordEntry.findUnique({
+  const entry = await prisma.teamPasswordEntry.findUnique({
     where: { id },
-    select: { orgId: true, entryType: true },
+    select: { teamId: true, entryType: true },
   });
 
-  if (!entry || entry.orgId !== teamId) {
+  if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const history = await prisma.orgPasswordEntryHistory.findUnique({
+  const history = await prisma.teamPasswordEntryHistory.findUnique({
     where: { id: historyId },
   });
 
@@ -50,6 +50,6 @@ export async function GET(_req: NextRequest, { params }: Params) {
     blobIv: history.blobIv,
     blobAuthTag: history.blobAuthTag,
     aadVersion: history.aadVersion,
-    orgKeyVersion: history.orgKeyVersion,
+    teamKeyVersion: history.teamKeyVersion,
   });
 }

@@ -7,7 +7,7 @@ const {
   TeamAuthError,
   mockLogAudit,
   mockScimToken,
-  mockOrganization,
+  mockTeamanization,
   mockHashToken,
 } = vi.hoisted(
   () => {
@@ -25,7 +25,7 @@ const {
       TeamAuthError: _TeamAuthError,
       mockLogAudit: vi.fn(),
       mockScimToken: { findMany: vi.fn(), create: vi.fn(), count: vi.fn() },
-      mockOrganization: { findUnique: vi.fn() },
+      mockTeamanization: { findUnique: vi.fn() },
       mockHashToken: vi.fn().mockReturnValue("hashed-token"),
     };
   },
@@ -41,7 +41,7 @@ vi.mock("@/lib/audit", () => ({
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
 }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { scimToken: mockScimToken, organization: mockOrganization },
+  prisma: { scimToken: mockScimToken, team: mockTeamanization },
 }));
 vi.mock("@/lib/crypto-server", () => ({
   hashToken: mockHashToken,
@@ -73,7 +73,7 @@ describe("GET /api/teams/[teamId]/scim-tokens", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockOrganization.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockTeamanization.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 
   it("returns 401 if not authenticated", async () => {
@@ -116,7 +116,7 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockOrganization.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockTeamanization.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 
   it("returns 409 when active token limit is exceeded", async () => {
