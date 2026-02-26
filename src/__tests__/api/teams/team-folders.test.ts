@@ -64,7 +64,7 @@ describe("GET /api/teams/[teamId]/folders", () => {
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const req = createRequest("GET");
-    const res = await GET(req, createParams({ orgId: "o1" }));
+    const res = await GET(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(401);
   });
@@ -73,7 +73,7 @@ describe("GET /api/teams/[teamId]/folders", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgMember.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const req = createRequest("GET");
-    const res = await GET(req, createParams({ orgId: "o1" }));
+    const res = await GET(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(403);
   });
@@ -93,7 +93,7 @@ describe("GET /api/teams/[teamId]/folders", () => {
       },
     ]);
     const req = createRequest("GET");
-    const res = await GET(req, createParams({ orgId: "o1" }));
+    const res = await GET(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(200);
     expect(json).toHaveLength(1);
@@ -107,7 +107,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const req = createRequest("POST", undefined, { body: { name: "F" } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(401);
   });
@@ -116,7 +116,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const req = createRequest("POST", undefined, { body: { name: "F" } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(403);
   });
@@ -130,7 +130,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
       body: "not json",
       headers: { "Content-Type": "text/plain" },
     });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("INVALID_JSON");
@@ -140,7 +140,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue(undefined);
     const req = createRequest("POST", undefined, { body: { name: "" } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
@@ -151,7 +151,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockOrgFolderFindFirst.mockResolvedValue({ id: "existing" });
     const req = createRequest("POST", undefined, { body: { name: "Dup" } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(409);
     expect(json.error).toBe("FOLDER_ALREADY_EXISTS");
@@ -163,7 +163,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     const parentCuid = "cm1234567890abcdefghijklmn";
     mockOrgFolderFindUnique.mockResolvedValue({ id: "existing" });
     const req = createRequest("POST", undefined, { body: { name: "Dup", parentId: parentCuid } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(409);
     expect(json.error).toBe("FOLDER_ALREADY_EXISTS");
@@ -175,7 +175,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     const parentCuid = "cm1234567890abcdefghijklmn";
     vi.mocked(validateParentFolder).mockRejectedValue(new Error("not found"));
     const req = createRequest("POST", undefined, { body: { name: "New", parentId: parentCuid } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(404);
   });
@@ -185,7 +185,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     mockRequireOrgPermission.mockResolvedValue(undefined);
     vi.mocked(validateFolderDepth).mockRejectedValue(new Error("depth exceeded"));
     const req = createRequest("POST", undefined, { body: { name: "Deep" } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("FOLDER_MAX_DEPTH_EXCEEDED");
@@ -206,7 +206,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     };
     mockOrgFolderCreate.mockResolvedValue(created);
     const req = createRequest("POST", undefined, { body: { name: "New" } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(201);
     expect(json.name).toBe("New");

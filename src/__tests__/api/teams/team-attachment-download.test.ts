@@ -56,7 +56,7 @@ import { GET, DELETE } from "@/app/api/teams/[teamId]/passwords/[id]/attachments
 import { OrgAuthError } from "@/lib/team-auth";
 
 function makeParams(orgId: string, id: string, attachmentId: string) {
-  return createParams({ orgId, id, attachmentId });
+  return createParams({ teamId: orgId, id, attachmentId });
 }
 
 function createGetRequest() {

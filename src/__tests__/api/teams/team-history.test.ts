@@ -41,7 +41,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const req = createRequest("GET");
-    const res = await GET(req, createParams({ orgId: "o1", id: "p1" }));
+    const res = await GET(req, createParams({ teamId: "o1", id: "p1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(401);
     expect(json.error).toBe("UNAUTHORIZED");
@@ -51,7 +51,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgMember.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const req = createRequest("GET");
-    const res = await GET(req, createParams({ orgId: "o1", id: "p1" }));
+    const res = await GET(req, createParams({ teamId: "o1", id: "p1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(403);
     expect(json.error).toBe("FORBIDDEN");
@@ -62,7 +62,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
     mockRequireOrgMember.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(null);
     const req = createRequest("GET");
-    const res = await GET(req, createParams({ orgId: "o1", id: "p1" }));
+    const res = await GET(req, createParams({ teamId: "o1", id: "p1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(404);
     expect(json.error).toBe("NOT_FOUND");
@@ -73,7 +73,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
     mockRequireOrgMember.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ orgId: "other-org" });
     const req = createRequest("GET");
-    const res = await GET(req, createParams({ orgId: "o1", id: "p1" }));
+    const res = await GET(req, createParams({ teamId: "o1", id: "p1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(404);
   });
@@ -98,7 +98,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
     ]);
 
     const req = createRequest("GET");
-    const res = await GET(req, createParams({ orgId: "o1", id: "p1" }));
+    const res = await GET(req, createParams({ teamId: "o1", id: "p1" }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);

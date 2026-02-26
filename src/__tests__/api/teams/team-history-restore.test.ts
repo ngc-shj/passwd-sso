@@ -51,7 +51,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const req = createRequest("POST");
-    const res = await POST(req, createParams({ orgId: "o1", id: "p1", historyId: "h1" }));
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(401);
     expect(json.error).toBe("UNAUTHORIZED");
@@ -61,7 +61,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const req = createRequest("POST");
-    const res = await POST(req, createParams({ orgId: "o1", id: "p1", historyId: "h1" }));
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(403);
   });
@@ -71,7 +71,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(null);
     const req = createRequest("POST");
-    const res = await POST(req, createParams({ orgId: "o1", id: "p1", historyId: "h1" }));
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(404);
     expect(json.error).toBe("NOT_FOUND");
@@ -82,7 +82,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     mockRequireOrgPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ id: "p1", orgId: "other-org" });
     const req = createRequest("POST");
-    const res = await POST(req, createParams({ orgId: "o1", id: "p1", historyId: "h1" }));
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(404);
   });
@@ -93,7 +93,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     mockEntryFindUnique.mockResolvedValue({ id: "p1", orgId: "o1" });
     mockHistoryFindUnique.mockResolvedValue(null);
     const req = createRequest("POST");
-    const res = await POST(req, createParams({ orgId: "o1", id: "p1", historyId: "h1" }));
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(404);
     expect(json.error).toBe("HISTORY_NOT_FOUND");
@@ -105,7 +105,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     mockEntryFindUnique.mockResolvedValue({ id: "p1", orgId: "o1" });
     mockHistoryFindUnique.mockResolvedValue({ id: "h1", entryId: "other-entry" });
     const req = createRequest("POST");
-    const res = await POST(req, createParams({ orgId: "o1", id: "p1", historyId: "h1" }));
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(404);
   });
@@ -144,7 +144,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     });
 
     const req = createRequest("POST");
-    const res = await POST(req, createParams({ orgId: "o1", id: "p1", historyId: "h1" }));
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(200);
     expect(json.success).toBe(true);

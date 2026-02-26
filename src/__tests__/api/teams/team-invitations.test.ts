@@ -59,7 +59,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const req = createRequest("GET");
-    const res = await GET(req, createParams({ orgId: "o1" }));
+    const res = await GET(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(401);
   });
@@ -68,7 +68,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const req = createRequest("GET");
-    const res = await GET(req, createParams({ orgId: "o1" }));
+    const res = await GET(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(403);
   });
@@ -89,7 +89,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
       },
     ]);
     const req = createRequest("GET");
-    const res = await GET(req, createParams({ orgId: "o1" }));
+    const res = await GET(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(200);
     expect(json).toHaveLength(1);
@@ -103,7 +103,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const req = createRequest("POST", undefined, { body: { email: "a@b.com", role: "MEMBER" } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(401);
   });
@@ -112,7 +112,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
     const req = createRequest("POST", undefined, { body: { email: "a@b.com", role: "MEMBER" } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(403);
   });
@@ -126,7 +126,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
       body: "not json",
       headers: { "Content-Type": "text/plain" },
     });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("INVALID_JSON");
@@ -136,7 +136,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireOrgPermission.mockResolvedValue(undefined);
     const req = createRequest("POST", undefined, { body: { email: "not-email" } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
@@ -148,7 +148,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockUserFindUnique.mockResolvedValue({ id: "u2", email: "existing@test.com" });
     mockOrgMemberFindUnique.mockResolvedValue({ id: "m1", deactivatedAt: null });
     const req = createRequest("POST", undefined, { body: { email: "existing@test.com", role: "MEMBER" } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(409);
     expect(json.error).toBe("ALREADY_A_MEMBER");
@@ -160,7 +160,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockUserFindUnique.mockResolvedValue(null);
     mockInvitationFindFirst.mockResolvedValue({ id: "inv-existing" });
     const req = createRequest("POST", undefined, { body: { email: "new@test.com", role: "MEMBER" } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(409);
     expect(json.error).toBe("INVITATION_ALREADY_SENT");
@@ -181,7 +181,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     };
     mockInvitationCreate.mockResolvedValue(created);
     const req = createRequest("POST", undefined, { body: { email: "new@test.com", role: "MEMBER" } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(201);
     expect(json.email).toBe("new@test.com");
@@ -203,7 +203,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     };
     mockInvitationCreate.mockResolvedValue(created);
     const req = createRequest("POST", undefined, { body: { email: "nonmember@test.com", role: "MEMBER" } });
-    const res = await POST(req, createParams({ orgId: "o1" }));
+    const res = await POST(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(201);
   });

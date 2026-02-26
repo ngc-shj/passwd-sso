@@ -62,7 +62,7 @@ import { GET, POST } from "@/app/api/teams/[teamId]/passwords/[id]/attachments/r
 import { OrgAuthError } from "@/lib/team-auth";
 
 function makeParams(orgId: string, id: string) {
-  return createParams({ orgId, id });
+  return createParams({ teamId: orgId, id });
 }
 
 function createGetRequest() {

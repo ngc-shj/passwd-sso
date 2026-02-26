@@ -52,7 +52,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs`
     );
 
-    const res = await GET(req, createParams({ orgId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(401);
@@ -70,7 +70,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs`
     );
 
-    const res = await GET(req, createParams({ orgId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(403);
@@ -104,7 +104,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs`
     );
 
-    const res = await GET(req, createParams({ orgId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -140,7 +140,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs?action=${AUDIT_ACTION.ORG_MEMBER_INVITE}`
     );
 
-    await GET(req, createParams({ orgId: ORG_ID }));
+    await GET(req, createParams({ teamId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -161,7 +161,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},${AUDIT_ACTION.ENTRY_UPDATE}`
     );
 
-    await GET(req, createParams({ orgId: ORG_ID }));
+    await GET(req, createParams({ teamId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -182,7 +182,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_TRASH}`
     );
 
-    await GET(req, createParams({ orgId: ORG_ID }));
+    await GET(req, createParams({ teamId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -203,7 +203,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_ARCHIVE}`
     );
 
-    await GET(req, createParams({ orgId: ORG_ID }));
+    await GET(req, createParams({ teamId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -224,7 +224,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_UNARCHIVE}`
     );
 
-    await GET(req, createParams({ orgId: ORG_ID }));
+    await GET(req, createParams({ teamId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -245,7 +245,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_RESTORE}`
     );
 
-    await GET(req, createParams({ orgId: ORG_ID }));
+    await GET(req, createParams({ teamId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -265,7 +265,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},NOPE`
     );
 
-    const res = await GET(req, createParams({ orgId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
@@ -284,7 +284,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs?from=2025-01-01T00:00:00Z&to=2025-06-30T23:59:59Z`
     );
 
-    await GET(req, createParams({ orgId: ORG_ID }));
+    await GET(req, createParams({ teamId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -322,7 +322,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs?limit=5`
     );
 
-    const res = await GET(req, createParams({ orgId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -340,7 +340,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs?cursor=bad-cursor`
     );
 
-    const res = await GET(req, createParams({ orgId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
@@ -357,7 +357,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     );
 
     await expect(
-      GET(req, createParams({ orgId: ORG_ID }))
+      GET(req, createParams({ teamId: ORG_ID }))
     ).rejects.toThrow("Unexpected");
   });
 
@@ -395,7 +395,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       "GET",
       `http://localhost/api/teams/${ORG_ID}/audit-logs`
     );
-    const res = await GET(req, createParams({ orgId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -433,7 +433,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       "GET",
       `http://localhost/api/teams/${ORG_ID}/audit-logs`
     );
-    const res = await GET(req, createParams({ orgId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: ORG_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -450,7 +450,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       `http://localhost/api/teams/${ORG_ID}/audit-logs?action=${AUDIT_ACTION_GROUP.ENTRY}`
     );
 
-    await GET(req, createParams({ orgId: ORG_ID }));
+    await GET(req, createParams({ teamId: ORG_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
