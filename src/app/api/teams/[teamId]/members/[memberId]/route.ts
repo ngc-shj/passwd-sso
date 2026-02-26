@@ -83,7 +83,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     });
 
     logAudit({
-      scope: AUDIT_SCOPE.ORG,
+      scope: AUDIT_SCOPE.TEAM,
       action: AUDIT_ACTION.TEAM_ROLE_UPDATE,
       userId: session.user.id,
       orgId: teamId,
@@ -131,7 +131,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.TEAM_ROLE_UPDATE,
     userId: session.user.id,
     orgId: teamId,
@@ -208,7 +208,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   ]);
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.TEAM_MEMBER_REMOVE,
     userId: session.user.id,
     orgId: teamId,

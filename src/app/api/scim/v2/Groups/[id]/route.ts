@@ -194,7 +194,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
     userId: auditUserId,
     orgId: scopedTeamId,
@@ -294,7 +294,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
     userId: auditUserId,
     orgId: scopedTeamId,

@@ -212,7 +212,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: auditAction,
     userId: auditUserId,
     orgId: scopedTeamId,
@@ -311,7 +311,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   // For PATCH, we skip User.name updates to avoid multi-team side effects.
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: auditAction,
     userId: auditUserId,
     orgId: scopedTeamId,
@@ -378,7 +378,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.SCIM_USER_DELETE,
     userId: auditUserId,
     orgId: scopedTeamId,

@@ -236,7 +236,7 @@ export async function POST(req: NextRequest) {
     });
 
     logAudit({
-      scope: AUDIT_SCOPE.ORG,
+      scope: AUDIT_SCOPE.TEAM,
       action: created.reactivated ? AUDIT_ACTION.SCIM_USER_REACTIVATE : AUDIT_ACTION.SCIM_USER_CREATE,
       userId: auditUserId,
       orgId: scopedTeamId,

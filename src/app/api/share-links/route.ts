@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);
   logAudit({
-    scope: orgPasswordEntryId ? AUDIT_SCOPE.ORG : AUDIT_SCOPE.PERSONAL,
+    scope: orgPasswordEntryId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.SHARE_CREATE,
     userId: session.user.id,
     orgId,

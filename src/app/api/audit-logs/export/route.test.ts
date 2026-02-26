@@ -127,7 +127,7 @@ describe("POST /api/audit-logs/export", () => {
     );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        scope: AUDIT_SCOPE.ORG,
+        scope: AUDIT_SCOPE.TEAM,
         orgId: "team-1",
       })
     );

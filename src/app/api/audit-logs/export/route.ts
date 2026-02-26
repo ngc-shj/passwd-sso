@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
   }
 
   logAudit({
-    scope: teamId ? AUDIT_SCOPE.ORG : AUDIT_SCOPE.PERSONAL,
+    scope: teamId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.ENTRY_EXPORT,
     userId: session.user.id,
     orgId: teamId ?? undefined,

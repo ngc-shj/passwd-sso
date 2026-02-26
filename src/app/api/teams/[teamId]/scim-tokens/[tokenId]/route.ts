@@ -45,7 +45,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   });
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.SCIM_TOKEN_REVOKE,
     userId: session.user.id,
     orgId: teamId,

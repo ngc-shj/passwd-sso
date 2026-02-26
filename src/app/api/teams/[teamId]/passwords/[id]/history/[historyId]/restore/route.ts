@@ -86,7 +86,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   });
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.ENTRY_HISTORY_RESTORE,
     userId: session.user.id,
     orgId: teamId,

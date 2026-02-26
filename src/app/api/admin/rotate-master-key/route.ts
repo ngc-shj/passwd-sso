@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
   // Audit log (fire-and-forget; logAudit handles errors internally)
   const { ip } = extractRequestMeta(req);
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.MASTER_KEY_ROTATION,
     userId: operatorId,
     metadata: {

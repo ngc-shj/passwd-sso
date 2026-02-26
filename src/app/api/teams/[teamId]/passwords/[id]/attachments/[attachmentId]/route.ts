@@ -121,7 +121,7 @@ export async function DELETE(
   });
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.ATTACHMENT_DELETE,
     userId: session.user.id,
     orgId: teamId,

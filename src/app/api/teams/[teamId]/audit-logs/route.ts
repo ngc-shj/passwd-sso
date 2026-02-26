@@ -45,7 +45,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const where: Record<string, unknown> = {
     orgId: teamId,
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
   };
 
   if (actionsParam) {

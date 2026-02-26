@@ -54,7 +54,7 @@ describe("logAudit", () => {
     mockCreate.mockResolvedValue({});
 
     logAudit({
-      scope: AUDIT_SCOPE.ORG,
+      scope: AUDIT_SCOPE.TEAM,
       action: AUDIT_ACTION.ENTRY_CREATE,
       userId: "user-1",
       orgId: "team-1",
@@ -67,7 +67,7 @@ describe("logAudit", () => {
 
     expect(mockCreate).toHaveBeenCalledWith({
       data: {
-        scope: AUDIT_SCOPE.ORG,
+        scope: AUDIT_SCOPE.TEAM,
         action: AUDIT_ACTION.ENTRY_CREATE,
         userId: "user-1",
         orgId: "team-1",

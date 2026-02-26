@@ -609,7 +609,7 @@ enum AuditAction {
 
 enum AuditScope {
   PERSONAL
-  ORG
+  TEAM
 }
 
 model AuditLog {

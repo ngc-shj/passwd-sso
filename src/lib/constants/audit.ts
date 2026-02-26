@@ -2,7 +2,7 @@ import type { AuditAction, AuditScope } from "@prisma/client";
 
 export const AUDIT_SCOPE = {
   PERSONAL: "PERSONAL",
-  ORG: "ORG",
+  TEAM: "TEAM",
 } as const satisfies Record<AuditScope, AuditScope>;
 
 export const AUDIT_ACTION = {

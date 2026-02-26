@@ -245,7 +245,7 @@ export async function POST(
   }
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.ATTACHMENT_UPLOAD,
     userId: session.user.id,
     orgId: teamId,

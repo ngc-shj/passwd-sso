@@ -120,7 +120,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       expect.objectContaining({
         where: {
           orgId: TEAM_ID,
-          scope: AUDIT_SCOPE.ORG,
+          scope: AUDIT_SCOPE.TEAM,
         },
         include: {
           user: { select: { id: true, name: true, image: true } },

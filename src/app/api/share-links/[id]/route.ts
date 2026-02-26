@@ -43,7 +43,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);
   logAudit({
-    scope: share.orgPasswordEntryId ? AUDIT_SCOPE.ORG : AUDIT_SCOPE.PERSONAL,
+    scope: share.orgPasswordEntryId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: share.shareType === "TEXT" || share.shareType === "FILE"
       ? AUDIT_ACTION.SEND_REVOKE
       : AUDIT_ACTION.SHARE_REVOKE,
