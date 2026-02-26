@@ -723,7 +723,6 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, orgId, teamId }:
       {scopedTeamId ? (
         <TeamAttachmentSection
           teamId={scopedTeamId}
-          orgId={scopedTeamId}
           entryId={data.id}
           attachments={teamAttachments}
           onAttachmentsChange={setTeamAttachments}

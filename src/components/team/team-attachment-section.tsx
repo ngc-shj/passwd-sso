@@ -47,11 +47,8 @@ export interface TeamAttachmentMeta {
   createdAt: string;
 }
 
-export type OrgAttachmentMeta = TeamAttachmentMeta;
-
 interface TeamAttachmentSectionProps {
   teamId?: string;
-  orgId?: string;
   entryId: string;
   attachments: TeamAttachmentMeta[];
   onAttachmentsChange: (attachments: TeamAttachmentMeta[]) => void;
@@ -75,14 +72,12 @@ function getExtension(filename: string): string {
 }
 
 export function TeamAttachmentSection({
-  teamId,
-  orgId,
+  teamId: scopedId,
   entryId,
   attachments,
   onAttachmentsChange,
   readOnly = false,
 }: TeamAttachmentSectionProps) {
-  const scopedId = teamId ?? orgId;
   if (!scopedId) return null;
   const t = useTranslations("Attachments");
   const tApi = useTranslations("ApiErrors");
@@ -178,8 +173,8 @@ export function TeamAttachmentSection({
   const handleDownload = async (attachment: TeamAttachmentMeta) => {
     setDownloading(attachment.id);
     try {
-      const orgKey = await getTeamEncryptionKey(scopedId);
-      if (!orgKey) throw new Error("No org key");
+      const teamKey = await getTeamEncryptionKey(scopedId);
+      if (!teamKey) throw new Error("No team key");
 
       const res = await fetch(
         apiPath.teamPasswordAttachmentById(scopedId, entryId, attachment.id)
@@ -201,7 +196,7 @@ export function TeamAttachmentSection({
         : undefined;
       const decrypted = await decryptBinary(
         { ciphertext, iv: data.iv, authTag: data.authTag },
-        orgKey,
+        teamKey,
         aad,
       );
 
@@ -363,5 +358,3 @@ export function TeamAttachmentSection({
     </div>
   );
 }
-
-export const OrgAttachmentSection = TeamAttachmentSection;

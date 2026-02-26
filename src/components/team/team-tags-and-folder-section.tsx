@@ -9,7 +9,6 @@ interface TeamTagsAndFolderSectionProps {
   tagsTitle: string;
   tagsHint: string;
   teamId?: string;
-  orgId?: string;
   selectedTags: TeamTagData[];
   onTagsChange: (tags: TeamTagData[]) => void;
   folders: TeamFolderItem[];
@@ -22,7 +21,6 @@ export function TeamTagsAndFolderSection({
   tagsTitle,
   tagsHint,
   teamId,
-  orgId,
   selectedTags,
   onTagsChange,
   folders,
@@ -30,13 +28,12 @@ export function TeamTagsAndFolderSection({
   onFolderChange,
   sectionCardClass = "",
 }: TeamTagsAndFolderSectionProps) {
-  const scopedId = teamId ?? orgId;
-  if (!scopedId) return null;
+  if (!teamId) return null;
   return (
     <EntryTagsAndFolderLayout
       tagsTitle={tagsTitle}
       tagsHint={tagsHint}
-      tagsInput={<TeamTagInput teamId={scopedId} selectedTags={selectedTags} onChange={onTagsChange} />}
+      tagsInput={<TeamTagInput teamId={teamId} selectedTags={selectedTags} onChange={onTagsChange} />}
       folders={folders}
       folderId={folderId}
       onFolderChange={onFolderChange}

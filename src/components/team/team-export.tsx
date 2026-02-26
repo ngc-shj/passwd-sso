@@ -24,11 +24,9 @@ import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
 interface TeamExportPanelContentProps {
   teamId?: string;
-  orgId?: string;
 }
 
-function TeamExportPanelContent({ teamId, orgId }: TeamExportPanelContentProps) {
-  const scopedTeamId = teamId ?? orgId;
+function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContentProps) {
   if (!scopedTeamId) return null;
   const t = useTranslations("Export");
   const { getTeamEncryptionKey } = useTeamVault();
@@ -237,10 +235,9 @@ function TeamExportPanelContent({ teamId, orgId }: TeamExportPanelContentProps) 
 
 interface TeamExportPagePanelProps {
   teamId?: string;
-  orgId?: string;
 }
 
-export function TeamExportPagePanel({ teamId, orgId }: TeamExportPagePanelProps) {
+export function TeamExportPagePanel({ teamId }: TeamExportPagePanelProps) {
   const t = useTranslations("Export");
   return (
     <PagePane
@@ -252,9 +249,7 @@ export function TeamExportPagePanel({ teamId, orgId }: TeamExportPagePanelProps)
         />
       }
     >
-      <TeamExportPanelContent teamId={teamId} orgId={orgId} />
+      <TeamExportPanelContent teamId={teamId} />
     </PagePane>
   );
 }
-
-export const OrgExportPagePanel = TeamExportPagePanel;

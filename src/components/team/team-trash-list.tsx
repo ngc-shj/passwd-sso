@@ -43,20 +43,17 @@ interface TeamTrashEntry {
 
 interface TeamTrashListProps {
   teamId?: string;
-  orgId?: string;
   searchQuery?: string;
   refreshKey: number;
   sortBy?: EntrySortOption;
 }
 
 export function TeamTrashList({
-  teamId: _teamId,
-  orgId: _orgId,
+  teamId: scopedTeamId,
   searchQuery = "",
   refreshKey,
   sortBy = "updatedAt",
 }: TeamTrashListProps) {
-  const scopedTeamId = _teamId ?? _orgId;
   const t = useTranslations("Trash");
   const tTeam = useTranslations("Team");
   const { getTeamEncryptionKey } = useTeamVault();

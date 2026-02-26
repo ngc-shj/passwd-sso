@@ -43,20 +43,17 @@ interface TeamArchivedEntry {
 
 interface TeamArchivedListProps {
   teamId?: string;
-  orgId?: string;
   searchQuery: string;
   refreshKey: number;
   sortBy?: EntrySortOption;
 }
 
 export function TeamArchivedList({
-  teamId: _teamId,
-  orgId: _orgId,
+  teamId: scopedTeamId,
   searchQuery,
   refreshKey,
   sortBy = "updatedAt",
 }: TeamArchivedListProps) {
-  const scopedTeamId = _teamId ?? _orgId;
   const t = useTranslations("Team");
   const { getTeamEncryptionKey } = useTeamVault();
   const [entries, setEntries] = useState<TeamArchivedEntry[]>([]);
