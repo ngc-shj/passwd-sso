@@ -41,6 +41,7 @@ interface HistoryEntry {
 
 interface EntryHistorySectionProps {
   entryId: string;
+  teamId?: string;
   orgId?: string;
   requireReprompt?: boolean;
   onRestore?: () => void;
@@ -129,7 +130,14 @@ function ViewContent({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore }: EntryHistorySectionProps) {
+export function EntryHistorySection({
+  entryId,
+  teamId,
+  orgId,
+  requireReprompt,
+  onRestore,
+}: EntryHistorySectionProps) {
+  const scopedTeamId = teamId ?? orgId;
   const t = useTranslations("PasswordDetail");
   const locale = useLocale();
   const { encryptionKey, userId } = useVault();
@@ -146,8 +154,8 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
   const fetchHistory = useCallback(async () => {
     setLoading(true);
     try {
-      const url = orgId
-        ? apiPath.teamPasswordHistory(orgId, entryId)
+      const url = scopedTeamId
+        ? apiPath.teamPasswordHistory(scopedTeamId, entryId)
         : apiPath.passwordHistory(entryId);
       const res = await fetch(url);
       if (res.ok) {
@@ -157,7 +165,7 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
     } finally {
       setLoading(false);
     }
-  }, [entryId, orgId]);
+  }, [entryId, scopedTeamId]);
 
   useEffect(() => {
     fetchHistory();
@@ -167,8 +175,8 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
     if (!restoreTarget) return;
     setRestoring(true);
     try {
-      const url = orgId
-        ? apiPath.teamPasswordHistoryRestore(orgId, entryId, restoreTarget.id)
+      const url = scopedTeamId
+        ? apiPath.teamPasswordHistoryRestore(scopedTeamId, entryId, restoreTarget.id)
         : apiPath.passwordHistoryRestore(entryId, restoreTarget.id);
       const res = await fetch(url, { method: "POST" });
       if (res.ok) {
@@ -185,19 +193,19 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
   const handleView = async (h: HistoryEntry) => {
     setViewLoading(true);
     try {
-      if (orgId) {
+      if (scopedTeamId) {
         // Org entries: fetch encrypted blob, then decrypt client-side.
         // TODO: If h.orgKeyVersion !== current org version, fetch old key via
         // GET /member-key?keyVersion=N for correct decryption.
         // Currently uses latest key only — history from before key rotation
         // will fail to decrypt until re-encryption is implemented.
-        const res = await fetch(apiPath.teamPasswordHistoryById(orgId, entryId, h.id));
+        const res = await fetch(apiPath.teamPasswordHistoryById(scopedTeamId, entryId, h.id));
         if (!res.ok) return;
         const data = await res.json();
-        const orgKey = await getTeamEncryptionKey(orgId);
-        if (!orgKey) return;
+        const teamKey = await getTeamEncryptionKey(scopedTeamId);
+        if (!teamKey) return;
         const aad = data.aadVersion >= 1
-          ? buildOrgEntryAAD(orgId, entryId, "blob")
+          ? buildOrgEntryAAD(scopedTeamId, entryId, "blob")
           : undefined;
         const plaintext = await decryptData(
           {
@@ -205,7 +213,7 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
             iv: data.blobIv,
             authTag: data.blobAuthTag,
           },
-          orgKey,
+          teamKey,
           aad,
         );
         setViewData(JSON.parse(plaintext));

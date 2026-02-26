@@ -25,11 +25,11 @@ import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
-interface OrgTrashEntry {
+interface TeamTrashEntry {
   id: string;
   entryType: EntryTypeValue;
-  orgId: string;
-  orgName: string;
+  teamId: string;
+  teamName: string;
   role: string;
   title: string;
   username: string | null;
@@ -41,26 +41,26 @@ interface OrgTrashEntry {
   deletedAt: string;
 }
 
-interface OrgTrashListProps {
-  orgId?: string;
+interface TeamTrashListProps {
   teamId?: string;
+  orgId?: string;
   searchQuery?: string;
   refreshKey: number;
   sortBy?: EntrySortOption;
 }
 
-export function OrgTrashList({
-  orgId: _orgId,
+export function TeamTrashList({
   teamId: _teamId,
+  orgId: _orgId,
   searchQuery = "",
   refreshKey,
   sortBy = "updatedAt",
-}: OrgTrashListProps) {
-  const scopedId = _teamId ?? _orgId;
+}: TeamTrashListProps) {
+  const scopedTeamId = _teamId ?? _orgId;
   const t = useTranslations("Trash");
-  const tOrg = useTranslations("Team");
+  const tTeam = useTranslations("Team");
   const { getTeamEncryptionKey } = useTeamVault();
-  const [entries, setEntries] = useState<OrgTrashEntry[]>([]);
+  const [entries, setEntries] = useState<TeamTrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchTrash = useCallback(async () => {
@@ -74,25 +74,25 @@ export function OrgTrashList({
       const decrypted = await Promise.all(
         data.map(async (entry: Record<string, unknown>) => {
           try {
-            const entryOrgId = entry.orgId as string;
-            const orgKey = await getTeamEncryptionKey(entryOrgId);
-            if (!orgKey) throw new Error("No org key");
-            const aad = buildOrgEntryAAD(entryOrgId, entry.id as string, "overview");
+            const entryTeamId = entry.orgId as string;
+            const teamKey = await getTeamEncryptionKey(entryTeamId);
+            if (!teamKey) throw new Error("No team key");
+            const aad = buildOrgEntryAAD(entryTeamId, entry.id as string, "overview");
             const json = await decryptData(
               {
                 ciphertext: entry.encryptedOverview as string,
                 iv: entry.overviewIv as string,
                 authTag: entry.overviewAuthTag as string,
               },
-              orgKey,
+              teamKey,
               aad,
             );
             const overview = JSON.parse(json);
             return {
               id: entry.id,
               entryType: entry.entryType,
-              orgId: entryOrgId,
-              orgName: entry.orgName,
+              teamId: entryTeamId,
+              teamName: entry.orgName,
               role: entry.role,
               title: overview.title ?? "",
               username: overview.username ?? null,
@@ -102,13 +102,13 @@ export function OrgTrashList({
               fullName: overview.fullName ?? null,
               idNumberLast4: overview.idNumberLast4 ?? null,
               deletedAt: entry.deletedAt,
-            } as OrgTrashEntry;
+            } as TeamTrashEntry;
           } catch {
             return {
               id: entry.id as string,
               entryType: entry.entryType as EntryTypeValue,
-              orgId: entry.orgId as string,
-              orgName: entry.orgName as string,
+              teamId: entry.orgId as string,
+              teamName: entry.orgName as string,
               role: entry.role as string,
               title: "(decryption failed)",
               username: null,
@@ -118,7 +118,7 @@ export function OrgTrashList({
               fullName: null,
               idNumberLast4: null,
               deletedAt: entry.deletedAt as string,
-            } as OrgTrashEntry;
+            } as TeamTrashEntry;
           }
         }),
       );
@@ -134,10 +134,10 @@ export function OrgTrashList({
     fetchTrash();
   }, [fetchTrash, refreshKey]);
 
-  const handleRestore = async (entry: OrgTrashEntry) => {
+  const handleRestore = async (entry: TeamTrashEntry) => {
     try {
       const res = await fetch(
-        apiPath.teamPasswordRestore(entry.orgId, entry.id),
+        apiPath.teamPasswordRestore(entry.teamId, entry.id),
         { method: "POST" }
       );
       if (res.ok) {
@@ -151,10 +151,10 @@ export function OrgTrashList({
     }
   };
 
-  const handleDeletePermanently = async (entry: OrgTrashEntry) => {
+  const handleDeletePermanently = async (entry: TeamTrashEntry) => {
     try {
       const res = await fetch(
-        `${apiPath.teamPasswordById(entry.orgId, entry.id)}?permanent=true`,
+        `${apiPath.teamPasswordById(entry.teamId, entry.id)}?permanent=true`,
         { method: "DELETE" }
       );
       if (res.ok) {
@@ -169,7 +169,7 @@ export function OrgTrashList({
   };
 
   const filtered = entries.filter((entry) => {
-    if (scopedId && entry.orgId !== scopedId) return false;
+    if (scopedTeamId && entry.teamId !== scopedTeamId) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -180,7 +180,7 @@ export function OrgTrashList({
       entry.lastFour?.includes(q) ||
       entry.fullName?.toLowerCase().includes(q) ||
       entry.idNumberLast4?.includes(q) ||
-      entry.orgName.toLowerCase().includes(q)
+      entry.teamName.toLowerCase().includes(q)
     );
   });
 
@@ -192,11 +192,11 @@ export function OrgTrashList({
 
   return (
     <div className="mt-6">
-      {!scopedId && (
+      {!scopedTeamId && (
         <div className="mb-3 flex items-center gap-2">
           <Building2 className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-medium text-muted-foreground">
-            {tOrg("trash")}
+            {tTeam("trash")}
           </h2>
         </div>
       )}
@@ -240,7 +240,7 @@ export function OrgTrashList({
                     )
                   )}
                   <span className="text-xs text-muted-foreground">
-                    {entry.orgName}
+                    {entry.teamName}
                   </span>
                 </div>
               </div>
@@ -287,3 +287,5 @@ export function OrgTrashList({
     </div>
   );
 }
+
+export const OrgTrashList = TeamTrashList;

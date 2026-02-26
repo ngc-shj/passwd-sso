@@ -17,11 +17,11 @@ import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
-interface OrgArchivedEntry {
+interface TeamArchivedEntry {
   id: string;
   entryType: EntryTypeValue;
-  orgId: string;
-  orgName: string;
+  teamId: string;
+  teamName: string;
   role: string;
   title: string;
   username: string | null;
@@ -41,29 +41,29 @@ interface OrgArchivedEntry {
   updatedAt: string;
 }
 
-interface OrgArchivedListProps {
-  orgId?: string;
+interface TeamArchivedListProps {
   teamId?: string;
+  orgId?: string;
   searchQuery: string;
   refreshKey: number;
   sortBy?: EntrySortOption;
 }
 
-export function OrgArchivedList({
-  orgId: _orgId,
+export function TeamArchivedList({
   teamId: _teamId,
+  orgId: _orgId,
   searchQuery,
   refreshKey,
   sortBy = "updatedAt",
-}: OrgArchivedListProps) {
-  const scopedId = _teamId ?? _orgId;
+}: TeamArchivedListProps) {
+  const scopedTeamId = _teamId ?? _orgId;
   const t = useTranslations("Team");
   const { getTeamEncryptionKey } = useTeamVault();
-  const [entries, setEntries] = useState<OrgArchivedEntry[]>([]);
+  const [entries, setEntries] = useState<TeamArchivedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
-  const [editOrgId, setEditOrgId] = useState<string | null>(null);
+  const [editTeamId, setEditTeamId] = useState<string | null>(null);
   const [editData, setEditData] = useState<{
     id: string;
     title: string;
@@ -84,29 +84,29 @@ export function OrgArchivedList({
       const data = await res.json();
       if (!Array.isArray(data)) return;
 
-      // Decrypt overview blobs (entries span multiple orgs)
+      // Decrypt overview blobs (entries span multiple teams)
       const decrypted = await Promise.all(
         data.map(async (entry: Record<string, unknown>) => {
           try {
-            const entryOrgId = entry.orgId as string;
-            const orgKey = await getTeamEncryptionKey(entryOrgId);
-            if (!orgKey) throw new Error("No org key");
-            const aad = buildOrgEntryAAD(entryOrgId, entry.id as string, "overview");
+            const entryTeamId = entry.orgId as string;
+            const teamKey = await getTeamEncryptionKey(entryTeamId);
+            if (!teamKey) throw new Error("No team key");
+            const aad = buildOrgEntryAAD(entryTeamId, entry.id as string, "overview");
             const json = await decryptData(
               {
                 ciphertext: entry.encryptedOverview as string,
                 iv: entry.overviewIv as string,
                 authTag: entry.overviewAuthTag as string,
               },
-              orgKey,
+              teamKey,
               aad,
             );
             const overview = JSON.parse(json);
             return {
               id: entry.id,
               entryType: entry.entryType,
-              orgId: entryOrgId,
-              orgName: entry.orgName,
+              teamId: entryTeamId,
+              teamName: entry.orgName,
               role: entry.role,
               title: overview.title ?? "",
               username: overview.username ?? null,
@@ -124,13 +124,13 @@ export function OrgArchivedList({
               updatedBy: entry.updatedBy,
               createdAt: entry.createdAt,
               updatedAt: entry.updatedAt,
-            } as OrgArchivedEntry;
+            } as TeamArchivedEntry;
           } catch {
             return {
               id: entry.id as string,
               entryType: entry.entryType as EntryTypeValue,
-              orgId: entry.orgId as string,
-              orgName: entry.orgName as string,
+              teamId: entry.orgId as string,
+              teamName: entry.orgName as string,
               role: entry.role as string,
               title: "(decryption failed)",
               username: null,
@@ -143,12 +143,12 @@ export function OrgArchivedList({
               idNumberLast4: null,
               isFavorite: entry.isFavorite as boolean,
               isArchived: entry.isArchived as boolean,
-              tags: (entry.tags ?? []) as OrgArchivedEntry["tags"],
-              createdBy: entry.createdBy as OrgArchivedEntry["createdBy"],
-              updatedBy: entry.updatedBy as OrgArchivedEntry["updatedBy"],
+              tags: (entry.tags ?? []) as TeamArchivedEntry["tags"],
+              createdBy: entry.createdBy as TeamArchivedEntry["createdBy"],
+              updatedBy: entry.updatedBy as TeamArchivedEntry["updatedBy"],
               createdAt: entry.createdAt as string,
               updatedAt: entry.updatedAt as string,
-            } as OrgArchivedEntry;
+            } as TeamArchivedEntry;
           }
         }),
       );
@@ -172,7 +172,7 @@ export function OrgArchivedList({
       prev.map((e) => (e.id === id ? { ...e, isFavorite: !e.isFavorite } : e))
     );
     try {
-      await fetch(apiPath.teamPasswordFavorite(entry.orgId, id), {
+      await fetch(apiPath.teamPasswordFavorite(entry.teamId, id), {
         method: "POST",
       });
     } catch {
@@ -187,7 +187,7 @@ export function OrgArchivedList({
     // Unarchive: remove from this list
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(apiPath.teamPasswordById(entry.orgId, id), {
+      const res = await fetch(apiPath.teamPasswordById(entry.teamId, id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isArchived: false }),
@@ -203,7 +203,7 @@ export function OrgArchivedList({
     if (!entry) return;
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(apiPath.teamPasswordById(entry.orgId, id), {
+      const res = await fetch(apiPath.teamPasswordById(entry.teamId, id), {
         method: "DELETE",
       });
       if (!res.ok) fetchArchived();
@@ -213,17 +213,17 @@ export function OrgArchivedList({
   };
 
   const decryptFullBlob = useCallback(
-    async (entryOrgId: string, id: string, raw: Record<string, unknown>) => {
-      const orgKey = await getTeamEncryptionKey(entryOrgId);
-      if (!orgKey) throw new Error("No org key");
-      const aad = buildOrgEntryAAD(entryOrgId, id, "blob");
+    async (entryTeamId: string, id: string, raw: Record<string, unknown>) => {
+      const teamKey = await getTeamEncryptionKey(entryTeamId);
+      if (!teamKey) throw new Error("No team key");
+      const aad = buildOrgEntryAAD(entryTeamId, id, "blob");
       const json = await decryptData(
         {
           ciphertext: raw.encryptedBlob as string,
           iv: raw.blobIv as string,
           authTag: raw.blobAuthTag as string,
         },
-        orgKey,
+        teamKey,
         aad,
       );
       return JSON.parse(json) as Record<string, unknown>;
@@ -235,11 +235,11 @@ export function OrgArchivedList({
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;
     try {
-      const res = await fetch(apiPath.teamPasswordById(entry.orgId, id));
+      const res = await fetch(apiPath.teamPasswordById(entry.teamId, id));
       if (!res.ok) return;
       const raw = await res.json();
-      const blob = await decryptFullBlob(entry.orgId, id, raw);
-      setEditOrgId(entry.orgId);
+      const blob = await decryptFullBlob(entry.teamId, id, raw);
+      setEditTeamId(entry.teamId);
       setEditData({
         id: raw.id,
         title: (blob.title as string) ?? "",
@@ -258,12 +258,12 @@ export function OrgArchivedList({
   };
 
   const createDetailFetcher = useCallback(
-    (entry: OrgArchivedEntry) =>
+    (entry: TeamArchivedEntry) =>
       async (): Promise<InlineDetailData> => {
-        const res = await fetch(apiPath.teamPasswordById(entry.orgId, entry.id));
+        const res = await fetch(apiPath.teamPasswordById(entry.teamId, entry.id));
         if (!res.ok) throw new Error("Failed");
         const raw = await res.json();
-        const blob = await decryptFullBlob(entry.orgId, entry.id, raw);
+        const blob = await decryptFullBlob(entry.teamId, entry.id, raw);
         return {
           id: raw.id,
           entryType: entry.entryType,
@@ -304,31 +304,31 @@ export function OrgArchivedList({
   );
 
   const createPasswordFetcher = useCallback(
-    (entry: OrgArchivedEntry) =>
+    (entry: TeamArchivedEntry) =>
       async (): Promise<string> => {
-        const res = await fetch(apiPath.teamPasswordById(entry.orgId, entry.id));
+        const res = await fetch(apiPath.teamPasswordById(entry.teamId, entry.id));
         if (!res.ok) throw new Error("Failed");
         const raw = await res.json();
-        const blob = await decryptFullBlob(entry.orgId, entry.id, raw);
+        const blob = await decryptFullBlob(entry.teamId, entry.id, raw);
         return (blob.password as string) ?? (blob.content as string) ?? "";
       },
     [decryptFullBlob]
   );
 
   const createUrlFetcher = useCallback(
-    (entry: OrgArchivedEntry) =>
+    (entry: TeamArchivedEntry) =>
       async (): Promise<string | null> => {
-        const res = await fetch(apiPath.teamPasswordById(entry.orgId, entry.id));
+        const res = await fetch(apiPath.teamPasswordById(entry.teamId, entry.id));
         if (!res.ok) throw new Error("Failed");
         const raw = await res.json();
-        const blob = await decryptFullBlob(entry.orgId, entry.id, raw);
+        const blob = await decryptFullBlob(entry.teamId, entry.id, raw);
         return (blob.url as string) ?? null;
       },
     [decryptFullBlob]
   );
 
   const filtered = entries.filter((p) => {
-    if (scopedId && p.orgId !== scopedId) return false;
+    if (scopedTeamId && p.teamId !== scopedTeamId) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -341,7 +341,7 @@ export function OrgArchivedList({
       p.brand?.toLowerCase().includes(q) ||
       p.lastFour?.includes(q) ||
       p.cardholderName?.toLowerCase().includes(q) ||
-      p.orgName.toLowerCase().includes(q)
+      p.teamName.toLowerCase().includes(q)
     );
   });
 
@@ -353,7 +353,7 @@ export function OrgArchivedList({
 
   return (
     <div className="mt-6">
-      {!scopedId && (
+      {!scopedTeamId && (
         <div className="mb-3 flex items-center gap-2">
           <Building2 className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-medium text-muted-foreground">
@@ -396,15 +396,16 @@ export function OrgArchivedList({
             onEditClick={() => handleEdit(entry.id)}
             canEdit={entry.role === ORG_ROLE.OWNER || entry.role === ORG_ROLE.ADMIN || entry.role === ORG_ROLE.MEMBER}
             canDelete={entry.role === ORG_ROLE.OWNER || entry.role === ORG_ROLE.ADMIN}
-            createdBy={entry.orgName}
-            orgId={entry.orgId}
+            createdBy={entry.teamName}
+            teamId={entry.teamId}
           />
         ))}
       </div>
 
-      {editOrgId && (
+      {editTeamId && (
         <OrgPasswordForm
-          orgId={editOrgId}
+          teamId={editTeamId}
+          orgId={editTeamId}
           open={formOpen}
           onOpenChange={setFormOpen}
           onSaved={() => {
@@ -417,3 +418,5 @@ export function OrgArchivedList({
     </div>
   );
 }
+
+export const OrgArchivedList = TeamArchivedList;
