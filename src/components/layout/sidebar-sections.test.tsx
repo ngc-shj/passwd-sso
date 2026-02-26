@@ -46,7 +46,7 @@ import {
   CategoriesSection,
   VaultSection,
   VaultManagementSection,
-  OrganizeSection,
+  ManageSection,
 } from "./sidebar-sections";
 
 describe("VaultSection", () => {
@@ -165,12 +165,12 @@ describe("VaultManagementSection", () => {
   });
 });
 
-describe("OrganizeSection", () => {
+describe("ManageSection", () => {
   it("calls onCreateFolder when plus button is clicked", () => {
     const onCreateFolder = vi.fn();
 
     render(
-      <OrganizeSection
+      <ManageSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
@@ -202,7 +202,7 @@ describe("OrganizeSection", () => {
     const onCreateTag = vi.fn();
 
     render(
-      <OrganizeSection
+      <ManageSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
@@ -235,7 +235,7 @@ describe("OrganizeSection", () => {
     const onDeleteTag = vi.fn();
 
     render(
-      <OrganizeSection
+      <ManageSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}

@@ -22,7 +22,7 @@ vi.mock("@/components/layout/sidebar-sections", () => ({
   VaultSection: () => <div>vault</div>,
   CategoriesSection: () => <div>categories</div>,
   VaultManagementSection: () => <div>vault-management</div>,
-  OrganizeSection: ({ onCreateFolder, onCreateTag }: { onCreateFolder: () => void; onCreateTag: () => void }) => (
+  ManageSection: ({ onCreateFolder, onCreateTag }: { onCreateFolder: () => void; onCreateTag: () => void }) => (
     <>
       <button onClick={onCreateFolder}>create-folder</button>
       <button onClick={onCreateTag}>create-tag</button>

@@ -56,7 +56,7 @@ export function makeTag(overrides: Record<string, unknown> = {}) {
   };
 }
 
-export function makeOrg(overrides: Record<string, unknown> = {}) {
+export function makeTeam(overrides: Record<string, unknown> = {}) {
   return {
     id: "team-1",
     name: "Test Team",
@@ -130,7 +130,7 @@ export function makeTeamInvitation(overrides: Record<string, unknown> = {}) {
   };
 }
 
-export function makeOrgTag(overrides: Record<string, unknown> = {}) {
+export function makeTeamTag(overrides: Record<string, unknown> = {}) {
   return {
     id: "team-tag-1",
     name: "Production",

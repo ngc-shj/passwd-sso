@@ -1,7 +1,7 @@
 /**
  * Server-side audit logging helpers.
  *
- * logAudit() is fire-and-forget — it never throws and never blocks the response.
+ * logAudit() is async nonblocking — it never throws and never blocks the response.
  * Dual-write: PostgreSQL AuditLog table + structured JSON to stdout (via pino).
  * extractRequestMeta() extracts IP and User-Agent from NextRequest headers.
  */
@@ -52,7 +52,7 @@ export function sanitizeMetadata(value: unknown): unknown {
 }
 
 /**
- * Write an audit log entry. Fire-and-forget: errors are silently caught.
+ * Write an audit log entry. Async nonblocking: errors are silently caught.
  *
  * Dual-write:
  * 1. PostgreSQL AuditLog table (existing, unchanged)

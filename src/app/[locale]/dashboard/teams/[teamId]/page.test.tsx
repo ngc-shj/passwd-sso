@@ -5,10 +5,10 @@ import { render, waitFor, act } from "@testing-library/react";
 import React from "react";
 
 /* ---------- hoisted mocks ---------- */
-const { mockSearchParams, mockFetch, mockGetOrgEncryptionKey } = vi.hoisted(() => ({
+const { mockSearchParams, mockFetch, mockGetTeamEncryptionKey } = vi.hoisted(() => ({
   mockSearchParams: new URLSearchParams(),
   mockFetch: vi.fn(),
-  mockGetOrgEncryptionKey: vi.fn().mockResolvedValue(null),
+  mockGetTeamEncryptionKey: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -140,7 +140,7 @@ vi.mock("@/components/team/team-favorites-list", () => ({
 
 vi.mock("@/lib/team-vault-context", () => ({
   useTeamVault: () => ({
-    getTeamEncryptionKey: mockGetOrgEncryptionKey,
+    getTeamEncryptionKey: mockGetTeamEncryptionKey,
     getTeamKeyInfo: vi.fn().mockResolvedValue(null),
     invalidateTeamKey: vi.fn(),
     clearAll: vi.fn(),

@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
     revokedShares = result.count;
   }
 
-  // Audit log (fire-and-forget; logAudit handles errors internally)
+  // Audit log (async nonblocking; logAudit handles errors internally)
   const { ip } = extractRequestMeta(req);
   logAudit({
     scope: AUDIT_SCOPE.TEAM,

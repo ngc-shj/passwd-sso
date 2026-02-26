@@ -6,14 +6,14 @@ import { SecuritySection, UtilitiesSection } from "@/components/layout/sidebar-s
 import {
   VaultSection,
   CategoriesSection,
-  OrganizeSection,
+  ManageSection,
   VaultManagementSection,
 } from "@/components/layout/sidebar-sections";
 import type { SidebarSection } from "@/hooks/use-sidebar-sections-state";
 import type {
   SidebarFolderItem,
   SidebarTeamItem,
-  SidebarOrganizeTagItem,
+  SidebarTeamTagItem,
 } from "@/hooks/use-sidebar-data";
 import type { VaultContext } from "@/hooks/use-vault-context";
 
@@ -38,7 +38,7 @@ export interface SidebarContentProps {
   isPersonalAuditLog: boolean;
   activeAuditTeamId: string | null;
   selectedFolders: SidebarFolderItem[];
-  selectedTags: SidebarOrganizeTagItem[];
+  selectedTags: SidebarTeamTagItem[];
   isOpen: (key: SidebarSection) => boolean;
   toggleSection: (key: SidebarSection) => (open: boolean) => void;
   onVaultChange: (value: string) => void;
@@ -46,8 +46,8 @@ export interface SidebarContentProps {
   onCreateTag: (teamId?: string) => void;
   onEditFolder: (folder: SidebarFolderItem, teamId?: string) => void;
   onDeleteFolder: (folder: SidebarFolderItem, teamId?: string) => void;
-  onEditTag: (tag: SidebarOrganizeTagItem, teamId?: string) => void;
-  onDeleteTag: (tag: SidebarOrganizeTagItem, teamId?: string) => void;
+  onEditTag: (tag: SidebarTeamTagItem, teamId?: string) => void;
+  onDeleteTag: (tag: SidebarTeamTagItem, teamId?: string) => void;
   onNavigate: () => void;
 }
 
@@ -114,9 +114,9 @@ export function SidebarContent({
 
       <Separator />
 
-      <OrganizeSection
-        isOpen={isOpen("organize")}
-        onOpenChange={toggleSection("organize")}
+      <ManageSection
+        isOpen={isOpen("manage")}
+        onOpenChange={toggleSection("manage")}
         t={t}
         canCreateFolder={vaultContext.type !== "team" || selectedTeamCanManageFolders}
         folders={selectedFolders}

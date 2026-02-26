@@ -40,7 +40,7 @@
   "changePassphraseFailed": "Failed to change passphrase.",
   "verifierNotSetHint": "Please lock and unlock your vault once before changing your passphrase.",
   "verifierVersionUnsupported": "Please update the app to change your passphrase.",
-  "forgotPassphrase": "Forgot passphrase?",
+  "recoverPassphrase": "Forgot passphrase?",
   "resetVault": "Reset vault",
   "recoveryKey": "Recovery Key",
   "recoveryKeyBannerMessage": "Set up a Recovery Key to protect against passphrase loss.",

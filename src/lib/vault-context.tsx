@@ -542,7 +542,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       secretKey.fill(0);
 
-      // 7. Auto-confirm pending emergency access grants (fire-and-forget)
+      // 7. Auto-confirm pending emergency access grants (async nonblocking)
       const userId = session?.user?.id;
       if (userId && secretKeyRef.current) {
         confirmPendingEmergencyGrants(secretKeyRef.current, userId, keyVersionRef.current).catch(() => {

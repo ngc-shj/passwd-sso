@@ -5,7 +5,7 @@ import type { SidebarContentProps } from "@/components/layout/sidebar-content";
 import type {
   SidebarFolderItem,
   SidebarTeamItem,
-  SidebarOrganizeTagItem,
+  SidebarTeamTagItem,
 } from "@/hooks/use-sidebar-data";
 import type { SidebarSection } from "@/hooks/use-sidebar-sections-state";
 import type { VaultContext } from "@/hooks/use-vault-context";
@@ -33,15 +33,15 @@ interface UseSidebarViewModelParams {
   isPersonalAuditLog: boolean;
   activeAuditTeamId: string | null;
   selectedFolders: SidebarFolderItem[];
-  selectedTags: SidebarOrganizeTagItem[];
+  selectedTags: SidebarTeamTagItem[];
   isOpen: (key: SidebarSection) => boolean;
   toggleSection: (key: SidebarSection) => (open: boolean) => void;
   handleFolderCreate: (teamId?: string) => void;
   handleFolderEdit: (folder: SidebarFolderItem, teamId?: string) => void;
   handleFolderDeleteClick: (folder: SidebarFolderItem, teamId?: string) => void;
   handleTagCreate: (teamId?: string) => void;
-  handleTagEdit: (tag: SidebarOrganizeTagItem, teamId?: string) => void;
-  handleTagDeleteClick: (tag: SidebarOrganizeTagItem, teamId?: string) => void;
+  handleTagEdit: (tag: SidebarTeamTagItem, teamId?: string) => void;
+  handleTagDeleteClick: (tag: SidebarTeamTagItem, teamId?: string) => void;
 }
 
 export function useSidebarViewModel({

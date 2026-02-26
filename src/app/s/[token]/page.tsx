@@ -77,7 +77,7 @@ export default async function SharePage({ params }: Props) {
     return <ShareError reason="maxViews" />;
   }
 
-  // Record access log (fire-and-forget)
+  // Record access log (async nonblocking)
   const ip = rateLimitIp === "unknown" ? null : rateLimitIp;
   const ua = headersList.get("user-agent");
   prisma.shareAccessLog

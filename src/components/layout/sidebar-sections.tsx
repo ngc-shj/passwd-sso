@@ -13,7 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { SidebarOrganizeTagItem } from "@/hooks/use-sidebar-data";
+import type { SidebarTeamTagItem } from "@/hooks/use-sidebar-data";
 import { type VaultContext } from "@/hooks/use-vault-context";
 import {
   Tag,
@@ -132,7 +132,7 @@ export function CategoriesSection({
   );
 }
 
-interface OrganizeSectionProps {
+interface ManageSectionProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
@@ -142,20 +142,20 @@ interface OrganizeSectionProps {
   activeFolderId: string | null;
   linkHref: (folderId: string) => string;
   showFolderMenu: boolean;
-  tags: SidebarOrganizeTagItem[];
+  tags: SidebarTeamTagItem[];
   activeTagId: string | null;
   tagHref: (tagId: string) => string;
   onCreateFolder: () => void;
   onCreateTag: () => void;
   onEditFolder: (folder: SidebarFolderItem) => void;
   onDeleteFolder: (folder: SidebarFolderItem) => void;
-  onEditTag: (tag: SidebarOrganizeTagItem) => void;
-  onDeleteTag: (tag: SidebarOrganizeTagItem) => void;
+  onEditTag: (tag: SidebarTeamTagItem) => void;
+  onDeleteTag: (tag: SidebarTeamTagItem) => void;
   showTagMenu: boolean;
   onNavigate: () => void;
 }
 
-export function OrganizeSection({
+export function ManageSection({
   isOpen,
   onOpenChange,
   t,
@@ -176,13 +176,13 @@ export function OrganizeSection({
   onDeleteTag,
   showTagMenu,
   onNavigate,
-}: OrganizeSectionProps) {
+}: ManageSectionProps) {
   return (
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
       <div className="flex items-center">
         <div className="flex-1">
           <CollapsibleSectionHeader icon={<Tag className="h-3 w-3" />} isOpen={isOpen}>
-            {t("organize")}
+            {t("manage")}
           </CollapsibleSectionHeader>
         </div>
         <DropdownMenu>

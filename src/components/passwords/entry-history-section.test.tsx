@@ -9,13 +9,13 @@ const {
   mockRepromptDialog,
   mockEncryptionKey,
   mockDecryptData,
-  mockGetOrgEncryptionKey,
+  mockGetTeamEncryptionKey,
 } = vi.hoisted(() => ({
   mockRequireVerification: vi.fn(),
   mockRepromptDialog: null as React.ReactNode,
   mockEncryptionKey: {} as CryptoKey,
   mockDecryptData: vi.fn(),
-  mockGetOrgEncryptionKey: vi.fn().mockResolvedValue({} as CryptoKey),
+  mockGetTeamEncryptionKey: vi.fn().mockResolvedValue({} as CryptoKey),
 }));
 
 vi.mock("next-intl", () => ({
@@ -43,7 +43,7 @@ vi.mock("@/lib/crypto-client", () => ({
 
 vi.mock("@/lib/team-vault-context", () => ({
   useTeamVault: () => ({
-    getTeamEncryptionKey: mockGetOrgEncryptionKey,
+    getTeamEncryptionKey: mockGetTeamEncryptionKey,
   }),
 }));
 

@@ -98,11 +98,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   try {
     await prisma.$transaction(async (tx) => {
       // Re-verify teamKeyVersion hasn't changed since pre-read
-      const currentOrg = await tx.team.findUnique({
+      const currentTeam = await tx.team.findUnique({
         where: { id: teamId },
         select: { teamKeyVersion: true },
       });
-      if (!currentOrg || currentOrg.teamKeyVersion !== team.teamKeyVersion) {
+      if (!currentTeam || currentTeam.teamKeyVersion !== team.teamKeyVersion) {
         throw new Error("ORG_KEY_VERSION_CONFLICT");
       }
 

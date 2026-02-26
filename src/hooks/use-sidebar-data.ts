@@ -38,7 +38,7 @@ export interface SidebarTeamFolderGroup {
   folders: SidebarFolderItem[];
 }
 
-export interface SidebarOrganizeTagItem {
+export interface SidebarTeamTagItem {
   id: string;
   name: string;
   color: string | null;

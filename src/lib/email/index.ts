@@ -43,7 +43,7 @@ function initProvider(): EmailProvider | null {
 
 /**
  * Send an email using the configured provider.
- * Fire-and-forget: errors are logged but never thrown.
+ * Async nonblocking: errors are logged but never thrown.
  * If EMAIL_PROVIDER is not set, the call is silently skipped.
  */
 export async function sendEmail(message: EmailMessage): Promise<void> {

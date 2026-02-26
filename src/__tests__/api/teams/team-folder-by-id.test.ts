@@ -197,17 +197,17 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
 describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
   let txTeamFolderUpdate: ReturnType<typeof vi.fn>;
   let txTeamFolderDelete: ReturnType<typeof vi.fn>;
-  let txOrgEntryUpdateMany: ReturnType<typeof vi.fn>;
+  let txTeamEntryUpdateMany: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     txTeamFolderUpdate = vi.fn();
     txTeamFolderDelete = vi.fn();
-    txOrgEntryUpdateMany = vi.fn();
+    txTeamEntryUpdateMany = vi.fn();
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
       await fn({
         teamFolder: { update: txTeamFolderUpdate, delete: txTeamFolderDelete },
-        teamPasswordEntry: { updateMany: txOrgEntryUpdateMany },
+        teamPasswordEntry: { updateMany: txTeamEntryUpdateMany },
       });
     });
   });
