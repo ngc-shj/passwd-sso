@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { createOrgE2ESchema } from "@/lib/validations";
+import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
 
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
-  const parsed = createOrgE2ESchema.safeParse(body);
+  const parsed = createTeamE2ESchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },

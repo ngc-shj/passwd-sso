@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { updateOrgE2EPasswordSchema } from "@/lib/validations";
+import { updateTeamE2EPasswordSchema } from "@/lib/validations";
 import {
   requireTeamPermission,
   requireTeamMember,
@@ -128,7 +128,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
-  const parsed = updateOrgE2EPasswordSchema.safeParse(body);
+  const parsed = updateTeamE2EPasswordSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },

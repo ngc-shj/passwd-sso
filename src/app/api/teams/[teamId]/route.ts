@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { updateOrgSchema } from "@/lib/validations";
+import { updateTeamSchema } from "@/lib/validations";
 import {
   requireTeamMember,
   requireTeamPermission,
@@ -79,7 +79,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
   }
 
-  const parsed = updateOrgSchema.safeParse(body);
+  const parsed = updateTeamSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
