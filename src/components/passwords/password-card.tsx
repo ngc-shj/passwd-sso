@@ -770,7 +770,7 @@ export function PasswordCard({
         open={shareDialogOpen}
         onOpenChange={setShareDialogOpen}
         passwordEntryId={isTeamMode ? undefined : id}
-        orgPasswordEntryId={isTeamMode ? id : undefined}
+        teamPasswordEntryId={isTeamMode ? id : undefined}
         decryptedData={shareData}
         entryType={isTeamMode ? entryType : undefined}
       />

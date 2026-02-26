@@ -51,7 +51,7 @@ interface ShareLinkItem {
   revokedAt: string | null;
   createdAt: string;
   passwordEntryId: string | null;
-  orgPasswordEntryId: string | null;
+  teamPasswordEntryId: string | null;
   teamName: string | null;
   hasPersonalEntry: boolean;
   sharedBy: string | null;
@@ -351,7 +351,7 @@ export default function ShareLinksPage() {
                         <span className="text-muted-foreground italic">
                           {t("personalEntry")}
                         </span>
-                      ) : link.shareType === "ENTRY_SHARE" && !link.orgPasswordEntryId ? (
+                      ) : link.shareType === "ENTRY_SHARE" && !link.teamPasswordEntryId ? (
                         <span className="text-muted-foreground italic">
                           {t("deletedEntry")}
                         </span>

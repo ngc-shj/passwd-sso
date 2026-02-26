@@ -35,6 +35,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.ALREADY_REVOKED }, { status: 409 });
   }
 
+  const teamPasswordEntryId = share.orgPasswordEntryId;
+
   await prisma.passwordShare.update({
     where: { id },
     data: { revokedAt: new Date() },
@@ -43,15 +45,15 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);
   logAudit({
-    scope: share.orgPasswordEntryId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
+    scope: teamPasswordEntryId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: share.shareType === "TEXT" || share.shareType === "FILE"
       ? AUDIT_ACTION.SEND_REVOKE
       : AUDIT_ACTION.SHARE_REVOKE,
     userId: session.user.id,
-    teamId: share.orgPasswordEntryId
+    teamId: teamPasswordEntryId
       ? (
           await prisma.orgPasswordEntry.findUnique({
-            where: { id: share.orgPasswordEntryId },
+            where: { id: teamPasswordEntryId },
             select: { orgId: true },
           })
         )?.orgId

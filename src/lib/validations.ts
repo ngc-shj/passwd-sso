@@ -290,23 +290,23 @@ const shareDataSchema = z.object({
 
 export const createShareLinkSchema = z.object({
   passwordEntryId: z.string().min(1).optional(),
-  orgPasswordEntryId: z.string().min(1).optional(),
+  teamPasswordEntryId: z.string().min(1).optional(),
   data: shareDataSchema.optional(),
   encryptedShareData: encryptedFieldSchema.optional(),
   entryType: entryTypeSchema.optional(),
   expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
   maxViews: z.number().int().min(1).max(100).optional(),
 }).refine(
-  (d) => (d.passwordEntryId ? !d.orgPasswordEntryId : !!d.orgPasswordEntryId),
-  { message: "Exactly one of passwordEntryId or orgPasswordEntryId is required" }
+  (d) => (d.passwordEntryId ? !d.teamPasswordEntryId : !!d.teamPasswordEntryId),
+  { message: "Exactly one of passwordEntryId or teamPasswordEntryId is required" }
 ).refine(
   (d) => (d.passwordEntryId ? !!d.data : true),
   { message: "data is required for personal entries" }
 ).refine(
-  (d) => (d.orgPasswordEntryId ? !!d.encryptedShareData && !!d.entryType : true),
+  (d) => (d.teamPasswordEntryId ? !!d.encryptedShareData && !!d.entryType : true),
   { message: "encryptedShareData and entryType are required for team entries" }
 ).refine(
-  (d) => (d.orgPasswordEntryId ? !d.data : true),
+  (d) => (d.teamPasswordEntryId ? !d.data : true),
   { message: "data must not be present for team entries (use encryptedShareData)" }
 );
 

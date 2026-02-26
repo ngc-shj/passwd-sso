@@ -108,7 +108,7 @@ export async function GET(req: NextRequest) {
       revokedAt: s.revokedAt,
       createdAt: s.createdAt,
       passwordEntryId: s.passwordEntryId,
-      orgPasswordEntryId: s.orgPasswordEntryId,
+      teamPasswordEntryId: s.orgPasswordEntryId,
       teamName: s.orgPasswordEntry?.org?.name ?? null,
       hasPersonalEntry: !!s.passwordEntry,
       sharedBy:

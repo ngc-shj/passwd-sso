@@ -112,7 +112,7 @@ describe("POST /api/share-links", () => {
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {
-        orgPasswordEntryId: VALID_ENTRY_ID,
+        teamPasswordEntryId: VALID_ENTRY_ID,
         data: { title: "Leaked", password: "oops" },
         encryptedShareData: {
           ciphertext: "c",
@@ -193,7 +193,7 @@ describe("POST /api/share-links", () => {
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {
-        orgPasswordEntryId: VALID_ENTRY_ID,
+        teamPasswordEntryId: VALID_ENTRY_ID,
         encryptedShareData: {
           ciphertext: "client-encrypted",
           iv: "c".repeat(24),
@@ -242,7 +242,7 @@ describe("POST /api/share-links", () => {
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {
-        orgPasswordEntryId: VALID_ENTRY_ID,
+        teamPasswordEntryId: VALID_ENTRY_ID,
         encryptedShareData: {
           ciphertext: "c",
           iv: "a".repeat(24),
@@ -270,7 +270,7 @@ describe("POST /api/share-links", () => {
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {
-        orgPasswordEntryId: VALID_ENTRY_ID,
+        teamPasswordEntryId: VALID_ENTRY_ID,
         encryptedShareData: {
           ciphertext: "c",
           iv: "a".repeat(24),
@@ -312,7 +312,7 @@ describe("POST /api/share-links", () => {
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {
-        orgPasswordEntryId: VALID_ENTRY_ID,
+        teamPasswordEntryId: VALID_ENTRY_ID,
         expiresIn: "1d",
       },
     });

@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { passwordEntryId, orgPasswordEntryId, data, encryptedShareData, expiresIn, maxViews } =
+  const { passwordEntryId, teamPasswordEntryId, data, encryptedShareData, expiresIn, maxViews } =
     parsed.data;
 
   let encryptedData: string;
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
   } else {
     // Team entry — E2E: client sends pre-encrypted share data
     const teamEntry = await prisma.orgPasswordEntry.findUnique({
-      where: { id: orgPasswordEntryId! },
+      where: { id: teamPasswordEntryId! },
       select: { orgId: true, entryType: true },
     });
     if (!teamEntry) {
@@ -138,14 +138,14 @@ export async function POST(req: NextRequest) {
       maxViews: maxViews ?? null,
       createdById: session.user.id,
       passwordEntryId: passwordEntryId ?? null,
-      orgPasswordEntryId: orgPasswordEntryId ?? null,
+      orgPasswordEntryId: teamPasswordEntryId ?? null,
     },
   });
 
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);
   logAudit({
-    scope: orgPasswordEntryId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
+    scope: teamPasswordEntryId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.SHARE_CREATE,
     userId: session.user.id,
     teamId,
@@ -173,9 +173,9 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const passwordEntryId = searchParams.get("passwordEntryId");
-  const orgPasswordEntryId = searchParams.get("orgPasswordEntryId");
+  const teamPasswordEntryId = searchParams.get("teamPasswordEntryId");
 
-  if (!passwordEntryId && !orgPasswordEntryId) {
+  if (!passwordEntryId && !teamPasswordEntryId) {
     return NextResponse.json(
       { error: API_ERROR.VALIDATION_ERROR },
       { status: 400 }
@@ -186,7 +186,7 @@ export async function GET(req: NextRequest) {
     createdById: session.user.id,
   };
   if (passwordEntryId) where.passwordEntryId = passwordEntryId;
-  if (orgPasswordEntryId) where.orgPasswordEntryId = orgPasswordEntryId;
+  if (teamPasswordEntryId) where.orgPasswordEntryId = teamPasswordEntryId;
 
   const shares = await prisma.passwordShare.findMany({
     where,
