@@ -76,11 +76,11 @@ export function getMasterKeyByVersion(version: number): Buffer {
 /** Encrypt plaintext JSON with an team key (AES-256-GCM). Optional AAD for binding context. */
 export function encryptServerData(
   plaintext: string,
-  orgKey: Buffer,
+  teamKey: Buffer,
   aad?: Buffer
 ): ServerEncryptedData {
   const iv = randomBytes(IV_LENGTH);
-  const cipher = createCipheriv(ALGORITHM, orgKey, iv, {
+  const cipher = createCipheriv(ALGORITHM, teamKey, iv, {
     authTagLength: AUTH_TAG_LENGTH,
   });
   if (aad) cipher.setAAD(aad);
@@ -101,14 +101,14 @@ export function encryptServerData(
 /** Decrypt ciphertext with an team key (AES-256-GCM). Optional AAD must match encryption. */
 export function decryptServerData(
   encrypted: ServerEncryptedData,
-  orgKey: Buffer,
+  teamKey: Buffer,
   aad?: Buffer
 ): string {
   const iv = Buffer.from(encrypted.iv, "hex");
   const authTag = Buffer.from(encrypted.authTag, "hex");
   const ciphertext = Buffer.from(encrypted.ciphertext, "hex");
 
-  const decipher = createDecipheriv(ALGORITHM, orgKey, iv, {
+  const decipher = createDecipheriv(ALGORITHM, teamKey, iv, {
     authTagLength: AUTH_TAG_LENGTH,
   });
   if (aad) decipher.setAAD(aad);
@@ -131,11 +131,11 @@ export interface ServerEncryptedBinary {
 /** Encrypt binary data (Buffer) with an team key (AES-256-GCM). Optional AAD for binding context. */
 export function encryptServerBinary(
   data: Buffer,
-  orgKey: Buffer,
+  teamKey: Buffer,
   aad?: Buffer
 ): ServerEncryptedBinary {
   const iv = randomBytes(IV_LENGTH);
-  const cipher = createCipheriv(ALGORITHM, orgKey, iv, {
+  const cipher = createCipheriv(ALGORITHM, teamKey, iv, {
     authTagLength: AUTH_TAG_LENGTH,
   });
   if (aad) cipher.setAAD(aad);
@@ -153,13 +153,13 @@ export function encryptServerBinary(
 /** Decrypt binary data with an team key (AES-256-GCM). Optional AAD must match encryption. */
 export function decryptServerBinary(
   encrypted: ServerEncryptedBinary,
-  orgKey: Buffer,
+  teamKey: Buffer,
   aad?: Buffer
 ): Buffer {
   const iv = Buffer.from(encrypted.iv, "hex");
   const authTag = Buffer.from(encrypted.authTag, "hex");
 
-  const decipher = createDecipheriv(ALGORITHM, orgKey, iv, {
+  const decipher = createDecipheriv(ALGORITHM, teamKey, iv, {
     authTagLength: AUTH_TAG_LENGTH,
   });
   if (aad) decipher.setAAD(aad);

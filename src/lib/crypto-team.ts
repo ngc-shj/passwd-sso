@@ -6,7 +6,7 @@
  *
  * Key derivation chain:
  *   ECDH(ephemeral, member) → HKDF("passwd-sso-org-v1", random salt) → AES-256-GCM wrapping key
- *   orgKey → HKDF("passwd-sso-org-enc-v1", empty) → AES-256-GCM encryption key
+ *   teamKey → HKDF("passwd-sso-org-enc-v1", empty) → AES-256-GCM encryption key
  *
  * Reuses patterns from crypto-emergency.ts (ECDH) and crypto-client.ts (AES-GCM).
  */
@@ -36,7 +36,7 @@ const HKDF_SALT_LENGTH = 32;
 /** HKDF info for org key wrapping (ECDH → AES key) */
 const HKDF_ORG_WRAP_INFO = "passwd-sso-org-v1";
 
-/** HKDF info for org entry encryption (orgKey → AES key) */
+/** HKDF info for team entry encryption (teamKey → AES key) */
 const HKDF_ORG_ENC_INFO = "passwd-sso-org-enc-v1";
 
 /** HKDF info for ECDH private key wrapping (secretKey → ecdhWrappingKey) */
@@ -69,7 +69,7 @@ function textEncode(text: string): ArrayBuffer {
 
 // ─── Team Symmetric Key Generation ───────────────────────────────
 
-/** Generate a random 256-bit org symmetric key */
+/** Generate a random 256-bit team symmetric key */
 export function generateTeamSymmetricKey(): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(32));
 }
@@ -77,17 +77,17 @@ export function generateTeamSymmetricKey(): Uint8Array {
 // ─── Team Encryption Key Derivation ──────────────────────────────
 
 /**
- * Derive AES-256-GCM encryption key from org symmetric key.
- * HKDF(orgKey, info="passwd-sso-org-enc-v1", salt=empty)
+ * Derive AES-256-GCM encryption key from team symmetric key.
+ * HKDF(teamKey, info="passwd-sso-org-enc-v1", salt=empty)
  *
- * Salt is empty because orgKey itself is unique per org (256-bit random).
+ * Salt is empty because teamKey itself is unique per org (256-bit random).
  */
 export async function deriveTeamEncryptionKey(
-  orgKey: Uint8Array
+  teamKey: Uint8Array
 ): Promise<CryptoKey> {
   const hkdfKey = await crypto.subtle.importKey(
     "raw",
-    toArrayBuffer(orgKey),
+    toArrayBuffer(teamKey),
     "HKDF",
     false,
     ["deriveKey"]
@@ -97,7 +97,7 @@ export async function deriveTeamEncryptionKey(
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new ArrayBuffer(32), // empty salt — orgKey has sufficient entropy
+      salt: new ArrayBuffer(32), // empty salt — teamKey has sufficient entropy
       info: textEncode(HKDF_ORG_ENC_INFO),
     },
     hkdfKey,
@@ -247,11 +247,11 @@ export function buildTeamKeyWrapAAD(ctx: TeamKeyWrapContext): Uint8Array {
 // ─── Team Key Wrapping (Admin → Member) ──────────────────────────
 
 /**
- * Wrap org symmetric key for a member using ECDH.
+ * Wrap team symmetric key for a member using ECDH.
  * Admin generates ephemeral key pair → ECDH with member's public key → AES-GCM wrap.
  */
 export async function wrapTeamKeyForMember(
-  orgKey: Uint8Array,
+  teamKey: Uint8Array,
   ephemeralPrivateKey: CryptoKey,
   memberPublicKey: CryptoKey,
   hkdfSalt: Uint8Array,
@@ -273,7 +273,7 @@ export async function wrapTeamKeyForMember(
       additionalData: toArrayBuffer(aad),
     },
     wrappingKey,
-    toArrayBuffer(orgKey)
+    toArrayBuffer(teamKey)
   );
 
   const encryptedBytes = new Uint8Array(encrypted);
@@ -288,7 +288,7 @@ export async function wrapTeamKeyForMember(
 }
 
 /**
- * Unwrap org symmetric key as a member.
+ * Unwrap team symmetric key as a member.
  * Member uses their ECDH private key + admin's ephemeral public key → AES-GCM unwrap.
  *
  * @param hkdfSalt - Hex-encoded HKDF salt (stored in OrgMemberKey.hkdfSalt)
@@ -348,14 +348,14 @@ export interface OrgKeyEscrowResult {
  * Create org key escrow for a member.
  * Generates ephemeral ECDH key pair, wraps org key, returns all fields for storage.
  *
- * @param orgKey - Plaintext org symmetric key
+ * @param teamKey - Plaintext team symmetric key
  * @param memberPublicKeyJwk - Member's ECDH public key (JWK string)
  * @param orgId - Organization ID
  * @param toUserId - Member user ID
  * @param keyVersion - Team key version
  */
 export async function createTeamKeyEscrow(
-  orgKey: Uint8Array,
+  teamKey: Uint8Array,
   memberPublicKeyJwk: string,
   orgId: string,
   toUserId: string,
@@ -375,7 +375,7 @@ export async function createTeamKeyEscrow(
   };
 
   const encrypted = await wrapTeamKeyForMember(
-    orgKey,
+    teamKey,
     ephemeralKeyPair.privateKey,
     memberPublicKey,
     salt,
@@ -400,48 +400,48 @@ export async function createTeamKeyEscrow(
 // ─── Team Entry Encryption/Decryption ────────────────────────────
 
 /**
- * Encrypt org entry data (text) with org encryption key.
+ * Encrypt team entry data (text) with team encryption key.
  * Uses AES-256-GCM with AAD from crypto-aad.ts (buildOrgEntryAAD).
  */
 export async function encryptOrgEntry(
   plaintext: string,
-  orgEncryptionKey: CryptoKey,
+  teamEncryptionKey: CryptoKey,
   aad?: Uint8Array
 ): Promise<EncryptedData> {
-  return encryptData(plaintext, orgEncryptionKey, aad);
+  return encryptData(plaintext, teamEncryptionKey, aad);
 }
 
 /**
- * Decrypt org entry data (text) with org encryption key.
+ * Decrypt team entry data (text) with team encryption key.
  */
 export async function decryptOrgEntry(
   encrypted: EncryptedData,
-  orgEncryptionKey: CryptoKey,
+  teamEncryptionKey: CryptoKey,
   aad?: Uint8Array
 ): Promise<string> {
-  return decryptData(encrypted, orgEncryptionKey, aad);
+  return decryptData(encrypted, teamEncryptionKey, aad);
 }
 
 /**
- * Encrypt org attachment (binary) with org encryption key.
+ * Encrypt team attachment (binary) with team encryption key.
  */
 export async function encryptOrgAttachment(
   data: ArrayBuffer,
-  orgEncryptionKey: CryptoKey,
+  teamEncryptionKey: CryptoKey,
   aad?: Uint8Array
 ): Promise<EncryptedBinary> {
-  return encryptBinary(data, orgEncryptionKey, aad);
+  return encryptBinary(data, teamEncryptionKey, aad);
 }
 
 /**
- * Decrypt org attachment (binary) with org encryption key.
+ * Decrypt team attachment (binary) with team encryption key.
  */
 export async function decryptOrgAttachment(
   encrypted: EncryptedBinary,
-  orgEncryptionKey: CryptoKey,
+  teamEncryptionKey: CryptoKey,
   aad?: Uint8Array
 ): Promise<ArrayBuffer> {
-  return decryptBinary(encrypted, orgEncryptionKey, aad);
+  return decryptBinary(encrypted, teamEncryptionKey, aad);
 }
 
 // ─── Re-exports for convenience ─────────────────────────────────
