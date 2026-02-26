@@ -2,9 +2,9 @@
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useOrgAttachments } from "@/hooks/use-team-attachments";
+import { useTeamAttachments } from "@/hooks/use-team-attachments";
 
-describe("useOrgAttachments", () => {
+describe("useTeamAttachments", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -15,7 +15,7 @@ describe("useOrgAttachments", () => {
       json: async () => [],
     } as Response);
 
-    const { result } = renderHook(() => useOrgAttachments(true, "org-1"));
+    const { result } = renderHook(() => useTeamAttachments(true, "team-1"));
 
     expect(result.current.attachments).toEqual([]);
     expect(result.current.fetchError).toBeNull();
@@ -28,13 +28,13 @@ describe("useOrgAttachments", () => {
       json: async () => [{ id: "a1", filename: "f.txt", sizeBytes: 1, contentType: "text/plain", createdAt: "2026-01-01" }],
     } as Response);
 
-    const { result } = renderHook(() => useOrgAttachments(true, "org-1", "entry-1"));
+    const { result } = renderHook(() => useTeamAttachments(true, "team-1", "entry-1"));
 
     await waitFor(() => {
       expect(result.current.attachments).toHaveLength(1);
     });
     expect(result.current.fetchError).toBeNull();
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/teams/org-1/passwords/entry-1/attachments");
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/teams/team-1/passwords/entry-1/attachments");
   });
 
   it("sets fetchError on non-ok response", async () => {
@@ -43,7 +43,7 @@ describe("useOrgAttachments", () => {
       status: 500,
     } as Response);
 
-    const { result } = renderHook(() => useOrgAttachments(true, "org-1", "entry-1"));
+    const { result } = renderHook(() => useTeamAttachments(true, "team-1", "entry-1"));
 
     await waitFor(() => {
       expect(result.current.fetchError).toContain("500");
@@ -54,7 +54,7 @@ describe("useOrgAttachments", () => {
   it("sets fetchError on network error", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network error"));
 
-    const { result } = renderHook(() => useOrgAttachments(true, "org-1", "entry-1"));
+    const { result } = renderHook(() => useTeamAttachments(true, "team-1", "entry-1"));
 
     await waitFor(() => {
       expect(result.current.fetchError).toContain("network error");

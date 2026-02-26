@@ -2,9 +2,9 @@
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useOrgFolders } from "@/hooks/use-team-folders";
+import { useTeamFolders } from "@/hooks/use-team-folders";
 
-describe("useOrgFolders", () => {
+describe("useTeamFolders", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -15,7 +15,7 @@ describe("useOrgFolders", () => {
       json: async () => [],
     } as Response);
 
-    const { result } = renderHook(() => useOrgFolders(false, "org-1"));
+    const { result } = renderHook(() => useTeamFolders(false, "team-1"));
 
     expect(result.current.folders).toEqual([]);
     expect(result.current.fetchError).toBeNull();
@@ -28,14 +28,14 @@ describe("useOrgFolders", () => {
       json: async () => [{ id: "f1", name: "Work", parentId: null }],
     } as Response);
 
-    const { result } = renderHook(() => useOrgFolders(true, "org-1"));
+    const { result } = renderHook(() => useTeamFolders(true, "team-1"));
 
     await waitFor(() => {
       expect(result.current.folders).toEqual([{ id: "f1", name: "Work", parentId: null }]);
     });
     expect(result.current.fetchError).toBeNull();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/teams/org-1/folders");
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/teams/team-1/folders");
   });
 
   it("sets fetchError on non-ok response", async () => {
@@ -44,7 +44,7 @@ describe("useOrgFolders", () => {
       status: 500,
     } as Response);
 
-    const { result } = renderHook(() => useOrgFolders(true, "org-1"));
+    const { result } = renderHook(() => useTeamFolders(true, "team-1"));
 
     await waitFor(() => {
       expect(result.current.fetchError).toContain("500");
@@ -55,7 +55,7 @@ describe("useOrgFolders", () => {
   it("sets fetchError on network error", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network error"));
 
-    const { result } = renderHook(() => useOrgFolders(true, "org-1"));
+    const { result } = renderHook(() => useTeamFolders(true, "team-1"));
 
     await waitFor(() => {
       expect(result.current.fetchError).toContain("network error");

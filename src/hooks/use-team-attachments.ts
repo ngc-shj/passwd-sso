@@ -30,4 +30,3 @@ export function useTeamAttachments(open: boolean, teamId: string, entryId?: stri
   return { attachments, setAttachments, fetchError };
 }
 
-export const useOrgAttachments = useTeamAttachments;

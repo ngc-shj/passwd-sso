@@ -33,4 +33,3 @@ export function useTeamFolders(open: boolean, teamId: string) {
   return { folders, fetchError };
 }
 
-export const useOrgFolders = useTeamFolders;
