@@ -45,7 +45,7 @@ describe("useSidebarTagCrud", () => {
     expect(refreshData).toHaveBeenCalledTimes(1);
   });
 
-  it("submits org tag update to /api/teams/:orgId/tags/:id", async () => {
+  it("submits team tag update to /api/teams/:teamId/tags/:id", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as never;
 
     const { result } = renderHook(() => useSidebarTagCrud({ refreshData, tErrors }));
@@ -87,7 +87,7 @@ describe("useSidebarTagCrud", () => {
     expect(refreshData).toHaveBeenCalledTimes(1);
   });
 
-  it("submits org tag creation via POST to /api/teams/:orgId/tags", async () => {
+  it("submits team tag creation via POST to /api/teams/:teamId/tags", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as never;
 
     const { result } = renderHook(() => useSidebarTagCrud({ refreshData, tErrors }));
@@ -97,7 +97,7 @@ describe("useSidebarTagCrud", () => {
     });
 
     await act(async () => {
-      await result.current.handleTagSubmit({ name: "Org Tag", color: "#00ff00" });
+      await result.current.handleTagSubmit({ name: "Team Tag", color: "#00ff00" });
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(

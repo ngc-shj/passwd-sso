@@ -114,6 +114,7 @@ export function useSidebarViewModel({
     tOrg,
     vaultContext,
     teams: teamItems,
+    orgs: teamItems,
     selectedOrg: selectedTeamItem,
     selectedOrgCanManageFolders: canManageFolders,
     selectedOrgCanManageTags: canManageTags,

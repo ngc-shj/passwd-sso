@@ -60,10 +60,10 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     clearDeletingFolder,
   } = useSidebarFolderCrud({
     folders,
-    orgFolderGroups: teamFolderGroups.map((group) => ({
-      orgId: group.teamId,
-      orgName: group.teamName,
-      orgRole: group.teamRole,
+    teamFolderGroups: teamFolderGroups.map((group) => ({
+      teamId: group.teamId,
+      teamName: group.teamName,
+      teamRole: group.teamRole,
       folders: group.folders,
     })),
     refreshData,
