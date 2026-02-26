@@ -2,7 +2,7 @@
  * Team E2E Encryption (ECDH-P256)
  *
  * Provides client-side encryption for organization vault entries using
- * ECDH key exchange for per-member org key distribution.
+ * ECDH key exchange for per-member team key distribution.
  *
  * Key derivation chain:
  *   ECDH(ephemeral, member) → HKDF("passwd-sso-org-v1", random salt) → AES-256-GCM wrapping key
@@ -34,15 +34,15 @@ const IV_LENGTH = 12;
 const HKDF_SALT_LENGTH = 32;
 
 /** HKDF info for org key wrapping (ECDH → AES key) */
-const HKDF_ORG_WRAP_INFO = "passwd-sso-org-v1";
+const HKDF_TEAM_WRAP_INFO = "passwd-sso-org-v1";
 
 /** HKDF info for team entry encryption (teamKey → AES key) */
-const HKDF_ORG_ENC_INFO = "passwd-sso-org-enc-v1";
+const HKDF_TEAM_ENC_INFO = "passwd-sso-org-enc-v1";
 
 /** HKDF info for ECDH private key wrapping (secretKey → ecdhWrappingKey) */
 export const HKDF_ECDH_WRAP_INFO = "passwd-sso-ecdh-v1";
 
-export const CURRENT_ORG_WRAP_VERSION = 1;
+export const CURRENT_TEAM_WRAP_VERSION = 1;
 
 /** AAD scope for OrgMemberKey wrapping */
 const AAD_SCOPE_ORG_KEY = "OK";
@@ -98,7 +98,7 @@ export async function deriveTeamEncryptionKey(
       name: "HKDF",
       hash: "SHA-256",
       salt: new ArrayBuffer(32), // empty salt — teamKey has sufficient entropy
-      info: textEncode(HKDF_ORG_ENC_INFO),
+      info: textEncode(HKDF_TEAM_ENC_INFO),
     },
     hkdfKey,
     { name: "AES-GCM", length: AES_KEY_LENGTH },
@@ -114,9 +114,9 @@ export async function deriveTeamEncryptionKey(
  * HKDF(sharedBits, info="passwd-sso-org-v1", salt=random per-escrow salt)
  *
  * The random salt is generated per key-wrapping operation and stored in OrgMemberKey.
- * Team-level domain separation is enforced via AAD (which includes orgId).
+ * Team-level domain separation is enforced via AAD (which includes teamId).
  */
-async function deriveOrgWrappingKey(
+async function deriveTeamWrappingKey(
   privateKey: CryptoKey,
   publicKey: CryptoKey,
   salt: Uint8Array
@@ -141,7 +141,7 @@ async function deriveOrgWrappingKey(
       name: "HKDF",
       hash: "SHA-256",
       salt: toArrayBuffer(salt),
-      info: textEncode(HKDF_ORG_WRAP_INFO),
+      info: textEncode(HKDF_TEAM_WRAP_INFO),
     },
     hkdfKey,
     { name: "AES-GCM", length: AES_KEY_LENGTH },
@@ -184,7 +184,7 @@ export async function deriveEcdhWrappingKey(
 // ─── AAD for OrgMemberKey Wrapping ──────────────────────────────
 
 export interface TeamKeyWrapContext {
-  orgId: string;
+  teamId: string;
   toUserId: string;
   keyVersion: number;
   wrapVersion: number;
@@ -196,12 +196,12 @@ export interface TeamKeyWrapContext {
  *   [scope: 2B "OK"] [aadVersion: 1B] [nFields: 1B=4]
  *   [field_len: 2B BE] [field: N bytes] × 4
  *
- * Fields: orgId | toUserId | keyVersion | wrapVersion
- * Prevents cross-org, cross-user, and cross-version transplant attacks.
+ * Fields: teamId | toUserId | keyVersion | wrapVersion
+ * Prevents cross-team, cross-user, and cross-version transplant attacks.
  */
 export function buildTeamKeyWrapAAD(ctx: TeamKeyWrapContext): Uint8Array {
   const fields = [
-    ctx.orgId,
+    ctx.teamId,
     ctx.toUserId,
     String(ctx.keyVersion),
     String(ctx.wrapVersion),
@@ -257,7 +257,7 @@ export async function wrapTeamKeyForMember(
   hkdfSalt: Uint8Array,
   ctx: TeamKeyWrapContext
 ): Promise<EncryptedData> {
-  const wrappingKey = await deriveOrgWrappingKey(
+  const wrappingKey = await deriveTeamWrappingKey(
     ephemeralPrivateKey,
     memberPublicKey,
     hkdfSalt
@@ -303,7 +303,7 @@ export async function unwrapTeamKey(
   const ephemeralPublicKey = await importPublicKey(ephemeralPublicKeyJwk);
   const salt = hexDecode(hkdfSalt);
 
-  const wrappingKey = await deriveOrgWrappingKey(
+  const wrappingKey = await deriveTeamWrappingKey(
     memberPrivateKey,
     ephemeralPublicKey,
     salt
@@ -334,7 +334,7 @@ export async function unwrapTeamKey(
 
 // ─── Key Escrow (One-shot wrap flow) ────────────────────────────
 
-export interface OrgKeyEscrowResult {
+export interface TeamKeyEscrowResult {
   ephemeralPublicKey: string;
   encryptedOrgKey: string;
   orgKeyIv: string;
@@ -345,22 +345,22 @@ export interface OrgKeyEscrowResult {
 }
 
 /**
- * Create org key escrow for a member.
- * Generates ephemeral ECDH key pair, wraps org key, returns all fields for storage.
+ * Create team key escrow for a member.
+ * Generates ephemeral ECDH key pair, wraps team key, returns all fields for storage.
  *
  * @param teamKey - Plaintext team symmetric key
  * @param memberPublicKeyJwk - Member's ECDH public key (JWK string)
- * @param orgId - Organization ID
+ * @param teamId - Organization ID
  * @param toUserId - Member user ID
  * @param keyVersion - Team key version
  */
 export async function createTeamKeyEscrow(
   teamKey: Uint8Array,
   memberPublicKeyJwk: string,
-  orgId: string,
+  teamId: string,
   toUserId: string,
   keyVersion: number
-): Promise<OrgKeyEscrowResult> {
+): Promise<TeamKeyEscrowResult> {
   const ephemeralKeyPair = await generateECDHKeyPair();
   const memberPublicKey = await importPublicKey(memberPublicKeyJwk);
 
@@ -368,10 +368,10 @@ export async function createTeamKeyEscrow(
   const salt = crypto.getRandomValues(new Uint8Array(HKDF_SALT_LENGTH));
 
   const ctx: TeamKeyWrapContext = {
-    orgId,
+    teamId,
     toUserId,
     keyVersion,
-    wrapVersion: CURRENT_ORG_WRAP_VERSION,
+    wrapVersion: CURRENT_TEAM_WRAP_VERSION,
   };
 
   const encrypted = await wrapTeamKeyForMember(
@@ -392,7 +392,7 @@ export async function createTeamKeyEscrow(
     orgKeyIv: encrypted.iv,
     orgKeyAuthTag: encrypted.authTag,
     hkdfSalt: hexEncode(salt),
-    wrapVersion: CURRENT_ORG_WRAP_VERSION,
+    wrapVersion: CURRENT_TEAM_WRAP_VERSION,
     keyVersion,
   };
 }

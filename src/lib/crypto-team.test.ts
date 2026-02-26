@@ -11,7 +11,7 @@ import {
   encryptOrgAttachment,
   decryptOrgAttachment,
   buildTeamKeyWrapAAD,
-  CURRENT_ORG_WRAP_VERSION,
+  CURRENT_TEAM_WRAP_VERSION,
   HKDF_ECDH_WRAP_INFO,
   generateECDHKeyPair,
   exportPublicKey,
@@ -26,10 +26,10 @@ import { deriveEncryptionKey } from "./crypto-client";
 const TEST_TEAM_ID = "team-test-001";
 
 const TEST_CTX: TeamKeyWrapContext = {
-  orgId: TEST_TEAM_ID,
+  teamId: TEST_TEAM_ID,
   toUserId: "member-user-002",
   keyVersion: 1,
-  wrapVersion: CURRENT_ORG_WRAP_VERSION,
+  wrapVersion: CURRENT_TEAM_WRAP_VERSION,
 };
 
 function makeCtx(overrides?: Partial<TeamKeyWrapContext>): TeamKeyWrapContext {
@@ -136,7 +136,7 @@ describe("crypto-team", () => {
     it("differs when any single field changes", () => {
       const baseAAD = hexEncode(buildTeamKeyWrapAAD(TEST_CTX));
       const variants: TeamKeyWrapContext[] = [
-        makeCtx({ orgId: "different-team" }),
+        makeCtx({ teamId: "different-team" }),
         makeCtx({ toUserId: "different-to" }),
         makeCtx({ keyVersion: 99 }),
         makeCtx({ wrapVersion: 99 }),
@@ -153,7 +153,7 @@ describe("crypto-team", () => {
       // After header (4 bytes), first field length
       const firstFieldLen = view.getUint16(4, false);
       const encoder = new TextEncoder();
-      expect(firstFieldLen).toBe(encoder.encode(TEST_CTX.orgId).length);
+      expect(firstFieldLen).toBe(encoder.encode(TEST_CTX.teamId).length);
     });
   });
 
@@ -238,7 +238,7 @@ describe("crypto-team", () => {
           ephemeralPubJwk,
           memberKeyPair.privateKey,
           saltHex,
-          makeCtx({ orgId: "wrong-team-id" }),
+          makeCtx({ teamId: "wrong-team-id" }),
         ),
       ).rejects.toThrow();
     });
@@ -292,7 +292,7 @@ describe("crypto-team", () => {
       expect(result.orgKeyIv).toHaveLength(24);
       expect(result.orgKeyAuthTag).toHaveLength(32);
       expect(result.hkdfSalt).toHaveLength(64);
-      expect(result.wrapVersion).toBe(CURRENT_ORG_WRAP_VERSION);
+      expect(result.wrapVersion).toBe(CURRENT_TEAM_WRAP_VERSION);
       expect(result.keyVersion).toBe(1);
     });
 
@@ -446,9 +446,9 @@ describe("crypto-team", () => {
     });
   });
 
-  describe("CURRENT_ORG_WRAP_VERSION", () => {
+  describe("CURRENT_TEAM_WRAP_VERSION", () => {
     it("is 1", () => {
-      expect(CURRENT_ORG_WRAP_VERSION).toBe(1);
+      expect(CURRENT_TEAM_WRAP_VERSION).toBe(1);
     });
   });
 
@@ -491,7 +491,7 @@ describe("crypto-team", () => {
         memberKeyPair.privateKey,
         escrow.hkdfSalt,
         {
-          orgId: TEST_TEAM_ID,
+          teamId: TEST_TEAM_ID,
           toUserId: "member-001",
           keyVersion: 1,
           wrapVersion: escrow.wrapVersion,

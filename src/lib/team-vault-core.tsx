@@ -130,7 +130,7 @@ export function TeamVaultProvider({
 
         // Build AAD context for unwrapping
         const ctx: TeamKeyWrapContext = {
-          orgId: teamId,
+          teamId,
           toUserId: userId,
           keyVersion: memberKeyData.keyVersion,
           wrapVersion: memberKeyData.wrapVersion,
@@ -236,7 +236,7 @@ export function TeamVaultProvider({
 
           // Build AAD context for own key unwrapping
           const ownCtx: TeamKeyWrapContext = {
-            orgId: teamId,
+            teamId,
             toUserId: userId,
             keyVersion: ownKeyData.keyVersion,
             wrapVersion: ownKeyData.wrapVersion,
