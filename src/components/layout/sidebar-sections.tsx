@@ -309,7 +309,7 @@ export function VaultManagementSection({
 }: VaultManagementSectionProps) {
   const isOrg = vaultContext.type === "org";
   const shareLinksHref = isOrg
-    ? `/dashboard/share-links?org=${encodeURIComponent(vaultContext.orgId)}`
+    ? `/dashboard/share-links?team=${encodeURIComponent(vaultContext.orgId)}`
     : "/dashboard/share-links";
   const auditLogHref = isOrg
     ? `/dashboard/teams/${vaultContext.orgId}/audit-logs`

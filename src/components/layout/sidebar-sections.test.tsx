@@ -160,7 +160,7 @@ describe("VaultManagementSection", () => {
 
     expect(screen.getByRole("link", { name: "archive" })).toHaveAttribute("href", "/dashboard/teams/org-1?scope=archive");
     expect(screen.getByRole("link", { name: "trash" })).toHaveAttribute("href", "/dashboard/teams/org-1?scope=trash");
-    expect(screen.getByRole("link", { name: "shareLinks" })).toHaveAttribute("href", "/dashboard/share-links?org=org-1");
+    expect(screen.getByRole("link", { name: "shareLinks" })).toHaveAttribute("href", "/dashboard/share-links?team=org-1");
     expect(screen.getByRole("link", { name: "auditLog" })).toHaveAttribute("href", "/dashboard/teams/org-1/audit-logs");
   });
 });

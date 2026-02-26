@@ -6,8 +6,8 @@ import { requireOrgMember, OrgAuthError } from "@/lib/org-auth";
 import { ORG_ROLE } from "@/lib/constants";
 
 // GET /api/share-links/mine
-// - Personal context (no `org`): links created by current user, personal entries only
-// - Org context (`org` present): all links in the organization
+// - Personal context (no `team`/`org`): links created by current user, personal entries only
+// - Team context (`team` or legacy `org` present): all links in the team
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -17,15 +17,15 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status"); // "active" | "expired" | "revoked" | null (all)
   const shareType = searchParams.get("shareType"); // "entry" | "send" | null (all)
-  const orgId = searchParams.get("org");
+  const teamId = searchParams.get("team") ?? searchParams.get("org");
   const cursor = searchParams.get("cursor");
   const limit = 30;
 
   const where: Record<string, unknown> = {};
-  if (orgId) {
+  if (teamId) {
     let membershipRole: string | undefined;
     try {
-      const membership = await requireOrgMember(session.user.id, orgId);
+      const membership = await requireOrgMember(session.user.id, teamId);
       membershipRole = membership.role;
     } catch (e) {
       if (e instanceof OrgAuthError) {
@@ -33,12 +33,12 @@ export async function GET(req: NextRequest) {
       }
       throw e;
     }
-    // Send is personal-only — org context never returns Send items
+    // Send is personal-only — team context never returns Send items
     if (shareType === "send") {
       return NextResponse.json({ items: [], nextCursor: null });
     }
-    where.orgPasswordEntry = { orgId };
-    // VIEWER can only see links they created. Higher roles can view org-wide links.
+    where.orgPasswordEntry = { orgId: teamId };
+    // VIEWER can only see links they created. Higher roles can view team-wide links.
     if (membershipRole === ORG_ROLE.VIEWER) {
       where.createdById = session.user.id;
     }
@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
     } else if (shareType === "send") {
       where.shareType = { in: ["TEXT", "FILE"] };
     }
-    // "all" or null: personal entries + sends, exclude org shares (shown in org context)
+    // "all" or null: personal entries + sends, exclude team shares (shown in team context)
     if (!shareType || (shareType !== "entry" && shareType !== "send")) {
       where.orgPasswordEntryId = null;
     }
