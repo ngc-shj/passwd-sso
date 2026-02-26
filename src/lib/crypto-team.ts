@@ -401,7 +401,7 @@ export async function createTeamKeyEscrow(
 
 /**
  * Encrypt team entry data (text) with team encryption key.
- * Uses AES-256-GCM with AAD from crypto-aad.ts (buildOrgEntryAAD).
+ * Uses AES-256-GCM with AAD from crypto-aad.ts (buildTeamEntryAAD).
  */
 export async function encryptOrgEntry(
   plaintext: string,

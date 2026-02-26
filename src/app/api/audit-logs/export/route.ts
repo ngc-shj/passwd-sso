@@ -8,12 +8,11 @@ import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 const bodySchema = z.object({
   teamId: z.string().optional(),
-  orgId: z.string().optional(),
   entryCount: z.number().int().min(0),
   format: z.enum(["csv", "json"]),
   filename: z.string().trim().min(1).max(255).optional(),
   encrypted: z.boolean().optional(),
-  includeOrgs: z.boolean().optional(),
+  includeTeams: z.boolean().optional(),
 });
 
 // POST /api/audit-logs/export — Record export audit event
@@ -36,15 +35,13 @@ export async function POST(req: NextRequest) {
   }
 
   const {
-    teamId: requestedTeamId,
-    orgId: legacyOrgId,
+    teamId,
     entryCount,
     format,
     filename,
     encrypted,
-    includeOrgs,
+    includeTeams,
   } = result.data;
-  const teamId = requestedTeamId ?? legacyOrgId;
 
   // Verify team membership when teamId is specified
   if (teamId) {
@@ -68,7 +65,7 @@ export async function POST(req: NextRequest) {
       format,
       ...(filename ? { filename } : {}),
       ...(typeof encrypted === "boolean" ? { encrypted } : {}),
-      ...(typeof includeOrgs === "boolean" ? { includeOrgs } : {}),
+      ...(typeof includeTeams === "boolean" ? { includeTeams } : {}),
     },
     ...extractRequestMeta(req),
   });

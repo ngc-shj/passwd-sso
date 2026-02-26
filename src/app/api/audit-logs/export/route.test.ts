@@ -95,7 +95,7 @@ describe("POST /api/audit-logs/export", () => {
           format: "json",
           filename: "passwd-sso-export-20260214.json",
           encrypted: true,
-          includeOrgs: true,
+          includeTeams: true,
         },
       })
     );
@@ -107,7 +107,7 @@ describe("POST /api/audit-logs/export", () => {
           format: "json",
           filename: "passwd-sso-export-20260214.json",
           encrypted: true,
-          includeOrgs: true,
+          includeTeams: true,
         },
       })
     );
@@ -159,17 +159,4 @@ describe("POST /api/audit-logs/export", () => {
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
-  it("accepts legacy orgId as fallback", async () => {
-    const res = await POST(
-      createRequest("POST", URL, {
-        body: { orgId: "team-legacy", entryCount: 1, format: "csv" },
-      })
-    );
-    expect(res.status).toBe(200);
-    expect(mockRequireTeamPermission).toHaveBeenCalledWith(
-      "user-1",
-      "team-legacy",
-      TEAM_PERMISSION.TEAM_UPDATE
-    );
-  });
 });

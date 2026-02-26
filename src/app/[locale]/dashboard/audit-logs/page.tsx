@@ -363,7 +363,7 @@ export default function AuditLogsPage() {
     if (log.action === AUDIT_ACTION.ENTRY_EXPORT && meta) {
       const filename = typeof meta.filename === "string" ? meta.filename : null;
       const encrypted = meta.encrypted === true;
-      const includeOrgs = meta.includeOrgs === true;
+      const includeTeams = meta.includeTeams === true;
       const format = typeof meta.format === "string" ? meta.format : "-";
       const entryCount = typeof meta.entryCount === "number" ? meta.entryCount : 0;
       return t("exportMeta", {
@@ -371,7 +371,7 @@ export default function AuditLogsPage() {
         format,
         entryCount,
         encrypted: encrypted ? t("yes") : t("no"),
-        orgs: includeOrgs ? t("included") : t("notIncluded"),
+        orgs: includeTeams ? t("included") : t("notIncluded"),
       });
     }
 

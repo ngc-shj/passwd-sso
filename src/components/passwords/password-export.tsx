@@ -159,7 +159,7 @@ function ExportPanelContent() {
           format,
           filename,
           encrypted: passwordProtect,
-          includeOrgs: false,
+          includeTeams: false,
         }),
       }).catch(() => {});
 

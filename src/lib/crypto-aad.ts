@@ -10,7 +10,7 @@
  *
  * Scopes:
  *   "PV" — Personal Vault entry  (userId, entryId)
- *   "OV" — Team Vault entry       (orgId, entryId, vaultType)
+ *   "OV" — Team Vault entry       (teamId, entryId, vaultType)
  *   "AT" — Attachment             (entryId, attachmentId)
  */
 
@@ -18,7 +18,7 @@ const AAD_VERSION = 1;
 
 // Scope constants (2 ASCII bytes each)
 const SCOPE_PERSONAL = "PV";
-const SCOPE_ORG = "OV";
+const SCOPE_TEAM = "OV";
 const SCOPE_ATTACHMENT = "AT";
 
 /**
@@ -113,11 +113,8 @@ export function buildTeamEntryAAD(
   entryId: string,
   vaultType: "blob" | "overview" = "blob"
 ): Uint8Array {
-  return buildAADBytes(SCOPE_ORG, 3, [teamId, entryId, vaultType]);
+  return buildAADBytes(SCOPE_TEAM, 3, [teamId, entryId, vaultType]);
 }
-
-// Backward-compatible alias for team naming.
-export const buildOrgEntryAAD = buildTeamEntryAAD;
 
 /**
  * Build AAD for attachment encryption.

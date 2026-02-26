@@ -59,7 +59,6 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
 
 async function handleApiAuth(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const normalizedPathname = pathname.replace(/^\/api\/orgs(\/|$)/, "/api/teams$1");
 
   // Handle CORS preflight for API routes only.
   // handleApiAuth() is already scoped to /api/* by the caller (proxy()).
@@ -86,10 +85,10 @@ async function handleApiAuth(request: NextRequest) {
       route === API_PATH.EXTENSION_TOKEN ||
       route === API_PATH.EXTENSION_TOKEN_REFRESH
     ) {
-      return normalizedPathname === route;
+      return pathname === route;
     }
     // Password/vault routes allow child paths.
-    return normalizedPathname === route || normalizedPathname.startsWith(route + "/");
+    return pathname === route || pathname.startsWith(route + "/");
   };
 
   if (hasBearer && extensionTokenRoutes.some(isBearerBypassRoute)) {
@@ -99,16 +98,16 @@ async function handleApiAuth(request: NextRequest) {
   // Note: /api/scim/v2/* is intentionally NOT listed here — SCIM endpoints
   // use their own Bearer token auth (validateScimToken) in each route handler.
   if (
-    normalizedPathname.startsWith(API_PATH.PASSWORDS) ||
-    normalizedPathname.startsWith(API_PATH.TAGS) ||
-    normalizedPathname.startsWith(`${API_PATH.API_ROOT}/watchtower`) ||
-    normalizedPathname.startsWith(API_PATH.TEAMS) ||
-    normalizedPathname.startsWith(API_PATH.AUDIT_LOGS) ||
-    normalizedPathname.startsWith(API_PATH.SHARE_LINKS) ||
-    normalizedPathname.startsWith(API_PATH.SENDS) ||
-    normalizedPathname.startsWith(API_PATH.EMERGENCY_ACCESS) ||
-    normalizedPathname.startsWith(API_PATH.SESSIONS) ||
-    normalizedPathname.startsWith(`${API_PATH.API_ROOT}/extension`)
+    pathname.startsWith(API_PATH.PASSWORDS) ||
+    pathname.startsWith(API_PATH.TAGS) ||
+    pathname.startsWith(`${API_PATH.API_ROOT}/watchtower`) ||
+    pathname.startsWith(API_PATH.TEAMS) ||
+    pathname.startsWith(API_PATH.AUDIT_LOGS) ||
+    pathname.startsWith(API_PATH.SHARE_LINKS) ||
+    pathname.startsWith(API_PATH.SENDS) ||
+    pathname.startsWith(API_PATH.EMERGENCY_ACCESS) ||
+    pathname.startsWith(API_PATH.SESSIONS) ||
+    pathname.startsWith(`${API_PATH.API_ROOT}/extension`)
   ) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {

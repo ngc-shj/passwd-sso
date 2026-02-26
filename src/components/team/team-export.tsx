@@ -168,12 +168,12 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          orgId: scopedTeamId,
+          teamId: scopedTeamId,
           entryCount: entries.length,
           format,
           filename,
           encrypted: passwordProtect,
-          includeOrgs: false,
+          includeTeams: false,
         }),
       }).catch(() => {});
 

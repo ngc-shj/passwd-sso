@@ -16,8 +16,6 @@ const LAST_USED_AT_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
 export interface ValidatedScimToken {
   tokenId: string;
   teamId: string;
-  // Legacy compatibility alias
-  orgId: string;
   tenantId: string;
   createdById: string | null;
   /** Always non-null: createdById ?? SCIM_SYSTEM_USER_ID. */
@@ -119,7 +117,6 @@ export async function validateScimToken(
     data: {
       tokenId: token.id,
       teamId: token.orgId,
-      orgId: token.orgId,
       tenantId,
       createdById: token.createdById,
       auditUserId: token.createdById ?? SCIM_SYSTEM_USER_ID,

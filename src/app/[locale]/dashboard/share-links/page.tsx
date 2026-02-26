@@ -71,7 +71,7 @@ export default function ShareLinksPage() {
   const tShare = useTranslations("Share");
   const locale = useLocale();
   const searchParams = useSearchParams();
-  const teamFilter = searchParams.get("team") ?? searchParams.get("org");
+  const teamFilter = searchParams.get("team");
   const typeParam = searchParams.get("type");
   const [links, setLinks] = useState<ShareLinkItem[]>([]);
   const [loading, setLoading] = useState(true);

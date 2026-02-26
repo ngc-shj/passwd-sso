@@ -6,8 +6,8 @@ import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { TEAM_ROLE } from "@/lib/constants";
 
 // GET /api/share-links/mine
-// - Personal context (no `team`/`org`): links created by current user, personal entries only
-// - Team context (`team` or legacy `org` present): all links in the team
+// - Personal context (no `team`): links created by current user, personal entries only
+// - Team context (`team` present): all links in the team
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status"); // "active" | "expired" | "revoked" | null (all)
   const shareType = searchParams.get("shareType"); // "entry" | "send" | null (all)
-  const teamId = searchParams.get("team") ?? searchParams.get("org");
+  const teamId = searchParams.get("team");
   const cursor = searchParams.get("cursor");
   const limit = 30;
 

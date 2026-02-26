@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildPersonalEntryAAD,
-  buildOrgEntryAAD,
+  buildTeamEntryAAD,
   buildAttachmentAAD,
   AAD_VERSION,
 } from "./crypto-aad";
@@ -33,8 +33,8 @@ describe("crypto-aad", () => {
       expect(aad.length).toBe(25);
     });
 
-    it("buildOrgEntryAAD produces correct binary layout with 3 fields", () => {
-      const aad = buildOrgEntryAAD("team-abc", "entry-def", "blob");
+    it("buildTeamEntryAAD produces correct binary layout with 3 fields", () => {
+      const aad = buildTeamEntryAAD("team-abc", "entry-def", "blob");
       const view = new DataView(aad.buffer, aad.byteOffset, aad.byteLength);
 
       expect(String.fromCharCode(aad[0], aad[1])).toBe("OV");
@@ -91,14 +91,14 @@ describe("crypto-aad", () => {
 
   describe("scope separation", () => {
     it("OV blob vs overview produce different AAD", () => {
-      const blob = buildOrgEntryAAD("team-1", "entry-1", "blob");
-      const overview = buildOrgEntryAAD("team-1", "entry-1", "overview");
+      const blob = buildTeamEntryAAD("team-1", "entry-1", "blob");
+      const overview = buildTeamEntryAAD("team-1", "entry-1", "overview");
       expect(blob).not.toEqual(overview);
     });
 
     it("OV defaults to blob vaultType", () => {
-      const explicit = buildOrgEntryAAD("team-1", "entry-1", "blob");
-      const defaulted = buildOrgEntryAAD("team-1", "entry-1");
+      const explicit = buildTeamEntryAAD("team-1", "entry-1", "blob");
+      const defaulted = buildTeamEntryAAD("team-1", "entry-1");
       expect(explicit).toEqual(defaulted);
     });
   });

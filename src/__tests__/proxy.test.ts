@@ -161,16 +161,6 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("applies teams auth guard to legacy /api/orgs paths", async () => {
-    const res = await proxy(
-      createApiRequest("/api/orgs/team-1/passwords", {
-        Cookie: "authjs.session-token=sess-orgs-legacy",
-      }),
-      dummyOptions,
-    );
-    expect(res.status).toBe(401);
-    expect(fetchSpy).toHaveBeenCalled();
-  });
 });
 
 describe("proxy — CORS preflight and headers", () => {
