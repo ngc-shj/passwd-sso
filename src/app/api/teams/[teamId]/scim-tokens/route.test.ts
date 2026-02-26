@@ -11,7 +11,7 @@ const {
   mockHashToken,
 } = vi.hoisted(
   () => {
-    class _OrgAuthError extends Error {
+    class _TeamAuthError extends Error {
       status: number;
       constructor(message: string, status: number) {
         super(message);
@@ -22,7 +22,7 @@ const {
     return {
       mockAuth: vi.fn(),
       mockRequireOrgPermission: vi.fn(),
-      TeamAuthError: _OrgAuthError,
+      TeamAuthError: _TeamAuthError,
       mockLogAudit: vi.fn(),
       mockScimToken: { findMany: vi.fn(), create: vi.fn(), count: vi.fn() },
       mockOrganization: { findUnique: vi.fn() },

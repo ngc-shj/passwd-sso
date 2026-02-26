@@ -6,7 +6,7 @@ const {
   mockRequireOrgPermission,
   mockPrismaOrgPasswordEntry,
   mockPrismaAttachment,
-  MockOrgAuthError,
+  MockTeamAuthError,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireOrgPermission: vi.fn(),
@@ -17,7 +17,7 @@ const {
     findUnique: vi.fn(),
     delete: vi.fn(),
   },
-  MockOrgAuthError: class MockOrgAuthError extends Error {
+  MockTeamAuthError: class MockTeamAuthError extends Error {
     status: number;
     constructor(message: string, status = 403) {
       super(message);
@@ -29,7 +29,7 @@ const {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamPermission: mockRequireOrgPermission,
-  TeamAuthError: MockOrgAuthError,
+  TeamAuthError: MockTeamAuthError,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -71,7 +71,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
 
   it("returns org auth error when permission denied", async () => {
     mockRequireOrgPermission.mockRejectedValue(
-      new MockOrgAuthError("FORBIDDEN", 403),
+      new MockTeamAuthError("FORBIDDEN", 403),
     );
     const res = await GET(
       createRequest(
@@ -163,7 +163,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
 
   it("returns org auth error when permission denied", async () => {
     mockRequireOrgPermission.mockRejectedValue(
-      new MockOrgAuthError("FORBIDDEN", 403),
+      new MockTeamAuthError("FORBIDDEN", 403),
     );
     const res = await DELETE(
       createRequest(

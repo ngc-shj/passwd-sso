@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaOrgMember, mockPrismaOrgMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireOrgPermission, mockIsRoleAbove, TeamAuthError } = vi.hoisted(() => {
-  class _OrgAuthError extends Error {
+  class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
@@ -26,7 +26,7 @@ const { mockAuth, mockPrismaOrgMember, mockPrismaOrgMemberKey, mockPrismaScimExt
     mockTransaction: vi.fn(),
     mockRequireOrgPermission: vi.fn(),
     mockIsRoleAbove: vi.fn(),
-    TeamAuthError: _OrgAuthError,
+    TeamAuthError: _TeamAuthError,
   };
 });
 

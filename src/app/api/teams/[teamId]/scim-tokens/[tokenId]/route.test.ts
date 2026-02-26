@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 
 const { mockAuth, mockRequireOrgPermission, TeamAuthError, mockLogAudit, mockScimToken } = vi.hoisted(
   () => {
-    class _OrgAuthError extends Error {
+    class _TeamAuthError extends Error {
       status: number;
       constructor(message: string, status: number) {
         super(message);
@@ -14,7 +14,7 @@ const { mockAuth, mockRequireOrgPermission, TeamAuthError, mockLogAudit, mockSci
     return {
       mockAuth: vi.fn(),
       mockRequireOrgPermission: vi.fn(),
-      TeamAuthError: _OrgAuthError,
+      TeamAuthError: _TeamAuthError,
       mockLogAudit: vi.fn(),
       mockScimToken: { findUnique: vi.fn(), update: vi.fn() },
     };

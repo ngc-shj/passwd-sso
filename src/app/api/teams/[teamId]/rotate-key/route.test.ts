@@ -6,13 +6,13 @@ const {
   mockRequireOrgPermission,
   mockOrgFindUnique,
   mockTransaction,
-  MockOrgAuthError,
+  MockTeamAuthError,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireOrgPermission: vi.fn(),
   mockOrgFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
-  MockOrgAuthError: class MockOrgAuthError extends Error {
+  MockTeamAuthError: class MockTeamAuthError extends Error {
     status: number;
     constructor(message: string, status = 403) {
       super(message);
@@ -31,7 +31,7 @@ const txMock = {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamPermission: mockRequireOrgPermission,
-  TeamAuthError: MockOrgAuthError,
+  TeamAuthError: MockTeamAuthError,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -55,8 +55,8 @@ function createRequest(body: unknown) {
   });
 }
 
-function createParams(orgId: string) {
-  return { params: Promise.resolve({ orgId }) };
+function createParams(teamId: string) {
+  return { params: Promise.resolve({ teamId }) };
 }
 
 function validEntry(id: string) {
@@ -157,7 +157,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
 
   it("returns 403 when user lacks permission", async () => {
     mockRequireOrgPermission.mockRejectedValue(
-      new MockOrgAuthError("FORBIDDEN", 403),
+      new MockTeamAuthError("FORBIDDEN", 403),
     );
     const res = await POST(
       createRequest({

@@ -263,9 +263,9 @@ describe("POST /api/share-links", () => {
     mockFindUnique.mockResolvedValueOnce({ orgId: "org-123" });
 
     const { requireTeamPermission } = await import("@/lib/team-auth");
-    const { TeamAuthError: RealOrgAuthError } = await import("@/lib/team-auth");
+    const { TeamAuthError: RealTeamAuthError } = await import("@/lib/team-auth");
     vi.mocked(requireTeamPermission).mockRejectedValueOnce(
-      new RealOrgAuthError("INSUFFICIENT_PERMISSION", 403)
+      new RealTeamAuthError("INSUFFICIENT_PERMISSION", 403)
     );
 
     const req = createRequest("POST", "http://localhost/api/share-links", {

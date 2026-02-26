@@ -3,7 +3,7 @@ import { createRequest, createParams } from "@/__tests__/helpers/request-builder
 
 // All mocks must be created inside vi.hoisted() to avoid hoisting issues
 const { mockAuth, mockPrismaOrganization, mockRequireOrgMember, mockRequireOrgPermission, TeamAuthError } = vi.hoisted(() => {
-  class _OrgAuthError extends Error {
+  class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
@@ -20,7 +20,7 @@ const { mockAuth, mockPrismaOrganization, mockRequireOrgMember, mockRequireOrgPe
     },
     mockRequireOrgMember: vi.fn(),
     mockRequireOrgPermission: vi.fn(),
-    TeamAuthError: _OrgAuthError,
+    TeamAuthError: _TeamAuthError,
   };
 });
 

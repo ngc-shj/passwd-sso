@@ -7,7 +7,7 @@ const {
   mockRequireOrgMember, mockHasOrgPermission, TeamAuthError,
   mockPrismaTransaction,
 } = vi.hoisted(() => {
-  class _OrgAuthError extends Error {
+  class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
@@ -28,7 +28,7 @@ const {
     mockRequireOrgPermission: vi.fn(),
     mockRequireOrgMember: vi.fn(),
     mockHasOrgPermission: vi.fn(),
-    TeamAuthError: _OrgAuthError,
+    TeamAuthError: _TeamAuthError,
     mockPrismaTransaction: vi.fn(),
   };
 });
