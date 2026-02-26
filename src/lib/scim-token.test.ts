@@ -73,7 +73,6 @@ describe("validateScimToken", () => {
       data: {
         tokenId: "tok-1",
         teamId: "team-1",
-        orgId: "team-1",
         tenantId: "tenant-1",
         createdById: "user-1",
         auditUserId: "user-1",
@@ -165,7 +164,7 @@ describe("validateScimToken", () => {
 
     const result = await validateScimToken(bearerRequest("scim_valid"));
 
-    expect(result).toEqual({ ok: true, data: expect.objectContaining({ teamId: "team-1", orgId: "team-1" }) });
+    expect(result).toEqual({ ok: true, data: expect.objectContaining({ teamId: "team-1" }) });
   });
 
   // ─── lastUsedAt throttle ────────────────────────────────────
@@ -211,7 +210,7 @@ describe("validateScimToken", () => {
     // Should still return ok
     expect(result).toEqual({
       ok: true,
-      data: expect.objectContaining({ teamId: "team-1", orgId: "team-1" }),
+      data: expect.objectContaining({ teamId: "team-1" }),
     });
   });
 
@@ -248,7 +247,6 @@ describe("validateScimToken", () => {
       ok: true,
       data: expect.objectContaining({
         teamId: "team-1",
-        orgId: "team-1",
         tenantId: "tenant-1",
       }),
     });
