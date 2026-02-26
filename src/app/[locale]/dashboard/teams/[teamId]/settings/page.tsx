@@ -89,6 +89,8 @@ export default function TeamSettingsPage({
   const [invEmail, setInvEmail] = useState("");
   const [invRole, setInvRole] = useState<string>(TEAM_ROLE.MEMBER);
   const [inviting, setInviting] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
@@ -357,7 +359,13 @@ export default function TeamSettingsPage({
                     <ShieldAlert className="h-5 w-5" />
                     {t("deleteTeam")}
                   </h2>
-                  <AlertDialog>
+                  <AlertDialog
+                    open={deleteDialogOpen}
+                    onOpenChange={(open) => {
+                      setDeleteDialogOpen(open);
+                      if (!open) setDeleteConfirmText("");
+                    }}
+                  >
                     <AlertDialogTrigger asChild>
                       <Button variant="destructive">{t("deleteTeam")}</Button>
                     </AlertDialogTrigger>
@@ -368,9 +376,23 @@ export default function TeamSettingsPage({
                           {t("deleteTeamConfirm", { name: team.name })}
                         </AlertDialogDescription>
                       </AlertDialogHeader>
+                      <div className="space-y-2">
+                        <Label>{t("deleteTeamTypeLabel")}</Label>
+                        <Input
+                          value={deleteConfirmText}
+                          onChange={(e) => setDeleteConfirmText(e.target.value)}
+                          placeholder={t("deleteTeamTypePlaceholder", { name: team.name })}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {t("deleteTeamTypeHint", { name: team.name })}
+                        </p>
+                      </div>
                       <AlertDialogFooter>
                         <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleDeleteTeam}>
+                        <AlertDialogAction
+                          onClick={handleDeleteTeam}
+                          disabled={deleteConfirmText !== team.name}
+                        >
                           {t("deleteTeam")}
                         </AlertDialogAction>
                       </AlertDialogFooter>
