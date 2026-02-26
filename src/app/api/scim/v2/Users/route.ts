@@ -20,6 +20,7 @@ import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
+import { withTenantRls } from "@/lib/tenant-rls";
 
 // GET /api/scim/v2/Users — List/filter users in the team
 export async function GET(req: NextRequest) {
@@ -33,81 +34,82 @@ export async function GET(req: NextRequest) {
     return scimError(429, "Too many requests");
   }
 
-  const url = req.nextUrl;
-  const startIndex = Math.max(1, parseInt(url.searchParams.get("startIndex") ?? "1", 10) || 1);
-  const count = Math.min(200, Math.max(1, parseInt(url.searchParams.get("count") ?? "100", 10) || 100));
-  const filterParam = url.searchParams.get("filter");
+  return withTenantRls(prisma, tenantId, async () => {
+    const url = req.nextUrl;
+    const startIndex = Math.max(1, parseInt(url.searchParams.get("startIndex") ?? "1", 10) || 1);
+    const count = Math.min(200, Math.max(1, parseInt(url.searchParams.get("count") ?? "100", 10) || 100));
+    const filterParam = url.searchParams.get("filter");
 
-  // Build Prisma where clause.
-  // No deactivatedAt filter by default — RFC 7644 §3.4.2 requires unfiltered
-  // GET to return all resources. The `active` field distinguishes state.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let prismaWhere: Record<string, any> = { teamId: scopedTeamId, user: { email: { not: null } } };
+    // Build Prisma where clause.
+    // No deactivatedAt filter by default — RFC 7644 §3.4.2 requires unfiltered
+    // GET to return all resources. The `active` field distinguishes state.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let prismaWhere: Record<string, any> = { teamId: scopedTeamId, user: { email: { not: null } } };
 
-  if (filterParam) {
-    try {
-      const ast = parseScimFilter(filterParam);
+    if (filterParam) {
+      try {
+        const ast = parseScimFilter(filterParam);
 
       // Pre-resolve externalId via ScimExternalMapping before building WHERE.
-      const extIdValue = extractExternalIdValue(ast);
+        const extIdValue = extractExternalIdValue(ast);
 
       // Reject externalId in OR expressions — semantics are ambiguous
-      if (extIdValue !== null && "or" in ast) {
-        return scimError(400, "externalId filter is not supported in OR expressions");
-      }
-
-      if (extIdValue !== null) {
-        const mapping = await prisma.scimExternalMapping.findFirst({
-          where: {
-            tenantId,
-            externalId: extIdValue,
-            resourceType: "User",
-          },
-        });
-        if (!mapping) {
-          return scimListResponse([], 0, startIndex);
+        if (extIdValue !== null && "or" in ast) {
+          return scimError(400, "externalId filter is not supported in OR expressions");
         }
-        prismaWhere.userId = mapping.internalId;
-      }
 
-      const where = filterToPrismaWhere(ast);
-      prismaWhere = { ...prismaWhere, ...where };
-    } catch (e) {
-      if (e instanceof FilterParseError) {
-        return scimError(400, e.message);
+        if (extIdValue !== null) {
+          const mapping = await prisma.scimExternalMapping.findFirst({
+            where: {
+              tenantId,
+              externalId: extIdValue,
+              resourceType: "User",
+            },
+          });
+          if (!mapping) {
+            return scimListResponse([], 0, startIndex);
+          }
+          prismaWhere.userId = mapping.internalId;
+        }
+
+        const where = filterToPrismaWhere(ast);
+        prismaWhere = { ...prismaWhere, ...where };
+      } catch (e) {
+        if (e instanceof FilterParseError) {
+          return scimError(400, e.message);
+        }
+        throw e;
       }
-      throw e;
     }
-  }
 
-  const [members, totalResults] = await Promise.all([
-    prisma.teamMember.findMany({
-      where: prismaWhere,
-      include: {
-        user: { select: { id: true, email: true, name: true } },
+    const [members, totalResults] = await Promise.all([
+      prisma.teamMember.findMany({
+        where: prismaWhere,
+        include: {
+          user: { select: { id: true, email: true, name: true } },
+        },
+        skip: startIndex - 1,
+        take: count,
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.teamMember.count({ where: prismaWhere }),
+    ]);
+
+    const baseUrl = getScimBaseUrl();
+
+    // Batch-fetch external IDs for the result set
+    const userIds = members.map((m) => m.userId);
+    const mappings = await prisma.scimExternalMapping.findMany({
+      where: {
+        tenantId,
+        resourceType: "User",
+        internalId: { in: userIds },
       },
-      skip: startIndex - 1,
-      take: count,
-      orderBy: { createdAt: "asc" },
-    }),
-    prisma.teamMember.count({ where: prismaWhere }),
-  ]);
+      select: { internalId: true, externalId: true },
+    });
+    const extIdMap = new Map(mappings.map((m) => [m.internalId, m.externalId]));
 
-  const baseUrl = getScimBaseUrl();
-
-  // Batch-fetch external IDs for the result set
-  const userIds = members.map((m) => m.userId);
-  const mappings = await prisma.scimExternalMapping.findMany({
-    where: {
-      tenantId,
-      resourceType: "User",
-      internalId: { in: userIds },
-    },
-    select: { internalId: true, externalId: true },
-  });
-  const extIdMap = new Map(mappings.map((m) => [m.internalId, m.externalId]));
-
-  const resources = members.map((m) => {
+    const resources = members.map((m) => {
       const input: ScimUserInput = {
         userId: m.userId,
         email: m.user.email!,
@@ -118,7 +120,8 @@ export async function GET(req: NextRequest) {
       return userToScimUser(input, baseUrl);
     });
 
-  return scimListResponse(resources, totalResults, startIndex);
+    return scimListResponse(resources, totalResults, startIndex);
+  });
 }
 
 // POST /api/scim/v2/Users — Create (provision) a user in the team
@@ -150,6 +153,10 @@ export async function POST(req: NextRequest) {
   // Transaction: find/create user + create TeamMember + create ScimExternalMapping
   try {
     const created = await prisma.$transaction(async (tx) => {
+      if (typeof tx.$executeRaw === "function") {
+        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
+      }
+
       // Find or create User by email
       let user = await tx.user.findUnique({ where: { email: userName } });
       if (!user) {

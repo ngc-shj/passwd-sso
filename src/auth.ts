@@ -6,6 +6,7 @@ import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { extractTenantClaimValue, slugifyTenant } from "@/lib/tenant-claim";
+import { withBypassRls } from "@/lib/tenant-rls";
 import authConfig from "./auth.config";
 
 async function ensureTenantMembershipForSignIn(
@@ -23,15 +24,15 @@ async function ensureTenantMembershipForSignIn(
     return false;
   }
 
-  const tenant = await prisma.$transaction(async (tx) => {
-    let found = await tx.tenant.findFirst({
+  const tenant = await withBypassRls(prisma, async () => {
+    let found = await prisma.tenant.findFirst({
       where: { OR: [{ id: tenantClaim }, { slug: tenantSlug }] },
       select: { id: true },
     });
 
     if (!found) {
       try {
-        found = await tx.tenant.create({
+        found = await prisma.tenant.create({
           data: {
             name: tenantClaim,
             slug: tenantSlug,
@@ -43,7 +44,7 @@ async function ensureTenantMembershipForSignIn(
           e instanceof Prisma.PrismaClientKnownRequestError &&
           e.code === "P2002"
         ) {
-          found = await tx.tenant.findUnique({
+          found = await prisma.tenant.findUnique({
             where: { slug: tenantSlug },
             select: { id: true },
           });
@@ -55,7 +56,7 @@ async function ensureTenantMembershipForSignIn(
 
     if (!found) return null;
 
-    const existingMembership = await tx.tenantMember.findFirst({
+    const existingMembership = await prisma.tenantMember.findFirst({
       where: { userId },
       select: { tenantId: true },
     });
@@ -65,7 +66,7 @@ async function ensureTenantMembershipForSignIn(
       return null;
     }
 
-    await tx.tenantMember.upsert({
+    await prisma.tenantMember.upsert({
       where: {
         tenantId_userId: {
           tenantId: found.id,

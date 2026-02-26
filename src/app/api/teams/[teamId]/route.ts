@@ -9,6 +9,8 @@ import {
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
+import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withTenantRls } from "@/lib/tenant-rls";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -22,18 +24,21 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    const membership = await requireTeamMember(session.user.id, teamId);
-    const team = await prisma.team.findUnique({
-      where: { id: teamId },
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        description: true,
-        createdAt: true,
-        updatedAt: true,
-        _count: { select: { members: true, passwords: true } },
-      },
+    const { membership, team } = await withTeamTenantRls(teamId, async () => {
+      const membership = await requireTeamMember(session.user.id, teamId);
+      const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          description: true,
+          createdAt: true,
+          updatedAt: true,
+          _count: { select: { members: true, passwords: true } },
+        },
+      });
+      return { membership, team };
     });
 
     if (!team) {
@@ -47,6 +52,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
       passwordCount: team._count.passwords,
     });
   } catch (e) {
+    if (e instanceof Error && e.message === "TENANT_NOT_RESOLVED") {
+      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    }
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
@@ -64,8 +72,13 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
+    await withTeamTenantRls(teamId, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE),
+    );
   } catch (e) {
+    if (e instanceof Error && e.message === "TENANT_NOT_RESOLVED") {
+      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    }
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
@@ -93,10 +106,12 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updateData.description = parsed.data.description || null;
   }
 
-  const team = await prisma.team.update({
-    where: { id: teamId },
-    data: updateData,
-  });
+  const team = await withTeamTenantRls(teamId, async () =>
+    prisma.team.update({
+      where: { id: teamId },
+      data: updateData,
+    }),
+  );
 
   return NextResponse.json({
     id: team.id,
@@ -117,27 +132,38 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_DELETE);
+    await withTeamTenantRls(teamId, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_DELETE),
+    );
   } catch (e) {
+    if (e instanceof Error && e.message === "TENANT_NOT_RESOLVED") {
+      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    }
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
   }
 
-  const team = await prisma.team.findUnique({
-    where: { id: teamId },
-    select: { tenantId: true },
-  });
+  const team = await withTeamTenantRls(teamId, async () =>
+    prisma.team.findUnique({
+      where: { id: teamId },
+      select: { tenantId: true },
+    }),
+  );
   if (!team) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  await prisma.team.delete({ where: { id: teamId } });
+  await withTenantRls(prisma, team.tenantId, async () =>
+    prisma.team.delete({ where: { id: teamId } }),
+  );
 
-  const remainingTeams = await prisma.team.count({
-    where: { tenantId: team.tenantId },
-  });
+  const remainingTeams = await withTenantRls(prisma, team.tenantId, async () =>
+    prisma.team.count({
+      where: { tenantId: team.tenantId },
+    }),
+  );
   if (remainingTeams === 0) {
     await prisma.tenant.delete({ where: { id: team.tenantId } });
   }

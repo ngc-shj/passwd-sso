@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
+import { resolveUserTenantId, withUserTenantRls } from "@/lib/tenant-context";
 
 // GET /api/teams — List teams the user belongs to
 export async function GET() {
@@ -13,36 +14,49 @@ export async function GET() {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const memberships = await prisma.teamMember.findMany({
-    where: { userId: session.user.id, deactivatedAt: null },
-    include: {
-      team: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          description: true,
-          createdAt: true,
-          _count: {
-            select: { members: true },
+  try {
+    const memberships = await withUserTenantRls(session.user.id, async () =>
+      prisma.teamMember.findMany({
+        where: { userId: session.user.id, deactivatedAt: null },
+        include: {
+          team: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              description: true,
+              createdAt: true,
+              _count: {
+                select: { members: true },
+              },
+            },
           },
         },
-      },
-    },
-    orderBy: { team: { name: "asc" } },
-  });
+        orderBy: { team: { name: "asc" } },
+      }),
+    );
 
-  const teams = memberships.map((m) => ({
-    id: m.team.id,
-    name: m.team.name,
-    slug: m.team.slug,
-    description: m.team.description,
-    createdAt: m.team.createdAt,
-    role: m.role,
-    memberCount: m.team._count.members,
-  }));
+    const teams = memberships.map((m) => ({
+      id: m.team.id,
+      name: m.team.name,
+      slug: m.team.slug,
+      description: m.team.description,
+      createdAt: m.team.createdAt,
+      role: m.role,
+      memberCount: m.team._count.members,
+    }));
 
-  return NextResponse.json(teams);
+    return NextResponse.json(teams);
+  } catch (e) {
+    if (
+      e instanceof Error &&
+      (e.message === "TENANT_NOT_RESOLVED" ||
+        e.message === "MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED")
+    ) {
+      return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    }
+    throw e;
+  }
 }
 
 // POST /api/teams — Create a new E2E-enabled team
@@ -68,55 +82,74 @@ export async function POST(req: NextRequest) {
   }
   const { id: clientId, name, slug, description, teamMemberKey } = parsed.data;
 
-  // Check slug uniqueness
-  const existing = await prisma.team.findUnique({
-    where: { slug },
-  });
+  let tenantId: string;
+  try {
+    tenantId = await resolveUserTenantId(session.user.id) ?? "";
+  } catch (e) {
+    if (e instanceof Error && e.message === "MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED") {
+      return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    }
+    throw e;
+  }
+  if (!tenantId) {
+    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+  }
+
+  // Check slug uniqueness in tenant context
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.team.findUnique({
+      where: { slug },
+      select: { id: true },
+    }),
+  );
   if (existing) {
     return NextResponse.json(
       { error: API_ERROR.SLUG_ALREADY_TAKEN },
-      { status: 409 }
+      { status: 409 },
     );
   }
 
   let team;
   try {
-    team = await prisma.team.create({
-      data: {
-        ...(clientId ? { id: clientId } : {}),
-        tenant: {
-          create: {
-            name,
-            slug: `tenant-${slug}`,
-            description: description || null,
+    team = await withUserTenantRls(session.user.id, async () =>
+      prisma.team.create({
+        data: {
+          ...(clientId ? { id: clientId } : {}),
+          tenant: { connect: { id: tenantId } },
+          name,
+          slug,
+          description: description || null,
+          teamKeyVersion: 1,
+          members: {
+            create: {
+              userId: session.user.id,
+              role: TEAM_ROLE.OWNER,
+              keyDistributed: true,
+            },
+          },
+          memberKeys: {
+            create: {
+              userId: session.user.id,
+              encryptedTeamKey: teamMemberKey.encryptedTeamKey,
+              teamKeyIv: teamMemberKey.teamKeyIv,
+              teamKeyAuthTag: teamMemberKey.teamKeyAuthTag,
+              ephemeralPublicKey: teamMemberKey.ephemeralPublicKey,
+              hkdfSalt: teamMemberKey.hkdfSalt,
+              keyVersion: teamMemberKey.keyVersion,
+              wrapVersion: teamMemberKey.wrapVersion,
+            },
           },
         },
-        name,
-        slug,
-        description: description || null,
-        teamKeyVersion: 1,
-        members: {
-          create: {
-            userId: session.user.id,
-            role: TEAM_ROLE.OWNER,
-            keyDistributed: true,
-          },
-        },
-        memberKeys: {
-          create: {
-            userId: session.user.id,
-            encryptedTeamKey: teamMemberKey.encryptedTeamKey,
-            teamKeyIv: teamMemberKey.teamKeyIv,
-            teamKeyAuthTag: teamMemberKey.teamKeyAuthTag,
-            ephemeralPublicKey: teamMemberKey.ephemeralPublicKey,
-            hkdfSalt: teamMemberKey.hkdfSalt,
-            keyVersion: teamMemberKey.keyVersion,
-            wrapVersion: teamMemberKey.wrapVersion,
-          },
-        },
-      },
-    });
+      }),
+    );
   } catch (e) {
+    if (
+      e instanceof Error &&
+      (e.message === "TENANT_NOT_RESOLVED" ||
+        e.message === "MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED")
+    ) {
+      return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    }
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       return NextResponse.json(
         { error: API_ERROR.SLUG_ALREADY_TAKEN },

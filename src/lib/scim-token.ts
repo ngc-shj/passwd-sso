@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
 import { SCIM_TOKEN_PREFIX } from "@/lib/scim/token-utils";
+import { withBypassRls } from "@/lib/tenant-rls";
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -68,21 +69,23 @@ export async function validateScimToken(
 
   const tokenHash = hashToken(plaintext);
 
-  const token = await prisma.scimToken.findUnique({
-    where: { tokenHash },
-    select: {
-      id: true,
-      teamId: true,
-      tenantId: true,
-      createdById: true,
-      revokedAt: true,
-      expiresAt: true,
-      lastUsedAt: true,
-      team: {
-        select: { tenantId: true },
+  const token = await withBypassRls(prisma, async () =>
+    prisma.scimToken.findUnique({
+      where: { tokenHash },
+      select: {
+        id: true,
+        teamId: true,
+        tenantId: true,
+        createdById: true,
+        revokedAt: true,
+        expiresAt: true,
+        lastUsedAt: true,
+        team: {
+          select: { tenantId: true },
+        },
       },
-    },
-  });
+    }),
+  );
 
   if (!token) {
     return { ok: false, error: "SCIM_TOKEN_INVALID" };
@@ -102,14 +105,14 @@ export async function validateScimToken(
   const now = Date.now();
   const lastUsed = token.lastUsedAt?.getTime() ?? 0;
   if (now - lastUsed >= LAST_USED_AT_THROTTLE_MS) {
-    void prisma.scimToken
-      .update({
+    void withBypassRls(prisma, async () => {
+      await prisma.scimToken.update({
         where: { id: token.id },
         data: { lastUsedAt: new Date(now) },
-      })
-      .catch((err) => {
-        console.warn("Failed to update SCIM token lastUsedAt:", err);
       });
+    }).catch((err) => {
+      console.warn("Failed to update SCIM token lastUsedAt:", err);
+    });
   }
 
   return {

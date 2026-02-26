@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeam } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, mockResolveUserTenantId } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamMember: { findMany: vi.fn() },
   mockPrismaTeam: { findUnique: vi.fn(), create: vi.fn() },
+  mockWithUserTenantRls: vi.fn(),
+  mockResolveUserTenantId: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -13,6 +15,10 @@ vi.mock("@/lib/prisma", () => ({
     teamMember: mockPrismaTeamMember,
     team: mockPrismaTeam,
   },
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
+  resolveUserTenantId: mockResolveUserTenantId,
 }));
 
 import { GET, POST } from "./route";
@@ -24,6 +30,8 @@ describe("GET /api/teams", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => unknown) => fn());
+    mockResolveUserTenantId.mockResolvedValue("tenant-1");
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -80,6 +88,8 @@ describe("POST /api/teams (E2E-only)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => unknown) => fn());
+    mockResolveUserTenantId.mockResolvedValue("tenant-1");
   });
 
   const validE2EBody = {
@@ -163,6 +173,7 @@ describe("POST /api/teams (E2E-only)", () => {
     expect(mockPrismaTeam.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
+          tenant: { connect: { id: "tenant-1" } },
           teamKeyVersion: 1,
           memberKeys: expect.objectContaining({
             create: expect.objectContaining({
