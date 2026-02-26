@@ -9,12 +9,11 @@ export type VaultContext =
   | { type: "personal" }
   | { type: "org"; orgId: string; orgName?: string; orgRole?: string };
 
-interface OrgContextItem {
+interface TeamContextItem {
   id: string;
   name: string;
   role: string;
 }
-type TeamContextItem = OrgContextItem;
 
 const CROSS_VAULT_PATHS = [
   "/dashboard/watchtower",
@@ -47,20 +46,20 @@ export function useVaultContext(teams: TeamContextItem[]): VaultContext {
 
   const resolved = useMemo<VaultContext>(() => {
     if (cleanPath === "/dashboard/share-links") {
-      const shareOrgId = searchParams.get("team") ?? searchParams.get("org");
-      if (shareOrgId) {
-        const org = teams.find((item) => item.id === shareOrgId);
-        if (org) {
-          return { type: "org", orgId: org.id, orgName: org.name, orgRole: org.role };
+      const shareTeamId = searchParams.get("team") ?? searchParams.get("org");
+      if (shareTeamId) {
+        const team = teams.find((item) => item.id === shareTeamId);
+        if (team) {
+          return { type: "org", orgId: team.id, orgName: team.name, orgRole: team.role };
         }
       }
     }
 
-    const orgMatch = cleanPath.match(/^\/dashboard\/(?:teams|orgs)\/([^/]+)/);
-    if (orgMatch) {
-      const org = teams.find((item) => item.id === orgMatch[1]);
-      if (org) {
-        return { type: "org", orgId: org.id, orgName: org.name, orgRole: org.role };
+    const teamMatch = cleanPath.match(/^\/dashboard\/(?:teams|orgs)\/([^/]+)/);
+    if (teamMatch) {
+      const team = teams.find((item) => item.id === teamMatch[1]);
+      if (team) {
+        return { type: "org", orgId: team.id, orgName: team.name, orgRole: team.role };
       }
     }
 
@@ -69,9 +68,9 @@ export function useVaultContext(teams: TeamContextItem[]): VaultContext {
     }
 
     if (isCrossVaultPath(cleanPath) && lastContext !== "personal") {
-      const org = teams.find((item) => item.id === lastContext);
-      if (org) {
-        return { type: "org", orgId: org.id, orgName: org.name, orgRole: org.role };
+      const team = teams.find((item) => item.id === lastContext);
+      if (team) {
+        return { type: "org", orgId: team.id, orgName: team.name, orgRole: team.role };
       }
     }
 
@@ -90,3 +89,5 @@ export function useVaultContext(teams: TeamContextItem[]): VaultContext {
 
   return resolved;
 }
+
+export const useTeamVaultContext = useVaultContext;
