@@ -93,11 +93,11 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (member.keyDistributed) return "already_distributed" as const;
 
     // Verify keyVersion matches current org key version (F-16)
-    const org = await tx.organization.findUnique({
+    const team = await tx.organization.findUnique({
       where: { id: teamId },
       select: { orgKeyVersion: true },
     });
-    if (!org || data.keyVersion !== org.orgKeyVersion) {
+    if (!team || data.keyVersion !== team.orgKeyVersion) {
       return "version_mismatch" as const;
     }
 
