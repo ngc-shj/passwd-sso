@@ -59,28 +59,13 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
 
 async function handleApiAuth(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const normalizedPathname = pathname.replace(/^\/api\/orgs(\/|$)/, "/api/teams$1");
 
   // Handle CORS preflight for API routes only.
   // handleApiAuth() is already scoped to /api/* by the caller (proxy()).
   // If a future route needs OPTIONS for business logic, add an exclusion here.
   if (request.method === "OPTIONS") {
     return handlePreflight(request);
-  }
-
-  // Legacy org API endpoints are deprecated in favor of /api/teams.
-  if (pathname === "/api/orgs" || pathname.startsWith("/api/orgs/")) {
-    const replacementPath = pathname.replace(/^\/api\/orgs/, API_PATH.TEAMS);
-    return applyCorsHeaders(
-      request,
-      NextResponse.json(
-        {
-          error: "ORG_API_DEPRECATED",
-          message: "Use /api/teams endpoints",
-          replacementPath,
-        },
-        { status: 410 },
-      ),
-    );
   }
 
   // Routes that accept extension token (Bearer) as alternative auth.
@@ -101,10 +86,10 @@ async function handleApiAuth(request: NextRequest) {
       route === API_PATH.EXTENSION_TOKEN ||
       route === API_PATH.EXTENSION_TOKEN_REFRESH
     ) {
-      return pathname === route;
+      return normalizedPathname === route;
     }
     // Password/vault routes allow child paths.
-    return pathname === route || pathname.startsWith(route + "/");
+    return normalizedPathname === route || normalizedPathname.startsWith(route + "/");
   };
 
   if (hasBearer && extensionTokenRoutes.some(isBearerBypassRoute)) {
@@ -114,16 +99,16 @@ async function handleApiAuth(request: NextRequest) {
   // Note: /api/scim/v2/* is intentionally NOT listed here — SCIM endpoints
   // use their own Bearer token auth (validateScimToken) in each route handler.
   if (
-    pathname.startsWith(API_PATH.PASSWORDS) ||
-    pathname.startsWith(API_PATH.TAGS) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/watchtower`) ||
-    pathname.startsWith(API_PATH.TEAMS) ||
-    pathname.startsWith(API_PATH.AUDIT_LOGS) ||
-    pathname.startsWith(API_PATH.SHARE_LINKS) ||
-    pathname.startsWith(API_PATH.SENDS) ||
-    pathname.startsWith(API_PATH.EMERGENCY_ACCESS) ||
-    pathname.startsWith(API_PATH.SESSIONS) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/extension`)
+    normalizedPathname.startsWith(API_PATH.PASSWORDS) ||
+    normalizedPathname.startsWith(API_PATH.TAGS) ||
+    normalizedPathname.startsWith(`${API_PATH.API_ROOT}/watchtower`) ||
+    normalizedPathname.startsWith(API_PATH.TEAMS) ||
+    normalizedPathname.startsWith(API_PATH.AUDIT_LOGS) ||
+    normalizedPathname.startsWith(API_PATH.SHARE_LINKS) ||
+    normalizedPathname.startsWith(API_PATH.SENDS) ||
+    normalizedPathname.startsWith(API_PATH.EMERGENCY_ACCESS) ||
+    normalizedPathname.startsWith(API_PATH.SESSIONS) ||
+    normalizedPathname.startsWith(`${API_PATH.API_ROOT}/extension`)
   ) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {
