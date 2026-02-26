@@ -179,7 +179,12 @@ export function useSidebarData(pathname: string) {
 
   const notifyDataChanged = () => {
     window.dispatchEvent(new CustomEvent("vault-data-changed"));
+    window.dispatchEvent(new CustomEvent("team-data-changed"));
+    // Legacy compatibility for listeners not migrated yet.
+    window.dispatchEvent(new CustomEvent("org-data-changed"));
   };
+
+  const notifyTeamDataChanged = notifyDataChanged;
 
   return {
     tags,
@@ -203,5 +208,6 @@ export function useSidebarData(pathname: string) {
     lastError,
     refreshData,
     notifyDataChanged,
+    notifyTeamDataChanged,
   };
 }
