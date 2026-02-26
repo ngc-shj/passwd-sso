@@ -47,7 +47,7 @@ export function useVaultContext(teams: TeamContextItem[]): VaultContext {
 
   const resolved = useMemo<VaultContext>(() => {
     if (cleanPath === "/dashboard/share-links") {
-      const shareOrgId = searchParams.get("org");
+      const shareOrgId = searchParams.get("team") ?? searchParams.get("org");
       if (shareOrgId) {
         const org = teams.find((item) => item.id === shareOrgId);
         if (org) {
