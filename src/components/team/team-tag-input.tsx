@@ -12,22 +12,24 @@ import { getTagColorClass } from "@/lib/dynamic-styles";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { apiPath } from "@/lib/constants";
 
-export interface OrgTagData {
+export interface TeamTagData {
   id: string;
   name: string;
   color: string | null;
 }
 
-interface OrgTagInputProps {
-  orgId: string;
-  selectedTags: OrgTagData[];
-  onChange: (tags: OrgTagData[]) => void;
+export type OrgTagData = TeamTagData;
+
+interface TeamTagInputProps {
+  teamId: string;
+  selectedTags: TeamTagData[];
+  onChange: (tags: TeamTagData[]) => void;
 }
 
-export function OrgTagInput({ orgId, selectedTags, onChange }: OrgTagInputProps) {
+export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputProps) {
   const t = useTranslations("Tag");
   const tApi = useTranslations("ApiErrors");
-  const [allTags, setAllTags] = useState<OrgTagData[]>([]);
+  const [allTags, setAllTags] = useState<TeamTagData[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -36,14 +38,14 @@ export function OrgTagInput({ orgId, selectedTags, onChange }: OrgTagInputProps)
 
   const fetchTags = useCallback(async () => {
     try {
-      const res = await fetch(apiPath.teamTags(orgId));
+      const res = await fetch(apiPath.teamTags(teamId));
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data)) setAllTags(data);
     } catch {
       // ignore
     }
-  }, [orgId]);
+  }, [teamId]);
 
   useEffect(() => {
     fetchTags();
@@ -76,7 +78,7 @@ export function OrgTagInput({ orgId, selectedTags, onChange }: OrgTagInputProps)
 
   const canCreate = inputValue.trim().length > 0 && !exactMatch;
 
-  const addTag = (tag: OrgTagData) => {
+  const addTag = (tag: TeamTagData) => {
     onChange([...selectedTags, tag]);
     setInputValue("");
     setShowDropdown(false);
@@ -90,13 +92,13 @@ export function OrgTagInput({ orgId, selectedTags, onChange }: OrgTagInputProps)
     if (!inputValue.trim() || creating) return;
     setCreating(true);
     try {
-      const res = await fetch(apiPath.teamTags(orgId), {
+      const res = await fetch(apiPath.teamTags(teamId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: inputValue.trim() }),
       });
       if (res.ok) {
-        const newTag: OrgTagData = await res.json();
+        const newTag: TeamTagData = await res.json();
         setAllTags((prev) => [...prev, newTag]);
         addTag(newTag);
       } else {
@@ -230,3 +232,5 @@ export function OrgTagInput({ orgId, selectedTags, onChange }: OrgTagInputProps)
     </div>
   );
 }
+
+export const OrgTagInput = TeamTagInput;

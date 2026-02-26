@@ -39,7 +39,7 @@ import {
   MAX_ATTACHMENTS_PER_ENTRY,
 } from "@/lib/validations";
 
-export interface OrgAttachmentMeta {
+export interface TeamAttachmentMeta {
   id: string;
   filename: string;
   contentType: string;
@@ -47,11 +47,14 @@ export interface OrgAttachmentMeta {
   createdAt: string;
 }
 
-interface OrgAttachmentSectionProps {
-  orgId: string;
+export type OrgAttachmentMeta = TeamAttachmentMeta;
+
+interface TeamAttachmentSectionProps {
+  teamId?: string;
+  orgId?: string;
   entryId: string;
-  attachments: OrgAttachmentMeta[];
-  onAttachmentsChange: (attachments: OrgAttachmentMeta[]) => void;
+  attachments: TeamAttachmentMeta[];
+  onAttachmentsChange: (attachments: TeamAttachmentMeta[]) => void;
   readOnly?: boolean;
 }
 
@@ -71,20 +74,23 @@ function getExtension(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() ?? "";
 }
 
-export function OrgAttachmentSection({
+export function TeamAttachmentSection({
+  teamId,
   orgId,
   entryId,
   attachments,
   onAttachmentsChange,
   readOnly = false,
-}: OrgAttachmentSectionProps) {
+}: TeamAttachmentSectionProps) {
+  const scopedId = teamId ?? orgId;
+  if (!scopedId) return null;
   const t = useTranslations("Attachments");
   const tApi = useTranslations("ApiErrors");
   const tc = useTranslations("Common");
   const { getOrgEncryptionKey, getOrgKeyInfo } = useOrgVault();
   const [uploading, setUploading] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<OrgAttachmentMeta | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<TeamAttachmentMeta | null>(null);
   const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -118,7 +124,7 @@ export function OrgAttachmentSection({
       return;
     }
 
-    const keyInfo = await getOrgKeyInfo(orgId);
+    const keyInfo = await getOrgKeyInfo(scopedId);
     if (!keyInfo) {
       toast.error(t("uploadError"));
       return;
@@ -149,7 +155,7 @@ export function OrgAttachmentSection({
       formData.append("orgKeyVersion", keyInfo.keyVersion.toString());
 
       const res = await fetch(
-        apiPath.teamPasswordAttachments(orgId, entryId),
+        apiPath.teamPasswordAttachments(scopedId, entryId),
         { method: "POST", body: formData }
       );
 
@@ -159,7 +165,7 @@ export function OrgAttachmentSection({
         return;
       }
 
-      const newAttachment: OrgAttachmentMeta = await res.json();
+      const newAttachment: TeamAttachmentMeta = await res.json();
       onAttachmentsChange([newAttachment, ...attachments]);
       toast.success(t("uploaded"));
     } catch {
@@ -169,14 +175,14 @@ export function OrgAttachmentSection({
     }
   };
 
-  const handleDownload = async (attachment: OrgAttachmentMeta) => {
+  const handleDownload = async (attachment: TeamAttachmentMeta) => {
     setDownloading(attachment.id);
     try {
-      const orgKey = await getOrgEncryptionKey(orgId);
+      const orgKey = await getOrgEncryptionKey(scopedId);
       if (!orgKey) throw new Error("No org key");
 
       const res = await fetch(
-        apiPath.teamPasswordAttachmentById(orgId, entryId, attachment.id)
+        apiPath.teamPasswordAttachmentById(scopedId, entryId, attachment.id)
       );
       if (!res.ok) throw new Error("Download failed");
 
@@ -222,7 +228,7 @@ export function OrgAttachmentSection({
     setDeleting(true);
     try {
       const res = await fetch(
-        apiPath.teamPasswordAttachmentById(orgId, entryId, deleteTarget.id),
+        apiPath.teamPasswordAttachmentById(scopedId, entryId, deleteTarget.id),
         { method: "DELETE" }
       );
       if (!res.ok) throw new Error("Delete failed");
@@ -357,3 +363,5 @@ export function OrgAttachmentSection({
     </div>
   );
 }
+
+export const OrgAttachmentSection = TeamAttachmentSection;

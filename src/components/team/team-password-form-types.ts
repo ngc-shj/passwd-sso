@@ -15,6 +15,8 @@ export interface OrgFolderItem {
   parentId: string | null;
 }
 
+export type TeamFolderItem = OrgFolderItem;
+
 export interface OrgPasswordFormEditData {
   id: string;
   entryType?: EntryTypeValue;

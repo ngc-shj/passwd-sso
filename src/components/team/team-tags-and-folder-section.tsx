@@ -1,25 +1,29 @@
 "use client";
 
 import { EntryTagsAndFolderLayout } from "@/components/passwords/entry-tags-and-folder-layout";
-import { OrgTagInput } from "@/components/team/team-tag-input";
-import type { OrgFolderItem } from "@/components/team/team-password-form-types";
-import type { OrgTagData } from "@/components/team/team-tag-input";
+import { TeamTagInput } from "@/components/team/team-tag-input";
+import type { TeamFolderItem } from "@/components/team/team-password-form-types";
+import type { TeamTagData } from "@/components/team/team-tag-input";
 
-interface OrgTagsAndFolderSectionProps {
+interface TeamTagsAndFolderSectionProps {
   tagsTitle: string;
   tagsHint: string;
-  orgId: string;
-  selectedTags: OrgTagData[];
-  onTagsChange: (tags: OrgTagData[]) => void;
-  folders: OrgFolderItem[];
+  teamId?: string;
+  orgId?: string;
+  selectedTags: TeamTagData[];
+  onTagsChange: (tags: TeamTagData[]) => void;
+  folders: TeamFolderItem[];
   folderId: string | null;
   onFolderChange: (folderId: string | null) => void;
   sectionCardClass?: string;
 }
 
-export function OrgTagsAndFolderSection({
+export type OrgTagsAndFolderSectionProps = TeamTagsAndFolderSectionProps;
+
+export function TeamTagsAndFolderSection({
   tagsTitle,
   tagsHint,
+  teamId,
   orgId,
   selectedTags,
   onTagsChange,
@@ -27,12 +31,14 @@ export function OrgTagsAndFolderSection({
   folderId,
   onFolderChange,
   sectionCardClass = "",
-}: OrgTagsAndFolderSectionProps) {
+}: TeamTagsAndFolderSectionProps) {
+  const scopedId = teamId ?? orgId;
+  if (!scopedId) return null;
   return (
     <EntryTagsAndFolderLayout
       tagsTitle={tagsTitle}
       tagsHint={tagsHint}
-      tagsInput={<OrgTagInput orgId={orgId} selectedTags={selectedTags} onChange={onTagsChange} />}
+      tagsInput={<TeamTagInput teamId={scopedId} selectedTags={selectedTags} onChange={onTagsChange} />}
       folders={folders}
       folderId={folderId}
       onFolderChange={onFolderChange}
@@ -40,3 +46,5 @@ export function OrgTagsAndFolderSection({
     />
   );
 }
+
+export const OrgTagsAndFolderSection = TeamTagsAndFolderSection;
