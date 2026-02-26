@@ -54,7 +54,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     entryType: entry.entryType,
     isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,
-    orgFolderId: entry.orgFolderId,
+    teamFolderId: entry.orgFolderId,
     tags: entry.tags,
     createdBy: entry.createdBy,
     updatedBy: entry.updatedBy,
@@ -67,7 +67,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     overviewIv: entry.overviewIv,
     overviewAuthTag: entry.overviewAuthTag,
     aadVersion: entry.aadVersion,
-    orgKeyVersion: entry.orgKeyVersion,
+    teamKeyVersion: entry.orgKeyVersion,
   });
 }
 
@@ -136,16 +136,16 @@ export async function PUT(req: NextRequest, { params }: Params) {
     );
   }
 
-  const { encryptedBlob, encryptedOverview, aadVersion, orgKeyVersion, tagIds, orgFolderId, isArchived } = parsed.data;
+  const { encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, tagIds, teamFolderId, isArchived } = parsed.data;
   const isFullUpdate = encryptedBlob !== undefined;
 
-  // Validate orgKeyVersion matches current team key version (F-13)
+  // Validate teamKeyVersion matches current team key version (F-13)
   if (isFullUpdate) {
     const team = await prisma.organization.findUnique({
       where: { id: teamId },
       select: { orgKeyVersion: true },
     });
-    if (!team || orgKeyVersion !== team.orgKeyVersion) {
+    if (!team || teamKeyVersion !== team.orgKeyVersion) {
       return NextResponse.json(
         { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
         { status: 409 }
@@ -153,10 +153,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
   }
 
-  // Validate orgFolderId belongs to this team
-  if (orgFolderId) {
+  // Validate teamFolderId belongs to this team
+  if (teamFolderId) {
     const folder = await prisma.orgFolder.findUnique({
-      where: { id: orgFolderId },
+      where: { id: teamFolderId },
       select: { orgId: true },
     });
     if (!folder || folder.orgId !== teamId) {
@@ -176,10 +176,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updateData.overviewIv = encryptedOverview!.iv;
     updateData.overviewAuthTag = encryptedOverview!.authTag;
     updateData.aadVersion = aadVersion;
-    updateData.orgKeyVersion = orgKeyVersion;
+    updateData.orgKeyVersion = teamKeyVersion;
   }
 
-  if (orgFolderId !== undefined) updateData.orgFolderId = orgFolderId;
+  if (teamFolderId !== undefined) updateData.orgFolderId = teamFolderId;
   if (isArchived !== undefined) updateData.isArchived = isArchived;
   if (tagIds !== undefined) {
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };

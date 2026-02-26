@@ -4,7 +4,7 @@ import type { TeamRoleValue } from "@/lib/constants";
 
 export interface MockMembership {
   id: string;
-  orgId: string;
+  teamId: string;
   userId: string;
   role: TeamRoleValue;
   createdAt: Date;
@@ -16,7 +16,7 @@ export function createMockMembership(
 ): MockMembership {
   return {
     id: "member-1",
-    orgId: "org-1",
+    teamId: "team-1",
     userId: "test-user-id",
     role: TEAM_ROLE.OWNER,
     createdAt: new Date(),

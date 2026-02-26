@@ -83,7 +83,7 @@ export async function runImportEntries({
             encryptedOverview,
             entryType: entry.entryType,
             aadVersion: AAD_VERSION,
-            orgKeyVersion: teamKeyVersion ?? 1,
+            teamKeyVersion: teamKeyVersion ?? 1,
             tagIds,
           }),
         });

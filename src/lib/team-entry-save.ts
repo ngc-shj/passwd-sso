@@ -44,7 +44,7 @@ export async function saveTeamEntry({
     encryptedBlob,
     encryptedOverview,
     aadVersion: AAD_VERSION,
-    orgKeyVersion: teamKeyVersion,
+    teamKeyVersion: teamKeyVersion,
     tagIds,
   };
 
@@ -52,7 +52,7 @@ export async function saveTeamEntry({
   if (mode === "create") body.id = entryId;
 
   if (entryType !== undefined) body.entryType = entryType;
-  if (teamFolderId !== undefined) body.orgFolderId = teamFolderId;
+  if (teamFolderId !== undefined) body.teamFolderId = teamFolderId;
 
   const endpoint = mode === "create"
     ? apiPath.teamPasswords(teamId)

@@ -144,10 +144,10 @@ export const createTeamE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
   aadVersion: z.number().int().min(1),
-  orgKeyVersion: z.number().int().min(1),
+  teamKeyVersion: z.number().int().min(1),
   entryType: entryTypeSchema.optional().default(ENTRY_TYPE.LOGIN),
   tagIds: z.array(z.string().cuid()).optional(),
-  orgFolderId: z.string().cuid().nullable().optional(),
+  teamFolderId: z.string().cuid().nullable().optional(),
 });
 
 /** Schema for E2E team password update — full blob replacement or metadata-only update */
@@ -155,16 +155,16 @@ export const updateTeamE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema.optional(),
   encryptedOverview: encryptedFieldSchema.optional(),
   aadVersion: z.number().int().min(1).optional(),
-  orgKeyVersion: z.number().int().min(1).optional(),
+  teamKeyVersion: z.number().int().min(1).optional(),
   tagIds: z.array(z.string().cuid()).optional(),
-  orgFolderId: z.string().cuid().nullable().optional(),
+  teamFolderId: z.string().cuid().nullable().optional(),
   isArchived: z.boolean().optional(),
 }).refine(
   (data) => {
     const hasBlob = data.encryptedBlob !== undefined;
     const hasOverview = data.encryptedOverview !== undefined;
     const hasAad = data.aadVersion !== undefined;
-    const hasKeyVer = data.orgKeyVersion !== undefined;
+    const hasKeyVer = data.teamKeyVersion !== undefined;
     const allPresent = hasBlob && hasOverview && hasAad && hasKeyVer;
     const nonePresent = !hasBlob && !hasOverview && !hasAad && !hasKeyVer;
     return allPresent || nonePresent;

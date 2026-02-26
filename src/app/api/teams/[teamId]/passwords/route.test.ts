@@ -114,7 +114,7 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     expect(json).toHaveLength(1);
     expect(json[0].encryptedOverview).toBe("enc-overview");
     expect(json[0].overviewIv).toBe("aabbccdd11223344");
-    expect(json[0].orgKeyVersion).toBe(1);
+    expect(json[0].teamKeyVersion).toBe(1);
     expect(json[0].isFavorite).toBe(true);
     expect(json[0].entryType).toBe(ENTRY_TYPE.LOGIN);
     // Should NOT contain decrypted fields
@@ -288,7 +288,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     encryptedBlob: { ciphertext: "enc-blob", iv: "a".repeat(24), authTag: "b".repeat(32) },
     encryptedOverview: { ciphertext: "enc-overview", iv: "c".repeat(24), authTag: "d".repeat(32) },
     aadVersion: 1,
-    orgKeyVersion: 1,
+    teamKeyVersion: 1,
     entryType: "LOGIN",
   };
 
@@ -345,12 +345,12 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 409 when orgKeyVersion does not match team's current version (S-15)", async () => {
+  it("returns 409 when teamKeyVersion does not match team's current version (S-15)", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 });
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
-        body: { ...validE2EBody, orgKeyVersion: 1 }, // stale version
+        body: { ...validE2EBody, teamKeyVersion: 1 }, // stale version
       }),
       createParams({ teamId: TEAM_ID }),
     );
@@ -432,7 +432,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     );
   });
 
-  it("creates entry with orgFolderId when folder belongs to same team", async () => {
+  it("creates entry with teamFolderId when folder belongs to same team", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
     mockPrismaTeamFolder.findUnique.mockResolvedValue({ orgId: TEAM_ID });
     mockPrismaTeamPasswordEntry.create.mockResolvedValue({
@@ -444,7 +444,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
-        body: { ...validE2EBody, orgFolderId: FOLDER_CUID },
+        body: { ...validE2EBody, teamFolderId: FOLDER_CUID },
       }),
       createParams({ teamId: TEAM_ID }),
     );
@@ -456,13 +456,13 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     );
   });
 
-  it("returns 400 when orgFolderId belongs to a different team", async () => {
+  it("returns 400 when teamFolderId belongs to a different team", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
     mockPrismaTeamFolder.findUnique.mockResolvedValue({ orgId: "other-team-999" });
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
-        body: { ...validE2EBody, orgFolderId: FOLDER_CUID },
+        body: { ...validE2EBody, teamFolderId: FOLDER_CUID },
       }),
       createParams({ teamId: TEAM_ID }),
     );
@@ -471,13 +471,13 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     expect(json.error).toBe("FOLDER_NOT_FOUND");
   });
 
-  it("returns 400 when orgFolderId does not exist", async () => {
+  it("returns 400 when teamFolderId does not exist", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
     mockPrismaTeamFolder.findUnique.mockResolvedValue(null);
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
-        body: { ...validE2EBody, orgFolderId: FOLDER_CUID },
+        body: { ...validE2EBody, teamFolderId: FOLDER_CUID },
       }),
       createParams({ teamId: TEAM_ID }),
     );
@@ -486,7 +486,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     expect(json.error).toBe("FOLDER_NOT_FOUND");
   });
 
-  it("creates entry without folder validation when orgFolderId is not provided", async () => {
+  it("creates entry without folder validation when teamFolderId is not provided", async () => {
     mockPrismaTeamPasswordEntry.create.mockResolvedValue({
       id: "new-pw",
       entryType: "LOGIN",

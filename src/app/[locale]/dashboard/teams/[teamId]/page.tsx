@@ -405,7 +405,7 @@ export default function TeamDashboardPage({
         credentialId: blob.credentialId as string | null | undefined,
         creationDate: blob.creationDate as string | null | undefined,
         deviceInfo: blob.deviceInfo as string | null | undefined,
-        teamFolderId: (raw.orgFolderId as string) ?? null,
+        teamFolderId: (raw.teamFolderId as string) ?? null,
       });
       setFormOpen(true);
     } catch {

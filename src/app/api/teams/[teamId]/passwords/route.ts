@@ -85,7 +85,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     overviewIv: entry.overviewIv,
     overviewAuthTag: entry.overviewAuthTag,
     aadVersion: entry.aadVersion,
-    orgKeyVersion: entry.orgKeyVersion,
+    teamKeyVersion: entry.orgKeyVersion,
     isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,
     tags: entry.tags,
@@ -138,24 +138,24 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, orgKeyVersion, entryType, tagIds, orgFolderId } = parsed.data;
+  const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, entryType, tagIds, teamFolderId } = parsed.data;
 
-  // Validate orgKeyVersion matches current team key version
+  // Validate teamKeyVersion matches current team key version
   const team = await prisma.organization.findUnique({
     where: { id: teamId },
     select: { orgKeyVersion: true },
   });
-  if (!team || orgKeyVersion !== team.orgKeyVersion) {
+  if (!team || teamKeyVersion !== team.orgKeyVersion) {
     return NextResponse.json(
       { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
       { status: 409 }
     );
   }
 
-  // Validate orgFolderId belongs to this team
-  if (orgFolderId) {
+  // Validate teamFolderId belongs to this team
+  if (teamFolderId) {
     const folder = await prisma.orgFolder.findUnique({
-      where: { id: orgFolderId },
+      where: { id: teamFolderId },
       select: { orgId: true },
     });
     if (!folder || folder.orgId !== teamId) {
@@ -176,12 +176,12 @@ export async function POST(req: NextRequest, { params }: Params) {
       overviewIv: encryptedOverview.iv,
       overviewAuthTag: encryptedOverview.authTag,
       aadVersion,
-      orgKeyVersion,
+      orgKeyVersion: teamKeyVersion,
       entryType,
       orgId: teamId,
       createdById: session.user.id,
       updatedById: session.user.id,
-      ...(orgFolderId ? { orgFolderId } : {}),
+      ...(teamFolderId ? { orgFolderId: teamFolderId } : {}),
       ...(tagIds?.length
         ? { tags: { connect: tagIds.map((id) => ({ id })) } }
         : {}),
