@@ -168,6 +168,20 @@ describe("PUT /api/teams/[teamId]", () => {
     expect(json.name).toBe("Updated Team");
   });
 
+  it("returns 404 when tenant cannot be resolved during update", async () => {
+    mockWithTeamTenantRls
+      .mockImplementationOnce(async (_teamId: string, fn: () => unknown) => fn())
+      .mockRejectedValueOnce(new Error("TENANT_NOT_RESOLVED"));
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}`, { body: { name: "Updated Team" } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe("NOT_FOUND");
+  });
+
   it("returns 400 for invalid JSON body", async () => {
     const { NextRequest } = await import("next/server");
     const req = new NextRequest(`http://localhost:3000/api/teams/${TEAM_ID}`, {
@@ -269,6 +283,20 @@ describe("DELETE /api/teams/[teamId]", () => {
     expect(json.success).toBe(true);
     expect(mockPrismaTeam.delete).toHaveBeenCalledWith({ where: { id: TEAM_ID } });
     expect(mockPrismaTenant.delete).toHaveBeenCalledWith({ where: { id: "tenant-1" } });
+  });
+
+  it("returns 404 when tenant cannot be resolved during delete", async () => {
+    mockWithTeamTenantRls
+      .mockImplementationOnce(async (_teamId: string, fn: () => unknown) => fn())
+      .mockRejectedValueOnce(new Error("TENANT_NOT_RESOLVED"));
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe("NOT_FOUND");
   });
 
   it("keeps tenant when other teams still exist", async () => {

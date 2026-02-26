@@ -18,6 +18,16 @@ const createTokenSchema = z.object({
   expiresInDays: z.number().int().min(1).max(3650).nullable().optional().default(365),
 });
 
+function handleTeamTenantError(e: unknown): NextResponse | null {
+  if (e instanceof Error && e.message === "TENANT_NOT_RESOLVED") {
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+  }
+  if (e instanceof TeamAuthError) {
+    return NextResponse.json({ error: e.message }, { status: e.status });
+  }
+  return null;
+}
+
 // GET /api/teams/[teamId]/scim-tokens — List SCIM tokens
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();
@@ -32,30 +42,33 @@ export async function GET(req: NextRequest, { params }: Params) {
       requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.SCIM_MANAGE),
     );
   } catch (e) {
-    if (e instanceof Error && e.message === "TENANT_NOT_RESOLVED") {
-      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
-    }
-    if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
+    const err = handleTeamTenantError(e);
+    if (err) return err;
     throw e;
   }
 
-  const tokens = await withTeamTenantRls(teamId, async () =>
-    prisma.scimToken.findMany({
-      where: { teamId: teamId },
-      select: {
-        id: true,
-        description: true,
-        createdAt: true,
-        lastUsedAt: true,
-        expiresAt: true,
-        revokedAt: true,
-        createdBy: { select: { id: true, name: true, email: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-  );
+  let tokens;
+  try {
+    tokens = await withTeamTenantRls(teamId, async () =>
+      prisma.scimToken.findMany({
+        where: { teamId: teamId },
+        select: {
+          id: true,
+          description: true,
+          createdAt: true,
+          lastUsedAt: true,
+          expiresAt: true,
+          revokedAt: true,
+          createdBy: { select: { id: true, name: true, email: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+    );
+  } catch (e) {
+    const err = handleTeamTenantError(e);
+    if (err) return err;
+    throw e;
+  }
 
   return NextResponse.json(tokens);
 }
@@ -74,12 +87,8 @@ export async function POST(req: NextRequest, { params }: Params) {
       requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.SCIM_MANAGE),
     );
   } catch (e) {
-    if (e instanceof Error && e.message === "TENANT_NOT_RESOLVED") {
-      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
-    }
-    if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
+    const err = handleTeamTenantError(e);
+    if (err) return err;
     throw e;
   }
 
@@ -99,15 +108,22 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   // Limit active (non-revoked, non-expired) tokens per team (max 10)
-  const tokenCount = await withTeamTenantRls(teamId, async () =>
-    prisma.scimToken.count({
-      where: {
-        teamId: teamId,
-        revokedAt: null,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-      },
-    }),
-  );
+  let tokenCount;
+  try {
+    tokenCount = await withTeamTenantRls(teamId, async () =>
+      prisma.scimToken.count({
+        where: {
+          teamId: teamId,
+          revokedAt: null,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+      }),
+    );
+  } catch (e) {
+    const err = handleTeamTenantError(e);
+    if (err) return err;
+    throw e;
+  }
   if (tokenCount >= 10) {
     return NextResponse.json(
       { error: API_ERROR.SCIM_TOKEN_LIMIT_EXCEEDED },
@@ -122,12 +138,19 @@ export async function POST(req: NextRequest, { params }: Params) {
     ? new Date(Date.now() + parsed.data.expiresInDays * 24 * 60 * 60 * 1000)
     : null;
 
-  const team = await withTeamTenantRls(teamId, async () =>
-    prisma.team.findUnique({
-      where: { id: teamId },
-      select: { tenantId: true },
-    }),
-  );
+  let team;
+  try {
+    team = await withTeamTenantRls(teamId, async () =>
+      prisma.team.findUnique({
+        where: { id: teamId },
+        select: { tenantId: true },
+      }),
+    );
+  } catch (e) {
+    const err = handleTeamTenantError(e);
+    if (err) return err;
+    throw e;
+  }
   if (!team?.tenantId) {
     return NextResponse.json(
       { error: API_ERROR.SCIM_TOKEN_INVALID },
@@ -135,18 +158,25 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  const token = await withTeamTenantRls(teamId, async () =>
-    prisma.scimToken.create({
-      data: {
-        teamId: teamId,
-        tenantId: team.tenantId,
-        tokenHash,
-        description: parsed.data.description ?? null,
-        expiresAt,
-        createdById: session.user.id,
-      },
-    }),
-  );
+  let token;
+  try {
+    token = await withTeamTenantRls(teamId, async () =>
+      prisma.scimToken.create({
+        data: {
+          teamId: teamId,
+          tenantId: team.tenantId,
+          tokenHash,
+          description: parsed.data.description ?? null,
+          expiresAt,
+          createdById: session.user.id,
+        },
+      }),
+    );
+  } catch (e) {
+    const err = handleTeamTenantError(e);
+    if (err) return err;
+    throw e;
+  }
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,

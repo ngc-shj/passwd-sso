@@ -14,6 +14,16 @@ import { withTenantRls } from "@/lib/tenant-rls";
 
 type Params = { params: Promise<{ teamId: string }> };
 
+function handleTeamTenantError(e: unknown): NextResponse | null {
+  if (e instanceof Error && e.message === "TENANT_NOT_RESOLVED") {
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+  }
+  if (e instanceof TeamAuthError) {
+    return NextResponse.json({ error: e.message }, { status: e.status });
+  }
+  return null;
+}
+
 // GET /api/teams/[teamId] — Get team details
 export async function GET(_req: NextRequest, { params }: Params) {
   const session = await auth();
@@ -52,12 +62,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
       passwordCount: team._count.passwords,
     });
   } catch (e) {
-    if (e instanceof Error && e.message === "TENANT_NOT_RESOLVED") {
-      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
-    }
-    if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
+    const err = handleTeamTenantError(e);
+    if (err) return err;
     throw e;
   }
 }
@@ -76,12 +82,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
       requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE),
     );
   } catch (e) {
-    if (e instanceof Error && e.message === "TENANT_NOT_RESOLVED") {
-      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
-    }
-    if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
+    const err = handleTeamTenantError(e);
+    if (err) return err;
     throw e;
   }
 
@@ -106,12 +108,19 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updateData.description = parsed.data.description || null;
   }
 
-  const team = await withTeamTenantRls(teamId, async () =>
-    prisma.team.update({
-      where: { id: teamId },
-      data: updateData,
-    }),
-  );
+  let team;
+  try {
+    team = await withTeamTenantRls(teamId, async () =>
+      prisma.team.update({
+        where: { id: teamId },
+        data: updateData,
+      }),
+    );
+  } catch (e) {
+    const err = handleTeamTenantError(e);
+    if (err) return err;
+    throw e;
+  }
 
   return NextResponse.json({
     id: team.id,
@@ -136,21 +145,24 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
       requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_DELETE),
     );
   } catch (e) {
-    if (e instanceof Error && e.message === "TENANT_NOT_RESOLVED") {
-      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
-    }
-    if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
+    const err = handleTeamTenantError(e);
+    if (err) return err;
     throw e;
   }
 
-  const team = await withTeamTenantRls(teamId, async () =>
-    prisma.team.findUnique({
-      where: { id: teamId },
-      select: { tenantId: true },
-    }),
-  );
+  let team;
+  try {
+    team = await withTeamTenantRls(teamId, async () =>
+      prisma.team.findUnique({
+        where: { id: teamId },
+        select: { tenantId: true },
+      }),
+    );
+  } catch (e) {
+    const err = handleTeamTenantError(e);
+    if (err) return err;
+    throw e;
+  }
   if (!team) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }

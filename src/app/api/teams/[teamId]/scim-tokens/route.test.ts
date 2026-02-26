@@ -114,6 +114,17 @@ describe("GET /api/teams/[teamId]/scim-tokens", () => {
     expect(body).toHaveLength(1);
     expect(body[0].description).toBe("Test token");
   });
+
+  it("returns 404 when tenant cannot be resolved while listing tokens", async () => {
+    mockWithTeamTenantRls
+      .mockImplementationOnce(async (_teamId: string, fn: () => unknown) => fn())
+      .mockRejectedValueOnce(new Error("TENANT_NOT_RESOLVED"));
+
+    const res = await GET(makeReq(), makeParams("team-1"));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toBe("NOT_FOUND");
+  });
 });
 
 describe("POST /api/teams/[teamId]/scim-tokens", () => {
@@ -228,5 +239,19 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
         data: expect.objectContaining({ expiresAt: null, tenantId: "tenant-1" }),
       }),
     );
+  });
+
+  it("returns 404 when tenant cannot be resolved during token creation flow", async () => {
+    mockWithTeamTenantRls
+      .mockImplementationOnce(async (_teamId: string, fn: () => unknown) => fn())
+      .mockRejectedValueOnce(new Error("TENANT_NOT_RESOLVED"));
+
+    const res = await POST(
+      makeReq({ body: { description: "My token", expiresInDays: 365 } }),
+      makeParams("team-1"),
+    );
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toBe("NOT_FOUND");
   });
 });

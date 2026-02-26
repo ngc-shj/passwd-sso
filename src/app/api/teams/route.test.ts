@@ -137,6 +137,16 @@ describe("POST /api/teams (E2E-only)", () => {
     expect(json.error).toBe("SLUG_ALREADY_TAKEN");
   });
 
+  it("returns 403 when tenant cannot be resolved during slug check", async () => {
+    mockWithUserTenantRls.mockRejectedValue(new Error("TENANT_NOT_RESOLVED"));
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
+      body: validE2EBody,
+    }));
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("FORBIDDEN");
+  });
+
   it("returns 409 on P2002 race condition during create", async () => {
     mockPrismaTeam.findUnique.mockResolvedValue(null);
     const p2002 = new Prisma.PrismaClientKnownRequestError(
