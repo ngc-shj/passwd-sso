@@ -15,6 +15,8 @@ const LAST_USED_AT_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
 
 export interface ValidatedScimToken {
   tokenId: string;
+  teamId: string;
+  // Compatibility alias
   orgId: string;
   tenantId: string;
   createdById: string | null;
@@ -51,7 +53,7 @@ function extractBearer(req: NextRequest): string | null {
  * 3. SHA-256 hash → DB lookup
  * 4. Check revokedAt / expiresAt
  * 5. Best-effort lastUsedAt update (throttled to 5-min intervals)
- * 6. Return orgId + auditUserId (with SCIM_SYSTEM_USER_ID fallback)
+ * 6. Return teamId + auditUserId (with SCIM_SYSTEM_USER_ID fallback)
  */
 export async function validateScimToken(
   req: NextRequest,
@@ -116,6 +118,7 @@ export async function validateScimToken(
     ok: true,
     data: {
       tokenId: token.id,
+      teamId: token.orgId,
       orgId: token.orgId,
       tenantId,
       createdById: token.createdById,
