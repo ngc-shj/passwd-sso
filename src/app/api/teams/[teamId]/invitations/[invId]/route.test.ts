@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgInvitation, mockRequireOrgPermission, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgInvitation, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -16,7 +16,7 @@ const { mockAuth, mockPrismaOrgInvitation, mockRequireOrgPermission, TeamAuthErr
       findUnique: vi.fn(),
       delete: vi.fn(),
     },
-    mockRequireOrgPermission: vi.fn(),
+    mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
   };
 });
@@ -26,37 +26,37 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { orgInvitation: mockPrismaOrgInvitation },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamPermission: mockRequireOrgPermission,
+  requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
 }));
 
 import { DELETE } from "./route";
 import { TEAM_ROLE } from "@/lib/constants";
 
-const ORG_ID = "org-123";
+const TEAM_ID = "org-123";
 const INV_ID = "inv-456";
 
 describe("DELETE /api/teams/[teamId]/invitations/[invId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
   });
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/invitations/${INV_ID}`),
-      createParams({ teamId: ORG_ID, invId: INV_ID }),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/invitations/${INV_ID}`),
+      createParams({ teamId: TEAM_ID, invId: INV_ID }),
     );
     expect(res.status).toBe(401);
   });
 
   it("returns TeamAuthError status when permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/invitations/${INV_ID}`),
-      createParams({ teamId: ORG_ID, invId: INV_ID }),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/invitations/${INV_ID}`),
+      createParams({ teamId: TEAM_ID, invId: INV_ID }),
     );
     expect(res.status).toBe(403);
     const json = await res.json();
@@ -64,11 +64,11 @@ describe("DELETE /api/teams/[teamId]/invitations/[invId]", () => {
   });
 
   it("rethrows non-TeamAuthError", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
+    mockRequireTeamPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       DELETE(
-        createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/invitations/${INV_ID}`),
-        createParams({ teamId: ORG_ID, invId: INV_ID }),
+        createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/invitations/${INV_ID}`),
+        createParams({ teamId: TEAM_ID, invId: INV_ID }),
       ),
     ).rejects.toThrow("unexpected");
   });
@@ -76,8 +76,8 @@ describe("DELETE /api/teams/[teamId]/invitations/[invId]", () => {
   it("returns 404 when invitation not found", async () => {
     mockPrismaOrgInvitation.findUnique.mockResolvedValue(null);
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/invitations/${INV_ID}`),
-      createParams({ teamId: ORG_ID, invId: INV_ID }),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/invitations/${INV_ID}`),
+      createParams({ teamId: TEAM_ID, invId: INV_ID }),
     );
     expect(res.status).toBe(404);
   });
@@ -85,19 +85,19 @@ describe("DELETE /api/teams/[teamId]/invitations/[invId]", () => {
   it("returns 404 when invitation belongs to different org", async () => {
     mockPrismaOrgInvitation.findUnique.mockResolvedValue({ id: INV_ID, orgId: "other-org" });
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/invitations/${INV_ID}`),
-      createParams({ teamId: ORG_ID, invId: INV_ID }),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/invitations/${INV_ID}`),
+      createParams({ teamId: TEAM_ID, invId: INV_ID }),
     );
     expect(res.status).toBe(404);
   });
 
   it("deletes invitation successfully", async () => {
-    mockPrismaOrgInvitation.findUnique.mockResolvedValue({ id: INV_ID, orgId: ORG_ID });
+    mockPrismaOrgInvitation.findUnique.mockResolvedValue({ id: INV_ID, orgId: TEAM_ID });
     mockPrismaOrgInvitation.delete.mockResolvedValue({});
 
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/invitations/${INV_ID}`),
-      createParams({ teamId: ORG_ID, invId: INV_ID }),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/invitations/${INV_ID}`),
+      createParams({ teamId: TEAM_ID, invId: INV_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(200);

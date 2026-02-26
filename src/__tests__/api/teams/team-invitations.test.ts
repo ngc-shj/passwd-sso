@@ -4,7 +4,7 @@ import { createRequest, createParams, parseResponse } from "../../helpers/reques
 
 const {
   mockAuth,
-  mockRequireOrgPermission,
+  mockRequireTeamPermission,
   mockInvitationFindMany,
   mockInvitationFindFirst,
   mockInvitationCreate,
@@ -12,7 +12,7 @@ const {
   mockOrgMemberFindUnique,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockRequireOrgPermission: vi.fn(),
+  mockRequireTeamPermission: vi.fn(),
   mockInvitationFindMany: vi.fn(),
   mockInvitationFindFirst: vi.fn(),
   mockInvitationCreate: vi.fn(),
@@ -29,7 +29,7 @@ vi.mock("@/lib/team-auth", () => {
       this.status = status;
     }
   }
-  return { requireTeamPermission: mockRequireOrgPermission, TeamAuthError };
+  return { requireTeamPermission: mockRequireTeamPermission, TeamAuthError };
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -66,7 +66,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
 
   it("returns 403 when lacking permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const req = createRequest("GET");
     const res = await GET(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
@@ -75,7 +75,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
 
   it("returns pending invitations", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockInvitationFindMany.mockResolvedValue([
       {
         id: "inv-1",
@@ -110,7 +110,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
   it("returns 403 when lacking permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const req = createRequest("POST", undefined, { body: { email: "a@b.com", role: "MEMBER" } });
     const res = await POST(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
@@ -119,7 +119,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
   it("returns 400 for invalid JSON", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     const { NextRequest } = await import("next/server");
     const req = new NextRequest("http://localhost/api/teams/o1/invitations", {
       method: "POST",
@@ -134,7 +134,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
   it("returns 400 for validation error", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     const req = createRequest("POST", undefined, { body: { email: "not-email" } });
     const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
@@ -144,7 +144,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
   it("returns 409 when user is already a member", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockUserFindUnique.mockResolvedValue({ id: "u2", email: "existing@test.com" });
     mockOrgMemberFindUnique.mockResolvedValue({ id: "m1", deactivatedAt: null });
     const req = createRequest("POST", undefined, { body: { email: "existing@test.com", role: "MEMBER" } });
@@ -156,7 +156,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
   it("returns 409 when pending invitation exists", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockUserFindUnique.mockResolvedValue(null);
     mockInvitationFindFirst.mockResolvedValue({ id: "inv-existing" });
     const req = createRequest("POST", undefined, { body: { email: "new@test.com", role: "MEMBER" } });
@@ -168,7 +168,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
   it("creates invitation successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockUserFindUnique.mockResolvedValue(null);
     mockInvitationFindFirst.mockResolvedValue(null);
     const created = {
@@ -189,7 +189,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
   it("allows inviting user who exists but is not a member", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockUserFindUnique.mockResolvedValue({ id: "u2", email: "nonmember@test.com" });
     mockOrgMemberFindUnique.mockResolvedValue(null);
     mockInvitationFindFirst.mockResolvedValue(null);

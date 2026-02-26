@@ -6,7 +6,7 @@ const {
   mockPrismaOrgFolder,
   mockPrismaOrgPasswordEntry,
   mockPrismaTransaction,
-  mockRequireOrgPermission,
+  mockRequireTeamPermission,
   TeamAuthError,
   mockLogAudit,
 } = vi.hoisted(() => {
@@ -32,7 +32,7 @@ const {
       updateMany: vi.fn(),
     },
     mockPrismaTransaction: vi.fn(),
-    mockRequireOrgPermission: vi.fn(),
+    mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
     mockLogAudit: vi.fn(),
   };
@@ -47,7 +47,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamPermission: mockRequireOrgPermission,
+  requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
 }));
 vi.mock("@/lib/audit", () => ({
@@ -68,15 +68,15 @@ import { PUT, DELETE } from "./route";
 import { validateParentFolder, validateFolderDepth, checkCircularReference } from "@/lib/folder-utils";
 import { TEAM_ROLE } from "@/lib/constants";
 
-const ORG_ID = "org-1";
+const TEAM_ID = "org-1";
 const FOLDER_ID = "cm000000000000000folder1";
-const BASE = `http://localhost:3000/api/teams/${ORG_ID}/folders/${FOLDER_ID}`;
+const BASE = `http://localhost:3000/api/teams/${TEAM_ID}/folders/${FOLDER_ID}`;
 const now = new Date("2025-06-01T00:00:00Z");
 const ownedFolder = {
   id: FOLDER_ID,
   name: "Engineering",
   parentId: null,
-  orgId: ORG_ID,
+  orgId: TEAM_ID,
   sortOrder: 0,
   createdAt: now,
   updatedAt: now,
@@ -86,23 +86,23 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
   });
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await PUT(
       createRequest("PUT", BASE, { body: { name: "Updated" } }),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     expect(res.status).toBe(401);
   });
 
   it("returns 403 when permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await PUT(
       createRequest("PUT", BASE, { body: { name: "Updated" } }),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     expect(res.status).toBe(403);
   });
@@ -111,7 +111,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
     mockPrismaOrgFolder.findUnique.mockResolvedValue(null);
     const res = await PUT(
       createRequest("PUT", BASE, { body: { name: "Updated" } }),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     expect(res.status).toBe(404);
   });
@@ -123,7 +123,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
     });
     const res = await PUT(
       createRequest("PUT", BASE, { body: { name: "Updated" } }),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     expect(res.status).toBe(404);
   });
@@ -138,7 +138,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
 
     const res = await PUT(
       createRequest("PUT", BASE, { body: { name: "Updated" } }),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -155,7 +155,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
       createRequest("PUT", BASE, {
         body: { parentId: "cm000000000000000other01" },
       }),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     expect(res.status).toBe(404);
     const json = await res.json();
@@ -170,7 +170,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
       createRequest("PUT", BASE, {
         body: { parentId: "cm000000000000000child00" },
       }),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     expect(res.status).toBe(400);
     const json = await res.json();
@@ -182,7 +182,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
 
     const res = await PUT(
       createRequest("PUT", BASE, { body: { parentId: FOLDER_ID } }),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     expect(res.status).toBe(400);
     const json = await res.json();
@@ -199,7 +199,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
       createRequest("PUT", BASE, {
         body: { parentId: "cm000000000000000deep001" },
       }),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     expect(res.status).toBe(400);
     const json = await res.json();
@@ -212,7 +212,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
 
     const res = await PUT(
       createRequest("PUT", BASE, { body: { name: "Duplicate" } }),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     expect(res.status).toBe(409);
     const json = await res.json();
@@ -224,23 +224,23 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
   });
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await DELETE(
       createRequest("DELETE", BASE),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     expect(res.status).toBe(401);
   });
 
   it("returns 403 when permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await DELETE(
       createRequest("DELETE", BASE),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     expect(res.status).toBe(403);
   });
@@ -249,7 +249,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
     mockPrismaOrgFolder.findUnique.mockResolvedValue(null);
     const res = await DELETE(
       createRequest("DELETE", BASE),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     expect(res.status).toBe(404);
   });
@@ -268,7 +268,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
 
     const res = await DELETE(
       createRequest("DELETE", BASE),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -277,7 +277,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "FOLDER_DELETE",
-        orgId: ORG_ID,
+        orgId: TEAM_ID,
       }),
     );
   });
@@ -307,7 +307,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
 
     const res = await DELETE(
       createRequest("DELETE", BASE),
-      createParams({ teamId: ORG_ID, id: FOLDER_ID }),
+      createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
     expect(res.status).toBe(200);
 

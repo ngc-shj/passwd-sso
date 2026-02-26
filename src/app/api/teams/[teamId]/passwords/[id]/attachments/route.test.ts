@@ -3,14 +3,14 @@ import { NextRequest } from "next/server";
 
 const {
   mockAuth,
-  mockRequireOrgPermission,
+  mockRequireTeamPermission,
   mockPrismaOrgPasswordEntry,
   mockPrismaAttachment,
   mockPrismaOrganization,
   MockTeamAuthError,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockRequireOrgPermission: vi.fn(),
+  mockRequireTeamPermission: vi.fn(),
   mockPrismaOrgPasswordEntry: {
     findUnique: vi.fn(),
   },
@@ -33,7 +33,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamPermission: mockRequireOrgPermission,
+  requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError: MockTeamAuthError,
 }));
 vi.mock("@/lib/prisma", () => ({
@@ -73,7 +73,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -97,7 +97,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   });
 
   it("returns org auth error when permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(
+    mockRequireTeamPermission.mockRejectedValue(
       new MockTeamAuthError("FORBIDDEN", 403),
     );
     const res = await GET(
@@ -135,7 +135,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "org-1" });
     mockPrismaAttachment.count.mockResolvedValue(0);
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
@@ -158,7 +158,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   });
 
   it("returns org auth error when update permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(
+    mockRequireTeamPermission.mockRejectedValue(
       new MockTeamAuthError("FORBIDDEN", 403),
     );
     const res = await POST(

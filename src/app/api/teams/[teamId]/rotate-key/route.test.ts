@@ -3,13 +3,13 @@ import { NextRequest } from "next/server";
 
 const {
   mockAuth,
-  mockRequireOrgPermission,
+  mockRequireTeamPermission,
   mockOrgFindUnique,
   mockTransaction,
   MockTeamAuthError,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockRequireOrgPermission: vi.fn(),
+  mockRequireTeamPermission: vi.fn(),
   mockOrgFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
   MockTeamAuthError: class MockTeamAuthError extends Error {
@@ -30,7 +30,7 @@ const txMock = {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamPermission: mockRequireOrgPermission,
+  requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError: MockTeamAuthError,
 }));
 vi.mock("@/lib/prisma", () => ({
@@ -84,7 +84,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockOrgFindUnique.mockResolvedValue({
       orgKeyVersion: 1,
     });
@@ -156,7 +156,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   });
 
   it("returns 403 when user lacks permission", async () => {
-    mockRequireOrgPermission.mockRejectedValue(
+    mockRequireTeamPermission.mockRejectedValue(
       new MockTeamAuthError("FORBIDDEN", 403),
     );
     const res = await POST(

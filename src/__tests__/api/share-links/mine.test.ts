@@ -7,8 +7,8 @@ const { mockAuth, mockFindMany } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
 }));
-const { mockRequireOrgMember } = vi.hoisted(() => ({
-  mockRequireOrgMember: vi.fn(),
+const { mockRequireTeamMember } = vi.hoisted(() => ({
+  mockRequireTeamMember: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -18,7 +18,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamMember: mockRequireOrgMember,
+  requireTeamMember: mockRequireTeamMember,
   TeamAuthError: class extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -56,7 +56,7 @@ function makeShare(overrides: Record<string, unknown> = {}) {
 describe("GET /api/share-links/mine", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.ADMIN });
+    mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.ADMIN });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -253,7 +253,7 @@ describe("GET /api/share-links/mine", () => {
         }),
       })
     );
-    expect(mockRequireOrgMember).not.toHaveBeenCalled();
+    expect(mockRequireTeamMember).not.toHaveBeenCalled();
   });
 
   it("requires org membership and filters by org when org query is provided", async () => {
@@ -263,7 +263,7 @@ describe("GET /api/share-links/mine", () => {
     const req = createRequest("GET", "http://localhost/api/share-links/mine?team=org-1");
     await GET(req as never);
 
-    expect(mockRequireOrgMember).toHaveBeenCalledWith(DEFAULT_SESSION.user.id, "org-1");
+    expect(mockRequireTeamMember).toHaveBeenCalledWith(DEFAULT_SESSION.user.id, "org-1");
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -283,7 +283,7 @@ describe("GET /api/share-links/mine", () => {
   it("returns TeamAuthError status when org membership check fails", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     const { TeamAuthError } = await import("@/lib/team-auth");
-    mockRequireOrgMember.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
+    mockRequireTeamMember.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
 
     const req = createRequest("GET", "http://localhost/api/share-links/mine?team=org-1");
     const res = await GET(req as never);
@@ -296,7 +296,7 @@ describe("GET /api/share-links/mine", () => {
 
   it("limits org scoped list to self-created links for VIEWER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.VIEWER });
+    mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.VIEWER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest("GET", "http://localhost/api/share-links/mine?team=org-1");
@@ -314,7 +314,7 @@ describe("GET /api/share-links/mine", () => {
 
   it("does not limit org scoped list to self-created links for MEMBER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.MEMBER });
+    mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.MEMBER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest("GET", "http://localhost/api/share-links/mine?team=org-1");
@@ -338,7 +338,7 @@ describe("GET /api/share-links/mine", () => {
 
   it("does not limit org scoped list to self-created links for OWNER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.OWNER });
+    mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest("GET", "http://localhost/api/share-links/mine?team=org-1");

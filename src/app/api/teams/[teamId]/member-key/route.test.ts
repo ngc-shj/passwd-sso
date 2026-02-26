@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const {
-  mockAuth, mockRequireOrgMember, mockPrismaOrgMember,
+  mockAuth, mockRequireTeamMember, mockPrismaOrgMember,
   mockPrismaOrgMemberKey, TeamAuthError,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
@@ -14,7 +14,7 @@ const {
   }
   return {
     mockAuth: vi.fn(),
-    mockRequireOrgMember: vi.fn(),
+    mockRequireTeamMember: vi.fn(),
     mockPrismaOrgMember: { findUnique: vi.fn(), findFirst: vi.fn() },
     mockPrismaOrgMemberKey: { findUnique: vi.fn(), findFirst: vi.fn() },
     TeamAuthError: _TeamAuthError,
@@ -23,7 +23,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamMember: mockRequireOrgMember,
+  requireTeamMember: mockRequireTeamMember,
   TeamAuthError,
 }));
 vi.mock("@/lib/prisma", () => ({
@@ -41,7 +41,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgMember.mockResolvedValue({ role: "MEMBER" });
+    mockRequireTeamMember.mockResolvedValue({ role: "MEMBER" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -54,7 +54,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
   });
 
   it("returns TeamAuthError status when not a member", async () => {
-    mockRequireOrgMember.mockRejectedValue(new TeamAuthError("NOT_ORG_MEMBER", 404));
+    mockRequireTeamMember.mockRejectedValue(new TeamAuthError("NOT_ORG_MEMBER", 404));
     const res = await GET(
       createRequest("GET", URL),
       { params: Promise.resolve({ teamId: "org-1" }) },
@@ -65,7 +65,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
   });
 
   it("rethrows non-TeamAuthError", async () => {
-    mockRequireOrgMember.mockRejectedValue(new Error("unexpected"));
+    mockRequireTeamMember.mockRejectedValue(new Error("unexpected"));
     await expect(
       GET(
         createRequest("GET", URL),

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgPasswordEntry, mockRequireOrgPermission, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgPasswordEntry, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -16,7 +16,7 @@ const { mockAuth, mockPrismaOrgPasswordEntry, mockRequireOrgPermission, TeamAuth
       findUnique: vi.fn(),
       update: vi.fn(),
     },
-    mockRequireOrgPermission: vi.fn(),
+    mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
   };
 });
@@ -26,28 +26,28 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { orgPasswordEntry: mockPrismaOrgPasswordEntry, auditLog: { create: vi.fn().mockResolvedValue({}) } },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamPermission: mockRequireOrgPermission,
+  requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
 }));
 
 import { POST } from "./route";
 import { TEAM_ROLE } from "@/lib/constants";
 
-const ORG_ID = "org-123";
+const TEAM_ID = "org-123";
 const PW_ID = "pw-456";
 
 describe("POST /api/teams/[teamId]/passwords/[id]/restore", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
   });
 
   it("returns TeamAuthError status when permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}/restore`),
-      createParams({ teamId: ORG_ID, id: PW_ID }),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}/restore`),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     expect(res.status).toBe(403);
     const json = await res.json();
@@ -55,11 +55,11 @@ describe("POST /api/teams/[teamId]/passwords/[id]/restore", () => {
   });
 
   it("rethrows non-TeamAuthError", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
+    mockRequireTeamPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       POST(
-        createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}/restore`),
-        createParams({ teamId: ORG_ID, id: PW_ID }),
+        createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}/restore`),
+        createParams({ teamId: TEAM_ID, id: PW_ID }),
       ),
     ).rejects.toThrow("unexpected");
   });
@@ -67,8 +67,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/restore", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}/restore`),
-      createParams({ teamId: ORG_ID, id: PW_ID }),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}/restore`),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     expect(res.status).toBe(401);
   });
@@ -76,8 +76,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/restore", () => {
   it("returns 404 when entry not found", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(null);
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}/restore`),
-      createParams({ teamId: ORG_ID, id: PW_ID }),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}/restore`),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     expect(res.status).toBe(404);
   });
@@ -85,12 +85,12 @@ describe("POST /api/teams/[teamId]/passwords/[id]/restore", () => {
   it("returns 400 when entry is not in trash", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       deletedAt: null,
     });
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}/restore`),
-      createParams({ teamId: ORG_ID, id: PW_ID }),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}/restore`),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     expect(res.status).toBe(400);
   });
@@ -98,14 +98,14 @@ describe("POST /api/teams/[teamId]/passwords/[id]/restore", () => {
   it("restores entry from trash", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       deletedAt: new Date(),
     });
     mockPrismaOrgPasswordEntry.update.mockResolvedValue({});
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords/${PW_ID}/restore`),
-      createParams({ teamId: ORG_ID, id: PW_ID }),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}/restore`),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(200);

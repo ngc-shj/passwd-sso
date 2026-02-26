@@ -5,7 +5,7 @@ const {
   mockAuth,
   mockPrismaOrgPasswordEntry,
   mockPrismaOrgPasswordEntryHistory,
-  mockRequireOrgMember,
+  mockRequireTeamMember,
   TeamAuthError,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
@@ -20,7 +20,7 @@ const {
     mockAuth: vi.fn(),
     mockPrismaOrgPasswordEntry: { findUnique: vi.fn() },
     mockPrismaOrgPasswordEntryHistory: { findUnique: vi.fn() },
-    mockRequireOrgMember: vi.fn(),
+    mockRequireTeamMember: vi.fn(),
     TeamAuthError: _TeamAuthError,
   };
 });
@@ -33,29 +33,29 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamMember: mockRequireOrgMember,
+  requireTeamMember: mockRequireTeamMember,
   TeamAuthError,
 }));
 
 import { GET } from "./route";
 
-const ORG_ID = "org-123";
+const TEAM_ID = "org-123";
 const ENTRY_ID = "entry-456";
 const HISTORY_ID = "hist-789";
 
 function makeUrl() {
-  return `http://localhost:3000/api/teams/${ORG_ID}/passwords/${ENTRY_ID}/history/${HISTORY_ID}`;
+  return `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${ENTRY_ID}/history/${HISTORY_ID}`;
 }
 
 function makeParams() {
-  return createParams({ teamId: ORG_ID, id: ENTRY_ID, historyId: HISTORY_ID });
+  return createParams({ teamId: TEAM_ID, id: ENTRY_ID, historyId: HISTORY_ID });
 }
 
 describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1" });
+    mockRequireTeamMember.mockResolvedValue({ id: "member-1" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -65,7 +65,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
   });
 
   it("returns 403 when not org member", async () => {
-    mockRequireOrgMember.mockRejectedValue(
+    mockRequireTeamMember.mockRejectedValue(
       new TeamAuthError("NOT_A_MEMBER", 403),
     );
     const res = await GET(createRequest("GET", makeUrl()), makeParams());
@@ -73,7 +73,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
   });
 
   it("rethrows non-TeamAuthError", async () => {
-    mockRequireOrgMember.mockRejectedValue(new Error("unexpected"));
+    mockRequireTeamMember.mockRejectedValue(new Error("unexpected"));
     await expect(
       GET(createRequest("GET", makeUrl()), makeParams()),
     ).rejects.toThrow("unexpected");
@@ -96,7 +96,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
 
   it("returns 404 when history not found", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       entryType: "LOGIN",
     });
     mockPrismaOrgPasswordEntryHistory.findUnique.mockResolvedValue(null);
@@ -106,7 +106,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
 
   it("returns 404 when history entryId does not match", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       entryType: "LOGIN",
     });
     mockPrismaOrgPasswordEntryHistory.findUnique.mockResolvedValue({
@@ -120,7 +120,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
   it("returns encrypted history blob as-is (E2E mode)", async () => {
     const changedAt = new Date("2025-01-01");
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       entryType: "LOGIN",
     });
     mockPrismaOrgPasswordEntryHistory.findUnique.mockResolvedValue({

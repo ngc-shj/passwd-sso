@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgMember, mockRequireOrgMember, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgMember, mockRequireTeamMember, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -13,7 +13,7 @@ const { mockAuth, mockPrismaOrgMember, mockRequireOrgMember, TeamAuthError } = v
   return {
     mockAuth: vi.fn(),
     mockPrismaOrgMember: { findMany: vi.fn() },
-    mockRequireOrgMember: vi.fn(),
+    mockRequireTeamMember: vi.fn(),
     TeamAuthError: _TeamAuthError,
   };
 });
@@ -23,37 +23,37 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { orgMember: mockPrismaOrgMember },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamMember: mockRequireOrgMember,
+  requireTeamMember: mockRequireTeamMember,
   TeamAuthError,
 }));
 
 import { GET } from "./route";
 import { TEAM_ROLE } from "@/lib/constants";
 
-const ORG_ID = "org-123";
+const TEAM_ID = "org-123";
 const now = new Date("2025-01-01T00:00:00Z");
 
 describe("GET /api/teams/[teamId]/members", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgMember.mockResolvedValue({ role: TEAM_ROLE.OWNER });
+    mockRequireTeamMember.mockResolvedValue({ role: TEAM_ROLE.OWNER });
   });
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/members`),
-      createParams({ teamId: ORG_ID }),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(401);
   });
 
   it("returns 404 when not a member", async () => {
-    mockRequireOrgMember.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
+    mockRequireTeamMember.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/members`),
-      createParams({ teamId: ORG_ID }),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(404);
   });
@@ -77,8 +77,8 @@ describe("GET /api/teams/[teamId]/members", () => {
     ]);
 
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/members`),
-      createParams({ teamId: ORG_ID }),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(200);

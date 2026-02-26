@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgMember, mockPrismaOrgMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireOrgPermission, mockIsRoleAbove, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgMember, mockPrismaOrgMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -24,7 +24,7 @@ const { mockAuth, mockPrismaOrgMember, mockPrismaOrgMemberKey, mockPrismaScimExt
       deleteMany: vi.fn(),
     },
     mockTransaction: vi.fn(),
-    mockRequireOrgPermission: vi.fn(),
+    mockRequireTeamPermission: vi.fn(),
     mockIsRoleAbove: vi.fn(),
     TeamAuthError: _TeamAuthError,
   };
@@ -41,7 +41,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamPermission: mockRequireOrgPermission,
+  requireTeamPermission: mockRequireTeamPermission,
   isRoleAbove: mockIsRoleAbove,
   TeamAuthError,
 }));
@@ -49,68 +49,68 @@ vi.mock("@/lib/team-auth", () => ({
 import { PUT, DELETE } from "./route";
 import { TEAM_ROLE } from "@/lib/constants";
 
-const ORG_ID = "org-123";
+const TEAM_ID = "org-123";
 const MEMBER_ID = "member-target";
 
-const ownerMembership = { id: "member-owner", orgId: ORG_ID, userId: "test-user-id", role: TEAM_ROLE.OWNER };
+const ownerMembership = { id: "member-owner", orgId: TEAM_ID, userId: "test-user-id", role: TEAM_ROLE.OWNER };
 
 describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue(ownerMembership);
+    mockRequireTeamPermission.mockResolvedValue(ownerMembership);
     mockIsRoleAbove.mockReturnValue(true);
   });
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
         body: { role: TEAM_ROLE.ADMIN },
       }),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(401);
   });
 
   it("returns 403 when lacking permission", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
         body: { role: TEAM_ROLE.ADMIN },
       }),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(403);
   });
 
   it("rethrows non-TeamAuthError from PUT", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
+    mockRequireTeamPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       PUT(
-        createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
+        createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
           body: { role: TEAM_ROLE.ADMIN },
         }),
-        createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+        createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
       ),
     ).rejects.toThrow("unexpected");
   });
 
   it("returns 400 on malformed JSON", async () => {
     const { NextRequest } = await import("next/server");
-    const req = new NextRequest(`http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
+    const req = new NextRequest(`http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
       method: "PUT",
       body: "not-json",
       headers: { "Content-Type": "application/json" },
     });
     mockPrismaOrgMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       userId: "target-user",
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
     });
-    const res = await PUT(req, createParams({ teamId: ORG_ID, memberId: MEMBER_ID }));
+    const res = await PUT(req, createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }));
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("INVALID_JSON");
@@ -119,16 +119,16 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
   it("returns 400 on validation error", async () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       userId: "target-user",
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
     });
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
         body: { role: "INVALID_ROLE" },
       }),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(400);
     const json = await res.json();
@@ -138,10 +138,10 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
   it("returns 404 when member not found", async () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue(null);
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
         body: { role: TEAM_ROLE.ADMIN },
       }),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(404);
   });
@@ -149,7 +149,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
   it("changes member role (OWNER changes MEMBER to ADMIN)", async () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       userId: "target-user",
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
@@ -162,10 +162,10 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
         body: { role: TEAM_ROLE.ADMIN },
       }),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -175,7 +175,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
   it("transfers ownership: promotes target to OWNER, demotes self to ADMIN", async () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       userId: "target-user",
       role: TEAM_ROLE.ADMIN,
       deactivatedAt: null,
@@ -188,10 +188,10 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
         body: { role: TEAM_ROLE.OWNER },
       }),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -203,20 +203,20 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
   });
 
   it("returns 403 when non-OWNER tries to transfer ownership", async () => {
-    mockRequireOrgPermission.mockResolvedValue({ ...ownerMembership, role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ ...ownerMembership, role: TEAM_ROLE.ADMIN });
     mockPrismaOrgMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       userId: "target-user",
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
     });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
         body: { role: TEAM_ROLE.OWNER },
       }),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(403);
   });
@@ -224,37 +224,37 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
   it("returns 403 when trying to change OWNER's role", async () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       userId: "owner-user",
       role: TEAM_ROLE.OWNER,
       deactivatedAt: null,
     });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
         body: { role: TEAM_ROLE.ADMIN },
       }),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(403);
   });
 
   it("returns 403 when ADMIN tries to change role of equal-level member", async () => {
-    mockRequireOrgPermission.mockResolvedValue({ ...ownerMembership, role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ ...ownerMembership, role: TEAM_ROLE.ADMIN });
     mockIsRoleAbove.mockReturnValue(false);
     mockPrismaOrgMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       userId: "other-admin",
       role: TEAM_ROLE.ADMIN,
       deactivatedAt: null,
     });
 
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`, {
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
         body: { role: TEAM_ROLE.MEMBER },
       }),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(403);
   });
@@ -264,15 +264,15 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue(ownerMembership);
+    mockRequireTeamPermission.mockResolvedValue(ownerMembership);
     mockIsRoleAbove.mockReturnValue(true);
   });
 
   it("returns TeamAuthError status when DELETE permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(403);
     const json = await res.json();
@@ -280,28 +280,28 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
   });
 
   it("rethrows non-TeamAuthError from DELETE", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
+    mockRequireTeamPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       DELETE(
-        createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
-        createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+        createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+        createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
       ),
     ).rejects.toThrow("unexpected");
   });
 
   it("returns 403 when ADMIN tries to remove equal-level member", async () => {
-    mockRequireOrgPermission.mockResolvedValue({ ...ownerMembership, role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ ...ownerMembership, role: TEAM_ROLE.ADMIN });
     mockIsRoleAbove.mockReturnValue(false);
     mockPrismaOrgMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       userId: "other-admin",
       role: TEAM_ROLE.ADMIN,
       deactivatedAt: null,
     });
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(403);
     const json = await res.json();
@@ -311,8 +311,8 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(401);
   });
@@ -320,8 +320,8 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
   it("returns 404 when member not found", async () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue(null);
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(404);
   });
@@ -329,13 +329,13 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
   it("returns 403 when trying to remove OWNER", async () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       role: TEAM_ROLE.OWNER,
       deactivatedAt: null,
     });
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(403);
   });
@@ -343,7 +343,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
   it("removes member successfully and deletes OrgMemberKeys", async () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
-      orgId: ORG_ID,
+      orgId: TEAM_ID,
       userId: "target-user",
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
@@ -351,15 +351,15 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     mockTransaction.mockResolvedValue([]);
 
     const res = await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/teams/${ORG_ID}/members/${MEMBER_ID}`),
-      createParams({ teamId: ORG_ID, memberId: MEMBER_ID }),
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockTransaction).toHaveBeenCalledWith([
-      mockPrismaOrgMemberKey.deleteMany({ where: { orgId: ORG_ID, userId: "target-user" } }),
-      mockPrismaScimExternalMapping.deleteMany({ where: { orgId: ORG_ID, internalId: "target-user", resourceType: "User" } }),
+      mockPrismaOrgMemberKey.deleteMany({ where: { orgId: TEAM_ID, userId: "target-user" } }),
+      mockPrismaScimExternalMapping.deleteMany({ where: { orgId: TEAM_ID, internalId: "target-user", resourceType: "User" } }),
       mockPrismaOrgMember.delete({ where: { id: MEMBER_ID } }),
     ]);
   });

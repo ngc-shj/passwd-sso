@@ -4,13 +4,13 @@ import { createRequest, createParams, parseResponse } from "../../helpers/reques
 
 const {
   mockAuth,
-  mockRequireOrgPermission,
+  mockRequireTeamPermission,
   mockEntryFindUnique,
   mockHistoryFindUnique,
   mockTransaction,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockRequireOrgPermission: vi.fn(),
+  mockRequireTeamPermission: vi.fn(),
   mockEntryFindUnique: vi.fn(),
   mockHistoryFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
@@ -26,7 +26,7 @@ vi.mock("@/lib/team-auth", () => {
     }
   }
   return {
-    requireTeamPermission: mockRequireOrgPermission,
+    requireTeamPermission: mockRequireTeamPermission,
     TeamAuthError,
   };
 });
@@ -59,7 +59,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   it("returns 403 when lacking permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status } = await parseResponse(res);
@@ -68,7 +68,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   it("returns 404 when entry not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(null);
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
@@ -79,7 +79,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   it("returns 404 when entry belongs to different org", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ id: "p1", orgId: "other-org" });
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
@@ -89,7 +89,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   it("returns 404 when history not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ id: "p1", orgId: "o1" });
     mockHistoryFindUnique.mockResolvedValue(null);
     const req = createRequest("POST");
@@ -101,7 +101,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   it("returns 404 when history belongs to different entry", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ id: "p1", orgId: "o1" });
     mockHistoryFindUnique.mockResolvedValue({ id: "h1", entryId: "other-entry" });
     const req = createRequest("POST");
@@ -112,7 +112,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   it("restores history version successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({
       id: "p1",
       orgId: "o1",

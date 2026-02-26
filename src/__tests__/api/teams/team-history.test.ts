@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, createParams, parseResponse } from "../../helpers/request-builder";
 
-const { mockAuth, mockRequireOrgMember, mockEntryFindUnique, mockHistoryFindMany } = vi.hoisted(
+const { mockAuth, mockRequireTeamMember, mockEntryFindUnique, mockHistoryFindMany } = vi.hoisted(
   () => ({
     mockAuth: vi.fn(),
-    mockRequireOrgMember: vi.fn(),
+    mockRequireTeamMember: vi.fn(),
     mockEntryFindUnique: vi.fn(),
     mockHistoryFindMany: vi.fn(),
   })
@@ -21,7 +21,7 @@ vi.mock("@/lib/team-auth", () => {
     }
   }
   return {
-    requireTeamMember: mockRequireOrgMember,
+    requireTeamMember: mockRequireTeamMember,
     TeamAuthError,
   };
 });
@@ -49,7 +49,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
 
   it("returns 403 when not org member", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
+    mockRequireTeamMember.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const req = createRequest("GET");
     const res = await GET(req, createParams({ teamId: "o1", id: "p1" }));
     const { status, json } = await parseResponse(res);
@@ -59,7 +59,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
 
   it("returns 404 when entry not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockResolvedValue(undefined);
+    mockRequireTeamMember.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(null);
     const req = createRequest("GET");
     const res = await GET(req, createParams({ teamId: "o1", id: "p1" }));
@@ -70,7 +70,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
 
   it("returns 404 when entry belongs to different org", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockResolvedValue(undefined);
+    mockRequireTeamMember.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ orgId: "other-org" });
     const req = createRequest("GET");
     const res = await GET(req, createParams({ teamId: "o1", id: "p1" }));
@@ -80,7 +80,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
 
   it("returns history entries with user info", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockResolvedValue(undefined);
+    mockRequireTeamMember.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ orgId: "o1" });
     const changedAt = new Date("2025-06-01");
     mockHistoryFindMany.mockResolvedValue([

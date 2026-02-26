@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockPrismaOrganization, mockAuditLogCreate, mockRequireOrgPermission, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockPrismaOrganization, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -20,7 +20,7 @@ const { mockAuth, mockPrismaOrgPasswordEntry, mockPrismaOrgFolder, mockPrismaOrg
     mockPrismaOrgFolder: { findUnique: vi.fn() },
     mockPrismaOrganization: { findUnique: vi.fn() },
     mockAuditLogCreate: vi.fn(),
-    mockRequireOrgPermission: vi.fn(),
+    mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
   };
 });
@@ -35,21 +35,21 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamPermission: mockRequireOrgPermission,
+  requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
 }));
 
 import { GET, POST } from "./route";
 import { ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
 
-const ORG_ID = "org-123";
+const TEAM_ID = "org-123";
 const now = new Date("2025-01-01T00:00:00Z");
 
 describe("GET /api/teams/[teamId]/passwords", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
     mockAuditLogCreate.mockResolvedValue({});
     mockPrismaOrgPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
   });
@@ -57,29 +57,29 @@ describe("GET /api/teams/[teamId]/passwords", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
-      createParams({ teamId: ORG_ID }),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(401);
   });
 
   it("returns 403 when user lacks permission", async () => {
-    mockRequireOrgPermission.mockRejectedValue(
+    mockRequireTeamPermission.mockRejectedValue(
       new TeamAuthError("FORBIDDEN", 403)
     );
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
-      createParams({ teamId: ORG_ID }),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(403);
   });
 
   it("rethrows non-TeamAuthError from GET", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
+    mockRequireTeamPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       GET(
-        createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
-        createParams({ teamId: ORG_ID }),
+        createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
+        createParams({ teamId: TEAM_ID }),
       ),
     ).rejects.toThrow("unexpected");
   });
@@ -106,8 +106,8 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     ]);
 
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
-      createParams({ teamId: ORG_ID }),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
+      createParams({ teamId: TEAM_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -126,10 +126,10 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
         searchParams: { type: "SECURE_NOTE" },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -142,8 +142,8 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
-      createParams({ teamId: ORG_ID }),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
+      createParams({ teamId: TEAM_ID }),
     );
     const call = mockPrismaOrgPasswordEntry.findMany.mock.calls[0][0];
     expect(call.where).not.toHaveProperty("entryType");
@@ -153,10 +153,10 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
         searchParams: { trash: "true" },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -169,8 +169,8 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
-      createParams({ teamId: ORG_ID }),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -183,10 +183,10 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
         searchParams: { archived: "true" },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -199,8 +199,8 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
-      createParams({ teamId: ORG_ID }),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -213,10 +213,10 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
         searchParams: { favorites: "true" },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -231,10 +231,10 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
         searchParams: { tag: "tag-456" },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -249,10 +249,10 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
         searchParams: { folder: "folder-789" },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(mockPrismaOrgPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -267,8 +267,8 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/passwords`),
-      createParams({ teamId: ORG_ID }),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
+      createParams({ teamId: TEAM_ID }),
     );
     const call = mockPrismaOrgPasswordEntry.findMany.mock.calls[0][0];
     expect(call.where).not.toHaveProperty("orgFolderId");
@@ -279,7 +279,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
     mockAuditLogCreate.mockResolvedValue({});
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
   });
@@ -295,17 +295,17 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, { body: validE2EBody }),
-      createParams({ teamId: ORG_ID }),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, { body: validE2EBody }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(401);
   });
 
   it("returns TeamAuthError status when POST permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, { body: validE2EBody }),
-      createParams({ teamId: ORG_ID }),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, { body: validE2EBody }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(403);
     const json = await res.json();
@@ -313,23 +313,23 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
   });
 
   it("rethrows non-TeamAuthError from POST", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new Error("unexpected"));
+    mockRequireTeamPermission.mockRejectedValue(new Error("unexpected"));
     await expect(
       POST(
-        createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, { body: validE2EBody }),
-        createParams({ teamId: ORG_ID }),
+        createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, { body: validE2EBody }),
+        createParams({ teamId: TEAM_ID }),
       ),
     ).rejects.toThrow("unexpected");
   });
 
   it("returns 400 on malformed JSON", async () => {
     const { NextRequest } = await import("next/server");
-    const req = new NextRequest(`http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
+    const req = new NextRequest(`http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
       method: "POST",
       body: "not-json",
       headers: { "Content-Type": "application/json" },
     });
-    const res = await POST(req, createParams({ teamId: ORG_ID }));
+    const res = await POST(req, createParams({ teamId: TEAM_ID }));
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("INVALID_JSON");
@@ -337,10 +337,10 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
 
   it("returns 400 on invalid E2E body", async () => {
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
         body: { encryptedBlob: { ciphertext: "x", iv: "short", authTag: "y" } },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(400);
   });
@@ -349,10 +349,10 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
         body: { ...validE2EBody, orgKeyVersion: 1 }, // stale version
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(409);
     const json = await res.json();
@@ -363,8 +363,8 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     mockPrismaOrganization.findUnique.mockResolvedValue(null);
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, { body: validE2EBody }),
-      createParams({ teamId: ORG_ID }),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, { body: validE2EBody }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(409);
     const json = await res.json();
@@ -380,8 +380,8 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, { body: validE2EBody }),
-      createParams({ teamId: ORG_ID }),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, { body: validE2EBody }),
+      createParams({ teamId: TEAM_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(201);
@@ -399,7 +399,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
           aadVersion: 1,
           orgKeyVersion: 1,
           entryType: "LOGIN",
-          orgId: ORG_ID,
+          orgId: TEAM_ID,
           createdById: "test-user-id",
           updatedById: "test-user-id",
         }),
@@ -417,10 +417,10 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
         body: { ...validE2EBody, tagIds: [TAG_CUID] },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(201);
     expect(mockPrismaOrgPasswordEntry.create).toHaveBeenCalledWith(
@@ -434,7 +434,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
 
   it("creates entry with orgFolderId when folder belongs to same org", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
-    mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: ORG_ID });
+    mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: TEAM_ID });
     mockPrismaOrgPasswordEntry.create.mockResolvedValue({
       id: "new-pw",
       entryType: "LOGIN",
@@ -443,10 +443,10 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
         body: { ...validE2EBody, orgFolderId: FOLDER_CUID },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(201);
     expect(mockPrismaOrgPasswordEntry.create).toHaveBeenCalledWith(
@@ -461,10 +461,10 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: "other-org-999" });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
         body: { ...validE2EBody, orgFolderId: FOLDER_CUID },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(400);
     const json = await res.json();
@@ -476,10 +476,10 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     mockPrismaOrgFolder.findUnique.mockResolvedValue(null);
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
         body: { ...validE2EBody, orgFolderId: FOLDER_CUID },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(400);
     const json = await res.json();
@@ -495,8 +495,8 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/passwords`, { body: validE2EBody }),
-      createParams({ teamId: ORG_ID }),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, { body: validE2EBody }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(201);
     expect(mockPrismaOrgFolder.findUnique).not.toHaveBeenCalled();

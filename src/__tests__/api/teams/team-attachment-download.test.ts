@@ -4,7 +4,7 @@ import { createParams } from "../../helpers/request-builder";
 
 const {
   mockAuth,
-  mockRequireOrgPermission,
+  mockRequireTeamPermission,
   mockEntryFindUnique,
   mockAttachmentFindUnique,
   mockAttachmentDelete,
@@ -12,7 +12,7 @@ const {
   mockDeleteObject,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockRequireOrgPermission: vi.fn(),
+  mockRequireTeamPermission: vi.fn(),
   mockEntryFindUnique: vi.fn(),
   mockAttachmentFindUnique: vi.fn(),
   mockAttachmentDelete: vi.fn(),
@@ -29,7 +29,7 @@ vi.mock("@/lib/team-auth", () => {
       this.status = status;
     }
   }
-  return { requireTeamPermission: mockRequireOrgPermission, TeamAuthError };
+  return { requireTeamPermission: mockRequireTeamPermission, TeamAuthError };
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -98,14 +98,14 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
 
   it("returns 403 when lacking permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const res = await GET(createGetRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(403);
   });
 
   it("returns 404 when entry not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(null);
     const res = await GET(createGetRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(404);
@@ -113,7 +113,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
 
   it("returns 404 when entry belongs to different org", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ orgId: "other-org" });
     const res = await GET(createGetRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(404);
@@ -121,7 +121,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
 
   it("returns 404 when attachment not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
     mockAttachmentFindUnique.mockResolvedValue(null);
     const res = await GET(createGetRequest(), makeParams("o1", "e1", "a1"));
@@ -130,7 +130,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
 
   it("returns encrypted data as JSON for client-side decryption", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(ORG_ENTRY);
     mockAttachmentFindUnique.mockResolvedValue(ATTACHMENT);
     mockGetObject.mockResolvedValue(Buffer.from("encrypted-data"));
@@ -162,14 +162,14 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
 
   it("returns 403 when lacking permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const res = await DELETE(createDeleteRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(403);
   });
 
   it("returns 404 when entry not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(null);
     const res = await DELETE(createDeleteRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(404);
@@ -177,7 +177,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
 
   it("returns 404 when entry belongs to different org", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ orgId: "other-org" });
     const res = await DELETE(createDeleteRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(404);
@@ -185,7 +185,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
 
   it("returns 404 when attachment not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ orgId: "o1" });
     mockAttachmentFindUnique.mockResolvedValue(null);
     const res = await DELETE(createDeleteRequest(), makeParams("o1", "e1", "a1"));
@@ -194,7 +194,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
 
   it("deletes attachment successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ orgId: "o1" });
     mockAttachmentFindUnique.mockResolvedValue({
       id: "a1",

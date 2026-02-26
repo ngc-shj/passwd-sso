@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgFolder, mockRequireOrgMember, mockRequireOrgPermission, TeamAuthError, mockLogAudit } =
+const { mockAuth, mockPrismaOrgFolder, mockRequireTeamMember, mockRequireTeamPermission, TeamAuthError, mockLogAudit } =
   vi.hoisted(() => {
     class _TeamAuthError extends Error {
       status: number;
@@ -19,8 +19,8 @@ const { mockAuth, mockPrismaOrgFolder, mockRequireOrgMember, mockRequireOrgPermi
         findFirst: vi.fn(),
         create: vi.fn(),
       },
-      mockRequireOrgMember: vi.fn(),
-      mockRequireOrgPermission: vi.fn(),
+      mockRequireTeamMember: vi.fn(),
+      mockRequireTeamPermission: vi.fn(),
       TeamAuthError: _TeamAuthError,
       mockLogAudit: vi.fn(),
     };
@@ -31,8 +31,8 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { orgFolder: mockPrismaOrgFolder },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamMember: mockRequireOrgMember,
-  requireTeamPermission: mockRequireOrgPermission,
+  requireTeamMember: mockRequireTeamMember,
+  requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
 }));
 vi.mock("@/lib/audit", () => ({
@@ -52,31 +52,31 @@ import { GET, POST } from "./route";
 import { validateParentFolder, validateFolderDepth } from "@/lib/folder-utils";
 import { TEAM_ROLE } from "@/lib/constants";
 
-const ORG_ID = "org-1";
-const BASE = `http://localhost:3000/api/teams/${ORG_ID}/folders`;
+const TEAM_ID = "org-1";
+const BASE = `http://localhost:3000/api/teams/${TEAM_ID}/folders`;
 const now = new Date("2025-06-01T00:00:00Z");
 
 describe("GET /api/teams/[teamId]/folders", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgMember.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
+    mockRequireTeamMember.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
   });
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(
       createRequest("GET", BASE),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(401);
   });
 
   it("returns 403 when not a member", async () => {
-    mockRequireOrgMember.mockRejectedValue(new TeamAuthError("NOT_ORG_MEMBER", 403));
+    mockRequireTeamMember.mockRejectedValue(new TeamAuthError("NOT_ORG_MEMBER", 403));
     const res = await GET(
       createRequest("GET", BASE),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(403);
   });
@@ -96,7 +96,7 @@ describe("GET /api/teams/[teamId]/folders", () => {
 
     const res = await GET(
       createRequest("GET", BASE),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -118,23 +118,23 @@ describe("POST /api/teams/[teamId]/folders", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
   });
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
       createRequest("POST", BASE, { body: { name: "Test" } }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(401);
   });
 
   it("returns 403 when permission denied", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await POST(
       createRequest("POST", BASE, { body: { name: "Test" } }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(403);
   });
@@ -142,7 +142,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
   it("returns 400 on invalid body", async () => {
     const res = await POST(
       createRequest("POST", BASE, { body: { name: "" } }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(400);
   });
@@ -156,7 +156,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
       createRequest("POST", BASE, {
         body: { name: "Child", parentId: "cm000000000000000other01" },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(404);
     const json = await res.json();
@@ -172,7 +172,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
       createRequest("POST", BASE, {
         body: { name: "Deep", parentId: "cm000000000000000deep001" },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(400);
     const json = await res.json();
@@ -184,7 +184,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
 
     const res = await POST(
       createRequest("POST", BASE, { body: { name: "Engineering" } }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(409);
     const json = await res.json();
@@ -198,7 +198,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
       createRequest("POST", BASE, {
         body: { name: "SubFolder", parentId: "cm000000000000000parent1" },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(409);
     const json = await res.json();
@@ -218,7 +218,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
 
     const res = await POST(
       createRequest("POST", BASE, { body: { name: "Finance" } }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(201);
@@ -226,7 +226,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "FOLDER_CREATE",
-        orgId: ORG_ID,
+        orgId: TEAM_ID,
       }),
     );
   });

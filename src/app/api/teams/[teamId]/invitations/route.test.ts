@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaOrgInvitation, mockPrismaUser, mockPrismaOrgMember, mockRequireOrgPermission, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaOrgInvitation, mockPrismaUser, mockPrismaOrgMember, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -19,7 +19,7 @@ const { mockAuth, mockPrismaOrgInvitation, mockPrismaUser, mockPrismaOrgMember, 
     },
     mockPrismaUser: { findUnique: vi.fn() },
     mockPrismaOrgMember: { findUnique: vi.fn() },
-    mockRequireOrgPermission: vi.fn(),
+    mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
   };
 });
@@ -34,37 +34,37 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamPermission: mockRequireOrgPermission,
+  requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
 }));
 
 import { GET, POST } from "./route";
 import { TEAM_ROLE, INVITATION_STATUS } from "@/lib/constants";
 
-const ORG_ID = "org-123";
+const TEAM_ID = "org-123";
 const now = new Date("2025-01-01T00:00:00Z");
 
 describe("GET /api/teams/[teamId]/invitations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
   });
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/invitations`),
-      createParams({ teamId: ORG_ID }),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(401);
   });
 
   it("returns 403 when lacking invite permission", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/invitations`),
-      createParams({ teamId: ORG_ID }),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(403);
   });
@@ -84,8 +84,8 @@ describe("GET /api/teams/[teamId]/invitations", () => {
     ]);
 
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${ORG_ID}/invitations`),
-      createParams({ teamId: ORG_ID }),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`),
+      createParams({ teamId: TEAM_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -98,7 +98,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     mockPrismaUser.findUnique.mockResolvedValue(null);
     mockPrismaOrgInvitation.findFirst.mockResolvedValue(null);
   });
@@ -106,20 +106,20 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
         body: { email: "new@test.com", role: TEAM_ROLE.MEMBER },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(401);
   });
 
   it("returns 400 on invalid body", async () => {
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
         body: { email: "invalid" },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(400);
   });
@@ -129,10 +129,10 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockPrismaOrgMember.findUnique.mockResolvedValue({ id: "existing-member", deactivatedAt: null });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
         body: { email: "existing@test.com", role: TEAM_ROLE.MEMBER },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(409);
     const json = await res.json();
@@ -143,10 +143,10 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockPrismaOrgInvitation.findFirst.mockResolvedValue({ id: "existing-inv" });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
         body: { email: "pending@test.com", role: TEAM_ROLE.MEMBER },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(409);
     const json = await res.json();
@@ -164,10 +164,10 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     });
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${ORG_ID}/invitations`, {
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
         body: { email: "new@test.com", role: TEAM_ROLE.MEMBER },
       }),
-      createParams({ teamId: ORG_ID }),
+      createParams({ teamId: TEAM_ID }),
     );
     const json = await res.json();
     expect(res.status).toBe(201);

@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 
 const {
   mockAuth,
-  mockRequireOrgPermission,
+  mockRequireTeamPermission,
   TeamAuthError,
   mockLogAudit,
   mockScimToken,
@@ -21,7 +21,7 @@ const {
     }
     return {
       mockAuth: vi.fn(),
-      mockRequireOrgPermission: vi.fn(),
+      mockRequireTeamPermission: vi.fn(),
       TeamAuthError: _TeamAuthError,
       mockLogAudit: vi.fn(),
       mockScimToken: { findMany: vi.fn(), create: vi.fn(), count: vi.fn() },
@@ -33,7 +33,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamPermission: mockRequireOrgPermission,
+  requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
 }));
 vi.mock("@/lib/audit", () => ({
@@ -72,7 +72,7 @@ describe("GET /api/teams/[teamId]/scim-tokens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockOrganization.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 
@@ -83,7 +83,7 @@ describe("GET /api/teams/[teamId]/scim-tokens", () => {
   });
 
   it("returns 403 if no SCIM_MANAGE permission", async () => {
-    mockRequireOrgPermission.mockRejectedValue(
+    mockRequireTeamPermission.mockRejectedValue(
       new TeamAuthError("FORBIDDEN", 403),
     );
     const res = await GET(makeReq(), makeParams("org-1"));
@@ -115,7 +115,7 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockOrganization.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 

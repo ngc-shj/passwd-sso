@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockAuth, mockPrismaOrgMember, mockPrismaOrgPasswordEntry, mockHasOrgPermission } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaOrgMember, mockPrismaOrgPasswordEntry, mockHasTeamPermission } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaOrgMember: { findMany: vi.fn() },
   mockPrismaOrgPasswordEntry: { findMany: vi.fn() },
-  mockHasOrgPermission: vi.fn(),
+  mockHasTeamPermission: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -15,7 +15,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/team-auth", () => ({
-  hasTeamPermission: mockHasOrgPermission,
+  hasTeamPermission: mockHasTeamPermission,
 }));
 
 import { GET } from "./route";
@@ -25,7 +25,7 @@ describe("GET /api/teams/trash", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockHasOrgPermission.mockReturnValue(true);
+    mockHasTeamPermission.mockReturnValue(true);
   });
 
   it("returns 401 when unauthenticated", async () => {

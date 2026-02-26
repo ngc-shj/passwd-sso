@@ -5,7 +5,7 @@ import { createRequest, createParams, parseResponse } from "../../helpers/reques
 const {
   mockAuth,
   mockFindMany,
-  mockRequireOrgPermission,
+  mockRequireTeamPermission,
   mockOrgEntryFindMany,
   TeamAuthError,
 } = vi.hoisted(() => {
@@ -20,7 +20,7 @@ const {
     return {
       mockAuth: vi.fn(),
       mockFindMany: vi.fn(),
-      mockRequireOrgPermission: vi.fn(),
+      mockRequireTeamPermission: vi.fn(),
       mockOrgEntryFindMany: vi.fn(),
       TeamAuthError,
     };
@@ -34,14 +34,14 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/team-auth", () => ({
-  requireTeamPermission: mockRequireOrgPermission,
+  requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
 }));
 
 import { GET } from "@/app/api/teams/[teamId]/audit-logs/route";
 import { AUDIT_ACTION, AUDIT_ACTION_GROUP, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TEAM_ROLE } from "@/lib/constants";
 
-const ORG_ID = "org-1";
+const TEAM_ID = "org-1";
 
 describe("GET /api/teams/[teamId]/audit-logs", () => {
   it("returns 401 when not authenticated", async () => {
@@ -49,10 +49,10 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs`
     );
 
-    const res = await GET(req, createParams({ teamId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: TEAM_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(401);
@@ -61,16 +61,16 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("returns 403 when user lacks org:update permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockRejectedValue(
+    mockRequireTeamPermission.mockRejectedValue(
       new TeamAuthError("FORBIDDEN", 403)
     );
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs`
     );
 
-    const res = await GET(req, createParams({ teamId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: TEAM_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(403);
@@ -79,7 +79,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("returns org audit logs for ADMIN/OWNER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
 
     const now = new Date();
     const logs = [
@@ -101,10 +101,10 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs`
     );
 
-    const res = await GET(req, createParams({ teamId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: TEAM_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -119,7 +119,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          orgId: ORG_ID,
+          orgId: TEAM_ID,
           scope: AUDIT_SCOPE.ORG,
         },
         include: {
@@ -132,15 +132,15 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies action filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs?action=${AUDIT_ACTION.ORG_MEMBER_INVITE}`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs?action=${AUDIT_ACTION.ORG_MEMBER_INVITE}`
     );
 
-    await GET(req, createParams({ teamId: ORG_ID }));
+    await GET(req, createParams({ teamId: TEAM_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -153,15 +153,15 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies actions filter with multiple values", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},${AUDIT_ACTION.ENTRY_UPDATE}`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},${AUDIT_ACTION.ENTRY_UPDATE}`
     );
 
-    await GET(req, createParams({ teamId: ORG_ID }));
+    await GET(req, createParams({ teamId: TEAM_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -174,15 +174,15 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies ENTRY_BULK_TRASH action filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_TRASH}`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_TRASH}`
     );
 
-    await GET(req, createParams({ teamId: ORG_ID }));
+    await GET(req, createParams({ teamId: TEAM_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -195,15 +195,15 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies ENTRY_BULK_ARCHIVE action filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_ARCHIVE}`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_ARCHIVE}`
     );
 
-    await GET(req, createParams({ teamId: ORG_ID }));
+    await GET(req, createParams({ teamId: TEAM_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -216,15 +216,15 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies ENTRY_BULK_UNARCHIVE action filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_UNARCHIVE}`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_UNARCHIVE}`
     );
 
-    await GET(req, createParams({ teamId: ORG_ID }));
+    await GET(req, createParams({ teamId: TEAM_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -237,15 +237,15 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies ENTRY_BULK_RESTORE action filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_RESTORE}`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_BULK_RESTORE}`
     );
 
-    await GET(req, createParams({ teamId: ORG_ID }));
+    await GET(req, createParams({ teamId: TEAM_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -258,14 +258,14 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("returns 400 for invalid actions filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},NOPE`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs?actions=${AUDIT_ACTION.ENTRY_CREATE},NOPE`
     );
 
-    const res = await GET(req, createParams({ teamId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: TEAM_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
@@ -276,15 +276,15 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies date range filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs?from=2025-01-01T00:00:00Z&to=2025-06-30T23:59:59Z`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs?from=2025-01-01T00:00:00Z&to=2025-06-30T23:59:59Z`
     );
 
-    await GET(req, createParams({ teamId: ORG_ID }));
+    await GET(req, createParams({ teamId: TEAM_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -300,7 +300,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("supports cursor-based pagination", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
 
     // Return limit+1 items to trigger hasMore
     const logs = Array.from({ length: 6 }, (_, i) => ({
@@ -319,10 +319,10 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs?limit=5`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs?limit=5`
     );
 
-    const res = await GET(req, createParams({ teamId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: TEAM_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -332,15 +332,15 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("returns 400 for invalid cursor", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     mockFindMany.mockRejectedValue(new Error("Invalid cursor"));
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs?cursor=bad-cursor`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs?cursor=bad-cursor`
     );
 
-    const res = await GET(req, createParams({ teamId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: TEAM_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
@@ -349,21 +349,21 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("re-throws non-TeamAuthError", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockRejectedValue(new Error("Unexpected"));
+    mockRequireTeamPermission.mockRejectedValue(new Error("Unexpected"));
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs`
     );
 
     await expect(
-      GET(req, createParams({ teamId: ORG_ID }))
+      GET(req, createParams({ teamId: TEAM_ID }))
     ).rejects.toThrow("Unexpected");
   });
 
   it("returns entryOverviews with encrypted overview data for entry targets", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
 
     const logs = [
       {
@@ -393,9 +393,9 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs`
     );
-    const res = await GET(req, createParams({ teamId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: TEAM_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -412,7 +412,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("returns empty entryOverviews when no entry targets", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
 
     const logs = [
       {
@@ -431,9 +431,9 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs`
     );
-    const res = await GET(req, createParams({ teamId: ORG_ID }));
+    const res = await GET(req, createParams({ teamId: TEAM_ID }));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -442,15 +442,15 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
   it("applies action group filter", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
     const req = createRequest(
       "GET",
-      `http://localhost/api/teams/${ORG_ID}/audit-logs?action=${AUDIT_ACTION_GROUP.ENTRY}`
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs?action=${AUDIT_ACTION_GROUP.ENTRY}`
     );
 
-    await GET(req, createParams({ teamId: ORG_ID }));
+    await GET(req, createParams({ teamId: TEAM_ID }));
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
