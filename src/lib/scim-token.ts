@@ -5,7 +5,7 @@ import { SCIM_TOKEN_PREFIX } from "@/lib/scim/token-utils";
 
 // ─── Constants ────────────────────────────────────────────────
 
-/** Fallback userId for audit logs when token creator has left the org. */
+/** Fallback userId for audit logs when token creator has left the team. */
 export const SCIM_SYSTEM_USER_ID = "system:scim";
 
 /** Minimum interval (ms) between lastUsedAt updates to reduce DB writes. */
@@ -16,7 +16,7 @@ const LAST_USED_AT_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
 export interface ValidatedScimToken {
   tokenId: string;
   teamId: string;
-  // Compatibility alias
+  // Legacy compatibility alias
   orgId: string;
   tenantId: string;
   createdById: string | null;

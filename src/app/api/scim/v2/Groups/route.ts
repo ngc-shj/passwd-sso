@@ -32,8 +32,8 @@ export async function GET(req: NextRequest) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId, tenantId } = result.data;
-  const scopedTeamId = teamId ?? orgId;
+  const { teamId, orgId: legacyOrgId, tenantId } = result.data;
+  const scopedTeamId = teamId ?? legacyOrgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -88,8 +88,8 @@ export async function POST(req: NextRequest) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId, tenantId } = result.data;
-  const scopedTeamId = teamId ?? orgId;
+  const { teamId, orgId: legacyOrgId, tenantId } = result.data;
+  const scopedTeamId = teamId ?? legacyOrgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");

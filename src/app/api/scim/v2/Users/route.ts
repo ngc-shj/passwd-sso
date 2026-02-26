@@ -27,8 +27,8 @@ export async function GET(req: NextRequest) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId, tenantId } = result.data;
-  const scopedTeamId = teamId ?? orgId;
+  const { teamId, orgId: legacyOrgId, tenantId } = result.data;
+  const scopedTeamId = teamId ?? legacyOrgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -128,8 +128,8 @@ export async function POST(req: NextRequest) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId, tenantId, auditUserId } = result.data;
-  const scopedTeamId = teamId ?? orgId;
+  const { teamId, orgId: legacyOrgId, tenantId, auditUserId } = result.data;
+  const scopedTeamId = teamId ?? legacyOrgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -263,7 +263,7 @@ export async function POST(req: NextRequest) {
     return scimResponse(resource, 201);
   } catch (e) {
     if (e instanceof Error && e.message === "SCIM_RESOURCE_EXISTS") {
-      return scimError(409, "User already exists in this organization", "uniqueness");
+      return scimError(409, "User already exists in this team", "uniqueness");
     }
     if (e instanceof Error && e.message === "SCIM_EXTERNAL_ID_CONFLICT") {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");

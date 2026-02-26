@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
           type: "boolean",
           multiValued: false,
           required: false,
-          description: "User active status in the organization",
+          description: "User active status in the team",
         },
         {
           name: "externalId",
@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
           type: "string",
           multiValued: false,
           required: true,
-          description: "Organization role name (ADMIN, MEMBER, VIEWER)",
+          description: "Team role name (ADMIN, MEMBER, VIEWER)",
         },
         {
           name: "members",

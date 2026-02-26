@@ -17,15 +17,15 @@ type Params = { params: Promise<{ id: string }> };
 
 /** Resolve SCIM id → userId. The id could be a userId directly or via ScimExternalMapping. */
 async function resolveUserId(
-  orgId: string,
+  teamId: string,
   tenantId: string,
   scimId: string,
 ): Promise<string | null> {
   if (scimId.length > 255) return null;
 
-  // First try as direct userId (OrgMember.userId)
+  // First try as direct userId (TeamMember.userId / orgMember table)
   const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId, userId: scimId } },
+    where: { orgId_userId: { orgId: teamId, userId: scimId } },
     select: { userId: true },
   });
   if (member) return member.userId;
@@ -43,13 +43,13 @@ async function resolveUserId(
 }
 
 async function fetchUserResource(
-  orgId: string,
+  teamId: string,
   tenantId: string,
   userId: string,
   baseUrl: string,
 ) {
   const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId, userId } },
+    where: { orgId_userId: { orgId: teamId, userId } },
     include: { user: { select: { id: true, email: true, name: true } } },
   });
   if (!member || !member.user.email) return null;
@@ -80,8 +80,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId, tenantId } = result.data;
-  const scopedTeamId = teamId ?? orgId;
+  const { teamId, orgId: legacyOrgId, tenantId } = result.data;
+  const scopedTeamId = teamId ?? legacyOrgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -102,14 +102,14 @@ export async function GET(req: NextRequest, { params }: Params) {
   return scimResponse(resource);
 }
 
-// PUT /api/scim/v2/Users/[id] — Full replace (update OrgMember attributes only)
+// PUT /api/scim/v2/Users/[id] — Full replace (update team member attributes only)
 export async function PUT(req: NextRequest, { params }: Params) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId, tenantId, auditUserId } = result.data;
-  const scopedTeamId = teamId ?? orgId;
+  const { teamId, orgId: legacyOrgId, tenantId, auditUserId } = result.data;
+  const scopedTeamId = teamId ?? legacyOrgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -155,10 +155,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
     auditAction = AUDIT_ACTION.SCIM_USER_REACTIVATE;
   }
 
-  // Atomic update: OrgMember + externalId mapping
+  // Atomic update: team member + externalId mapping
   try {
     await prisma.$transaction(async (tx) => {
-      // Update OrgMember attributes
+      // Update team member attributes
       await tx.orgMember.update({
         where: { id: member.id },
         data: {
@@ -235,8 +235,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId, tenantId, auditUserId } = result.data;
-  const scopedTeamId = teamId ?? orgId;
+  const { teamId, orgId: legacyOrgId, tenantId, auditUserId } = result.data;
+  const scopedTeamId = teamId ?? legacyOrgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -309,7 +309,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     data: updateData,
   });
 
-  // Update User.name if requested (OrgMember attribute, not User table — per plan)
+  // Update User.name if requested (team member attribute, not User table — per plan)
   // Note: name.formatted maps to User.name, but per plan we only update User table at first provision.
   // For PATCH, we skip User.name updates to avoid multi-org side effects.
 
@@ -329,14 +329,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   return scimResponse(resource!);
 }
 
-// DELETE /api/scim/v2/Users/[id] — Hard delete OrgMember + OrgMemberKey + ScimExternalMapping
+// DELETE /api/scim/v2/Users/[id] — Hard delete team member + member keys + external mapping
 export async function DELETE(req: NextRequest, { params }: Params) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId, tenantId, auditUserId } = result.data;
-  const scopedTeamId = teamId ?? orgId;
+  const { teamId, orgId: legacyOrgId, tenantId, auditUserId } = result.data;
+  const scopedTeamId = teamId ?? legacyOrgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -361,7 +361,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
   }
 
-  // Atomic delete: OrgMemberKey + ScimExternalMapping + OrgMember
+  // Atomic delete: member keys + external mapping + team member
   try {
     await prisma.$transaction([
       prisma.orgMemberKey.deleteMany({ where: { orgId: scopedTeamId, userId } }),

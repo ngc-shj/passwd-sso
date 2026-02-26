@@ -23,15 +23,15 @@ const SCIM_GROUP_ROLES: OrgRole[] = [
   ORG_ROLE.VIEWER,
 ];
 
-/** Resolve a SCIM Group ID back to (orgId, role). Falls back to ScimExternalMapping. */
+/** Resolve a SCIM Group ID back to (teamId, role). Falls back to ScimExternalMapping. */
 async function resolveGroupRole(
-  orgId: string,
+  teamId: string,
   tenantId: string,
   scimId: string,
 ): Promise<OrgRole | null> {
   // First try computed group IDs
   for (const role of SCIM_GROUP_ROLES) {
-    if (roleGroupId(orgId, role) === scimId) return role;
+    if (roleGroupId(teamId, role) === scimId) return role;
   }
 
   // Fallback: resolve via ScimExternalMapping (IdP may use externalId as the group id)
@@ -45,7 +45,7 @@ async function resolveGroupRole(
   });
   if (mapping) {
     for (const role of SCIM_GROUP_ROLES) {
-      if (roleGroupId(orgId, role) === mapping.internalId) return role;
+      if (roleGroupId(teamId, role) === mapping.internalId) return role;
     }
   }
 
@@ -53,12 +53,12 @@ async function resolveGroupRole(
 }
 
 async function buildGroupResource(
-  orgId: string,
+  teamId: string,
   role: OrgRole,
   baseUrl: string,
 ) {
   const members = await prisma.orgMember.findMany({
-    where: { orgId, role, deactivatedAt: null },
+    where: { orgId: teamId, role, deactivatedAt: null },
     include: { user: { select: { id: true, email: true } } },
   });
   const memberInputs: ScimGroupMemberInput[] = members
@@ -67,7 +67,7 @@ async function buildGroupResource(
       userId: m.userId,
       email: m.user.email!,
     }));
-  return roleToScimGroup(orgId, role, memberInputs, baseUrl);
+  return roleToScimGroup(teamId, role, memberInputs, baseUrl);
 }
 
 // GET /api/scim/v2/Groups/[id]
@@ -76,8 +76,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId, tenantId } = result.data;
-  const scopedTeamId = teamId ?? orgId;
+  const { teamId, orgId: legacyOrgId, tenantId } = result.data;
+  const scopedTeamId = teamId ?? legacyOrgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -100,8 +100,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId, tenantId, auditUserId } = result.data;
-  const scopedTeamId = teamId ?? orgId;
+  const { teamId, orgId: legacyOrgId, tenantId, auditUserId } = result.data;
+  const scopedTeamId = teamId ?? legacyOrgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -186,7 +186,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   } catch (e) {
     if (e instanceof Error) {
       if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
-        return scimError(400, "Referenced member does not exist in this organization");
+        return scimError(400, "Referenced member does not exist in this team");
       }
       if (e.message === "SCIM_OWNER_PROTECTED") {
         return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
@@ -217,8 +217,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId, orgId, tenantId, auditUserId } = result.data;
-  const scopedTeamId = teamId ?? orgId;
+  const { teamId, orgId: legacyOrgId, tenantId, auditUserId } = result.data;
+  const scopedTeamId = teamId ?? legacyOrgId;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -287,7 +287,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   } catch (e) {
     if (e instanceof Error) {
       if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
-        return scimError(400, "Referenced member does not exist in this organization");
+        return scimError(400, "Referenced member does not exist in this team");
       }
       if (e.message === "SCIM_OWNER_PROTECTED") {
         return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
