@@ -87,10 +87,12 @@ export function SidebarContent({
   onNavigate,
 }: SidebarContentProps) {
   const teamItems = teams ?? orgs ?? [];
+  const scopedTeamId =
+    vaultContext.type === "org" ? (vaultContext.teamId ?? vaultContext.orgId) : "";
   return (
     <nav className="space-y-4 p-4">
       <VaultSelector
-        value={vaultContext.type === "org" ? vaultContext.orgId : "personal"}
+        value={vaultContext.type === "org" ? scopedTeamId : "personal"}
         teams={teamItems}
         onValueChange={onVaultChange}
       />
@@ -123,7 +125,7 @@ export function SidebarContent({
         activeFolderId={selectedFolderId}
         linkHref={(id) =>
           vaultContext.type === "org"
-            ? `/dashboard/teams/${vaultContext.orgId}?folder=${id}`
+            ? `/dashboard/teams/${scopedTeamId}?folder=${id}`
             : `/dashboard/folders/${id}`
         }
         showFolderMenu={vaultContext.type === "org" ? selectedOrgCanManageFolders : true}
@@ -131,38 +133,38 @@ export function SidebarContent({
         activeTagId={selectedTagId}
         tagHref={(id) =>
           vaultContext.type === "org"
-            ? `/dashboard/teams/${vaultContext.orgId}?tag=${id}`
+            ? `/dashboard/teams/${scopedTeamId}?tag=${id}`
             : `/dashboard/tags/${id}`
         }
         onCreateFolder={() =>
           vaultContext.type === "org"
-            ? onCreateFolder(vaultContext.orgId)
+            ? onCreateFolder(scopedTeamId)
             : onCreateFolder()
         }
         onCreateTag={() =>
           vaultContext.type === "org"
-            ? onCreateTag(vaultContext.orgId)
+            ? onCreateTag(scopedTeamId)
             : onCreateTag()
         }
         canCreateTag={vaultContext.type !== "org" || selectedOrgCanManageTags}
         onEditFolder={(f) =>
           vaultContext.type === "org"
-            ? onEditFolder(f, vaultContext.orgId)
+            ? onEditFolder(f, scopedTeamId)
             : onEditFolder(f)
         }
         onDeleteFolder={(f) =>
           vaultContext.type === "org"
-            ? onDeleteFolder(f, vaultContext.orgId)
+            ? onDeleteFolder(f, scopedTeamId)
             : onDeleteFolder(f)
         }
         onEditTag={(tag) =>
           vaultContext.type === "org"
-            ? onEditTag(tag, vaultContext.orgId)
+            ? onEditTag(tag, scopedTeamId)
             : onEditTag(tag)
         }
         onDeleteTag={(tag) =>
           vaultContext.type === "org"
-            ? onDeleteTag(tag, vaultContext.orgId)
+            ? onDeleteTag(tag, scopedTeamId)
             : onDeleteTag(tag)
         }
         showTagMenu={vaultContext.type !== "org" || selectedOrgCanManageTags}
