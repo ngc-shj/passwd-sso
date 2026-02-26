@@ -82,7 +82,16 @@ export function ScimProvisioningCard() {
   }
 
   if (!manageableTeams.length || !selectedTeamId) {
-    return null;
+    return (
+      <Card className="rounded-xl border bg-card/80 p-4">
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">{t("scimTitle")}</h2>
+          <p className="text-sm text-muted-foreground">
+            {t("forbidden")}
+          </p>
+        </section>
+      </Card>
+    );
   }
 
   return (
