@@ -9,10 +9,10 @@ import { EntryListHeader } from "@/components/passwords/entry-list-header";
 import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
 import { SearchBar } from "@/components/layout/search-bar";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
-import { OrgPasswordForm } from "@/components/team/team-password-form";
-import { OrgArchivedList } from "@/components/team/team-archived-list";
-import { OrgTrashList } from "@/components/team/team-trash-list";
-import { OrgRoleBadge } from "@/components/team/team-role-badge";
+import { OrgPasswordForm as TeamPasswordForm } from "@/components/team/team-password-form";
+import { OrgArchivedList as TeamArchivedList } from "@/components/team/team-archived-list";
+import { OrgTrashList as TeamTrashList } from "@/components/team/team-trash-list";
+import { OrgRoleBadge as TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -31,7 +31,7 @@ import { useOrgVault } from "@/lib/org-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
-interface OrgInfo {
+interface TeamInfo {
   id: string;
   name: string;
   slug: string;
@@ -40,7 +40,7 @@ interface OrgInfo {
   passwordCount: number;
 }
 
-interface OrgPasswordEntry {
+interface TeamPasswordEntry {
   id: string;
   entryType: EntryTypeValue;
   title: string;
@@ -62,7 +62,7 @@ interface OrgPasswordEntry {
   updatedAt: string;
 }
 
-export default function OrgDashboardPage({
+export default function TeamDashboardPage({
   params,
 }: {
   params: Promise<{ teamId: string }>;
@@ -76,8 +76,8 @@ export default function OrgDashboardPage({
   const t = useTranslations("Team");
   const tDash = useTranslations("Dashboard");
   const { getOrgEncryptionKey } = useOrgVault();
-  const [org, setOrg] = useState<OrgInfo | null>(null);
-  const [passwords, setPasswords] = useState<OrgPasswordEntry[]>([]);
+  const [org, setOrg] = useState<TeamInfo | null>(null);
+  const [passwords, setPasswords] = useState<TeamPasswordEntry[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -121,12 +121,12 @@ export default function OrgDashboardPage({
     deviceInfo?: string | null;
     orgFolderId?: string | null;
   } | null>(null);
-  const isOrgArchive = activeScope === "archive";
-  const isOrgTrash = activeScope === "trash";
-  const isOrgFavorites = activeScope === "favorites";
-  const isOrgSpecialView = isOrgArchive || isOrgTrash;
+  const isTeamArchive = activeScope === "archive";
+  const isTeamTrash = activeScope === "trash";
+  const isTeamFavorites = activeScope === "favorites";
+  const isTeamSpecialView = isTeamArchive || isTeamTrash;
 
-  const fetchOrg = async (): Promise<boolean> => {
+  const fetchTeam = async (): Promise<boolean> => {
     try {
       const res = await fetch(apiPath.teamById(teamId));
       if (!res.ok) {
@@ -152,7 +152,7 @@ export default function OrgDashboardPage({
       if (activeTagId) params.set("tag", activeTagId);
       if (activeFolderId) params.set("folder", activeFolderId);
       if (activeEntryType) params.set("type", activeEntryType);
-      if (isOrgFavorites) params.set("favorites", "true");
+      if (isTeamFavorites) params.set("favorites", "true");
       const qs = params.toString();
       const url = `${apiPath.teamPasswords(teamId)}${qs ? `?${qs}` : ""}`;
       const res = await fetch(url);
@@ -201,7 +201,7 @@ export default function OrgDashboardPage({
               updatedBy: entry.updatedBy,
               createdAt: entry.createdAt,
               updatedAt: entry.updatedAt,
-            } as OrgPasswordEntry;
+            } as TeamPasswordEntry;
           } catch {
             return {
               id: entry.id as string,
@@ -218,12 +218,12 @@ export default function OrgDashboardPage({
               relyingPartyId: null,
               isFavorite: entry.isFavorite as boolean,
               isArchived: entry.isArchived as boolean,
-              tags: (entry.tags ?? []) as OrgPasswordEntry["tags"],
-              createdBy: entry.createdBy as OrgPasswordEntry["createdBy"],
-              updatedBy: entry.updatedBy as OrgPasswordEntry["updatedBy"],
+              tags: (entry.tags ?? []) as TeamPasswordEntry["tags"],
+              createdBy: entry.createdBy as TeamPasswordEntry["createdBy"],
+              updatedBy: entry.updatedBy as TeamPasswordEntry["updatedBy"],
               createdAt: entry.createdAt as string,
               updatedAt: entry.updatedAt as string,
-            } as OrgPasswordEntry;
+            } as TeamPasswordEntry;
           }
         }),
       );
@@ -233,16 +233,16 @@ export default function OrgDashboardPage({
     } finally {
       setLoading(false);
     }
-  }, [teamId, activeTagId, activeFolderId, activeEntryType, isOrgFavorites, getOrgEncryptionKey]);
+  }, [teamId, activeTagId, activeFolderId, activeEntryType, isTeamFavorites, getOrgEncryptionKey]);
 
   useEffect(() => {
     setLoadError(false);
     (async () => {
-      const ok = await fetchOrg();
-      if (ok && !isOrgSpecialView) fetchPasswords();
+      const ok = await fetchTeam();
+      if (ok && !isTeamSpecialView) fetchPasswords();
       else setLoading(false);
     })();
-  }, [teamId, fetchPasswords, isOrgSpecialView]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [teamId, fetchPasswords, isTeamSpecialView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const canCreate =
     org?.role === ORG_ROLE.OWNER || org?.role === ORG_ROLE.ADMIN || org?.role === ORG_ROLE.MEMBER;
@@ -260,11 +260,11 @@ export default function OrgDashboardPage({
         [ENTRY_TYPE.PASSKEY]: tDash("catPasskey"),
       } as Record<string, string>)[activeEntryType] ?? activeEntryType
     : null;
-  const subtitle = isOrgTrash
+  const subtitle = isTeamTrash
     ? t("trash")
-    : isOrgArchive
+    : isTeamArchive
       ? t("archive")
-      : isOrgFavorites
+      : isTeamFavorites
         ? t("favorites")
       : (activeCategoryLabel ?? t("passwords"));
   const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -275,36 +275,36 @@ export default function OrgDashboardPage({
     PASSKEY: <Fingerprint className="h-6 w-6" />,
   };
 
-  const headerIcon = isOrgTrash
+  const headerIcon = isTeamTrash
     ? <Trash2 className="h-6 w-6" />
-    : isOrgArchive
+    : isTeamArchive
       ? <Archive className="h-6 w-6" />
-      : isOrgFavorites
+      : isTeamFavorites
         ? <Star className="h-6 w-6" />
         : activeEntryType && ENTRY_TYPE_ICONS[activeEntryType]
           ? ENTRY_TYPE_ICONS[activeEntryType]
           : <KeyRound className="h-6 w-6" />;
 
-  const isOrgAll =
-    !isOrgTrash &&
-    !isOrgArchive &&
-    !isOrgFavorites &&
+  const isTeamAll =
+    !isTeamTrash &&
+    !isTeamArchive &&
+    !isTeamFavorites &&
     !activeCategoryLabel &&
     !activeTagId &&
     !activeFolderId;
   const isCategorySelected = !!activeCategoryLabel;
   const isFolderOrTagSelected = Boolean(activeTagId || activeFolderId);
   const isPrimaryScopeLabel =
-    isOrgTrash ||
-    isOrgArchive ||
-    isOrgFavorites ||
-    isOrgAll ||
+    isTeamTrash ||
+    isTeamArchive ||
+    isTeamFavorites ||
+    isTeamAll ||
     isCategorySelected ||
     isFolderOrTagSelected;
 
   const handleToggleFavorite = async (id: string, current: boolean) => {
     // Optimistic update
-    if (isOrgFavorites && current) {
+    if (isTeamFavorites && current) {
       setPasswords((prev) => prev.filter((e) => e.id !== id));
     } else {
       setPasswords((prev) =>
@@ -530,10 +530,10 @@ export default function OrgDashboardPage({
           title={isPrimaryScopeLabel ? subtitle : (org?.name ?? "...")}
           subtitle={subtitle}
           showSubtitle={!isPrimaryScopeLabel}
-          titleExtra={!isPrimaryScopeLabel && org ? <OrgRoleBadge role={org.role} /> : null}
+          titleExtra={!isPrimaryScopeLabel && org ? <TeamRoleBadge role={org.role} /> : null}
           actions={
             <>
-              {canCreate && !isOrgSpecialView && (
+              {canCreate && !isTeamSpecialView && (
                 contextualEntryType ? (
                   <Button
                     onClick={() => {
@@ -597,7 +597,7 @@ export default function OrgDashboardPage({
           />
         </div>
 
-        {keyPending && !isOrgSpecialView && (
+        {keyPending && !isTeamSpecialView && (
           <Card className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
             <div className="flex items-start gap-3">
               <Clock className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
@@ -613,15 +613,15 @@ export default function OrgDashboardPage({
           </Card>
         )}
 
-        {isOrgArchive ? (
-          <OrgArchivedList
+        {isTeamArchive ? (
+          <TeamArchivedList
             teamId={teamId}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
             sortBy={sortBy}
           />
-        ) : isOrgTrash ? (
-          <OrgTrashList
+        ) : isTeamTrash ? (
+          <TeamTrashList
             teamId={teamId}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
@@ -692,7 +692,7 @@ export default function OrgDashboardPage({
         )}
       </div>
 
-      <OrgPasswordForm
+      <TeamPasswordForm
         orgId={teamId}
         teamId={teamId}
         open={formOpen}
