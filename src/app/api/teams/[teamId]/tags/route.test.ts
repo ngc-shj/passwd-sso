@@ -36,7 +36,7 @@ vi.mock("@/lib/team-auth", () => ({
 import { GET, POST } from "./route";
 import { TEAM_ROLE } from "@/lib/constants";
 
-const TEAM_ID = "org-123";
+const TEAM_ID = "team-123";
 
 describe("GET /api/teams/[teamId]/tags", () => {
   beforeEach(() => {

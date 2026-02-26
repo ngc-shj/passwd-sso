@@ -34,17 +34,17 @@ describe("GET /api/teams/pending-key-distributions", () => {
     expect(json).toEqual([]);
   });
 
-  it("returns pending members for admin orgs", async () => {
+  it("returns pending members for admin teams", async () => {
     // First call: admin memberships
     mockPrismaOrgMember.findMany.mockResolvedValueOnce([
-      { orgId: "org-1" },
-      { orgId: "org-2" },
+      { orgId: "team-1" },
+      { orgId: "team-2" },
     ]);
     // Second call: pending members
     mockPrismaOrgMember.findMany.mockResolvedValueOnce([
       {
         id: "member-1",
-        orgId: "org-1",
+        orgId: "team-1",
         userId: "pending-user",
         user: { ecdhPublicKey: "pub-key", name: "Test User", email: "test@test.com" },
         org: { orgKeyVersion: 1 },
@@ -57,7 +57,7 @@ describe("GET /api/teams/pending-key-distributions", () => {
     expect(json).toHaveLength(1);
     expect(json[0]).toEqual({
       memberId: "member-1",
-      orgId: "org-1",
+      teamId: "team-1",
       userId: "pending-user",
       ecdhPublicKey: "pub-key",
       orgKeyVersion: 1,
@@ -69,7 +69,7 @@ describe("GET /api/teams/pending-key-distributions", () => {
 
   it("queries for pending members with correct filters", async () => {
     mockPrismaOrgMember.findMany
-      .mockResolvedValueOnce([{ orgId: "org-1" }])
+      .mockResolvedValueOnce([{ orgId: "team-1" }])
       .mockResolvedValueOnce([]);
 
     await GET();

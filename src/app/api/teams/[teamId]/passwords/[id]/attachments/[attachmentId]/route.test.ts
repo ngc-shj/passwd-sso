@@ -54,7 +54,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "org-1" });
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -64,7 +64,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
         "GET",
         "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
-      createParams("org-1", "pw-1", "att-1"),
+      createParams("team-1", "pw-1", "att-1"),
     );
     expect(res.status).toBe(401);
   });
@@ -78,7 +78,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
         "GET",
         "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
-      createParams("org-1", "pw-1", "att-1"),
+      createParams("team-1", "pw-1", "att-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(403);
@@ -86,13 +86,13 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
   });
 
   it("returns 404 when entry does not belong to org", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-org" });
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
     const res = await GET(
       createRequest(
         "GET",
         "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
-      createParams("org-1", "pw-1", "att-1"),
+      createParams("team-1", "pw-1", "att-1"),
     );
     expect(res.status).toBe(404);
   });
@@ -104,7 +104,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
         "GET",
         "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
-      createParams("org-1", "pw-1", "att-1"),
+      createParams("team-1", "pw-1", "att-1"),
     );
     expect(res.status).toBe(404);
   });
@@ -127,7 +127,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
         "GET",
         "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
-      createParams("org-1", "pw-1", "att-1"),
+      createParams("team-1", "pw-1", "att-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -146,7 +146,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "org-1" });
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -156,7 +156,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
         "DELETE",
         "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
-      createParams("org-1", "pw-1", "att-1"),
+      createParams("team-1", "pw-1", "att-1"),
     );
     expect(res.status).toBe(401);
   });
@@ -170,7 +170,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
         "DELETE",
         "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
-      createParams("org-1", "pw-1", "att-1"),
+      createParams("team-1", "pw-1", "att-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(403);
@@ -178,13 +178,13 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
   });
 
   it("returns 404 when entry does not belong to org", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-org" });
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
     const res = await DELETE(
       createRequest(
         "DELETE",
         "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
-      createParams("org-1", "pw-1", "att-1"),
+      createParams("team-1", "pw-1", "att-1"),
     );
     expect(res.status).toBe(404);
   });
@@ -196,7 +196,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
         "DELETE",
         "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
-      createParams("org-1", "pw-1", "att-1"),
+      createParams("team-1", "pw-1", "att-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(404);
@@ -216,7 +216,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
         "DELETE",
         "http://localhost/api/teams/org-1/passwords/pw-1/attachments/att-1",
       ),
-      createParams("org-1", "pw-1", "att-1"),
+      createParams("team-1", "pw-1", "att-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(200);

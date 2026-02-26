@@ -80,7 +80,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
   it("returns 404 when entry belongs to different org", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ id: "p1", orgId: "other-org" });
+    mockEntryFindUnique.mockResolvedValue({ id: "p1", orgId: "other-team" });
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status } = await parseResponse(res);

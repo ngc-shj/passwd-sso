@@ -5,34 +5,34 @@ import { hasTeamPermission } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 
-// GET /api/teams/trash — Get all trashed org passwords across all orgs
+// GET /api/teams/trash — Get all trashed team passwords across all teams
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  // Find all orgs the user is a member of (with role for permission check)
+  // Find all teams the user is a member of (with role for permission check)
   const memberships = await prisma.orgMember.findMany({
     where: { userId: session.user.id, deactivatedAt: null },
     select: { orgId: true, role: true },
   });
 
-  // Only include orgs where user has password:read permission
+  // Only include teams where user has password:read permission
   const readable = memberships.filter((m) =>
     hasTeamPermission(m.role, TEAM_PERMISSION.PASSWORD_READ)
   );
-  const orgIds = readable.map((m) => m.orgId);
+  const teamIds = readable.map((m) => m.orgId);
   const roleMap = new Map(readable.map((m) => [m.orgId, m.role]));
 
-  if (orgIds.length === 0) {
+  if (teamIds.length === 0) {
     return NextResponse.json([]);
   }
 
-  // Find all trashed org password entries (deletedAt is set)
+  // Find all trashed team password entries (deletedAt is set)
   const trashedEntries = await prisma.orgPasswordEntry.findMany({
     where: {
-      orgId: { in: orgIds },
+      orgId: { in: teamIds },
       deletedAt: { not: null },
     },
     include: {
@@ -55,8 +55,8 @@ export async function GET() {
   const entries = trashedEntries.map((entry) => ({
     id: entry.id,
     entryType: entry.entryType,
-    orgId: entry.org.id,
-    orgName: entry.org.name,
+    teamId: entry.org.id,
+    teamName: entry.org.name,
     role: roleMap.get(entry.orgId),
     isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,

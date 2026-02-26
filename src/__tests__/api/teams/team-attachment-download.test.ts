@@ -114,7 +114,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
   it("returns 404 when entry belongs to different org", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ orgId: "other-org" });
+    mockEntryFindUnique.mockResolvedValue({ orgId: "other-team" });
     const res = await GET(createGetRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(404);
   });
@@ -178,7 +178,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
   it("returns 404 when entry belongs to different org", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ orgId: "other-org" });
+    mockEntryFindUnique.mockResolvedValue({ orgId: "other-team" });
     const res = await DELETE(createDeleteRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(404);
   });

@@ -71,7 +71,7 @@ export function TeamTrashList({
       const decrypted = await Promise.all(
         data.map(async (entry: Record<string, unknown>) => {
           try {
-            const entryTeamId = entry.orgId as string;
+            const entryTeamId = entry.teamId as string;
             const teamKey = await getTeamEncryptionKey(entryTeamId);
             if (!teamKey) throw new Error("No team key");
             const aad = buildTeamEntryAAD(entryTeamId, entry.id as string, "overview");
@@ -89,7 +89,7 @@ export function TeamTrashList({
               id: entry.id,
               entryType: entry.entryType,
               teamId: entryTeamId,
-              teamName: entry.orgName,
+              teamName: entry.teamName,
               role: entry.role,
               title: overview.title ?? "",
               username: overview.username ?? null,
@@ -104,8 +104,8 @@ export function TeamTrashList({
             return {
               id: entry.id as string,
               entryType: entry.entryType as EntryTypeValue,
-              teamId: entry.orgId as string,
-              teamName: entry.orgName as string,
+              teamId: entry.teamId as string,
+              teamName: entry.teamName as string,
               role: entry.role as string,
               title: "(decryption failed)",
               username: null,

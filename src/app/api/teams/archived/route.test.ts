@@ -34,7 +34,7 @@ describe("GET /api/teams/archived", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns empty array when no readable orgs", async () => {
+  it("returns empty array when no readable teams", async () => {
     mockPrismaOrgMember.findMany.mockResolvedValue([]);
     const res = await GET();
     const json = await res.json();
@@ -44,12 +44,12 @@ describe("GET /api/teams/archived", () => {
   it("returns archived entries with encrypted overviews (E2E mode)", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
     mockPrismaOrgMember.findMany.mockResolvedValue([
-      { orgId: "org-1", role: TEAM_ROLE.MEMBER },
+      { orgId: "team-1", role: TEAM_ROLE.MEMBER },
     ]);
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {
         id: "pw-1",
-        orgId: "org-1",
+        orgId: "team-1",
         entryType: "LOGIN",
         isArchived: true,
         deletedAt: null,
@@ -58,7 +58,7 @@ describe("GET /api/teams/archived", () => {
         overviewAuthTag: "aabbccddee0011223344556677889900",
         aadVersion: 1,
         orgKeyVersion: 1,
-        org: { id: "org-1", name: "My Org" },
+        org: { id: "team-1", name: "My Org" },
         tags: [],
         createdBy: { id: "u1", name: "User", image: null },
         updatedBy: { id: "u1", name: "User" },
@@ -78,8 +78,8 @@ describe("GET /api/teams/archived", () => {
     expect(json[0].aadVersion).toBe(1);
     expect(json[0].orgKeyVersion).toBe(1);
     expect(json[0].isArchived).toBe(true);
-    expect(json[0].orgId).toBe("org-1");
-    expect(json[0].orgName).toBe("My Org");
+    expect(json[0].teamId).toBe("team-1");
+    expect(json[0].teamName).toBe("My Org");
     // Should NOT contain decrypted fields
     expect(json[0].title).toBeUndefined();
     expect(json[0].username).toBeUndefined();

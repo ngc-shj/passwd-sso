@@ -86,7 +86,7 @@ describe("runImportEntries", () => {
       sourceFilename: "team.csv",
       teamEncryptionKey: {} as CryptoKey,
       teamKeyVersion: 1,
-      teamId: "org-1",
+      teamId: "team-1",
       onProgress: progress,
     });
 

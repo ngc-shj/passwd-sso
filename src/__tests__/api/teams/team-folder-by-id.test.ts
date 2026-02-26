@@ -88,7 +88,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   it("returns 404 when folder belongs to different org", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockOrgFolderFindUnique.mockResolvedValue({ id: "f1", orgId: "other-org", parentId: null, name: "Old" });
+    mockOrgFolderFindUnique.mockResolvedValue({ id: "f1", orgId: "other-team", parentId: null, name: "Old" });
     const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: "x" } });
     const res = await PUT(req, createParams({ teamId: "o1", id: "f1" }));
     const { status } = await parseResponse(res);

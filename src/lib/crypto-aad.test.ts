@@ -34,19 +34,19 @@ describe("crypto-aad", () => {
     });
 
     it("buildOrgEntryAAD produces correct binary layout with 3 fields", () => {
-      const aad = buildOrgEntryAAD("org-abc", "entry-def", "blob");
+      const aad = buildOrgEntryAAD("team-abc", "entry-def", "blob");
       const view = new DataView(aad.buffer, aad.byteOffset, aad.byteLength);
 
       expect(String.fromCharCode(aad[0], aad[1])).toBe("OV");
       expect(view.getUint8(2)).toBe(AAD_VERSION);
       expect(view.getUint8(3)).toBe(3); // 3 fields
 
-      // Field 1: "org-abc" (7 bytes)
-      expect(view.getUint16(4, false)).toBe(7);
+      // Field 1: "team-abc" (8 bytes)
+      expect(view.getUint16(4, false)).toBe(8);
 
       // Field 3 (vaultType): "blob" (4 bytes)
-      // offset = 4 + (2+7) + (2+9) = 24
-      const field3Start = 4 + (2 + 7) + (2 + 9);
+      // offset = 4 + (2+8) + (2+9) = 25
+      const field3Start = 4 + (2 + 8) + (2 + 9);
       expect(view.getUint16(field3Start, false)).toBe(4);
       const field3 = new TextDecoder().decode(
         aad.slice(field3Start + 2, field3Start + 2 + 4)
@@ -91,14 +91,14 @@ describe("crypto-aad", () => {
 
   describe("scope separation", () => {
     it("OV blob vs overview produce different AAD", () => {
-      const blob = buildOrgEntryAAD("org-1", "entry-1", "blob");
-      const overview = buildOrgEntryAAD("org-1", "entry-1", "overview");
+      const blob = buildOrgEntryAAD("team-1", "entry-1", "blob");
+      const overview = buildOrgEntryAAD("team-1", "entry-1", "overview");
       expect(blob).not.toEqual(overview);
     });
 
     it("OV defaults to blob vaultType", () => {
-      const explicit = buildOrgEntryAAD("org-1", "entry-1", "blob");
-      const defaulted = buildOrgEntryAAD("org-1", "entry-1");
+      const explicit = buildOrgEntryAAD("team-1", "entry-1", "blob");
+      const defaulted = buildOrgEntryAAD("team-1", "entry-1");
       expect(explicit).toEqual(defaulted);
     });
   });

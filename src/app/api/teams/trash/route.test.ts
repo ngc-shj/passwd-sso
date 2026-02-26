@@ -34,7 +34,7 @@ describe("GET /api/teams/trash", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns empty array when no readable orgs", async () => {
+  it("returns empty array when no readable teams", async () => {
     mockPrismaOrgMember.findMany.mockResolvedValue([]);
     const res = await GET();
     const json = await res.json();
@@ -45,12 +45,12 @@ describe("GET /api/teams/trash", () => {
     const now = new Date("2025-01-01T00:00:00Z");
     const deletedAt = new Date("2025-01-02T00:00:00Z");
     mockPrismaOrgMember.findMany.mockResolvedValue([
-      { orgId: "org-1", role: TEAM_ROLE.ADMIN },
+      { orgId: "team-1", role: TEAM_ROLE.ADMIN },
     ]);
     mockPrismaOrgPasswordEntry.findMany.mockResolvedValue([
       {
         id: "pw-1",
-        orgId: "org-1",
+        orgId: "team-1",
         entryType: ENTRY_TYPE.LOGIN,
         isArchived: false,
         deletedAt,
@@ -59,7 +59,7 @@ describe("GET /api/teams/trash", () => {
         overviewAuthTag: "aabbccddee0011223344556677889900",
         aadVersion: 1,
         orgKeyVersion: 1,
-        org: { id: "org-1", name: "My Org" },
+        org: { id: "team-1", name: "My Org" },
         tags: [],
         createdBy: { id: "u1", name: "User", image: null },
         updatedBy: { id: "u1", name: "User" },

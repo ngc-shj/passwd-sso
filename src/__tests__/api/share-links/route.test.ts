@@ -185,7 +185,7 @@ describe("POST /api/share-links", () => {
 
   it("creates E2E org share link with client-encrypted data", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockFindUnique.mockResolvedValue({ orgId: "org-123" });
+    mockFindUnique.mockResolvedValue({ orgId: "team-123" });
     mockCreate.mockResolvedValue({
       id: "share-e2e",
       expiresAt: new Date(Date.now() + 86400000),
@@ -260,7 +260,7 @@ describe("POST /api/share-links", () => {
 
   it("returns TeamAuthError status for org entry permission denied", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockFindUnique.mockResolvedValueOnce({ orgId: "org-123" });
+    mockFindUnique.mockResolvedValueOnce({ orgId: "team-123" });
 
     const { requireTeamPermission } = await import("@/lib/team-auth");
     const { TeamAuthError: RealTeamAuthError } = await import("@/lib/team-auth");

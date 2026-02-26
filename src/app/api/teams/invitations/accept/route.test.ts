@@ -37,13 +37,13 @@ const futureDate = new Date("2099-01-01T00:00:00Z");
 
 const validInvitation = {
   id: "inv-1",
-  orgId: "org-1",
+  orgId: "team-1",
   email: "user@test.com",
   role: TEAM_ROLE.MEMBER,
   token: "valid-token",
   status: INVITATION_STATUS.PENDING,
   expiresAt: futureDate,
-  org: { id: "org-1", name: "My Org", slug: "my-org" },
+  org: { id: "team-1", name: "My Org", slug: "my-org" },
 };
 
 describe("POST /api/teams/invitations/accept", () => {

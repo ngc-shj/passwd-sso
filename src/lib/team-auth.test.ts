@@ -123,19 +123,19 @@ describe("getTeamMembership", () => {
   });
 
   it("returns membership when found (active member)", async () => {
-    const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: TEAM_ROLE.MEMBER };
+    const membership = { id: "m-1", orgId: "team-1", userId: "u-1", role: TEAM_ROLE.MEMBER };
     mockPrisma.orgMember.findFirst.mockResolvedValue(membership);
 
-    const result = await getTeamMembership("u-1", "org-1");
+    const result = await getTeamMembership("u-1", "team-1");
     expect(result).toEqual(membership);
     expect(mockPrisma.orgMember.findFirst).toHaveBeenCalledWith({
-      where: { orgId: "org-1", userId: "u-1", deactivatedAt: null },
+      where: { orgId: "team-1", userId: "u-1", deactivatedAt: null },
     });
   });
 
   it("returns null when not found", async () => {
     mockPrisma.orgMember.findFirst.mockResolvedValue(null);
-    const result = await getTeamMembership("u-1", "org-1");
+    const result = await getTeamMembership("u-1", "team-1");
     expect(result).toBeNull();
   });
 });
@@ -146,19 +146,19 @@ describe("requireTeamMember", () => {
   });
 
   it("returns membership when found", async () => {
-    const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: TEAM_ROLE.OWNER };
+    const membership = { id: "m-1", orgId: "team-1", userId: "u-1", role: TEAM_ROLE.OWNER };
     mockPrisma.orgMember.findFirst.mockResolvedValue(membership);
 
-    const result = await requireTeamMember("u-1", "org-1");
+    const result = await requireTeamMember("u-1", "team-1");
     expect(result).toEqual(membership);
   });
 
   it("throws TeamAuthError(404) when not found", async () => {
     mockPrisma.orgMember.findFirst.mockResolvedValue(null);
 
-    await expect(requireTeamMember("u-1", "org-1")).rejects.toThrow(TeamAuthError);
+    await expect(requireTeamMember("u-1", "team-1")).rejects.toThrow(TeamAuthError);
     try {
-      await requireTeamMember("u-1", "org-1");
+      await requireTeamMember("u-1", "team-1");
     } catch (err) {
       expect(err).toBeInstanceOf(TeamAuthError);
       expect((err as TeamAuthError).status).toBe(404);
@@ -172,23 +172,23 @@ describe("requireTeamPermission", () => {
   });
 
   it("returns membership when permission is granted", async () => {
-    const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: TEAM_ROLE.OWNER };
+    const membership = { id: "m-1", orgId: "team-1", userId: "u-1", role: TEAM_ROLE.OWNER };
     mockPrisma.orgMember.findFirst.mockResolvedValue(membership);
 
-    const result = await requireTeamPermission("u-1", "org-1", TEAM_PERMISSION.ORG_DELETE);
+    const result = await requireTeamPermission("u-1", "team-1", TEAM_PERMISSION.ORG_DELETE);
     expect(result).toEqual(membership);
   });
 
   it("throws TeamAuthError(403) when permission is denied", async () => {
-    const membership = { id: "m-1", orgId: "org-1", userId: "u-1", role: TEAM_ROLE.VIEWER };
+    const membership = { id: "m-1", orgId: "team-1", userId: "u-1", role: TEAM_ROLE.VIEWER };
     mockPrisma.orgMember.findFirst.mockResolvedValue(membership);
 
     await expect(
-      requireTeamPermission("u-1", "org-1", TEAM_PERMISSION.PASSWORD_CREATE)
+      requireTeamPermission("u-1", "team-1", TEAM_PERMISSION.PASSWORD_CREATE)
     ).rejects.toThrow(TeamAuthError);
 
     try {
-      await requireTeamPermission("u-1", "org-1", TEAM_PERMISSION.PASSWORD_CREATE);
+      await requireTeamPermission("u-1", "team-1", TEAM_PERMISSION.PASSWORD_CREATE);
     } catch (err) {
       expect((err as TeamAuthError).status).toBe(403);
     }
@@ -198,7 +198,7 @@ describe("requireTeamPermission", () => {
     mockPrisma.orgMember.findFirst.mockResolvedValue(null);
 
     try {
-      await requireTeamPermission("u-1", "org-1", TEAM_PERMISSION.PASSWORD_READ);
+      await requireTeamPermission("u-1", "team-1", TEAM_PERMISSION.PASSWORD_READ);
     } catch (err) {
       expect((err as TeamAuthError).status).toBe(404);
     }

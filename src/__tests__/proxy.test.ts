@@ -164,7 +164,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
   it("applies teams auth guard to legacy /api/orgs paths", async () => {
     const res = await proxy(
       createApiRequest("/api/orgs/org-1/passwords", {
-        Cookie: "authjs.session-token=sess-orgs",
+        Cookie: "authjs.session-token=sess-orgs-legacy",
       }),
       dummyOptions,
     );

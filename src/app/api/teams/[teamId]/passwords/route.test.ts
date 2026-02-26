@@ -42,7 +42,7 @@ vi.mock("@/lib/team-auth", () => ({
 import { GET, POST } from "./route";
 import { ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
 
-const TEAM_ID = "org-123";
+const TEAM_ID = "team-123";
 const now = new Date("2025-01-01T00:00:00Z");
 
 describe("GET /api/teams/[teamId]/passwords", () => {
@@ -458,7 +458,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
 
   it("returns 400 when orgFolderId belongs to a different org", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
-    mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: "other-org-999" });
+    mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: "other-team-999" });
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {

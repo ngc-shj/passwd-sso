@@ -58,7 +58,7 @@ vi.mock("@/lib/folder-utils", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/folder-utils")>();
   return {
     ...original,
-    validateParentFolder: vi.fn().mockResolvedValue({ parentId: null, ownerId: "org-1" }),
+    validateParentFolder: vi.fn().mockResolvedValue({ parentId: null, ownerId: "team-1" }),
     validateFolderDepth: vi.fn().mockResolvedValue(1),
     checkCircularReference: vi.fn().mockResolvedValue(false),
   };
@@ -68,7 +68,7 @@ import { PUT, DELETE } from "./route";
 import { validateParentFolder, validateFolderDepth, checkCircularReference } from "@/lib/folder-utils";
 import { TEAM_ROLE } from "@/lib/constants";
 
-const TEAM_ID = "org-1";
+const TEAM_ID = "team-1";
 const FOLDER_ID = "cm000000000000000folder1";
 const BASE = `http://localhost:3000/api/teams/${TEAM_ID}/folders/${FOLDER_ID}`;
 const now = new Date("2025-06-01T00:00:00Z");
@@ -119,7 +119,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   it("returns 404 when folder belongs to another org", async () => {
     mockPrismaOrgFolder.findUnique.mockResolvedValue({
       ...ownedFolder,
-      orgId: "other-org",
+      orgId: "other-team",
     });
     const res = await PUT(
       createRequest("PUT", BASE, { body: { name: "Updated" } }),

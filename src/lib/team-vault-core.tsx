@@ -208,35 +208,35 @@ export function TeamVaultProvider({
       );
       ecdhPrivateKeyBytes.fill(0);
 
-      // Group by orgId for efficiency
-      const byOrg = new Map<
+      // Group by teamId for efficiency
+      const byTeam = new Map<
         string,
         Array<{
           memberId: string;
-          orgId: string;
+          teamId: string;
           userId: string;
           ecdhPublicKey: string | null;
           orgKeyVersion: number;
         }>
       >();
       for (const member of pendingMembers) {
-        const list = byOrg.get(member.orgId) ?? [];
+        const list = byTeam.get(member.teamId) ?? [];
         list.push(member);
-        byOrg.set(member.orgId, list);
+        byTeam.set(member.teamId, list);
       }
 
-      for (const [orgId, members] of byOrg) {
+      for (const [teamId, members] of byTeam) {
         let orgKeyBytes: Uint8Array | undefined;
         try {
           // Get own org key first
-          const ownKeyRes = await fetch(apiPath.teamMemberKey(orgId));
+          const ownKeyRes = await fetch(apiPath.teamMemberKey(teamId));
           if (!ownKeyRes.ok) continue;
 
           const ownKeyData = await ownKeyRes.json();
 
           // Build AAD context for own key unwrapping
           const ownCtx: OrgKeyWrapContext = {
-            orgId,
+            orgId: teamId,
             toUserId: userId,
             keyVersion: ownKeyData.keyVersion,
             wrapVersion: ownKeyData.wrapVersion,
@@ -263,14 +263,14 @@ export function TeamVaultProvider({
               const escrow = await createOrgKeyEscrow(
                 orgKeyBytes,
                 member.ecdhPublicKey,
-                orgId,
+                teamId,
                 member.userId,
                 member.orgKeyVersion
               );
 
               // Send to confirm-key endpoint
               await fetch(
-                apiPath.teamMemberConfirmKey(orgId, member.memberId),
+                apiPath.teamMemberConfirmKey(teamId, member.memberId),
                 {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
@@ -290,7 +290,7 @@ export function TeamVaultProvider({
             }
           }
         } catch {
-          // Skip failed org — will retry on next poll
+          // Skip failed team — will retry on next poll
         } finally {
           orgKeyBytes?.fill(0);
         }

@@ -106,7 +106,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     expect(res.status).toBe(401);
   });
@@ -118,7 +118,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(409);
@@ -133,7 +133,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")], // missing user-2
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(400);
@@ -148,7 +148,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     expect(res.status).toBe(404);
     const json = await res.json();
@@ -165,7 +165,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     expect(res.status).toBe(403);
   });
@@ -178,7 +178,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: tooManyEntries,
         memberKeys: [validMemberKey("user-1")],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     expect(res.status).toBe(400);
   });
@@ -189,7 +189,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       body: "not-json",
       headers: { "Content-Type": "application/json" },
     });
-    const res = await POST(req, createParams("org-1"));
+    const res = await POST(req, createParams("team-1"));
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("INVALID_JSON");
@@ -203,7 +203,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1"), validMemberKey("non-member-user")],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(400);
@@ -219,7 +219,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(409);
@@ -233,7 +233,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -243,7 +243,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "ORG_KEY_ROTATION",
-        orgId: "org-1",
+        orgId: "team-1",
         metadata: expect.objectContaining({
           fromVersion: 1,
           toVersion: 2,
@@ -263,7 +263,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: [validEntry("e1")],
         memberKeys: [validMemberKey("user-1")],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(400);
@@ -278,7 +278,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: [validEntry("deleted-or-foreign-id")],
         memberKeys: [validMemberKey("user-1")],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(400);
@@ -292,7 +292,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: [validEntry("e1")],
         memberKeys: [{ ...validMemberKey("user-1"), wrapVersion: 1 }],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     expect(res.status).toBe(200);
     expect(txMock.orgMemberKey.create).toHaveBeenCalledWith(
@@ -312,7 +312,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
           keyVersion: 999, // intentionally wrong
         }],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     expect(res.status).toBe(200);
     expect(txMock.orgMemberKey.create).toHaveBeenCalledWith(
@@ -334,13 +334,13 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: [validEntry("e1"), validEntry("e-trash")],
         memberKeys: [validMemberKey("user-1")],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     expect(res.status).toBe(200);
     expect(txMock.orgPasswordEntry.updateMany).toHaveBeenCalledTimes(2);
     // Verify findMany was called without deletedAt filter
     expect(txMock.orgPasswordEntry.findMany).toHaveBeenCalledWith({
-      where: { orgId: "org-1" },
+      where: { orgId: "team-1" },
       select: { id: true },
     });
   });
@@ -357,7 +357,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         entries: [validEntry("e1"), validEntry("e2")],
         memberKeys: [validMemberKey("user-1")],
       }),
-      createParams("org-1"),
+      createParams("team-1"),
     );
     expect(res.status).toBe(200);
     expect(txMock.orgPasswordEntry.updateMany).toHaveBeenCalledTimes(2);

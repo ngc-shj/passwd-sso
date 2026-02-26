@@ -91,7 +91,7 @@ describe("crypto-server", () => {
 
     it("roundtrips with AAD", () => {
       const orgKey = randomBytes(32);
-      const aad = Buffer.from("org-1|entry-1");
+      const aad = Buffer.from("team-1|entry-1");
       const encrypted = encryptServerData("secret", orgKey, aad);
       const decrypted = decryptServerData(encrypted, orgKey, aad);
       expect(decrypted).toBe("secret");
@@ -99,8 +99,8 @@ describe("crypto-server", () => {
 
     it("fails when AAD mismatches", () => {
       const orgKey = randomBytes(32);
-      const aad1 = Buffer.from("org-1|entry-1");
-      const aad2 = Buffer.from("org-1|entry-2");
+      const aad1 = Buffer.from("team-1|entry-1");
+      const aad2 = Buffer.from("team-1|entry-2");
       const encrypted = encryptServerData("secret", orgKey, aad1);
       expect(() => decryptServerData(encrypted, orgKey, aad2)).toThrow();
     });

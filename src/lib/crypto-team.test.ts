@@ -23,7 +23,7 @@ import {
 } from "./crypto-team";
 import { deriveEncryptionKey } from "./crypto-client";
 
-const TEST_ORG_ID = "org-test-001";
+const TEST_ORG_ID = "team-test-001";
 
 const TEST_CTX: OrgKeyWrapContext = {
   orgId: TEST_ORG_ID,
@@ -136,7 +136,7 @@ describe("crypto-team", () => {
     it("differs when any single field changes", () => {
       const baseAAD = hexEncode(buildOrgKeyWrapAAD(TEST_CTX));
       const variants: OrgKeyWrapContext[] = [
-        makeCtx({ orgId: "different-org" }),
+        makeCtx({ orgId: "different-team" }),
         makeCtx({ toUserId: "different-to" }),
         makeCtx({ keyVersion: 99 }),
         makeCtx({ wrapVersion: 99 }),
@@ -238,7 +238,7 @@ describe("crypto-team", () => {
           ephemeralPubJwk,
           memberKeyPair.privateKey,
           saltHex,
-          makeCtx({ orgId: "wrong-org-id" }),
+          makeCtx({ orgId: "wrong-team-id" }),
         ),
       ).rejects.toThrow();
     });
@@ -354,7 +354,7 @@ describe("crypto-team", () => {
       const memberEncKey = await deriveOrgEncryptionKey(unwrapped);
 
       // Encrypt with admin's key, decrypt with member's key
-      const plaintext = "org-entry-secret-data";
+      const plaintext = "team-entry-secret-data";
       const encrypted = await encryptOrgEntry(plaintext, orgEncKey);
       const decrypted = await decryptOrgEntry(encrypted, memberEncKey);
       expect(decrypted).toBe(plaintext);
@@ -465,7 +465,7 @@ describe("crypto-team", () => {
       const orgEncKey = await deriveOrgEncryptionKey(orgKey);
 
       // 2. Admin encrypts org data
-      const entry = '{"title":"Org Secret","password":"org-pass-123"}';
+      const entry = '{"title":"Org Secret","password":"team-pass-123"}';
       const encryptedEntry = await encryptOrgEntry(entry, orgEncKey);
 
       // 3. Member joins → admin distributes org key

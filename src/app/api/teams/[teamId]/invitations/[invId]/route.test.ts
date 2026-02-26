@@ -33,7 +33,7 @@ vi.mock("@/lib/team-auth", () => ({
 import { DELETE } from "./route";
 import { TEAM_ROLE } from "@/lib/constants";
 
-const TEAM_ID = "org-123";
+const TEAM_ID = "team-123";
 const INV_ID = "inv-456";
 
 describe("DELETE /api/teams/[teamId]/invitations/[invId]", () => {
@@ -83,7 +83,7 @@ describe("DELETE /api/teams/[teamId]/invitations/[invId]", () => {
   });
 
   it("returns 404 when invitation belongs to different org", async () => {
-    mockPrismaOrgInvitation.findUnique.mockResolvedValue({ id: INV_ID, orgId: "other-org" });
+    mockPrismaOrgInvitation.findUnique.mockResolvedValue({ id: INV_ID, orgId: "other-team" });
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/invitations/${INV_ID}`),
       createParams({ teamId: TEAM_ID, invId: INV_ID }),

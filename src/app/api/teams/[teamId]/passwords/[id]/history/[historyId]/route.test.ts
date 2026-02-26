@@ -39,7 +39,7 @@ vi.mock("@/lib/team-auth", () => ({
 
 import { GET } from "./route";
 
-const TEAM_ID = "org-123";
+const TEAM_ID = "team-123";
 const ENTRY_ID = "entry-456";
 const HISTORY_ID = "hist-789";
 
@@ -87,7 +87,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
 
   it("returns 404 when entry orgId does not match", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
-      orgId: "other-org",
+      orgId: "other-team",
       entryType: "LOGIN",
     });
     const res = await GET(createRequest("GET", makeUrl()), makeParams());

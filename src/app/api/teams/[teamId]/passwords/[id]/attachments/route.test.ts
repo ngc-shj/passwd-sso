@@ -80,18 +80,18 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(
       createRequest("GET", "http://localhost/api/teams/org-1/passwords/pw-1/attachments"),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     expect(res.status).toBe(401);
   });
 
   it("returns 404 when entry does not belong to org", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
-      orgId: "other-org",
+      orgId: "other-team",
     });
     const res = await GET(
       createRequest("GET", "http://localhost/api/teams/org-1/passwords/pw-1/attachments"),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     expect(res.status).toBe(404);
   });
@@ -102,7 +102,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
     );
     const res = await GET(
       createRequest("GET", "http://localhost/api/teams/org-1/passwords/pw-1/attachments"),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(403);
@@ -110,7 +110,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   });
 
   it("returns attachment metadata list", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "org-1" });
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
     mockPrismaAttachment.findMany.mockResolvedValue([
       {
         id: "att-1",
@@ -122,7 +122,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
     ]);
     const res = await GET(
       createRequest("GET", "http://localhost/api/teams/org-1/passwords/pw-1/attachments"),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -136,7 +136,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "org-1" });
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "team-1" });
     mockPrismaAttachment.count.mockResolvedValue(0);
     mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 1 });
   });
@@ -152,7 +152,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         authTag: VALID_AUTH_TAG,
         sizeBytes: "3",
       }),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     expect(res.status).toBe(401);
   });
@@ -170,7 +170,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         authTag: VALID_AUTH_TAG,
         sizeBytes: "3",
       }),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(403);
@@ -178,7 +178,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   });
 
   it("returns 404 when entry does not belong to org", async () => {
-    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-org" });
+    mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
     const res = await POST(
       createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
@@ -188,7 +188,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         authTag: VALID_AUTH_TAG,
         sizeBytes: "3",
       }),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     expect(res.status).toBe(404);
   });
@@ -198,7 +198,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
       createFormDataRequest("http://localhost/api/teams/org-1/passwords/pw-1/attachments", {
         filename: "doc.pdf",
       }),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(400);
@@ -215,7 +215,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         authTag: VALID_AUTH_TAG,
         sizeBytes: "3",
       }),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(400);
@@ -233,7 +233,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         authTag: VALID_AUTH_TAG,
         sizeBytes: "3",
       }),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(400);
@@ -254,7 +254,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         },
         { "content-length": String(30 * 1024 * 1024) },
       ),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(413);
@@ -272,7 +272,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         authTag: VALID_AUTH_TAG,
         sizeBytes: "100",
       }),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(400);
@@ -284,7 +284,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
       headers: new Headers(),
       formData: vi.fn().mockRejectedValue(new Error("bad form")),
     } as unknown as NextRequest;
-    const res = await POST(req, createParams("org-1", "pw-1"));
+    const res = await POST(req, createParams("team-1", "pw-1"));
     const json = await res.json();
     expect(res.status).toBe(400);
     expect(json.error).toBe("INVALID_FORM_DATA");
@@ -300,7 +300,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         authTag: VALID_AUTH_TAG,
         sizeBytes: "3",
       }),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     expect(res.status).toBe(400);
   });
@@ -315,7 +315,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         authTag: VALID_AUTH_TAG,
         sizeBytes: "3",
       }),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(400);
@@ -332,7 +332,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         authTag: "bad-tag",
         sizeBytes: "3",
       }),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(400);
@@ -358,7 +358,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         orgKeyVersion: "1",
         aadVersion: "1",
       }),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     expect(res.status).toBe(201);
     expect(mockPrismaAttachment.create).toHaveBeenCalledWith(
@@ -387,7 +387,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         sizeBytes: "3",
         orgKeyVersion: "1",
       }),
-      createParams("org-1", "pw-1"),
+      createParams("team-1", "pw-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(409);

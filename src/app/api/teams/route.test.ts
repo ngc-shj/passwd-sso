@@ -35,11 +35,11 @@ describe("GET /api/teams", () => {
     mockPrismaOrgMember.findMany.mockResolvedValue([
       {
         role: TEAM_ROLE.OWNER,
-        org: { id: "org-1", name: "My Org", slug: "my-org", description: null, createdAt: now },
+        org: { id: "team-1", name: "My Org", slug: "my-org", description: null, createdAt: now },
       },
       {
         role: TEAM_ROLE.MEMBER,
-        org: { id: "org-2", name: "Other", slug: "other", description: "desc", createdAt: now },
+        org: { id: "team-2", name: "Other", slug: "other", description: "desc", createdAt: now },
       },
     ]);
 

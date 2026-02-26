@@ -57,51 +57,51 @@ describe("DELETE /api/teams/[teamId]/scim-tokens/[tokenId]", () => {
     mockRequireTeamPermission.mockRejectedValue(
       new TeamAuthError("FORBIDDEN", 403),
     );
-    const res = await DELETE(makeReq(), makeParams("org-1", "t1"));
+    const res = await DELETE(makeReq(), makeParams("team-1", "t1"));
     expect(res.status).toBe(403);
   });
 
   it("returns 401 if not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const res = await DELETE(makeReq(), makeParams("org-1", "t1"));
+    const res = await DELETE(makeReq(), makeParams("team-1", "t1"));
     expect(res.status).toBe(401);
   });
 
   it("returns 404 when token not found", async () => {
     mockScimToken.findUnique.mockResolvedValue(null);
-    const res = await DELETE(makeReq(), makeParams("org-1", "t1"));
+    const res = await DELETE(makeReq(), makeParams("team-1", "t1"));
     expect(res.status).toBe(404);
   });
 
   it("returns 404 for orgId mismatch (IDOR prevention)", async () => {
     mockScimToken.findUnique.mockResolvedValue({
       id: "t1",
-      orgId: "other-org", // different org
+      orgId: "other-team", // different org
       revokedAt: null,
     });
-    const res = await DELETE(makeReq(), makeParams("org-1", "t1"));
+    const res = await DELETE(makeReq(), makeParams("team-1", "t1"));
     expect(res.status).toBe(404);
   });
 
   it("returns 409 when token already revoked", async () => {
     mockScimToken.findUnique.mockResolvedValue({
       id: "t1",
-      orgId: "org-1",
+      orgId: "team-1",
       revokedAt: new Date(),
     });
-    const res = await DELETE(makeReq(), makeParams("org-1", "t1"));
+    const res = await DELETE(makeReq(), makeParams("team-1", "t1"));
     expect(res.status).toBe(409);
   });
 
   it("revokes token and returns success", async () => {
     mockScimToken.findUnique.mockResolvedValue({
       id: "t1",
-      orgId: "org-1",
+      orgId: "team-1",
       revokedAt: null,
     });
     mockScimToken.update.mockResolvedValue({});
 
-    const res = await DELETE(makeReq(), makeParams("org-1", "t1"));
+    const res = await DELETE(makeReq(), makeParams("team-1", "t1"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);

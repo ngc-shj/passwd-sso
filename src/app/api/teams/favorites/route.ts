@@ -5,7 +5,7 @@ import { hasTeamPermission } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 
-// GET /api/teams/favorites — Get all org passwords favorited by current user
+// GET /api/teams/favorites — Get all team passwords favorited by current user
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
@@ -46,8 +46,8 @@ export async function GET() {
     return {
       id: entry.id,
       entryType: entry.entryType,
-      orgId: entry.org.id,
-      orgName: entry.org.name,
+      teamId: entry.org.id,
+      teamName: entry.org.name,
       role: roleMap.get(entry.orgId),
       encryptedOverview: entry.encryptedOverview,
       overviewIv: entry.overviewIv,

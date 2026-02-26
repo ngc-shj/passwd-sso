@@ -36,7 +36,7 @@ function bearerRequest(token: string): NextRequest {
 function makeToken(overrides: Record<string, unknown> = {}) {
   return {
     id: "tok-1",
-    orgId: "org-1",
+    orgId: "team-1",
     tenantId: "tenant-1",
     createdById: "user-1",
     revokedAt: null,
@@ -72,8 +72,8 @@ describe("validateScimToken", () => {
       ok: true,
       data: {
         tokenId: "tok-1",
-        teamId: "org-1",
-        orgId: "org-1",
+        teamId: "team-1",
+        orgId: "team-1",
         tenantId: "tenant-1",
         createdById: "user-1",
         auditUserId: "user-1",
@@ -165,7 +165,7 @@ describe("validateScimToken", () => {
 
     const result = await validateScimToken(bearerRequest("scim_valid"));
 
-    expect(result).toEqual({ ok: true, data: expect.objectContaining({ teamId: "org-1", orgId: "org-1" }) });
+    expect(result).toEqual({ ok: true, data: expect.objectContaining({ teamId: "team-1", orgId: "team-1" }) });
   });
 
   // ─── lastUsedAt throttle ────────────────────────────────────
@@ -211,7 +211,7 @@ describe("validateScimToken", () => {
     // Should still return ok
     expect(result).toEqual({
       ok: true,
-      data: expect.objectContaining({ teamId: "org-1", orgId: "org-1" }),
+      data: expect.objectContaining({ teamId: "team-1", orgId: "team-1" }),
     });
   });
 
@@ -247,8 +247,8 @@ describe("validateScimToken", () => {
     expect(result).toEqual({
       ok: true,
       data: expect.objectContaining({
-        teamId: "org-1",
-        orgId: "org-1",
+        teamId: "team-1",
+        orgId: "team-1",
         tenantId: "tenant-1",
       }),
     });

@@ -48,7 +48,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(
       createRequest("GET", URL),
-      { params: Promise.resolve({ teamId: "org-1" }) },
+      { params: Promise.resolve({ teamId: "team-1" }) },
     );
     expect(res.status).toBe(401);
   });
@@ -57,7 +57,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
     mockRequireTeamMember.mockRejectedValue(new TeamAuthError("NOT_ORG_MEMBER", 404));
     const res = await GET(
       createRequest("GET", URL),
-      { params: Promise.resolve({ teamId: "org-1" }) },
+      { params: Promise.resolve({ teamId: "team-1" }) },
     );
     expect(res.status).toBe(404);
     const json = await res.json();
@@ -69,7 +69,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
     await expect(
       GET(
         createRequest("GET", URL),
-        { params: Promise.resolve({ teamId: "org-1" }) },
+        { params: Promise.resolve({ teamId: "team-1" }) },
       ),
     ).rejects.toThrow("unexpected");
   });
@@ -78,7 +78,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
     mockPrismaOrgMember.findFirst.mockResolvedValue({ keyDistributed: false });
     const res = await GET(
       createRequest("GET", URL),
-      { params: Promise.resolve({ teamId: "org-1" }) },
+      { params: Promise.resolve({ teamId: "team-1" }) },
     );
     expect(res.status).toBe(403);
     const json = await res.json();
@@ -99,7 +99,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
 
     const res = await GET(
       createRequest("GET", URL),
-      { params: Promise.resolve({ teamId: "org-1" }) },
+      { params: Promise.resolve({ teamId: "team-1" }) },
     );
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -107,7 +107,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
     expect(json.keyVersion).toBe(2);
     expect(json.wrapVersion).toBe(1);
     expect(mockPrismaOrgMemberKey.findFirst).toHaveBeenCalledWith({
-      where: { orgId: "org-1", userId: "user-1" },
+      where: { orgId: "team-1", userId: "user-1" },
       orderBy: { keyVersion: "desc" },
     });
   });
@@ -126,7 +126,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
 
     const res = await GET(
       createRequest("GET", `${URL}?keyVersion=1`),
-      { params: Promise.resolve({ teamId: "org-1" }) },
+      { params: Promise.resolve({ teamId: "team-1" }) },
     );
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -139,7 +139,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
 
     const res = await GET(
       createRequest("GET", `${URL}?keyVersion=abc`),
-      { params: Promise.resolve({ teamId: "org-1" }) },
+      { params: Promise.resolve({ teamId: "team-1" }) },
     );
     expect(res.status).toBe(400);
   });
@@ -149,7 +149,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
 
     const res = await GET(
       createRequest("GET", `${URL}?keyVersion=0`),
-      { params: Promise.resolve({ teamId: "org-1" }) },
+      { params: Promise.resolve({ teamId: "team-1" }) },
     );
     expect(res.status).toBe(400);
   });
@@ -159,7 +159,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
 
     const res = await GET(
       createRequest("GET", `${URL}?keyVersion=10001`),
-      { params: Promise.resolve({ teamId: "org-1" }) },
+      { params: Promise.resolve({ teamId: "team-1" }) },
     );
     expect(res.status).toBe(400);
   });
@@ -170,7 +170,7 @@ describe("GET /api/teams/[teamId]/member-key", () => {
 
     const res = await GET(
       createRequest("GET", URL),
-      { params: Promise.resolve({ teamId: "org-1" }) },
+      { params: Promise.resolve({ teamId: "team-1" }) },
     );
     expect(res.status).toBe(404);
     const json = await res.json();

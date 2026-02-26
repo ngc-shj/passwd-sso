@@ -83,6 +83,7 @@ vi.mock("@/lib/dynamic-styles", () => ({
 
 vi.mock("@/hooks/use-vault-context", () => ({
   useVaultContext: (orgs: unknown[]) => mockUseVaultContext(orgs),
+  useTeamVaultContext: (orgs: unknown[]) => mockUseVaultContext(orgs),
 }));
 
 // Stub heavy UI components
@@ -494,7 +495,7 @@ describe("Sidebar org folder CRUD integration", () => {
 
   /** Open org submenu by clicking the toggle button, then wait for folders. */
   async function openOrgSubmenu(sidebar: ReturnType<typeof within>, teamId: string) {
-    const toggle = sidebar.queryByRole("button", { name: `toggle-${teamId}` });
+    const toggle = sidebar.queryByRole("button", { name: `toggle-${teamId}` });
     if (toggle) fireEvent.click(toggle);
   }
 

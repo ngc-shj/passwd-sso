@@ -78,7 +78,7 @@ describe("GET /api/teams/[teamId]/scim-tokens", () => {
 
   it("returns 401 if not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const res = await GET(makeReq(), makeParams("org-1"));
+    const res = await GET(makeReq(), makeParams("team-1"));
     expect(res.status).toBe(401);
   });
 
@@ -86,7 +86,7 @@ describe("GET /api/teams/[teamId]/scim-tokens", () => {
     mockRequireTeamPermission.mockRejectedValue(
       new TeamAuthError("FORBIDDEN", 403),
     );
-    const res = await GET(makeReq(), makeParams("org-1"));
+    const res = await GET(makeReq(), makeParams("team-1"));
     expect(res.status).toBe(403);
   });
 
@@ -103,7 +103,7 @@ describe("GET /api/teams/[teamId]/scim-tokens", () => {
       },
     ]);
 
-    const res = await GET(makeReq(), makeParams("org-1"));
+    const res = await GET(makeReq(), makeParams("team-1"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toHaveLength(1);
@@ -123,7 +123,7 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
     mockScimToken.count.mockResolvedValue(10);
     const res = await POST(
       makeReq({ body: { description: "Overflow" } }),
-      makeParams("org-1"),
+      makeParams("team-1"),
     );
     expect(res.status).toBe(409);
     const body = await res.json();
@@ -141,7 +141,7 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
 
     await POST(
       makeReq({ body: { description: "After expired" } }),
-      makeParams("org-1"),
+      makeParams("team-1"),
     );
     // Verify count query includes expiry filter (OR clause)
     expect(mockScimToken.count).toHaveBeenCalledWith(
@@ -168,7 +168,7 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
 
     const res = await POST(
       makeReq({ body: { description: "My token", expiresInDays: 365 } }),
-      makeParams("org-1"),
+      makeParams("team-1"),
     );
     expect(res.status).toBe(201);
     // S-22: Verify Cache-Control: no-store on token response
@@ -182,7 +182,7 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
   it("returns 400 for expiresInDays exceeding max", async () => {
     const res = await POST(
       makeReq({ body: { expiresInDays: 3651 } }),
-      makeParams("org-1"),
+      makeParams("team-1"),
     );
     expect(res.status).toBe(400);
   });
@@ -190,7 +190,7 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
   it("returns 400 for expiresInDays of zero", async () => {
     const res = await POST(
       makeReq({ body: { expiresInDays: 0 } }),
-      makeParams("org-1"),
+      makeParams("team-1"),
     );
     expect(res.status).toBe(400);
   });
@@ -198,7 +198,7 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
   it("returns 400 for invalid body", async () => {
     const res = await POST(
       makeReq({ body: { expiresInDays: -1 } }),
-      makeParams("org-1"),
+      makeParams("team-1"),
     );
     expect(res.status).toBe(400);
   });
@@ -214,7 +214,7 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
 
     const res = await POST(
       makeReq({ body: { expiresInDays: null } }),
-      makeParams("org-1"),
+      makeParams("team-1"),
     );
     expect(res.status).toBe(201);
     // Verify expiresAt was set to null

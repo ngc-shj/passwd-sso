@@ -71,7 +71,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
   it("returns 404 when entry belongs to different org", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamMember.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ orgId: "other-org" });
+    mockEntryFindUnique.mockResolvedValue({ orgId: "other-team" });
     const req = createRequest("GET");
     const res = await GET(req, createParams({ teamId: "o1", id: "p1" }));
     const { status } = await parseResponse(res);

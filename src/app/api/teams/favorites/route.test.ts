@@ -45,13 +45,13 @@ describe("GET /api/teams/favorites", () => {
   it("returns favorited entries with encrypted overviews (E2E mode)", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
     mockPrismaOrgMember.findMany.mockResolvedValue([
-      { orgId: "org-1", role: TEAM_ROLE.MEMBER },
+      { orgId: "team-1", role: TEAM_ROLE.MEMBER },
     ]);
     mockPrismaOrgPasswordFavorite.findMany.mockResolvedValue([
       {
         orgPasswordEntry: {
           id: "pw-1",
-          orgId: "org-1",
+          orgId: "team-1",
           entryType: ENTRY_TYPE.LOGIN,
           deletedAt: null,
           isArchived: false,
@@ -60,7 +60,7 @@ describe("GET /api/teams/favorites", () => {
           overviewAuthTag: "b".repeat(32),
           aadVersion: 1,
           orgKeyVersion: 1,
-          org: { id: "org-1", name: "My Org" },
+          org: { id: "team-1", name: "My Org" },
           tags: [],
           createdBy: { id: "u1", name: "User", image: null },
           updatedBy: { id: "u1", name: "User" },
@@ -89,13 +89,13 @@ describe("GET /api/teams/favorites", () => {
   it("filters out deleted and archived entries", async () => {
     const now = new Date("2025-01-01T00:00:00Z");
     mockPrismaOrgMember.findMany.mockResolvedValue([
-      { orgId: "org-1", role: TEAM_ROLE.MEMBER },
+      { orgId: "team-1", role: TEAM_ROLE.MEMBER },
     ]);
     mockPrismaOrgPasswordFavorite.findMany.mockResolvedValue([
       {
         orgPasswordEntry: {
           id: "pw-del",
-          orgId: "org-1",
+          orgId: "team-1",
           entryType: ENTRY_TYPE.LOGIN,
           deletedAt: now,
           isArchived: false,
@@ -104,7 +104,7 @@ describe("GET /api/teams/favorites", () => {
           overviewAuthTag: "b".repeat(32),
           aadVersion: 1,
           orgKeyVersion: 1,
-          org: { id: "org-1", name: "My Org" },
+          org: { id: "team-1", name: "My Org" },
           tags: [],
           createdBy: { id: "u1", name: "User", image: null },
           updatedBy: null,
@@ -115,7 +115,7 @@ describe("GET /api/teams/favorites", () => {
       {
         orgPasswordEntry: {
           id: "pw-arch",
-          orgId: "org-1",
+          orgId: "team-1",
           entryType: ENTRY_TYPE.LOGIN,
           deletedAt: null,
           isArchived: true,
@@ -124,7 +124,7 @@ describe("GET /api/teams/favorites", () => {
           overviewAuthTag: "b".repeat(32),
           aadVersion: 1,
           orgKeyVersion: 1,
-          org: { id: "org-1", name: "My Org" },
+          org: { id: "team-1", name: "My Org" },
           tags: [],
           createdBy: { id: "u1", name: "User", image: null },
           updatedBy: null,

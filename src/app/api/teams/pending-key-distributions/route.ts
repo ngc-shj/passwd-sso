@@ -5,7 +5,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
 
 // GET /api/teams/pending-key-distributions
-// Returns all pending key distributions across all orgs where the user is OWNER/ADMIN.
+// Returns all pending key distributions across all teams where the user is OWNER/ADMIN.
 // Used for automatic background key distribution after vault unlock.
 export async function GET() {
   const session = await auth();
@@ -13,7 +13,7 @@ export async function GET() {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  // Find orgs where the user is OWNER or ADMIN and org is E2E-enabled
+  // Find teams where the user is OWNER or ADMIN and team is E2E-enabled
   const adminMemberships = await prisma.orgMember.findMany({
     where: {
       userId: session.user.id,
@@ -27,12 +27,12 @@ export async function GET() {
     return NextResponse.json([]);
   }
 
-  const orgIds = adminMemberships.map((m) => m.orgId);
+  const teamIds = adminMemberships.map((m) => m.orgId);
 
   // Find members who need key distribution
   const pendingMembers = await prisma.orgMember.findMany({
     where: {
-      orgId: { in: orgIds },
+      orgId: { in: teamIds },
       keyDistributed: false,
       deactivatedAt: null,
       user: {
@@ -58,7 +58,7 @@ export async function GET() {
 
   const result = pendingMembers.map((m) => ({
     memberId: m.id,
-    orgId: m.orgId,
+    teamId: m.orgId,
     userId: m.userId,
     ecdhPublicKey: m.user.ecdhPublicKey,
     orgKeyVersion: m.org.orgKeyVersion,

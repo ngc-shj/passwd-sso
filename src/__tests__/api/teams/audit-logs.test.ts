@@ -41,7 +41,7 @@ vi.mock("@/lib/team-auth", () => ({
 import { GET } from "@/app/api/teams/[teamId]/audit-logs/route";
 import { AUDIT_ACTION, AUDIT_ACTION_GROUP, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TEAM_ROLE } from "@/lib/constants";
 
-const TEAM_ID = "org-1";
+const TEAM_ID = "team-1";
 
 describe("GET /api/teams/[teamId]/audit-logs", () => {
   it("returns 401 when not authenticated", async () => {

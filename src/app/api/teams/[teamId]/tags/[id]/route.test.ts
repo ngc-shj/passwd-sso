@@ -34,7 +34,7 @@ vi.mock("@/lib/team-auth", () => ({
 import { PUT, DELETE } from "./route";
 import { TEAM_ROLE } from "@/lib/constants";
 
-const TEAM_ID = "org-123";
+const TEAM_ID = "team-123";
 const TAG_ID = "tag-456";
 
 describe("PUT /api/teams/[teamId]/tags/[id]", () => {

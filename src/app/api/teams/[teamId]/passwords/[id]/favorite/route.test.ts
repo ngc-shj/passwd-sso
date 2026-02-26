@@ -38,7 +38,7 @@ vi.mock("@/lib/team-auth", () => ({
 import { POST } from "./route";
 import { TEAM_ROLE } from "@/lib/constants";
 
-const TEAM_ID = "org-123";
+const TEAM_ID = "team-123";
 const PW_ID = "pw-456";
 
 describe("POST /api/teams/[teamId]/passwords/[id]/favorite", () => {

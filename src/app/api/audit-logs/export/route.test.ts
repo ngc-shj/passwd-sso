@@ -116,19 +116,19 @@ describe("POST /api/audit-logs/export", () => {
   it("logs org export when orgId provided and user is member", async () => {
     const res = await POST(
       createRequest("POST", URL, {
-        body: { orgId: "org-1", entryCount: 3, format: "json" },
+        body: { orgId: "team-1", entryCount: 3, format: "json" },
       })
     );
     expect(res.status).toBe(200);
     expect(mockRequireTeamPermission).toHaveBeenCalledWith(
       "user-1",
-      "org-1",
+      "team-1",
       TEAM_PERMISSION.ORG_UPDATE
     );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         scope: AUDIT_SCOPE.ORG,
-        orgId: "org-1",
+        orgId: "team-1",
       })
     );
   });
@@ -137,7 +137,7 @@ describe("POST /api/audit-logs/export", () => {
     mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const res = await POST(
       createRequest("POST", URL, {
-        body: { orgId: "org-1", entryCount: 1, format: "csv" },
+        body: { orgId: "team-1", entryCount: 1, format: "csv" },
       })
     );
     expect(res.status).toBe(403);
@@ -150,7 +150,7 @@ describe("POST /api/audit-logs/export", () => {
     mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
     const res = await POST(
       createRequest("POST", URL, {
-        body: { orgId: "org-other", entryCount: 1, format: "csv" },
+        body: { orgId: "team-other", entryCount: 1, format: "csv" },
       })
     );
     expect(res.status).toBe(404);

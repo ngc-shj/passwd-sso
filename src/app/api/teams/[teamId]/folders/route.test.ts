@@ -43,7 +43,7 @@ vi.mock("@/lib/folder-utils", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/folder-utils")>();
   return {
     ...original,
-    validateParentFolder: vi.fn().mockResolvedValue({ parentId: null, ownerId: "org-1" }),
+    validateParentFolder: vi.fn().mockResolvedValue({ parentId: null, ownerId: "team-1" }),
     validateFolderDepth: vi.fn().mockResolvedValue(1),
   };
 });
@@ -52,7 +52,7 @@ import { GET, POST } from "./route";
 import { validateParentFolder, validateFolderDepth } from "@/lib/folder-utils";
 import { TEAM_ROLE } from "@/lib/constants";
 
-const TEAM_ID = "org-1";
+const TEAM_ID = "team-1";
 const BASE = `http://localhost:3000/api/teams/${TEAM_ID}/folders`;
 const now = new Date("2025-06-01T00:00:00Z");
 
