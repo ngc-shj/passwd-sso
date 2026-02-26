@@ -80,7 +80,7 @@ describe("roleToScimGroup", () => {
 });
 
 describe("roleGroupId", () => {
-  it("returns deterministic UUID for the same org+role", () => {
+  it("returns deterministic UUID for the same team+role", () => {
     const id1 = roleGroupId("team-1", "ADMIN");
     const id2 = roleGroupId("team-1", "ADMIN");
     expect(id1).toBe(id2);
@@ -92,7 +92,7 @@ describe("roleGroupId", () => {
     expect(id1).not.toBe(id2);
   });
 
-  it("returns different UUIDs for different orgs", () => {
+  it("returns different UUIDs for different teams", () => {
     const id1 = roleGroupId("team-1", "ADMIN");
     const id2 = roleGroupId("team-2", "ADMIN");
     expect(id1).not.toBe(id2);

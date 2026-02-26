@@ -26,7 +26,7 @@ describe("GET /api/teams/pending-key-distributions", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns empty array when user is not admin of any E2E org", async () => {
+  it("returns empty array when user is not admin of any E2E team", async () => {
     mockPrismaOrgMember.findMany.mockResolvedValueOnce([]); // admin memberships
     const res = await GET();
     const json = await res.json();

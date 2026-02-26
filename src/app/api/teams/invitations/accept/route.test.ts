@@ -173,7 +173,7 @@ describe("POST /api/teams/invitations/accept", () => {
     expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
 
-  it("returns needsKeyDistribution for org accept", async () => {
+  it("returns needsKeyDistribution for team accept", async () => {
     mockPrismaOrgInvitation.findUnique.mockResolvedValue(validInvitation);
     mockPrismaOrgMember.findUnique.mockResolvedValue(null);
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key-jwk" });

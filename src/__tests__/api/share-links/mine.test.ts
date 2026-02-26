@@ -129,7 +129,7 @@ describe("GET /api/share-links/mine", () => {
     expect(json.items[0].isActive).toBe(false);
   });
 
-  it("includes teamName from orgPasswordEntry", async () => {
+  it("includes teamName from team password entry relation", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindMany.mockResolvedValue([
       makeShare({

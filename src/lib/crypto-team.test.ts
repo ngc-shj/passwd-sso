@@ -296,7 +296,7 @@ describe("crypto-team", () => {
       expect(result.keyVersion).toBe(1);
     });
 
-    it("member can unwrap org key from escrow result", async () => {
+    it("member can unwrap team key from escrow result", async () => {
       const teamKey = generateTeamSymmetricKey();
       const memberKeyPair = await generateECDHKeyPair();
       const memberPubJwk = await exportPublicKey(memberKeyPair.publicKey);
@@ -324,7 +324,7 @@ describe("crypto-team", () => {
       expect(unwrapped).toEqual(teamKey);
     });
 
-    it("derives same encryption key from unwrapped org key", async () => {
+    it("derives same encryption key from unwrapped team key", async () => {
       const teamKey = generateTeamSymmetricKey();
       const orgEncKey = await deriveTeamEncryptionKey(teamKey);
 
@@ -468,7 +468,7 @@ describe("crypto-team", () => {
       const entry = '{"title":"Team Secret","password":"team-pass-123"}';
       const encryptedEntry = await encryptOrgEntry(entry, orgEncKey);
 
-      // 3. Member joins → admin distributes org key
+      // 3. Member joins -> admin distributes team key
       const memberKeyPair = await generateECDHKeyPair();
       const memberPubJwk = await exportPublicKey(memberKeyPair.publicKey);
 

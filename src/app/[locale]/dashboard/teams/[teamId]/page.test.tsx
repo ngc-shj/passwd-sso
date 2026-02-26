@@ -73,23 +73,23 @@ import TeamDashboardPage from "./page";
 
 /* ---------- helpers ---------- */
 
-function makeOrgResponse(role = "OWNER") {
+function makeTeamResponse(role = "OWNER") {
   return {
     id: "team-1",
     name: "Test Team",
-    slug: "test-org",
+    slug: "test-team",
     role,
     memberCount: 3,
     passwordCount: 5,
   };
 }
 
-function setupFetch(orgRes = makeOrgResponse(), passwords: unknown[] = []) {
+function setupFetch(teamRes = makeTeamResponse(), passwords: unknown[] = []) {
   mockFetch.mockImplementation((url: string) => {
     if (url.includes("/api/teams/team-1") && !url.includes("/passwords")) {
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve(orgRes),
+        json: () => Promise.resolve(teamRes),
       });
     }
     if (url.includes("/passwords")) {
@@ -294,7 +294,7 @@ describe("TeamDashboardPage — role-based rendering", () => {
   });
 
   it("shows newItem button for OWNER role", async () => {
-    setupFetch(makeOrgResponse("OWNER"));
+    setupFetch(makeTeamResponse("OWNER"));
 
     let view: ReturnType<typeof render>;
     await act(async () => {
@@ -308,7 +308,7 @@ describe("TeamDashboardPage — role-based rendering", () => {
   });
 
   it("does NOT show newItem button for VIEWER role", async () => {
-    setupFetch(makeOrgResponse("VIEWER"));
+    setupFetch(makeTeamResponse("VIEWER"));
 
     let view: ReturnType<typeof render>;
     await act(async () => {
