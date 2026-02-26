@@ -3,31 +3,31 @@ import { buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
-interface SaveOrgEntryParams {
+interface SaveTeamEntryParams {
   mode: "create" | "edit";
   teamId: string;
   initialId?: string;
-  orgEncryptionKey: CryptoKey;
-  orgKeyVersion: number;
+  teamEncryptionKey: CryptoKey;
+  teamKeyVersion: number;
   fullBlob: string;
   overviewBlob: string;
   entryType?: EntryTypeValue;
   tagIds: string[];
-  orgFolderId?: string | null;
+  teamFolderId?: string | null;
 }
 
-export async function saveOrgEntry({
+export async function saveTeamEntry({
   mode,
   teamId,
   initialId,
-  orgEncryptionKey,
-  orgKeyVersion,
+  teamEncryptionKey,
+  teamKeyVersion,
   fullBlob,
   overviewBlob,
   entryType,
   tagIds,
-  orgFolderId,
-}: SaveOrgEntryParams): Promise<Response> {
+  teamFolderId,
+}: SaveTeamEntryParams): Promise<Response> {
   if (mode === "edit" && !initialId) {
     throw new Error("initialId is required for edit mode");
   }
@@ -37,14 +37,14 @@ export async function saveOrgEntry({
   const blobAAD = buildOrgEntryAAD(teamId, entryId, "blob");
   const overviewAAD = buildOrgEntryAAD(teamId, entryId, "overview");
 
-  const encryptedBlob = await encryptData(fullBlob, orgEncryptionKey, blobAAD);
-  const encryptedOverview = await encryptData(overviewBlob, orgEncryptionKey, overviewAAD);
+  const encryptedBlob = await encryptData(fullBlob, teamEncryptionKey, blobAAD);
+  const encryptedOverview = await encryptData(overviewBlob, teamEncryptionKey, overviewAAD);
 
   const body: Record<string, unknown> = {
     encryptedBlob,
     encryptedOverview,
     aadVersion: AAD_VERSION,
-    orgKeyVersion,
+    orgKeyVersion: teamKeyVersion,
     tagIds,
   };
 
@@ -52,7 +52,7 @@ export async function saveOrgEntry({
   if (mode === "create") body.id = entryId;
 
   if (entryType !== undefined) body.entryType = entryType;
-  if (orgFolderId !== undefined) body.orgFolderId = orgFolderId;
+  if (teamFolderId !== undefined) body.orgFolderId = teamFolderId;
 
   const endpoint = mode === "create"
     ? apiPath.teamPasswords(teamId)

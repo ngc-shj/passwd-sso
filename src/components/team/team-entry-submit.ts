@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { saveOrgEntry } from "@/lib/org-entry-save";
+import { saveTeamEntry } from "@/lib/team-entry-save";
 import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
@@ -39,17 +39,17 @@ export async function executeTeamEntrySubmit({
 }: ExecuteTeamEntrySubmitArgs): Promise<void> {
   setSaving(true);
   try {
-    const res = await saveOrgEntry({
+    const res = await saveTeamEntry({
       mode: isEdit ? "edit" : "create",
       teamId,
       initialId: editData?.id,
-      orgEncryptionKey: teamEncryptionKey,
-      orgKeyVersion: teamKeyVersion,
+      teamEncryptionKey,
+      teamKeyVersion,
       fullBlob,
       overviewBlob,
       entryType,
       tagIds,
-      orgFolderId: teamFolderId,
+      teamFolderId,
     });
 
     if (!res.ok) throw new Error("Failed");

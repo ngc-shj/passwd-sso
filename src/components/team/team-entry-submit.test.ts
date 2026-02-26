@@ -10,12 +10,12 @@ vi.mock("sonner", () => ({
   },
 }));
 
-const { mockSaveOrgEntry } = vi.hoisted(() => ({
-  mockSaveOrgEntry: vi.fn(),
+const { mockSaveTeamEntry } = vi.hoisted(() => ({
+  mockSaveTeamEntry: vi.fn(),
 }));
 
-vi.mock("@/lib/org-entry-save", () => ({
-  saveOrgEntry: mockSaveOrgEntry,
+vi.mock("@/lib/team-entry-save", () => ({
+  saveTeamEntry: mockSaveTeamEntry,
 }));
 
 import { executeTeamEntrySubmit } from "@/components/team/team-entry-submit";
@@ -26,7 +26,7 @@ describe("executeTeamEntrySubmit", () => {
   beforeEach(() => {
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
-    mockSaveOrgEntry.mockReset();
+    mockSaveTeamEntry.mockReset();
     vi.restoreAllMocks();
   });
 
@@ -35,7 +35,7 @@ describe("executeTeamEntrySubmit", () => {
     const onSaved = vi.fn();
     const handleOpenChange = vi.fn();
 
-    mockSaveOrgEntry.mockResolvedValue({ ok: true });
+    mockSaveTeamEntry.mockResolvedValue({ ok: true });
 
     await executeTeamEntrySubmit({
       teamId: "team-1",
@@ -60,7 +60,7 @@ describe("executeTeamEntrySubmit", () => {
   it("handles error and resets saving", async () => {
     const setSaving = vi.fn();
 
-    mockSaveOrgEntry.mockResolvedValue({ ok: false });
+    mockSaveTeamEntry.mockResolvedValue({ ok: false });
 
     await executeTeamEntrySubmit({
       teamId: "team-1",

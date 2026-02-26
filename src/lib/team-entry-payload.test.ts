@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
+import { buildTeamEntryPayload } from "@/lib/team-entry-payload";
 
-describe("buildOrgEntryPayload", () => {
+describe("buildTeamEntryPayload", () => {
   it("builds login blobs with totp null and non-empty custom fields only", () => {
-    const { fullBlob, overviewBlob } = buildOrgEntryPayload({
+    const { fullBlob, overviewBlob } = buildTeamEntryPayload({
       entryType: ENTRY_TYPE.LOGIN,
       title: "  A  ",
       notes: "  ",
@@ -35,7 +35,7 @@ describe("buildOrgEntryPayload", () => {
   });
 
   it("builds secure note blobs with entryType", () => {
-    const { fullBlob, overviewBlob } = buildOrgEntryPayload({
+    const { fullBlob, overviewBlob } = buildTeamEntryPayload({
       entryType: ENTRY_TYPE.SECURE_NOTE,
       title: "Note",
       notes: "",
@@ -53,7 +53,7 @@ describe("buildOrgEntryPayload", () => {
   });
 
   it("builds credit card blobs with explicit entryType", () => {
-    const { fullBlob } = buildOrgEntryPayload({
+    const { fullBlob } = buildTeamEntryPayload({
       entryType: ENTRY_TYPE.CREDIT_CARD,
       title: "Card",
       notes: "",
@@ -74,7 +74,7 @@ describe("buildOrgEntryPayload", () => {
   });
 
   it("builds identity blobs with trimmed fields", () => {
-    const { fullBlob, overviewBlob } = buildOrgEntryPayload({
+    const { fullBlob, overviewBlob } = buildTeamEntryPayload({
       entryType: ENTRY_TYPE.IDENTITY,
       title: "My ID",
       notes: "",
@@ -102,7 +102,7 @@ describe("buildOrgEntryPayload", () => {
   });
 
   it("builds passkey blobs with all fields", () => {
-    const { fullBlob, overviewBlob } = buildOrgEntryPayload({
+    const { fullBlob, overviewBlob } = buildTeamEntryPayload({
       entryType: ENTRY_TYPE.PASSKEY,
       title: "GitHub Passkey",
       notes: "",

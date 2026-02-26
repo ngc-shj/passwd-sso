@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
+import { validateTeamEntryBeforeSubmit } from "@/lib/team-entry-validation";
 
-describe("validateOrgEntryBeforeSubmit", () => {
+describe("validateTeamEntryBeforeSubmit", () => {
   it("validates passkey required fields", () => {
     expect(
-      validateOrgEntryBeforeSubmit({
+      validateTeamEntryBeforeSubmit({
         entryType: ENTRY_TYPE.PASSKEY,
         title: "t",
         password: "",
@@ -18,7 +18,7 @@ describe("validateOrgEntryBeforeSubmit", () => {
     ).toBe(true);
 
     expect(
-      validateOrgEntryBeforeSubmit({
+      validateTeamEntryBeforeSubmit({
         entryType: ENTRY_TYPE.PASSKEY,
         title: "t",
         password: "",
@@ -32,7 +32,7 @@ describe("validateOrgEntryBeforeSubmit", () => {
   });
 
   it("validates identity date constraints", () => {
-    const futureDob = validateOrgEntryBeforeSubmit({
+    const futureDob = validateTeamEntryBeforeSubmit({
       entryType: ENTRY_TYPE.IDENTITY,
       title: "id",
       password: "",
@@ -46,7 +46,7 @@ describe("validateOrgEntryBeforeSubmit", () => {
     expect(futureDob.ok).toBe(false);
     expect(futureDob.dobFuture).toBe(true);
 
-    const invalidRange = validateOrgEntryBeforeSubmit({
+    const invalidRange = validateTeamEntryBeforeSubmit({
       entryType: ENTRY_TYPE.IDENTITY,
       title: "id",
       password: "",
@@ -62,7 +62,7 @@ describe("validateOrgEntryBeforeSubmit", () => {
   });
 
   it("validates login requires password", () => {
-    const ok = validateOrgEntryBeforeSubmit({
+    const ok = validateTeamEntryBeforeSubmit({
       entryType: ENTRY_TYPE.LOGIN,
       title: "login",
       password: "pw",
@@ -74,7 +74,7 @@ describe("validateOrgEntryBeforeSubmit", () => {
     });
     expect(ok.ok).toBe(true);
 
-    const ng = validateOrgEntryBeforeSubmit({
+    const ng = validateTeamEntryBeforeSubmit({
       entryType: ENTRY_TYPE.LOGIN,
       title: "login",
       password: "",

@@ -1,5 +1,5 @@
-import { buildOrgEntryPayload } from "@/lib/org-entry-payload";
-import { validateOrgEntryBeforeSubmit } from "@/lib/org-entry-validation";
+import { buildTeamEntryPayload } from "@/lib/team-entry-payload";
+import { validateTeamEntryBeforeSubmit } from "@/lib/team-entry-validation";
 import { extractTagIds } from "@/lib/entry-form-helpers";
 import { detectCardBrand, formatCardNumber, normalizeCardBrand, normalizeCardNumber } from "@/lib/credit-card";
 import { executeTeamEntrySubmit } from "@/components/team/team-entry-submit";
@@ -133,7 +133,7 @@ export async function submitTeamPasswordForm({
   handleOpenChange,
   onSaved,
 }: SubmitTeamPasswordFormArgs): Promise<void> {
-  const validation = validateOrgEntryBeforeSubmit({
+  const validation = validateTeamEntryBeforeSubmit({
     entryType: effectiveEntryType,
     title,
     password,
@@ -152,7 +152,7 @@ export async function submitTeamPasswordForm({
   const tagIds = extractTagIds(selectedTags);
   const tagNames = selectedTags.map((t) => ({ name: t.name, color: t.color }));
 
-  const { fullBlob, overviewBlob } = buildOrgEntryPayload({
+  const { fullBlob, overviewBlob } = buildTeamEntryPayload({
     entryType: effectiveEntryType,
     title,
     notes,

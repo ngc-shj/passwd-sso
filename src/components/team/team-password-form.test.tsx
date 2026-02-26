@@ -31,8 +31,8 @@ vi.mock("@/lib/team-vault-context", () => ({
 }));
 
 // Mock save entry helper to skip encryption (this is a UI test, not a crypto test)
-vi.mock("@/lib/org-entry-save", () => ({
-  saveOrgEntry: vi.fn(async (params: Record<string, unknown>) => {
+vi.mock("@/lib/team-entry-save", () => ({
+  saveTeamEntry: vi.fn(async (params: Record<string, unknown>) => {
     const teamId = params.teamId as string;
     const initialId = params.initialId as string | undefined;
     const mode = params.mode as string;
@@ -43,7 +43,7 @@ vi.mock("@/lib/org-entry-save", () => ({
       method: mode === "create" ? "POST" : "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        teamFolderId: params.teamFolderId ?? params.orgFolderId ?? null,
+        teamFolderId: params.teamFolderId ?? null,
         tagIds: params.tagIds,
         entryType: params.entryType,
       }),

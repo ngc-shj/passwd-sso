@@ -1,7 +1,7 @@
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 
-interface ValidateOrgEntryInput {
+interface ValidateTeamEntryInput {
   entryType: EntryTypeValue;
   title: string;
   password: string;
@@ -13,15 +13,15 @@ interface ValidateOrgEntryInput {
   todayIsoDate?: string;
 }
 
-interface ValidateOrgEntryResult {
+interface ValidateTeamEntryResult {
   ok: boolean;
   dobFuture: boolean;
   expiryBeforeIssue: boolean;
 }
 
-export function validateOrgEntryBeforeSubmit(
-  input: ValidateOrgEntryInput
-): ValidateOrgEntryResult {
+export function validateTeamEntryBeforeSubmit(
+  input: ValidateTeamEntryInput
+): ValidateTeamEntryResult {
   const today = input.todayIsoDate ?? new Date().toISOString().slice(0, 10);
   const title = input.title.trim();
 

@@ -3,7 +3,7 @@ import type { EntryTypeValue } from "@/lib/constants";
 import { filterNonEmptyCustomFields, parseUrlHost } from "@/lib/entry-form-helpers";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 
-export interface BuildOrgEntryPayloadInput {
+export interface BuildTeamEntryPayloadInput {
   entryType: EntryTypeValue;
   title: string;
   notes: string;
@@ -45,8 +45,8 @@ export interface BuildOrgEntryPayloadInput {
  * Build fullBlob + overviewBlob JSON strings for E2E encryption.
  * The blobs are encrypted client-side before sending to the server.
  */
-export function buildOrgEntryPayload(
-  input: BuildOrgEntryPayloadInput
+export function buildTeamEntryPayload(
+  input: BuildTeamEntryPayloadInput
 ): { fullBlob: string; overviewBlob: string } {
   const tags = input.tagNames;
   const title = input.title.trim();
