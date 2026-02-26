@@ -6,7 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import {
   TEAM_PERMISSION,
   AUDIT_SCOPE,
-  AUDIT_ACTION_GROUPS_ORG,
+  AUDIT_ACTION_GROUPS_TEAM,
   AUDIT_ACTION_VALUES,
   AUDIT_TARGET_TYPE,
 } from "@/lib/constants";
@@ -59,8 +59,8 @@ export async function GET(req: NextRequest, { params }: Params) {
     }
     where.action = { in: requested };
   } else if (action) {
-    if (AUDIT_ACTION_GROUPS_ORG[action]) {
-      where.action = { in: AUDIT_ACTION_GROUPS_ORG[action] };
+    if (AUDIT_ACTION_GROUPS_TEAM[action]) {
+      where.action = { in: AUDIT_ACTION_GROUPS_TEAM[action] };
     } else if (VALID_ACTIONS.has(action as AuditAction)) {
       where.action = action;
     }

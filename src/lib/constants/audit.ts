@@ -139,7 +139,7 @@ export const AUDIT_ACTION_GROUP = {
   ATTACHMENT: "group:attachment",
   FOLDER: "group:folder",
   HISTORY: "group:history",
-  ORG: "group:org",
+  TEAM: "group:team",
   SHARE: "group:share",
   SEND: "group:send",
   EMERGENCY: "group:emergency",
@@ -182,7 +182,7 @@ export const AUDIT_ACTION_GROUPS_PERSONAL: Record<string, AuditAction[]> = {
     AUDIT_ACTION.ATTACHMENT_UPLOAD,
     AUDIT_ACTION.ATTACHMENT_DELETE,
   ],
-  [AUDIT_ACTION_GROUP.ORG]: [
+  [AUDIT_ACTION_GROUP.TEAM]: [
     AUDIT_ACTION.ORG_MEMBER_INVITE,
     AUDIT_ACTION.ORG_MEMBER_REMOVE,
     AUDIT_ACTION.ORG_ROLE_UPDATE,
@@ -216,7 +216,7 @@ export const AUDIT_ACTION_GROUPS_PERSONAL: Record<string, AuditAction[]> = {
   ],
 };
 
-export const AUDIT_ACTION_GROUPS_ORG: Record<string, AuditAction[]> = {
+export const AUDIT_ACTION_GROUPS_TEAM: Record<string, AuditAction[]> = {
   [AUDIT_ACTION_GROUP.ENTRY]: [
     AUDIT_ACTION.ENTRY_CREATE,
     AUDIT_ACTION.ENTRY_UPDATE,
@@ -245,7 +245,7 @@ export const AUDIT_ACTION_GROUPS_ORG: Record<string, AuditAction[]> = {
     AUDIT_ACTION.ENTRY_HISTORY_RESTORE,
     AUDIT_ACTION.HISTORY_PURGE,
   ],
-  [AUDIT_ACTION_GROUP.ORG]: [
+  [AUDIT_ACTION_GROUP.TEAM]: [
     AUDIT_ACTION.ORG_MEMBER_INVITE,
     AUDIT_ACTION.ORG_MEMBER_REMOVE,
     AUDIT_ACTION.ORG_ROLE_UPDATE,
