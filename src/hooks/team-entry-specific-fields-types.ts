@@ -1,17 +1,17 @@
 "use client";
 
 import type { ComponentProps } from "react";
-import { OrgEntrySpecificFields } from "@/components/team/team-entry-specific-fields";
-import type { OrgPasswordFormTranslations } from "@/hooks/entry-form-translations";
+import { TeamEntrySpecificFields } from "@/components/team/team-entry-specific-fields";
+import type { TeamPasswordFormTranslations } from "@/hooks/entry-form-translations";
 
-export type OrgEntrySpecificFieldsProps = ComponentProps<typeof OrgEntrySpecificFields>;
+export type TeamEntrySpecificFieldsProps = ComponentProps<typeof TeamEntrySpecificFields>;
 
-export type OrgEntrySpecificFieldTranslations = Pick<
-  OrgPasswordFormTranslations,
+export type TeamEntrySpecificFieldTranslations = Pick<
+  TeamPasswordFormTranslations,
   "t" | "tn" | "tcc" | "ti" | "tpk"
 >;
 
-export type OrgEntrySpecificComputedProps =
+export type TeamEntrySpecificComputedProps =
   | "notesLabel"
   | "notesPlaceholder"
   | "titleLabel"
@@ -49,14 +49,14 @@ export type OrgEntrySpecificComputedProps =
   | "deviceInfoPlaceholder"
   | "passkeyLabels";
 
-export type OrgEntrySpecificFieldsBuilderArgs = Omit<
-  OrgEntrySpecificFieldsProps,
-  OrgEntrySpecificComputedProps
+export type TeamEntrySpecificFieldsBuilderArgs = Omit<
+  TeamEntrySpecificFieldsProps,
+  TeamEntrySpecificComputedProps
 > & {
   entryCopy: {
     notesLabel: string;
     notesPlaceholder: string;
   };
-  translations: OrgEntrySpecificFieldTranslations;
+  translations: TeamEntrySpecificFieldTranslations;
   lengthHint: string;
 };

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
 import {
   handleOrgCardNumberChange,
-  submitOrgPasswordForm,
+  submitTeamPasswordForm,
 } from "@/components/team/team-password-form-actions";
 
 const executeOrgEntrySubmitMock = vi.fn();
@@ -52,14 +52,14 @@ describe("org-password-form-actions", () => {
     const setDobError = vi.fn();
     const setExpiryError = vi.fn();
 
-    await submitOrgPasswordForm({
+    await submitTeamPasswordForm({
       orgId: "org-1",
       isEdit: false,
       effectiveEntryType: ENTRY_TYPE.IDENTITY,
       title: "id",
       notes: "",
       selectedTags: [],
-      orgFolderId: null,
+      teamFolderId: null,
       username: "",
       password: "",
       url: "",

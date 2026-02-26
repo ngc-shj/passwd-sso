@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { buildOrgSubmitArgs } from "@/hooks/team-password-form-submit-args";
+import { buildTeamSubmitArgs } from "@/hooks/team-password-form-submit-args";
 
 function buildDefaultParams(overrides: Record<string, unknown> = {}) {
   return {
@@ -28,7 +28,7 @@ function buildDefaultParams(overrides: Record<string, unknown> = {}) {
     handleOpenChange: vi.fn(),
     setters: { setDobError: vi.fn(), setExpiryError: vi.fn(), setSaving: vi.fn() },
     entryValues: {
-      title: "title", notes: "notes", selectedTags: [], orgFolderId: null,
+      title: "title", notes: "notes", selectedTags: [], teamFolderId: null,
       username: "user", password: "pass", url: "https://example.com",
       customFields: [], totp: null, content: "",
       cardholderName: "", cardNumber: "", brand: "",
@@ -45,9 +45,9 @@ function buildDefaultParams(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("buildOrgSubmitArgs", () => {
+describe("buildTeamSubmitArgs", () => {
   it("maps login entry type correctly", () => {
-    const args = buildOrgSubmitArgs(buildDefaultParams() as Parameters<typeof buildOrgSubmitArgs>[0]);
+    const args = buildTeamSubmitArgs(buildDefaultParams() as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.effectiveEntryType).toBe(ENTRY_TYPE.LOGIN);
     expect(args.isIdentity).toBe(false);
     expect(args.title).toBe("title");
@@ -61,7 +61,7 @@ describe("buildOrgSubmitArgs", () => {
     const onSaved = vi.fn();
     const handleOpenChange = vi.fn();
 
-    const args = buildOrgSubmitArgs({
+    const args = buildTeamSubmitArgs({
       orgId: "org-1",
       onSaved,
       isEdit: true,
@@ -96,7 +96,7 @@ describe("buildOrgSubmitArgs", () => {
         title: "title",
         notes: "notes",
         selectedTags: [],
-        orgFolderId: null,
+        teamFolderId: null,
         username: "user",
         password: "pass",
         url: "https://example.com",
@@ -146,23 +146,23 @@ describe("buildOrgSubmitArgs", () => {
 
   it("sets isEdit and editData for edit mode", () => {
     const editData = { id: "e-1", title: "old", username: "u", password: "p", url: null, notes: null };
-    const args = buildOrgSubmitArgs(buildDefaultParams({
+    const args = buildTeamSubmitArgs(buildDefaultParams({
       isEdit: true,
       editData,
-    }) as Parameters<typeof buildOrgSubmitArgs>[0]);
+    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.isEdit).toBe(true);
     expect(args.editData).toBe(editData);
   });
 
   it("passes cardNumberValid through", () => {
-    const args = buildOrgSubmitArgs(buildDefaultParams({
+    const args = buildTeamSubmitArgs(buildDefaultParams({
       cardNumberValid: false,
-    }) as Parameters<typeof buildOrgSubmitArgs>[0]);
+    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.cardNumberValid).toBe(false);
   });
 
   it("maps credit card entry type", () => {
-    const args = buildOrgSubmitArgs(buildDefaultParams({
+    const args = buildTeamSubmitArgs(buildDefaultParams({
       effectiveEntryType: ENTRY_TYPE.CREDIT_CARD,
       entryKindState: {
         entryKind: "creditCard",
@@ -172,13 +172,13 @@ describe("buildOrgSubmitArgs", () => {
         isIdentity: false,
         isPasskey: false,
       },
-    }) as Parameters<typeof buildOrgSubmitArgs>[0]);
+    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.effectiveEntryType).toBe(ENTRY_TYPE.CREDIT_CARD);
     expect(args.isIdentity).toBe(false);
   });
 
   it("maps secure note entry type", () => {
-    const args = buildOrgSubmitArgs(buildDefaultParams({
+    const args = buildTeamSubmitArgs(buildDefaultParams({
       effectiveEntryType: ENTRY_TYPE.SECURE_NOTE,
       entryKindState: {
         entryKind: "secureNote",
@@ -188,7 +188,7 @@ describe("buildOrgSubmitArgs", () => {
         isIdentity: false,
         isPasskey: false,
       },
-    }) as Parameters<typeof buildOrgSubmitArgs>[0]);
+    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.effectiveEntryType).toBe(ENTRY_TYPE.SECURE_NOTE);
     expect(args.isIdentity).toBe(false);
   });

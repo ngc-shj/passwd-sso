@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { apiPath } from "@/lib/constants";
 import type { OrgAttachmentMeta } from "@/components/team/team-attachment-section";
 
-export function useOrgAttachments(open: boolean, teamId: string, entryId?: string) {
+export function useTeamAttachments(open: boolean, teamId: string, entryId?: string) {
   const [attachments, setAttachments] = useState<OrgAttachmentMeta[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
@@ -29,3 +29,5 @@ export function useOrgAttachments(open: boolean, teamId: string, entryId?: strin
 
   return { attachments, setAttachments, fetchError };
 }
+
+export const useOrgAttachments = useTeamAttachments;

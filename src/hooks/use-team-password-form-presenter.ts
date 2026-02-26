@@ -5,31 +5,31 @@ import { getOrgCardValidationState } from "@/components/team/team-credit-card-va
 import { buildOrgEntryCopy } from "@/components/team/team-entry-copy";
 import { buildOrgEntryCopyData } from "@/components/team/team-entry-copy-data";
 import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
-import { buildOrgEntrySpecificFieldsPropsFromState } from "@/hooks/team-entry-specific-fields-props";
+import { buildTeamEntrySpecificFieldsPropsFromState } from "@/hooks/team-entry-specific-fields-props";
 import {
-  buildOrgCardNumberChangeCallback,
-  buildOrgCardPresentationProps,
+  buildTeamCardNumberChangeCallback,
+  buildTeamCardPresentationProps,
 } from "@/hooks/team-password-form-presenter-card";
 import {
   selectOrgEntryFieldValues,
-  type OrgPasswordFormState,
+  type TeamPasswordFormState,
 } from "@/hooks/use-team-password-form-state";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
-import type { OrgPasswordFormTranslations } from "@/hooks/entry-form-translations";
+import type { TeamPasswordFormTranslations } from "@/hooks/entry-form-translations";
 
-export interface OrgPasswordFormPresenterArgs {
+export interface TeamPasswordFormPresenterArgs {
   isEdit: boolean;
   entryKind: OrgEntryKindState["entryKind"];
-  translations: OrgPasswordFormTranslations;
-  formState: OrgPasswordFormState;
+  translations: TeamPasswordFormTranslations;
+  formState: TeamPasswordFormState;
 }
 
-export function useOrgPasswordFormPresenter({
+export function useTeamPasswordFormPresenter({
   isEdit,
   entryKind,
   translations,
   formState,
-}: OrgPasswordFormPresenterArgs) {
+}: TeamPasswordFormPresenterArgs) {
   const { t, ti, tn, tcc, tpk, tGen } = translations;
   const { values, setters } = formState;
   const entryValues = selectOrgEntryFieldValues(values);
@@ -43,7 +43,7 @@ export function useOrgPasswordFormPresenter({
     hasBrandHint,
   } = getOrgCardValidationState(values.cardNumber, values.brand);
 
-  const handleCardNumberChange = buildOrgCardNumberChangeCallback(values, setters);
+  const handleCardNumberChange = buildTeamCardNumberChangeCallback(values, setters);
 
   const generatorSummary = useMemo(
     () =>
@@ -64,13 +64,13 @@ export function useOrgPasswordFormPresenter({
     [isEdit, entryKind, t, tn, tcc, ti, tpk],
   );
 
-  const cardPresentation = buildOrgCardPresentationProps({
+  const cardPresentation = buildTeamCardPresentationProps({
     cardValidation,
     hasBrandHint,
     tcc,
   });
 
-  const entrySpecificFieldsProps = buildOrgEntrySpecificFieldsPropsFromState({
+  const entrySpecificFieldsProps = buildTeamEntrySpecificFieldsPropsFromState({
     entryKind,
     entryCopy,
     translations: { t, tn, tcc, ti, tpk },

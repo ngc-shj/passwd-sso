@@ -1,23 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  buildOrgEntrySpecificFieldsBuilderArgsFromState,
-  buildOrgEntrySpecificFieldsPropsFromState,
+  buildTeamEntrySpecificFieldsBuilderArgsFromState,
+  buildTeamEntrySpecificFieldsPropsFromState,
 } from "@/hooks/team-entry-specific-fields-props";
-import { buildOrgEntrySpecificCallbacks } from "@/hooks/team-entry-specific-fields-callbacks";
+import { buildTeamEntrySpecificCallbacks } from "@/hooks/team-entry-specific-fields-callbacks";
 import type {
-  OrgPasswordFormValues,
-  OrgPasswordFormSettersState,
+  TeamPasswordFormValues,
+  TeamPasswordFormSettersState,
 } from "@/hooks/use-team-password-form-state";
 
-describe("buildOrgEntrySpecificFieldsPropsFromState", () => {
+describe("buildTeamEntrySpecificFieldsPropsFromState", () => {
   it("builds complete builder args from state and callbacks", () => {
     const { values, setters } = createState();
     values.title = "Entry";
     values.brand = "Visa";
     const onCardNumberChange = vi.fn();
-    const callbacks = buildOrgEntrySpecificCallbacks(values, setters);
+    const callbacks = buildTeamEntrySpecificCallbacks(values, setters);
 
-    const args = buildOrgEntrySpecificFieldsBuilderArgsFromState({
+    const args = buildTeamEntrySpecificFieldsBuilderArgsFromState({
       entryKind: "creditCard",
       entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
       translations: {
@@ -49,7 +49,7 @@ describe("buildOrgEntrySpecificFieldsPropsFromState", () => {
 
   it("sets brand and switches source to manual on brand change", () => {
     const { values, setters } = createState();
-    const result = buildOrgEntrySpecificFieldsPropsFromState({
+    const result = buildTeamEntrySpecificFieldsPropsFromState({
       entryKind: "creditCard",
       entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
       translations: {
@@ -78,7 +78,7 @@ describe("buildOrgEntrySpecificFieldsPropsFromState", () => {
 
   it("clears identity errors when date fields change", () => {
     const { values, setters } = createState();
-    const result = buildOrgEntrySpecificFieldsPropsFromState({
+    const result = buildTeamEntrySpecificFieldsPropsFromState({
       entryKind: "identity",
       entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
       translations: {
@@ -115,7 +115,7 @@ describe("buildOrgEntrySpecificFieldsPropsFromState", () => {
 
   it("uses generator output to update password and generator settings", () => {
     const { values, setters } = createState();
-    const result = buildOrgEntrySpecificFieldsPropsFromState({
+    const result = buildTeamEntrySpecificFieldsPropsFromState({
       entryKind: "password",
       entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
       translations: {
@@ -137,7 +137,7 @@ describe("buildOrgEntrySpecificFieldsPropsFromState", () => {
       lengthHint: "16",
     });
 
-    const nextSettings = { length: 24 } as OrgPasswordFormValues["generatorSettings"];
+    const nextSettings = { length: 24 } as TeamPasswordFormValues["generatorSettings"];
     result.onGeneratorUse("generated-password", nextSettings);
     expect(setters.setPassword).toHaveBeenCalledWith("generated-password");
     expect(setters.setShowPassword).toHaveBeenCalledWith(true);
@@ -152,7 +152,7 @@ describe("buildOrgEntrySpecificFieldsPropsFromState", () => {
     values.showIdNumber = true;
     values.showCredentialId = true;
 
-    const result = buildOrgEntrySpecificFieldsPropsFromState({
+    const result = buildTeamEntrySpecificFieldsPropsFromState({
       entryKind: "passkey",
       entryCopy: { notesLabel: "notes", notesPlaceholder: "notes" },
       translations: {
@@ -188,8 +188,8 @@ describe("buildOrgEntrySpecificFieldsPropsFromState", () => {
 });
 
 function createState(): {
-  values: OrgPasswordFormValues;
-  setters: OrgPasswordFormSettersState;
+  values: TeamPasswordFormValues;
+  setters: TeamPasswordFormSettersState;
 } {
   return {
     values: {
@@ -207,7 +207,7 @@ function createState(): {
       url: "",
       notes: "",
       selectedTags: [],
-      generatorSettings: {} as OrgPasswordFormValues["generatorSettings"],
+      generatorSettings: {} as TeamPasswordFormValues["generatorSettings"],
       customFields: [],
       totp: null,
       showTotpInput: false,
@@ -234,7 +234,7 @@ function createState(): {
       credentialId: "",
       creationDate: "",
       deviceInfo: "",
-      orgFolderId: null,
+      teamFolderId: null,
     },
     setters: {
       setSaving: vi.fn(),

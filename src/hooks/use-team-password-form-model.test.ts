@@ -3,47 +3,47 @@
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { useOrgPasswordFormModel } from "@/hooks/use-team-password-form-model";
+import { useTeamPasswordFormModel } from "@/hooks/use-team-password-form-model";
 
-const useOrgPasswordFormStateMock = vi.fn();
-const useOrgAttachmentsMock = vi.fn();
-const useOrgFoldersMock = vi.fn();
-const useOrgPasswordFormLifecycleMock = vi.fn();
-const useOrgPasswordFormControllerMock = vi.fn();
+const useTeamPasswordFormStateMock = vi.fn();
+const useTeamAttachmentsMock = vi.fn();
+const useTeamFoldersMock = vi.fn();
+const useTeamPasswordFormLifecycleMock = vi.fn();
+const useTeamPasswordFormControllerMock = vi.fn();
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
 vi.mock("@/hooks/use-team-password-form-state", () => ({
-  useOrgPasswordFormState: (...args: unknown[]) => useOrgPasswordFormStateMock(...args),
+  useTeamPasswordFormState: (...args: unknown[]) => useTeamPasswordFormStateMock(...args),
 }));
 
 vi.mock("@/hooks/use-team-attachments", () => ({
-  useOrgAttachments: (...args: unknown[]) => useOrgAttachmentsMock(...args),
+  useTeamAttachments: (...args: unknown[]) => useTeamAttachmentsMock(...args),
 }));
 
 vi.mock("@/hooks/use-team-folders", () => ({
-  useOrgFolders: (...args: unknown[]) => useOrgFoldersMock(...args),
+  useTeamFolders: (...args: unknown[]) => useTeamFoldersMock(...args),
 }));
 
 vi.mock("@/hooks/use-team-password-form-lifecycle", () => ({
-  useOrgPasswordFormLifecycle: (...args: unknown[]) => useOrgPasswordFormLifecycleMock(...args),
+  useTeamPasswordFormLifecycle: (...args: unknown[]) => useTeamPasswordFormLifecycleMock(...args),
 }));
 
 vi.mock("@/hooks/use-team-password-form-controller", () => ({
-  useOrgPasswordFormController: (...args: unknown[]) => useOrgPasswordFormControllerMock(...args),
+  useTeamPasswordFormController: (...args: unknown[]) => useTeamPasswordFormControllerMock(...args),
 }));
 
-describe("useOrgPasswordFormModel", () => {
+describe("useTeamPasswordFormModel", () => {
   beforeEach(() => {
-    useOrgPasswordFormStateMock.mockReset();
-    useOrgAttachmentsMock.mockReset();
-    useOrgFoldersMock.mockReset();
-    useOrgPasswordFormLifecycleMock.mockReset();
-    useOrgPasswordFormControllerMock.mockReset();
+    useTeamPasswordFormStateMock.mockReset();
+    useTeamAttachmentsMock.mockReset();
+    useTeamFoldersMock.mockReset();
+    useTeamPasswordFormLifecycleMock.mockReset();
+    useTeamPasswordFormControllerMock.mockReset();
 
-    useOrgPasswordFormStateMock.mockReturnValue({
+    useTeamPasswordFormStateMock.mockReturnValue({
       values: {
         saving: false,
         title: "t",
@@ -51,7 +51,7 @@ describe("useOrgPasswordFormModel", () => {
         customFields: [],
         totp: null,
         showTotpInput: false,
-        orgFolderId: null,
+        teamFolderId: null,
       },
       setters: {
         setTitle: vi.fn(),
@@ -62,10 +62,10 @@ describe("useOrgPasswordFormModel", () => {
         setOrgFolderId: vi.fn(),
       },
     });
-    useOrgAttachmentsMock.mockReturnValue({ attachments: [], setAttachments: vi.fn() });
-    useOrgFoldersMock.mockReturnValue([]);
-    useOrgPasswordFormLifecycleMock.mockReturnValue({ handleOpenChange: vi.fn() });
-    useOrgPasswordFormControllerMock.mockReturnValue({
+    useTeamAttachmentsMock.mockReturnValue({ attachments: [], setAttachments: vi.fn() });
+    useTeamFoldersMock.mockReturnValue({ folders: [], fetchError: null });
+    useTeamPasswordFormLifecycleMock.mockReturnValue({ handleOpenChange: vi.fn() });
+    useTeamPasswordFormControllerMock.mockReturnValue({
       entryCopy: { dialogLabel: "x", titleLabel: "y", tagsTitle: "z" },
       entrySpecificFieldsProps: { a: 1 },
       handleSubmit: vi.fn(),
@@ -76,7 +76,7 @@ describe("useOrgPasswordFormModel", () => {
 
   it("wires dependencies and exposes model values", () => {
     const { result } = renderHook(() =>
-      useOrgPasswordFormModel({
+      useTeamPasswordFormModel({
         orgId: "org-1",
         open: true,
         onOpenChange: vi.fn(),
@@ -86,10 +86,10 @@ describe("useOrgPasswordFormModel", () => {
       }),
     );
 
-    expect(useOrgPasswordFormStateMock).toHaveBeenCalledWith(null);
-    expect(useOrgAttachmentsMock).toHaveBeenCalledWith(true, "org-1", undefined);
-    expect(useOrgFoldersMock).toHaveBeenCalledWith(true, "org-1");
-    expect(useOrgPasswordFormControllerMock).toHaveBeenCalledTimes(1);
+    expect(useTeamPasswordFormStateMock).toHaveBeenCalledWith(null);
+    expect(useTeamAttachmentsMock).toHaveBeenCalledWith(true, "org-1", undefined);
+    expect(useTeamFoldersMock).toHaveBeenCalledWith(true, "org-1");
+    expect(useTeamPasswordFormControllerMock).toHaveBeenCalledTimes(1);
     expect(result.current.formState.values.title).toBe("t");
     expect(result.current.entryCopy.dialogLabel).toBe("x");
     expect(result.current.hasChanges).toBe(false);
@@ -97,10 +97,10 @@ describe("useOrgPasswordFormModel", () => {
 
   it("passes attachment setter into lifecycle setters", () => {
     const setAttachments = vi.fn();
-    useOrgAttachmentsMock.mockReturnValue({ attachments: [], setAttachments });
+    useTeamAttachmentsMock.mockReturnValue({ attachments: [], setAttachments });
 
     renderHook(() =>
-      useOrgPasswordFormModel({
+      useTeamPasswordFormModel({
         orgId: "org-1",
         open: true,
         onOpenChange: vi.fn(),
@@ -110,7 +110,7 @@ describe("useOrgPasswordFormModel", () => {
       }),
     );
 
-    const lifecycleArgs = useOrgPasswordFormLifecycleMock.mock.calls[0]?.[0] as
+    const lifecycleArgs = useTeamPasswordFormLifecycleMock.mock.calls[0]?.[0] as
       | { setters?: { setAttachments?: unknown } }
       | undefined;
     expect(lifecycleArgs?.setters?.setAttachments).toBe(setAttachments);
@@ -118,7 +118,7 @@ describe("useOrgPasswordFormModel", () => {
 
   it("prefers editData entryType and forwards derived kind flags to controller", () => {
     renderHook(() =>
-      useOrgPasswordFormModel({
+      useTeamPasswordFormModel({
         orgId: "org-1",
         open: true,
         onOpenChange: vi.fn(),
@@ -136,7 +136,7 @@ describe("useOrgPasswordFormModel", () => {
       }),
     );
 
-    const controllerArgs = useOrgPasswordFormControllerMock.mock.calls[0]?.[0] as
+    const controllerArgs = useTeamPasswordFormControllerMock.mock.calls[0]?.[0] as
       | {
           effectiveEntryType?: string;
           entryKindState?: {

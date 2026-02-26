@@ -4,7 +4,7 @@ import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { buildOrgSubmitDisabled } from "@/hooks/team-password-form-derived-helpers";
-import { useOrgPasswordFormDerived } from "@/hooks/use-team-password-form-derived";
+import { useTeamPasswordFormDerived } from "@/hooks/use-team-password-form-derived";
 import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
 import type { OrgEntryFieldValues } from "@/hooks/use-team-password-form-state";
 
@@ -24,7 +24,7 @@ function baseEntryValues(): OrgEntryFieldValues {
     title: "Title",
     notes: "memo",
     selectedTags: [{ id: "t1", name: "tag", color: null }],
-    orgFolderId: null,
+    teamFolderId: null,
     username: "user",
     password: "pass",
     url: "https://example.com",
@@ -68,7 +68,7 @@ function baseArgs() {
       tags: [{ id: "t1", name: "tag", color: null }],
       customFields: [],
       totp: null,
-      orgFolderId: null,
+      teamFolderId: null,
     },
     entryKindState: baseEntryKindState(),
     entryValues: baseEntryValues(),
@@ -76,9 +76,9 @@ function baseArgs() {
   };
 }
 
-describe("useOrgPasswordFormDerived", () => {
+describe("useTeamPasswordFormDerived", () => {
   it("hasChanges=false when current equals baseline", () => {
-    const { result } = renderHook(() => useOrgPasswordFormDerived(baseArgs()));
+    const { result } = renderHook(() => useTeamPasswordFormDerived(baseArgs()));
     expect(result.current.hasChanges).toBe(false);
     expect(result.current.submitDisabled).toBe(false);
   });
@@ -87,7 +87,7 @@ describe("useOrgPasswordFormDerived", () => {
     const args = baseArgs();
     args.entryValues.title = "Changed";
 
-    const { result } = renderHook(() => useOrgPasswordFormDerived(args));
+    const { result } = renderHook(() => useTeamPasswordFormDerived(args));
     expect(result.current.hasChanges).toBe(true);
   });
 
@@ -95,7 +95,7 @@ describe("useOrgPasswordFormDerived", () => {
     const args = baseArgs();
     args.entryValues.password = "";
 
-    const { result } = renderHook(() => useOrgPasswordFormDerived(args));
+    const { result } = renderHook(() => useTeamPasswordFormDerived(args));
     expect(result.current.submitDisabled).toBe(true);
   });
 });

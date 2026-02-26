@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildOrgFormSectionsProps } from "@/hooks/team-form-sections-props";
-import type { OrgPasswordFormState } from "@/hooks/use-team-password-form-state";
+import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
+import type { TeamPasswordFormState } from "@/hooks/use-team-password-form-state";
 
-describe("buildOrgFormSectionsProps", () => {
+describe("buildTeamFormSectionsProps", () => {
   it("maps tags/folders and action bar props", () => {
     const state = createState();
-    const result = buildOrgFormSectionsProps({
+    const result = buildTeamFormSectionsProps({
       orgId: "org-1",
       tagsTitle: "tags",
       tagsHint: "hint",
@@ -33,7 +33,7 @@ describe("buildOrgFormSectionsProps", () => {
 
   it("omits custom fields/totp props when entry is not login", () => {
     const state = createState();
-    const result = buildOrgFormSectionsProps({
+    const result = buildTeamFormSectionsProps({
       orgId: "org-1",
       tagsTitle: "tags",
       tagsHint: "hint",
@@ -58,21 +58,21 @@ describe("buildOrgFormSectionsProps", () => {
   });
 });
 
-function createState(): Pick<OrgPasswordFormState, "values" | "setters"> {
+function createState(): Pick<TeamPasswordFormState, "values" | "setters"> {
   return {
     values: {
       selectedTags: [],
-      orgFolderId: null,
+      teamFolderId: null,
       customFields: [],
       totp: null,
       showTotpInput: false,
-    } as OrgPasswordFormState["values"],
+    } as TeamPasswordFormState["values"],
     setters: {
       setSelectedTags: vi.fn(),
       setOrgFolderId: vi.fn(),
       setCustomFields: vi.fn(),
       setTotp: vi.fn(),
       setShowTotpInput: vi.fn(),
-    } as OrgPasswordFormState["setters"],
+    } as TeamPasswordFormState["setters"],
   };
 }

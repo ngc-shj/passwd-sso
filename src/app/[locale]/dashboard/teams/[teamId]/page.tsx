@@ -9,7 +9,7 @@ import { EntryListHeader } from "@/components/passwords/entry-list-header";
 import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
 import { SearchBar } from "@/components/layout/search-bar";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
-import { OrgPasswordForm as TeamPasswordForm } from "@/components/team/team-password-form";
+import { TeamPasswordForm } from "@/components/team/team-password-form";
 import { OrgArchivedList as TeamArchivedList } from "@/components/team/team-archived-list";
 import { OrgTrashList as TeamTrashList } from "@/components/team/team-trash-list";
 import { OrgRoleBadge as TeamRoleBadge } from "@/components/team/team-role-badge";

@@ -1,9 +1,9 @@
 "use client";
 
 import type {
-  OrgEntrySpecificComputedProps,
-  OrgEntrySpecificFieldTranslations,
-  OrgEntrySpecificFieldsProps,
+  TeamEntrySpecificComputedProps,
+  TeamEntrySpecificFieldTranslations,
+  TeamEntrySpecificFieldsProps,
 } from "@/hooks/team-entry-specific-fields-types";
 
 interface EntryCopyText {
@@ -11,11 +11,11 @@ interface EntryCopyText {
   notesPlaceholder: string;
 }
 
-export function buildOrgEntrySpecificTextProps(
-  translations: OrgEntrySpecificFieldTranslations,
+export function buildTeamEntrySpecificTextProps(
+  translations: TeamEntrySpecificFieldTranslations,
   entryCopy: EntryCopyText,
   lengthHint: string,
-): Pick<OrgEntrySpecificFieldsProps, OrgEntrySpecificComputedProps> {
+): Pick<TeamEntrySpecificFieldsProps, TeamEntrySpecificComputedProps> {
   const { t, tn, tcc, ti, tpk } = translations;
 
   return {

@@ -4,7 +4,7 @@ import { render, screen } from "@testing-library/react";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import { describe, expect, it, vi } from "vitest";
-import { OrgEntrySpecificFields } from "@/components/team/team-entry-specific-fields";
+import { TeamEntrySpecificFields } from "@/components/team/team-entry-specific-fields";
 
 vi.mock("@/components/passwords/entry-login-main-fields", () => ({
   EntryLoginMainFields: () => <div data-testid="org-login-fields" />,
@@ -28,7 +28,7 @@ const baseGeneratorSettings: GeneratorSettings = {
 
 function renderSubject(entryKind: "password" | "secureNote" | "creditCard" | "identity" | "passkey") {
   return render(
-    <OrgEntrySpecificFields
+    <TeamEntrySpecificFields
       entryKind={entryKind}
       notesLabel="notes"
       notesPlaceholder="notesPlaceholder"
@@ -166,7 +166,7 @@ function renderSubject(entryKind: "password" | "secureNote" | "creditCard" | "id
   );
 }
 
-describe("OrgEntrySpecificFields", () => {
+describe("TeamEntrySpecificFields", () => {
   it("renders login fields for password kind", () => {
     renderSubject("password");
     expect(screen.getByTestId("org-login-fields")).toBeTruthy();

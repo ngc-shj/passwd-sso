@@ -2,19 +2,19 @@
 
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useOrgPasswordFormLifecycle } from "@/hooks/use-team-password-form-lifecycle";
-import { createOrgPasswordFormLifecycleSettersMock } from "@/test-utils/team-password-form-setters";
+import { useTeamPasswordFormLifecycle } from "@/hooks/use-team-password-form-lifecycle";
+import { createTeamPasswordFormLifecycleSettersMock } from "@/test-utils/team-password-form-setters";
 
-describe("useOrgPasswordFormLifecycle", () => {
+describe("useTeamPasswordFormLifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("applies edit data when opened with editData", () => {
-    const setters = createOrgPasswordFormLifecycleSettersMock();
+    const setters = createTeamPasswordFormLifecycleSettersMock();
 
     renderHook(() =>
-      useOrgPasswordFormLifecycle({
+      useTeamPasswordFormLifecycle({
         open: true,
         editData: {
           id: "e1",
@@ -37,10 +37,10 @@ describe("useOrgPasswordFormLifecycle", () => {
 
   it("resets form when closing via handleOpenChange", () => {
     const onOpenChange = vi.fn();
-    const setters = createOrgPasswordFormLifecycleSettersMock();
+    const setters = createTeamPasswordFormLifecycleSettersMock();
 
     const { result } = renderHook(() =>
-      useOrgPasswordFormLifecycle({
+      useTeamPasswordFormLifecycle({
         open: true,
         editData: null,
         onOpenChange,

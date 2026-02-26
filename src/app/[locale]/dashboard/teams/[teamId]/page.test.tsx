@@ -37,7 +37,7 @@ vi.mock("@/components/passwords/password-card", () => ({
   PasswordCard: () => <div data-testid="password-card" />,
 }));
 vi.mock("@/components/team/team-password-form", () => ({
-  OrgPasswordForm: () => null,
+  TeamPasswordForm: () => null,
 }));
 vi.mock("@/components/team/team-archived-list", () => ({
   OrgArchivedList: () => null,

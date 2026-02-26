@@ -1,37 +1,37 @@
 "use client";
 
 import { toast } from "sonner";
-import { submitOrgPasswordForm } from "@/components/team/team-password-form-actions";
-import type { OrgPasswordFormProps } from "@/components/team/team-password-form-types";
+import { submitTeamPasswordForm } from "@/components/team/team-password-form-actions";
+import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
 import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { OrgPasswordFormTranslations } from "@/hooks/entry-form-translations";
+import type { TeamPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import {
-  useOrgPasswordFormPresenter,
+  useTeamPasswordFormPresenter,
 } from "@/hooks/use-team-password-form-presenter";
-import { useOrgPasswordFormDerived } from "@/hooks/use-team-password-form-derived";
-import { type OrgPasswordFormState } from "@/hooks/use-team-password-form-state";
-import { buildOrgSubmitArgs } from "@/hooks/team-password-form-submit-args";
+import { useTeamPasswordFormDerived } from "@/hooks/use-team-password-form-derived";
+import { type TeamPasswordFormState } from "@/hooks/use-team-password-form-state";
+import { buildTeamSubmitArgs } from "@/hooks/team-password-form-submit-args";
 import { useTeamVault } from "@/lib/team-vault-context";
 
-export interface OrgPasswordFormControllerArgs {
-  orgId: OrgPasswordFormProps["orgId"];
-  onSaved: OrgPasswordFormProps["onSaved"];
+export interface TeamPasswordFormControllerArgs {
+  orgId: TeamPasswordFormProps["orgId"];
+  onSaved: TeamPasswordFormProps["onSaved"];
   isEdit: boolean;
-  editData?: OrgPasswordFormProps["editData"];
+  editData?: TeamPasswordFormProps["editData"];
   effectiveEntryType: EntryTypeValue;
   entryKindState: OrgEntryKindState;
-  translations: OrgPasswordFormTranslations;
-  formState: OrgPasswordFormState;
+  translations: TeamPasswordFormTranslations;
+  formState: TeamPasswordFormState;
   handleOpenChange: (open: boolean) => void;
 }
 
-export interface TeamPasswordFormControllerArgs extends Omit<OrgPasswordFormControllerArgs, "orgId"> {
-  teamId?: OrgPasswordFormProps["orgId"];
-  orgId?: OrgPasswordFormProps["orgId"];
+export interface TeamPasswordFormControllerCompatArgs extends Omit<TeamPasswordFormControllerArgs, "orgId"> {
+  teamId?: TeamPasswordFormProps["orgId"];
+  orgId?: TeamPasswordFormProps["orgId"];
 }
 
-export function useOrgPasswordFormController({
+function useTeamPasswordFormControllerInternal({
   orgId,
   onSaved,
   isEdit,
@@ -41,18 +41,18 @@ export function useOrgPasswordFormController({
   translations,
   formState,
   handleOpenChange,
-}: OrgPasswordFormControllerArgs) {
+}: TeamPasswordFormControllerArgs) {
   const { setters } = formState;
   const { getTeamKeyInfo } = useTeamVault();
   const { entryValues, cardNumberValid, entryCopy, entrySpecificFieldsProps } =
-    useOrgPasswordFormPresenter({
+    useTeamPasswordFormPresenter({
     isEdit,
     entryKind: entryKindState.entryKind,
     translations,
     formState,
   });
 
-  const { hasChanges, submitDisabled } = useOrgPasswordFormDerived({
+  const { hasChanges, submitDisabled } = useTeamPasswordFormDerived({
     effectiveEntryType,
     editData,
     entryKindState,
@@ -67,7 +67,7 @@ export function useOrgPasswordFormController({
       return;
     }
 
-    const submitArgs = buildOrgSubmitArgs({
+    const submitArgs = buildTeamSubmitArgs({
       orgId,
       orgEncryptionKey: keyInfo.key,
       orgKeyVersion: keyInfo.keyVersion,
@@ -82,7 +82,7 @@ export function useOrgPasswordFormController({
       entryValues,
       cardNumberValid,
     });
-    await submitOrgPasswordForm(submitArgs);
+    await submitTeamPasswordForm(submitArgs);
   };
 
   return {
@@ -98,12 +98,12 @@ export function useTeamPasswordFormController({
   teamId,
   orgId,
   ...rest
-}: TeamPasswordFormControllerArgs) {
+}: TeamPasswordFormControllerCompatArgs) {
   const scopedTeamId = teamId ?? orgId;
   if (!scopedTeamId) {
     throw new Error("useTeamPasswordFormController requires teamId or orgId");
   }
-  return useOrgPasswordFormController({
+  return useTeamPasswordFormControllerInternal({
     orgId: scopedTeamId,
     ...rest,
   });

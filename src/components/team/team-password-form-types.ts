@@ -1,6 +1,6 @@
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { OrgTagData } from "@/components/team/team-tag-input";
+import type { TeamTagData } from "@/components/team/team-tag-input";
 
 export type OrgEntryKind =
   | "password"
@@ -9,15 +9,13 @@ export type OrgEntryKind =
   | "identity"
   | "passkey";
 
-export interface OrgFolderItem {
+export interface TeamFolderItem {
   id: string;
   name: string;
   parentId: string | null;
 }
 
-export type TeamFolderItem = OrgFolderItem;
-
-export interface OrgPasswordFormEditData {
+export interface TeamPasswordFormEditData {
   id: string;
   entryType?: EntryTypeValue;
   title: string;
@@ -26,7 +24,7 @@ export interface OrgPasswordFormEditData {
   content?: string;
   url: string | null;
   notes: string | null;
-  tags?: OrgTagData[];
+  tags?: TeamTagData[];
   customFields?: EntryCustomField[];
   totp?: EntryTotp | null;
   cardholderName?: string | null;
@@ -49,15 +47,15 @@ export interface OrgPasswordFormEditData {
   credentialId?: string | null;
   creationDate?: string | null;
   deviceInfo?: string | null;
-  orgFolderId?: string | null;
+  teamFolderId?: string | null;
 }
 
-export interface OrgPasswordFormProps {
+export interface TeamPasswordFormProps {
   orgId: string;
   teamId?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
   entryType?: EntryTypeValue;
-  editData?: OrgPasswordFormEditData | null;
+  editData?: TeamPasswordFormEditData | null;
 }

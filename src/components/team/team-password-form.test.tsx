@@ -30,7 +30,7 @@ vi.mock("@/lib/team-vault-context", () => ({
   }),
 }));
 
-// Mock saveOrgEntry to skip encryption (this is a UI test, not a crypto test)
+// Mock save entry helper to skip encryption (this is a UI test, not a crypto test)
 vi.mock("@/lib/org-entry-save", () => ({
   saveOrgEntry: vi.fn(async (params: Record<string, unknown>) => {
     const orgId = params.orgId as string;
@@ -43,7 +43,7 @@ vi.mock("@/lib/org-entry-save", () => ({
       method: mode === "create" ? "POST" : "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        orgFolderId: params.orgFolderId,
+        teamFolderId: params.teamFolderId ?? params.orgFolderId ?? null,
         tagIds: params.tagIds,
         entryType: params.entryType,
       }),
@@ -212,7 +212,7 @@ vi.mock("@/components/passwords/entry-form-ui", () => ({
   ),
 }));
 
-import { OrgPasswordForm } from "./team-password-form";
+import { TeamPasswordForm } from "./team-password-form";
 
 /* ---------- helpers ---------- */
 
@@ -250,7 +250,7 @@ function setupFetch(folders = FOLDERS, submitOk = true) {
 
 /* ---------- tests ---------- */
 
-describe("OrgPasswordForm — folder selection", () => {
+describe("TeamPasswordForm — folder selection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     globalThis.fetch = mockFetch as unknown as typeof fetch;
@@ -261,7 +261,7 @@ describe("OrgPasswordForm — folder selection", () => {
 
     await act(async () => {
       render(
-        <OrgPasswordForm
+        <TeamPasswordForm
           orgId="org-1"
           open={true}
           onOpenChange={vi.fn()}
@@ -281,7 +281,7 @@ describe("OrgPasswordForm — folder selection", () => {
 
     await act(async () => {
       render(
-        <OrgPasswordForm
+        <TeamPasswordForm
           orgId="org-1"
           open={true}
           onOpenChange={vi.fn()}
@@ -301,7 +301,7 @@ describe("OrgPasswordForm — folder selection", () => {
 
     await act(async () => {
       render(
-        <OrgPasswordForm
+        <TeamPasswordForm
           orgId="org-1"
           open={true}
           onOpenChange={vi.fn()}
@@ -324,12 +324,12 @@ describe("OrgPasswordForm — folder selection", () => {
     expect(folderLabels.length).toBe(0);
   });
 
-  it("initializes orgFolderId from editData", async () => {
+  it("initializes teamFolderId from editData", async () => {
     setupFetch();
 
     await act(async () => {
       render(
-        <OrgPasswordForm
+        <TeamPasswordForm
           orgId="org-1"
           open={true}
           onOpenChange={vi.fn()}
@@ -341,7 +341,7 @@ describe("OrgPasswordForm — folder selection", () => {
             password: "pass",
             url: null,
             notes: null,
-            orgFolderId: "folder-1",
+            teamFolderId: "folder-1",
           }}
         />,
       );
@@ -357,13 +357,13 @@ describe("OrgPasswordForm — folder selection", () => {
     });
   });
 
-  it("sends orgFolderId in submit payload", async () => {
+  it("sends teamFolderId in submit payload", async () => {
     setupFetch();
     const onSaved = vi.fn();
 
     await act(async () => {
       render(
-        <OrgPasswordForm
+        <TeamPasswordForm
           orgId="org-1"
           open={true}
           onOpenChange={vi.fn()}
@@ -375,7 +375,7 @@ describe("OrgPasswordForm — folder selection", () => {
             password: "pass",
             url: null,
             notes: null,
-            orgFolderId: "folder-2",
+            teamFolderId: "folder-2",
           }}
         />,
       );
@@ -397,17 +397,17 @@ describe("OrgPasswordForm — folder selection", () => {
       );
       expect(putCall).toBeDefined();
       const body = JSON.parse(putCall![1]!.body as string);
-      expect(body.orgFolderId).toBe("folder-2");
+      expect(body.teamFolderId).toBe("folder-2");
     });
   });
 
-  it("sends null orgFolderId when folder is deselected", async () => {
+  it("sends null teamFolderId when folder is deselected", async () => {
     setupFetch();
     const onSaved = vi.fn();
 
     await act(async () => {
       render(
-        <OrgPasswordForm
+        <TeamPasswordForm
           orgId="org-1"
           open={true}
           onOpenChange={vi.fn()}
@@ -419,7 +419,7 @@ describe("OrgPasswordForm — folder selection", () => {
             password: "pass",
             url: null,
             notes: null,
-            orgFolderId: null,
+            teamFolderId: null,
           }}
         />,
       );
@@ -429,7 +429,7 @@ describe("OrgPasswordForm — folder selection", () => {
       expect(screen.getByText("folder")).toBeInTheDocument();
     });
 
-    // Submit — orgFolderId should be null
+    // Submit — teamFolderId should be null
     const submitBtn = screen.getByTestId("submit-btn");
     await act(async () => {
       fireEvent.click(submitBtn);
@@ -441,7 +441,7 @@ describe("OrgPasswordForm — folder selection", () => {
       );
       expect(putCall).toBeDefined();
       const body = JSON.parse(putCall![1]!.body as string);
-      expect(body.orgFolderId).toBeNull();
+      expect(body.teamFolderId).toBeNull();
     });
   });
 
@@ -450,7 +450,7 @@ describe("OrgPasswordForm — folder selection", () => {
     const onOpenChange = vi.fn();
 
     const view = render(
-      <OrgPasswordForm
+      <TeamPasswordForm
         orgId="org-1"
         open={true}
         onOpenChange={onOpenChange}
@@ -462,7 +462,7 @@ describe("OrgPasswordForm — folder selection", () => {
           password: "first-pass",
           url: null,
           notes: null,
-          orgFolderId: "folder-1",
+          teamFolderId: "folder-1",
         }}
       />,
     );
@@ -472,7 +472,7 @@ describe("OrgPasswordForm — folder selection", () => {
     });
 
     view.rerender(
-      <OrgPasswordForm
+      <TeamPasswordForm
         orgId="org-1"
         open={false}
         onOpenChange={onOpenChange}
@@ -484,13 +484,13 @@ describe("OrgPasswordForm — folder selection", () => {
           password: "first-pass",
           url: null,
           notes: null,
-          orgFolderId: "folder-1",
+          teamFolderId: "folder-1",
         }}
       />,
     );
 
     view.rerender(
-      <OrgPasswordForm
+      <TeamPasswordForm
         orgId="org-1"
         open={true}
         onOpenChange={onOpenChange}
@@ -502,7 +502,7 @@ describe("OrgPasswordForm — folder selection", () => {
           password: "second-pass",
           url: null,
           notes: null,
-          orgFolderId: "folder-2",
+          teamFolderId: "folder-2",
         }}
       />,
     );

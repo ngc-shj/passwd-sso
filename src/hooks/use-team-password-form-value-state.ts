@@ -1,17 +1,17 @@
 import { useState } from "react";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { OrgTagData } from "@/components/team/team-tag-input";
-import type { OrgPasswordFormInitialValues } from "@/hooks/team-password-form-initial-values";
+import type { TeamTagData } from "@/components/team/team-tag-input";
+import type { TeamPasswordFormInitialValues } from "@/hooks/team-password-form-initial-values";
 
-export function useOrgPasswordFormValueState(initial: OrgPasswordFormInitialValues) {
+export function useTeamPasswordFormValueState(initial: TeamPasswordFormInitialValues) {
   const [title, setTitle] = useState(initial.title);
   const [username, setUsername] = useState(initial.username);
   const [password, setPassword] = useState(initial.password);
   const [content, setContent] = useState(initial.content);
   const [url, setUrl] = useState(initial.url);
   const [notes, setNotes] = useState(initial.notes);
-  const [selectedTags, setSelectedTags] = useState<OrgTagData[]>(initial.selectedTags);
+  const [selectedTags, setSelectedTags] = useState<TeamTagData[]>(initial.selectedTags);
   const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(initial.generatorSettings);
   const [customFields, setCustomFields] = useState<EntryCustomField[]>(initial.customFields);
   const [totp, setTotp] = useState<EntryTotp | null>(initial.totp);
@@ -39,7 +39,7 @@ export function useOrgPasswordFormValueState(initial: OrgPasswordFormInitialValu
   const [credentialId, setCredentialId] = useState(initial.credentialId);
   const [creationDate, setCreationDate] = useState(initial.creationDate);
   const [deviceInfo, setDeviceInfo] = useState(initial.deviceInfo);
-  const [orgFolderId, setOrgFolderId] = useState<string | null>(initial.orgFolderId);
+  const [teamFolderId, setOrgFolderId] = useState<string | null>(initial.teamFolderId);
 
   return {
     values: {
@@ -77,7 +77,7 @@ export function useOrgPasswordFormValueState(initial: OrgPasswordFormInitialValu
       credentialId,
       creationDate,
       deviceInfo,
-      orgFolderId,
+      teamFolderId,
     },
     setters: {
       setTitle,

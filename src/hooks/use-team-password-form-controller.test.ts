@@ -3,24 +3,24 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { useOrgPasswordFormController } from "@/hooks/use-team-password-form-controller";
-import type { OrgPasswordFormState } from "@/hooks/use-team-password-form-state";
+import { useTeamPasswordFormController } from "@/hooks/use-team-password-form-controller";
+import type { TeamPasswordFormState } from "@/hooks/use-team-password-form-state";
 
-const submitOrgPasswordFormMock = vi.fn();
-const useOrgPasswordFormDerivedMock = vi.fn();
-const useOrgPasswordFormPresenterMock = vi.fn();
+const submitTeamPasswordFormMock = vi.fn();
+const useTeamPasswordFormDerivedMock = vi.fn();
+const useTeamPasswordFormPresenterMock = vi.fn();
 const mockGetOrgKeyInfo = vi.fn();
 
 vi.mock("@/components/team/team-password-form-actions", () => ({
-  submitOrgPasswordForm: (...args: unknown[]) => submitOrgPasswordFormMock(...args),
+  submitTeamPasswordForm: (...args: unknown[]) => submitTeamPasswordFormMock(...args),
 }));
 
 vi.mock("@/hooks/use-team-password-form-derived", () => ({
-  useOrgPasswordFormDerived: (...args: unknown[]) => useOrgPasswordFormDerivedMock(...args),
+  useTeamPasswordFormDerived: (...args: unknown[]) => useTeamPasswordFormDerivedMock(...args),
 }));
 
 vi.mock("@/hooks/use-team-password-form-presenter", () => ({
-  useOrgPasswordFormPresenter: (...args: unknown[]) => useOrgPasswordFormPresenterMock(...args),
+  useTeamPasswordFormPresenter: (...args: unknown[]) => useTeamPasswordFormPresenterMock(...args),
 }));
 
 vi.mock("@/lib/team-vault-context", () => ({
@@ -33,15 +33,15 @@ vi.mock("@/lib/team-vault-context", () => ({
   }),
 }));
 
-describe("useOrgPasswordFormController", () => {
+describe("useTeamPasswordFormController", () => {
   beforeEach(() => {
-    submitOrgPasswordFormMock.mockReset();
-    useOrgPasswordFormDerivedMock.mockReset();
-    useOrgPasswordFormPresenterMock.mockReset();
+    submitTeamPasswordFormMock.mockReset();
+    useTeamPasswordFormDerivedMock.mockReset();
+    useTeamPasswordFormPresenterMock.mockReset();
     mockGetOrgKeyInfo.mockReset();
     mockGetOrgKeyInfo.mockResolvedValue({ key: {} as CryptoKey, keyVersion: 1 });
 
-    useOrgPasswordFormPresenterMock.mockReturnValue({
+    useTeamPasswordFormPresenterMock.mockReturnValue({
       entryValues: {
         title: "title",
         username: "user",
@@ -72,19 +72,19 @@ describe("useOrgPasswordFormController", () => {
         credentialId: "",
         creationDate: "",
         deviceInfo: "",
-        orgFolderId: null,
+        teamFolderId: null,
         generatorSettings: {},
       },
       cardNumberValid: true,
       entryCopy: { dialogLabel: "dialog" },
       entrySpecificFieldsProps: { kind: "props" },
     });
-    useOrgPasswordFormDerivedMock.mockReturnValue({ hasChanges: true, submitDisabled: false });
+    useTeamPasswordFormDerivedMock.mockReturnValue({ hasChanges: true, submitDisabled: false });
   });
 
   it("returns derived state and entry-specific props", () => {
     const { result } = renderHook(() =>
-      useOrgPasswordFormController({
+      useTeamPasswordFormController({
         orgId: "org-1",
         onSaved: vi.fn(),
         isEdit: false,
@@ -116,12 +116,12 @@ describe("useOrgPasswordFormController", () => {
     expect(result.current.entrySpecificFieldsProps).toEqual({ kind: "props" });
   });
 
-  it("delegates submit to submitOrgPasswordForm", async () => {
+  it("delegates submit to submitTeamPasswordForm", async () => {
     const onSaved = vi.fn();
     const handleOpenChange = vi.fn();
 
     const { result } = renderHook(() =>
-      useOrgPasswordFormController({
+      useTeamPasswordFormController({
         orgId: "org-1",
         onSaved,
         isEdit: true,
@@ -150,8 +150,8 @@ describe("useOrgPasswordFormController", () => {
 
     await result.current.handleSubmit();
 
-    expect(submitOrgPasswordFormMock).toHaveBeenCalledTimes(1);
-    expect(submitOrgPasswordFormMock.mock.calls[0]?.[0]).toMatchObject({
+    expect(submitTeamPasswordFormMock).toHaveBeenCalledTimes(1);
+    expect(submitTeamPasswordFormMock.mock.calls[0]?.[0]).toMatchObject({
       orgId: "org-1",
       isEdit: true,
       onSaved,
@@ -161,7 +161,7 @@ describe("useOrgPasswordFormController", () => {
 
   it("uses presenter output for entry-specific props", () => {
     renderHook(() =>
-      useOrgPasswordFormController({
+      useTeamPasswordFormController({
         orgId: "org-1",
         onSaved: vi.fn(),
         isEdit: false,
@@ -188,12 +188,12 @@ describe("useOrgPasswordFormController", () => {
       }),
     );
 
-    expect(useOrgPasswordFormPresenterMock).toHaveBeenCalledTimes(1);
+    expect(useTeamPasswordFormPresenterMock).toHaveBeenCalledTimes(1);
   });
 });
 
 function buildFormState() {
-  const state: OrgPasswordFormState = {
+  const state: TeamPasswordFormState = {
     values: {
       saving: false,
       cardNumber: "4242 4242 4242 4242",
@@ -203,7 +203,7 @@ function buildFormState() {
       title: "title",
       notes: "notes",
       selectedTags: [],
-      orgFolderId: null,
+      teamFolderId: null,
       username: "user",
       password: "pass",
       url: "https://example.com",

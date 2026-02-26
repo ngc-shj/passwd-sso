@@ -8,17 +8,17 @@ vi.mock("@/components/team/team-password-form-actions", () => ({
 }));
 
 import {
-  buildOrgCardNumberChangeCallback,
-  buildOrgCardPresentationProps,
+  buildTeamCardNumberChangeCallback,
+  buildTeamCardPresentationProps,
 } from "@/hooks/team-password-form-presenter-card";
 
-describe("buildOrgCardNumberChangeCallback", () => {
+describe("buildTeamCardNumberChangeCallback", () => {
   it("delegates to handleOrgCardNumberChange with values and setters", () => {
     handleOrgCardNumberChangeMock.mockReset();
     const setCardNumber = vi.fn();
     const setBrand = vi.fn();
 
-    const callback = buildOrgCardNumberChangeCallback(
+    const callback = buildTeamCardNumberChangeCallback(
       { brand: "visa", brandSource: "manual" },
       { setCardNumber, setBrand },
     );
@@ -35,12 +35,12 @@ describe("buildOrgCardNumberChangeCallback", () => {
   });
 });
 
-describe("buildOrgCardPresentationProps", () => {
+describe("buildTeamCardPresentationProps", () => {
   const tcc: CreditCardFormTranslator = (key, opts) =>
     opts && "brand" in opts ? `${key}:${opts.brand}` : key;
 
   it("returns translated detectedBrand when brand is present", () => {
-    const result = buildOrgCardPresentationProps({
+    const result = buildTeamCardPresentationProps({
       cardValidation: { detectedBrand: "Visa", digits: "4242" },
       hasBrandHint: true,
       tcc,
@@ -50,7 +50,7 @@ describe("buildOrgCardPresentationProps", () => {
   });
 
   it("returns undefined detectedBrand when brand is null", () => {
-    const result = buildOrgCardPresentationProps({
+    const result = buildTeamCardPresentationProps({
       cardValidation: { detectedBrand: null, digits: "1234" },
       hasBrandHint: true,
       tcc,
@@ -60,7 +60,7 @@ describe("buildOrgCardPresentationProps", () => {
   });
 
   it("returns hasBrandHint false when digits are empty", () => {
-    const result = buildOrgCardPresentationProps({
+    const result = buildTeamCardPresentationProps({
       cardValidation: { detectedBrand: "Visa", digits: "" },
       hasBrandHint: true,
       tcc,
@@ -69,7 +69,7 @@ describe("buildOrgCardPresentationProps", () => {
   });
 
   it("returns hasBrandHint false when hasBrandHint arg is false", () => {
-    const result = buildOrgCardPresentationProps({
+    const result = buildTeamCardPresentationProps({
       cardValidation: { detectedBrand: "Visa", digits: "4242" },
       hasBrandHint: false,
       tcc,

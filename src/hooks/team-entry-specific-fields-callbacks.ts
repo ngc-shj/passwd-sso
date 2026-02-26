@@ -2,13 +2,13 @@
 
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type {
-  OrgPasswordFormValues,
-  OrgPasswordFormSettersState,
+  TeamPasswordFormValues,
+  TeamPasswordFormSettersState,
 } from "@/hooks/use-team-password-form-state";
 
-export function buildOrgEntrySpecificCallbacks(
-  values: OrgPasswordFormValues,
-  setters: OrgPasswordFormSettersState,
+export function buildTeamEntrySpecificCallbacks(
+  values: TeamPasswordFormValues,
+  setters: TeamPasswordFormSettersState,
 ) {
   return {
     onNotesChange: setters.setNotes,

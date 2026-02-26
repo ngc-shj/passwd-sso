@@ -2,13 +2,13 @@
 
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { OrgPasswordFormTranslations } from "@/hooks/entry-form-translations";
-import { useOrgPasswordFormPresenter } from "@/hooks/use-team-password-form-presenter";
-import type { OrgPasswordFormState } from "@/hooks/use-team-password-form-state";
+import type { TeamPasswordFormTranslations } from "@/hooks/entry-form-translations";
+import { useTeamPasswordFormPresenter } from "@/hooks/use-team-password-form-presenter";
+import type { TeamPasswordFormState } from "@/hooks/use-team-password-form-state";
 
 const getOrgCardValidationStateMock = vi.fn();
 const handleOrgCardNumberChangeMock = vi.fn();
-const buildOrgEntrySpecificFieldsPropsFromStateMock = vi.fn();
+const buildTeamEntrySpecificFieldsPropsFromStateMock = vi.fn();
 
 vi.mock("@/components/team/team-credit-card-validation", () => ({
   getOrgCardValidationState: (...args: unknown[]) => getOrgCardValidationStateMock(...args),
@@ -19,15 +19,15 @@ vi.mock("@/components/team/team-password-form-actions", () => ({
 }));
 
 vi.mock("@/hooks/team-entry-specific-fields-props", () => ({
-  buildOrgEntrySpecificFieldsPropsFromState: (...args: unknown[]) =>
-    buildOrgEntrySpecificFieldsPropsFromStateMock(...args),
+  buildTeamEntrySpecificFieldsPropsFromState: (...args: unknown[]) =>
+    buildTeamEntrySpecificFieldsPropsFromStateMock(...args),
 }));
 
-describe("useOrgPasswordFormPresenter", () => {
+describe("useTeamPasswordFormPresenter", () => {
   beforeEach(() => {
     getOrgCardValidationStateMock.mockReset();
     handleOrgCardNumberChangeMock.mockReset();
-    buildOrgEntrySpecificFieldsPropsFromStateMock.mockReset();
+    buildTeamEntrySpecificFieldsPropsFromStateMock.mockReset();
 
     getOrgCardValidationStateMock.mockReturnValue({
       cardValidation: { detectedBrand: "Visa", digits: "4242" },
@@ -38,12 +38,12 @@ describe("useOrgPasswordFormPresenter", () => {
       cardNumberValid: true,
       hasBrandHint: true,
     });
-    buildOrgEntrySpecificFieldsPropsFromStateMock.mockReturnValue({ kind: "props" });
+    buildTeamEntrySpecificFieldsPropsFromStateMock.mockReturnValue({ kind: "props" });
   });
 
   it("returns presenter payload with entry-specific props", () => {
     const { result } = renderHook(() =>
-      useOrgPasswordFormPresenter({
+      useTeamPasswordFormPresenter({
         isEdit: false,
         entryKind: "password",
         translations: buildTranslations(),
@@ -53,14 +53,14 @@ describe("useOrgPasswordFormPresenter", () => {
 
     expect(result.current.cardNumberValid).toBe(true);
     expect(result.current.entryValues.title).toBe("title");
-    expect(result.current.entryValues.orgFolderId).toBeNull();
+    expect(result.current.entryValues.teamFolderId).toBeNull();
     expect(result.current.entrySpecificFieldsProps).toEqual({ kind: "props" });
     expect(result.current.entryCopy.dialogLabel).toBeDefined();
   });
 
   it("wires card number change callback through shared action helper", () => {
     renderHook(() =>
-      useOrgPasswordFormPresenter({
+      useTeamPasswordFormPresenter({
         isEdit: false,
         entryKind: "creditCard",
         translations: buildTranslations(),
@@ -68,7 +68,7 @@ describe("useOrgPasswordFormPresenter", () => {
       }),
     );
 
-    const presenterArgs = buildOrgEntrySpecificFieldsPropsFromStateMock.mock.calls[0]?.[0] as
+    const presenterArgs = buildTeamEntrySpecificFieldsPropsFromStateMock.mock.calls[0]?.[0] as
       | { onCardNumberChange?: (value: string) => void }
       | undefined;
     expect(presenterArgs?.onCardNumberChange).toBeTypeOf("function");
@@ -85,7 +85,7 @@ describe("useOrgPasswordFormPresenter", () => {
   });
 });
 
-function buildFormState(): OrgPasswordFormState {
+function buildFormState(): TeamPasswordFormState {
   return {
     values: {
       saving: false,
@@ -96,7 +96,7 @@ function buildFormState(): OrgPasswordFormState {
       title: "title",
       notes: "notes",
       selectedTags: [],
-      orgFolderId: null,
+      teamFolderId: null,
       username: "user",
       password: "pass",
       url: "https://example.com",
@@ -178,7 +178,7 @@ function buildFormState(): OrgPasswordFormState {
   };
 }
 
-function buildTranslations(): OrgPasswordFormTranslations {
+function buildTranslations(): TeamPasswordFormTranslations {
   return {
     t: (key) => key,
     tGen: (key) => key,

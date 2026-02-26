@@ -22,7 +22,7 @@ describe("org-password-form-derived-helpers snapshot helpers", () => {
         ],
         customFields: [{ id: "cf-1", label: "L", value: "V", type: "text" }],
         totp: { secret: "totp-secret", digits: 6, period: 30, algorithm: "SHA1" },
-        orgFolderId: "folder-1",
+        teamFolderId: "folder-1",
       },
       entryKindState: {
         entryKind: "password",
@@ -39,7 +39,7 @@ describe("org-password-form-derived-helpers snapshot helpers", () => {
     expect(parsed.selectedTagIds).toEqual(["a", "b"]);
     expect(parsed.login.username).toBe("user@example.com");
     expect(parsed.login.password).toBe("secret");
-    expect(parsed.orgFolderId).toBe("folder-1");
+    expect(parsed.teamFolderId).toBe("folder-1");
     expect(parsed.secureNote).toBeNull();
   });
 
@@ -61,7 +61,7 @@ describe("org-password-form-derived-helpers snapshot helpers", () => {
           { id: "tag-z", name: "Z", color: "#ff0000" },
           { id: "tag-a", name: "A", color: "#00ff00" },
         ],
-        orgFolderId: null,
+        teamFolderId: null,
         username: "passkey-user",
         password: "",
         url: "",

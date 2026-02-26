@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { OrgPasswordFormProps } from "@/components/team/team-password-form-types";
+import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
 import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
 import type { OrgEntryFieldValues } from "@/hooks/use-team-password-form-state";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -11,21 +11,21 @@ import {
   buildOrgSubmitDisabled,
 } from "@/hooks/team-password-form-derived-helpers";
 
-export type OrgPasswordFormDerivedArgs = {
+export type TeamPasswordFormDerivedArgs = {
   effectiveEntryType: EntryTypeValue;
-  editData?: OrgPasswordFormProps["editData"];
+  editData?: TeamPasswordFormProps["editData"];
   entryKindState: OrgEntryKindState;
   entryValues: OrgEntryFieldValues;
   cardNumberValid: boolean;
 };
 
-export function useOrgPasswordFormDerived({
+export function useTeamPasswordFormDerived({
   effectiveEntryType,
   editData,
   entryKindState,
   entryValues,
   cardNumberValid,
-}: OrgPasswordFormDerivedArgs) {
+}: TeamPasswordFormDerivedArgs) {
   const { isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey } = entryKindState;
 
   const baselineSnapshot = useMemo(

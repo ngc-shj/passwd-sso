@@ -1,18 +1,18 @@
-import type { OrgPasswordFormEditData } from "@/components/team/team-password-form-types";
+import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
 import { formatCardNumber } from "@/lib/credit-card";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { OrgTagData } from "@/components/team/team-tag-input";
+import type { TeamTagData } from "@/components/team/team-tag-input";
 
-export interface OrgPasswordFormInitialValues {
+export interface TeamPasswordFormInitialValues {
   title: string;
   username: string;
   password: string;
   content: string;
   url: string;
   notes: string;
-  selectedTags: OrgTagData[];
+  selectedTags: TeamTagData[];
   generatorSettings: GeneratorSettings;
   customFields: EntryCustomField[];
   totp: EntryTotp | null;
@@ -38,12 +38,12 @@ export interface OrgPasswordFormInitialValues {
   credentialId: string;
   creationDate: string;
   deviceInfo: string;
-  orgFolderId: string | null;
+  teamFolderId: string | null;
 }
 
-export function buildOrgPasswordFormInitialValues(
-  editData?: OrgPasswordFormEditData | null,
-): OrgPasswordFormInitialValues {
+export function buildTeamPasswordFormInitialValues(
+  editData?: TeamPasswordFormEditData | null,
+): TeamPasswordFormInitialValues {
   return {
     title: editData?.title ?? "",
     username: editData?.username ?? "",
@@ -77,6 +77,6 @@ export function buildOrgPasswordFormInitialValues(
     credentialId: editData?.credentialId ?? "",
     creationDate: editData?.creationDate ?? "",
     deviceInfo: editData?.deviceInfo ?? "",
-    orgFolderId: editData?.orgFolderId ?? null,
+    teamFolderId: editData?.teamFolderId ?? null,
   };
 }

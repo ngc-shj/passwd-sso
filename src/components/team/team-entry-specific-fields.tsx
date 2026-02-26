@@ -9,7 +9,7 @@ import { OrgSecureNoteFields } from "@/components/team/team-secure-note-fields";
 import type { OrgEntryKind } from "@/components/team/team-password-form-types";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 
-interface OrgEntrySpecificFieldsProps {
+interface TeamEntrySpecificFieldsProps {
   entryKind: OrgEntryKind;
   notesLabel: string;
   notesPlaceholder: string;
@@ -151,7 +151,7 @@ interface OrgEntrySpecificFieldsProps {
   };
 }
 
-export function OrgEntrySpecificFields({
+export function TeamEntrySpecificFields({
   entryKind,
   notesLabel,
   notesPlaceholder,
@@ -263,7 +263,7 @@ export function OrgEntrySpecificFields({
   onDeviceInfoChange,
   deviceInfoPlaceholder,
   passkeyLabels,
-}: OrgEntrySpecificFieldsProps) {
+}: TeamEntrySpecificFieldsProps) {
   switch (entryKind) {
     case "passkey":
       return (

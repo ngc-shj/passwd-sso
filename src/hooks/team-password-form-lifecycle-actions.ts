@@ -1,12 +1,12 @@
 import { formatCardNumber } from "@/lib/credit-card";
-import type { OrgPasswordFormEditData } from "@/components/team/team-password-form-types";
-import type { OrgPasswordFormLifecycleSetters } from "@/hooks/use-team-password-form-state";
+import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
+import type { TeamPasswordFormLifecycleSetters } from "@/hooks/use-team-password-form-state";
 
-export type OrgPasswordFormSetters = OrgPasswordFormLifecycleSetters;
+export type TeamPasswordFormSetters = TeamPasswordFormLifecycleSetters;
 
 export function applyOrgEditDataToForm(
-  data: OrgPasswordFormEditData,
-  setters: OrgPasswordFormSetters,
+  data: TeamPasswordFormEditData,
+  setters: TeamPasswordFormSetters,
 ): void {
   setters.setTitle(data.title);
   setters.setUsername(data.username ?? "");
@@ -39,10 +39,10 @@ export function applyOrgEditDataToForm(
   setters.setCredentialId(data.credentialId ?? "");
   setters.setCreationDate(data.creationDate ?? "");
   setters.setDeviceInfo(data.deviceInfo ?? "");
-  setters.setOrgFolderId(data.orgFolderId ?? null);
+  setters.setOrgFolderId(data.teamFolderId ?? null);
 }
 
-export function resetOrgFormForClose(setters: OrgPasswordFormSetters): void {
+export function resetOrgFormForClose(setters: TeamPasswordFormSetters): void {
   setters.setTitle("");
   setters.setUsername("");
   setters.setPassword("");

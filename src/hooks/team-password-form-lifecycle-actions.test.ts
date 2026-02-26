@@ -3,10 +3,10 @@ import {
   applyOrgEditDataToForm,
   resetOrgFormForClose,
 } from "@/hooks/team-password-form-lifecycle-actions";
-import { createOrgPasswordFormLifecycleSettersMock } from "@/test-utils/team-password-form-setters";
+import { createTeamPasswordFormLifecycleSettersMock } from "@/test-utils/team-password-form-setters";
 
 function createSetters() {
-  return createOrgPasswordFormLifecycleSettersMock();
+  return createTeamPasswordFormLifecycleSettersMock();
 }
 
 describe("org-password-form-lifecycle-actions", () => {
@@ -24,7 +24,7 @@ describe("org-password-form-lifecycle-actions", () => {
         notes: "notes",
         brand: "Visa",
         cardNumber: "4111111111111111",
-        orgFolderId: "folder-1",
+        teamFolderId: "folder-1",
       },
       setters,
     );

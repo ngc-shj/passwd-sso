@@ -1,32 +1,32 @@
 "use client";
 
-import type { SubmitOrgPasswordFormArgs } from "@/components/team/team-password-form-actions";
-import type { OrgPasswordFormProps } from "@/components/team/team-password-form-types";
+import type { SubmitTeamPasswordFormArgs } from "@/components/team/team-password-form-actions";
+import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
 import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { OrgPasswordFormTranslations } from "@/hooks/entry-form-translations";
-import type { OrgPasswordFormState } from "@/hooks/use-team-password-form-state";
-import type { useOrgPasswordFormPresenter } from "@/hooks/use-team-password-form-presenter";
+import type { TeamPasswordFormTranslations } from "@/hooks/entry-form-translations";
+import type { TeamPasswordFormState } from "@/hooks/use-team-password-form-state";
+import type { useTeamPasswordFormPresenter } from "@/hooks/use-team-password-form-presenter";
 
-type OrgEntryValues = ReturnType<typeof useOrgPasswordFormPresenter>["entryValues"];
+type OrgEntryValues = ReturnType<typeof useTeamPasswordFormPresenter>["entryValues"];
 
 interface BuildOrgSubmitArgsParams {
-  orgId: OrgPasswordFormProps["orgId"];
+  orgId: TeamPasswordFormProps["orgId"];
   orgEncryptionKey: CryptoKey;
   orgKeyVersion: number;
-  onSaved: OrgPasswordFormProps["onSaved"];
+  onSaved: TeamPasswordFormProps["onSaved"];
   isEdit: boolean;
-  editData?: OrgPasswordFormProps["editData"];
+  editData?: TeamPasswordFormProps["editData"];
   effectiveEntryType: EntryTypeValue;
   entryKindState: OrgEntryKindState;
-  translations: OrgPasswordFormTranslations;
+  translations: TeamPasswordFormTranslations;
   handleOpenChange: (open: boolean) => void;
-  setters: Pick<OrgPasswordFormState["setters"], "setDobError" | "setExpiryError" | "setSaving">;
+  setters: Pick<TeamPasswordFormState["setters"], "setDobError" | "setExpiryError" | "setSaving">;
   entryValues: OrgEntryValues;
   cardNumberValid: boolean;
 }
 
-export function buildOrgSubmitArgs({
+export function buildTeamSubmitArgs({
   orgId,
   orgEncryptionKey,
   orgKeyVersion,
@@ -40,7 +40,7 @@ export function buildOrgSubmitArgs({
   setters,
   entryValues,
   cardNumberValid,
-}: BuildOrgSubmitArgsParams): SubmitOrgPasswordFormArgs {
+}: BuildOrgSubmitArgsParams): SubmitTeamPasswordFormArgs {
   return {
     orgId,
     orgEncryptionKey,

@@ -3,20 +3,21 @@
 import type { ComponentProps } from "react";
 import { EntryActionBar } from "@/components/passwords/entry-form-ui";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
-import { OrgTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
-import type { OrgFolderItem } from "@/components/team/team-password-form-types";
-import type { OrgPasswordFormState } from "@/hooks/use-team-password-form-state";
+import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
+import type { TeamFolderItem } from "@/components/team/team-password-form-types";
+import type { TeamPasswordFormState } from "@/hooks/use-team-password-form-state";
 import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";
 
-type OrgTagsAndFolderSectionProps = ComponentProps<typeof OrgTagsAndFolderSection>;
+type TeamTagsAndFolderSectionProps = ComponentProps<typeof TeamTagsAndFolderSection>;
 type EntryCustomFieldsTotpSectionProps = ComponentProps<typeof EntryCustomFieldsTotpSection>;
 type EntryActionBarProps = ComponentProps<typeof EntryActionBar>;
 
-interface UseOrgFormSectionsPropsArgs {
-  orgId: string;
+interface UseTeamFormSectionsPropsArgs {
+  teamId?: string;
+  orgId?: string;
   tagsTitle: string;
   tagsHint: string;
-  folders: OrgFolderItem[];
+  folders: TeamFolderItem[];
   sectionCardClass: string;
   isLoginEntry: boolean;
   hasChanges: boolean;
@@ -28,22 +29,23 @@ interface UseOrgFormSectionsPropsArgs {
   statusSavedLabel: string;
   onCancel: () => void;
   values: Pick<
-    OrgPasswordFormState["values"],
-    "selectedTags" | "orgFolderId" | "customFields" | "totp" | "showTotpInput"
+    TeamPasswordFormState["values"],
+    "selectedTags" | "teamFolderId" | "customFields" | "totp" | "showTotpInput"
   >;
   setters: Pick<
-    OrgPasswordFormState["setters"],
+    TeamPasswordFormState["setters"],
     "setSelectedTags" | "setOrgFolderId" | "setCustomFields" | "setTotp" | "setShowTotpInput"
   >;
 }
 
-interface OrgFormSectionsPropsResult {
-  tagsAndFolderProps: OrgTagsAndFolderSectionProps;
+interface TeamFormSectionsPropsResult {
+  tagsAndFolderProps: TeamTagsAndFolderSectionProps;
   customFieldsTotpProps: EntryCustomFieldsTotpSectionProps | null;
   actionBarProps: EntryActionBarProps;
 }
 
-export function buildOrgFormSectionsProps({
+export function buildTeamFormSectionsProps({
+  teamId,
   orgId,
   tagsTitle,
   tagsHint,
@@ -60,16 +62,18 @@ export function buildOrgFormSectionsProps({
   onCancel,
   values,
   setters,
-}: UseOrgFormSectionsPropsArgs): OrgFormSectionsPropsResult {
+}: UseTeamFormSectionsPropsArgs): TeamFormSectionsPropsResult {
+  const scopedTeamId = teamId ?? orgId ?? "";
   return {
     tagsAndFolderProps: {
       tagsTitle,
       tagsHint,
-      orgId,
+      teamId: scopedTeamId,
+      orgId: scopedTeamId,
       selectedTags: values.selectedTags,
       onTagsChange: setters.setSelectedTags,
       folders,
-      folderId: values.orgFolderId,
+      folderId: values.teamFolderId,
       onFolderChange: setters.setOrgFolderId,
       sectionCardClass,
     },
@@ -96,5 +100,3 @@ export function buildOrgFormSectionsProps({
     }),
   };
 }
-
-export const buildTeamFormSectionsProps = buildOrgFormSectionsProps;

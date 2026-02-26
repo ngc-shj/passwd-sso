@@ -18,8 +18,6 @@ interface TeamTagsAndFolderSectionProps {
   sectionCardClass?: string;
 }
 
-export type OrgTagsAndFolderSectionProps = TeamTagsAndFolderSectionProps;
-
 export function TeamTagsAndFolderSection({
   tagsTitle,
   tagsHint,
@@ -46,5 +44,3 @@ export function TeamTagsAndFolderSection({
     />
   );
 }
-
-export const OrgTagsAndFolderSection = TeamTagsAndFolderSection;

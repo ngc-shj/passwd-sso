@@ -1,33 +1,33 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import type { OrgPasswordFormEditData, OrgPasswordFormProps } from "@/components/team/team-password-form-types";
-import type { OrgPasswordFormLifecycleSetters } from "@/hooks/use-team-password-form-state";
+import type { TeamPasswordFormEditData, TeamPasswordFormProps } from "@/components/team/team-password-form-types";
+import type { TeamPasswordFormLifecycleSetters } from "@/hooks/use-team-password-form-state";
 import {
   applyOrgEditDataToForm,
   resetOrgFormForClose,
 } from "@/hooks/team-password-form-lifecycle-actions";
 
-export interface OrgPasswordFormLifecycleArgs {
-  open: OrgPasswordFormProps["open"];
-  editData?: OrgPasswordFormProps["editData"];
-  onOpenChange: OrgPasswordFormProps["onOpenChange"];
-  setters: OrgPasswordFormLifecycleSetters;
+export interface TeamPasswordFormLifecycleArgs {
+  open: TeamPasswordFormProps["open"];
+  editData?: TeamPasswordFormProps["editData"];
+  onOpenChange: TeamPasswordFormProps["onOpenChange"];
+  setters: TeamPasswordFormLifecycleSetters;
 }
 
-export function useOrgPasswordFormLifecycle({
+export function useTeamPasswordFormLifecycle({
   open,
   editData,
   onOpenChange,
   setters,
-}: OrgPasswordFormLifecycleArgs) {
+}: TeamPasswordFormLifecycleArgs) {
   const settersRef = useRef(setters);
 
   useEffect(() => {
     settersRef.current = setters;
   }, [setters]);
 
-  const applyEditData = useCallback((data: OrgPasswordFormEditData) => {
+  const applyEditData = useCallback((data: TeamPasswordFormEditData) => {
     applyOrgEditDataToForm(data, settersRef.current);
   }, []);
 

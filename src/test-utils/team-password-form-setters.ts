@@ -1,7 +1,7 @@
 import { vi } from "vitest";
-import type { OrgPasswordFormLifecycleSetters } from "@/hooks/use-team-password-form-state";
+import type { TeamPasswordFormLifecycleSetters } from "@/hooks/use-team-password-form-state";
 
-export function createOrgPasswordFormLifecycleSettersMock(): OrgPasswordFormLifecycleSetters {
+export function createTeamPasswordFormLifecycleSettersMock(): TeamPasswordFormLifecycleSetters {
   const noop = vi.fn();
   return {
     setTitle: noop,

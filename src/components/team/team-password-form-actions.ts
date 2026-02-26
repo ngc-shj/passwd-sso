@@ -4,9 +4,9 @@ import { extractTagIds } from "@/lib/entry-form-helpers";
 import { detectCardBrand, formatCardNumber, normalizeCardBrand, normalizeCardNumber } from "@/lib/credit-card";
 import { executeOrgEntrySubmit } from "@/components/team/team-entry-submit";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { OrgPasswordFormEditData } from "@/components/team/team-password-form-types";
+import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { OrgTagData } from "@/components/team/team-tag-input";
+import type { TeamTagData } from "@/components/team/team-tag-input";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 interface HandleOrgCardNumberChangeArgs {
@@ -35,17 +35,17 @@ export function handleOrgCardNumberChange({
   }
 }
 
-export interface SubmitOrgPasswordFormArgs {
+export interface SubmitTeamPasswordFormArgs {
   orgId: string;
   orgEncryptionKey: CryptoKey;
   orgKeyVersion: number;
   isEdit: boolean;
-  editData?: OrgPasswordFormEditData | null;
+  editData?: TeamPasswordFormEditData | null;
   effectiveEntryType: EntryTypeValue;
   title: string;
   notes: string;
-  selectedTags: OrgTagData[];
-  orgFolderId: string | null;
+  selectedTags: TeamTagData[];
+  teamFolderId: string | null;
   username: string;
   password: string;
   url: string;
@@ -86,7 +86,7 @@ export interface SubmitOrgPasswordFormArgs {
   onSaved: () => void;
 }
 
-export async function submitOrgPasswordForm({
+export async function submitTeamPasswordForm({
   orgId,
   orgEncryptionKey,
   orgKeyVersion,
@@ -96,7 +96,7 @@ export async function submitOrgPasswordForm({
   title,
   notes,
   selectedTags,
-  orgFolderId,
+  teamFolderId,
   username,
   password,
   url,
@@ -132,7 +132,7 @@ export async function submitOrgPasswordForm({
   setSaving,
   handleOpenChange,
   onSaved,
-}: SubmitOrgPasswordFormArgs): Promise<void> {
+}: SubmitTeamPasswordFormArgs): Promise<void> {
   const validation = validateOrgEntryBeforeSubmit({
     entryType: effectiveEntryType,
     title,
@@ -195,7 +195,7 @@ export async function submitOrgPasswordForm({
     overviewBlob,
     entryType: effectiveEntryType,
     tagIds,
-    orgFolderId,
+    teamFolderId,
     t,
     setSaving,
     handleOpenChange,

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildOrgEntrySpecificTextProps } from "@/hooks/team-entry-specific-fields-text-props";
+import { buildTeamEntrySpecificTextProps } from "@/hooks/team-entry-specific-fields-text-props";
 
-describe("buildOrgEntrySpecificTextProps", () => {
+describe("buildTeamEntrySpecificTextProps", () => {
   it("maps translation namespaces and entry copy values", () => {
-    const props = buildOrgEntrySpecificTextProps(
+    const props = buildTeamEntrySpecificTextProps(
       {
         t: (k) => `t.${k}`,
         tn: (k) => `tn.${k}`,

@@ -1,21 +1,21 @@
 "use client";
 
 import type {
-  OrgPasswordFormValues,
-  OrgPasswordFormSettersState,
+  TeamPasswordFormValues,
+  TeamPasswordFormSettersState,
 } from "@/hooks/use-team-password-form-state";
 import {
-  buildOrgEntrySpecificCallbacks,
+  buildTeamEntrySpecificCallbacks,
 } from "@/hooks/team-entry-specific-fields-callbacks";
 import {
-  buildOrgEntrySpecificTextProps,
+  buildTeamEntrySpecificTextProps,
 } from "@/hooks/team-entry-specific-fields-text-props";
 import type {
-  OrgEntrySpecificFieldsBuilderArgs,
-  OrgEntrySpecificFieldsProps,
+  TeamEntrySpecificFieldsBuilderArgs,
+  TeamEntrySpecificFieldsProps,
 } from "@/hooks/team-entry-specific-fields-types";
 
-export function buildOrgEntrySpecificFieldsProps({
+export function buildTeamEntrySpecificFieldsProps({
   entryKind,
   entryCopy,
   translations,
@@ -94,8 +94,8 @@ export function buildOrgEntrySpecificFieldsProps({
   onCreationDateChange,
   deviceInfo,
   onDeviceInfoChange,
-}: OrgEntrySpecificFieldsBuilderArgs): OrgEntrySpecificFieldsProps {
-  const computedTextProps = buildOrgEntrySpecificTextProps(translations, entryCopy, lengthHint);
+}: TeamEntrySpecificFieldsBuilderArgs): TeamEntrySpecificFieldsProps {
+  const computedTextProps = buildTeamEntrySpecificTextProps(translations, entryCopy, lengthHint);
 
   return {
     entryKind,
@@ -177,8 +177,8 @@ export function buildOrgEntrySpecificFieldsProps({
   };
 }
 
-export type BuildOrgEntrySpecificFieldsPropsFromStateArgs = Pick<
-  OrgEntrySpecificFieldsBuilderArgs,
+export type BuildTeamEntrySpecificFieldsPropsFromStateArgs = Pick<
+  TeamEntrySpecificFieldsBuilderArgs,
   | "entryKind"
   | "entryCopy"
   | "translations"
@@ -191,13 +191,13 @@ export type BuildOrgEntrySpecificFieldsPropsFromStateArgs = Pick<
   | "lengthHint"
   | "onCardNumberChange"
 > & {
-  values: OrgPasswordFormValues;
-  setters: OrgPasswordFormSettersState;
+  values: TeamPasswordFormValues;
+  setters: TeamPasswordFormSettersState;
 };
 
-type OrgEntrySpecificCallbacks = ReturnType<typeof buildOrgEntrySpecificCallbacks>;
+type TeamEntrySpecificCallbacks = ReturnType<typeof buildTeamEntrySpecificCallbacks>;
 
-export function buildOrgEntrySpecificFieldsBuilderArgsFromState({
+export function buildTeamEntrySpecificFieldsBuilderArgsFromState({
   entryKind,
   entryCopy,
   translations,
@@ -211,9 +211,9 @@ export function buildOrgEntrySpecificFieldsBuilderArgsFromState({
   detectedBrand,
   hasBrandHint,
   lengthHint,
-}: Omit<BuildOrgEntrySpecificFieldsPropsFromStateArgs, "setters"> & {
-  callbacks: OrgEntrySpecificCallbacks;
-}): OrgEntrySpecificFieldsBuilderArgs {
+}: Omit<BuildTeamEntrySpecificFieldsPropsFromStateArgs, "setters"> & {
+  callbacks: TeamEntrySpecificCallbacks;
+}): TeamEntrySpecificFieldsBuilderArgs {
   return {
     entryKind,
     entryCopy,
@@ -296,7 +296,7 @@ export function buildOrgEntrySpecificFieldsBuilderArgsFromState({
   };
 }
 
-export function buildOrgEntrySpecificFieldsPropsFromState({
+export function buildTeamEntrySpecificFieldsPropsFromState({
   entryKind,
   entryCopy,
   translations,
@@ -310,9 +310,9 @@ export function buildOrgEntrySpecificFieldsPropsFromState({
   detectedBrand,
   hasBrandHint,
   lengthHint,
-}: BuildOrgEntrySpecificFieldsPropsFromStateArgs): OrgEntrySpecificFieldsProps {
-  const callbacks = buildOrgEntrySpecificCallbacks(values, setters);
-  const builderArgs = buildOrgEntrySpecificFieldsBuilderArgsFromState({
+}: BuildTeamEntrySpecificFieldsPropsFromStateArgs): TeamEntrySpecificFieldsProps {
+  const callbacks = buildTeamEntrySpecificCallbacks(values, setters);
+  const builderArgs = buildTeamEntrySpecificFieldsBuilderArgsFromState({
     entryKind,
     entryCopy,
     translations,
@@ -328,5 +328,5 @@ export function buildOrgEntrySpecificFieldsPropsFromState({
     lengthHint,
   });
 
-  return buildOrgEntrySpecificFieldsProps(builderArgs);
+  return buildTeamEntrySpecificFieldsProps(builderArgs);
 }

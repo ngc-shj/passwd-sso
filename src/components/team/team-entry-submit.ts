@@ -1,20 +1,20 @@
 import { toast } from "sonner";
 import { saveOrgEntry } from "@/lib/org-entry-save";
-import type { OrgPasswordFormEditData } from "@/components/team/team-password-form-types";
+import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 interface ExecuteOrgEntrySubmitArgs {
   teamId: string;
   isEdit: boolean;
-  editData?: OrgPasswordFormEditData | null;
+  editData?: TeamPasswordFormEditData | null;
   orgEncryptionKey: CryptoKey;
   orgKeyVersion: number;
   fullBlob: string;
   overviewBlob: string;
   entryType?: EntryTypeValue;
   tagIds: string[];
-  orgFolderId?: string | null;
+  teamFolderId?: string | null;
   t: PasswordFormTranslator;
   setSaving: (value: boolean) => void;
   handleOpenChange: (open: boolean) => void;
@@ -31,7 +31,7 @@ export async function executeOrgEntrySubmit({
   overviewBlob,
   entryType,
   tagIds,
-  orgFolderId,
+  teamFolderId,
   t,
   setSaving,
   handleOpenChange,
@@ -49,7 +49,7 @@ export async function executeOrgEntrySubmit({
       overviewBlob,
       entryType,
       tagIds,
-      orgFolderId,
+      orgFolderId: teamFolderId,
     });
 
     if (!res.ok) throw new Error("Failed");

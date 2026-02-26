@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-export function useOrgPasswordFormUiState() {
+export function useTeamPasswordFormUiState() {
   const [saving, setSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showGenerator, setShowGenerator] = useState(false);

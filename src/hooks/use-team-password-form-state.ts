@@ -1,15 +1,15 @@
-import type { OrgPasswordFormEditData } from "@/components/team/team-password-form-types";
+import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
 import type { OrgAttachmentMeta } from "@/components/team/team-attachment-section";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { OrgTagData } from "@/components/team/team-tag-input";
-import { useOrgPasswordFormUiState } from "@/hooks/use-team-password-form-ui-state";
-import { useOrgPasswordFormValueState } from "@/hooks/use-team-password-form-value-state";
-import { buildOrgPasswordFormInitialValues } from "@/hooks/team-password-form-initial-values";
+import type { TeamTagData } from "@/components/team/team-tag-input";
+import { useTeamPasswordFormUiState } from "@/hooks/use-team-password-form-ui-state";
+import { useTeamPasswordFormValueState } from "@/hooks/use-team-password-form-value-state";
+import { buildTeamPasswordFormInitialValues } from "@/hooks/team-password-form-initial-values";
 
-export function useOrgPasswordFormState(editData?: OrgPasswordFormEditData | null) {
-  const initial = buildOrgPasswordFormInitialValues(editData);
-  const uiState = useOrgPasswordFormUiState();
-  const valueState = useOrgPasswordFormValueState(initial);
+export function useTeamPasswordFormState(editData?: TeamPasswordFormEditData | null) {
+  const initial = buildTeamPasswordFormInitialValues(editData);
+  const uiState = useTeamPasswordFormUiState();
+  const valueState = useTeamPasswordFormValueState(initial);
 
   const values = {
     ...uiState.values,
@@ -24,18 +24,18 @@ export function useOrgPasswordFormState(editData?: OrgPasswordFormEditData | nul
   return { values, setters };
 }
 
-export type OrgPasswordFormState = ReturnType<typeof useOrgPasswordFormState>;
-export type OrgPasswordFormValues = OrgPasswordFormState["values"];
-export type OrgPasswordFormSettersState = OrgPasswordFormState["setters"];
-export type OrgPasswordFormLifecycleSetters = OrgPasswordFormSettersState & {
+export type TeamPasswordFormState = ReturnType<typeof useTeamPasswordFormState>;
+export type TeamPasswordFormValues = TeamPasswordFormState["values"];
+export type TeamPasswordFormSettersState = TeamPasswordFormState["setters"];
+export type TeamPasswordFormLifecycleSetters = TeamPasswordFormSettersState & {
   setAttachments: (value: OrgAttachmentMeta[]) => void;
 };
 
 export interface OrgEntryFieldValues {
   title: string;
   notes: string;
-  selectedTags: OrgTagData[];
-  orgFolderId: string | null;
+  selectedTags: TeamTagData[];
+  teamFolderId: string | null;
   username: string;
   password: string;
   url: string;
@@ -64,12 +64,12 @@ export interface OrgEntryFieldValues {
   deviceInfo: string;
 }
 
-export function selectOrgEntryFieldValues(values: OrgPasswordFormValues): OrgEntryFieldValues {
+export function selectOrgEntryFieldValues(values: TeamPasswordFormValues): OrgEntryFieldValues {
   return {
     title: values.title,
     notes: values.notes,
     selectedTags: values.selectedTags,
-    orgFolderId: values.orgFolderId,
+    teamFolderId: values.teamFolderId,
     username: values.username,
     password: values.password,
     url: values.url,

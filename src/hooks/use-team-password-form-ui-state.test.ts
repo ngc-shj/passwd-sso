@@ -2,11 +2,11 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { useOrgPasswordFormUiState } from "@/hooks/use-team-password-form-ui-state";
+import { useTeamPasswordFormUiState } from "@/hooks/use-team-password-form-ui-state";
 
-describe("useOrgPasswordFormUiState", () => {
+describe("useTeamPasswordFormUiState", () => {
   it("initializes all ui flags as false", () => {
-    const { result } = renderHook(() => useOrgPasswordFormUiState());
+    const { result } = renderHook(() => useTeamPasswordFormUiState());
 
     expect(result.current.values.saving).toBe(false);
     expect(result.current.values.showPassword).toBe(false);
@@ -18,7 +18,7 @@ describe("useOrgPasswordFormUiState", () => {
   });
 
   it("updates ui flags via setters", () => {
-    const { result } = renderHook(() => useOrgPasswordFormUiState());
+    const { result } = renderHook(() => useTeamPasswordFormUiState());
 
     act(() => {
       result.current.setters.setSaving(true);

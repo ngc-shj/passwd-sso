@@ -10,9 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { OrgAttachmentSection } from "./team-attachment-section";
-import { OrgEntrySpecificFields } from "@/components/team/team-entry-specific-fields";
-import { OrgTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
-import type { OrgPasswordFormProps } from "@/components/team/team-password-form-types";
+import { TeamEntrySpecificFields } from "@/components/team/team-entry-specific-fields";
+import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
+import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   EntryActionBar,
@@ -21,7 +21,7 @@ import {
 import { useTeamPasswordFormModel } from "@/hooks/use-team-password-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
 
-export function OrgPasswordForm({
+export function TeamPasswordForm({
   orgId,
   teamId,
   open,
@@ -29,7 +29,7 @@ export function OrgPasswordForm({
   onSaved,
   entryType,
   editData,
-}: OrgPasswordFormProps) {
+}: TeamPasswordFormProps) {
   const scopedId = teamId ?? orgId;
   if (!scopedId) return null;
   const {
@@ -62,7 +62,7 @@ export function OrgPasswordForm({
   } = formState;
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
   const { tagsAndFolderProps, customFieldsTotpProps, actionBarProps } = buildTeamFormSectionsProps({
-    orgId: scopedId,
+    teamId: scopedId,
     tagsTitle: entryCopy.tagsTitle,
     tagsHint: t("tagsHint"),
     folders: orgFolders,
@@ -80,7 +80,7 @@ export function OrgPasswordForm({
     setters: formState.setters,
   });
 
-  const entrySpecificFields = <OrgEntrySpecificFields {...entrySpecificFieldsProps} />;
+  const entrySpecificFields = <TeamEntrySpecificFields {...entrySpecificFieldsProps} />;
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,7 +107,7 @@ export function OrgPasswordForm({
 
           {entrySpecificFields}
 
-          <OrgTagsAndFolderSection {...tagsAndFolderProps} />
+          <TeamTagsAndFolderSection {...tagsAndFolderProps} />
 
           {customFieldsTotpProps && (
             <EntryCustomFieldsTotpSection {...customFieldsTotpProps} />

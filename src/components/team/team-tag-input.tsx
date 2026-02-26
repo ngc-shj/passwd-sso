@@ -18,8 +18,6 @@ export interface TeamTagData {
   color: string | null;
 }
 
-export type OrgTagData = TeamTagData;
-
 interface TeamTagInputProps {
   teamId: string;
   selectedTags: TeamTagData[];

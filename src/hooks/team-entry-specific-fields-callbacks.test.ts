@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildOrgEntrySpecificCallbacks } from "@/hooks/team-entry-specific-fields-callbacks";
+import { buildTeamEntrySpecificCallbacks } from "@/hooks/team-entry-specific-fields-callbacks";
 import type {
-  OrgPasswordFormSettersState,
-  OrgPasswordFormValues,
+  TeamPasswordFormSettersState,
+  TeamPasswordFormValues,
 } from "@/hooks/use-team-password-form-state";
 
 function createState(): {
-  values: OrgPasswordFormValues;
-  setters: OrgPasswordFormSettersState;
+  values: TeamPasswordFormValues;
+  setters: TeamPasswordFormSettersState;
 } {
   return {
     values: {
@@ -25,7 +25,7 @@ function createState(): {
       url: "",
       notes: "",
       selectedTags: [],
-      generatorSettings: {} as OrgPasswordFormValues["generatorSettings"],
+      generatorSettings: {} as TeamPasswordFormValues["generatorSettings"],
       customFields: [],
       totp: null,
       showTotpInput: false,
@@ -52,7 +52,7 @@ function createState(): {
       credentialId: "",
       creationDate: "",
       deviceInfo: "",
-      orgFolderId: null,
+      teamFolderId: null,
     },
     setters: {
       setSaving: vi.fn(),
@@ -101,10 +101,10 @@ function createState(): {
   };
 }
 
-describe("buildOrgEntrySpecificCallbacks", () => {
+describe("buildTeamEntrySpecificCallbacks", () => {
   it("toggles visibility flags and applies generated password", () => {
     const { values, setters } = createState();
-    const callbacks = buildOrgEntrySpecificCallbacks(values, setters);
+    const callbacks = buildTeamEntrySpecificCallbacks(values, setters);
 
     callbacks.onToggleShowPassword();
     callbacks.onToggleGenerator();
@@ -120,7 +120,7 @@ describe("buildOrgEntrySpecificCallbacks", () => {
     expect(setters.setShowIdNumber).toHaveBeenCalledWith(false);
     expect(setters.setShowCredentialId).toHaveBeenCalledWith(false);
 
-    const settings = { length: 20 } as OrgPasswordFormValues["generatorSettings"];
+    const settings = { length: 20 } as TeamPasswordFormValues["generatorSettings"];
     callbacks.onGeneratorUse("generated", settings);
     expect(setters.setPassword).toHaveBeenCalledWith("generated");
     expect(setters.setShowPassword).toHaveBeenCalledWith(true);
@@ -129,7 +129,7 @@ describe("buildOrgEntrySpecificCallbacks", () => {
 
   it("sets manual brand source and clears identity date errors", () => {
     const { values, setters } = createState();
-    const callbacks = buildOrgEntrySpecificCallbacks(values, setters);
+    const callbacks = buildTeamEntrySpecificCallbacks(values, setters);
 
     callbacks.onBrandChange("Visa");
     expect(setters.setBrand).toHaveBeenCalledWith("Visa");

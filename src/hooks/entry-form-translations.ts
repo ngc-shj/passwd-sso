@@ -22,6 +22,7 @@ export interface OrgPasswordFormTranslations {
   ti: IdentityFormTranslator;
   tpk: PasskeyFormTranslator;
 }
+export type TeamPasswordFormTranslations = OrgPasswordFormTranslations;
 
 export interface EntryFormTranslationsBundle {
   t: PasswordFormTranslator;
@@ -55,3 +56,5 @@ export function toOrgPasswordFormTranslations(
     tpk: translations.tpk,
   };
 }
+
+export const toTeamPasswordFormTranslations = toOrgPasswordFormTranslations;

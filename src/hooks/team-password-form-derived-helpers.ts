@@ -1,12 +1,12 @@
 import { formatCardNumber } from "@/lib/credit-card";
-import type { OrgPasswordFormProps } from "@/components/team/team-password-form-types";
+import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
 import type { OrgEntryKindState } from "@/components/team/team-entry-kind";
 import type { OrgEntryFieldValues } from "@/hooks/use-team-password-form-state";
 import type { EntryTypeValue } from "@/lib/constants";
 
 export type OrgSnapshotBaselineArgs = {
   effectiveEntryType: EntryTypeValue;
-  editData?: OrgPasswordFormProps["editData"];
+  editData?: TeamPasswordFormProps["editData"];
   entryKindState: OrgEntryKindState;
 };
 
@@ -21,7 +21,7 @@ export function buildBaselineSnapshot({
     title: editData?.title ?? "",
     notes: editData?.notes ?? "",
     selectedTagIds: (editData?.tags ?? []).map((tag) => tag.id).sort(),
-    orgFolderId: editData?.orgFolderId ?? null,
+    teamFolderId: editData?.teamFolderId ?? null,
     login: isLoginEntry
       ? {
           username: editData?.username ?? "",
@@ -88,7 +88,7 @@ export function buildCurrentSnapshot({
     title,
     notes,
     selectedTags,
-    orgFolderId,
+    teamFolderId,
     username,
     password,
     url,
@@ -121,7 +121,7 @@ export function buildCurrentSnapshot({
     title,
     notes,
     selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
-    orgFolderId,
+    teamFolderId,
     login: isLoginEntry ? { username, password, url, customFields, totp } : null,
     secureNote: isNote ? { content } : null,
     creditCard: isCreditCard
