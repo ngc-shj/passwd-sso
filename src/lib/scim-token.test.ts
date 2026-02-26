@@ -6,6 +6,9 @@ const { mockFindUnique, mockUpdate } = vi.hoisted(() => ({
   mockFindUnique: vi.fn(),
   mockUpdate: vi.fn(),
 }));
+const { mockWithBypassRls } = vi.hoisted(() => ({
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+}));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -18,6 +21,9 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/crypto-server", () => ({
   hashToken: (token: string) => `hashed:${token}`,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
 import {

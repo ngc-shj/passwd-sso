@@ -9,6 +9,7 @@ const {
   mockScimToken,
   mockTeamanization,
   mockHashToken,
+  mockWithTeamTenantRls,
 } = vi.hoisted(
   () => {
     class _TeamAuthError extends Error {
@@ -27,6 +28,7 @@ const {
       mockScimToken: { findMany: vi.fn(), create: vi.fn(), count: vi.fn() },
       mockTeamanization: { findUnique: vi.fn() },
       mockHashToken: vi.fn().mockReturnValue("hashed-token"),
+      mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
     };
   },
 );
@@ -48,6 +50,9 @@ vi.mock("@/lib/crypto-server", () => ({
 }));
 vi.mock("@/lib/scim/token-utils", () => ({
   generateScimToken: () => "scim_mock_token_value",
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withTeamTenantRls: mockWithTeamTenantRls,
 }));
 
 import { GET, POST } from "./route";

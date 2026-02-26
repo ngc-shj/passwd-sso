@@ -1,10 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
 
-function isTestEnv(): boolean {
-  return process.env.NODE_ENV === "test";
-}
-
 export async function resolveUserTenantId(userId: string): Promise<string | null> {
   return withBypassRls(prisma, async () => {
     const memberships = await prisma.tenantMember.findMany({
@@ -36,7 +32,6 @@ export async function withUserTenantRls<T>(
   userId: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  if (isTestEnv()) return fn();
   const tenantId = await resolveUserTenantId(userId);
   if (!tenantId) {
     throw new Error("TENANT_NOT_RESOLVED");
@@ -48,7 +43,6 @@ export async function withTeamTenantRls<T>(
   teamId: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  if (isTestEnv()) return fn();
   const tenantId = await resolveTeamTenantId(teamId);
   if (!tenantId) {
     throw new Error("TENANT_NOT_RESOLVED");

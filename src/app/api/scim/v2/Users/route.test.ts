@@ -9,6 +9,7 @@ const {
   mockUser,
   mockScimExternalMapping,
   mockTransaction,
+  mockWithTenantRls,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
@@ -17,6 +18,7 @@ const {
   mockUser: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
   mockScimExternalMapping: { findFirst: vi.fn(), findMany: vi.fn(), upsert: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
+  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/lib/scim-token", () => ({
@@ -36,6 +38,9 @@ vi.mock("@/lib/prisma", () => ({
     scimExternalMapping: mockScimExternalMapping,
     $transaction: mockTransaction,
   },
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withTenantRls: mockWithTenantRls,
 }));
 
 import { GET, POST } from "./route";
