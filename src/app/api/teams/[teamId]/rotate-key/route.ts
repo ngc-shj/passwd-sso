@@ -6,7 +6,7 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { orgMemberKeySchema } from "@/lib/validations";
+import { teamMemberKeySchema } from "@/lib/validations";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -37,7 +37,7 @@ const rotateKeySchema = z.object({
   memberKeys: z.array(
     z.object({
       userId: z.string().min(1),
-    }).merge(orgMemberKeySchema)
+    }).merge(teamMemberKeySchema)
   ).min(1).max(1000),
 });
 

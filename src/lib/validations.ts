@@ -122,8 +122,8 @@ export const createTeamSchema = z.object({
   description: z.string().max(500).trim().optional(),
 });
 
-/** Schema for E2E team creation — includes client-encrypted OrgMemberKey for owner */
-export const orgMemberKeySchema = z.object({
+/** Schema for E2E team creation — includes client-encrypted TeamMemberKey for owner */
+export const teamMemberKeySchema = z.object({
   encryptedOrgKey: z.string().min(1).max(1000),
   orgKeyIv: z.string().regex(/^[0-9a-f]{24}$/),
   orgKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/),
@@ -135,7 +135,7 @@ export const orgMemberKeySchema = z.object({
 
 export const createTeamE2ESchema = createTeamSchema.extend({
   id: z.string().uuid().optional(),
-  orgMemberKey: orgMemberKeySchema,
+  orgMemberKey: teamMemberKeySchema,
 });
 
 /** Schema for E2E team password creation — client sends pre-encrypted blobs */
@@ -371,7 +371,7 @@ export type CreateTagInput = z.infer<typeof createTagSchema>;
 export type UpdateTagInput = z.infer<typeof updateTagSchema>;
 export type CreateTeamInput = z.infer<typeof createTeamSchema>;
 export type CreateTeamE2EInput = z.infer<typeof createTeamE2ESchema>;
-export type OrgMemberKeyInput = z.infer<typeof orgMemberKeySchema>;
+export type TeamMemberKeyInput = z.infer<typeof teamMemberKeySchema>;
 export type CreateTeamE2EPasswordInput = z.infer<typeof createTeamE2EPasswordSchema>;
 export type UpdateTeamE2EPasswordInput = z.infer<typeof updateTeamE2EPasswordSchema>;
 export type UpdateTeamInput = z.infer<typeof updateTeamSchema>;
