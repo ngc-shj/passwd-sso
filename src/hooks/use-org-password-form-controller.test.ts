@@ -23,8 +23,8 @@ vi.mock("@/hooks/use-org-password-form-presenter", () => ({
   useOrgPasswordFormPresenter: (...args: unknown[]) => useOrgPasswordFormPresenterMock(...args),
 }));
 
-vi.mock("@/lib/org-vault-context", () => ({
-  useOrgVault: () => ({
+vi.mock("@/lib/team-vault-context", () => ({
+  useTeamVault: () => ({
     getOrgKeyInfo: mockGetOrgKeyInfo,
     getOrgEncryptionKey: vi.fn(),
     invalidateOrgKey: vi.fn(),

@@ -12,7 +12,7 @@ import {
 import { useOrgPasswordFormDerived } from "@/hooks/use-org-password-form-derived";
 import { type OrgPasswordFormState } from "@/hooks/use-org-password-form-state";
 import { buildOrgSubmitArgs } from "@/hooks/org-password-form-submit-args";
-import { useOrgVault } from "@/lib/org-vault-context";
+import { useTeamVault } from "@/lib/team-vault-context";
 
 export interface OrgPasswordFormControllerArgs {
   orgId: OrgPasswordFormProps["orgId"];
@@ -38,7 +38,7 @@ export function useOrgPasswordFormController({
   handleOpenChange,
 }: OrgPasswordFormControllerArgs) {
   const { setters } = formState;
-  const { getOrgKeyInfo } = useOrgVault();
+  const { getOrgKeyInfo } = useTeamVault();
   const { entryValues, cardNumberValid, entryCopy, entrySpecificFieldsProps } =
     useOrgPasswordFormPresenter({
     isEdit,

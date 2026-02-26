@@ -27,7 +27,7 @@ import { ORG_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-sort";
-import { useOrgVault } from "@/lib/org-vault-context";
+import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
@@ -75,7 +75,7 @@ export default function TeamDashboardPage({
   const activeScope = searchParams.get("scope");
   const t = useTranslations("Team");
   const tDash = useTranslations("Dashboard");
-  const { getOrgEncryptionKey } = useOrgVault();
+  const { getOrgEncryptionKey } = useTeamVault();
   const [org, setOrg] = useState<TeamInfo | null>(null);
   const [passwords, setPasswords] = useState<TeamPasswordEntry[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);

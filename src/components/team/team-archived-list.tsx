@@ -13,7 +13,7 @@ import {
   compareEntriesWithFavorite,
   type EntrySortOption,
 } from "@/lib/entry-sort";
-import { useOrgVault } from "@/lib/org-vault-context";
+import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
@@ -58,7 +58,7 @@ export function OrgArchivedList({
 }: OrgArchivedListProps) {
   const scopedId = _teamId ?? _orgId;
   const t = useTranslations("Team");
-  const { getOrgEncryptionKey } = useOrgVault();
+  const { getOrgEncryptionKey } = useTeamVault();
   const [entries, setEntries] = useState<OrgArchivedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);

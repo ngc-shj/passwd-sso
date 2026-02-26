@@ -21,7 +21,7 @@ import {
   compareEntriesByDeletedAt,
   type EntrySortOption,
 } from "@/lib/entry-sort";
-import { useOrgVault } from "@/lib/org-vault-context";
+import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
@@ -59,7 +59,7 @@ export function OrgTrashList({
   const scopedId = _teamId ?? _orgId;
   const t = useTranslations("Trash");
   const tOrg = useTranslations("Team");
-  const { getOrgEncryptionKey } = useOrgVault();
+  const { getOrgEncryptionKey } = useTeamVault();
   const [entries, setEntries] = useState<OrgTrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
 

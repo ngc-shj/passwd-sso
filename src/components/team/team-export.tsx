@@ -18,7 +18,7 @@ import {
   formatExportContent as formatExportContentShared,
   formatExportDate,
 } from "@/lib/export-format-common";
-import { useOrgVault } from "@/lib/org-vault-context";
+import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildOrgEntryAAD } from "@/lib/crypto-aad";
 
@@ -31,7 +31,7 @@ function OrgExportPanelContent({ orgId, teamId }: OrgExportPanelContentProps) {
   const scopedId = teamId ?? orgId;
   if (!scopedId) return null;
   const t = useTranslations("Export");
-  const { getOrgEncryptionKey } = useOrgVault();
+  const { getOrgEncryptionKey } = useTeamVault();
   const [exporting, setExporting] = useState(false);
   const [passwordProtect, setPasswordProtect] = useState(true);
   const [exportPassword, setExportPassword] = useState("");

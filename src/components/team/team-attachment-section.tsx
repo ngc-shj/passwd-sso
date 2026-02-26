@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
-import { useOrgVault } from "@/lib/org-vault-context";
+import { useTeamVault } from "@/lib/team-vault-context";
 import {
   encryptBinary,
   decryptBinary,
@@ -87,7 +87,7 @@ export function TeamAttachmentSection({
   const t = useTranslations("Attachments");
   const tApi = useTranslations("ApiErrors");
   const tc = useTranslations("Common");
-  const { getOrgEncryptionKey, getOrgKeyInfo } = useOrgVault();
+  const { getOrgEncryptionKey, getOrgKeyInfo } = useTeamVault();
   const [uploading, setUploading] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TeamAttachmentMeta | null>(null);

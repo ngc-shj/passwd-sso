@@ -7,7 +7,7 @@ import { ChevronDown, ChevronRight, Eye, EyeOff, History, RotateCcw } from "luci
 import { Button } from "@/components/ui/button";
 import { apiPath } from "@/lib/constants";
 import { useVault } from "@/lib/vault-context";
-import { useOrgVault } from "@/lib/org-vault-context";
+import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD, buildOrgEntryAAD } from "@/lib/crypto-aad";
 import {
@@ -133,7 +133,7 @@ export function EntryHistorySection({ entryId, orgId, requireReprompt, onRestore
   const t = useTranslations("PasswordDetail");
   const locale = useLocale();
   const { encryptionKey, userId } = useVault();
-  const { getOrgEncryptionKey } = useOrgVault();
+  const { getOrgEncryptionKey } = useTeamVault();
   const { requireVerification, repromptDialog } = useReprompt();
   const [expanded, setExpanded] = useState(false);
   const [histories, setHistories] = useState<HistoryEntry[]>([]);

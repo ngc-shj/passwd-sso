@@ -20,8 +20,8 @@ vi.mock("@/lib/ime-guard", () => ({
   preventIMESubmit: vi.fn(),
 }));
 
-vi.mock("@/lib/org-vault-context", () => ({
-  useOrgVault: () => ({
+vi.mock("@/lib/team-vault-context", () => ({
+  useTeamVault: () => ({
     getOrgKeyInfo: vi.fn().mockResolvedValue({ key: {} as CryptoKey, keyVersion: 1 }),
     getOrgEncryptionKey: vi.fn(),
     invalidateOrgKey: vi.fn(),

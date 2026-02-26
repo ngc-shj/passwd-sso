@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
-import { useOrgVaultOptional } from "@/lib/org-vault-context";
+import { useTeamVaultOptional } from "@/lib/team-vault-context";
 import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
 import { FileUp } from "lucide-react";
@@ -31,7 +31,7 @@ function ImportPanelContent({ onComplete, orgId, teamId }: ImportPanelContentPro
   const scopedId = teamId ?? orgId;
   const t = useTranslations("Import");
   const { encryptionKey, userId } = useVault();
-  const orgVault = useOrgVaultOptional();
+  const orgVault = useTeamVaultOptional();
   const isOrgImport = Boolean(scopedId);
   const tagsPath = scopedId ? apiPath.teamTags(scopedId) : API_PATH.TAGS;
   const passwordsPath = scopedId ? apiPath.teamPasswords(scopedId) : API_PATH.PASSWORDS;
