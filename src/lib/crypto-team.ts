@@ -45,7 +45,7 @@ export const HKDF_ECDH_WRAP_INFO = "passwd-sso-ecdh-v1";
 export const CURRENT_TEAM_WRAP_VERSION = 1;
 
 /** AAD scope for TeamMemberKey wrapping */
-const AAD_SCOPE_ORG_KEY = "OK";
+const AAD_SCOPE_TEAM_KEY = "OK";
 
 /** AAD version for team key wrapping */
 const AAD_VERSION = 1;
@@ -221,8 +221,8 @@ export function buildTeamKeyWrapAAD(ctx: TeamKeyWrapContext): Uint8Array {
   let offset = 0;
 
   // Scope: "OK"
-  bytes[offset] = AAD_SCOPE_ORG_KEY.charCodeAt(0);
-  bytes[offset + 1] = AAD_SCOPE_ORG_KEY.charCodeAt(1);
+  bytes[offset] = AAD_SCOPE_TEAM_KEY.charCodeAt(0);
+  bytes[offset + 1] = AAD_SCOPE_TEAM_KEY.charCodeAt(1);
   offset += 2;
 
   // AAD version

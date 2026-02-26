@@ -103,7 +103,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         select: { teamKeyVersion: true },
       });
       if (!currentTeam || currentTeam.teamKeyVersion !== team.teamKeyVersion) {
-        throw new Error("ORG_KEY_VERSION_CONFLICT");
+        throw new Error("TEAM_KEY_VERSION_CONFLICT");
       }
 
       // Verify all active members have a key in the payload (F-26: inside tx)
@@ -200,7 +200,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       });
     }, { timeout: 60_000 });
   } catch (e) {
-    if (e instanceof Error && e.message === "ORG_KEY_VERSION_CONFLICT") {
+    if (e instanceof Error && e.message === "TEAM_KEY_VERSION_CONFLICT") {
       return NextResponse.json(
         { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
         { status: 409 }
