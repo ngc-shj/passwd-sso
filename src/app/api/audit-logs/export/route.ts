@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 const bodySchema = z.object({
+  teamId: z.string().optional(),
   orgId: z.string().optional(),
   entryCount: z.number().int().min(0),
   format: z.enum(["csv", "json"]),
@@ -34,7 +35,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
   }
 
-  const { orgId: teamId, entryCount, format, filename, encrypted, includeOrgs } = result.data;
+  const {
+    teamId: requestedTeamId,
+    orgId: legacyOrgId,
+    entryCount,
+    format,
+    filename,
+    encrypted,
+    includeOrgs,
+  } = result.data;
+  const teamId = requestedTeamId ?? legacyOrgId;
 
   // Verify team membership when teamId is specified
   if (teamId) {
