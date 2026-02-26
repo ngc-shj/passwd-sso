@@ -15,10 +15,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, id, historyId } = await params;
+  const { teamId, id, historyId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.PASSWORD_UPDATE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     where: { id },
   });
 
-  if (!entry || entry.orgId !== orgId) {
+  if (!entry || entry.orgId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.ENTRY_HISTORY_RESTORE,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.ORG_PASSWORD_ENTRY,
     targetId: id,
     metadata: {

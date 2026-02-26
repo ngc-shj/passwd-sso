@@ -13,10 +13,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, id } = await params;
+  const { teamId, id } = await params;
 
   try {
-    await requireTeamMember(session.user.id, orgId);
+    await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -29,7 +29,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     select: { orgId: true },
   });
 
-  if (!entry || entry.orgId !== orgId) {
+  if (!entry || entry.orgId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
