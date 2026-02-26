@@ -15,10 +15,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, id } = await params;
+  const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -27,7 +27,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   const tag = await prisma.orgTag.findUnique({ where: { id } });
-  if (!tag || tag.orgId !== orgId) {
+  if (!tag || tag.orgId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
@@ -68,10 +68,10 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, id } = await params;
+  const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -80,7 +80,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   }
 
   const tag = await prisma.orgTag.findUnique({ where: { id } });
-  if (!tag || tag.orgId !== orgId) {
+  if (!tag || tag.orgId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 

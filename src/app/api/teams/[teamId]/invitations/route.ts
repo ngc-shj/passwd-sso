@@ -17,10 +17,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.MEMBER_INVITE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -29,7 +29,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 
   const invitations = await prisma.orgInvitation.findMany({
-    where: { orgId, status: INVITATION_STATUS.PENDING },
+    where: { orgId: teamId, status: INVITATION_STATUS.PENDING },
     include: {
       invitedBy: {
         select: { id: true, name: true, email: true },
@@ -59,10 +59,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.MEMBER_INVITE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -94,7 +94,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (existingUser) {
     const existingMember = await prisma.orgMember.findUnique({
       where: {
-        orgId_userId: { orgId, userId: existingUser.id },
+        orgId_userId: { orgId: teamId, userId: existingUser.id },
       },
     });
     if (existingMember) {
@@ -118,7 +118,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // Check for existing pending invitation
   const existingInv = await prisma.orgInvitation.findFirst({
-    where: { orgId, email, status: INVITATION_STATUS.PENDING },
+    where: { orgId: teamId, email, status: INVITATION_STATUS.PENDING },
   });
   if (existingInv) {
     return NextResponse.json(
@@ -132,7 +132,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const invitation = await prisma.orgInvitation.create({
     data: {
-      orgId,
+      orgId: teamId,
       email,
       role,
       token,
@@ -145,7 +145,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.ORG,
     action: AUDIT_ACTION.ORG_MEMBER_INVITE,
     userId: session.user.id,
-    orgId,
+    orgId: teamId,
     targetType: AUDIT_TARGET_TYPE.ORG_INVITATION,
     targetId: invitation.id,
     metadata: { email, role },

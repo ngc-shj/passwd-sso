@@ -14,10 +14,10 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId, invId } = await params;
+  const { teamId, invId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.MEMBER_INVITE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -29,7 +29,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     where: { id: invId },
   });
 
-  if (!invitation || invitation.orgId !== orgId) {
+  if (!invitation || invitation.orgId !== teamId) {
     return NextResponse.json(
       { error: API_ERROR.INVITATION_NOT_FOUND },
       { status: 404 }

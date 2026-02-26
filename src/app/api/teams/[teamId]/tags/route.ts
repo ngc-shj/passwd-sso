@@ -19,10 +19,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamMember(session.user.id, orgId);
+    await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -31,7 +31,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 
   const tags = await prisma.orgTag.findMany({
-    where: { orgId },
+    where: { orgId: teamId },
     orderBy: { name: "asc" },
     include: {
       _count: {
@@ -61,10 +61,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.TAG_MANAGE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { name, color } = parsed.data;
 
   const existing = await prisma.orgTag.findUnique({
-    where: { name_orgId: { name, orgId } },
+    where: { name_orgId: { name, orgId: teamId } },
   });
   if (existing) {
     return NextResponse.json(
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     data: {
       name,
       color: color || null,
-      orgId,
+      orgId: teamId,
     },
   });
 

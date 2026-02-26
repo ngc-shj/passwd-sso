@@ -19,12 +19,12 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    const membership = await requireTeamMember(session.user.id, orgId);
+    const membership = await requireTeamMember(session.user.id, teamId);
     const org = await prisma.organization.findUnique({
-      where: { id: orgId },
+      where: { id: teamId },
       select: {
         id: true,
         name: true,
@@ -61,10 +61,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.ORG_UPDATE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.ORG_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -94,7 +94,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   const org = await prisma.organization.update({
-    where: { id: orgId },
+    where: { id: teamId },
     data: updateData,
   });
 
@@ -114,10 +114,10 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, orgId, TEAM_PERMISSION.ORG_DELETE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.ORG_DELETE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -125,7 +125,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  await prisma.organization.delete({ where: { id: orgId } });
+  await prisma.organization.delete({ where: { id: teamId } });
 
   return NextResponse.json({ success: true });
 }

@@ -14,10 +14,10 @@ export async function GET(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const { teamId: orgId } = await params;
+  const { teamId } = await params;
 
   try {
-    await requireTeamMember(session.user.id, orgId);
+    await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   // Check if key has been distributed to this member
   const membership = await prisma.orgMember.findFirst({
-    where: { orgId, userId: session.user.id, deactivatedAt: null },
+    where: { orgId: teamId, userId: session.user.id, deactivatedAt: null },
     select: { keyDistributed: true },
   });
 
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     memberKey = await prisma.orgMemberKey.findUnique({
       where: {
         orgId_userId_keyVersion: {
-          orgId,
+          orgId: teamId,
           userId: session.user.id,
           keyVersion,
         },
@@ -62,7 +62,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   } else {
     // Get the latest key version
     memberKey = await prisma.orgMemberKey.findFirst({
-      where: { orgId, userId: session.user.id },
+      where: { orgId: teamId, userId: session.user.id },
       orderBy: { keyVersion: "desc" },
     });
   }
