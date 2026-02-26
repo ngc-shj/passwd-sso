@@ -14,13 +14,13 @@ import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@
 
 type Params = { params: Promise<{ teamId: string }> };
 
-function getOrgParent(id: string): Promise<ParentNode | null> {
+function getTeamParent(id: string): Promise<ParentNode | null> {
   return prisma.orgFolder
     .findUnique({ where: { id }, select: { parentId: true, orgId: true } })
     .then((f) => (f ? { parentId: f.parentId, ownerId: f.orgId } : null));
 }
 
-// GET /api/teams/[teamId]/folders - List org folders with entry count
+// GET /api/teams/[teamId]/folders - List team folders with entry count
 export async function GET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -65,7 +65,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   );
 }
 
-// POST /api/teams/[teamId]/folders - Create an org folder
+// POST /api/teams/[teamId]/folders - Create a team folder
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Parent ownership + existence check
   if (parentId) {
     try {
-      await validateParentFolder(parentId, teamId, getOrgParent);
+      await validateParentFolder(parentId, teamId, getTeamParent);
     } catch {
       return NextResponse.json(
         { error: API_ERROR.NOT_FOUND },
@@ -113,7 +113,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   try {
-    await validateFolderDepth(parentId ?? null, teamId, getOrgParent);
+    await validateFolderDepth(parentId ?? null, teamId, getTeamParent);
   } catch {
     return NextResponse.json(
       { error: API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED },

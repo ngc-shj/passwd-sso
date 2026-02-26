@@ -81,7 +81,7 @@ describe("GET /api/teams/[teamId]/folders", () => {
     expect(res.status).toBe(403);
   });
 
-  it("returns org folders with entry count", async () => {
+  it("returns team folders with entry count", async () => {
     mockPrismaOrgFolder.findMany.mockResolvedValue([
       {
         id: "f1",
@@ -205,7 +205,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     expect(json.error).toBe("FOLDER_ALREADY_EXISTS");
   });
 
-  it("creates org folder successfully (201)", async () => {
+  it("creates team folder successfully (201)", async () => {
     mockPrismaOrgFolder.findFirst.mockResolvedValue(null);
     mockPrismaOrgFolder.create.mockResolvedValue({
       id: "new-folder-id",

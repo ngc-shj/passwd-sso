@@ -200,13 +200,13 @@ const ORG_FOLDERS_DATA = [
 /** Mock fetch for initial data loads returning folders and empty tags/orgs. */
 function mockFetchSuccess(overrides?: {
   foldersData?: unknown[];
-  orgsData?: unknown[];
-  orgFoldersData?: unknown[];
+  teamsData?: unknown[];
+  teamFoldersData?: unknown[];
   orgTagsData?: unknown[];
 }) {
   const folders = overrides?.foldersData ?? FOLDERS_DATA;
-  const orgsData = overrides?.orgsData ?? [];
-  const orgFolders = overrides?.orgFoldersData ?? [];
+  const teamsData = overrides?.teamsData ?? [];
+  const orgFolders = overrides?.teamFoldersData ?? [];
   const orgTags = overrides?.orgTagsData ?? [];
   return vi.fn((url: string) => {
     if (url.includes("/api/tags") && !url.includes("/api/teams/")) {
@@ -237,7 +237,7 @@ function mockFetchSuccess(overrides?: {
     if (url.includes("/api/teams")) {
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve(orgsData),
+        json: () => Promise.resolve(teamsData),
       });
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
@@ -501,8 +501,8 @@ describe("Sidebar team folder CRUD integration", () => {
 
   it("shows team folder create button for OWNER role", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
-      orgFoldersData: ORG_FOLDERS_DATA,
+      teamsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
+      teamFoldersData: ORG_FOLDERS_DATA,
     });
     globalThis.fetch = fetchMock;
 
@@ -525,8 +525,8 @@ describe("Sidebar team folder CRUD integration", () => {
 
   it("shows team folder create button for ADMIN role", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "ADMIN" }],
-      orgFoldersData: ORG_FOLDERS_DATA,
+      teamsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "ADMIN" }],
+      teamFoldersData: ORG_FOLDERS_DATA,
     });
     globalThis.fetch = fetchMock;
 
@@ -547,8 +547,8 @@ describe("Sidebar team folder CRUD integration", () => {
 
   it("shows enabled team folder create button for MEMBER role", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
-      orgFoldersData: ORG_FOLDERS_DATA,
+      teamsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
+      teamFoldersData: ORG_FOLDERS_DATA,
     });
     globalThis.fetch = fetchMock;
 
@@ -569,8 +569,8 @@ describe("Sidebar team folder CRUD integration", () => {
 
   it("shows edit/delete menu for team folders when role is MEMBER", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
-      orgFoldersData: ORG_FOLDERS_DATA,
+      teamsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
+      teamFoldersData: ORG_FOLDERS_DATA,
     });
     globalThis.fetch = fetchMock;
 
@@ -591,8 +591,8 @@ describe("Sidebar team folder CRUD integration", () => {
 
   it("shows edit/delete menu for team folders when role is OWNER", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
-      orgFoldersData: ORG_FOLDERS_DATA,
+      teamsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
+      teamFoldersData: ORG_FOLDERS_DATA,
     });
     globalThis.fetch = fetchMock;
 
@@ -613,8 +613,8 @@ describe("Sidebar team folder CRUD integration", () => {
 
   it("calls team API endpoint when creating team folder", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
-      orgFoldersData: ORG_FOLDERS_DATA,
+      teamsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
+      teamFoldersData: ORG_FOLDERS_DATA,
     });
     globalThis.fetch = fetchMock;
 
@@ -661,8 +661,8 @@ describe("Sidebar team folder CRUD integration", () => {
 
   it("shows team folder create button even when team has zero folders (OWNER)", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
-      orgFoldersData: [], // No folders yet
+      teamsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "OWNER" }],
+      teamFoldersData: [], // No folders yet
     });
     globalThis.fetch = fetchMock;
 
@@ -681,8 +681,8 @@ describe("Sidebar team folder CRUD integration", () => {
 
   it("shows enabled team folder create button when MEMBER and team has zero folders", async () => {
     const fetchMock = mockFetchSuccess({
-      orgsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
-      orgFoldersData: [], // No folders
+      teamsData: [{ id: "team-1", name: "Acme Corp", slug: "acme", role: "MEMBER" }],
+      teamFoldersData: [], // No folders
     });
     globalThis.fetch = fetchMock;
 

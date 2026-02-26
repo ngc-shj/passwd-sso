@@ -15,13 +15,13 @@ import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
-function getOrgParent(id: string): Promise<ParentNode | null> {
+function getTeamParent(id: string): Promise<ParentNode | null> {
   return prisma.orgFolder
     .findUnique({ where: { id }, select: { parentId: true, orgId: true } })
     .then((f) => (f ? { parentId: f.parentId, ownerId: f.orgId } : null));
 }
 
-// PUT /api/teams/[teamId]/folders/[id] - Update an org folder
+// PUT /api/teams/[teamId]/folders/[id] - Update a team folder
 export async function PUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -72,7 +72,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       if (newParentId) {
         // Parent ownership + existence check
         try {
-          await validateParentFolder(newParentId, teamId, getOrgParent);
+          await validateParentFolder(newParentId, teamId, getTeamParent);
         } catch {
           return NextResponse.json(
             { error: API_ERROR.NOT_FOUND },
@@ -87,7 +87,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
           );
         }
 
-        const isCircular = await checkCircularReference(id, newParentId, getOrgParent);
+        const isCircular = await checkCircularReference(id, newParentId, getTeamParent);
         if (isCircular) {
           return NextResponse.json(
             { error: API_ERROR.FOLDER_CIRCULAR_REFERENCE },
@@ -97,7 +97,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       }
 
       try {
-        await validateFolderDepth(newParentId, teamId, getOrgParent);
+        await validateFolderDepth(newParentId, teamId, getTeamParent);
       } catch {
         return NextResponse.json(
           { error: API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED },
@@ -164,7 +164,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 }
 
-// DELETE /api/teams/[teamId]/folders/[id] - Delete an org folder
+// DELETE /api/teams/[teamId]/folders/[id] - Delete a team folder
 export async function DELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
