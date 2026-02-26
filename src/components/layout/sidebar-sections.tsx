@@ -296,7 +296,7 @@ interface VaultManagementSectionProps {
   isSelectedVaultTrash: boolean;
   isShareLinks: boolean;
   isPersonalAuditLog: boolean;
-  activeAuditOrgId: string | null;
+  activeAuditTeamId: string | null;
   onNavigate: () => void;
 }
 
@@ -307,7 +307,7 @@ export function VaultManagementSection({
   isSelectedVaultTrash,
   isShareLinks,
   isPersonalAuditLog,
-  activeAuditOrgId,
+  activeAuditTeamId,
   onNavigate,
 }: VaultManagementSectionProps) {
   const isOrg = vaultContext.type === "org";
@@ -319,7 +319,7 @@ export function VaultManagementSection({
     ? `/dashboard/teams/${scopedTeamId}/audit-logs`
     : "/dashboard/audit-logs";
   const isAuditActive = isOrg
-    ? activeAuditOrgId === scopedTeamId
+    ? activeAuditTeamId === scopedTeamId
     : isPersonalAuditLog;
 
   return (

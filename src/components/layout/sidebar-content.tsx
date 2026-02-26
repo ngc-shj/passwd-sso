@@ -12,20 +12,19 @@ import {
 import type { SidebarSection } from "@/hooks/use-sidebar-sections-state";
 import type {
   SidebarFolderItem,
-  SidebarOrgItem,
+  SidebarTeamItem,
   SidebarOrganizeTagItem,
 } from "@/hooks/use-sidebar-data";
 import type { VaultContext } from "@/hooks/use-vault-context";
 
 export interface SidebarContentProps {
   t: (key: string) => string;
-  tOrg: (key: string) => string;
+  tTeam: (key: string) => string;
   vaultContext: VaultContext;
-  teams?: SidebarOrgItem[];
-  orgs?: SidebarOrgItem[];
-  selectedOrg: SidebarOrgItem | null;
-  selectedOrgCanManageFolders: boolean;
-  selectedOrgCanManageTags: boolean;
+  teams: SidebarTeamItem[];
+  selectedTeam: SidebarTeamItem | null;
+  selectedTeamCanManageFolders: boolean;
+  selectedTeamCanManageTags: boolean;
   selectedTypeFilter: string | null;
   selectedFolderId: string | null;
   selectedTagId: string | null;
@@ -37,30 +36,29 @@ export interface SidebarContentProps {
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
   isPersonalAuditLog: boolean;
-  activeAuditOrgId: string | null;
+  activeAuditTeamId: string | null;
   selectedFolders: SidebarFolderItem[];
   selectedTags: SidebarOrganizeTagItem[];
   isOpen: (key: SidebarSection) => boolean;
   toggleSection: (key: SidebarSection) => (open: boolean) => void;
   onVaultChange: (value: string) => void;
-  onCreateFolder: (orgId?: string) => void;
-  onCreateTag: (orgId?: string) => void;
-  onEditFolder: (folder: SidebarFolderItem, orgId?: string) => void;
-  onDeleteFolder: (folder: SidebarFolderItem, orgId?: string) => void;
-  onEditTag: (tag: SidebarOrganizeTagItem, orgId?: string) => void;
-  onDeleteTag: (tag: SidebarOrganizeTagItem, orgId?: string) => void;
+  onCreateFolder: (teamId?: string) => void;
+  onCreateTag: (teamId?: string) => void;
+  onEditFolder: (folder: SidebarFolderItem, teamId?: string) => void;
+  onDeleteFolder: (folder: SidebarFolderItem, teamId?: string) => void;
+  onEditTag: (tag: SidebarOrganizeTagItem, teamId?: string) => void;
+  onDeleteTag: (tag: SidebarOrganizeTagItem, teamId?: string) => void;
   onNavigate: () => void;
 }
 
 export function SidebarContent({
   t,
-  tOrg,
+  tTeam,
   vaultContext,
   teams,
-  orgs,
-  selectedOrg,
-  selectedOrgCanManageFolders,
-  selectedOrgCanManageTags,
+  selectedTeam,
+  selectedTeamCanManageFolders,
+  selectedTeamCanManageTags,
   selectedTypeFilter,
   selectedFolderId,
   selectedTagId,
@@ -72,7 +70,7 @@ export function SidebarContent({
   isShareLinks,
   isEmergencyAccess,
   isPersonalAuditLog,
-  activeAuditOrgId,
+  activeAuditTeamId,
   selectedFolders,
   selectedTags,
   isOpen,
@@ -86,7 +84,7 @@ export function SidebarContent({
   onDeleteTag,
   onNavigate,
 }: SidebarContentProps) {
-  const teamItems = teams ?? orgs ?? [];
+  const teamItems = teams;
   const scopedTeamId =
     vaultContext.type === "org" ? (vaultContext.teamId ?? vaultContext.orgId) : "";
   return (
@@ -120,7 +118,7 @@ export function SidebarContent({
         isOpen={isOpen("organize")}
         onOpenChange={toggleSection("organize")}
         t={t}
-        canCreateFolder={vaultContext.type !== "org" || selectedOrgCanManageFolders}
+        canCreateFolder={vaultContext.type !== "org" || selectedTeamCanManageFolders}
         folders={selectedFolders}
         activeFolderId={selectedFolderId}
         linkHref={(id) =>
@@ -128,7 +126,7 @@ export function SidebarContent({
             ? `/dashboard/teams/${scopedTeamId}?folder=${id}`
             : `/dashboard/folders/${id}`
         }
-        showFolderMenu={vaultContext.type === "org" ? selectedOrgCanManageFolders : true}
+        showFolderMenu={vaultContext.type === "org" ? selectedTeamCanManageFolders : true}
         tags={selectedTags}
         activeTagId={selectedTagId}
         tagHref={(id) =>
@@ -146,7 +144,7 @@ export function SidebarContent({
             ? onCreateTag(scopedTeamId)
             : onCreateTag()
         }
-        canCreateTag={vaultContext.type !== "org" || selectedOrgCanManageTags}
+        canCreateTag={vaultContext.type !== "org" || selectedTeamCanManageTags}
         onEditFolder={(f) =>
           vaultContext.type === "org"
             ? onEditFolder(f, scopedTeamId)
@@ -167,7 +165,7 @@ export function SidebarContent({
             ? onDeleteTag(tag, scopedTeamId)
             : onDeleteTag(tag)
         }
-        showTagMenu={vaultContext.type !== "org" || selectedOrgCanManageTags}
+        showTagMenu={vaultContext.type !== "org" || selectedTeamCanManageTags}
         onNavigate={onNavigate}
       />
 
@@ -180,7 +178,7 @@ export function SidebarContent({
         isSelectedVaultTrash={isSelectedVaultTrash}
         isShareLinks={isShareLinks}
         isPersonalAuditLog={isPersonalAuditLog}
-        activeAuditOrgId={activeAuditOrgId}
+        activeAuditTeamId={activeAuditTeamId}
         onNavigate={onNavigate}
       />
 
@@ -201,8 +199,8 @@ export function SidebarContent({
         isOpen={isOpen("utilities")}
         onOpenChange={toggleSection("utilities")}
         t={t}
-        tOrg={tOrg}
-        selectedOrg={selectedOrg}
+        tTeam={tTeam}
+        selectedTeam={selectedTeam}
         onNavigate={onNavigate}
       />
     </nav>

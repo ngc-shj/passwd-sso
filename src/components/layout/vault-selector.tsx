@@ -17,13 +17,12 @@ interface VaultSelectorTeam {
 
 interface VaultSelectorProps {
   value: string;
-  teams?: VaultSelectorTeam[];
-  orgs?: VaultSelectorTeam[];
+  teams: VaultSelectorTeam[];
   onValueChange: (value: string) => void;
 }
 
-export function VaultSelector({ value, teams, orgs, onValueChange }: VaultSelectorProps) {
-  const teamOptions = teams ?? orgs ?? [];
+export function VaultSelector({ value, teams, onValueChange }: VaultSelectorProps) {
+  const teamOptions = teams;
   const t = useTranslations("Dashboard");
 
   if (teamOptions.length === 0) {

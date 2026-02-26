@@ -39,7 +39,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const router = useRouter();
   const t = useTranslations("Dashboard");
   const tCommon = useTranslations("Common");
-  const tOrg = useTranslations("Team");
+  const tTeam = useTranslations("Team");
   const tErrors = useTranslations("ApiErrors");
 
   const pathname = usePathname();
@@ -113,20 +113,11 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     pathname,
     searchParams,
     vaultContext,
-    orgs: teams,
+    teams,
     folders,
     tags,
-    orgFolderGroups: teamFolderGroups.map((group) => ({
-      orgId: group.teamId,
-      orgName: group.teamName,
-      orgRole: group.teamRole,
-      folders: group.folders,
-    })),
-    orgTagGroups: teamTagGroups.map((group) => ({
-      orgId: group.teamId,
-      orgName: group.teamName,
-      tags: group.tags,
-    })),
+    teamFolderGroups,
+    teamTagGroups,
   });
 
   const { isOpen, toggleSection } = useSidebarSectionsState({
@@ -142,11 +133,11 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 
   const sidebarContentProps = useSidebarViewModel({
     t,
-    tOrg,
+    tTeam,
     router,
     onOpenChange,
     vaultContext,
-    orgs: teams,
+    teams,
     selectedTeam,
     selectedTeamCanManageFolders,
     selectedTeamCanManageTags,

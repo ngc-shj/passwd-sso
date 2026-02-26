@@ -3,19 +3,19 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { useSidebarData } from "./use-sidebar-data";
 
-const orgs = [{ id: "org-1", name: "Security", slug: "security", role: "ADMIN" }];
+const teams = [{ id: "team-1", name: "Security", slug: "security", role: "ADMIN" }];
 const tags = [{ id: "tag-1", name: "Critical", color: "red", passwordCount: 2 }];
 const folders = [{ id: "folder-1", name: "Root", parentId: null, sortOrder: 0, entryCount: 3 }];
-const orgTags = [{ id: "org-tag-1", name: "Ops", color: null, count: 1 }];
-const orgFolders = [{ id: "org-folder-1", name: "Infra", parentId: null, sortOrder: 0, entryCount: 4 }];
+const teamTags = [{ id: "team-tag-1", name: "Ops", color: null, count: 1 }];
+const teamFolders = [{ id: "team-folder-1", name: "Infra", parentId: null, sortOrder: 0, entryCount: 4 }];
 
 function createFetchMock() {
   return vi.fn(async (url: string) => {
     if (url === "/api/tags") return { ok: true, json: async () => tags };
     if (url === "/api/folders") return { ok: true, json: async () => folders };
-    if (url === "/api/teams") return { ok: true, json: async () => orgs };
-    if (url === "/api/teams/org-1/tags") return { ok: true, json: async () => orgTags };
-    if (url === "/api/teams/org-1/folders") return { ok: true, json: async () => orgFolders };
+    if (url === "/api/teams") return { ok: true, json: async () => teams };
+    if (url === "/api/teams/team-1/tags") return { ok: true, json: async () => teamTags };
+    if (url === "/api/teams/team-1/folders") return { ok: true, json: async () => teamFolders };
     return { ok: false, json: async () => ({}) };
   });
 }
@@ -32,22 +32,22 @@ describe("useSidebarData", () => {
     vi.restoreAllMocks();
   });
 
-  it("fetches tags/folders/org data on mount", async () => {
+  it("fetches tags/folders/team data on mount", async () => {
     const { result } = renderHook(() => useSidebarData("/dashboard"));
 
     await waitFor(() => {
       expect(result.current.tags).toHaveLength(1);
       expect(result.current.folders).toHaveLength(1);
-      expect(result.current.orgs).toHaveLength(1);
-      expect(result.current.orgTagGroups).toHaveLength(1);
-      expect(result.current.orgFolderGroups).toHaveLength(1);
+      expect(result.current.teams).toHaveLength(1);
+      expect(result.current.teamTagGroups).toHaveLength(1);
+      expect(result.current.teamFolderGroups).toHaveLength(1);
     });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/tags");
     expect(fetchMock).toHaveBeenCalledWith("/api/folders");
     expect(fetchMock).toHaveBeenCalledWith("/api/teams");
-    expect(fetchMock).toHaveBeenCalledWith("/api/teams/org-1/tags");
-    expect(fetchMock).toHaveBeenCalledWith("/api/teams/org-1/folders");
+    expect(fetchMock).toHaveBeenCalledWith("/api/teams/team-1/tags");
+    expect(fetchMock).toHaveBeenCalledWith("/api/teams/team-1/folders");
   });
 
   it("refreshes on vault-data-changed event", async () => {
@@ -113,13 +113,13 @@ describe("useSidebarData", () => {
 
     act(() => {
       window.dispatchEvent(new CustomEvent("vault-data-changed"));
-      window.dispatchEvent(new CustomEvent("org-data-changed"));
+      window.dispatchEvent(new CustomEvent("team-data-changed"));
     });
 
     expect(fetchMock.mock.calls.length).toBe(firstCallCount);
   });
 
-  it("keeps defaults when org fetch fails", async () => {
+  it("keeps defaults when team fetch fails", async () => {
     fetchMock = vi.fn(async (url: string) => {
       if (url === "/api/tags") return { ok: true, json: async () => tags };
       if (url === "/api/folders") return { ok: true, json: async () => folders };
@@ -135,9 +135,9 @@ describe("useSidebarData", () => {
       expect(result.current.folders).toHaveLength(1);
     });
 
-    expect(result.current.orgs).toEqual([]);
-    expect(result.current.orgTagGroups).toEqual([]);
-    expect(result.current.orgFolderGroups).toEqual([]);
+    expect(result.current.teams).toEqual([]);
+    expect(result.current.teamTagGroups).toEqual([]);
+    expect(result.current.teamFolderGroups).toEqual([]);
     expect(result.current.lastError).toContain("/api/teams");
   });
 
@@ -173,18 +173,18 @@ describe("useSidebarData", () => {
     });
   });
 
-  it("includes org folder group for admin even with zero folders", async () => {
+  it("includes team folder group for admin even with zero folders", async () => {
     fetchMock = vi.fn(async (url: string) => {
       if (url === "/api/tags") return { ok: true, json: async () => [] };
       if (url === "/api/folders") return { ok: true, json: async () => [] };
       if (url === "/api/teams") {
         return {
           ok: true,
-          json: async () => [{ id: "org-1", name: "Security", slug: "security", role: "ADMIN" }],
+          json: async () => [{ id: "team-1", name: "Security", slug: "security", role: "ADMIN" }],
         };
       }
-      if (url === "/api/teams/org-1/tags") return { ok: true, json: async () => [] };
-      if (url === "/api/teams/org-1/folders") return { ok: true, json: async () => [] };
+      if (url === "/api/teams/team-1/tags") return { ok: true, json: async () => [] };
+      if (url === "/api/teams/team-1/folders") return { ok: true, json: async () => [] };
       return { ok: false, json: async () => ({}) };
     }) as Mock;
     globalThis.fetch = fetchMock;
@@ -192,12 +192,12 @@ describe("useSidebarData", () => {
     const { result } = renderHook(() => useSidebarData("/dashboard"));
 
     await waitFor(() => {
-      expect(result.current.orgFolderGroups).toHaveLength(1);
+      expect(result.current.teamFolderGroups).toHaveLength(1);
     });
 
-    expect(result.current.orgFolderGroups[0]).toMatchObject({
-      orgId: "org-1",
-      orgRole: "ADMIN",
+    expect(result.current.teamFolderGroups[0]).toMatchObject({
+      teamId: "team-1",
+      teamRole: "ADMIN",
       folders: [],
     });
   });

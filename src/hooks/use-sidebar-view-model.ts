@@ -4,7 +4,7 @@ import { useCallback } from "react";
 import type { SidebarContentProps } from "@/components/layout/sidebar-content";
 import type {
   SidebarFolderItem,
-  SidebarOrgItem,
+  SidebarTeamItem,
   SidebarOrganizeTagItem,
 } from "@/hooks/use-sidebar-data";
 import type { SidebarSection } from "@/hooks/use-sidebar-sections-state";
@@ -12,18 +12,14 @@ import type { VaultContext } from "@/hooks/use-vault-context";
 
 interface UseSidebarViewModelParams {
   t: (key: string) => string;
-  tOrg: (key: string) => string;
+  tTeam: (key: string) => string;
   router: { push: (href: string) => void };
   onOpenChange: (open: boolean) => void;
   vaultContext: VaultContext;
-  teams?: SidebarOrgItem[];
-  orgs?: SidebarOrgItem[];
-  selectedTeam?: SidebarOrgItem | null;
-  selectedOrg?: SidebarOrgItem | null;
+  teams: SidebarTeamItem[];
+  selectedTeam: SidebarTeamItem | null;
   selectedTeamCanManageFolders?: boolean;
-  selectedOrgCanManageFolders?: boolean;
   selectedTeamCanManageTags?: boolean;
-  selectedOrgCanManageTags?: boolean;
   selectedTypeFilter: string | null;
   selectedFolderId: string | null;
   selectedTagId: string | null;
@@ -35,34 +31,29 @@ interface UseSidebarViewModelParams {
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
   isPersonalAuditLog: boolean;
-  activeAuditTeamId?: string | null;
-  activeAuditOrgId?: string | null;
+  activeAuditTeamId: string | null;
   selectedFolders: SidebarFolderItem[];
   selectedTags: SidebarOrganizeTagItem[];
   isOpen: (key: SidebarSection) => boolean;
   toggleSection: (key: SidebarSection) => (open: boolean) => void;
-  handleFolderCreate: (orgId?: string) => void;
-  handleFolderEdit: (folder: SidebarFolderItem, orgId?: string) => void;
-  handleFolderDeleteClick: (folder: SidebarFolderItem, orgId?: string) => void;
-  handleTagCreate: (orgId?: string) => void;
-  handleTagEdit: (tag: SidebarOrganizeTagItem, orgId?: string) => void;
-  handleTagDeleteClick: (tag: SidebarOrganizeTagItem, orgId?: string) => void;
+  handleFolderCreate: (teamId?: string) => void;
+  handleFolderEdit: (folder: SidebarFolderItem, teamId?: string) => void;
+  handleFolderDeleteClick: (folder: SidebarFolderItem, teamId?: string) => void;
+  handleTagCreate: (teamId?: string) => void;
+  handleTagEdit: (tag: SidebarOrganizeTagItem, teamId?: string) => void;
+  handleTagDeleteClick: (tag: SidebarOrganizeTagItem, teamId?: string) => void;
 }
 
 export function useSidebarViewModel({
   t,
-  tOrg,
+  tTeam,
   router,
   onOpenChange,
   vaultContext,
   teams,
-  orgs,
   selectedTeam,
-  selectedOrg,
   selectedTeamCanManageFolders,
-  selectedOrgCanManageFolders,
   selectedTeamCanManageTags,
-  selectedOrgCanManageTags,
   selectedTypeFilter,
   selectedFolderId,
   selectedTagId,
@@ -75,7 +66,6 @@ export function useSidebarViewModel({
   isEmergencyAccess,
   isPersonalAuditLog,
   activeAuditTeamId,
-  activeAuditOrgId,
   selectedFolders,
   selectedTags,
   isOpen,
@@ -87,11 +77,9 @@ export function useSidebarViewModel({
   handleTagEdit,
   handleTagDeleteClick,
 }: UseSidebarViewModelParams): SidebarContentProps {
-  const teamItems = teams ?? orgs ?? [];
-  const selectedTeamItem = selectedTeam ?? selectedOrg ?? null;
-  const canManageFolders = selectedTeamCanManageFolders ?? selectedOrgCanManageFolders ?? false;
-  const canManageTags = selectedTeamCanManageTags ?? selectedOrgCanManageTags ?? false;
-  const activeAuditTeam = activeAuditTeamId ?? activeAuditOrgId ?? null;
+  const teamItems = teams;
+  const canManageFolders = selectedTeamCanManageFolders ?? false;
+  const canManageTags = selectedTeamCanManageTags ?? false;
   const onNavigate = useCallback(() => {
     onOpenChange(false);
   }, [onOpenChange]);
@@ -111,13 +99,12 @@ export function useSidebarViewModel({
 
   return {
     t,
-    tOrg,
+    tTeam,
     vaultContext,
     teams: teamItems,
-    orgs: teamItems,
-    selectedOrg: selectedTeamItem,
-    selectedOrgCanManageFolders: canManageFolders,
-    selectedOrgCanManageTags: canManageTags,
+    selectedTeam,
+    selectedTeamCanManageFolders: canManageFolders,
+    selectedTeamCanManageTags: canManageTags,
     selectedTypeFilter,
     selectedFolderId,
     selectedTagId,
@@ -129,7 +116,7 @@ export function useSidebarViewModel({
     isShareLinks,
     isEmergencyAccess,
     isPersonalAuditLog,
-    activeAuditOrgId: activeAuditTeam,
+    activeAuditTeamId,
     selectedFolders,
     selectedTags,
     isOpen,

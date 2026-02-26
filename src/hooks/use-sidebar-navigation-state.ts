@@ -5,9 +5,9 @@ import { ORG_ROLE } from "@/lib/constants";
 import { stripLocalePrefix } from "@/i18n/locale-utils";
 import type {
   SidebarFolderItem,
-  SidebarOrgFolderGroup,
-  SidebarOrgItem,
-  SidebarOrgTagGroup,
+  SidebarTeamFolderGroup,
+  SidebarTeamItem,
+  SidebarTeamTagGroup,
   SidebarTagItem,
 } from "@/hooks/use-sidebar-data";
 import type { VaultContext } from "@/hooks/use-vault-context";
@@ -16,14 +16,11 @@ interface UseSidebarNavigationStateParams {
   pathname: string;
   searchParams: URLSearchParams;
   vaultContext: VaultContext;
-  teams?: SidebarOrgItem[];
-  orgs?: SidebarOrgItem[];
+  teams: SidebarTeamItem[];
   folders: SidebarFolderItem[];
   tags: SidebarTagItem[];
-  teamFolderGroups?: SidebarOrgFolderGroup[];
-  orgFolderGroups?: SidebarOrgFolderGroup[];
-  teamTagGroups?: SidebarOrgTagGroup[];
-  orgTagGroups?: SidebarOrgTagGroup[];
+  teamFolderGroups: SidebarTeamFolderGroup[];
+  teamTagGroups: SidebarTeamTagGroup[];
 }
 
 export function useSidebarNavigationState({
@@ -31,17 +28,14 @@ export function useSidebarNavigationState({
   searchParams,
   vaultContext,
   teams,
-  orgs,
   folders,
   tags,
   teamFolderGroups,
-  orgFolderGroups,
   teamTagGroups,
-  orgTagGroups,
 }: UseSidebarNavigationStateParams) {
-  const teamItems = teams ?? orgs ?? [];
-  const scopedFolderGroups = teamFolderGroups ?? orgFolderGroups ?? [];
-  const scopedTagGroups = teamTagGroups ?? orgTagGroups ?? [];
+  const teamItems = teams;
+  const scopedFolderGroups = teamFolderGroups;
+  const scopedTagGroups = teamTagGroups;
   return useMemo(() => {
     const cleanPath = stripLocalePrefix(pathname);
 
@@ -53,19 +47,19 @@ export function useSidebarNavigationState({
     const isWatchtower = cleanPath === "/dashboard/watchtower";
     const isAuditLog = cleanPath === "/dashboard/audit-logs" || cleanPath.endsWith("/audit-logs");
     const isPersonalAuditLog = cleanPath === "/dashboard/audit-logs";
-    const auditTeamMatch = cleanPath.match(/^\/dashboard\/(?:teams|orgs)\/([^/]+)\/audit-logs$/);
+    const auditTeamMatch = cleanPath.match(/^\/dashboard\/teams\/([^/]+)\/audit-logs$/);
     const activeAuditTeamId = auditTeamMatch ? auditTeamMatch[1] : null;
     const tagMatch = cleanPath.match(/^\/dashboard\/tags\/([^/]+)/);
     const activeTagId = tagMatch ? tagMatch[1] : null;
     const folderMatch = cleanPath.match(/^\/dashboard\/folders\/([^/]+)/);
     const activeFolderId = folderMatch ? folderMatch[1] : null;
-    const teamMatch = cleanPath.match(/^\/dashboard\/(?:teams|orgs)\/([^/]+)/);
+    const teamMatch = cleanPath.match(/^\/dashboard\/teams\/([^/]+)/);
     const activeTeamId = teamMatch && !isAuditLog ? teamMatch[1] : null;
     const activeTeamTagId = activeTeamId ? searchParams.get("tag") : null;
     const activeTeamFolderId = activeTeamId ? searchParams.get("folder") : null;
     const activeTeamTypeFilter = activeTeamId ? searchParams.get("type") : null;
     const activeTeamScope = activeTeamId ? searchParams.get("scope") : null;
-    const isTeamsManage = cleanPath === "/dashboard/teams" || cleanPath === "/dashboard/orgs";
+    const isTeamsManage = cleanPath === "/dashboard/teams";
     const isShareLinks = cleanPath === "/dashboard/share-links";
     const isEmergencyAccess =
       cleanPath === "/dashboard/emergency-access" ||
@@ -74,10 +68,10 @@ export function useSidebarNavigationState({
     const selectedTeamId = vaultContext.type === "org" ? vaultContext.orgId : null;
     const selectedTeam = selectedTeamId ? teamItems.find((team) => team.id === selectedTeamId) ?? null : null;
     const selectedTeamFolderGroup = selectedTeamId
-      ? scopedFolderGroups.find((group) => group.orgId === selectedTeamId)
+      ? scopedFolderGroups.find((group) => group.teamId === selectedTeamId)
       : null;
     const selectedTeamTagGroup = selectedTeamId
-      ? scopedTagGroups.find((group) => group.orgId === selectedTeamId)
+      ? scopedTagGroups.find((group) => group.teamId === selectedTeamId)
       : null;
 
     const selectedTeamCanManageFolders = selectedTeam
@@ -144,24 +138,17 @@ export function useSidebarNavigationState({
 
     return {
       activeTeamId,
-      activeOrgId: activeTeamId,
       activeAuditTeamId,
-      activeAuditOrgId: activeAuditTeamId,
       isTeamsManage,
-      isOrgsManage: isTeamsManage,
       isWatchtower,
       isShareLinks,
       isEmergencyAccess,
       isAuditLog,
       isPersonalAuditLog,
       selectedTeamId,
-      selectedOrgId: selectedTeamId,
       selectedTeam,
-      selectedOrg: selectedTeam,
       selectedTeamCanManageFolders,
-      selectedOrgCanManageFolders: selectedTeamCanManageFolders,
       selectedTeamCanManageTags,
-      selectedOrgCanManageTags: selectedTeamCanManageTags,
       selectedTypeFilter,
       selectedFolderId,
       selectedTagId,

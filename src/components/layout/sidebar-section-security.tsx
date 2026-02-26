@@ -72,9 +72,8 @@ interface UtilitiesSectionProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
-  tOrg: (key: string) => string;
+  tTeam: (key: string) => string;
   selectedTeam?: SecurityTeam | null;
-  selectedOrg?: SecurityTeam | null;
   onNavigate: () => void;
 }
 
@@ -82,12 +81,11 @@ export function UtilitiesSection({
   isOpen,
   onOpenChange,
   t,
-  tOrg,
+  tTeam,
   selectedTeam,
-  selectedOrg,
   onNavigate,
 }: UtilitiesSectionProps) {
-  const scopedTeam = selectedTeam ?? selectedOrg ?? null;
+  const scopedTeam = selectedTeam ?? null;
   const exportHref = scopedTeam
     ? `/dashboard/teams/${scopedTeam.id}/export`
     : "/dashboard/export";
@@ -105,7 +103,7 @@ export function UtilitiesSection({
             <Button variant="ghost" className="w-full justify-start gap-2" asChild>
               <Link href={`/dashboard/teams/${scopedTeam.id}/settings`} onClick={onNavigate}>
                 <Settings className="h-4 w-4" />
-                {tOrg("orgSettings")}
+                {tTeam("orgSettings")}
               </Link>
             </Button>
           ) : !scopedTeam && (
@@ -119,7 +117,7 @@ export function UtilitiesSection({
               <Button variant="ghost" className="w-full justify-start gap-2" asChild>
                 <Link href="/dashboard/teams" onClick={onNavigate}>
                   <Settings className="h-4 w-4" />
-                  {tOrg("orgSettings")}
+                  {tTeam("orgSettings")}
                 </Link>
               </Button>
             </>

@@ -45,32 +45,32 @@ describe("SecuritySection", () => {
 });
 
 describe("UtilitiesSection", () => {
-  it("shows org settings link for admin", () => {
+  it("shows team settings link for admin", () => {
     render(
       <UtilitiesSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        tOrg={(k) => k}
-        selectedOrg={{ id: "org-1", name: "Acme", role: "ADMIN" }}
+        tTeam={(k) => k}
+        selectedTeam={{ id: "team-1", name: "Acme", role: "ADMIN" }}
         onNavigate={() => {}}
       />
     );
 
     expect(screen.getByRole("link", { name: "orgSettings" })).toHaveAttribute(
       "href",
-      "/dashboard/teams/org-1/settings"
+      "/dashboard/teams/team-1/settings"
     );
   });
 
-  it("hides org settings link for member", () => {
+  it("hides team settings link for member", () => {
     render(
       <UtilitiesSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        tOrg={(k) => k}
-        selectedOrg={{ id: "org-1", name: "Acme", role: "MEMBER" }}
+        tTeam={(k) => k}
+        selectedTeam={{ id: "team-1", name: "Acme", role: "MEMBER" }}
         onNavigate={() => {}}
       />
     );
@@ -78,14 +78,14 @@ describe("UtilitiesSection", () => {
     expect(screen.queryByRole("link", { name: "orgSettings" })).toBeNull();
   });
 
-  it("shows settings and org settings links in personal context", () => {
+  it("shows settings and team settings links in personal context", () => {
     render(
       <UtilitiesSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        tOrg={(k) => k}
-        selectedOrg={null}
+        tTeam={(k) => k}
+        selectedTeam={null}
         onNavigate={() => {}}
       />
     );
@@ -100,14 +100,14 @@ describe("UtilitiesSection", () => {
     );
   });
 
-  it("hides settings link when org is selected", () => {
+  it("hides settings link when team is selected", () => {
     render(
       <UtilitiesSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        tOrg={(k) => k}
-        selectedOrg={{ id: "org-1", name: "Acme", role: "ADMIN" }}
+        tTeam={(k) => k}
+        selectedTeam={{ id: "team-1", name: "Acme", role: "ADMIN" }}
         onNavigate={() => {}}
       />
     );
@@ -115,25 +115,25 @@ describe("UtilitiesSection", () => {
     expect(screen.queryByRole("link", { name: "settings" })).toBeNull();
   });
 
-  it("routes import/export to org pages when org is selected", () => {
+  it("routes import/export to team pages when team is selected", () => {
     render(
       <UtilitiesSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        tOrg={(k) => k}
-        selectedOrg={{ id: "org-1", name: "Acme", role: "MEMBER" }}
+        tTeam={(k) => k}
+        selectedTeam={{ id: "team-1", name: "Acme", role: "MEMBER" }}
         onNavigate={() => {}}
       />
     );
 
     expect(screen.getByRole("link", { name: "export" })).toHaveAttribute(
       "href",
-      "/dashboard/teams/org-1/export"
+      "/dashboard/teams/team-1/export"
     );
     expect(screen.getByRole("link", { name: "import" })).toHaveAttribute(
       "href",
-      "/dashboard/teams/org-1/import"
+      "/dashboard/teams/team-1/import"
     );
   });
 });

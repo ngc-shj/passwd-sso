@@ -9,7 +9,7 @@ vi.mock("@/components/ui/separator", () => ({
 
 vi.mock("@/components/layout/vault-selector", () => ({
   VaultSelector: ({ onValueChange }: { onValueChange: (v: string) => void }) => (
-    <button onClick={() => onValueChange("org-1")}>vault-selector</button>
+    <button onClick={() => onValueChange("team-1")}>vault-selector</button>
   ),
 }));
 
@@ -35,12 +35,12 @@ import { SidebarContent, type SidebarContentProps } from "./sidebar-content";
 function baseProps(overrides: Partial<SidebarContentProps> = {}): SidebarContentProps {
   return {
     t: (k: string) => k,
-    tOrg: (k: string) => k,
+    tTeam: (k: string) => k,
     vaultContext: { type: "personal" },
-    orgs: [{ id: "org-1", name: "Acme", slug: "acme", role: "ADMIN" }],
-    selectedOrg: null,
-    selectedOrgCanManageFolders: false,
-    selectedOrgCanManageTags: false,
+    teams: [{ id: "team-1", name: "Acme", slug: "acme", role: "ADMIN" }],
+    selectedTeam: null,
+    selectedTeamCanManageFolders: false,
+    selectedTeamCanManageTags: false,
     selectedTypeFilter: null,
     selectedFolderId: null,
     selectedTagId: null,
@@ -52,7 +52,7 @@ function baseProps(overrides: Partial<SidebarContentProps> = {}): SidebarContent
     isShareLinks: false,
     isEmergencyAccess: false,
     isPersonalAuditLog: false,
-    activeAuditOrgId: null,
+    activeAuditTeamId: null,
     selectedFolders: [],
     selectedTags: [],
     isOpen: vi.fn(() => true),
@@ -76,10 +76,10 @@ describe("SidebarContent", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "vault-selector" }));
 
-    expect(props.onVaultChange).toHaveBeenCalledWith("org-1");
+    expect(props.onVaultChange).toHaveBeenCalledWith("team-1");
   });
 
-  it("calls onCreateFolder without orgId in personal context", () => {
+  it("calls onCreateFolder without teamId in personal context", () => {
     const props = baseProps({ vaultContext: { type: "personal" } });
     render(<SidebarContent {...props} />);
 
@@ -88,16 +88,16 @@ describe("SidebarContent", () => {
     expect(props.onCreateFolder).toHaveBeenCalledWith();
   });
 
-  it("calls onCreateFolder with orgId in org context", () => {
-    const props = baseProps({ vaultContext: { type: "org", orgId: "org-1" } });
+  it("calls onCreateFolder with teamId in team context", () => {
+    const props = baseProps({ vaultContext: { type: "org", teamId: "team-1" } });
     render(<SidebarContent {...props} />);
 
     fireEvent.click(screen.getByRole("button", { name: "create-folder" }));
 
-    expect(props.onCreateFolder).toHaveBeenCalledWith("org-1");
+    expect(props.onCreateFolder).toHaveBeenCalledWith("team-1");
   });
 
-  it("calls onCreateTag without orgId in personal context", () => {
+  it("calls onCreateTag without teamId in personal context", () => {
     const props = baseProps({ vaultContext: { type: "personal" } });
     render(<SidebarContent {...props} />);
 
@@ -106,12 +106,12 @@ describe("SidebarContent", () => {
     expect(props.onCreateTag).toHaveBeenCalledWith();
   });
 
-  it("calls onCreateTag with orgId in org context", () => {
-    const props = baseProps({ vaultContext: { type: "org", orgId: "org-1" } });
+  it("calls onCreateTag with teamId in team context", () => {
+    const props = baseProps({ vaultContext: { type: "org", teamId: "team-1" } });
     render(<SidebarContent {...props} />);
 
     fireEvent.click(screen.getByRole("button", { name: "create-tag" }));
 
-    expect(props.onCreateTag).toHaveBeenCalledWith("org-1");
+    expect(props.onCreateTag).toHaveBeenCalledWith("team-1");
   });
 });

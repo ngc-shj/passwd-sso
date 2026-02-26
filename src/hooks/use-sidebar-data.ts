@@ -18,39 +18,24 @@ export interface SidebarFolderItem {
   entryCount: number;
 }
 
-export interface SidebarOrgItem {
+export interface SidebarTeamItem {
   id: string;
   name: string;
   slug: string;
   role: string;
 }
 
-export interface SidebarOrgTagGroup {
-  orgId: string;
-  orgName: string;
-  tags: { id: string; name: string; color: string | null; count: number }[];
-}
-
-export interface SidebarOrgFolderGroup {
-  orgId: string;
-  orgName: string;
-  orgRole: string;
-  folders: SidebarFolderItem[];
-}
-
-export type SidebarTeamItem = SidebarOrgItem;
-
 export interface SidebarTeamTagGroup {
   teamId: string;
   teamName: string;
-  tags: SidebarOrgTagGroup["tags"];
+  tags: { id: string; name: string; color: string | null; count: number }[];
 }
 
 export interface SidebarTeamFolderGroup {
   teamId: string;
   teamName: string;
   teamRole: string;
-  folders: SidebarOrgFolderGroup["folders"];
+  folders: SidebarFolderItem[];
 }
 
 export interface SidebarOrganizeTagItem {
@@ -168,11 +153,9 @@ export function useSidebarData(pathname: string) {
   useEffect(() => {
     const handler = () => refreshData();
     window.addEventListener("vault-data-changed", handler);
-    window.addEventListener("org-data-changed", handler);
     window.addEventListener("team-data-changed", handler);
     return () => {
       window.removeEventListener("vault-data-changed", handler);
-      window.removeEventListener("org-data-changed", handler);
       window.removeEventListener("team-data-changed", handler);
     };
   }, [refreshData]);
@@ -180,8 +163,6 @@ export function useSidebarData(pathname: string) {
   const notifyDataChanged = () => {
     window.dispatchEvent(new CustomEvent("vault-data-changed"));
     window.dispatchEvent(new CustomEvent("team-data-changed"));
-    // Legacy compatibility for listeners not migrated yet.
-    window.dispatchEvent(new CustomEvent("org-data-changed"));
   };
 
   const notifyTeamDataChanged = notifyDataChanged;
@@ -192,19 +173,6 @@ export function useSidebarData(pathname: string) {
     teams,
     teamTagGroups,
     teamFolderGroups,
-    // Backward-compatible aliases
-    orgs: teams,
-    orgTagGroups: teamTagGroups.map((group) => ({
-      orgId: group.teamId,
-      orgName: group.teamName,
-      tags: group.tags,
-    })),
-    orgFolderGroups: teamFolderGroups.map((group) => ({
-      orgId: group.teamId,
-      orgName: group.teamName,
-      orgRole: group.teamRole,
-      folders: group.folders,
-    })),
     lastError,
     refreshData,
     notifyDataChanged,
