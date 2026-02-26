@@ -308,7 +308,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
 
   it("returns 409 when orgKeyVersion does not match team's current version (F-13)", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
-    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 }); // org is at v2
+    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 }); // team is at v2
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
@@ -417,7 +417,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     );
   });
 
-  it("updates entry with orgFolderId when folder belongs to same org", async () => {
+  it("updates entry with orgFolderId when folder belongs to same team", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: TEAM_ID });

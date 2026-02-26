@@ -41,7 +41,7 @@ const rotateKeySchema = z.object({
   ).min(1).max(1000),
 });
 
-// POST /api/teams/[teamId]/rotate-key — Rotate org encryption key
+// POST /api/teams/[teamId]/rotate-key — Rotate team encryption key
 export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -147,7 +147,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       }
 
       // Re-encrypt all entries with new key.
-      // updateMany + orgId scope prevents out-of-org updates.
+      // updateMany + orgId scope prevents out-of-team updates.
       // orgKeyVersion is NOT in where: entries restored from history may have
       // a stale version, but the ID set verification above guarantees completeness (F-29).
       // Note: Prisma interactive transaction auto-rolls back on any thrown error.

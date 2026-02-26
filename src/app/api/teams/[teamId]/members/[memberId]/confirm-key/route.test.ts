@@ -179,7 +179,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
       .mockResolvedValueOnce({ id: "member-1", orgId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
       .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null }); // re-check passes
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
-    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 }); // org rotated to v2
+    mockPrismaOrganization.findUnique.mockResolvedValue({ orgKeyVersion: 2 }); // team rotated to v2
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }), // keyVersion: 1 (stale)

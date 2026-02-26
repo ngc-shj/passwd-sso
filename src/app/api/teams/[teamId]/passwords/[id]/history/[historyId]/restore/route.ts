@@ -69,7 +69,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
 
     // Restore: writes back history blob with its original orgKeyVersion.
-    // If history.orgKeyVersion !== org.orgKeyVersion (e.g. after key rotation),
+    // If history.orgKeyVersion !== team.orgKeyVersion (e.g. after key rotation),
     // the client must detect the mismatch, decrypt with the old key via
     // GET /member-key?keyVersion=N, re-encrypt with the current key, and PUT.
     await tx.orgPasswordEntry.update({

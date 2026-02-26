@@ -85,7 +85,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 404 when entry does not belong to org", async () => {
+  it("returns 404 when entry does not belong to team", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({
       orgId: "other-team",
     });
@@ -177,7 +177,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     expect(json.error).toBe("FORBIDDEN");
   });
 
-  it("returns 404 when entry does not belong to org", async () => {
+  it("returns 404 when entry does not belong to team", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
     const res = await POST(
       createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {

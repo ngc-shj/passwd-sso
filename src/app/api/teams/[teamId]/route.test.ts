@@ -74,11 +74,11 @@ describe("GET /api/teams/[teamId]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns org details with counts", async () => {
+  it("returns team details with counts", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue({
       id: TEAM_ID,
       name: "My Team",
-      slug: "my-org",
+      slug: "my-team",
       description: null,
       createdAt: now,
       updatedAt: now,
@@ -131,11 +131,11 @@ describe("PUT /api/teams/[teamId]", () => {
     expect(res.status).toBe(403);
   });
 
-  it("updates org name successfully", async () => {
+  it("updates team name successfully", async () => {
     mockPrismaOrganization.update.mockResolvedValue({
       id: TEAM_ID,
       name: "Updated Team",
-      slug: "my-org",
+      slug: "my-team",
       description: null,
       updatedAt: now,
     });
@@ -176,7 +176,7 @@ describe("PUT /api/teams/[teamId]", () => {
     mockPrismaOrganization.update.mockResolvedValue({
       id: TEAM_ID,
       name: "Team",
-      slug: "org",
+      slug: "team",
       description: null,
       updatedAt: now,
     });
@@ -195,7 +195,7 @@ describe("PUT /api/teams/[teamId]", () => {
     mockPrismaOrganization.update.mockResolvedValue({
       id: TEAM_ID,
       name: "Team",
-      slug: "org",
+      slug: "team",
       description: "Hello",
       updatedAt: now,
     });
@@ -236,7 +236,7 @@ describe("DELETE /api/teams/[teamId]", () => {
     expect(res.status).toBe(403);
   });
 
-  it("deletes org successfully", async () => {
+  it("deletes team successfully", async () => {
     mockPrismaOrganization.delete.mockResolvedValue({});
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}`),

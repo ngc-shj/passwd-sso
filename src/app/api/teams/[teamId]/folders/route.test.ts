@@ -147,7 +147,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 404 when parentId belongs to another org or does not exist", async () => {
+  it("returns 404 when parentId belongs to another team or does not exist", async () => {
     vi.mocked(validateParentFolder).mockRejectedValueOnce(
       new Error("PARENT_NOT_FOUND"),
     );

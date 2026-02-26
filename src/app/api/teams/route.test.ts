@@ -35,7 +35,7 @@ describe("GET /api/teams", () => {
     mockPrismaOrgMember.findMany.mockResolvedValue([
       {
         role: TEAM_ROLE.OWNER,
-        org: { id: "team-1", name: "My Team", slug: "my-org", description: null, createdAt: now },
+        org: { id: "team-1", name: "My Team", slug: "my-team", description: null, createdAt: now },
       },
       {
         role: TEAM_ROLE.MEMBER,
@@ -67,7 +67,7 @@ describe("POST /api/teams (E2E-only)", () => {
 
   const validE2EBody = {
     name: "E2E Team",
-    slug: "e2e-org",
+    slug: "e2e-team",
     orgMemberKey: {
       encryptedOrgKey: "encrypted-team-key-data",
       orgKeyIv: "a".repeat(24),
@@ -88,7 +88,7 @@ describe("POST /api/teams (E2E-only)", () => {
 
   it("returns 400 when orgMemberKey is missing", async () => {
     const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
-      body: { name: "My Team", slug: "my-org" },
+      body: { name: "My Team", slug: "my-team" },
     }));
     expect(res.status).toBe(400);
   });
@@ -110,12 +110,12 @@ describe("POST /api/teams (E2E-only)", () => {
     expect(json.error).toBe("SLUG_ALREADY_TAKEN");
   });
 
-  it("creates E2E org with OrgMemberKey (201)", async () => {
+  it("creates E2E team with TeamMemberKey (201)", async () => {
     mockPrismaOrganization.findUnique.mockResolvedValue(null);
     mockPrismaOrganization.create.mockResolvedValue({
       id: "e2e-team-id",
       name: "E2E Team",
-      slug: "e2e-org",
+      slug: "e2e-team",
       description: null,
       createdAt: now,
     });
@@ -160,7 +160,7 @@ describe("POST /api/teams (E2E-only)", () => {
     mockPrismaOrganization.create.mockResolvedValue({
       id: "e2e-team-id",
       name: "E2E Team",
-      slug: "e2e-org",
+      slug: "e2e-team",
       description: null,
       createdAt: now,
     });
@@ -185,7 +185,7 @@ describe("POST /api/teams (E2E-only)", () => {
   it("returns 400 when E2E body has invalid orgKeyIv", async () => {
     const invalidBody = {
       name: "Bad Team",
-      slug: "bad-org",
+      slug: "bad-team",
       orgMemberKey: {
         encryptedOrgKey: "data",
         orgKeyIv: "short",

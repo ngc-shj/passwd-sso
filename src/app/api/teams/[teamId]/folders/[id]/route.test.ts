@@ -116,7 +116,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 404 when folder belongs to another org", async () => {
+  it("returns 404 when folder belongs to another team", async () => {
     mockPrismaOrgFolder.findUnique.mockResolvedValue({
       ...ownedFolder,
       orgId: "other-team",
@@ -145,7 +145,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
     expect(json.name).toBe("Updated");
   });
 
-  it("returns 404 when parentId belongs to another org or does not exist", async () => {
+  it("returns 404 when parentId belongs to another team or does not exist", async () => {
     mockPrismaOrgFolder.findUnique.mockResolvedValue(ownedFolder);
     vi.mocked(validateParentFolder).mockRejectedValueOnce(
       new Error("PARENT_NOT_FOUND"),

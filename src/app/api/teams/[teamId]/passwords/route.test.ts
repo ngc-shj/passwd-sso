@@ -432,7 +432,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     );
   });
 
-  it("creates entry with orgFolderId when folder belongs to same org", async () => {
+  it("creates entry with orgFolderId when folder belongs to same team", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
     mockPrismaOrgFolder.findUnique.mockResolvedValue({ orgId: TEAM_ID });
     mockPrismaOrgPasswordEntry.create.mockResolvedValue({

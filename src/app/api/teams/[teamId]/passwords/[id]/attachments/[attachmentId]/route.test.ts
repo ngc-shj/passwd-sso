@@ -85,7 +85,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
     expect(json.error).toBe("FORBIDDEN");
   });
 
-  it("returns 404 when entry does not belong to org", async () => {
+  it("returns 404 when entry does not belong to team", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
     const res = await GET(
       createRequest(
@@ -177,7 +177,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     expect(json.error).toBe("FORBIDDEN");
   });
 
-  it("returns 404 when entry does not belong to org", async () => {
+  it("returns 404 when entry does not belong to team", async () => {
     mockPrismaOrgPasswordEntry.findUnique.mockResolvedValue({ orgId: "other-team" });
     const res = await DELETE(
       createRequest(

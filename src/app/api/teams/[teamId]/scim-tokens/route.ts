@@ -85,7 +85,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  // Limit active (non-revoked, non-expired) tokens per org (max 10)
+  // Limit active (non-revoked, non-expired) tokens per team (max 10)
   const tokenCount = await prisma.scimToken.count({
     where: {
       orgId: teamId,
