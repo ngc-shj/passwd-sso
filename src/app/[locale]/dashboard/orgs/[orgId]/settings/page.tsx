@@ -73,7 +73,7 @@ export default function OrgSettingsPage({
   params: Promise<{ orgId: string }>;
 }) {
   const { orgId: teamId } = use(params);
-  const t = useTranslations("Org");
+  const t = useTranslations("Team");
   const locale = useLocale();
   const router = useRouter();
 

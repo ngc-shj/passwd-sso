@@ -27,7 +27,7 @@ interface OrgCreateDialogProps {
 }
 
 export function OrgCreateDialog({ trigger, onCreated }: OrgCreateDialogProps) {
-  const t = useTranslations("Org");
+  const t = useTranslations("Team");
   const { status, userId, getEcdhPublicKeyJwk } = useVault();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);

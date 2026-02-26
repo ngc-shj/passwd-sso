@@ -55,7 +55,7 @@ export function OrgTrashList({
   sortBy = "updatedAt",
 }: OrgTrashListProps) {
   const t = useTranslations("Trash");
-  const tOrg = useTranslations("Org");
+  const tOrg = useTranslations("Team");
   const { getOrgEncryptionKey } = useOrgVault();
   const [entries, setEntries] = useState<OrgTrashEntry[]>([]);
   const [loading, setLoading] = useState(true);

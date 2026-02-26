@@ -54,7 +54,7 @@ export function OrgArchivedList({
   refreshKey,
   sortBy = "updatedAt",
 }: OrgArchivedListProps) {
-  const t = useTranslations("Org");
+  const t = useTranslations("Team");
   const { getOrgEncryptionKey } = useOrgVault();
   const [entries, setEntries] = useState<OrgArchivedEntry[]>([]);
   const [loading, setLoading] = useState(true);

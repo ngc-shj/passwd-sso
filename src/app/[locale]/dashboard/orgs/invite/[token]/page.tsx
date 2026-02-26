@@ -20,7 +20,7 @@ export default function AcceptInvitePage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = use(params);
-  const t = useTranslations("Org");
+  const t = useTranslations("Team");
   const router = useRouter();
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars

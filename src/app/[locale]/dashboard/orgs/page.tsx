@@ -20,7 +20,7 @@ interface OrgListItem {
 }
 
 export default function OrgsPage() {
-  const t = useTranslations("Org");
+  const t = useTranslations("Team");
   const [orgs, setOrgs] = useState<OrgListItem[]>([]);
   const [loading, setLoading] = useState(true);
 

@@ -12,7 +12,7 @@ const roleColors: Record<string, string> = {
 };
 
 export function OrgRoleBadge({ role }: { role: string }) {
-  const t = useTranslations("Org");
+  const t = useTranslations("Team");
 
   const roleKeys: Record<string, string> = {
     [ORG_ROLE.OWNER]: "roleOwner",

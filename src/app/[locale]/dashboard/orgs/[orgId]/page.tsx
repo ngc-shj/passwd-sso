@@ -73,7 +73,7 @@ export default function OrgDashboardPage({
   const activeFolderId = searchParams.get("folder");
   const activeEntryType = searchParams.get("type");
   const activeScope = searchParams.get("scope");
-  const t = useTranslations("Org");
+  const t = useTranslations("Team");
   const tDash = useTranslations("Dashboard");
   const { getOrgEncryptionKey } = useOrgVault();
   const [org, setOrg] = useState<OrgInfo | null>(null);

@@ -46,7 +46,7 @@ interface Props {
 }
 
 export function ScimTokenManager({ teamId, locale }: Props) {
-  const t = useTranslations("Org");
+  const t = useTranslations("Team");
   const [tokens, setTokens] = useState<ScimToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);

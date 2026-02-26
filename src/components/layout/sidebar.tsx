@@ -39,7 +39,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const router = useRouter();
   const t = useTranslations("Dashboard");
   const tCommon = useTranslations("Common");
-  const tOrg = useTranslations("Org");
+  const tOrg = useTranslations("Team");
   const tErrors = useTranslations("ApiErrors");
 
   const pathname = usePathname();
