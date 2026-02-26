@@ -64,6 +64,53 @@ export function useTeamVaultOptional(): TeamVaultContextValue | null {
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const KEY_DISTRIBUTE_INTERVAL_MS = 2 * 60 * 1000; // check pending distributions every 2 minutes
 
+type TeamMemberKeyResponse = {
+  encryptedTeamKey: string;
+  teamKeyIv: string;
+  teamKeyAuthTag: string;
+  ephemeralPublicKey: string;
+  hkdfSalt: string;
+  keyVersion: number;
+  wrapVersion: number;
+};
+
+function describeUnknownError(e: unknown): string {
+  if (e instanceof Error) {
+    const base = e.message ? `${e.name}: ${e.message}` : `${e.name}: <empty message>`;
+    return e.cause ? `${base} cause=${String(e.cause)}` : base;
+  }
+  return String(e);
+}
+
+function parseTeamMemberKeyResponse(data: unknown): TeamMemberKeyResponse {
+  if (!data || typeof data !== "object") {
+    throw new Error("invalid member-key response: not an object");
+  }
+  const d = data as Record<string, unknown>;
+  const isString = (v: unknown) => typeof v === "string" && v.length > 0;
+  const isPositiveInt = (v: unknown) => typeof v === "number" && Number.isInteger(v) && v > 0;
+  if (
+    !isString(d.encryptedTeamKey) ||
+    !isString(d.teamKeyIv) ||
+    !isString(d.teamKeyAuthTag) ||
+    !isString(d.ephemeralPublicKey) ||
+    !isString(d.hkdfSalt) ||
+    !isPositiveInt(d.keyVersion) ||
+    !isPositiveInt(d.wrapVersion)
+  ) {
+    throw new Error("invalid member-key response: missing or malformed fields");
+  }
+  return {
+    encryptedTeamKey: d.encryptedTeamKey as string,
+    teamKeyIv: d.teamKeyIv as string,
+    teamKeyAuthTag: d.teamKeyAuthTag as string,
+    ephemeralPublicKey: d.ephemeralPublicKey as string,
+    hkdfSalt: d.hkdfSalt as string,
+    keyVersion: d.keyVersion as number,
+    wrapVersion: d.wrapVersion as number,
+  };
+}
+
 // ─── Provider ─────────────────────────────────────────────────
 
 interface TeamVaultProviderProps {
@@ -104,17 +151,34 @@ export function TeamVaultProvider({
         return null;
       }
 
+      let stage = "fetch_member_key";
       try {
         // Fetch own TeamMemberKey
         const res = await fetch(apiPath.teamMemberKey(teamId));
         if (!res.ok) {
+          let errorCode: string | null = null;
+          try {
+            const body = await res.json();
+            if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
+              errorCode = body.error;
+            }
+          } catch {
+            // no-op: keep status-based logging
+          }
+          console.warn("[getTeamEncryptionKey] member-key request failed", {
+            teamId,
+            status: res.status,
+            error: errorCode,
+          });
           ecdhPrivateKeyBytes.fill(0);
           return null;
         }
 
-        const memberKeyData = await res.json();
+        stage = "parse_member_key";
+        const memberKeyData = parseTeamMemberKeyResponse(await res.json());
 
         // Import ECDH private key, then zero-clear the copy
+        stage = "import_ecdh_private_key";
         const keyBuf = ecdhPrivateKeyBytes.buffer.slice(
           ecdhPrivateKeyBytes.byteOffset,
           ecdhPrivateKeyBytes.byteOffset + ecdhPrivateKeyBytes.byteLength
@@ -137,6 +201,7 @@ export function TeamVaultProvider({
         };
 
         // Unwrap team key
+        stage = "unwrap_team_key";
         const teamKeyBytes = await unwrapTeamKey(
           {
             ciphertext: memberKeyData.encryptedTeamKey,
@@ -150,10 +215,12 @@ export function TeamVaultProvider({
         );
 
         // Derive encryption key from team key, then zero-clear raw bytes
+        stage = "derive_team_encryption_key";
         const encryptionKey = await deriveTeamEncryptionKey(teamKeyBytes);
         teamKeyBytes.fill(0);
 
         // Cache (always the latest key from server)
+        stage = "cache_team_key";
         cacheRef.current.set(teamId, {
           key: encryptionKey,
           keyVersion: memberKeyData.keyVersion,
@@ -162,7 +229,10 @@ export function TeamVaultProvider({
 
         return encryptionKey;
       } catch (e) {
-        console.error("[getTeamEncryptionKey]", e instanceof Error ? e.message : "unknown");
+        const errorText = describeUnknownError(e);
+        console.error(
+          `[getTeamEncryptionKey] failed teamId=${teamId} stage=${stage} error=${errorText}`
+        );
         ecdhPrivateKeyBytes.fill(0);
         return null;
       }
