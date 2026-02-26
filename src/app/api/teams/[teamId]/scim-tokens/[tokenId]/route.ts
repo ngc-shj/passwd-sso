@@ -48,7 +48,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.SCIM_TOKEN_REVOKE,
     userId: session.user.id,
-    orgId: teamId,
+    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.SCIM_TOKEN,
     targetId: tokenId,
     ...extractRequestMeta(req),

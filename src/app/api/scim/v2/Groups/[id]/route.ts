@@ -197,7 +197,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
     userId: auditUserId,
-    orgId: scopedTeamId,
+    teamId: scopedTeamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: id,
     metadata: { role, added: toAdd.length, removed: toRemove.length },
@@ -297,7 +297,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
     userId: auditUserId,
-    orgId: scopedTeamId,
+    teamId: scopedTeamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: id,
     metadata: {

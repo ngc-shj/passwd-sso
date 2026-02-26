@@ -48,7 +48,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       ? AUDIT_ACTION.SEND_REVOKE
       : AUDIT_ACTION.SHARE_REVOKE,
     userId: session.user.id,
-    orgId: share.orgPasswordEntryId
+    teamId: share.orgPasswordEntryId
       ? (
           await prisma.orgPasswordEntry.findUnique({
             where: { id: share.orgPasswordEntryId },

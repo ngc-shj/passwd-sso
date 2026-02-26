@@ -145,7 +145,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.TEAM_MEMBER_INVITE,
     userId: session.user.id,
-    orgId: teamId,
+    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_INVITATION,
     targetId: invitation.id,
     metadata: { email, role },

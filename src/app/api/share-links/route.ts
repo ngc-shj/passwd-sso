@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
     scope: orgPasswordEntryId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.SHARE_CREATE,
     userId: session.user.id,
-    orgId,
+    teamId: orgId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
     metadata: { expiresIn, maxViews: maxViews ?? null },

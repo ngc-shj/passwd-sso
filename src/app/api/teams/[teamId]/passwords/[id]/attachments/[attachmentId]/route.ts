@@ -124,7 +124,7 @@ export async function DELETE(
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.ATTACHMENT_DELETE,
     userId: session.user.id,
-    orgId: teamId,
+    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.ATTACHMENT,
     targetId: attachmentId,
     metadata: { filename: attachment.filename, entryId: id },

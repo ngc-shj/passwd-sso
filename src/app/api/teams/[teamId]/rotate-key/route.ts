@@ -225,7 +225,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.TEAM_KEY_ROTATION,
     userId: session.user.id,
-    orgId: teamId,
+    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: teamId,
     metadata: {

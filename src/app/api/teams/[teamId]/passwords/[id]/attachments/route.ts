@@ -248,7 +248,7 @@ export async function POST(
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.ATTACHMENT_UPLOAD,
     userId: session.user.id,
-    orgId: teamId,
+    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.ATTACHMENT,
     targetId: attachment.id,
     metadata: { filename: sanitizedFilename, sizeBytes: originalSize, entryId: id },

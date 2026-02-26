@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
     scope: teamId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.ENTRY_EXPORT,
     userId: session.user.id,
-    orgId: teamId ?? undefined,
+    teamId: teamId ?? undefined,
     metadata: {
       entryCount,
       format,

@@ -133,7 +133,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.SCIM_TOKEN_CREATE,
     userId: session.user.id,
-    orgId: teamId,
+    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.SCIM_TOKEN,
     targetId: token.id,
     metadata: { description: parsed.data.description, expiresInDays: parsed.data.expiresInDays },

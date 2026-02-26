@@ -156,7 +156,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.FOLDER_CREATE,
     userId: session.user.id,
-    orgId: teamId,
+    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_FOLDER,
     targetId: folder.id,
     ...extractRequestMeta(req),

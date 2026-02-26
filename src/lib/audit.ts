@@ -17,7 +17,7 @@ export interface AuditLogParams {
   scope: AuditScope;
   action: AuditAction;
   userId: string;
-  orgId?: string;
+  teamId?: string;
   targetType?: string;
   targetId?: string;
   metadata?: Record<string, unknown>;
@@ -59,7 +59,7 @@ export function sanitizeMetadata(value: unknown): unknown {
  * 2. Structured JSON to stdout via pino (for Fluent Bit forwarding)
  */
 export function logAudit(params: AuditLogParams): void {
-  const { scope, action, userId, orgId, targetType, targetId, metadata, ip, userAgent } = params;
+  const { scope, action, userId, teamId, targetType, targetId, metadata, ip, userAgent } = params;
 
   // Truncate metadata if too large
   let safeMetadata: Record<string, unknown> | undefined;
@@ -81,7 +81,7 @@ export function logAudit(params: AuditLogParams): void {
         scope,
         action,
         userId,
-        orgId: orgId ?? null,
+        orgId: teamId ?? null,
         targetType: targetType ?? null,
         targetId: targetId ?? null,
         metadata: safeMetadata as never ?? undefined,
@@ -103,7 +103,7 @@ export function logAudit(params: AuditLogParams): void {
           scope,
           action,
           userId,
-          orgId: orgId ?? null,
+          teamId: teamId ?? null,
           targetType: targetType ?? null,
           targetId: targetId ?? null,
           metadata: sanitizeMetadata(safeMetadata),
