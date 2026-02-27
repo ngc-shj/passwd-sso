@@ -102,9 +102,10 @@ async function handlePOST(request: Request) {
     .update(parsed.data.newAuthHash + newServerSalt)
     .digest("hex");
 
-  // Update vault wrapping and bump keyVersion in a transaction
-  await withUserTenantRls(session.user.id, async () =>
-    prisma.$transaction([
+  // Update vault wrapping, bump keyVersion, and mark EA grants as STALE.
+  // All operations run within the same RLS context.
+  await withUserTenantRls(session.user.id, async () => {
+    await prisma.$transaction([
       prisma.user.update({
         where: { id: session.user.id },
         data: {
@@ -127,11 +128,11 @@ async function handlePOST(request: Request) {
           verificationAuthTag: parsed.data.verificationArtifact.authTag,
         },
       }),
-    ]),
-  );
+    ]);
 
-  // Mark EA grants as STALE (best-effort, outside transaction)
-  await markGrantsStaleForOwner(session.user.id, newKeyVersion).catch(() => {});
+    // Mark EA grants as STALE (best-effort, within RLS context)
+    await markGrantsStaleForOwner(session.user.id, newKeyVersion).catch(() => {});
+  });
 
   getLogger().info({ userId: session.user.id }, "vault.rotateKey.success");
 

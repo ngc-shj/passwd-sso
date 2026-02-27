@@ -1,6 +1,8 @@
 import type { Account } from "next-auth";
 import { createHash } from "node:crypto";
 
+const MAX_TENANT_CLAIM_LENGTH = 255;
+
 const DEFAULT_TENANT_CLAIM_KEYS = [
   "tenant_id",
   "tenantId",
@@ -34,6 +36,15 @@ export function slugifyTenant(input: string): string {
   return slug;
 }
 
+function sanitizeTenantClaimValue(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const cleaned = value.trim().replace(/\0/g, "");
+  if (cleaned.length === 0 || cleaned.length > MAX_TENANT_CLAIM_LENGTH) {
+    return null;
+  }
+  return cleaned;
+}
+
 export function extractTenantClaimValue(
   account?: Account | null,
   profile?: Record<string, unknown> | null,
@@ -42,18 +53,14 @@ export function extractTenantClaimValue(
 
   const keys = parseTenantClaimKeys();
   for (const key of keys) {
-    const value = profile[key];
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value.trim();
-    }
+    const cleaned = sanitizeTenantClaimValue(profile[key]);
+    if (cleaned) return cleaned;
   }
 
   // Google Workspace fallback: hosted domain claim (hd)
   if (account?.provider === "google") {
-    const hd = profile.hd;
-    if (typeof hd === "string" && hd.trim().length > 0) {
-      return hd.trim();
-    }
+    const cleaned = sanitizeTenantClaimValue(profile.hd);
+    if (cleaned) return cleaned;
   }
 
   return null;

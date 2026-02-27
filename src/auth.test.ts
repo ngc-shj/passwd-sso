@@ -104,12 +104,12 @@ describe("ensureTenantMembershipForSignIn", () => {
     vi.clearAllMocks();
     mockExtractTenantClaimValue.mockReturnValue("tenant-acme");
     mockSlugifyTenant.mockReturnValue("tenant-acme");
-    mockPrisma.tenant.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => {
-      if (where.id === "tenant-acme") return { id: "tenant-acme", slug: "tenant-acme" };
-      if (where.id === "cuid_bootstrap_1") return { slug: "bootstrap-abc123" };
+    mockPrisma.tenant.findUnique.mockImplementation(async ({ where }: { where: { id?: string; externalId?: string } }) => {
+      if (where.externalId === "tenant-acme") return { id: "cuid_acme_1" };
+      if (where.id === "cuid_bootstrap_1") return { isBootstrap: true };
       return null;
     });
-    mockPrisma.tenant.create.mockResolvedValue({ id: "tenant-acme", slug: "tenant-acme" });
+    mockPrisma.tenant.create.mockResolvedValue({ id: "cuid_acme_1" });
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
     mockPrisma.tenantMember.upsert.mockResolvedValue({});
     mockPrisma.tenantMember.deleteMany.mockResolvedValue({ count: 1 });
@@ -158,7 +158,7 @@ describe("ensureTenantMembershipForSignIn", () => {
 
   it("allows sign-in when tenant claim is missing but membership exists", async () => {
     mockExtractTenantClaimValue.mockReturnValue(null);
-    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "tenant-acme" }]);
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "cuid_acme_1" }]);
 
     const ok = await ensureTenantMembershipForSignIn("user-1", null, null);
 
@@ -184,31 +184,31 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
     expect(mockPrisma.user.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
-      data: { tenantId: "tenant-acme" },
+      data: { tenantId: "cuid_acme_1" },
     });
     expect(mockPrisma.account.updateMany).toHaveBeenCalledWith({
       where: { userId: "user-1" },
-      data: { tenantId: "tenant-acme" },
+      data: { tenantId: "cuid_acme_1" },
     });
     // Verify all tenant-scoped data tables are migrated
     expect(mockPrisma.passwordEntry.updateMany).toHaveBeenCalledWith({
       where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
-      data: { tenantId: "tenant-acme" },
+      data: { tenantId: "cuid_acme_1" },
     });
     for (const model of ["tag", "folder", "session", "extensionToken", "auditLog"] as const) {
       expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
         where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
-        data: { tenantId: "tenant-acme" },
+        data: { tenantId: "cuid_acme_1" },
       });
     }
     // passwordEntryHistory has no userId — filtered by tenantId only
     expect(mockPrisma.passwordEntryHistory.updateMany).toHaveBeenCalledWith({
       where: { tenantId: "cuid_bootstrap_1" },
-      data: { tenantId: "tenant-acme" },
+      data: { tenantId: "cuid_acme_1" },
     });
     expect(mockPrisma.vaultKey.updateMany).toHaveBeenCalledWith({
       where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
-      data: { tenantId: "tenant-acme" },
+      data: { tenantId: "cuid_acme_1" },
     });
     expect(mockPrisma.tenantMember.deleteMany).toHaveBeenCalledWith({
       where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
@@ -219,7 +219,7 @@ describe("ensureTenantMembershipForSignIn", () => {
   });
 
   it("keeps existing tenant when already in target tenant", async () => {
-    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "tenant-acme" }]);
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "cuid_acme_1" }]);
 
     const ok = await ensureTenantMembershipForSignIn("user-1", null, {});
 
@@ -232,5 +232,77 @@ describe("ensureTenantMembershipForSignIn", () => {
       orderBy: { createdAt: "asc" },
       take: 2,
     });
+  });
+
+  it("creates tenant with externalId (not id) in data", async () => {
+    mockPrisma.tenant.findUnique.mockResolvedValue(null);
+    mockPrisma.tenant.create.mockResolvedValue({ id: "cuid_acme_1" });
+
+    await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(mockPrisma.tenant.create).toHaveBeenCalledWith({
+      data: {
+        externalId: "tenant-acme",
+        name: "tenant-acme",
+        slug: "tenant-acme",
+      },
+      select: { id: true },
+    });
+    const createData = mockPrisma.tenant.create.mock.calls[0][0].data;
+    expect(createData).not.toHaveProperty("id");
+  });
+
+  it("retries findUnique by externalId after P2002 from tenant create", async () => {
+    const { Prisma } = await import("@prisma/client");
+    mockPrisma.tenant.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "cuid_acme_1" });
+    mockPrisma.tenant.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("unique", {
+        code: "P2002",
+        clientVersion: "7.0.0",
+      }),
+    );
+
+    const ok = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(ok).toBe(true);
+    expect(mockPrisma.tenant.findUnique).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.tenant.findUnique).toHaveBeenNthCalledWith(1, {
+      where: { externalId: "tenant-acme" },
+      select: { id: true },
+    });
+    expect(mockPrisma.tenant.findUnique).toHaveBeenNthCalledWith(2, {
+      where: { externalId: "tenant-acme" },
+      select: { id: true },
+    });
+  });
+
+  it("rejects migration when isBootstrap is false even if slug resembles bootstrap", async () => {
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "cuid_fake_boot" }]);
+    mockPrisma.tenant.findUnique.mockImplementation(async ({ where }: { where: { id?: string; externalId?: string } }) => {
+      if (where.externalId === "tenant-acme") return { id: "cuid_acme_1" };
+      if (where.id === "cuid_fake_boot") return { isBootstrap: false };
+      return null;
+    });
+
+    const ok = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(ok).toBe(false);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("allows migration when isBootstrap is true regardless of slug pattern", async () => {
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "cuid_odd_slug" }]);
+    mockPrisma.tenant.findUnique.mockImplementation(async ({ where }: { where: { id?: string; externalId?: string } }) => {
+      if (where.externalId === "tenant-acme") return { id: "cuid_acme_1" };
+      if (where.id === "cuid_odd_slug") return { isBootstrap: true };
+      return null;
+    });
+
+    const ok = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(ok).toBe(true);
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
   });
 });

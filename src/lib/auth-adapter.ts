@@ -37,6 +37,7 @@ export function createCustomAdapter(): Adapter {
             data: {
               name: user.email ?? user.name ?? "User",
               slug: `bootstrap-${randomUUID().replace(/-/g, "").slice(0, 24)}`,
+              isBootstrap: true,
             },
             select: { id: true },
           });

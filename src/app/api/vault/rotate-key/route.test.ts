@@ -66,6 +66,7 @@ describe("POST /api/vault/rotate-key", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "tenant-1",
       vaultSetupAt: new Date(),
       masterPasswordServerHash: serverHash,
       masterPasswordServerSalt: serverSalt,

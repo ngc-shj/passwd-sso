@@ -82,6 +82,10 @@ describe("createCustomAdapter", () => {
       });
 
       expect(mockPrismaTenant.create).toHaveBeenCalledTimes(1);
+      expect(mockPrismaTenant.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ isBootstrap: true }),
+        select: { id: true },
+      });
       expect(mockPrismaUser.create).toHaveBeenCalledWith({
         data: {
           name: "Test User",
