@@ -5,6 +5,7 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { teamMemberKeySchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -20,10 +21,12 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // Only OWNER/ADMIN can distribute keys (mapped to MEMBER_INVITE permission)
   try {
-    await requireTeamPermission(
-      session.user.id,
-      teamId,
-      TEAM_PERMISSION.MEMBER_INVITE
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(
+        session.user.id,
+        teamId,
+        TEAM_PERMISSION.MEMBER_INVITE
+      ),
     );
   } catch (e) {
     if (e instanceof TeamAuthError) {
@@ -33,10 +36,12 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   // Verify target member exists, belongs to this team, and is active
-  const targetMember = await prisma.teamMember.findUnique({
-    where: { id: memberId },
-    select: { teamId: true, userId: true, keyDistributed: true, deactivatedAt: true },
-  });
+  const targetMember = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamMember.findUnique({
+      where: { id: memberId },
+      select: { teamId: true, userId: true, keyDistributed: true, deactivatedAt: true },
+    }),
+  );
 
   if (!targetMember || targetMember.teamId !== teamId || targetMember.deactivatedAt !== null) {
     return NextResponse.json(
@@ -46,10 +51,12 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   // Verify the target user has an ECDH public key (vault set up)
-  const targetUser = await prisma.user.findUnique({
-    where: { id: targetMember.userId },
-    select: { ecdhPublicKey: true },
-  });
+  const targetUser = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: targetMember.userId },
+      select: { ecdhPublicKey: true },
+    }),
+  );
 
   if (!targetUser?.ecdhPublicKey) {
     return NextResponse.json(
@@ -84,59 +91,61 @@ export async function POST(req: NextRequest, { params }: Params) {
   const data = parsed.data;
 
   // Atomic check-and-set: re-verify keyDistributed + deactivatedAt + teamKeyVersion inside transaction (S-12/F-16/S-24)
-  const distributed = await prisma.$transaction(async (tx) => {
-    const member = await tx.teamMember.findUnique({
-      where: { id: memberId },
-      select: { keyDistributed: true, deactivatedAt: true },
-    });
-    if (!member || member.deactivatedAt !== null) return "member_not_found" as const;
-    if (member.keyDistributed) return "already_distributed" as const;
+  const distributed = await withUserTenantRls(session.user.id, async () =>
+    prisma.$transaction(async (tx) => {
+      const member = await tx.teamMember.findUnique({
+        where: { id: memberId },
+        select: { keyDistributed: true, deactivatedAt: true },
+      });
+      if (!member || member.deactivatedAt !== null) return "member_not_found" as const;
+      if (member.keyDistributed) return "already_distributed" as const;
 
-    // Verify keyVersion matches current team key version (F-16)
-    const team = await tx.team.findUnique({
-      where: { id: teamId },
-      select: { teamKeyVersion: true },
-    });
-    if (!team || data.keyVersion !== team.teamKeyVersion) {
-      return "version_mismatch" as const;
-    }
+      // Verify keyVersion matches current team key version (F-16)
+      const team = await tx.team.findUnique({
+        where: { id: teamId },
+        select: { teamKeyVersion: true },
+      });
+      if (!team || data.keyVersion !== team.teamKeyVersion) {
+        return "version_mismatch" as const;
+      }
 
-    await tx.teamMemberKey.upsert({
-      where: {
-        teamId_userId_keyVersion: {
+      await tx.teamMemberKey.upsert({
+        where: {
+          teamId_userId_keyVersion: {
+            teamId: teamId,
+            userId: targetMember.userId,
+            keyVersion: data.keyVersion,
+          },
+        },
+        create: {
           teamId: teamId,
           userId: targetMember.userId,
+          encryptedTeamKey: data.encryptedTeamKey,
+          teamKeyIv: data.teamKeyIv,
+          teamKeyAuthTag: data.teamKeyAuthTag,
+          ephemeralPublicKey: data.ephemeralPublicKey,
+          hkdfSalt: data.hkdfSalt,
           keyVersion: data.keyVersion,
+          wrapVersion: data.wrapVersion,
         },
-      },
-      create: {
-        teamId: teamId,
-        userId: targetMember.userId,
-        encryptedTeamKey: data.encryptedTeamKey,
-        teamKeyIv: data.teamKeyIv,
-        teamKeyAuthTag: data.teamKeyAuthTag,
-        ephemeralPublicKey: data.ephemeralPublicKey,
-        hkdfSalt: data.hkdfSalt,
-        keyVersion: data.keyVersion,
-        wrapVersion: data.wrapVersion,
-      },
-      update: {
-        encryptedTeamKey: data.encryptedTeamKey,
-        teamKeyIv: data.teamKeyIv,
-        teamKeyAuthTag: data.teamKeyAuthTag,
-        ephemeralPublicKey: data.ephemeralPublicKey,
-        hkdfSalt: data.hkdfSalt,
-        wrapVersion: data.wrapVersion,
-      },
-    });
+        update: {
+          encryptedTeamKey: data.encryptedTeamKey,
+          teamKeyIv: data.teamKeyIv,
+          teamKeyAuthTag: data.teamKeyAuthTag,
+          ephemeralPublicKey: data.ephemeralPublicKey,
+          hkdfSalt: data.hkdfSalt,
+          wrapVersion: data.wrapVersion,
+        },
+      });
 
-    await tx.teamMember.update({
-      where: { id: memberId },
-      data: { keyDistributed: true },
-    });
+      await tx.teamMember.update({
+        where: { id: memberId },
+        data: { keyDistributed: true },
+      });
 
-    return "success" as const;
-  });
+      return "success" as const;
+    }),
+  );
 
   if (distributed === "member_not_found") {
     return NextResponse.json(

@@ -11,6 +11,7 @@ import {
   AUDIT_TARGET_TYPE,
 } from "@/lib/constants";
 import type { AuditAction } from "@prisma/client";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -26,7 +27,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -75,15 +78,17 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   let logs;
   try {
-    logs = await prisma.auditLog.findMany({
-      where,
-      include: {
-        user: { select: { id: true, name: true, image: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: limit + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    });
+    logs = await withUserTenantRls(session.user.id, async () =>
+      prisma.auditLog.findMany({
+        where,
+        include: {
+          user: { select: { id: true, name: true, image: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: limit + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      }),
+    );
   } catch {
     return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
   }
@@ -110,17 +115,19 @@ export async function GET(req: NextRequest, { params }: Params) {
   }> = {};
 
   if (entryIds.length > 0) {
-    const entries = await prisma.teamPasswordEntry.findMany({
-      where: { id: { in: entryIds } },
-      select: {
-        id: true,
-        encryptedOverview: true,
-        overviewIv: true,
-        overviewAuthTag: true,
-        aadVersion: true,
-        teamKeyVersion: true,
-      },
-    });
+    const entries = await withUserTenantRls(session.user.id, async () =>
+      prisma.teamPasswordEntry.findMany({
+        where: { id: { in: entryIds } },
+        select: {
+          id: true,
+          encryptedOverview: true,
+          overviewIv: true,
+          overviewAuthTag: true,
+          aadVersion: true,
+          teamKeyVersion: true,
+        },
+      }),
+    );
 
     for (const e of entries) {
       entryOverviews[e.id] = {

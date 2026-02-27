@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaTeamMember, mockPrismaUser,
-  mockPrismaTeamMemberKey, mockPrismaTeam, mockTransaction,
+  mockPrismaTeamMemberKey, mockPrismaTeam, mockTransaction, mockWithUserTenantRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamMember: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
@@ -10,6 +10,7 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaUser,
   mockPrismaTeamMemberKey: { upsert: vi.fn() },
   mockPrismaTeam: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -28,6 +29,9 @@ vi.mock("@/lib/prisma", () => ({
     teamMemberKey: mockPrismaTeamMemberKey,
     $transaction: mockTransaction,
   },
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { POST } from "./route";

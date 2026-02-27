@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeamMember, mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeamMember, mockRequireTeamPermission, TeamAuthError, mockWithUserTenantRls } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -21,6 +21,7 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeamMember
     mockPrismaTeamMember: { findUnique: vi.fn() },
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   };
 });
 
@@ -36,6 +37,9 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { GET, POST } from "./route";

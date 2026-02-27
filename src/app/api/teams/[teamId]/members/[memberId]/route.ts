@@ -10,6 +10,7 @@ import {
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -24,10 +25,12 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   let actorMembership;
   try {
-    actorMembership = await requireTeamPermission(
-      session.user.id,
-      teamId,
-      TEAM_PERMISSION.MEMBER_CHANGE_ROLE
+    actorMembership = await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(
+        session.user.id,
+        teamId,
+        TEAM_PERMISSION.MEMBER_CHANGE_ROLE
+      ),
     );
   } catch (e) {
     if (e instanceof TeamAuthError) {
@@ -36,9 +39,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const target = await prisma.teamMember.findUnique({
-    where: { id: memberId },
-  });
+  const target = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamMember.findUnique({
+      where: { id: memberId },
+    }),
+  );
 
   if (!target || target.teamId !== teamId || target.deactivatedAt !== null) {
     return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
@@ -69,17 +74,19 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
 
     // Transfer: promote target to OWNER, demote self to ADMIN
-    await prisma.teamMember.update({
-      where: { id: actorMembership.id },
-      data: { role: TEAM_ROLE.ADMIN },
-    });
+    const updated = await withUserTenantRls(session.user.id, async () => {
+      await prisma.teamMember.update({
+        where: { id: actorMembership.id },
+        data: { role: TEAM_ROLE.ADMIN },
+      });
 
-    const updated = await prisma.teamMember.update({
-      where: { id: memberId },
-      data: { role: TEAM_ROLE.OWNER },
-      include: {
-        user: { select: { id: true, name: true, email: true, image: true } },
-      },
+      return prisma.teamMember.update({
+        where: { id: memberId },
+        data: { role: TEAM_ROLE.OWNER },
+        include: {
+          user: { select: { id: true, name: true, email: true, image: true } },
+        },
+      });
     });
 
     logAudit({
@@ -122,13 +129,15 @@ export async function PUT(req: NextRequest, { params }: Params) {
     );
   }
 
-  const updated = await prisma.teamMember.update({
-    where: { id: memberId },
-    data: { role: parsed.data.role },
-    include: {
-      user: { select: { id: true, name: true, email: true, image: true } },
-    },
-  });
+  const updated = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamMember.update({
+      where: { id: memberId },
+      data: { role: parsed.data.role },
+      include: {
+        user: { select: { id: true, name: true, email: true, image: true } },
+      },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,
@@ -162,10 +171,12 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   let actorMembership;
   try {
-    actorMembership = await requireTeamPermission(
-      session.user.id,
-      teamId,
-      TEAM_PERMISSION.MEMBER_REMOVE
+    actorMembership = await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(
+        session.user.id,
+        teamId,
+        TEAM_PERMISSION.MEMBER_REMOVE
+      ),
     );
   } catch (e) {
     if (e instanceof TeamAuthError) {
@@ -174,9 +185,11 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const target = await prisma.teamMember.findUnique({
-    where: { id: memberId },
-  });
+  const target = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamMember.findUnique({
+      where: { id: memberId },
+    }),
+  );
 
   if (!target || target.teamId !== teamId || target.deactivatedAt !== null) {
     return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
@@ -199,13 +212,15 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     );
   }
 
-  await prisma.$transaction([
-    prisma.teamMemberKey.deleteMany({ where: { teamId: teamId, userId: target.userId } }),
-    prisma.scimExternalMapping.deleteMany({
-      where: { teamId: teamId, internalId: target.userId, resourceType: "User" },
-    }),
-    prisma.teamMember.delete({ where: { id: memberId } }),
-  ]);
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.$transaction([
+      prisma.teamMemberKey.deleteMany({ where: { teamId: teamId, userId: target.userId } }),
+      prisma.scimExternalMapping.deleteMany({
+        where: { teamId: teamId, internalId: target.userId, resourceType: "User" },
+      }),
+      prisma.teamMember.delete({ where: { id: memberId } }),
+    ]),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,

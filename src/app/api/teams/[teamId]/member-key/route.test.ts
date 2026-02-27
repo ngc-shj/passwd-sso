@@ -3,7 +3,7 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const {
   mockAuth, mockRequireTeamMember, mockPrismaTeamMember,
-  mockPrismaTeamMemberKey, TeamAuthError,
+  mockPrismaTeamMemberKey, TeamAuthError, mockWithUserTenantRls,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
@@ -18,6 +18,7 @@ const {
     mockPrismaTeamMember: { findUnique: vi.fn(), findFirst: vi.fn() },
     mockPrismaTeamMemberKey: { findUnique: vi.fn(), findFirst: vi.fn() },
     TeamAuthError: _TeamAuthError,
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   };
 });
 
@@ -31,6 +32,9 @@ vi.mock("@/lib/prisma", () => ({
     teamMember: mockPrismaTeamMember,
     teamMemberKey: mockPrismaTeamMemberKey,
   },
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { GET } from "./route";

@@ -7,6 +7,7 @@ import { inviteSchema } from "@/lib/validations";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { INVITATION_STATUS, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -20,7 +21,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -28,15 +31,17 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const invitations = await prisma.teamInvitation.findMany({
-    where: { teamId: teamId, status: INVITATION_STATUS.PENDING },
-    include: {
-      invitedBy: {
-        select: { id: true, name: true, email: true },
+  const invitations = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamInvitation.findMany({
+      where: { teamId: teamId, status: INVITATION_STATUS.PENDING },
+      include: {
+        invitedBy: {
+          select: { id: true, name: true, email: true },
+        },
       },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+      orderBy: { createdAt: "desc" },
+    }),
+  );
 
   return NextResponse.json(
     invitations.map((inv) => ({
@@ -62,7 +67,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -88,15 +95,19 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { email, role } = parsed.data;
 
   // Check if already a member
-  const existingUser = await prisma.user.findUnique({
-    where: { email },
-  });
+  const existingUser = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { email },
+    }),
+  );
   if (existingUser) {
-    const existingMember = await prisma.teamMember.findUnique({
-      where: {
-        teamId_userId: { teamId: teamId, userId: existingUser.id },
-      },
-    });
+    const existingMember = await withUserTenantRls(session.user.id, async () =>
+      prisma.teamMember.findUnique({
+        where: {
+          teamId_userId: { teamId: teamId, userId: existingUser.id },
+        },
+      }),
+    );
     if (existingMember) {
       // Active member → already a member
       if (existingMember.deactivatedAt === null) {
@@ -117,9 +128,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   // Check for existing pending invitation
-  const existingInv = await prisma.teamInvitation.findFirst({
-    where: { teamId: teamId, email, status: INVITATION_STATUS.PENDING },
-  });
+  const existingInv = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamInvitation.findFirst({
+      where: { teamId: teamId, email, status: INVITATION_STATUS.PENDING },
+    }),
+  );
   if (existingInv) {
     return NextResponse.json(
       { error: API_ERROR.INVITATION_ALREADY_SENT },
@@ -130,16 +143,18 @@ export async function POST(req: NextRequest, { params }: Params) {
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-  const invitation = await prisma.teamInvitation.create({
-    data: {
-      teamId: teamId,
-      email,
-      role,
-      token,
-      expiresAt,
-      invitedById: session.user.id,
-    },
-  });
+  const invitation = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamInvitation.create({
+      data: {
+        teamId: teamId,
+        email,
+        role,
+        token,
+        expiresAt,
+        invitedById: session.user.id,
+      },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,

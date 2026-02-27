@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { INVITATION_STATUS } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 
@@ -33,10 +34,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.TOKEN_REQUIRED }, { status: 400 });
   }
 
-  const invitation = await prisma.teamInvitation.findUnique({
-    where: { token },
-    include: { team: { select: { id: true, name: true, slug: true } } },
-  });
+  const invitation = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamInvitation.findUnique({
+      where: { token },
+      include: { team: { select: { id: true, name: true, slug: true } } },
+    }),
+  );
 
   if (!invitation) {
     return NextResponse.json(
@@ -53,10 +56,12 @@ export async function POST(req: NextRequest) {
   }
 
   if (invitation.expiresAt < new Date()) {
-    await prisma.teamInvitation.update({
-      where: { id: invitation.id },
-      data: { status: INVITATION_STATUS.EXPIRED },
-    });
+    await withUserTenantRls(session.user.id, async () =>
+      prisma.teamInvitation.update({
+        where: { id: invitation.id },
+        data: { status: INVITATION_STATUS.EXPIRED },
+      }),
+    );
     return NextResponse.json(
       { error: API_ERROR.INVITATION_EXPIRED },
       { status: 410 }
@@ -72,22 +77,26 @@ export async function POST(req: NextRequest) {
   }
 
   // Check if already a member (active or deactivated)
-  const existingMember = await prisma.teamMember.findUnique({
-    where: {
-      teamId_userId: {
-        teamId: invitation.teamId,
-        userId: session.user.id,
+  const existingMember = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamMember.findUnique({
+      where: {
+        teamId_userId: {
+          teamId: invitation.teamId,
+          userId: session.user.id,
+        },
       },
-    },
-  });
+    }),
+  );
 
   if (existingMember) {
     // Active member → already a member
     if (existingMember.deactivatedAt === null) {
-      await prisma.teamInvitation.update({
-        where: { id: invitation.id },
-        data: { status: INVITATION_STATUS.ACCEPTED },
-      });
+      await withUserTenantRls(session.user.id, async () =>
+        prisma.teamInvitation.update({
+          where: { id: invitation.id },
+          data: { status: INVITATION_STATUS.ACCEPTED },
+        }),
+      );
       return NextResponse.json({
         team: invitation.team,
         alreadyMember: true,
@@ -107,40 +116,44 @@ export async function POST(req: NextRequest) {
 
   // Team is always E2E-enabled.
   // Check if the user has an ECDH public key (vault set up).
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { ecdhPublicKey: true },
-  });
+  const user = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { ecdhPublicKey: true },
+    }),
+  );
   const vaultSetupRequired = !user?.ecdhPublicKey;
 
   // Create membership (or re-activate if previously deactivated) and mark invitation as accepted.
   // keyDistributed starts as false (admin must distribute team key).
-  await prisma.$transaction([
-    prisma.teamMember.upsert({
-      where: {
-        teamId_userId: {
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.$transaction([
+      prisma.teamMember.upsert({
+        where: {
+          teamId_userId: {
+            teamId: invitation.teamId,
+            userId: session.user.id,
+          },
+        },
+        create: {
           teamId: invitation.teamId,
           userId: session.user.id,
+          role: invitation.role,
+          keyDistributed: false,
         },
-      },
-      create: {
-        teamId: invitation.teamId,
-        userId: session.user.id,
-        role: invitation.role,
-        keyDistributed: false,
-      },
-      update: {
-        role: invitation.role,
-        keyDistributed: false,
-        deactivatedAt: null,
-        scimManaged: false,
-      },
-    }),
-    prisma.teamInvitation.update({
-      where: { id: invitation.id },
-      data: { status: INVITATION_STATUS.ACCEPTED },
-    }),
-  ]);
+        update: {
+          role: invitation.role,
+          keyDistributed: false,
+          deactivatedAt: null,
+          scimManaged: false,
+        },
+      }),
+      prisma.teamInvitation.update({
+        where: { id: invitation.id },
+        data: { status: INVITATION_STATUS.ACCEPTED },
+      }),
+    ]),
+  );
 
   return NextResponse.json({
     team: invitation.team,

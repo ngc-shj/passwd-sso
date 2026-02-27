@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser, mockTransaction, mockRateLimiter } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser, mockTransaction, mockRateLimiter, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamInvitation: {
     findUnique: vi.fn(),
@@ -15,6 +15,7 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser
   mockPrismaUser: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
   mockRateLimiter: { check: vi.fn() },
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -28,6 +29,9 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => mockRateLimiter,
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { POST } from "./route";

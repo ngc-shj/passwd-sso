@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockAuth, mockRequireTeamPermission, TeamAuthError, mockLogAudit, mockScimToken } = vi.hoisted(
+const { mockAuth, mockRequireTeamPermission, TeamAuthError, mockLogAudit, mockScimToken, mockWithUserTenantRls } = vi.hoisted(
   () => {
     class _TeamAuthError extends Error {
       status: number;
@@ -17,6 +17,7 @@ const { mockAuth, mockRequireTeamPermission, TeamAuthError, mockLogAudit, mockSc
       TeamAuthError: _TeamAuthError,
       mockLogAudit: vi.fn(),
       mockScimToken: { findUnique: vi.fn(), update: vi.fn() },
+      mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
     };
   },
 );
@@ -32,6 +33,9 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { scimToken: mockScimToken },
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { DELETE } from "./route";

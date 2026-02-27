@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -17,7 +18,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamMember(session.user.id, teamId);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamMember(session.user.id, teamId),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -26,10 +29,12 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   // Check if key has been distributed to this member
-  const membership = await prisma.teamMember.findFirst({
-    where: { teamId: teamId, userId: session.user.id, deactivatedAt: null },
-    select: { keyDistributed: true },
-  });
+  const membership = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamMember.findFirst({
+      where: { teamId: teamId, userId: session.user.id, deactivatedAt: null },
+      select: { keyDistributed: true },
+    }),
+  );
 
   if (!membership?.keyDistributed) {
     return NextResponse.json(
@@ -50,21 +55,25 @@ export async function GET(req: NextRequest, { params }: Params) {
         { status: 400 }
       );
     }
-    memberKey = await prisma.teamMemberKey.findUnique({
-      where: {
-        teamId_userId_keyVersion: {
-          teamId: teamId,
-          userId: session.user.id,
-          keyVersion,
+    memberKey = await withUserTenantRls(session.user.id, async () =>
+      prisma.teamMemberKey.findUnique({
+        where: {
+          teamId_userId_keyVersion: {
+            teamId: teamId,
+            userId: session.user.id,
+            keyVersion,
+          },
         },
-      },
-    });
+      }),
+    );
   } else {
     // Get the latest key version
-    memberKey = await prisma.teamMemberKey.findFirst({
-      where: { teamId: teamId, userId: session.user.id },
-      orderBy: { keyVersion: "desc" },
-    });
+    memberKey = await withUserTenantRls(session.user.id, async () =>
+      prisma.teamMemberKey.findFirst({
+        where: { teamId: teamId, userId: session.user.id },
+        orderBy: { keyVersion: "desc" },
+      }),
+    );
   }
 
   if (!memberKey) {
