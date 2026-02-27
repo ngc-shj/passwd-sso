@@ -99,7 +99,10 @@ export function ScimProvisioningCard() {
       {manageableTeams.length > 1 && (
         <Card className="rounded-xl border bg-card/80 p-4">
           <section className="space-y-2">
-            <Label>SCIM Managed Team</Label>
+            <Label>SCIM Permission Context Team</Label>
+            <p className="text-xs text-muted-foreground">
+              SCIM tokens are tenant-scoped. Select a team where you have SCIM management permission.
+            </p>
             <Select value={selectedTeamId} onValueChange={setSelectedTeamId}>
               <SelectTrigger className="w-full max-w-sm">
                 <SelectValue />

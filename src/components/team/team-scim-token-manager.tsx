@@ -135,6 +135,9 @@ export function ScimTokenManager({ teamId, locale }: Props) {
         <p className="text-sm text-muted-foreground mt-1">
           {t("scimDescription")}
         </p>
+        <p className="text-xs text-muted-foreground mt-1">
+          Tokens are tenant-scoped. Changes here affect SCIM access for all teams in this tenant.
+        </p>
       </section>
 
       {/* SCIM Endpoint URL */}
