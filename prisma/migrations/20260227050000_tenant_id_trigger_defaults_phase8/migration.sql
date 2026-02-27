@@ -198,16 +198,19 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  INSERT INTO "tenant_members" ("id", "tenant_id", "user_id", "role", "created_at", "updated_at")
-  VALUES (
-    CONCAT('tm_', SUBSTRING(MD5(NEW.tenant_id || ':' || NEW.id) FROM 1 FOR 24)),
-    NEW.tenant_id,
-    NEW.id,
-    'OWNER'::"TenantRole",
-    NOW(),
-    NOW()
-  )
-  ON CONFLICT ("tenant_id", "user_id") DO NOTHING;
+  -- Bootstrap users (auto-created tenant_usr_*) get OWNER membership automatically.
+  IF NEW.tenant_id LIKE 'tenant_usr_%' THEN
+    INSERT INTO "tenant_members" ("id", "tenant_id", "user_id", "role", "created_at", "updated_at")
+    VALUES (
+      CONCAT('tm_', SUBSTRING(MD5(NEW.tenant_id || ':' || NEW.id) FROM 1 FOR 24)),
+      NEW.tenant_id,
+      NEW.id,
+      'OWNER'::"TenantRole",
+      NOW(),
+      NOW()
+    )
+    ON CONFLICT ("tenant_id", "user_id") DO NOTHING;
+  END IF;
 
   RETURN NEW;
 END;

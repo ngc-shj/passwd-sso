@@ -32,8 +32,8 @@ export async function ensureTenantMembershipForSignIn(
   }
 
   const tenant = await withBypassRls(prisma, async () => {
-    let found = await prisma.tenant.findFirst({
-      where: { OR: [{ id: tenantClaim }, { slug: tenantSlug }] },
+    let found = await prisma.tenant.findUnique({
+      where: { id: tenantClaim },
       select: { id: true },
     });
 
@@ -41,6 +41,7 @@ export async function ensureTenantMembershipForSignIn(
       try {
         found = await prisma.tenant.create({
           data: {
+            id: tenantClaim,
             name: tenantClaim,
             slug: tenantSlug,
           },
@@ -52,7 +53,7 @@ export async function ensureTenantMembershipForSignIn(
           e.code === "P2002"
         ) {
           found = await prisma.tenant.findUnique({
-            where: { slug: tenantSlug },
+            where: { id: tenantClaim },
             select: { id: true },
           });
         } else {

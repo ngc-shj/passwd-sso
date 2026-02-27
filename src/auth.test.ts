@@ -8,7 +8,6 @@ const {
 } = vi.hoisted(() => {
   const mockPrisma = {
     tenant: {
-      findFirst: vi.fn(),
       create: vi.fn(),
       findUnique: vi.fn(),
       delete: vi.fn(),
@@ -81,9 +80,8 @@ describe("ensureTenantMembershipForSignIn", () => {
     vi.clearAllMocks();
     mockExtractTenantClaimValue.mockReturnValue("tenant-acme");
     mockSlugifyTenant.mockReturnValue("tenant-acme");
-    mockPrisma.tenant.findFirst.mockResolvedValue({ id: "tenant-acme" });
-    mockPrisma.tenant.create.mockResolvedValue({ id: "tenant-acme" });
     mockPrisma.tenant.findUnique.mockResolvedValue({ id: "tenant-acme" });
+    mockPrisma.tenant.create.mockResolvedValue({ id: "tenant-acme" });
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
     mockPrisma.tenantMember.upsert.mockResolvedValue({});
     mockPrisma.tenantMember.deleteMany.mockResolvedValue({ count: 1 });
@@ -108,6 +106,17 @@ describe("ensureTenantMembershipForSignIn", () => {
       select: { tenantId: true },
       take: 2,
     });
+  });
+
+  it("throws when tenant creation fails with non-retryable error", async () => {
+    mockPrisma.tenant.findUnique.mockResolvedValue(null);
+    mockPrisma.tenant.create.mockRejectedValueOnce(
+      new Error("slug conflict"),
+    );
+
+    await expect(
+      ensureTenantMembershipForSignIn("user-1", null, {}),
+    ).rejects.toThrow("slug conflict");
   });
 
   it("allows sign-in when tenant claim is missing but membership exists", async () => {
