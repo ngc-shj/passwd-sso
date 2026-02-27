@@ -27,7 +27,6 @@ interface TeamExportPanelContentProps {
 }
 
 function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContentProps) {
-  if (!scopedTeamId) return null;
   const t = useTranslations("Export");
   const { getTeamEncryptionKey } = useTeamVault();
   const [exporting, setExporting] = useState(false);
@@ -36,6 +35,8 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [exportProfile, setExportProfile] = useState<ExportProfile>("compatible");
+
+  if (!scopedTeamId) return null;
 
   const resetState = () => {
     setPasswordProtect(true);

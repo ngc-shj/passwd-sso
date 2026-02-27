@@ -26,7 +26,7 @@ export interface TeamPasswordFormControllerArgs {
   handleOpenChange: (open: boolean) => void;
 }
 
-export interface TeamPasswordFormControllerCompatArgs extends TeamPasswordFormControllerArgs {}
+export type TeamPasswordFormControllerCompatArgs = TeamPasswordFormControllerArgs;
 
 function useTeamPasswordFormControllerInternal({
   teamId,

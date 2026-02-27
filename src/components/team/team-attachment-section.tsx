@@ -78,7 +78,6 @@ export function TeamAttachmentSection({
   onAttachmentsChange,
   readOnly = false,
 }: TeamAttachmentSectionProps) {
-  if (!scopedId) return null;
   const t = useTranslations("Attachments");
   const tApi = useTranslations("ApiErrors");
   const tc = useTranslations("Common");
@@ -88,6 +87,8 @@ export function TeamAttachmentSection({
   const [deleteTarget, setDeleteTarget] = useState<TeamAttachmentMeta | null>(null);
   const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  if (!scopedId) return null;
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
