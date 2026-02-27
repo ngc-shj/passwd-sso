@@ -94,16 +94,17 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma));
   });
 
-  it("returns false when tenant claim is missing and no membership exists", async () => {
+  it("allows sign-in when tenant claim is missing and no membership exists", async () => {
     mockExtractTenantClaimValue.mockReturnValue(null);
 
     const ok = await ensureTenantMembershipForSignIn("user-1", null, null);
 
-    expect(ok).toBe(false);
+    expect(ok).toBe(true);
     expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
     expect(mockPrisma.tenantMember.findMany).toHaveBeenCalledWith({
       where: { userId: "user-1", deactivatedAt: null },
       select: { tenantId: true },
+      orderBy: { createdAt: "asc" },
       take: 2,
     });
   });
@@ -170,6 +171,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(mockPrisma.tenantMember.findMany).toHaveBeenCalledWith({
       where: { userId: "user-1", deactivatedAt: null },
       select: { tenantId: true },
+      orderBy: { createdAt: "asc" },
       take: 2,
     });
   });

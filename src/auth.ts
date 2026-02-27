@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { extractTenantClaimValue, slugifyTenant } from "@/lib/tenant-claim";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
 import authConfig from "./auth.config";
 
 export async function ensureTenantMembershipForSignIn(
@@ -16,14 +17,20 @@ export async function ensureTenantMembershipForSignIn(
 ): Promise<boolean> {
   const tenantClaim = extractTenantClaimValue(account, profile);
   if (!tenantClaim) {
-    const memberships = await withBypassRls(prisma, async () =>
-      prisma.tenantMember.findMany({
-        where: { userId, deactivatedAt: null },
-        select: { tenantId: true },
-        take: 2,
-      }),
-    );
-    return memberships.length === 1;
+    try {
+      await resolveUserTenantId(userId);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === "MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED"
+      ) {
+        return false;
+      }
+      throw error;
+    }
+    // Allow first-time sign-in without tenant claim.
+    // Membership bootstrap is handled by the auth adapter createUser flow.
+    return true;
   }
 
   const tenantSlug = slugifyTenant(tenantClaim);
@@ -64,18 +71,13 @@ export async function ensureTenantMembershipForSignIn(
 
     if (!found) return null;
 
-    const existingMemberships = await prisma.tenantMember.findMany({
-      where: { userId, deactivatedAt: null },
-      select: { tenantId: true },
-      take: 2,
-    });
-    const existingMembership = existingMemberships[0] ?? null;
+    const existingTenantId = await resolveUserTenantIdFromClient(prisma, userId);
 
     // Single-tenant sign-in policy: reject cross-tenant login.
-    if (existingMembership && existingMembership.tenantId !== found.id) {
-      const isBootstrapTenant = existingMembership.tenantId.startsWith("tenant_usr_");
+    if (existingTenantId && existingTenantId !== found.id) {
+      const isBootstrapTenant = existingTenantId.startsWith("tenant_usr_");
       // Allow one-time migration from bootstrap tenant to IdP tenant.
-      if (isBootstrapTenant && existingMemberships.length === 1) {
+      if (isBootstrapTenant) {
         await prisma.$transaction(async (tx) => {
           await tx.user.update({
             where: { id: userId },
@@ -103,7 +105,7 @@ export async function ensureTenantMembershipForSignIn(
           });
 
           await tx.tenantMember.deleteMany({
-            where: { userId, tenantId: existingMembership.tenantId },
+            where: { userId, tenantId: existingTenantId },
           });
         });
       } else {
@@ -151,10 +153,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!baseResult) return false;
       }
 
-      if (!params.user?.id) return false;
+      let userId = params.user?.id ?? null;
+      if (!userId && params.user?.email) {
+        const existing = await withBypassRls(prisma, async () =>
+          prisma.user.findUnique({
+            where: { email: params.user.email! },
+            select: { id: true },
+          }),
+        );
+        userId = existing?.id ?? null;
+      }
+
+      // First-ever sign-in can reach this callback before user row is persisted.
+      // Allow auth flow to continue so createUser can provision bootstrap data.
+      if (!userId) return true;
 
       const ok = await ensureTenantMembershipForSignIn(
-        params.user.id,
+        userId,
         params.account,
         (params.profile ?? null) as Record<string, unknown> | null,
       );
