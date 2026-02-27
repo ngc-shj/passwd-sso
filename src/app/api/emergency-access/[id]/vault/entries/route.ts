@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // GET /api/emergency-access/[id]/vault/entries — Fetch owner's encrypted entries
 export async function GET(
@@ -17,9 +18,11 @@ export async function GET(
 
   const { id } = await params;
 
-  const grant = await prisma.emergencyAccessGrant.findUnique({
-    where: { id },
-  });
+  const grant = await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.findUnique({
+      where: { id },
+    }),
+  );
 
   if (!grant || grant.granteeId !== session.user.id) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -33,29 +36,31 @@ export async function GET(
   }
 
   // Fetch all non-deleted entries for the owner
-  const entries = await prisma.passwordEntry.findMany({
-    where: {
-      userId: grant.ownerId,
-      deletedAt: null,
-    },
-    select: {
-      id: true,
-      encryptedBlob: true,
-      blobIv: true,
-      blobAuthTag: true,
-      encryptedOverview: true,
-      overviewIv: true,
-      overviewAuthTag: true,
-      keyVersion: true,
-      aadVersion: true,
-      entryType: true,
-      isFavorite: true,
-      isArchived: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-    orderBy: { updatedAt: "desc" },
-  });
+  const entries = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.findMany({
+      where: {
+        userId: grant.ownerId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        encryptedBlob: true,
+        blobIv: true,
+        blobAuthTag: true,
+        encryptedOverview: true,
+        overviewIv: true,
+        overviewAuthTag: true,
+        keyVersion: true,
+        aadVersion: true,
+        entryType: true,
+        isFavorite: true,
+        isArchived: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { updatedAt: "desc" },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,

@@ -8,6 +8,7 @@ import { emergencyAccessApprovedEmail } from "@/lib/email/templates/emergency-ac
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { routing } from "@/i18n/routing";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // POST /api/emergency-access/[id]/approve — Owner early-approves emergency access request
 export async function POST(
@@ -21,9 +22,11 @@ export async function POST(
 
   const { id } = await params;
 
-  const grant = await prisma.emergencyAccessGrant.findUnique({
-    where: { id },
-  });
+  const grant = await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.findUnique({
+      where: { id },
+    }),
+  );
 
   if (!grant || grant.ownerId !== session.user.id) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -36,13 +39,15 @@ export async function POST(
     );
   }
 
-  await prisma.emergencyAccessGrant.update({
-    where: { id },
-    data: {
-      status: EA_STATUS.ACTIVATED,
-      activatedAt: new Date(),
-    },
-  });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.update({
+      where: { id },
+      data: {
+        status: EA_STATUS.ACTIVATED,
+        activatedAt: new Date(),
+      },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
@@ -55,10 +60,12 @@ export async function POST(
   });
 
   if (grant.granteeId) {
-    const grantee = await prisma.user.findUnique({
-      where: { id: grant.granteeId },
-      select: { email: true, name: true },
-    });
+    const grantee = await withUserTenantRls(session.user.id, async () =>
+      prisma.user.findUnique({
+        where: { id: grant.granteeId },
+        select: { email: true, name: true },
+      }),
+    );
     if (grantee?.email) {
       const ownerName = session.user.name ?? session.user.email ?? "";
       const { subject, html, text } = emergencyAccessApprovedEmail(routing.defaultLocale, ownerName);

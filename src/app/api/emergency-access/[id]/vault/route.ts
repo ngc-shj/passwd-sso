@@ -5,6 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const vaultLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
@@ -24,13 +25,15 @@ export async function GET(
 
   const { id } = await params;
 
-  const grant = await prisma.emergencyAccessGrant.findUnique({
-    where: { id },
-    include: {
-      granteeKeyPair: true,
-      owner: { select: { name: true, email: true } },
-    },
-  });
+  const grant = await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.findUnique({
+      where: { id },
+      include: {
+        granteeKeyPair: true,
+        owner: { select: { name: true, email: true } },
+      },
+    }),
+  );
 
   if (!grant || grant.granteeId !== session.user.id) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -38,10 +41,12 @@ export async function GET(
 
   // Auto-activate if wait period has expired
   if (grant.status === EA_STATUS.REQUESTED && grant.waitExpiresAt && grant.waitExpiresAt <= new Date()) {
-    await prisma.emergencyAccessGrant.update({
-      where: { id },
-      data: { status: EA_STATUS.ACTIVATED, activatedAt: new Date() },
-    });
+    await withUserTenantRls(session.user.id, async () =>
+      prisma.emergencyAccessGrant.update({
+        where: { id },
+        data: { status: EA_STATUS.ACTIVATED, activatedAt: new Date() },
+      }),
+    );
     grant.status = EA_STATUS.ACTIVATED;
 
     logAudit({

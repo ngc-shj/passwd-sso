@@ -9,6 +9,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { routing } from "@/i18n/routing";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const requestLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 3 });
 
@@ -28,9 +29,11 @@ export async function POST(
 
   const { id } = await params;
 
-  const grant = await prisma.emergencyAccessGrant.findUnique({
-    where: { id },
-  });
+  const grant = await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.findUnique({
+      where: { id },
+    }),
+  );
 
   if (!grant || grant.granteeId !== session.user.id) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -46,14 +49,16 @@ export async function POST(
   const now = new Date();
   const waitExpiresAt = new Date(now.getTime() + grant.waitDays * 24 * 60 * 60 * 1000);
 
-  await prisma.emergencyAccessGrant.update({
-    where: { id },
-    data: {
-      status: EA_STATUS.REQUESTED,
-      requestedAt: now,
-      waitExpiresAt,
-    },
-  });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.update({
+      where: { id },
+      data: {
+        status: EA_STATUS.REQUESTED,
+        requestedAt: now,
+        waitExpiresAt,
+      },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
@@ -65,15 +70,19 @@ export async function POST(
     ...extractRequestMeta(req),
   });
 
-  const owner = await prisma.user.findUnique({
-    where: { id: grant.ownerId },
-    select: { email: true, name: true },
-  });
+  const owner = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: grant.ownerId },
+      select: { email: true, name: true },
+    }),
+  );
   if (owner?.email) {
-    const grantee = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { name: true, email: true },
-    });
+    const grantee = await withUserTenantRls(session.user.id, async () =>
+      prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { name: true, email: true },
+      }),
+    );
     const granteeName = grantee?.name ?? grantee?.email ?? "";
     const { subject, html, text } = emergencyAccessRequestedEmail(routing.defaultLocale, granteeName, grant.waitDays);
     void sendEmail({ to: owner.email, subject, html, text });
