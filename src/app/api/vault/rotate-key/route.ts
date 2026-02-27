@@ -8,6 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 export const runtime = "nodejs";
 
@@ -63,15 +64,17 @@ async function handlePOST(request: Request) {
     );
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: {
-      vaultSetupAt: true,
-      masterPasswordServerHash: true,
-      masterPasswordServerSalt: true,
-      keyVersion: true,
-    },
-  });
+  const user = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        vaultSetupAt: true,
+        masterPasswordServerHash: true,
+        masterPasswordServerSalt: true,
+        keyVersion: true,
+      },
+    }),
+  );
 
   if (!user?.vaultSetupAt) {
     return NextResponse.json(
@@ -99,29 +102,31 @@ async function handlePOST(request: Request) {
     .digest("hex");
 
   // Update vault wrapping and bump keyVersion in a transaction
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: session.user.id },
-      data: {
-        encryptedSecretKey: parsed.data.encryptedSecretKey,
-        secretKeyIv: parsed.data.secretKeyIv,
-        secretKeyAuthTag: parsed.data.secretKeyAuthTag,
-        accountSalt: parsed.data.accountSalt,
-        masterPasswordServerHash: newServerHash,
-        masterPasswordServerSalt: newServerSalt,
-        keyVersion: newKeyVersion,
-      },
-    }),
-    prisma.vaultKey.create({
-      data: {
-        userId: session.user.id,
-        version: newKeyVersion,
-        verificationCiphertext: parsed.data.verificationArtifact.ciphertext,
-        verificationIv: parsed.data.verificationArtifact.iv,
-        verificationAuthTag: parsed.data.verificationArtifact.authTag,
-      },
-    }),
-  ]);
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.$transaction([
+      prisma.user.update({
+        where: { id: session.user.id },
+        data: {
+          encryptedSecretKey: parsed.data.encryptedSecretKey,
+          secretKeyIv: parsed.data.secretKeyIv,
+          secretKeyAuthTag: parsed.data.secretKeyAuthTag,
+          accountSalt: parsed.data.accountSalt,
+          masterPasswordServerHash: newServerHash,
+          masterPasswordServerSalt: newServerSalt,
+          keyVersion: newKeyVersion,
+        },
+      }),
+      prisma.vaultKey.create({
+        data: {
+          userId: session.user.id,
+          version: newKeyVersion,
+          verificationCiphertext: parsed.data.verificationArtifact.ciphertext,
+          verificationIv: parsed.data.verificationArtifact.iv,
+          verificationAuthTag: parsed.data.verificationArtifact.authTag,
+        },
+      }),
+    ]),
+  );
 
   // Mark EA grants as STALE (best-effort, outside transaction)
   await markGrantsStaleForOwner(session.user.id, newKeyVersion).catch(() => {});

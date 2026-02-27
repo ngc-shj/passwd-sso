@@ -13,6 +13,8 @@ const {
   mockUpdate,
   mockTransaction,
   mockCheck,
+  mockWithUserTenantRls,
+  mockWithBypassRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockCreate: vi.fn(),
@@ -22,6 +24,8 @@ const {
   mockUpdate: vi.fn(),
   mockTransaction: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue(true),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -47,6 +51,12 @@ vi.mock("@/lib/rate-limit", () => ({
 vi.mock("@/lib/redis", () => ({
   getRedis: () => null,
   validateRedisConfig: () => {},
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { POST, DELETE } from "./route";
