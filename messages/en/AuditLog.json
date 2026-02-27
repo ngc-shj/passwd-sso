@@ -112,7 +112,7 @@
   "no": "no",
   "included": "included",
   "notIncluded": "not included",
-  "exportMeta": "File: {filename} / Count: {entryCount} / Format: {format} / Encrypted: {encrypted} / Orgs: {orgs}",
+  "exportMeta": "File: {filename} / Count: {entryCount} / Format: {format} / Encrypted: {encrypted} / Teams: {teams}",
   "exportMetaTeam": "File: {filename} / Count: {entryCount} / Format: {format} / Encrypted: {encrypted}",
   "importMeta": "File: {filename} / Format: {format} / Encrypted: {encrypted} / Success: {successCount} / Failed: {failedCount} / Total: {requestedCount}"
 }
