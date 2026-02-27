@@ -124,4 +124,13 @@ Loop 1-2の設計変更要件 (F-1/S-1, F-4, S-3, S-4, S-5) を実装済み:
 ### テスト追加
 - auth.test.ts: P2002 slug collision fallback テスト、slugifyTenant 空文字列テスト、bootstrap 移行の新テーブルアサーション
 - tenant-claim.test.ts: 非文字列型、空白のみ、制御文字境界、予約プレフィックス排除テスト
-- rotate-key/route.test.ts: withUserTenantRls スコープ検証テスト
+- rotate-key/route.test.ts: withUserTenantRls スコープ検証テスト、vaultKey.create tenantId アサーション
+
+### Loop 2 追加修正 (0ad0b01)
+- N1: fallback slug を50文字以内に truncate (slice(0,41) + 9文字サフィックス)
+- N2: fallback create の二重 P2002 を try/catch で graceful fail
+- N3: emergencyAccessKeyPair/shareAccessLog の userId フィルタ欠如について single-user 前提コメント追加
+- R1: vaultKey.create に tenantId アサーション追加
+
+### Loop 3 結果
+全観点 (機能・セキュリティ・テスト) で**指摘なし**。レビュー完了。
