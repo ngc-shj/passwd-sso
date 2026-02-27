@@ -66,15 +66,20 @@ export async function ensureTenantMembershipForSignIn(
           });
           // P2002 on slug (not externalId) — retry with unique suffix
           if (!found) {
-            const suffix = randomBytes(4).toString("hex");
-            found = await prisma.tenant.create({
-              data: {
-                externalId: tenantClaim,
-                name: tenantClaim,
-                slug: `${tenantSlug}-${suffix}`,
-              },
-              select: { id: true },
-            });
+            try {
+              const suffix = randomBytes(4).toString("hex");
+              found = await prisma.tenant.create({
+                data: {
+                  externalId: tenantClaim,
+                  name: tenantClaim,
+                  slug: `${tenantSlug.slice(0, 41)}-${suffix}`,
+                },
+                select: { id: true },
+              });
+            } catch {
+              // Extremely unlikely double collision — treat as sign-in failure
+              found = null;
+            }
           }
         } else {
           throw e;
@@ -144,6 +149,8 @@ export async function ensureTenantMembershipForSignIn(
             where: { ownerId: userId, tenantId: existingTenantId },
             data: { tenantId: found.id },
           });
+          // emergencyAccessKeyPair/shareAccessLog have no userId column;
+          // safe because bootstrap tenants are single-user by design.
           await tx.emergencyAccessKeyPair.updateMany({
             where: { tenantId: existingTenantId },
             data: { tenantId: found.id },

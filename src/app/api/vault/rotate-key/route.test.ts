@@ -134,6 +134,13 @@ describe("POST /api/vault/rotate-key", () => {
     expect(json.success).toBe(true);
     expect(json.keyVersion).toBe(2);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(mockPrismaVaultKey.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "user-1",
+        tenantId: "tenant-1",
+        version: 2,
+      }),
+    });
   });
 
   it("calls markGrantsStaleForOwner with new keyVersion", async () => {
