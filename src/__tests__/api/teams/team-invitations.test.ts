@@ -8,6 +8,7 @@ const {
   mockInvitationFindMany,
   mockInvitationFindFirst,
   mockInvitationCreate,
+  mockPrismaTeam,
   mockUserFindUnique,
   mockTeamMemberFindUnique,
   mockWithUserTenantRls,
@@ -17,6 +18,7 @@ const {
   mockInvitationFindMany: vi.fn(),
   mockInvitationFindFirst: vi.fn(),
   mockInvitationCreate: vi.fn(),
+  mockPrismaTeam: { findUnique: vi.fn() },
   mockUserFindUnique: vi.fn(),
   mockTeamMemberFindUnique: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
@@ -40,6 +42,7 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: mockInvitationFindFirst,
       create: mockInvitationCreate,
     },
+    team: mockPrismaTeam,
     user: { findUnique: mockUserFindUnique },
     teamMember: { findUnique: mockTeamMemberFindUnique },
   },
@@ -103,7 +106,10 @@ describe("GET /api/teams/[teamId]/invitations", () => {
 });
 
 describe("POST /api/teams/[teamId]/invitations", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockPrismaTeam.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+  });
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);

@@ -9,6 +9,7 @@ const {
   mockCreate,
   mockFindMany,
   mockFindUnique,
+  mockUserFindUnique,
   mockUpdateMany,
   mockUpdate,
   mockTransaction,
@@ -20,6 +21,7 @@ const {
   mockCreate: vi.fn(),
   mockFindMany: vi.fn(),
   mockFindUnique: vi.fn(),
+  mockUserFindUnique: vi.fn(),
   mockUpdateMany: vi.fn(),
   mockUpdate: vi.fn(),
   mockTransaction: vi.fn(),
@@ -37,6 +39,9 @@ vi.mock("@/lib/prisma", () => ({
       create: mockCreate,
       updateMany: mockUpdateMany,
       update: mockUpdate,
+    },
+    user: {
+      findUnique: mockUserFindUnique,
     },
     $transaction: mockTransaction,
   },
@@ -66,6 +71,7 @@ import { POST, DELETE } from "./route";
 describe("POST /api/extension/token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     // Default: transaction executes the callback with the mock prisma
     mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
       cb({

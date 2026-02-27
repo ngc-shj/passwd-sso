@@ -1,18 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTag, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTag, mockPrismaUser, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTag: {
     findMany: vi.fn(),
     findUnique: vi.fn(),
     create: vi.fn(),
   },
+  mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { tag: mockPrismaTag },
+  prisma: { tag: mockPrismaTag, user: mockPrismaUser },
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -24,6 +25,7 @@ describe("GET /api/tags", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -58,6 +60,7 @@ describe("POST /api/tags", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 
   it("returns 401 when unauthenticated", async () => {

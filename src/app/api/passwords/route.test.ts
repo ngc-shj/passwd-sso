@@ -7,6 +7,7 @@ const {
   mockPrismaPasswordEntry,
   mockExtTokenFindUnique,
   mockExtTokenUpdate,
+  mockPrismaUser,
   mockAuditCreate,
   mockWithUserTenantRls,
   mockWithBypassRls,
@@ -19,6 +20,7 @@ const {
   },
   mockExtTokenFindUnique: vi.fn(),
   mockExtTokenUpdate: vi.fn(),
+  mockPrismaUser: { findUnique: vi.fn() },
   mockAuditCreate: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
@@ -27,6 +29,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: mockPrismaPasswordEntry,
+    user: mockPrismaUser,
     auditLog: { create: mockAuditCreate },
     extensionToken: { findUnique: mockExtTokenFindUnique, update: mockExtTokenUpdate },
   },
@@ -79,6 +82,7 @@ describe("GET /api/passwords", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
     mockExtTokenUpdate.mockResolvedValue({});
   });

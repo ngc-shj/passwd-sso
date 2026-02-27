@@ -10,6 +10,7 @@ const {
   mockTeamFolderFindUnique,
   mockTeamFolderFindFirst,
   mockTeamFolderCreate,
+  mockPrismaTeam,
   mockWithUserTenantRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -19,6 +20,7 @@ const {
   mockTeamFolderFindUnique: vi.fn(),
   mockTeamFolderFindFirst: vi.fn(),
   mockTeamFolderCreate: vi.fn(),
+  mockPrismaTeam: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
@@ -45,6 +47,7 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: mockTeamFolderFindFirst,
       create: mockTeamFolderCreate,
     },
+    team: mockPrismaTeam,
   },
 }));
 vi.mock("@/lib/audit", () => ({
@@ -107,7 +110,10 @@ describe("GET /api/teams/[teamId]/folders", () => {
 });
 
 describe("POST /api/teams/[teamId]/folders", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockPrismaTeam.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+  });
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);

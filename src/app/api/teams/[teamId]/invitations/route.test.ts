@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeamMember, mockRequireTeamPermission, TeamAuthError, mockWithUserTenantRls } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeam, mockPrismaTeamMember, mockRequireTeamPermission, TeamAuthError, mockWithUserTenantRls } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -18,6 +18,7 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeamMember
       create: vi.fn(),
     },
     mockPrismaUser: { findUnique: vi.fn() },
+    mockPrismaTeam: { findUnique: vi.fn() },
     mockPrismaTeamMember: { findUnique: vi.fn() },
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
@@ -30,6 +31,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamInvitation: mockPrismaTeamInvitation,
     user: mockPrismaUser,
+    team: mockPrismaTeam,
     teamMember: mockPrismaTeamMember,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
@@ -104,6 +106,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     mockPrismaUser.findUnique.mockResolvedValue(null);
+    mockPrismaTeam.findUnique.mockResolvedValue({ name: "Team", tenantId: "tenant-1" });
     mockPrismaTeamInvitation.findFirst.mockResolvedValue(null);
   });
 

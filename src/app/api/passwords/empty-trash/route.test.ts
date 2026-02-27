@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockFindMany, mockDeleteMany, mockAuditCreate, mockWithUserTenantRls } = vi.hoisted(
-  () => ({
-    mockAuth: vi.fn(),
-    mockFindMany: vi.fn(),
-    mockDeleteMany: vi.fn(),
-    mockAuditCreate: vi.fn(),
-    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-  })
-);
+const { mockAuth, mockFindMany, mockDeleteMany, mockAuditCreate, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
+  mockAuth: vi.fn(),
+  mockFindMany: vi.fn(),
+  mockDeleteMany: vi.fn(),
+  mockAuditCreate: vi.fn(),
+  mockPrismaUser: { findUnique: vi.fn() },
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+}));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -21,10 +21,14 @@ vi.mock("@/lib/prisma", () => ({
     auditLog: {
       create: mockAuditCreate,
     },
+    user: mockPrismaUser,
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { POST } from "./route";
@@ -33,6 +37,7 @@ describe("POST /api/passwords/empty-trash", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
+    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockDeleteMany.mockResolvedValue({ count: 2 });
     mockAuditCreate.mockResolvedValue({});

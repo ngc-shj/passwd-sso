@@ -2,11 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createMultipartRequest, parseResponse } from "../../helpers/request-builder";
 
-const { mockAuth, mockCreate, mockAggregate, mockCheck, mockLogAudit, mockFileTypeFromBuffer, mockWithUserTenantRls } =
+const { mockAuth, mockCreate, mockAggregate, mockUserFindUnique, mockCheck, mockLogAudit, mockFileTypeFromBuffer, mockWithUserTenantRls } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockCreate: vi.fn(),
     mockAggregate: vi.fn(),
+    mockUserFindUnique: vi.fn(),
     mockCheck: vi.fn().mockResolvedValue(true),
     mockLogAudit: vi.fn(),
     mockFileTypeFromBuffer: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { create: mockCreate, aggregate: mockAggregate },
+    user: { findUnique: mockUserFindUnique },
   },
 }));
 vi.mock("@/lib/crypto-server", () => ({
@@ -74,6 +76,7 @@ function createFormData(overrides: Record<string, unknown> = {}): FormData {
 describe("POST /api/sends/file", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockCheck.mockResolvedValue(true);
     mockFileTypeFromBuffer.mockResolvedValue(undefined); // text files
     mockAggregate.mockResolvedValue({ _sum: { sendSizeBytes: 0 } });

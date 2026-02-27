@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamFolder, mockRequireTeamMember, mockRequireTeamPermission, TeamAuthError, mockLogAudit, mockWithUserTenantRls } =
+const { mockAuth, mockPrismaTeamFolder, mockPrismaTeam, mockRequireTeamMember, mockRequireTeamPermission, TeamAuthError, mockLogAudit, mockWithUserTenantRls } =
   vi.hoisted(() => {
     class _TeamAuthError extends Error {
       status: number;
@@ -19,6 +19,7 @@ const { mockAuth, mockPrismaTeamFolder, mockRequireTeamMember, mockRequireTeamPe
         findFirst: vi.fn(),
         create: vi.fn(),
       },
+      mockPrismaTeam: { findUnique: vi.fn() },
       mockRequireTeamMember: vi.fn(),
       mockRequireTeamPermission: vi.fn(),
       TeamAuthError: _TeamAuthError,
@@ -29,7 +30,7 @@ const { mockAuth, mockPrismaTeamFolder, mockRequireTeamMember, mockRequireTeamPe
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { teamFolder: mockPrismaTeamFolder },
+  prisma: { teamFolder: mockPrismaTeamFolder, team: mockPrismaTeam },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
@@ -65,6 +66,7 @@ describe("GET /api/teams/[teamId]/folders", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamMember.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
+    mockPrismaTeam.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -123,6 +125,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockPrismaTeam.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 
   it("returns 401 when unauthenticated", async () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaFolder, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaFolder, mockPrismaUser, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaFolder: {
     findMany: vi.fn(),
@@ -9,13 +9,17 @@ const { mockAuth, mockPrismaFolder, mockLogAudit, mockWithUserTenantRls } = vi.h
     findFirst: vi.fn(),
     create: vi.fn(),
   },
+  mockPrismaUser: { findUnique: vi.fn() },
   mockLogAudit: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { folder: mockPrismaFolder },
+  prisma: {
+    folder: mockPrismaFolder,
+    user: mockPrismaUser,
+  },
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -93,6 +97,7 @@ describe("POST /api/folders", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
+    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 
   it("returns 401 when unauthenticated", async () => {
