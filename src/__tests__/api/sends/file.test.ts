@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createMultipartRequest, parseResponse } from "../../helpers/request-builder";
 
-const { mockAuth, mockCreate, mockAggregate, mockCheck, mockLogAudit, mockFileTypeFromBuffer } =
+const { mockAuth, mockCreate, mockAggregate, mockCheck, mockLogAudit, mockFileTypeFromBuffer, mockWithUserTenantRls } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockCreate: vi.fn(),
@@ -10,6 +10,7 @@ const { mockAuth, mockCreate, mockAggregate, mockCheck, mockLogAudit, mockFileTy
     mockCheck: vi.fn().mockResolvedValue(true),
     mockLogAudit: vi.fn(),
     mockFileTypeFromBuffer: vi.fn(),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -40,6 +41,9 @@ vi.mock("@/lib/rate-limit", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 vi.mock("file-type", () => ({
   fileTypeFromBuffer: mockFileTypeFromBuffer,

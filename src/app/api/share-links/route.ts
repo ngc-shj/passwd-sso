@@ -18,6 +18,7 @@ import {
   AUDIT_SCOPE,
 } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const shareLinkLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
@@ -69,10 +70,12 @@ export async function POST(req: NextRequest) {
 
   if (passwordEntryId) {
     // Personal entry — verify ownership
-    const entry = await prisma.passwordEntry.findUnique({
-      where: { id: passwordEntryId },
-      select: { userId: true, entryType: true },
-    });
+    const entry = await withUserTenantRls(session.user.id, async () =>
+      prisma.passwordEntry.findUnique({
+        where: { id: passwordEntryId },
+        select: { userId: true, entryType: true },
+      }),
+    );
     if (!entry || entry.userId !== session.user.id) {
       return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
     }
@@ -90,19 +93,23 @@ export async function POST(req: NextRequest) {
     masterKeyVersion = encrypted.masterKeyVersion;
   } else {
     // Team entry — E2E: client sends pre-encrypted share data
-    const teamEntry = await prisma.teamPasswordEntry.findUnique({
-      where: { id: teamPasswordEntryId! },
-      select: { teamId: true, entryType: true },
-    });
+    const teamEntry = await withUserTenantRls(session.user.id, async () =>
+      prisma.teamPasswordEntry.findUnique({
+        where: { id: teamPasswordEntryId! },
+        select: { teamId: true, entryType: true },
+      }),
+    );
     if (!teamEntry) {
       return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
     }
 
     try {
-      await requireTeamPermission(
-        session.user.id,
-        teamEntry.teamId,
-        TEAM_PERMISSION.PASSWORD_READ
+      await withUserTenantRls(session.user.id, async () =>
+        requireTeamPermission(
+          session.user.id,
+          teamEntry.teamId,
+          TEAM_PERMISSION.PASSWORD_READ
+        ),
       );
     } catch (e) {
       if (e instanceof TeamAuthError) {
@@ -126,21 +133,23 @@ export async function POST(req: NextRequest) {
 
   const expiresAt = new Date(Date.now() + EXPIRY_MAP[expiresIn]);
 
-  const share = await prisma.passwordShare.create({
-    data: {
-      tokenHash,
-      entryType,
-      encryptedData,
-      dataIv,
-      dataAuthTag,
-      masterKeyVersion,
-      expiresAt,
-      maxViews: maxViews ?? null,
-      createdById: session.user.id,
-      passwordEntryId: passwordEntryId ?? null,
-      teamPasswordEntryId: teamPasswordEntryId ?? null,
-    },
-  });
+  const share = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordShare.create({
+      data: {
+        tokenHash,
+        entryType,
+        encryptedData,
+        dataIv,
+        dataAuthTag,
+        masterKeyVersion,
+        expiresAt,
+        maxViews: maxViews ?? null,
+        createdById: session.user.id,
+        passwordEntryId: passwordEntryId ?? null,
+        teamPasswordEntryId: teamPasswordEntryId ?? null,
+      },
+    }),
+  );
 
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);
@@ -188,18 +197,20 @@ export async function GET(req: NextRequest) {
   if (passwordEntryId) where.passwordEntryId = passwordEntryId;
   if (teamPasswordEntryId) where.teamPasswordEntryId = teamPasswordEntryId;
 
-  const shares = await prisma.passwordShare.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      expiresAt: true,
-      maxViews: true,
-      viewCount: true,
-      revokedAt: true,
-      createdAt: true,
-    },
-  });
+  const shares = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordShare.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        expiresAt: true,
+        maxViews: true,
+        viewCount: true,
+        revokedAt: true,
+        createdAt: true,
+      },
+    }),
+  );
 
   const now = new Date();
   return NextResponse.json({

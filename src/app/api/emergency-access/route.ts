@@ -10,6 +10,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { routing } from "@/i18n/routing";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const createLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 5 });
 
@@ -47,13 +48,15 @@ export async function POST(req: NextRequest) {
   }
 
   // Check for duplicate active grant
-  const existing = await prisma.emergencyAccessGrant.findFirst({
-    where: {
-      ownerId: session.user.id,
-      granteeEmail: { equals: granteeEmail, mode: "insensitive" },
-      status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] },
-    },
-  });
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.findFirst({
+      where: {
+        ownerId: session.user.id,
+        granteeEmail: { equals: granteeEmail, mode: "insensitive" },
+        status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] },
+      },
+    }),
+  );
 
   if (existing) {
     return NextResponse.json(
@@ -65,15 +68,17 @@ export async function POST(req: NextRequest) {
   const token = generateShareToken();
   const tokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-  const grant = await prisma.emergencyAccessGrant.create({
-    data: {
-      ownerId: session.user.id,
-      granteeEmail,
-      waitDays,
-      tokenHash: hashToken(token),
-      tokenExpiresAt,
-    },
-  });
+  const grant = await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.create({
+      data: {
+        ownerId: session.user.id,
+        granteeEmail,
+        waitDays,
+        tokenHash: hashToken(token),
+        tokenExpiresAt,
+      },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
@@ -107,23 +112,25 @@ export async function GET() {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const grants = await prisma.emergencyAccessGrant.findMany({
-    where: {
-      OR: [
-        { ownerId: session.user.id },
-        { granteeId: session.user.id },
-        {
-          granteeEmail: { equals: session.user.email, mode: "insensitive" },
-          status: EA_STATUS.PENDING,
-        },
-      ],
-    },
-    include: {
-      owner: { select: { id: true, name: true, email: true, image: true } },
-      grantee: { select: { id: true, name: true, email: true, image: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const grants = await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.findMany({
+      where: {
+        OR: [
+          { ownerId: session.user.id },
+          { granteeId: session.user.id },
+          {
+            granteeEmail: { equals: session.user.email, mode: "insensitive" },
+            status: EA_STATUS.PENDING,
+          },
+        ],
+      },
+      include: {
+        owner: { select: { id: true, name: true, email: true, image: true } },
+        grantee: { select: { id: true, name: true, email: true, image: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+  );
 
   const result = grants.map((g) => ({
     id: g.id,

@@ -16,6 +16,7 @@ import {
   AUDIT_SCOPE,
   SEND_EXPIRY_MAP,
 } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const sendTextLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
@@ -59,21 +60,23 @@ export async function POST(req: NextRequest) {
 
   const expiresAt = new Date(Date.now() + SEND_EXPIRY_MAP[expiresIn]);
 
-  const share = await prisma.passwordShare.create({
-    data: {
-      tokenHash,
-      shareType: "TEXT",
-      entryType: null,
-      sendName: name,
-      encryptedData: encrypted.ciphertext,
-      dataIv: encrypted.iv,
-      dataAuthTag: encrypted.authTag,
-      masterKeyVersion: encrypted.masterKeyVersion,
-      expiresAt,
-      maxViews: maxViews ?? null,
-      createdById: session.user.id,
-    },
-  });
+  const share = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordShare.create({
+      data: {
+        tokenHash,
+        shareType: "TEXT",
+        entryType: null,
+        sendName: name,
+        encryptedData: encrypted.ciphertext,
+        dataIv: encrypted.iv,
+        dataAuthTag: encrypted.authTag,
+        masterKeyVersion: encrypted.masterKeyVersion,
+        expiresAt,
+        maxViews: maxViews ?? null,
+        createdById: session.user.id,
+      },
+    }),
+  );
 
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);

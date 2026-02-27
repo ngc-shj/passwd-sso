@@ -3,12 +3,13 @@ import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-const { mockAuth, mockCreate, mockFindMany, mockFindUnique } = vi.hoisted(
+const { mockAuth, mockCreate, mockFindMany, mockFindUnique, mockWithUserTenantRls } = vi.hoisted(
   () => ({
     mockAuth: vi.fn(),
     mockCreate: vi.fn(),
     mockFindMany: vi.fn(),
     mockFindUnique: vi.fn(),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   })
 );
 
@@ -43,6 +44,9 @@ vi.mock("@/lib/team-auth", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 const { mockCheck } = vi.hoisted(() => ({
