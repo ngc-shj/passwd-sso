@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
+import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -71,14 +72,16 @@ async function handlePOST(request: Request) {
 
   const data = parsed.data;
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: {
-      vaultSetupAt: true,
-      passphraseVerifierHmac: true,
-      passphraseVerifierVersion: true,
-    },
-  });
+  const user = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        vaultSetupAt: true,
+        passphraseVerifierHmac: true,
+        passphraseVerifierVersion: true,
+      },
+    }),
+  );
 
   if (!user?.vaultSetupAt) {
     return NextResponse.json(
@@ -117,16 +120,18 @@ async function handlePOST(request: Request) {
   }
 
   // Update: re-wrapped secret key + new verifier (keyVersion unchanged)
-  await prisma.user.update({
-    where: { id: session.user.id },
-    data: {
-      accountSalt: data.accountSalt,
-      encryptedSecretKey: data.encryptedSecretKey,
-      secretKeyIv: data.secretKeyIv,
-      secretKeyAuthTag: data.secretKeyAuthTag,
-      passphraseVerifierHmac: hmacVerifier(data.newVerifierHash),
-    },
-  });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.user.update({
+      where: { id: session.user.id },
+      data: {
+        accountSalt: data.accountSalt,
+        encryptedSecretKey: data.encryptedSecretKey,
+        secretKeyIv: data.secretKeyIv,
+        secretKeyAuthTag: data.secretKeyAuthTag,
+        passphraseVerifierHmac: hmacVerifier(data.newVerifierHash),
+      },
+    }),
+  );
 
   getLogger().info({ userId: session.user.id }, "vault.changePassphrase.success");
 

@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getSessionToken } from "../helpers";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const revokeLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
@@ -42,10 +43,12 @@ async function handleDELETE(
     );
   }
 
-  const target = await prisma.session.findFirst({
-    where: { id, userId: session.user.id },
-    select: { sessionToken: true },
-  });
+  const target = await withUserTenantRls(session.user.id, async () =>
+    prisma.session.findFirst({
+      where: { id, userId: session.user.id },
+      select: { sessionToken: true },
+    }),
+  );
   if (target?.sessionToken === currentToken) {
     return NextResponse.json(
       { error: API_ERROR.CANNOT_REVOKE_CURRENT_SESSION },
@@ -54,9 +57,11 @@ async function handleDELETE(
   }
 
   // Delete with userId condition to prevent deleting other users' sessions
-  const result = await prisma.session.deleteMany({
-    where: { id, userId: session.user.id },
-  });
+  const result = await withUserTenantRls(session.user.id, async () =>
+    prisma.session.deleteMany({
+      where: { id, userId: session.user.id },
+    }),
+  );
 
   if (result.count === 0) {
     return NextResponse.json(
