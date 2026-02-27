@@ -1,20 +1,22 @@
 #!/usr/bin/env node
-import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, extname } from "node:path";
 
 const TARGETS = ["src/app/api", "src/lib"];
 const CALLS = ["withUserTenantRls(", "withTeamTenantRls("];
 const FORBIDDEN = ["requireTeamPermission(", "requireTeamMember("];
 
 function getFiles() {
-  const out = execSync(
-    `rg --files ${TARGETS.join(" ")} -g '*.ts' -g '*.tsx'`,
-    { encoding: "utf8" },
-  );
-  return out
-    .split("\n")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const files = [];
+  for (const dir of TARGETS) {
+    for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      const ext = extname(entry.name);
+      if (ext !== ".ts" && ext !== ".tsx") continue;
+      files.push(join(entry.parentPath ?? entry.path, entry.name));
+    }
+  }
+  return files;
 }
 
 function lineOf(text, index) {

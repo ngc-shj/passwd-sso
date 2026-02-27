@@ -5,8 +5,8 @@
  * Any new usage of withBypassRls must be explicitly added to ALLOWED_FILES
  * after security review. This prevents accidental RLS bypass in new code.
  */
-import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, extname } from "node:path";
 
 // Files allowed to call withBypassRls (relative to repo root).
 // Test files (*.test.ts) are always allowed (mocks only).
@@ -22,13 +22,14 @@ const ALLOWED_FILES = new Set([
 ]);
 
 function getSourceFiles() {
-  const out = execSync(`rg --files src -g '*.ts' -g '*.tsx'`, {
-    encoding: "utf8",
-  });
-  return out
-    .split("\n")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const files = [];
+  for (const entry of readdirSync("src", { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const ext = extname(entry.name);
+    if (ext !== ".ts" && ext !== ".tsx") continue;
+    files.push(join(entry.parentPath ?? entry.path, entry.name));
+  }
+  return files;
 }
 
 const violations = [];
