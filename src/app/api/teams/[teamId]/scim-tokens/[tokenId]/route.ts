@@ -29,14 +29,20 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const token = await withUserTenantRls(session.user.id, async () =>
-    prisma.scimToken.findUnique({
-      where: { id: tokenId },
-      select: { id: true, teamId: true, revokedAt: true },
-    }),
+  const [team, token] = await withUserTenantRls(session.user.id, async () =>
+    Promise.all([
+      prisma.team.findUnique({
+        where: { id: teamId },
+        select: { tenantId: true },
+      }),
+      prisma.scimToken.findUnique({
+        where: { id: tokenId },
+        select: { id: true, tenantId: true, revokedAt: true },
+      }),
+    ]),
   );
 
-  if (!token || token.teamId !== teamId) {
+  if (!team || !token || token.tenantId !== team.tenantId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 

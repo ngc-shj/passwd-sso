@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockAuth, mockRequireTeamPermission, TeamAuthError, mockLogAudit, mockScimToken, mockWithUserTenantRls } = vi.hoisted(
+const { mockAuth, mockRequireTeamPermission, TeamAuthError, mockLogAudit, mockTeam, mockScimToken, mockWithUserTenantRls } = vi.hoisted(
   () => {
     class _TeamAuthError extends Error {
       status: number;
@@ -16,6 +16,7 @@ const { mockAuth, mockRequireTeamPermission, TeamAuthError, mockLogAudit, mockSc
       mockRequireTeamPermission: vi.fn(),
       TeamAuthError: _TeamAuthError,
       mockLogAudit: vi.fn(),
+      mockTeam: { findUnique: vi.fn() },
       mockScimToken: { findUnique: vi.fn(), update: vi.fn() },
       mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
     };
@@ -32,7 +33,7 @@ vi.mock("@/lib/audit", () => ({
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
 }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { scimToken: mockScimToken },
+  prisma: { team: mockTeam, scimToken: mockScimToken },
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -55,6 +56,7 @@ describe("DELETE /api/teams/[teamId]/scim-tokens/[tokenId]", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockTeam.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 
   it("returns 403 if no SCIM_MANAGE permission", async () => {
@@ -77,10 +79,10 @@ describe("DELETE /api/teams/[teamId]/scim-tokens/[tokenId]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 404 for teamId mismatch (IDOR prevention)", async () => {
+  it("returns 404 for tenant mismatch (IDOR prevention)", async () => {
     mockScimToken.findUnique.mockResolvedValue({
       id: "t1",
-      teamId: "other-team", // different team
+      tenantId: "tenant-2",
       revokedAt: null,
     });
     const res = await DELETE(makeReq(), makeParams("team-1", "t1"));
@@ -90,17 +92,17 @@ describe("DELETE /api/teams/[teamId]/scim-tokens/[tokenId]", () => {
   it("returns 409 when token already revoked", async () => {
     mockScimToken.findUnique.mockResolvedValue({
       id: "t1",
-      teamId: "team-1",
+      tenantId: "tenant-1",
       revokedAt: new Date(),
     });
     const res = await DELETE(makeReq(), makeParams("team-1", "t1"));
     expect(res.status).toBe(409);
   });
 
-  it("revokes token and returns success", async () => {
+  it("revokes token and returns success across teams in same tenant", async () => {
     mockScimToken.findUnique.mockResolvedValue({
       id: "t1",
-      teamId: "team-1",
+      tenantId: "tenant-1",
       revokedAt: null,
     });
     mockScimToken.update.mockResolvedValue({});
