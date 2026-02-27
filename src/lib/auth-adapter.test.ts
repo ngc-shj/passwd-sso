@@ -1,18 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockPrismaSession, mockSessionMetaGetStore } = vi.hoisted(() => ({
+const { mockPrismaSession, mockPrismaUser, mockSessionMetaGetStore, mockWithBypassRls } = vi.hoisted(() => ({
   mockPrismaSession: {
     create: vi.fn(),
     update: vi.fn(),
   },
+  mockPrismaUser: {
+    findUnique: vi.fn(),
+  },
   mockSessionMetaGetStore: vi.fn(),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/lib/prisma", () => ({
-  prisma: { session: mockPrismaSession },
+  prisma: { session: mockPrismaSession, user: mockPrismaUser },
 }));
 vi.mock("@/lib/session-meta", () => ({
   sessionMetaStorage: { getStore: mockSessionMetaGetStore },
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@auth/prisma-adapter", () => ({
   PrismaAdapter: () => ({
@@ -35,6 +42,7 @@ describe("createCustomAdapter", () => {
         ip: "192.168.1.1",
         userAgent: "Mozilla/5.0",
       });
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
       mockPrismaSession.create.mockResolvedValue({
         sessionToken: "tok-1",
         userId: "u-1",
@@ -52,6 +60,7 @@ describe("createCustomAdapter", () => {
         data: {
           sessionToken: "tok-1",
           userId: "u-1",
+          tenantId: "tenant-1",
           expires,
           ipAddress: "192.168.1.1",
           userAgent: "Mozilla/5.0",
@@ -66,6 +75,7 @@ describe("createCustomAdapter", () => {
 
     it("sets null when sessionMetaStorage has no store (undefined)", async () => {
       mockSessionMetaGetStore.mockReturnValue(undefined);
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-2" });
       mockPrismaSession.create.mockResolvedValue({
         sessionToken: "tok-2",
         userId: "u-2",
@@ -93,6 +103,7 @@ describe("createCustomAdapter", () => {
         ip: "10.0.0.1",
         userAgent: longUA,
       });
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-3" });
       mockPrismaSession.create.mockResolvedValue({
         sessionToken: "tok-3",
         userId: "u-3",

@@ -4,7 +4,7 @@ import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
 export async function resolveUserTenantId(userId: string): Promise<string | null> {
   return withBypassRls(prisma, async () => {
     const memberships = await prisma.tenantMember.findMany({
-      where: { userId },
+      where: { userId, deactivatedAt: null },
       select: { tenantId: true },
       orderBy: { createdAt: "asc" },
       take: 2,

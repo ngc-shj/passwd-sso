@@ -18,7 +18,7 @@ export async function ensureTenantMembershipForSignIn(
   if (!tenantClaim) {
     const memberships = await withBypassRls(prisma, async () =>
       prisma.tenantMember.findMany({
-        where: { userId },
+        where: { userId, deactivatedAt: null },
         select: { tenantId: true },
         take: 2,
       }),
@@ -64,7 +64,7 @@ export async function ensureTenantMembershipForSignIn(
     if (!found) return null;
 
     const existingMemberships = await prisma.tenantMember.findMany({
-      where: { userId },
+      where: { userId, deactivatedAt: null },
       select: { tenantId: true },
       take: 2,
     });

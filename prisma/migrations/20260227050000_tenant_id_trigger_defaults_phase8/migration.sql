@@ -139,7 +139,7 @@ BEGIN
         NEW.tenant_id := ctx_tenant_id;
       ELSE
         -- Special case: users can be created before tenant context is set.
-        -- Assign a deterministic dedicated tenant and owner-membership.
+        -- Assign a deterministic dedicated tenant.
         IF TG_TABLE_NAME = 'users' THEN
           NEW.tenant_id := CONCAT('tenant_usr_', SUBSTRING(MD5(NEW.id) FROM 1 FOR 20));
 
@@ -152,17 +152,6 @@ BEGIN
             NOW()
           )
           ON CONFLICT ("id") DO NOTHING;
-
-          INSERT INTO "tenant_members" ("id", "tenant_id", "user_id", "role", "created_at", "updated_at")
-          VALUES (
-            CONCAT('tm_', SUBSTRING(MD5(NEW.tenant_id || ':' || NEW.id) FROM 1 FOR 24)),
-            NEW.tenant_id,
-            NEW.id,
-            'OWNER'::"TenantRole",
-            NOW(),
-            NOW()
-          )
-          ON CONFLICT ("tenant_id", "user_id") DO NOTHING;
         ELSE
           derived_tenant_id := resolve_tenant_id_from_row(TG_TABLE_NAME, to_jsonb(NEW));
           IF derived_tenant_id IS NULL THEN
@@ -204,11 +193,36 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION ensure_tenant_owner_membership_after_user_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO "tenant_members" ("id", "tenant_id", "user_id", "role", "created_at", "updated_at")
+  VALUES (
+    CONCAT('tm_', SUBSTRING(MD5(NEW.tenant_id || ':' || NEW.id) FROM 1 FOR 24)),
+    NEW.tenant_id,
+    NEW.id,
+    'OWNER'::"TenantRole",
+    NOW(),
+    NOW()
+  )
+  ON CONFLICT ("tenant_id", "user_id") DO NOTHING;
+
+  RETURN NEW;
+END;
+$$;
+
 -- Attach to all tenant-scoped tables.
 DROP TRIGGER IF EXISTS trg_enforce_tenant_id_users ON "users";
 CREATE TRIGGER trg_enforce_tenant_id_users
 BEFORE INSERT OR UPDATE ON "users"
 FOR EACH ROW EXECUTE FUNCTION enforce_tenant_id_from_context();
+
+DROP TRIGGER IF EXISTS trg_after_insert_users_tenant_owner_membership ON "users";
+CREATE TRIGGER trg_after_insert_users_tenant_owner_membership
+AFTER INSERT ON "users"
+FOR EACH ROW EXECUTE FUNCTION ensure_tenant_owner_membership_after_user_insert();
 
 DROP TRIGGER IF EXISTS trg_enforce_tenant_id_accounts ON "accounts";
 CREATE TRIGGER trg_enforce_tenant_id_accounts

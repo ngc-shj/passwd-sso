@@ -3,6 +3,7 @@ import type { Adapter, AdapterSession } from "next-auth/adapters";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sessionMetaStorage } from "@/lib/session-meta";
+import { withBypassRls } from "@/lib/tenant-rls";
 
 /**
  * Custom Auth.js adapter that extends PrismaAdapter with:
@@ -19,23 +20,25 @@ export function createCustomAdapter(): Adapter {
       session: { sessionToken: string; userId: string; expires: Date },
     ): Promise<AdapterSession> {
       const meta = sessionMetaStorage.getStore();
-      const user = await prisma.user.findUnique({
-        where: { id: session.userId },
-        select: { tenantId: true },
-      });
-      if (!user) {
-        throw new Error("USER_NOT_FOUND");
-      }
+      const created = await withBypassRls(prisma, async () => {
+        const user = await prisma.user.findUnique({
+          where: { id: session.userId },
+          select: { tenantId: true },
+        });
+        if (!user) {
+          throw new Error("USER_NOT_FOUND");
+        }
 
-      const created = await prisma.session.create({
-        data: {
-          sessionToken: session.sessionToken,
-          userId: session.userId,
-          tenantId: user.tenantId,
-          expires: session.expires,
-          ipAddress: meta?.ip ?? null,
-          userAgent: meta?.userAgent?.slice(0, 512) ?? null,
-        },
+        return prisma.session.create({
+          data: {
+            sessionToken: session.sessionToken,
+            userId: session.userId,
+            tenantId: user.tenantId,
+            expires: session.expires,
+            ipAddress: meta?.ip ?? null,
+            userAgent: meta?.userAgent?.slice(0, 512) ?? null,
+          },
+        });
       });
 
       return {
