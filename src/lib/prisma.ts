@@ -138,9 +138,25 @@ export const prisma = new Proxy(baseClient, {
     const ctx = getTenantRlsContext();
     const active = ctx?.tx;
 
-    if (active && prop in active) {
-      const value = Reflect.get(active, prop, active);
-      return typeof value === "function" ? value.bind(active) : value;
+    if (active) {
+      // Keep nested transaction calls inside the current tenant-scoped tx context.
+      if (prop === "$transaction") {
+        return async (
+          arg:
+            | ((tx: typeof active) => unknown)
+            | Array<Promise<unknown>>,
+        ) => {
+          if (typeof arg === "function") {
+            return arg(active);
+          }
+          return Promise.all(arg);
+        };
+      }
+
+      if (prop in active) {
+        const value = Reflect.get(active, prop, active);
+        return typeof value === "function" ? value.bind(active) : value;
+      }
     }
 
     const value = Reflect.get(target, prop, receiver);

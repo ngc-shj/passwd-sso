@@ -16,7 +16,14 @@ export async function ensureTenantMembershipForSignIn(
 ): Promise<boolean> {
   const tenantClaim = extractTenantClaimValue(account, profile);
   if (!tenantClaim) {
-    return false;
+    const memberships = await withBypassRls(prisma, async () =>
+      prisma.tenantMember.findMany({
+        where: { userId },
+        select: { tenantId: true },
+        take: 2,
+      }),
+    );
+    return memberships.length === 1;
   }
 
   const tenantSlug = slugifyTenant(tenantClaim);

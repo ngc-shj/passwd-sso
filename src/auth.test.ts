@@ -96,13 +96,23 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma));
   });
 
-  it("returns false when tenant claim is missing", async () => {
+  it("returns false when tenant claim is missing and no membership exists", async () => {
     mockExtractTenantClaimValue.mockReturnValue(null);
 
     const ok = await ensureTenantMembershipForSignIn("user-1", null, null);
 
     expect(ok).toBe(false);
-    expect(mockWithBypassRls).not.toHaveBeenCalled();
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows sign-in when tenant claim is missing but membership exists", async () => {
+    mockExtractTenantClaimValue.mockReturnValue(null);
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "tenant-acme" }]);
+
+    const ok = await ensureTenantMembershipForSignIn("user-1", null, null);
+
+    expect(ok).toBe(true);
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
   });
 
   it("rejects cross-tenant sign-in for non-bootstrap membership", async () => {
