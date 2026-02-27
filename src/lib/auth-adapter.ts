@@ -132,13 +132,15 @@ export function createCustomAdapter(): Adapter {
       session: Partial<AdapterSession> & Pick<AdapterSession, "sessionToken">,
     ): Promise<AdapterSession | null | undefined> {
       try {
-        const updated = await prisma.session.update({
-          where: { sessionToken: session.sessionToken },
-          data: {
-            ...(session.expires ? { expires: session.expires } : {}),
-            lastActiveAt: new Date(),
-          },
-        });
+        const updated = await withBypassRls(prisma, async () =>
+          prisma.session.update({
+            where: { sessionToken: session.sessionToken },
+            data: {
+              ...(session.expires ? { expires: session.expires } : {}),
+              lastActiveAt: new Date(),
+            },
+          }),
+        );
 
         return {
           sessionToken: updated.sessionToken,

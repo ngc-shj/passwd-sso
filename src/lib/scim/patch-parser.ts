@@ -161,6 +161,9 @@ function parseMemberValues(value: unknown): string[] {
   if (!Array.isArray(value)) {
     throw new PatchParseError("members value must be an array");
   }
+  if (value.length > 1000) {
+    throw new PatchParseError("members array exceeds maximum of 1000 entries");
+  }
   return value.map((item: unknown) => {
     if (
       typeof item !== "object" ||
@@ -172,7 +175,13 @@ function parseMemberValues(value: unknown): string[] {
         "Each member must be an object with a string 'value' field",
       );
     }
-    return (item as { value: string }).value;
+    const v = (item as { value: string }).value;
+    if (v.length === 0 || v.length > 255) {
+      throw new PatchParseError(
+        "Member value must be between 1 and 255 characters",
+      );
+    }
+    return v;
   });
 }
 

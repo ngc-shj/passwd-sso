@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
 import { SCIM_TOKEN_PREFIX } from "@/lib/scim/token-utils";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { getLogger } from "@/lib/logger";
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -111,7 +112,7 @@ export async function validateScimToken(
         data: { lastUsedAt: new Date(now) },
       });
     }).catch((err) => {
-      console.warn("Failed to update SCIM token lastUsedAt:", err);
+      getLogger().warn({ err }, "scim.token.lastUsedAt.update_failed");
     });
   }
 

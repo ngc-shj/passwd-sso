@@ -126,4 +126,22 @@ describe("POST /api/scim/v2/Groups", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it("returns 400 when displayName format is invalid on POST", async () => {
+    mockTeam.findUnique.mockResolvedValue({ slug: "core" });
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "invalid-no-colon",
+          externalId: "grp-new",
+        },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("displayName");
+  });
 });

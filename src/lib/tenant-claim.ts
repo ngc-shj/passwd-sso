@@ -1,4 +1,5 @@
 import type { Account } from "next-auth";
+import { createHash } from "node:crypto";
 
 const DEFAULT_TENANT_CLAIM_KEYS = [
   "tenant_id",
@@ -19,12 +20,18 @@ export function parseTenantClaimKeys(): string[] {
 }
 
 export function slugifyTenant(input: string): string {
-  return input
+  const slug = input
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 50);
+
+  // Fallback for non-ASCII-only inputs (e.g. Japanese org names)
+  if (!slug) {
+    return createHash("sha256").update(input.trim()).digest("hex").slice(0, 24);
+  }
+  return slug;
 }
 
 export function extractTenantClaimValue(

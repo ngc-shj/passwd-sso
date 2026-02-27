@@ -131,6 +131,68 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       expect.objectContaining({ where: { id: "tm1" } }),
     );
   });
+
+  it("returns 403 when deactivating OWNER via PUT", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "OWNER", deactivatedAt: null });
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "owner@example.com",
+          active: false,
+        },
+      }),
+      makeParams("user-1"),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockTenantMember.update).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when externalId conflicts with another user on PUT", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null });
+
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        tenantMember: { update: mockTenantMember.update },
+        scimExternalMapping: {
+          findFirst: mockScimExternalMapping.findFirst,
+          deleteMany: mockScimExternalMapping.deleteMany,
+          create: mockScimExternalMapping.create,
+        },
+      }),
+    );
+    mockTenantMember.update.mockResolvedValue({});
+    mockScimExternalMapping.findFirst.mockResolvedValue({
+      tenantId: "tenant-1",
+      externalId: "ext-1",
+      internalId: "other-user",
+      resourceType: "User",
+    });
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "u@example.com",
+          active: true,
+          externalId: "ext-1",
+        },
+      }),
+      makeParams("user-1"),
+    );
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.detail).toContain("externalId");
+  });
 });
 
 describe("PATCH /api/scim/v2/Users/[id]", () => {
@@ -153,6 +215,26 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it("returns 403 when deactivating OWNER via PATCH", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "OWNER", deactivatedAt: null });
+
+    const res = await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{ op: "replace", path: "active", value: false }],
+        },
+      }),
+      makeParams("user-1"),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockTenantMember.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("DELETE /api/scim/v2/Users/[id]", () => {
@@ -171,5 +253,15 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
     expect(res.status).toBe(204);
     expect(mockTransaction).toHaveBeenCalledWith(expect.any(Array));
+  });
+
+  it("returns 403 when deleting OWNER via DELETE", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "OWNER", user: { email: "owner@example.com" } });
+
+    const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 });

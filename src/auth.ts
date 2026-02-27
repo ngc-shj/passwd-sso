@@ -83,6 +83,7 @@ export async function ensureTenantMembershipForSignIn(
       // Allow one-time migration from bootstrap tenant to IdP tenant.
       if (isBootstrapTenant) {
         await prisma.$transaction(async (tx) => {
+          // Migrate user and account rows
           await tx.user.update({
             where: { id: userId },
             data: { tenantId: found.id },
@@ -93,6 +94,41 @@ export async function ensureTenantMembershipForSignIn(
             data: { tenantId: found.id },
           });
 
+          // Migrate all tenant-scoped data tables
+          await tx.passwordEntry.updateMany({
+            where: { userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.tag.updateMany({
+            where: { userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.folder.updateMany({
+            where: { userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.session.updateMany({
+            where: { userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.extensionToken.updateMany({
+            where: { userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.passwordEntryHistory.updateMany({
+            where: { tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.vaultKey.updateMany({
+            where: { userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.auditLog.updateMany({
+            where: { userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+
+          // Create membership in new tenant and remove old
           await tx.tenantMember.upsert({
             where: {
               tenantId_userId: {
@@ -112,6 +148,9 @@ export async function ensureTenantMembershipForSignIn(
             where: { userId, tenantId: existingTenantId },
           });
         });
+
+        // Bootstrap migration complete — skip redundant upsert below
+        return found;
       } else {
         return null;
       }

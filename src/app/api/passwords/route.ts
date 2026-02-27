@@ -127,37 +127,32 @@ async function handlePOST(req: NextRequest) {
 
   const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, entryType, requireReprompt, expiresAt } = parsed.data;
 
-  // Verify folder ownership
-  if (folderId) {
-    const folder = await withUserTenantRls(userId, async () =>
-      prisma.folder.findFirst({ where: { id: folderId, userId } }),
-    );
-    if (!folder) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid folderId" }, { status: 400 });
+  const createResult = await withUserTenantRls(userId, async () => {
+    // Verify folder ownership
+    if (folderId) {
+      const folder = await prisma.folder.findFirst({ where: { id: folderId, userId } });
+      if (!folder) {
+        return { error: "INVALID_FOLDER" as const };
+      }
     }
-  }
 
-  // Verify tag ownership
-  if (tagIds?.length) {
-    const ownedCount = await withUserTenantRls(userId, async () =>
-      prisma.tag.count({ where: { id: { in: tagIds }, userId } }),
-    );
-    if (ownedCount !== tagIds.length) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid tagIds" }, { status: 400 });
+    // Verify tag ownership
+    if (tagIds?.length) {
+      const ownedCount = await prisma.tag.count({ where: { id: { in: tagIds }, userId } });
+      if (ownedCount !== tagIds.length) {
+        return { error: "INVALID_TAGS" as const };
+      }
     }
-  }
-  const actor = await withUserTenantRls(userId, async () =>
-    prisma.user.findUnique({
+
+    const actor = await prisma.user.findUnique({
       where: { id: userId },
       select: { tenantId: true },
-    }),
-  );
-  if (!actor) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
-  }
+    });
+    if (!actor) {
+      return { error: "UNAUTHORIZED" as const };
+    }
 
-  const entry = await withUserTenantRls(userId, async () =>
-    prisma.passwordEntry.create({
+    const entry = await prisma.passwordEntry.create({
       data: {
         ...(clientId ? { id: clientId } : {}),
         encryptedBlob: encryptedBlob.ciphertext,
@@ -179,8 +174,20 @@ async function handlePOST(req: NextRequest) {
           : {}),
       },
       include: { tags: { select: { id: true } } },
-    }),
-  );
+    });
+
+    return { entry };
+  });
+
+  if ("error" in createResult) {
+    if (createResult.error === "UNAUTHORIZED") {
+      return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    }
+    const detail = createResult.error === "INVALID_FOLDER" ? "Invalid folderId" : "Invalid tagIds";
+    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: detail }, { status: 400 });
+  }
+
+  const { entry } = createResult;
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,

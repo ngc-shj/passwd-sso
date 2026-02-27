@@ -25,6 +25,30 @@ const {
     account: {
       updateMany: vi.fn(),
     },
+    passwordEntry: {
+      updateMany: vi.fn(),
+    },
+    tag: {
+      updateMany: vi.fn(),
+    },
+    folder: {
+      updateMany: vi.fn(),
+    },
+    session: {
+      updateMany: vi.fn(),
+    },
+    extensionToken: {
+      updateMany: vi.fn(),
+    },
+    passwordEntryHistory: {
+      updateMany: vi.fn(),
+    },
+    auditLog: {
+      updateMany: vi.fn(),
+    },
+    vaultKey: {
+      updateMany: vi.fn(),
+    },
     team: {
       count: vi.fn(),
     },
@@ -92,6 +116,14 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockPrisma.user.update.mockResolvedValue({});
     mockPrisma.account.updateMany.mockResolvedValue({ count: 1 });
     mockPrisma.user.count.mockResolvedValue(0);
+    mockPrisma.passwordEntry.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.tag.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.folder.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.session.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.extensionToken.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.passwordEntryHistory.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.auditLog.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.vaultKey.updateMany.mockResolvedValue({ count: 0 });
     mockPrisma.team.count.mockResolvedValue(0);
     mockPrisma.tenantMember.count.mockResolvedValue(0);
     mockPrisma.tenant.delete.mockResolvedValue({});
@@ -154,9 +186,35 @@ describe("ensureTenantMembershipForSignIn", () => {
       where: { id: "user-1" },
       data: { tenantId: "tenant-acme" },
     });
+    expect(mockPrisma.account.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1" },
+      data: { tenantId: "tenant-acme" },
+    });
+    // Verify all tenant-scoped data tables are migrated
+    expect(mockPrisma.passwordEntry.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
+      data: { tenantId: "tenant-acme" },
+    });
+    for (const model of ["tag", "folder", "session", "extensionToken", "auditLog"] as const) {
+      expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
+        where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
+        data: { tenantId: "tenant-acme" },
+      });
+    }
+    // passwordEntryHistory has no userId — filtered by tenantId only
+    expect(mockPrisma.passwordEntryHistory.updateMany).toHaveBeenCalledWith({
+      where: { tenantId: "cuid_bootstrap_1" },
+      data: { tenantId: "tenant-acme" },
+    });
+    expect(mockPrisma.vaultKey.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
+      data: { tenantId: "tenant-acme" },
+    });
     expect(mockPrisma.tenantMember.deleteMany).toHaveBeenCalledWith({
       where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
     });
+    // Bootstrap migration returns early — no redundant upsert
+    expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledTimes(1);
     expect(mockPrisma.tenant.delete).not.toHaveBeenCalled();
   });
 
