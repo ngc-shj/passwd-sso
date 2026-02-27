@@ -28,6 +28,7 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 - Team vault E2E encryption (ECDH-P256 key distribution)
 - Multi-tenant isolation (FORCE ROW LEVEL SECURITY on 28 tables)
 - Auto-lock (15 min idle / 5 min hidden tab)
+- Concurrent session management (list/revoke, device detection, rate limited)
 - Account lockout (progressive: 5 -> 15 min, 10 -> 1h, 15 -> 24h)
 - Rate limiting (Redis + in-memory fallback)
 - CSP + nonce + security headers (HSTS, X-Frame-Options, etc.)
@@ -69,12 +70,18 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 - ECDH-P256 key exchange + ML-KEM hybrid (PQC-ready)
 - 8-step state machine (PENDING -> ACTIVATED)
 - Waiting periods (7/14/30 days)
+- Email notifications across all 6 EA workflows (invite, accept, decline, request, approve, revoke)
 
 ### Recovery
 
 - Recovery key (256-bit, Base32, HKDF + AES-256-GCM)
 - Vault reset (full deletion, last resort)
 - Passphrase change / key rotation (API prepared)
+
+### Notifications
+
+- Email notification infrastructure (Resend + SMTP dual-provider, bilingual templates)
+- Emergency-access email notifications (6 types across all EA workflows)
 
 ### Other
 
@@ -97,7 +104,7 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 | ~~S-2~~ | ~~Master-password reprompt (sensitive actions)~~ | - | Yes | - | - | - | Yes | - | — | — |
 | ~~S-3~~ | ~~FIDO2 / WebAuthn (login 2FA)~~ | Yes | Yes | Yes | Yes | - | Yes | Yes | — | — |
 | S-4 | Passkey-based vault unlock | - | Yes | - | - | - | - | - | Medium | High |
-| S-5 | Concurrent session management (list/revoke) | Yes | Yes | Yes | Yes | - | Yes | Yes | Medium | Medium |
+| ~~S-5~~ | ~~Concurrent session management (list/revoke)~~ | Yes | Yes | Yes | Yes | - | Yes | Yes | — | — |
 | S-6 | New-device login notification | Yes | Yes | Yes | Yes | - | Yes | Yes | Medium | Medium |
 | S-7 | Phishing detection alert | - | - | - | Yes | - | - | - | Low | High |
 
@@ -117,6 +124,10 @@ Added `PasswordEntry.requireReprompt`. Requires master-password re-entry for vie
 #### ~~S-3 FIDO2 / WebAuthn~~ — Out of scope
 
 By OSS-first design, authentication is not embedded in the app. MFA/2FA is expected at external IdP level (Google Advanced Protection / SAML IdP MFA features).
+
+#### ~~S-5 Concurrent session management~~ — Implemented (2026-02-23)
+
+Active session list (`GET /api/sessions`) and individual/bulk revocation (`DELETE /api/sessions/[id]`, `DELETE /api/sessions`). Device/browser/OS detection via Bowser. Rate limited (10/min single, 5/min bulk). Audit logged (`SESSION_REVOKE`, `SESSION_REVOKE_ALL`). Tenant RLS applied. UI in `sessions-card.tsx`.
 
 ---
 
@@ -247,16 +258,18 @@ Audit events: `SEND_CREATE`, `SEND_REVOKE`. Sidebar integrated under "Share".
 
 | # | Feature | 1P | BW | LP | DL | KP | PP | NP | Impact | Implementation Effort |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| N-1 | Email notifications (breach etc.) | Yes | Yes | Yes | Yes | - | Yes | Yes | High | Medium |
+| ~~N-1~~ | ~~Email notifications (breach etc.)~~ | Yes | Yes | Yes | Yes | - | Yes | Yes | — | — |
 | N-2 | In-app notification center | Yes | Yes | Yes | Yes | - | Yes | Yes | Medium | Medium |
 | ~~N-3~~ | ~~Password-change reminders~~ | Yes | - | Yes | - | Yes | - | - | — | — |
-| N-4 | Emergency-access request email | - | Yes | Yes | - | - | - | Yes | Medium | Low |
+| ~~N-4~~ | ~~Emergency-access request email~~ | - | Yes | Yes | - | - | - | Yes | — | — |
 
-#### N-1 Email notifications
+#### ~~N-1 Email notification infrastructure~~ — Implemented (2026-02-23)
 
-- Current: breach detection exists only in Watchtower UI; no email notifications
-- Proposal: introduce transactional email foundation (SendGrid / Amazon SES / Resend)
-  - notification types: breach detection, emergency-access request, new-device login, password expiry
+Dual-provider email foundation: Resend and SMTP (nodemailer). Provider selection via `EMAIL_PROVIDER` env var. Bilingual templates (en/ja). Async non-blocking sends with error logging. HTML + plain-text variants. HTML escaping for injection prevention.
+
+#### ~~N-4 Emergency-access email notifications~~ — Implemented (2026-02-23)
+
+6 email notification types across all emergency access workflows: invite, grant accepted, grant declined, access requested (with wait period), access approved, access revoked. Integrated into all EA API routes. Uses N-1 email infrastructure.
 
 ---
 
@@ -333,9 +346,7 @@ Implemented SCIM 2.0 provisioning scoped to tenant level. Endpoints: `/api/scim/
 | ~~V-3~~ | Duplicate detection | ✅ 2026-02-20 |
 | ~~N-3~~ | Password-change reminders | ✅ 2026-02-20 |
 
-> **N-4 (Emergency-access notifications)** moved to P1 because it depends on N-1 email foundation.
-
-### P1: Planned implementation (high impact x medium/high effort) — Partially complete
+### P1: Planned implementation (high impact x medium/high effort) — ✅ Completed
 
 | ID | Feature | Status |
 | --- | --- | --- |
@@ -344,15 +355,15 @@ Implemented SCIM 2.0 provisioning scoped to tenant level. Endpoints: `/api/scim/
 | ~~X-1~~ | TOTP autofill (extension) | ✅ 2026-01 |
 | ~~C-1~~ | Send (temporary sharing) | ✅ 2026-02-19 |
 | ~~X-5~~ | ~~New-login detect & save~~ | ✅ 2026-02-28 |
-| N-1 | Email notification foundation | Not started |
-| N-4 | Emergency-access notification (email) | Not started (depends on N-1) |
+| ~~N-1~~ | ~~Email notification foundation~~ | ✅ 2026-02-23 |
+| ~~N-4~~ | ~~Emergency-access notification (email)~~ | ✅ 2026-02-23 |
 | ~~B-1~~ | ~~SCIM provisioning~~ | ✅ 2026-02-27 |
 
 ### P2: Start early (medium impact x low/medium effort)
 
 | ID | Feature | Rationale |
 | --- | --- | --- |
-| S-5 | Session management | DB sessions already exist; mostly UI/API additions |
+| ~~S-5~~ | ~~Session management~~ | ✅ 2026-02-23 |
 | S-6 | Login notifications | Built on top of N-1 email foundation |
 | E-2 | Bank account type | Enum + UI additions |
 | E-3 | Software license type | Enum + UI additions |
@@ -415,28 +426,28 @@ Completed: 2026-02-28
 9. ~~**X-3** Context menu~~ ✅
 10. ~~**X-4** Extension keyboard shortcuts~~ ✅
 
-### Phase 3: Notifications + sharing (late P1) — Partially complete
+### Phase 3: Notifications + sharing (late P1) — ✅ Completed
 
 ```
 Goal: Establish notification foundation and strengthen collaboration
-Remaining: N-1, N-4
+Completed: 2026-02-23
 ```
 
-11. **N-1** Email notification foundation
-12. **N-4** Emergency-access request notifications
+11. ~~**N-1** Email notification foundation~~ ✅
+12. ~~**N-4** Emergency-access request notifications~~ ✅
 13. ~~**C-1** Send (temporary sharing)~~ ✅
 
 ### Phase 4: Enterprise readiness (P1 + P2) — Partially complete
 
 ```
 Goal: Add controls needed for enterprise use
-Completed: B-1 SCIM
+Completed: B-1 SCIM, S-5 Session management
 ```
 
 1. ~~**B-1** SCIM provisioning~~ ✅
 2. **B-4** Security policies
 3. **B-3** SIEM integration
-4. **S-5** Session management
+4. ~~**S-5** Session management~~ ✅
 
 ### Phase 5: Platform expansion (P2 + P3)
 
@@ -477,12 +488,13 @@ Feature-category coverage:
 - Send (temporary text/file sharing) parity with Bitwarden
 - Strong vault management: folder hierarchy + entry history + duplicate detection
 - Full extension feature set: autofill, TOTP, context menu, keyboard shortcuts, login detection & save
+- Email notification infrastructure (Resend + SMTP) with full emergency-access notification coverage
+- Concurrent session management (list/revoke with device detection)
 
 **Largest gaps:**
 
 - No mobile / desktop apps
-- No general email notification foundation (breach/emergency/device alerts)
-- Enterprise controls (SIEM, policy engine) — SCIM now implemented
+- Enterprise controls (SIEM, policy engine) — SCIM and session management implemented
 - Extension gaps: card/address autofill (X-2), TOTP QR capture (X-6)
 
 **Improvements since previous report (2026-02-20):**
@@ -492,6 +504,7 @@ Feature-category coverage:
 - Org-to-team rename completed (DB, API, UI, i18n)
 - CI guard scripts for RLS bypass allowlist and nested auth detection
 - Extension Group A completed: context menu, keyboard shortcuts, new-login detect & save
+- Group B completed: session management, email notification infrastructure, emergency-access notifications
 
 ---
 
@@ -507,13 +520,13 @@ Combine remaining Phase 2 scope with low-friction P2 items.
 | ~~X-3~~ | ~~Context menu (right-click)~~ | Low | ✅ Chrome `contextMenus` API |
 | ~~X-4~~ | ~~Extension keyboard shortcuts~~ | Low | ✅ Chrome `commands` API |
 
-### Group B: Session Management + Notification Foundation
+### Group B: Session Management + Notification Foundation — ✅ Completed (2026-02-23)
 
 | ID | Feature | Effort | Notes |
 | --- | --- | --- | --- |
-| S-5 | Concurrent session management | Medium | DB sessions already exist; mostly UI/API work |
-| N-1 | Email notification foundation | Medium | Resend / SES; prerequisite for N-4 and S-6 |
-| N-4 | Emergency-access notifications | Low | Built on N-1 |
+| ~~S-5~~ | ~~Concurrent session management~~ | Medium | ✅ Session list/revoke API + UI, device detection |
+| ~~N-1~~ | ~~Email notification foundation~~ | Medium | ✅ Resend + SMTP dual-provider, bilingual templates |
+| ~~N-4~~ | ~~Emergency-access notifications~~ | Low | ✅ 6 email types across all EA workflows |
 
 ### Group C: Entry Type Expansion
 
@@ -524,7 +537,7 @@ Combine remaining Phase 2 scope with low-friction P2 items.
 | E-4 | Custom field: BOOLEAN | Low | Enum addition |
 | E-5 | Custom field: DATE, MONTH_YEAR | Low | Enum addition |
 
-**Recommended order:** ~~A~~ -> B -> C (Group A completed; proceed with B next)
+**Recommended order:** ~~A~~ -> ~~B~~ -> C (Groups A and B completed; proceed with C next)
 
 ---
 
