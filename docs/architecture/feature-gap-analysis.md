@@ -1,6 +1,6 @@
 # Feature Gap Analysis Report
 
-Last updated: 2026-02-27
+Last updated: 2026-02-28
 
 ## Purpose
 
@@ -179,9 +179,9 @@ Added `PasswordEntry.expiresAt`, date-picker UI, Watchtower expired/expiring det
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ~~X-1~~ | ~~TOTP autofill~~ | Yes | Yes | - | - | Yes | Yes | Yes | — | — |
 | X-2 | Credit-card / address autofill | Yes | Yes | Yes | Yes | - | Yes | Yes | Medium | Medium |
-| X-3 | Context menu (right click) | Yes | Yes | Yes | - | - | - | - | Medium | Low |
-| X-4 | Extension keyboard shortcuts | Yes | Yes | - | - | - | - | - | Medium | Low |
-| X-5 | New-login detect & save prompt | Yes | Yes | Yes | Yes | Yes | Yes | Yes | High | Medium |
+| ~~X-3~~ | ~~Context menu (right click)~~ | Yes | Yes | Yes | - | - | - | - | — | — |
+| ~~X-4~~ | ~~Extension keyboard shortcuts~~ | Yes | Yes | - | - | - | - | - | — | — |
+| ~~X-5~~ | ~~New-login detect & save prompt~~ | Yes | Yes | Yes | Yes | Yes | Yes | Yes | — | — |
 | X-6 | TOTP QR capture | - | Yes | - | - | - | - | - | Low | Medium |
 
 #### ~~X-1 TOTP autofill~~ — Implemented (2026-01)
@@ -189,10 +189,17 @@ Added `PasswordEntry.expiresAt`, date-picker UI, Watchtower expired/expiring det
 Implemented TOTP generation (SHA1/SHA256/SHA512) and auto-fill into 2FA fields in extension.
 Runs automatically after login autofill; password autofill is not blocked when TOTP generation fails.
 
-#### X-5 New-login detection
+#### ~~X-3 Context menu~~ — Implemented (2026-02-28)
 
-- Current: form detection exists, but post-submit save prompt is incomplete
-- Proposal: intercept `submit` / `fetch` / `XMLHttpRequest` and show "Save this login?" after successful responses
+Chrome `contextMenus` API with URL-matched entry listing (max 5), debounced updates on tab switch, autofill on click with UUID validation on entryId. Includes "Open passwd-sso" shortcut.
+
+#### ~~X-4 Extension keyboard shortcuts~~ — Implemented (2026-02-28)
+
+5 Chrome `commands`: open popup (Cmd+Shift+A, Chrome-native), copy password (Cmd+Shift+P), copy username (Cmd+Shift+U), trigger autofill (Cmd+Shift+F), lock vault. Clipboard auto-clear after 30 seconds.
+
+#### ~~X-5 New-login detection~~ — Implemented (2026-02-28)
+
+Form submit capture (capture phase) + click-based detection for SPAs. Registration form skipping heuristics (multiple password fields, registration-specific URL paths, extra form fields). Save/update banner in Shadow DOM (15s auto-dismiss). Pending save push/pull mechanism for post-navigation persistence. Security: sender.tab.url validation (untrusted message.url), cross-origin push guard, AAD-bound encryption, pending save TTL 30s / max 5.
 
 ---
 
@@ -336,7 +343,7 @@ Implemented SCIM 2.0 provisioning scoped to tenant level. Endpoints: `/api/scim/
 | ~~V-2~~ | Entry history | ✅ 2026-02-18 |
 | ~~X-1~~ | TOTP autofill (extension) | ✅ 2026-01 |
 | ~~C-1~~ | Send (temporary sharing) | ✅ 2026-02-19 |
-| X-5 | New-login detect & save | Not started |
+| ~~X-5~~ | ~~New-login detect & save~~ | ✅ 2026-02-28 |
 | N-1 | Email notification foundation | Not started |
 | N-4 | Emergency-access notification (email) | Not started (depends on N-1) |
 | ~~B-1~~ | ~~SCIM provisioning~~ | ✅ 2026-02-27 |
@@ -349,8 +356,8 @@ Implemented SCIM 2.0 provisioning scoped to tenant level. Endpoints: `/api/scim/
 | S-6 | Login notifications | Built on top of N-1 email foundation |
 | E-2 | Bank account type | Enum + UI additions |
 | E-3 | Software license type | Enum + UI additions |
-| X-3 | Context menu | Chrome `contextMenus` API |
-| X-4 | Extension keyboard shortcuts | Chrome `commands` API |
+| ~~X-3~~ | ~~Context menu~~ | ✅ 2026-02-28 |
+| ~~X-4~~ | ~~Extension keyboard shortcuts~~ | ✅ 2026-02-28 |
 | C-2 | Granular sharing permissions | Extend existing RBAC |
 | B-3 | SIEM integration | Expose audit logs via REST |
 | B-4 | Security policies | Add team policy tables/settings |
@@ -394,17 +401,19 @@ Completed: 2026-02-20
 3. ~~**V-3** Duplicate detection (Watchtower extension)~~ ✅
 4. ~~**V-4** Entry expiration + **N-3** change reminders~~ ✅
 
-### Phase 2: UX + extension improvements (early P1) — Nearly complete
+### Phase 2: UX + extension improvements (early P1) — ✅ Completed
 
 ```
 Goal: Significantly improve day-to-day usability
-Remaining: X-5 only
+Completed: 2026-02-28
 ```
 
 5. ~~**V-1** Folders / hierarchy~~ ✅
 6. ~~**V-2** Entry history~~ ✅
 7. ~~**X-1** TOTP autofill (extension)~~ ✅
-8. **X-5** New-login detection
+8. ~~**X-5** New-login detection~~ ✅
+9. ~~**X-3** Context menu~~ ✅
+10. ~~**X-4** Extension keyboard shortcuts~~ ✅
 
 ### Phase 3: Notifications + sharing (late P1) — Partially complete
 
@@ -413,9 +422,9 @@ Goal: Establish notification foundation and strengthen collaboration
 Remaining: N-1, N-4
 ```
 
-9. **N-1** Email notification foundation
-10. **N-4** Emergency-access request notifications
-11. ~~**C-1** Send (temporary sharing)~~ ✅
+11. **N-1** Email notification foundation
+12. **N-4** Emergency-access request notifications
+13. ~~**C-1** Send (temporary sharing)~~ ✅
 
 ### Phase 4: Enterprise readiness (P1 + P2) — Partially complete
 
@@ -467,13 +476,14 @@ Feature-category coverage:
 - Strong audit-log surface (36 action types)
 - Send (temporary text/file sharing) parity with Bitwarden
 - Strong vault management: folder hierarchy + entry history + duplicate detection
+- Full extension feature set: autofill, TOTP, context menu, keyboard shortcuts, login detection & save
 
 **Largest gaps:**
 
 - No mobile / desktop apps
 - No general email notification foundation (breach/emergency/device alerts)
 - Enterprise controls (SIEM, policy engine) — SCIM now implemented
-- Extension gaps: new-login detect/save prompt, card/address autofill
+- Extension gaps: card/address autofill (X-2), TOTP QR capture (X-6)
 
 **Improvements since previous report (2026-02-20):**
 
@@ -481,6 +491,7 @@ Feature-category coverage:
 - Multi-tenant model with FORCE ROW LEVEL SECURITY on all 28 tenant-scoped tables
 - Org-to-team rename completed (DB, API, UI, i18n)
 - CI guard scripts for RLS bypass allowlist and nested auth detection
+- Extension Group A completed: context menu, keyboard shortcuts, new-login detect & save
 
 ---
 
@@ -488,13 +499,13 @@ Feature-category coverage:
 
 Combine remaining Phase 2 scope with low-friction P2 items.
 
-### Group A: Browser Extension Enhancements
+### Group A: Browser Extension Enhancements — ✅ Completed (2026-02-28)
 
 | ID | Feature | Effort | Notes |
 | --- | --- | --- | --- |
-| X-5 | New-login detect & save | Medium | Needed to complete Phase 2; submit/fetch interception |
-| X-3 | Context menu (right-click) | Low | Chrome `contextMenus` API |
-| X-4 | Extension keyboard shortcuts | Low | Chrome `commands` API |
+| ~~X-5~~ | ~~New-login detect & save~~ | Medium | ✅ Form submit capture + click-based detection |
+| ~~X-3~~ | ~~Context menu (right-click)~~ | Low | ✅ Chrome `contextMenus` API |
+| ~~X-4~~ | ~~Extension keyboard shortcuts~~ | Low | ✅ Chrome `commands` API |
 
 ### Group B: Session Management + Notification Foundation
 
@@ -513,7 +524,7 @@ Combine remaining Phase 2 scope with low-friction P2 items.
 | E-4 | Custom field: BOOLEAN | Low | Enum addition |
 | E-5 | Custom field: DATE, MONTH_YEAR | Low | Enum addition |
 
-**Recommended order:** A -> B -> C (prioritize daily UX improvements in extension first)
+**Recommended order:** ~~A~~ -> B -> C (Group A completed; proceed with B next)
 
 ---
 
