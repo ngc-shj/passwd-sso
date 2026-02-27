@@ -17,9 +17,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await withUserTenantRls(session.user.id, async () =>
-      requireTeamMember(session.user.id, teamId),
-    );
+    await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

@@ -21,9 +21,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await withUserTenantRls(session.user.id, async () =>
-      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE),
-    );
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -67,9 +65,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await withUserTenantRls(session.user.id, async () =>
-      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE),
-    );
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

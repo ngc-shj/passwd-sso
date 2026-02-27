@@ -11,6 +11,7 @@
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 import type { TeamRole } from "@prisma/client";
 
 // ─── Permission Definitions ─────────────────────────────────────
@@ -84,10 +85,16 @@ export function isRoleAbove(actorRole: TeamRole, targetRole: TeamRole): boolean 
  * cannot include non-unique-index fields (deactivatedAt) in the where clause.
  * The @@unique([teamId, userId]) constraint ensures at most one row per team+user.
  */
-export async function getTeamMembership(userId: string, teamId: string) {
+async function getTeamMembershipInRlsContext(userId: string, teamId: string) {
   return prisma.teamMember.findFirst({
     where: { teamId: teamId, userId, deactivatedAt: null },
   });
+}
+
+export async function getTeamMembership(userId: string, teamId: string) {
+  return withUserTenantRls(userId, async () =>
+    getTeamMembershipInRlsContext(userId, teamId),
+  );
 }
 
 /**

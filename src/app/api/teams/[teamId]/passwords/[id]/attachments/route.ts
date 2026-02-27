@@ -34,9 +34,7 @@ export async function GET(
   const { teamId, id } = await params;
 
   try {
-    await withUserTenantRls(session.user.id, async () =>
-      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ),
-    );
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -85,9 +83,7 @@ export async function POST(
   const { teamId, id } = await params;
 
   try {
-    await withUserTenantRls(session.user.id, async () =>
-      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE),
-    );
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

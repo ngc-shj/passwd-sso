@@ -26,9 +26,7 @@ export async function GET(req: NextRequest) {
   if (teamId) {
     let membershipRole: string | undefined;
     try {
-      const membership = await withUserTenantRls(session.user.id, async () =>
-        requireTeamMember(session.user.id, teamId),
-      );
+      const membership = await requireTeamMember(session.user.id, teamId);
       membershipRole = membership.role;
     } catch (e) {
       if (e instanceof TeamAuthError) {

@@ -52,9 +52,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await withUserTenantRls(session.user.id, async () =>
-      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE),
-    );
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

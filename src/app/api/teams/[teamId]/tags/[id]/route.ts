@@ -19,9 +19,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await withUserTenantRls(session.user.id, async () =>
-      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE),
-    );
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -78,9 +76,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await withUserTenantRls(session.user.id, async () =>
-      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE),
-    );
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

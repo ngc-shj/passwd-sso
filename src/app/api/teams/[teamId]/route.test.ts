@@ -169,9 +169,7 @@ describe("PUT /api/teams/[teamId]", () => {
   });
 
   it("returns 404 when tenant cannot be resolved during update", async () => {
-    mockWithTeamTenantRls
-      .mockImplementationOnce(async (_teamId: string, fn: () => unknown) => fn())
-      .mockRejectedValueOnce(new Error("TENANT_NOT_RESOLVED"));
+    mockWithTeamTenantRls.mockRejectedValueOnce(new Error("TENANT_NOT_RESOLVED"));
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}`, { body: { name: "Updated Team" } }),
@@ -284,9 +282,7 @@ describe("DELETE /api/teams/[teamId]", () => {
   });
 
   it("returns 404 when tenant cannot be resolved during delete", async () => {
-    mockWithTeamTenantRls
-      .mockImplementationOnce(async (_teamId: string, fn: () => unknown) => fn())
-      .mockRejectedValueOnce(new Error("TENANT_NOT_RESOLVED"));
+    mockWithTeamTenantRls.mockRejectedValueOnce(new Error("TENANT_NOT_RESOLVED"));
 
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}`),

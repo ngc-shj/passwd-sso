@@ -25,13 +25,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   let actorMembership;
   try {
-    actorMembership = await withUserTenantRls(session.user.id, async () =>
-      requireTeamPermission(
+    actorMembership = await requireTeamPermission(
         session.user.id,
         teamId,
         TEAM_PERMISSION.MEMBER_CHANGE_ROLE
-      ),
-    );
+      );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -171,13 +169,11 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   let actorMembership;
   try {
-    actorMembership = await withUserTenantRls(session.user.id, async () =>
-      requireTeamPermission(
+    actorMembership = await requireTeamPermission(
         session.user.id,
         teamId,
         TEAM_PERMISSION.MEMBER_REMOVE
-      ),
-    );
+      );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

@@ -21,13 +21,11 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // Only OWNER/ADMIN can distribute keys (mapped to MEMBER_INVITE permission)
   try {
-    await withUserTenantRls(session.user.id, async () =>
-      requireTeamPermission(
+    await requireTeamPermission(
         session.user.id,
         teamId,
         TEAM_PERMISSION.MEMBER_INVITE
-      ),
-    );
+      );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

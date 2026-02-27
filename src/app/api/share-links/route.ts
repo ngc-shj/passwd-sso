@@ -106,13 +106,11 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      await withUserTenantRls(session.user.id, async () =>
-        requireTeamPermission(
+      await requireTeamPermission(
           session.user.id,
           teamEntry.teamId,
           TEAM_PERMISSION.PASSWORD_READ
-        ),
-      );
+        );
     } catch (e) {
       if (e instanceof TeamAuthError) {
         return NextResponse.json({ error: e.message }, { status: e.status });

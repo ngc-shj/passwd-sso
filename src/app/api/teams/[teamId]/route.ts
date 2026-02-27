@@ -34,9 +34,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    const { membership, team } = await withTeamTenantRls(teamId, async () => {
-      const membership = await requireTeamMember(session.user.id, teamId);
-      const team = await prisma.team.findUnique({
+    const membership = await requireTeamMember(session.user.id, teamId);
+    const team = await withTeamTenantRls(teamId, async () =>
+      prisma.team.findUnique({
         where: { id: teamId },
         select: {
           id: true,
@@ -47,9 +47,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
           updatedAt: true,
           _count: { select: { members: true, passwords: true } },
         },
-      });
-      return { membership, team };
-    });
+      }),
+    );
 
     if (!team) {
       return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -78,9 +77,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await withTeamTenantRls(teamId, async () =>
-      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE),
-    );
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
   } catch (e) {
     const err = handleTeamTenantError(e);
     if (err) return err;
@@ -141,9 +138,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await withTeamTenantRls(teamId, async () =>
-      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_DELETE),
-    );
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_DELETE);
   } catch (e) {
     const err = handleTeamTenantError(e);
     if (err) return err;

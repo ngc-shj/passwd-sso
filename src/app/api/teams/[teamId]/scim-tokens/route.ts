@@ -48,9 +48,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await withTeamTenantRls(teamId, async () =>
-      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.SCIM_MANAGE),
-    );
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.SCIM_MANAGE);
   } catch (e) {
     const err = handleTeamTenantError(e);
     if (err) return err;
@@ -101,9 +99,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await withTeamTenantRls(teamId, async () =>
-      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.SCIM_MANAGE),
-    );
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.SCIM_MANAGE);
   } catch (e) {
     const err = handleTeamTenantError(e);
     if (err) return err;

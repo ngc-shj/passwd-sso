@@ -23,6 +23,9 @@ vi.mock("@/lib/prisma", () => {
   const proxy = new Proxy({}, handler);
   return { prisma: proxy };
 });
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+}));
 
 import { prisma } from "@/lib/prisma";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
