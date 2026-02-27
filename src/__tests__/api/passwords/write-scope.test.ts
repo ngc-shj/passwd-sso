@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams, parseResponse } from "../../helpers/request-builder";
 
-const { mockAuth, mockAuthOrToken, mockCreate, mockFindUnique, mockUpdate, mockTransaction, mockHistoryCreate, mockHistoryFindMany, mockHistoryDeleteMany } = vi.hoisted(() => ({
+const { mockAuth, mockAuthOrToken, mockCreate, mockFindUnique, mockUpdate, mockTransaction, mockHistoryCreate, mockHistoryFindMany, mockHistoryDeleteMany, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockAuthOrToken: vi.fn(),
   mockCreate: vi.fn(),
@@ -11,6 +11,7 @@ const { mockAuth, mockAuthOrToken, mockCreate, mockFindUnique, mockUpdate, mockT
   mockHistoryCreate: vi.fn(),
   mockHistoryFindMany: vi.fn(),
   mockHistoryDeleteMany: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -35,6 +36,9 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(),
   extractRequestMeta: vi.fn().mockReturnValue({}),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { POST } from "@/app/api/passwords/route";

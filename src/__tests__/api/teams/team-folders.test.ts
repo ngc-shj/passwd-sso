@@ -10,6 +10,7 @@ const {
   mockTeamFolderFindUnique,
   mockTeamFolderFindFirst,
   mockTeamFolderCreate,
+  mockWithUserTenantRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamMember: vi.fn(),
@@ -18,6 +19,7 @@ const {
   mockTeamFolderFindUnique: vi.fn(),
   mockTeamFolderFindFirst: vi.fn(),
   mockTeamFolderCreate: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -52,6 +54,9 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/folder-utils", () => ({
   validateParentFolder: vi.fn(),
   validateFolderDepth: vi.fn(),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { GET, POST } from "@/app/api/teams/[teamId]/folders/route";

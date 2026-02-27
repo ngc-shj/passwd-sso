@@ -10,6 +10,7 @@ const {
   mockInvitationCreate,
   mockUserFindUnique,
   mockTeamMemberFindUnique,
+  mockWithUserTenantRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
@@ -18,6 +19,7 @@ const {
   mockInvitationCreate: vi.fn(),
   mockUserFindUnique: vi.fn(),
   mockTeamMemberFindUnique: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -48,6 +50,9 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("node:crypto", () => ({
   randomBytes: () => Buffer.from("a".repeat(32)),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { GET, POST } from "@/app/api/teams/[teamId]/invitations/route";

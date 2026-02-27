@@ -3,11 +3,12 @@ import { DEFAULT_SESSION } from "../helpers/mock-auth";
 import { createRequest, parseResponse } from "../helpers/request-builder";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
-const { mockAuth, mockFindMany, mockEntryFindMany, mockUserFindMany } = vi.hoisted(() => ({
+const { mockAuth, mockFindMany, mockEntryFindMany, mockUserFindMany, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
   mockEntryFindMany: vi.fn().mockResolvedValue([]),
   mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -18,6 +19,9 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
+}));
 
 import { GET } from "@/app/api/audit-logs/route";
 

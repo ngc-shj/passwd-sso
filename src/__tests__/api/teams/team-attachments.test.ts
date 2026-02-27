@@ -12,6 +12,7 @@ const {
   mockTeamFindUnique,
   mockPutObject,
   mockDeleteObject,
+  mockWithUserTenantRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
@@ -22,6 +23,7 @@ const {
   mockTeamFindUnique: vi.fn(),
   mockPutObject: vi.fn(),
   mockDeleteObject: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -55,6 +57,9 @@ vi.mock("@/lib/blob-store", () => ({
     putObject: mockPutObject,
     deleteObject: mockDeleteObject,
   }),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { NextRequest } from "next/server";

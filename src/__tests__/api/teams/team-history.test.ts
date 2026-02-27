@@ -2,12 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, createParams, parseResponse } from "../../helpers/request-builder";
 
-const { mockAuth, mockRequireTeamMember, mockEntryFindUnique, mockHistoryFindMany } = vi.hoisted(
+const { mockAuth, mockRequireTeamMember, mockEntryFindUnique, mockHistoryFindMany, mockWithUserTenantRls } = vi.hoisted(
   () => ({
     mockAuth: vi.fn(),
     mockRequireTeamMember: vi.fn(),
     mockEntryFindUnique: vi.fn(),
     mockHistoryFindMany: vi.fn(),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   })
 );
 
@@ -30,6 +31,9 @@ vi.mock("@/lib/prisma", () => ({
     teamPasswordEntry: { findUnique: mockEntryFindUnique },
     teamPasswordEntryHistory: { findMany: mockHistoryFindMany },
   },
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { GET } from "@/app/api/teams/[teamId]/passwords/[id]/history/route";
