@@ -25,6 +25,17 @@ function toDisplayName(teamSlug: string | null | undefined, role: TeamRole): str
   return teamSlug ? `${teamSlug}:${role}` : role;
 }
 
+function parseRoleFromDisplayName(displayName: string, expectedTeamSlug: string | null | undefined): TeamRole | null {
+  if (!expectedTeamSlug) return null;
+  const separator = displayName.indexOf(":");
+  if (separator < 1) return null;
+  const slugPart = displayName.slice(0, separator).trim();
+  const rolePart = displayName.slice(separator + 1).trim();
+  if (slugPart !== expectedTeamSlug) return null;
+  const matchedRole = SCIM_GROUP_ROLES.find((r) => r.toLowerCase() === rolePart.toLowerCase());
+  return matchedRole ?? null;
+}
+
 function buildGroupResource(
   externalGroupId: string,
   displayName: string,
@@ -146,11 +157,13 @@ export async function POST(req: NextRequest) {
   }
 
   return withTenantRls(prisma, tenantId, async () => {
-    const matchedRole = SCIM_GROUP_ROLES.find(
-      (r) => r.toLowerCase() === displayName.toLowerCase(),
-    );
+    const team = await prisma.team.findUnique({
+      where: { id: scopedTeamId },
+      select: { slug: true },
+    });
+    const matchedRole = parseRoleFromDisplayName(displayName, team?.slug);
     if (!matchedRole) {
-      return scimError(400, `Unknown group displayName. Valid names: ${SCIM_GROUP_ROLES.join(", ")}`);
+      return scimError(400, "displayName must be in the format '<teamSlug>:<ROLE>' for the scoped team");
     }
 
     const existing = await prisma.scimGroupMapping.findUnique({
@@ -181,11 +194,6 @@ export async function POST(req: NextRequest) {
         },
       });
     }
-
-    const team = await prisma.team.findUnique({
-      where: { id: scopedTeamId },
-      select: { slug: true },
-    });
 
     const members = await loadGroupMembers(scopedTeamId, matchedRole);
 

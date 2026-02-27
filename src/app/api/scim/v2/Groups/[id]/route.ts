@@ -140,6 +140,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
       return { error: scimError(404, "Group not found") };
     }
 
+    const expectedDisplayName = toDisplayName(mapping.team.slug, mapping.role);
+    if (parsed.data.displayName.toLowerCase() !== expectedDisplayName.toLowerCase()) {
+      return { error: scimError(400, `displayName must be '${expectedDisplayName}'`) };
+    }
+
     const requestedUserIds = new Set(parsed.data.members.map((m) => m.value));
 
     const currentMembers = await prisma.teamMember.findMany({

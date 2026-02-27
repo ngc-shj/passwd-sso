@@ -138,7 +138,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
         method: "PUT",
         body: {
           schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
-          displayName: "ADMIN",
+          displayName: "core:ADMIN",
           members: [{ value: "user-2" }],
         },
       }),

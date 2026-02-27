@@ -106,7 +106,7 @@ describe("POST /api/scim/v2/Groups", () => {
       makeReq({
         body: {
           schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
-          displayName: "ADMIN",
+          displayName: "core:ADMIN",
           externalId: "grp-1",
         },
       }),
@@ -120,7 +120,7 @@ describe("POST /api/scim/v2/Groups", () => {
       makeReq({
         body: {
           schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
-          displayName: "ADMIN",
+          displayName: "core:ADMIN",
         },
       }),
     );
