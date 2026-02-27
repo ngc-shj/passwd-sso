@@ -62,19 +62,19 @@ vi.mock("@/components/ui/select", () => ({
 import { VaultSelector } from "./vault-selector";
 
 describe("VaultSelector", () => {
-  it("does not render when org list is empty", () => {
+  it("does not render when team list is empty", () => {
     const { container } = render(
-      <VaultSelector value="personal" orgs={[]} onValueChange={() => {}} />
+      <VaultSelector value="personal" teams={[]} onValueChange={() => {}} />
     );
 
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders selector when orgs exist", () => {
+  it("renders selector when teams exist", () => {
     render(
       <VaultSelector
         value="personal"
-        orgs={[{ id: "org-1", name: "Security" }]}
+        teams={[{ id: "team-1", name: "Security" }]}
         onValueChange={() => {}}
       />
     );
@@ -83,23 +83,23 @@ describe("VaultSelector", () => {
     expect(screen.getByRole("combobox", { name: "vault-select" })).toBeTruthy();
   });
 
-  it("calls onValueChange when org is selected", async () => {
+  it("calls onValueChange when team is selected", async () => {
     const onValueChange = vi.fn();
     const user = userEvent.setup();
 
     render(
       <VaultSelector
         value="personal"
-        orgs={[{ id: "org-1", name: "Security" }]}
+        teams={[{ id: "team-1", name: "Security" }]}
         onValueChange={onValueChange}
       />
     );
 
     await user.selectOptions(
       screen.getByRole("combobox", { name: "vault-select" }),
-      "org-1"
+      "team-1"
     );
 
-    expect(onValueChange).toHaveBeenCalledWith("org-1");
+    expect(onValueChange).toHaveBeenCalledWith("team-1");
   });
 });

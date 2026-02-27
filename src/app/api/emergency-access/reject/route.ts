@@ -9,6 +9,7 @@ import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-acc
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { routing } from "@/i18n/routing";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // POST /api/emergency-access/reject — Reject an emergency access invitation
 export async function POST(req: NextRequest) {
@@ -30,9 +31,11 @@ export async function POST(req: NextRequest) {
   }
 
   // Hash the token for DB lookup (DB stores only the hash)
-  const grant = await prisma.emergencyAccessGrant.findUnique({
-    where: { tokenHash: hashToken(parsed.data.token) },
-  });
+  const grant = await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.findUnique({
+      where: { tokenHash: hashToken(parsed.data.token) },
+    }),
+  );
 
   if (!grant) {
     return NextResponse.json(
@@ -52,10 +55,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  await prisma.emergencyAccessGrant.update({
-    where: { id: grant.id },
-    data: { status: EA_STATUS.REJECTED },
-  });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.update({
+      where: { id: grant.id },
+      data: { status: EA_STATUS.REJECTED },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
@@ -67,10 +72,12 @@ export async function POST(req: NextRequest) {
     ...extractRequestMeta(req),
   });
 
-  const owner = await prisma.user.findUnique({
-    where: { id: grant.ownerId },
-    select: { email: true, name: true },
-  });
+  const owner = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: grant.ownerId },
+      select: { email: true, name: true },
+    }),
+  );
   if (owner?.email) {
     const granteeName = session.user.name ?? session.user.email ?? "";
     const { subject, html, text } = emergencyGrantDeclinedEmail(routing.defaultLocale, granteeName);

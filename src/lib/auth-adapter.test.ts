@@ -1,18 +1,43 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockPrismaSession, mockSessionMetaGetStore } = vi.hoisted(() => ({
+const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockWithBypassRls } = vi.hoisted(() => ({
   mockPrismaSession: {
     create: vi.fn(),
     update: vi.fn(),
   },
+  mockPrismaUser: {
+    findUnique: vi.fn(),
+    create: vi.fn(),
+  },
+  mockPrismaTenant: {
+    create: vi.fn(),
+  },
+  mockPrismaTenantMember: {
+    create: vi.fn(),
+  },
+  mockPrismaAccount: {
+    create: vi.fn(),
+  },
+  mockPrismaTransaction: vi.fn(),
   mockSessionMetaGetStore: vi.fn(),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/lib/prisma", () => ({
-  prisma: { session: mockPrismaSession },
+  prisma: {
+    session: mockPrismaSession,
+    user: mockPrismaUser,
+    tenant: mockPrismaTenant,
+    tenantMember: mockPrismaTenantMember,
+    account: mockPrismaAccount,
+    $transaction: mockPrismaTransaction,
+  },
 }));
 vi.mock("@/lib/session-meta", () => ({
   sessionMetaStorage: { getStore: mockSessionMetaGetStore },
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@auth/prisma-adapter", () => ({
   PrismaAdapter: () => ({
@@ -27,6 +52,64 @@ describe("createCustomAdapter", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        tenant: mockPrismaTenant,
+        user: mockPrismaUser,
+        tenantMember: mockPrismaTenantMember,
+      }),
+    );
+  });
+
+  describe("createUser", () => {
+    it("creates bootstrap tenant, user, and owner membership", async () => {
+      mockPrismaTenant.create.mockResolvedValue({ id: "tenant-1" });
+      mockPrismaUser.create.mockResolvedValue({
+        id: "user-1",
+        name: "Test User",
+        email: "test@example.com",
+        image: "https://example.com/avatar.png",
+        emailVerified: null,
+      });
+      mockPrismaTenantMember.create.mockResolvedValue({ id: "tm-1" });
+
+      const adapter = createCustomAdapter();
+      const user = await adapter.createUser!({
+        name: "Test User",
+        email: "test@example.com",
+        image: "https://example.com/avatar.png",
+        emailVerified: null,
+      });
+
+      expect(mockPrismaTenant.create).toHaveBeenCalledTimes(1);
+      expect(mockPrismaTenant.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ isBootstrap: true }),
+        select: { id: true },
+      });
+      expect(mockPrismaUser.create).toHaveBeenCalledWith({
+        data: {
+          name: "Test User",
+          email: "test@example.com",
+          image: "https://example.com/avatar.png",
+          emailVerified: null,
+          tenantId: "tenant-1",
+        },
+      });
+      expect(mockPrismaTenantMember.create).toHaveBeenCalledWith({
+        data: {
+          tenantId: "tenant-1",
+          userId: "user-1",
+          role: "OWNER",
+        },
+      });
+      expect(user).toEqual({
+        id: "user-1",
+        name: "Test User",
+        email: "test@example.com",
+        image: "https://example.com/avatar.png",
+        emailVerified: null,
+      });
+    });
   });
 
   describe("createSession", () => {
@@ -35,6 +118,7 @@ describe("createCustomAdapter", () => {
         ip: "192.168.1.1",
         userAgent: "Mozilla/5.0",
       });
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
       mockPrismaSession.create.mockResolvedValue({
         sessionToken: "tok-1",
         userId: "u-1",
@@ -52,6 +136,7 @@ describe("createCustomAdapter", () => {
         data: {
           sessionToken: "tok-1",
           userId: "u-1",
+          tenantId: "tenant-1",
           expires,
           ipAddress: "192.168.1.1",
           userAgent: "Mozilla/5.0",
@@ -66,6 +151,7 @@ describe("createCustomAdapter", () => {
 
     it("sets null when sessionMetaStorage has no store (undefined)", async () => {
       mockSessionMetaGetStore.mockReturnValue(undefined);
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-2" });
       mockPrismaSession.create.mockResolvedValue({
         sessionToken: "tok-2",
         userId: "u-2",
@@ -93,6 +179,7 @@ describe("createCustomAdapter", () => {
         ip: "10.0.0.1",
         userAgent: longUA,
       });
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-3" });
       mockPrismaSession.create.mockResolvedValue({
         sessionToken: "tok-3",
         userId: "u-3",
@@ -111,6 +198,49 @@ describe("createCustomAdapter", () => {
           userAgent: "X".repeat(512),
         }),
       });
+    });
+  });
+
+  describe("linkAccount", () => {
+    it("writes account with resolved tenantId", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaAccount.create.mockResolvedValue({ id: "acc-1" });
+
+      const adapter = createCustomAdapter();
+      await adapter.linkAccount!({
+        userId: "u-1",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "google-1",
+        access_token: "access",
+        token_type: "bearer",
+        session_state: 42 as unknown as string,
+      });
+
+      expect(mockPrismaAccount.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          userId: "u-1",
+          tenantId: "tenant-1",
+          provider: "google",
+          providerAccountId: "google-1",
+          session_state: "42",
+        }),
+      });
+    });
+
+    it("throws when user does not exist", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue(null);
+
+      const adapter = createCustomAdapter();
+      await expect(
+        adapter.linkAccount!({
+          userId: "missing-user",
+          type: "oidc",
+          provider: "google",
+          providerAccountId: "google-1",
+        }),
+      ).rejects.toThrow("USER_NOT_FOUND");
+      expect(mockPrismaAccount.create).not.toHaveBeenCalled();
     });
   });
 

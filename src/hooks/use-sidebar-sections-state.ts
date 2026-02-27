@@ -5,13 +5,13 @@ import { useLocalStorage } from "@/hooks/use-local-storage";
 
 export type SidebarSection =
   | "categories"
-  | "organize"
+  | "manage"
   | "security"
   | "utilities";
 
 const COLLAPSE_DEFAULTS: Record<SidebarSection, boolean> = {
   categories: true,
-  organize: true,
+  manage: true,
   security: false,
   utilities: true,
 };
@@ -53,7 +53,7 @@ export function useSidebarSectionsState({
   useEffect(() => {
     const toOpen: SidebarSection[] = [];
     if (selectedTypeFilter !== null) toOpen.push("categories");
-    if (selectedTagId !== null || selectedFolderId !== null) toOpen.push("organize");
+    if (selectedTagId !== null || selectedFolderId !== null) toOpen.push("manage");
     if (isWatchtower || isShareLinks || isEmergencyAccess || isAuditLog) toOpen.push("security");
 
     if (toOpen.length === 0) return;

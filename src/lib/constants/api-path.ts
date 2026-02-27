@@ -12,12 +12,12 @@ export const API_PATH = {
   FOLDERS: "/api/folders",
   TAGS: "/api/tags",
   MAINTENANCE_PURGE_HISTORY: "/api/maintenance/purge-history",
-  ORGS: "/api/orgs",
-  ORGS_ARCHIVED: "/api/orgs/archived",
-  ORGS_FAVORITES: "/api/orgs/favorites",
-  ORGS_TRASH: "/api/orgs/trash",
-  ORGS_INVITATIONS_ACCEPT: "/api/orgs/invitations/accept",
-  ORGS_PENDING_KEY_DISTRIBUTIONS: "/api/orgs/pending-key-distributions",
+  TEAMS: "/api/teams",
+  TEAMS_ARCHIVED: "/api/teams/archived",
+  TEAMS_FAVORITES: "/api/teams/favorites",
+  TEAMS_TRASH: "/api/teams/trash",
+  TEAMS_INVITATIONS_ACCEPT: "/api/teams/invitations/accept",
+  TEAMS_PENDING_KEY_DISTRIBUTIONS: "/api/teams/pending-key-distributions",
   AUDIT_LOGS: "/api/audit-logs",
   SHARE_LINKS: "/api/share-links",
   SHARE_LINKS_MINE: "/api/share-links/mine",
@@ -55,29 +55,29 @@ export const apiPath = {
     `${API_PATH.EMERGENCY_ACCESS}/${grantId}/vault`,
   emergencyGrantVaultEntries: (grantId: string) =>
     `${API_PATH.EMERGENCY_ACCESS}/${grantId}/vault/entries`,
-  orgById: (orgId: string) => `${API_PATH.ORGS}/${orgId}`,
-  orgMembers: (orgId: string) => `${API_PATH.ORGS}/${orgId}/members`,
-  orgMemberById: (orgId: string, memberId: string) =>
-    `${API_PATH.ORGS}/${orgId}/members/${memberId}`,
-  orgInvitations: (orgId: string) => `${API_PATH.ORGS}/${orgId}/invitations`,
-  orgInvitationById: (orgId: string, invitationId: string) =>
-    `${API_PATH.ORGS}/${orgId}/invitations/${invitationId}`,
-  orgPasswords: (orgId: string) => `${API_PATH.ORGS}/${orgId}/passwords`,
-  orgPasswordById: (orgId: string, entryId: string) =>
-    `${API_PATH.ORGS}/${orgId}/passwords/${entryId}`,
-  orgPasswordFavorite: (orgId: string, entryId: string) =>
-    `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/favorite`,
-  orgPasswordRestore: (orgId: string, entryId: string) =>
-    `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/restore`,
-  orgPasswordAttachments: (orgId: string, entryId: string) =>
-    `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/attachments`,
-  orgPasswordAttachmentById: (orgId: string, entryId: string, attachmentId: string) =>
-    `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/attachments/${attachmentId}`,
-  orgMemberKey: (orgId: string) => `${API_PATH.ORGS}/${orgId}/member-key`,
-  orgMemberConfirmKey: (orgId: string, memberId: string) =>
-    `${API_PATH.ORGS}/${orgId}/members/${memberId}/confirm-key`,
-  orgTags: (orgId: string) => `${API_PATH.ORGS}/${orgId}/tags`,
-  orgAuditLogs: (orgId: string) => `${API_PATH.ORGS}/${orgId}/audit-logs`,
+  teamById: (teamId: string) => `${API_PATH.TEAMS}/${teamId}`,
+  teamMembers: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/members`,
+  teamMemberById: (teamId: string, memberId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/members/${memberId}`,
+  teamInvitations: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/invitations`,
+  teamInvitationById: (teamId: string, invitationId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/invitations/${invitationId}`,
+  teamPasswords: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/passwords`,
+  teamPasswordById: (teamId: string, entryId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}`,
+  teamPasswordFavorite: (teamId: string, entryId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/favorite`,
+  teamPasswordRestore: (teamId: string, entryId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/restore`,
+  teamPasswordAttachments: (teamId: string, entryId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/attachments`,
+  teamPasswordAttachmentById: (teamId: string, entryId: string, attachmentId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/attachments/${attachmentId}`,
+  teamMemberKey: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/member-key`,
+  teamMemberConfirmKey: (teamId: string, memberId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/members/${memberId}/confirm-key`,
+  teamTags: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/tags`,
+  teamAuditLogs: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/audit-logs`,
   passwordById: (entryId: string) => `${API_PATH.PASSWORDS}/${entryId}`,
   passwordsBulkTrash: () => API_PATH.PASSWORDS_BULK_TRASH,
   passwordsBulkArchive: () => API_PATH.PASSWORDS_BULK_ARCHIVE,
@@ -94,21 +94,21 @@ export const apiPath = {
   shareLinkAccessLogs: (shareId: string) =>
     `${API_PATH.SHARE_LINKS}/${shareId}/access-logs`,
   folderById: (folderId: string) => `${API_PATH.FOLDERS}/${folderId}`,
-  orgFolders: (orgId: string) => `${API_PATH.ORGS}/${orgId}/folders`,
-  orgFolderById: (orgId: string, folderId: string) =>
-    `${API_PATH.ORGS}/${orgId}/folders/${folderId}`,
+  teamFolders: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/folders`,
+  teamFolderById: (teamId: string, folderId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/folders/${folderId}`,
   passwordHistory: (entryId: string) =>
     `${API_PATH.PASSWORDS}/${entryId}/history`,
   passwordHistoryRestore: (entryId: string, historyId: string) =>
     `${API_PATH.PASSWORDS}/${entryId}/history/${historyId}/restore`,
-  orgPasswordHistory: (orgId: string, entryId: string) =>
-    `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/history`,
-  orgPasswordHistoryById: (orgId: string, entryId: string, historyId: string) =>
-    `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/history/${historyId}`,
-  orgPasswordHistoryRestore: (orgId: string, entryId: string, historyId: string) =>
-    `${API_PATH.ORGS}/${orgId}/passwords/${entryId}/history/${historyId}/restore`,
+  teamPasswordHistory: (teamId: string, entryId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/history`,
+  teamPasswordHistoryById: (teamId: string, entryId: string, historyId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/history/${historyId}`,
+  teamPasswordHistoryRestore: (teamId: string, entryId: string, historyId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/history/${historyId}/restore`,
   sessionById: (sessionId: string) => `${API_PATH.SESSIONS}/${sessionId}`,
-  orgScimTokens: (orgId: string) => `${API_PATH.ORGS}/${orgId}/scim-tokens`,
-  orgScimTokenById: (orgId: string, tokenId: string) =>
-    `${API_PATH.ORGS}/${orgId}/scim-tokens/${tokenId}`,
+  teamScimTokens: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/scim-tokens`,
+  teamScimTokenById: (teamId: string, tokenId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/scim-tokens/${tokenId}`,
 } as const;

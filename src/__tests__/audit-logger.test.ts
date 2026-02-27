@@ -159,7 +159,7 @@ describe("METADATA_BLOCKLIST", () => {
       "encryptedOverview",
       "encryptedData",
       "encryptedSecretKey",
-      "encryptedOrgKey",
+      "encryptedTeamKey",
       "masterPasswordServerHash",
       "token",
       "tokenHash",

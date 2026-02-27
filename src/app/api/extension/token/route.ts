@@ -5,6 +5,7 @@ import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { validateExtensionToken } from "@/lib/extension-token";
+import { withUserTenantRls } from "@/lib/tenant-context";
 import {
   EXTENSION_TOKEN_DEFAULT_SCOPES,
   EXTENSION_TOKEN_TTL_MS,
@@ -44,30 +45,44 @@ export async function POST() {
   const plaintext = generateShareToken();
   const tokenHash = hashToken(plaintext);
   const scopeCsv = EXTENSION_TOKEN_DEFAULT_SCOPES.join(",");
+  const actor = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { tenantId: true },
+    }),
+  );
+  if (!actor) {
+    return NextResponse.json(
+      { error: API_ERROR.UNAUTHORIZED },
+      { status: 401 },
+    );
+  }
 
-  const created = await prisma.$transaction(async (tx) => {
-    // Find active tokens (non-revoked, non-expired)
-    const active = await tx.extensionToken.findMany({
-      where: { userId: session.user.id, revokedAt: null, expiresAt: { gt: now } },
-      orderBy: { createdAt: "asc" },
-      select: { id: true },
-    });
-
-    // Revoke oldest if at max (need room for the new one)
-    const over = active.length + 1 - EXTENSION_TOKEN_MAX_ACTIVE;
-    if (over > 0) {
-      const toRevoke = active.slice(0, over).map((t) => t.id);
-      await tx.extensionToken.updateMany({
-        where: { id: { in: toRevoke } },
-        data: { revokedAt: now },
+  const created = await withUserTenantRls(session.user.id, async () =>
+    prisma.$transaction(async (tx) => {
+      // Find active tokens (non-revoked, non-expired)
+      const active = await tx.extensionToken.findMany({
+        where: { userId: session.user.id, revokedAt: null, expiresAt: { gt: now } },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
       });
-    }
 
-    return tx.extensionToken.create({
-      data: { userId: session.user.id, tokenHash, scope: scopeCsv, expiresAt },
-      select: { id: true, expiresAt: true, scope: true },
-    });
-  });
+      // Revoke oldest if at max (need room for the new one)
+      const over = active.length + 1 - EXTENSION_TOKEN_MAX_ACTIVE;
+      if (over > 0) {
+        const toRevoke = active.slice(0, over).map((t) => t.id);
+        await tx.extensionToken.updateMany({
+          where: { id: { in: toRevoke } },
+          data: { revokedAt: now },
+        });
+      }
+
+      return tx.extensionToken.create({
+        data: { userId: session.user.id, tenantId: actor.tenantId, tokenHash, scope: scopeCsv, expiresAt },
+        select: { id: true, expiresAt: true, scope: true },
+      });
+    }),
+  );
 
   return NextResponse.json({
     token: plaintext,
@@ -95,10 +110,12 @@ export async function DELETE(req: NextRequest) {
     );
   }
 
-  await prisma.extensionToken.update({
-    where: { id: result.data.tokenId },
-    data: { revokedAt: new Date() },
-  });
+  await withUserTenantRls(result.data.userId, async () =>
+    prisma.extensionToken.update({
+      where: { id: result.data.tokenId },
+      data: { revokedAt: new Date() },
+    }),
+  );
 
   return NextResponse.json({ ok: true });
 }

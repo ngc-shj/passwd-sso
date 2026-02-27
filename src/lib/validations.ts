@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
-import { INVITE_ROLE_VALUES, ORG_ROLE, ORG_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, CUSTOM_FIELD_TYPE_VALUES } from "@/lib/constants";
+import { TEAM_INVITE_ROLE_VALUES, TEAM_ROLE, TEAM_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, CUSTOM_FIELD_TYPE_VALUES } from "@/lib/constants";
 
 export const generatePasswordSchema = z.object({
   length: z.number().int().min(8).max(128).default(16),
@@ -108,11 +108,11 @@ export const generatePassphraseSchema = z.object({
   includeNumber: z.boolean().default(false),
 });
 
-// ─── Organization Schemas ──────────────────────────────────
+// ─── Team Schemas ──────────────────────────────────────────
 
 const slugRegex = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
 
-export const createOrgSchema = z.object({
+export const createTeamSchema = z.object({
   name: z.string().min(1).max(100).trim(),
   slug: z
     .string()
@@ -122,49 +122,49 @@ export const createOrgSchema = z.object({
   description: z.string().max(500).trim().optional(),
 });
 
-/** Schema for E2E org creation — includes client-encrypted OrgMemberKey for owner */
-export const orgMemberKeySchema = z.object({
-  encryptedOrgKey: z.string().min(1).max(1000),
-  orgKeyIv: z.string().regex(/^[0-9a-f]{24}$/),
-  orgKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/),
+/** Schema for E2E team creation — includes client-encrypted TeamMemberKey for owner */
+export const teamMemberKeySchema = z.object({
+  encryptedTeamKey: z.string().min(1).max(1000),
+  teamKeyIv: z.string().regex(/^[0-9a-f]{24}$/),
+  teamKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/),
   ephemeralPublicKey: z.string().min(1).max(500),
   hkdfSalt: z.string().regex(/^[0-9a-f]{64}$/),
   keyVersion: z.number().int().min(1),
   wrapVersion: z.number().int().min(1).max(1).default(1),
 });
 
-export const createOrgE2ESchema = createOrgSchema.extend({
+export const createTeamE2ESchema = createTeamSchema.extend({
   id: z.string().uuid().optional(),
-  orgMemberKey: orgMemberKeySchema,
+  teamMemberKey: teamMemberKeySchema,
 });
 
-/** Schema for E2E org password creation — client sends pre-encrypted blobs */
-export const createOrgE2EPasswordSchema = z.object({
+/** Schema for E2E team password creation — client sends pre-encrypted blobs */
+export const createTeamE2EPasswordSchema = z.object({
   id: z.string().uuid().optional(),
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
   aadVersion: z.number().int().min(1),
-  orgKeyVersion: z.number().int().min(1),
+  teamKeyVersion: z.number().int().min(1),
   entryType: entryTypeSchema.optional().default(ENTRY_TYPE.LOGIN),
   tagIds: z.array(z.string().cuid()).optional(),
-  orgFolderId: z.string().cuid().nullable().optional(),
+  teamFolderId: z.string().cuid().nullable().optional(),
 });
 
-/** Schema for E2E org password update — full blob replacement or metadata-only update */
-export const updateOrgE2EPasswordSchema = z.object({
+/** Schema for E2E team password update — full blob replacement or metadata-only update */
+export const updateTeamE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema.optional(),
   encryptedOverview: encryptedFieldSchema.optional(),
   aadVersion: z.number().int().min(1).optional(),
-  orgKeyVersion: z.number().int().min(1).optional(),
+  teamKeyVersion: z.number().int().min(1).optional(),
   tagIds: z.array(z.string().cuid()).optional(),
-  orgFolderId: z.string().cuid().nullable().optional(),
+  teamFolderId: z.string().cuid().nullable().optional(),
   isArchived: z.boolean().optional(),
 }).refine(
   (data) => {
     const hasBlob = data.encryptedBlob !== undefined;
     const hasOverview = data.encryptedOverview !== undefined;
     const hasAad = data.aadVersion !== undefined;
-    const hasKeyVer = data.orgKeyVersion !== undefined;
+    const hasKeyVer = data.teamKeyVersion !== undefined;
     const allPresent = hasBlob && hasOverview && hasAad && hasKeyVer;
     const nonePresent = !hasBlob && !hasOverview && !hasAad && !hasKeyVer;
     return allPresent || nonePresent;
@@ -172,21 +172,21 @@ export const updateOrgE2EPasswordSchema = z.object({
   { message: "Encrypted fields must be all present or all absent" },
 );
 
-export const updateOrgSchema = z.object({
+export const updateTeamSchema = z.object({
   name: z.string().min(1).max(100).trim().optional(),
   description: z.string().max(500).trim().optional().or(z.literal("")),
 });
 
 export const inviteSchema = z.object({
   email: z.string().email(),
-  role: z.enum(INVITE_ROLE_VALUES).default(ORG_ROLE.MEMBER),
+  role: z.enum(TEAM_INVITE_ROLE_VALUES).default(TEAM_ROLE.MEMBER),
 });
 
 export const updateMemberRoleSchema = z.object({
-  role: z.enum(ORG_ROLE_VALUES),
+  role: z.enum(TEAM_ROLE_VALUES),
 });
 
-export const createOrgTagSchema = z.object({
+export const createTeamTagSchema = z.object({
   name: z.string().min(1).max(50).trim(),
   color: z
     .string()
@@ -290,24 +290,24 @@ const shareDataSchema = z.object({
 
 export const createShareLinkSchema = z.object({
   passwordEntryId: z.string().min(1).optional(),
-  orgPasswordEntryId: z.string().min(1).optional(),
+  teamPasswordEntryId: z.string().min(1).optional(),
   data: shareDataSchema.optional(),
   encryptedShareData: encryptedFieldSchema.optional(),
   entryType: entryTypeSchema.optional(),
   expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
   maxViews: z.number().int().min(1).max(100).optional(),
 }).refine(
-  (d) => (d.passwordEntryId ? !d.orgPasswordEntryId : !!d.orgPasswordEntryId),
-  { message: "Exactly one of passwordEntryId or orgPasswordEntryId is required" }
+  (d) => (d.passwordEntryId ? !d.teamPasswordEntryId : !!d.teamPasswordEntryId),
+  { message: "Exactly one of passwordEntryId or teamPasswordEntryId is required" }
 ).refine(
   (d) => (d.passwordEntryId ? !!d.data : true),
   { message: "data is required for personal entries" }
 ).refine(
-  (d) => (d.orgPasswordEntryId ? !!d.encryptedShareData && !!d.entryType : true),
-  { message: "encryptedShareData and entryType are required for org entries" }
+  (d) => (d.teamPasswordEntryId ? !!d.encryptedShareData && !!d.entryType : true),
+  { message: "encryptedShareData and entryType are required for team entries" }
 ).refine(
-  (d) => (d.orgPasswordEntryId ? !d.data : true),
-  { message: "data must not be present for org entries (use encryptedShareData)" }
+  (d) => (d.teamPasswordEntryId ? !d.data : true),
+  { message: "data must not be present for team entries (use encryptedShareData)" }
 );
 
 // ─── Emergency Access Schemas ─────────────────────────────
@@ -369,15 +369,15 @@ export type CreateFolderInput = z.infer<typeof createFolderSchema>;
 export type UpdateFolderInput = z.infer<typeof updateFolderSchema>;
 export type CreateTagInput = z.infer<typeof createTagSchema>;
 export type UpdateTagInput = z.infer<typeof updateTagSchema>;
-export type CreateOrgInput = z.infer<typeof createOrgSchema>;
-export type CreateOrgE2EInput = z.infer<typeof createOrgE2ESchema>;
-export type OrgMemberKeyInput = z.infer<typeof orgMemberKeySchema>;
-export type CreateOrgE2EPasswordInput = z.infer<typeof createOrgE2EPasswordSchema>;
-export type UpdateOrgE2EPasswordInput = z.infer<typeof updateOrgE2EPasswordSchema>;
-export type UpdateOrgInput = z.infer<typeof updateOrgSchema>;
+export type CreateTeamInput = z.infer<typeof createTeamSchema>;
+export type CreateTeamE2EInput = z.infer<typeof createTeamE2ESchema>;
+export type TeamMemberKeyInput = z.infer<typeof teamMemberKeySchema>;
+export type CreateTeamE2EPasswordInput = z.infer<typeof createTeamE2EPasswordSchema>;
+export type UpdateTeamE2EPasswordInput = z.infer<typeof updateTeamE2EPasswordSchema>;
+export type UpdateTeamInput = z.infer<typeof updateTeamSchema>;
 export type InviteInput = z.infer<typeof inviteSchema>;
 export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
-export type CreateOrgTagInput = z.infer<typeof createOrgTagSchema>;
+export type CreateTeamTagInput = z.infer<typeof createTeamTagSchema>;
 export type CreateSendTextInput = z.infer<typeof createSendTextSchema>;
 export type CreateSendFileMetaInput = z.infer<typeof createSendFileMetaSchema>;
 export type CreateShareLinkInput = z.infer<typeof createShareLinkSchema>;

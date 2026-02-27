@@ -27,21 +27,21 @@ describe("crypto-server", () => {
 
   describe("encryptServerData / decryptServerData", () => {
     it("roundtrips correctly", () => {
-      const orgKey = randomBytes(32);
+      const teamKey = randomBytes(32);
       const plaintext = JSON.stringify({
         title: "Test Password",
         username: "admin",
         password: "secret123",
       });
 
-      const encrypted = encryptServerData(plaintext, orgKey);
-      const decrypted = decryptServerData(encrypted, orgKey);
+      const encrypted = encryptServerData(plaintext, teamKey);
+      const decrypted = decryptServerData(encrypted, teamKey);
       expect(decrypted).toBe(plaintext);
     });
 
     it("returns valid encrypted data structure", () => {
-      const orgKey = randomBytes(32);
-      const encrypted = encryptServerData("hello", orgKey);
+      const teamKey = randomBytes(32);
+      const encrypted = encryptServerData("hello", teamKey);
 
       expect(typeof encrypted.ciphertext).toBe("string");
       expect(encrypted.iv).toHaveLength(24);
@@ -49,110 +49,110 @@ describe("crypto-server", () => {
     });
 
     it("handles empty string", () => {
-      const orgKey = randomBytes(32);
-      const encrypted = encryptServerData("", orgKey);
-      const decrypted = decryptServerData(encrypted, orgKey);
+      const teamKey = randomBytes(32);
+      const encrypted = encryptServerData("", teamKey);
+      const decrypted = decryptServerData(encrypted, teamKey);
       expect(decrypted).toBe("");
     });
 
     it("handles unicode content", () => {
-      const orgKey = randomBytes(32);
+      const teamKey = randomBytes(32);
       const plaintext = "パスワード管理 🔐";
-      const encrypted = encryptServerData(plaintext, orgKey);
-      const decrypted = decryptServerData(encrypted, orgKey);
+      const encrypted = encryptServerData(plaintext, teamKey);
+      const decrypted = decryptServerData(encrypted, teamKey);
       expect(decrypted).toBe(plaintext);
     });
 
     it("fails with wrong key", () => {
-      const orgKey1 = randomBytes(32);
-      const orgKey2 = randomBytes(32);
-      const encrypted = encryptServerData("secret", orgKey1);
+      const teamKey1 = randomBytes(32);
+      const teamKey2 = randomBytes(32);
+      const encrypted = encryptServerData("secret", teamKey1);
 
-      expect(() => decryptServerData(encrypted, orgKey2)).toThrow();
+      expect(() => decryptServerData(encrypted, teamKey2)).toThrow();
     });
 
     it("fails with tampered ciphertext", () => {
-      const orgKey = randomBytes(32);
-      const encrypted = encryptServerData("secret", orgKey);
+      const teamKey = randomBytes(32);
+      const encrypted = encryptServerData("secret", teamKey);
 
       const b = parseInt(encrypted.ciphertext.slice(0, 2), 16);
       const f = ((b ^ 0x01) & 0xff).toString(16).padStart(2, "0");
       encrypted.ciphertext = f + encrypted.ciphertext.slice(2);
-      expect(() => decryptServerData(encrypted, orgKey)).toThrow();
+      expect(() => decryptServerData(encrypted, teamKey)).toThrow();
     });
 
     it("produces different ciphertexts for same plaintext (random IV)", () => {
-      const orgKey = randomBytes(32);
-      const e1 = encryptServerData("same input", orgKey);
-      const e2 = encryptServerData("same input", orgKey);
+      const teamKey = randomBytes(32);
+      const e1 = encryptServerData("same input", teamKey);
+      const e2 = encryptServerData("same input", teamKey);
       expect(e1.ciphertext).not.toBe(e2.ciphertext);
       expect(e1.iv).not.toBe(e2.iv);
     });
 
     it("roundtrips with AAD", () => {
-      const orgKey = randomBytes(32);
-      const aad = Buffer.from("org-1|entry-1");
-      const encrypted = encryptServerData("secret", orgKey, aad);
-      const decrypted = decryptServerData(encrypted, orgKey, aad);
+      const teamKey = randomBytes(32);
+      const aad = Buffer.from("team-1|entry-1");
+      const encrypted = encryptServerData("secret", teamKey, aad);
+      const decrypted = decryptServerData(encrypted, teamKey, aad);
       expect(decrypted).toBe("secret");
     });
 
     it("fails when AAD mismatches", () => {
-      const orgKey = randomBytes(32);
-      const aad1 = Buffer.from("org-1|entry-1");
-      const aad2 = Buffer.from("org-1|entry-2");
-      const encrypted = encryptServerData("secret", orgKey, aad1);
-      expect(() => decryptServerData(encrypted, orgKey, aad2)).toThrow();
+      const teamKey = randomBytes(32);
+      const aad1 = Buffer.from("team-1|entry-1");
+      const aad2 = Buffer.from("team-1|entry-2");
+      const encrypted = encryptServerData("secret", teamKey, aad1);
+      expect(() => decryptServerData(encrypted, teamKey, aad2)).toThrow();
     });
 
     it("fails when AAD expected but not provided", () => {
-      const orgKey = randomBytes(32);
+      const teamKey = randomBytes(32);
       const aad = Buffer.from("context");
-      const encrypted = encryptServerData("secret", orgKey, aad);
-      expect(() => decryptServerData(encrypted, orgKey)).toThrow();
+      const encrypted = encryptServerData("secret", teamKey, aad);
+      expect(() => decryptServerData(encrypted, teamKey)).toThrow();
     });
   });
 
   describe("encryptServerBinary / decryptServerBinary", () => {
     it("roundtrips correctly", () => {
-      const orgKey = randomBytes(32);
+      const teamKey = randomBytes(32);
       const data = Buffer.from("binary file content");
-      const encrypted = encryptServerBinary(data, orgKey);
-      const decrypted = decryptServerBinary(encrypted, orgKey);
+      const encrypted = encryptServerBinary(data, teamKey);
+      const decrypted = decryptServerBinary(encrypted, teamKey);
       expect(decrypted.equals(data)).toBe(true);
     });
 
     it("roundtrips with AAD", () => {
-      const orgKey = randomBytes(32);
+      const teamKey = randomBytes(32);
       const data = Buffer.from("attachment data");
       const aad = Buffer.from("entry-1|attach-1");
-      const encrypted = encryptServerBinary(data, orgKey, aad);
-      const decrypted = decryptServerBinary(encrypted, orgKey, aad);
+      const encrypted = encryptServerBinary(data, teamKey, aad);
+      const decrypted = decryptServerBinary(encrypted, teamKey, aad);
       expect(decrypted.equals(data)).toBe(true);
     });
 
     it("fails when AAD mismatches", () => {
-      const orgKey = randomBytes(32);
+      const teamKey = randomBytes(32);
       const data = Buffer.from("secret binary");
       const aad1 = Buffer.from("entry-1|attach-1");
       const aad2 = Buffer.from("entry-1|attach-2");
-      const encrypted = encryptServerBinary(data, orgKey, aad1);
-      expect(() => decryptServerBinary(encrypted, orgKey, aad2)).toThrow();
+      const encrypted = encryptServerBinary(data, teamKey, aad1);
+      expect(() => decryptServerBinary(encrypted, teamKey, aad2)).toThrow();
     });
 
     it("fails when AAD expected but not provided", () => {
-      const orgKey = randomBytes(32);
+      const teamKey = randomBytes(32);
       const data = Buffer.from("protected binary");
       const aad = Buffer.from("context");
-      const encrypted = encryptServerBinary(data, orgKey, aad);
-      expect(() => decryptServerBinary(encrypted, orgKey)).toThrow();
+      const encrypted = encryptServerBinary(data, teamKey, aad);
+      expect(() => decryptServerBinary(encrypted, teamKey)).toThrow();
     });
 
     it("fails with wrong key", () => {
-      const orgKey1 = randomBytes(32);
-      const orgKey2 = randomBytes(32);
-      const encrypted = encryptServerBinary(Buffer.from("data"), orgKey1);
-      expect(() => decryptServerBinary(encrypted, orgKey2)).toThrow();
+      const teamKey1 = randomBytes(32);
+      const teamKey2 = randomBytes(32);
+      const encrypted = encryptServerBinary(Buffer.from("data"), teamKey1);
+      expect(() => decryptServerBinary(encrypted, teamKey2)).toThrow();
     });
   });
 

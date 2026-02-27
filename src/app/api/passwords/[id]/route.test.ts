@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaTransaction, mockAuditCreate } = vi.hoisted(() => ({
+const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUser, mockPrismaTransaction, mockAuditCreate, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockAuthOrToken: vi.fn(),
   mockPrismaPasswordEntry: {
@@ -15,8 +15,11 @@ const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockPrismaHistory, m
     findMany: vi.fn(),
     deleteMany: vi.fn(),
   },
+  mockPrismaUser: { findUnique: vi.fn() },
   mockPrismaTransaction: vi.fn(),
   mockAuditCreate: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
@@ -24,9 +27,16 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: mockPrismaPasswordEntry,
     passwordEntryHistory: mockPrismaHistory,
+    user: mockPrismaUser,
     auditLog: { create: mockAuditCreate },
     $transaction: mockPrismaTransaction,
   },
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { GET, PUT, DELETE } from "./route";
@@ -59,6 +69,7 @@ describe("GET /api/passwords/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
+    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockAuditCreate.mockResolvedValue({});
   });
 
@@ -224,6 +235,7 @@ describe("PUT /api/passwords/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
+    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockAuditCreate.mockResolvedValue({});
     mockPrismaTransaction.mockImplementation(async (fn: (tx: typeof txMock) => Promise<unknown>) => fn(txMock));
   });

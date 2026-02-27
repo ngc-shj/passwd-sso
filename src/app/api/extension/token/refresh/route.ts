@@ -5,6 +5,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { validateExtensionToken } from "@/lib/extension-token";
 import { EXTENSION_TOKEN_TTL_MS } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 export const runtime = "nodejs";
 
@@ -39,13 +40,15 @@ export async function POST(req: NextRequest) {
   }
 
   // Verify user's Auth.js session is still active
-  const activeSession = await prisma.session.findFirst({
-    where: {
-      userId,
-      expires: { gt: new Date() },
-    },
-    select: { id: true },
-  });
+  const activeSession = await withUserTenantRls(userId, async () =>
+    prisma.session.findFirst({
+      where: {
+        userId,
+        expires: { gt: new Date() },
+      },
+      select: { id: true, tenantId: true },
+    }),
+  );
 
   if (!activeSession) {
     return NextResponse.json(
@@ -61,27 +64,30 @@ export async function POST(req: NextRequest) {
   const newTokenHash = hashToken(plaintext);
   const scopeCsv = scopes.join(",");
 
-  const created = await prisma.$transaction(async (tx) => {
-    const revoked = await tx.extensionToken.updateMany({
-      where: { id: tokenId, revokedAt: null, expiresAt: { gt: now } },
-      data: { revokedAt: now },
-    });
+  const created = await withUserTenantRls(userId, async () =>
+    prisma.$transaction(async (tx) => {
+      const revoked = await tx.extensionToken.updateMany({
+        where: { id: tokenId, revokedAt: null, expiresAt: { gt: now } },
+        data: { revokedAt: now },
+      });
 
-    if (revoked.count === 0) {
-      return null; // Already revoked by concurrent refresh
-    }
+      if (revoked.count === 0) {
+        return null; // Already revoked by concurrent refresh
+      }
 
-    await tx.extensionToken.create({
-      data: {
-        userId,
-        tokenHash: newTokenHash,
-        scope: scopeCsv,
-        expiresAt,
-      },
-    });
+      await tx.extensionToken.create({
+        data: {
+          userId,
+          tenantId: activeSession.tenantId,
+          tokenHash: newTokenHash,
+          scope: scopeCsv,
+          expiresAt,
+        },
+      });
 
-    return true;
-  });
+      return true;
+    }),
+  );
 
   if (!created) {
     return NextResponse.json(

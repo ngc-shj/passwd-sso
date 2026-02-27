@@ -5,11 +5,20 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { stripLocalePrefix } from "@/i18n/locale-utils";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 
+export type TeamScopedVaultContext = {
+  type: "team";
+  teamId: string;
+  teamName?: string;
+  teamRole?: string;
+};
+
 export type VaultContext =
   | { type: "personal" }
-  | { type: "org"; orgId: string; orgName?: string; orgRole?: string };
+  | TeamScopedVaultContext;
 
-interface OrgContextItem {
+export type TeamVaultContext = VaultContext;
+
+interface TeamContextItem {
   id: string;
   name: string;
   role: string;
@@ -19,7 +28,7 @@ const CROSS_VAULT_PATHS = [
   "/dashboard/watchtower",
   "/dashboard/share-links",
   "/dashboard/emergency-access",
-  "/dashboard/orgs",
+  "/dashboard/teams",
 ] as const;
 
 function isPersonalVaultPath(path: string): boolean {
@@ -38,7 +47,16 @@ function isCrossVaultPath(path: string): boolean {
   return CROSS_VAULT_PATHS.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
 }
 
-export function useVaultContext(orgs: OrgContextItem[]): VaultContext {
+function createTeamScopedContext(team: TeamContextItem): TeamScopedVaultContext {
+  return {
+    type: "team",
+    teamId: team.id,
+    teamName: team.name,
+    teamRole: team.role,
+      };
+}
+
+export function useVaultContext(teams: TeamContextItem[]): VaultContext {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const cleanPath = stripLocalePrefix(pathname);
@@ -46,20 +64,20 @@ export function useVaultContext(orgs: OrgContextItem[]): VaultContext {
 
   const resolved = useMemo<VaultContext>(() => {
     if (cleanPath === "/dashboard/share-links") {
-      const shareOrgId = searchParams.get("org");
-      if (shareOrgId) {
-        const org = orgs.find((item) => item.id === shareOrgId);
-        if (org) {
-          return { type: "org", orgId: org.id, orgName: org.name, orgRole: org.role };
+      const shareTeamId = searchParams.get("team");
+      if (shareTeamId) {
+        const team = teams.find((item) => item.id === shareTeamId);
+        if (team) {
+          return createTeamScopedContext(team);
         }
       }
     }
 
-    const orgMatch = cleanPath.match(/^\/dashboard\/orgs\/([^/]+)/);
-    if (orgMatch) {
-      const org = orgs.find((item) => item.id === orgMatch[1]);
-      if (org) {
-        return { type: "org", orgId: org.id, orgName: org.name, orgRole: org.role };
+    const teamMatch = cleanPath.match(/^\/dashboard\/(?:teams)\/([^/]+)/);
+    if (teamMatch) {
+      const team = teams.find((item) => item.id === teamMatch[1]);
+      if (team) {
+        return createTeamScopedContext(team);
       }
     }
 
@@ -68,18 +86,18 @@ export function useVaultContext(orgs: OrgContextItem[]): VaultContext {
     }
 
     if (isCrossVaultPath(cleanPath) && lastContext !== "personal") {
-      const org = orgs.find((item) => item.id === lastContext);
-      if (org) {
-        return { type: "org", orgId: org.id, orgName: org.name, orgRole: org.role };
+      const team = teams.find((item) => item.id === lastContext);
+      if (team) {
+        return createTeamScopedContext(team);
       }
     }
 
     return { type: "personal" };
-  }, [cleanPath, lastContext, orgs, searchParams]);
+  }, [cleanPath, lastContext, teams, searchParams]);
 
   useEffect(() => {
-    if (resolved.type === "org" && lastContext !== resolved.orgId) {
-      setLastContext(resolved.orgId);
+    if (resolved.type === "team" && lastContext !== resolved.teamId) {
+      setLastContext(resolved.teamId);
       return;
     }
     if (resolved.type === "personal" && isPersonalVaultPath(cleanPath) && lastContext !== "personal") {
@@ -89,3 +107,5 @@ export function useVaultContext(orgs: OrgContextItem[]): VaultContext {
 
   return resolved;
 }
+
+export const useTeamVaultContext = useVaultContext;

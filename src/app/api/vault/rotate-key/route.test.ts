@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkStale } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkStale, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: {
     findUnique: vi.fn(),
@@ -12,6 +12,7 @@ const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkS
   },
   mockTransaction: vi.fn(),
   mockMarkStale: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -32,6 +33,9 @@ vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { createHash } from "crypto";
@@ -62,6 +66,7 @@ describe("POST /api/vault/rotate-key", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "tenant-1",
       vaultSetupAt: new Date(),
       masterPasswordServerHash: serverHash,
       masterPasswordServerSalt: serverSalt,
@@ -129,6 +134,13 @@ describe("POST /api/vault/rotate-key", () => {
     expect(json.success).toBe(true);
     expect(json.keyVersion).toBe(2);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(mockPrismaVaultKey.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "user-1",
+        tenantId: "tenant-1",
+        version: 2,
+      }),
+    });
   });
 
   it("calls markGrantsStaleForOwner with new keyVersion", async () => {
@@ -159,5 +171,15 @@ describe("POST /api/vault/rotate-key", () => {
     const json = await res.json();
     expect(json.keyVersion).toBe(6);
     expect(mockMarkStale).toHaveBeenCalledWith("user-1", 6);
+  });
+
+  it("runs key rotation and EA stale within withUserTenantRls scope", async () => {
+    await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
+    );
+    // withUserTenantRls should be called twice: once for findUnique, once for rotation+stale
+    expect(mockWithUserTenantRls).toHaveBeenCalledTimes(2);
+    expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(1, "user-1", expect.any(Function));
+    expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(2, "user-1", expect.any(Function));
   });
 });

@@ -4,22 +4,22 @@ import { useCallback } from "react";
 import type { SidebarContentProps } from "@/components/layout/sidebar-content";
 import type {
   SidebarFolderItem,
-  SidebarOrgItem,
-  SidebarOrganizeTagItem,
+  SidebarTeamItem,
+  SidebarTeamTagItem,
 } from "@/hooks/use-sidebar-data";
 import type { SidebarSection } from "@/hooks/use-sidebar-sections-state";
 import type { VaultContext } from "@/hooks/use-vault-context";
 
 interface UseSidebarViewModelParams {
   t: (key: string) => string;
-  tOrg: (key: string) => string;
+  tTeam: (key: string) => string;
   router: { push: (href: string) => void };
   onOpenChange: (open: boolean) => void;
   vaultContext: VaultContext;
-  orgs: SidebarOrgItem[];
-  selectedOrg: SidebarOrgItem | null;
-  selectedOrgCanManageFolders: boolean;
-  selectedOrgCanManageTags: boolean;
+  teams: SidebarTeamItem[];
+  selectedTeam: SidebarTeamItem | null;
+  selectedTeamCanManageFolders?: boolean;
+  selectedTeamCanManageTags?: boolean;
   selectedTypeFilter: string | null;
   selectedFolderId: string | null;
   selectedTagId: string | null;
@@ -31,29 +31,29 @@ interface UseSidebarViewModelParams {
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
   isPersonalAuditLog: boolean;
-  activeAuditOrgId: string | null;
+  activeAuditTeamId: string | null;
   selectedFolders: SidebarFolderItem[];
-  selectedTags: SidebarOrganizeTagItem[];
+  selectedTags: SidebarTeamTagItem[];
   isOpen: (key: SidebarSection) => boolean;
   toggleSection: (key: SidebarSection) => (open: boolean) => void;
-  handleFolderCreate: (orgId?: string) => void;
-  handleFolderEdit: (folder: SidebarFolderItem, orgId?: string) => void;
-  handleFolderDeleteClick: (folder: SidebarFolderItem, orgId?: string) => void;
-  handleTagCreate: (orgId?: string) => void;
-  handleTagEdit: (tag: SidebarOrganizeTagItem, orgId?: string) => void;
-  handleTagDeleteClick: (tag: SidebarOrganizeTagItem, orgId?: string) => void;
+  handleFolderCreate: (teamId?: string) => void;
+  handleFolderEdit: (folder: SidebarFolderItem, teamId?: string) => void;
+  handleFolderDeleteClick: (folder: SidebarFolderItem, teamId?: string) => void;
+  handleTagCreate: (teamId?: string) => void;
+  handleTagEdit: (tag: SidebarTeamTagItem, teamId?: string) => void;
+  handleTagDeleteClick: (tag: SidebarTeamTagItem, teamId?: string) => void;
 }
 
 export function useSidebarViewModel({
   t,
-  tOrg,
+  tTeam,
   router,
   onOpenChange,
   vaultContext,
-  orgs,
-  selectedOrg,
-  selectedOrgCanManageFolders,
-  selectedOrgCanManageTags,
+  teams,
+  selectedTeam,
+  selectedTeamCanManageFolders,
+  selectedTeamCanManageTags,
   selectedTypeFilter,
   selectedFolderId,
   selectedTagId,
@@ -65,7 +65,7 @@ export function useSidebarViewModel({
   isShareLinks,
   isEmergencyAccess,
   isPersonalAuditLog,
-  activeAuditOrgId,
+  activeAuditTeamId,
   selectedFolders,
   selectedTags,
   isOpen,
@@ -77,6 +77,9 @@ export function useSidebarViewModel({
   handleTagEdit,
   handleTagDeleteClick,
 }: UseSidebarViewModelParams): SidebarContentProps {
+  const teamItems = teams;
+  const canManageFolders = selectedTeamCanManageFolders ?? false;
+  const canManageTags = selectedTeamCanManageTags ?? false;
   const onNavigate = useCallback(() => {
     onOpenChange(false);
   }, [onOpenChange]);
@@ -88,7 +91,7 @@ export function useSidebarViewModel({
         onOpenChange(false);
         return;
       }
-      router.push(`/dashboard/orgs/${value}`);
+      router.push(`/dashboard/teams/${value}`);
       onOpenChange(false);
     },
     [router, onOpenChange],
@@ -96,12 +99,12 @@ export function useSidebarViewModel({
 
   return {
     t,
-    tOrg,
+    tTeam,
     vaultContext,
-    orgs,
-    selectedOrg,
-    selectedOrgCanManageFolders,
-    selectedOrgCanManageTags,
+    teams: teamItems,
+    selectedTeam,
+    selectedTeamCanManageFolders: canManageFolders,
+    selectedTeamCanManageTags: canManageTags,
     selectedTypeFilter,
     selectedFolderId,
     selectedTagId,
@@ -113,7 +116,7 @@ export function useSidebarViewModel({
     isShareLinks,
     isEmergencyAccess,
     isPersonalAuditLog,
-    activeAuditOrgId,
+    activeAuditTeamId,
     selectedFolders,
     selectedTags,
     isOpen,

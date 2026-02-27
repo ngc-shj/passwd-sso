@@ -3,7 +3,7 @@
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 import { CollapsibleSectionHeader } from "@/components/layout/sidebar-shared";
 import {
   Download,
@@ -14,7 +14,7 @@ import {
   Upload,
 } from "lucide-react";
 
-interface SecurityOrg {
+interface SecurityTeam {
   id: string;
   name: string;
   role: string;
@@ -72,8 +72,8 @@ interface UtilitiesSectionProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
-  tOrg: (key: string) => string;
-  selectedOrg: SecurityOrg | null;
+  tTeam: (key: string) => string;
+  selectedTeam?: SecurityTeam | null;
   onNavigate: () => void;
 }
 
@@ -81,15 +81,16 @@ export function UtilitiesSection({
   isOpen,
   onOpenChange,
   t,
-  tOrg,
-  selectedOrg,
+  tTeam,
+  selectedTeam,
   onNavigate,
 }: UtilitiesSectionProps) {
-  const exportHref = selectedOrg
-    ? `/dashboard/orgs/${selectedOrg.id}/export`
+  const scopedTeam = selectedTeam ?? null;
+  const exportHref = scopedTeam
+    ? `/dashboard/teams/${scopedTeam.id}/export`
     : "/dashboard/export";
-  const importHref = selectedOrg
-    ? `/dashboard/orgs/${selectedOrg.id}/import`
+  const importHref = scopedTeam
+    ? `/dashboard/teams/${scopedTeam.id}/import`
     : "/dashboard/import";
 
   return (
@@ -97,15 +98,15 @@ export function UtilitiesSection({
       <CollapsibleSectionHeader isOpen={isOpen}>{t("utilities")}</CollapsibleSectionHeader>
       <CollapsibleContent>
         <div className="space-y-1">
-          {selectedOrg &&
-            (selectedOrg.role === ORG_ROLE.OWNER || selectedOrg.role === ORG_ROLE.ADMIN) ? (
+          {scopedTeam &&
+            (scopedTeam.role === TEAM_ROLE.OWNER || scopedTeam.role === TEAM_ROLE.ADMIN) ? (
             <Button variant="ghost" className="w-full justify-start gap-2" asChild>
-              <Link href={`/dashboard/orgs/${selectedOrg.id}/settings`} onClick={onNavigate}>
+              <Link href={`/dashboard/teams/${scopedTeam.id}/settings`} onClick={onNavigate}>
                 <Settings className="h-4 w-4" />
-                {tOrg("orgSettings")}
+                {tTeam("teamSettings")}
               </Link>
             </Button>
-          ) : !selectedOrg && (
+          ) : !scopedTeam && (
             <>
               <Button variant="ghost" className="w-full justify-start gap-2" asChild>
                 <Link href="/dashboard/settings" onClick={onNavigate}>
@@ -114,9 +115,9 @@ export function UtilitiesSection({
                 </Link>
               </Button>
               <Button variant="ghost" className="w-full justify-start gap-2" asChild>
-                <Link href="/dashboard/orgs" onClick={onNavigate}>
+                <Link href="/dashboard/teams" onClick={onNavigate}>
                   <Settings className="h-4 w-4" />
-                  {tOrg("orgSettings")}
+                  {tTeam("teamSettings")}
                 </Link>
               </Button>
             </>

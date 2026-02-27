@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockRateLimiter } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockRateLimiter, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
   mockPrismaVaultKey: { create: vi.fn() },
   mockTransaction: vi.fn(),
   mockRateLimiter: { check: vi.fn() },
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -27,6 +28,9 @@ vi.mock("@/lib/logger", () => ({
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
+}));
 
 import { POST } from "./route";
 
@@ -42,7 +46,7 @@ const validBody = {
     iv: "e".repeat(24),
     authTag: "f".repeat(32),
   },
-  // ECDH key pair for org E2E
+  // ECDH key pair for team E2E
   ecdhPublicKey: '{"kty":"EC","crv":"P-256","x":"test","y":"test"}',
   encryptedEcdhPrivateKey: "encrypted-ecdh-private-key-data",
   ecdhPrivateKeyIv: "a".repeat(24),

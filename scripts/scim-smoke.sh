@@ -18,6 +18,7 @@ SMOKE_USER_EMAIL="${SMOKE_USER_EMAIL:-scim-smoke+$(date +%s)@example.com}"
 SMOKE_USER_NAME="${SMOKE_USER_NAME:-SCIM Smoke User}"
 SMOKE_USER_EXTERNAL_ID="${SMOKE_USER_EXTERNAL_ID:-ext-user-$(date +%s)}"
 SMOKE_GROUP_EXTERNAL_ID="${SMOKE_GROUP_EXTERNAL_ID:-ext-group-admin-$(date +%s)}"
+SMOKE_GROUP_DISPLAY_NAME="${SMOKE_GROUP_DISPLAY_NAME:-}"
 
 if [[ -z "$SCIM_TOKEN" ]]; then
   echo "[ERROR] SCIM_TOKEN is required" >&2
@@ -135,13 +136,26 @@ expect_status 200 "$RESP_STATUS" "GET /Users?filter=externalId"
 printf '%s' "$RESP_BODY" | jq -e '.totalResults >= 1' >/dev/null
 
 log "6/8 Groups: PATCH add/remove user in ADMIN group"
-http_json GET "/Groups?filter=displayName%20eq%20\"ADMIN\""
+http_json GET "/Groups"
 expect_status 200 "$RESP_STATUS" "GET /Groups?filter=displayName"
-admin_group_id=$(extract_json "$RESP_BODY" '.Resources[0].id')
+admin_group_id=$(extract_json "$RESP_BODY" '.Resources[] | select(.displayName | test(":ADMIN$")) | .id' | head -n 1)
+admin_group_name=$(extract_json "$RESP_BODY" '.Resources[] | select(.displayName | test(":ADMIN$")) | .displayName' | head -n 1)
+if [[ ( -z "$admin_group_id" || "$admin_group_id" == "null" ) && -n "$SMOKE_GROUP_DISPLAY_NAME" ]]; then
+  log "No existing *:ADMIN group mapping found. Creating one with displayName=$SMOKE_GROUP_DISPLAY_NAME"
+  group_post=$(jq -n \
+    --arg ext "$SMOKE_GROUP_EXTERNAL_ID" \
+    --arg dn "$SMOKE_GROUP_DISPLAY_NAME" \
+    '{schemas:["urn:ietf:params:scim:schemas:core:2.0:Group"],displayName:$dn,externalId:$ext}')
+  http_json POST "/Groups" "$group_post"
+  expect_status 201 "$RESP_STATUS" "POST /Groups"
+  admin_group_id=$(extract_json "$RESP_BODY" '.id')
+  admin_group_name=$(extract_json "$RESP_BODY" '.displayName')
+fi
 if [[ -z "$admin_group_id" || "$admin_group_id" == "null" ]]; then
-  echo "[ERROR] ADMIN group id not found" >&2
+  echo "[ERROR] ADMIN group id not found. Set SMOKE_GROUP_DISPLAY_NAME='<teamSlug>:ADMIN'" >&2
   exit 1
 fi
+log "Using group: $admin_group_name ($admin_group_id)"
 
 patch_add=$(jq -n --arg uid "$USER_ID" '{schemas:["urn:ietf:params:scim:api:messages:2.0:PatchOp"],Operations:[{op:"add",path:"members",value:[{value:$uid}]}]}')
 http_json PATCH "/Groups/$admin_group_id" "$patch_add"
@@ -166,9 +180,16 @@ expect_status 204 "$RESP_STATUS" "DELETE /Users/{id}"
 USER_ID=""
 
 log "Optional: register group mapping (POST /Groups)"
-group_post=$(jq -n --arg ext "$SMOKE_GROUP_EXTERNAL_ID" '{schemas:["urn:ietf:params:scim:schemas:core:2.0:Group"],displayName:"ADMIN",externalId:$ext}')
-http_json POST "/Groups" "$group_post"
-expect_status 201 "$RESP_STATUS" "POST /Groups"
+if [[ -n "$SMOKE_GROUP_DISPLAY_NAME" ]]; then
+  group_post=$(jq -n \
+    --arg ext "$SMOKE_GROUP_EXTERNAL_ID" \
+    --arg dn "$SMOKE_GROUP_DISPLAY_NAME" \
+    '{schemas:["urn:ietf:params:scim:schemas:core:2.0:Group"],displayName:$dn,externalId:$ext}')
+  http_json POST "/Groups" "$group_post"
+  expect_status 201 "$RESP_STATUS" "POST /Groups"
+else
+  log "Skipped: set SMOKE_GROUP_DISPLAY_NAME='<teamSlug>:ADMIN' to run optional POST /Groups"
+fi
 
 DONE=1
 log "All SCIM smoke checks passed"

@@ -22,6 +22,7 @@ import {
   AUDIT_SCOPE,
   SEND_EXPIRY_MAP,
 } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const sendFileLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
 
@@ -111,16 +112,18 @@ export async function POST(req: NextRequest) {
 
   // Storage limit check: sum of active (non-revoked, non-expired) Send files
   const now = new Date();
-  const activeTotal = await prisma.passwordShare.aggregate({
-    where: {
-      createdById: session.user.id,
-      shareType: "FILE",
-      revokedAt: null,
-      expiresAt: { gt: now },
-      sendSizeBytes: { not: null },
-    },
-    _sum: { sendSizeBytes: true },
-  });
+  const activeTotal = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordShare.aggregate({
+      where: {
+        createdById: session.user.id,
+        shareType: "FILE",
+        revokedAt: null,
+        expiresAt: { gt: now },
+        sendSizeBytes: { not: null },
+      },
+      _sum: { sendSizeBytes: true },
+    }),
+  );
   const currentTotal = activeTotal._sum.sendSizeBytes ?? 0;
   if (currentTotal + file.size > SEND_MAX_ACTIVE_TOTAL_BYTES) {
     return NextResponse.json(
@@ -142,28 +145,40 @@ export async function POST(req: NextRequest) {
 
   const expiresAt = new Date(Date.now() + SEND_EXPIRY_MAP[meta.expiresIn]);
   const contentType = detected?.mime ?? file.type ?? "application/octet-stream";
+  const actor = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { tenantId: true },
+    }),
+  );
+  if (!actor) {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
 
-  const share = await prisma.passwordShare.create({
-    data: {
-      tokenHash,
-      shareType: "FILE",
-      entryType: null,
-      sendName: meta.name,
-      sendFilename: filename,
-      sendContentType: contentType,
-      sendSizeBytes: file.size,
-      encryptedData: encryptedMeta.ciphertext,
-      dataIv: encryptedMeta.iv,
-      dataAuthTag: encryptedMeta.authTag,
-      encryptedFile: new Uint8Array(encryptedFile.ciphertext),
-      fileIv: encryptedFile.iv,
-      fileAuthTag: encryptedFile.authTag,
-      masterKeyVersion: encryptedMeta.masterKeyVersion,
-      expiresAt,
-      maxViews: meta.maxViews ?? null,
-      createdById: session.user.id,
-    },
-  });
+  const share = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordShare.create({
+      data: {
+        tokenHash,
+        shareType: "FILE",
+        entryType: null,
+        sendName: meta.name,
+        sendFilename: filename,
+        sendContentType: contentType,
+        sendSizeBytes: file.size,
+        encryptedData: encryptedMeta.ciphertext,
+        dataIv: encryptedMeta.iv,
+        dataAuthTag: encryptedMeta.authTag,
+        encryptedFile: new Uint8Array(encryptedFile.ciphertext),
+        fileIv: encryptedFile.iv,
+        fileAuthTag: encryptedFile.authTag,
+        masterKeyVersion: encryptedMeta.masterKeyVersion,
+        expiresAt,
+        maxViews: meta.maxViews ?? null,
+        createdById: session.user.id,
+        tenantId: actor.tenantId,
+      },
+    }),
+  );
 
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);

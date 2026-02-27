@@ -150,7 +150,7 @@ function ExportPanelContent() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      // Fire-and-forget audit log
+      // Async nonblocking audit log
       fetch(API_PATH.AUDIT_LOGS_EXPORT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -159,7 +159,7 @@ function ExportPanelContent() {
           format,
           filename,
           encrypted: passwordProtect,
-          includeOrgs: false,
+          includeTeams: false,
         }),
       }).catch(() => {});
 

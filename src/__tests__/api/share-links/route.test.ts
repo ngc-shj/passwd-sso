@@ -3,12 +3,13 @@ import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-const { mockAuth, mockCreate, mockFindMany, mockFindUnique } = vi.hoisted(
+const { mockAuth, mockCreate, mockFindMany, mockFindUnique, mockWithUserTenantRls } = vi.hoisted(
   () => ({
     mockAuth: vi.fn(),
     mockCreate: vi.fn(),
     mockFindMany: vi.fn(),
     mockFindUnique: vi.fn(),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   })
 );
 
@@ -16,7 +17,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: { findUnique: mockFindUnique },
-    orgPasswordEntry: { findUnique: mockFindUnique },
+    teamPasswordEntry: { findUnique: mockFindUnique },
     passwordShare: { create: mockCreate, findMany: mockFindMany },
   },
 }));
@@ -30,9 +31,9 @@ vi.mock("@/lib/crypto-server", () => ({
     masterKeyVersion: 1,
   }),
 }));
-vi.mock("@/lib/org-auth", () => ({
-  requireOrgPermission: vi.fn(),
-  OrgAuthError: class extends Error {
+vi.mock("@/lib/team-auth", () => ({
+  requireTeamPermission: vi.fn(),
+  TeamAuthError: class extends Error {
     status: number;
     constructor(msg: string, status: number) {
       super(msg);
@@ -43,6 +44,9 @@ vi.mock("@/lib/org-auth", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 const { mockCheck } = vi.hoisted(() => ({
@@ -107,12 +111,12 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("VALIDATION_ERROR");
   });
 
-  it("returns 400 when org share includes data field (S-24)", async () => {
+  it("returns 400 when team share includes data field (S-24)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {
-        orgPasswordEntryId: VALID_ENTRY_ID,
+        teamPasswordEntryId: VALID_ENTRY_ID,
         data: { title: "Leaked", password: "oops" },
         encryptedShareData: {
           ciphertext: "c",
@@ -183,9 +187,9 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
   });
 
-  it("creates E2E org share link with client-encrypted data", async () => {
+  it("creates E2E team share link with client-encrypted data", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockFindUnique.mockResolvedValue({ orgId: "org-123" });
+    mockFindUnique.mockResolvedValue({ teamId: "team-123" });
     mockCreate.mockResolvedValue({
       id: "share-e2e",
       expiresAt: new Date(Date.now() + 86400000),
@@ -193,7 +197,7 @@ describe("POST /api/share-links", () => {
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {
-        orgPasswordEntryId: VALID_ENTRY_ID,
+        teamPasswordEntryId: VALID_ENTRY_ID,
         encryptedShareData: {
           ciphertext: "client-encrypted",
           iv: "c".repeat(24),
@@ -236,13 +240,13 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("INVALID_JSON");
   });
 
-  it("returns 404 when org entry not found", async () => {
+  it("returns 404 when team entry not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue(null);
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {
-        orgPasswordEntryId: VALID_ENTRY_ID,
+        teamPasswordEntryId: VALID_ENTRY_ID,
         encryptedShareData: {
           ciphertext: "c",
           iv: "a".repeat(24),
@@ -258,19 +262,19 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("NOT_FOUND");
   });
 
-  it("returns OrgAuthError status for org entry permission denied", async () => {
+  it("returns TeamAuthError status for team entry permission denied", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockFindUnique.mockResolvedValueOnce({ orgId: "org-123" });
+    mockFindUnique.mockResolvedValueOnce({ teamId: "team-123" });
 
-    const { requireOrgPermission } = await import("@/lib/org-auth");
-    const { OrgAuthError: RealOrgAuthError } = await import("@/lib/org-auth");
-    vi.mocked(requireOrgPermission).mockRejectedValueOnce(
-      new RealOrgAuthError("INSUFFICIENT_PERMISSION", 403)
+    const { requireTeamPermission } = await import("@/lib/team-auth");
+    const { TeamAuthError: RealTeamAuthError } = await import("@/lib/team-auth");
+    vi.mocked(requireTeamPermission).mockRejectedValueOnce(
+      new RealTeamAuthError("INSUFFICIENT_PERMISSION", 403)
     );
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {
-        orgPasswordEntryId: VALID_ENTRY_ID,
+        teamPasswordEntryId: VALID_ENTRY_ID,
         encryptedShareData: {
           ciphertext: "c",
           iv: "a".repeat(24),
@@ -307,12 +311,12 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("NOT_FOUND");
   });
 
-  it("returns 400 when org share omits encryptedShareData", async () => {
+  it("returns 400 when team share omits encryptedShareData", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {
-        orgPasswordEntryId: VALID_ENTRY_ID,
+        teamPasswordEntryId: VALID_ENTRY_ID,
         expiresIn: "1d",
       },
     });

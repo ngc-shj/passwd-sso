@@ -11,6 +11,7 @@ import {
   AUDIT_SCOPE,
   AUDIT_TARGET_TYPE,
 } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 
@@ -71,15 +72,17 @@ export async function GET(req: NextRequest) {
 
   let logs;
   try {
-    logs = await prisma.auditLog.findMany({
-      where,
-      include: {
-        user: { select: { id: true, name: true, email: true, image: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: limit + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    });
+    logs = await withUserTenantRls(session.user.id, async () =>
+      prisma.auditLog.findMany({
+        where,
+        include: {
+          user: { select: { id: true, name: true, email: true, image: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: limit + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      }),
+    );
   } catch {
     return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
   }
@@ -103,16 +106,18 @@ export async function GET(req: NextRequest) {
   > = {};
 
   if (entryIds.length > 0) {
-    const entries = await prisma.passwordEntry.findMany({
-      where: { id: { in: entryIds } },
-      select: {
-        id: true,
-        encryptedOverview: true,
-        overviewIv: true,
-        overviewAuthTag: true,
-        aadVersion: true,
-      },
-    });
+    const entries = await withUserTenantRls(session.user.id, async () =>
+      prisma.passwordEntry.findMany({
+        where: { id: { in: entryIds } },
+        select: {
+          id: true,
+          encryptedOverview: true,
+          overviewIv: true,
+          overviewAuthTag: true,
+          aadVersion: true,
+        },
+      }),
+    );
     for (const e of entries) {
       entryOverviews[e.id] = {
         ciphertext: e.encryptedOverview,
@@ -137,10 +142,12 @@ export async function GET(req: NextRequest) {
 
   const relatedUsers: Record<string, { id: string; name: string | null; email: string | null; image: string | null }> = {};
   if (relatedIds.length > 0) {
-    const users = await prisma.user.findMany({
-      where: { id: { in: relatedIds } },
-      select: { id: true, name: true, email: true, image: true },
-    });
+    const users = await withUserTenantRls(session.user.id, async () =>
+      prisma.user.findMany({
+        where: { id: { in: relatedIds } },
+        select: { id: true, name: true, email: true, image: true },
+      }),
+    );
     for (const user of users) {
       relatedUsers[user.id] = user;
     }

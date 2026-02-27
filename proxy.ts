@@ -23,7 +23,7 @@ export const config = {
     "/api/passwords/:path*",
     "/api/tags/:path*",
     "/api/watchtower/:path*",
-    "/api/orgs/:path*",
+    "/api/teams/:path*",
     "/api/audit-logs/:path*",
     "/api/share-links/:path*",
   ],

@@ -2,17 +2,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
 
-const { mockAuth, mockCreate, mockCheck, mockLogAudit } = vi.hoisted(() => ({
+const { mockAuth, mockCreate, mockCheck, mockLogAudit, mockPrismaUser, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockCreate: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue(true),
   mockLogAudit: vi.fn(),
+  mockPrismaUser: { findUnique: vi.fn() },
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { create: mockCreate },
+    user: mockPrismaUser,
   },
 }));
 vi.mock("@/lib/crypto-server", () => ({
@@ -32,6 +35,9 @@ vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
 }));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
+}));
 
 import { POST } from "@/app/api/sends/route";
 
@@ -45,6 +51,7 @@ describe("POST /api/sends", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCheck.mockResolvedValue(true);
+    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 
   it("returns 401 when not authenticated", async () => {

@@ -25,7 +25,7 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 ### Encryption / Security
 
 - E2E encryption (PBKDF2 600k -> HKDF -> AES-256-GCM)
-- Organization vault E2E encryption (ECDH-P256 key distribution)
+- Team vault E2E encryption (ECDH-P256 key distribution)
 - Auto-lock (15 min idle / 5 min hidden tab)
 - Account lockout (progressive: 5 -> 15 min, 10 -> 1h, 15 -> 24h)
 - Rate limiting (Redis + in-memory fallback)
@@ -42,7 +42,7 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 - Tags (with color, user-scope unique constraint)
 - Custom fields (TEXT, HIDDEN, URL)
 - File attachments (10 MB, max 20 per entry, E2E encrypted)
-- Folders / hierarchical grouping (personal + org, max depth 5, cycle detection)
+- Folders / hierarchical grouping (personal + team, max depth 5, cycle detection)
 - Entry history (max 20 snapshots per entry, 90-day purge, restore support)
 - Duplicate entry detection (Watchtower, host + username match)
 - Entry expiration (`expiresAt`, Watchtower expiry checks)
@@ -58,9 +58,9 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 
 - Share links (expiry / max views / revoke / access logs)
 - Send (Bitwarden-like temporary text/file sharing)
-- Organization vault (RBAC: OWNER, ADMIN, MEMBER, VIEWER)
+- Team vault (RBAC: OWNER, ADMIN, MEMBER, VIEWER)
 - Invitation flow (token + expiry)
-- Org-scoped tags, favorites, and folders
+- Team-scoped tags, favorites, and folders
 
 ### Emergency Access
 
@@ -78,7 +78,7 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 
 - Browser extension (Chrome MV3, form detection, manual/auto fill, TOTP autofill)
 - i18n (ja/en, 884 keys)
-- Audit logs (34 actions, personal + org)
+- Audit logs (34 actions, personal + team)
 - Import/export (CSV, JSON, password-protected encrypted export)
 - Dark mode / keyboard shortcuts
 - Health checks / structured logs / Terraform IaC
@@ -118,7 +118,7 @@ By OSS-first design, authentication is not embedded in the app. MFA/2FA is expec
 
 ---
 
-### 2.2 Vault Management / Organization
+### 2.2 Vault Management / Team
 
 | # | Feature | 1P | BW | LP | DL | KP | PP | NP | Impact | Implementation Effort |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -131,11 +131,11 @@ By OSS-first design, authentication is not embedded in the app. MFA/2FA is expec
 
 #### ~~V-1 Folders / hierarchy~~ — Implemented (2026-02-18)
 
-Implemented `Folder` / `OrgFolder` for personal + org hierarchical folders. Max depth 5, cycle detection, drag-and-drop ordering. Tags and folders coexist: folders for hierarchy, tags for cross-cutting classification.
+Implemented `Folder` / `TeamFolder` for personal + team hierarchical folders. Max depth 5, cycle detection, drag-and-drop ordering. Tags and folders coexist: folders for hierarchy, tags for cross-cutting classification.
 
 #### ~~V-2 Entry history~~ — Implemented (2026-02-18)
 
-Added `PasswordEntryHistory` / `OrgPasswordEntryHistory`. PUT automatically snapshots old `encryptedBlob`. Max 20 records per entry, 90-day purge, restore support. Sensitive-field masking and reprompt guard included.
+Added `PasswordEntryHistory` / `TeamPasswordEntryHistory`. PUT automatically snapshots old `encryptedBlob`. Max 20 records per entry, 90-day purge, restore support. Sensitive-field masking and reprompt guard included.
 
 #### ~~V-3 Duplicate detection~~ — Implemented (2026-02-20)
 
@@ -263,7 +263,7 @@ Audit events: `SEND_CREATE`, `SEND_REVOKE`. Sidebar integrated under "Share".
 
 #### B-1 SCIM provisioning
 
-- Current: org membership is manual invitation only
+- Current: team membership is manual invitation only
 - Competitors: enterprise products broadly support SCIM 2.0
 - Proposal: add `/api/scim/v2/Users` and `/api/scim/v2/Groups`, integrate with Okta/Azure AD/Google Workspace
 - Reference: existing notes in `docs/archive/scim-provisioning.md`
@@ -354,7 +354,7 @@ Audit events: `SEND_CREATE`, `SEND_REVOKE`. Sidebar integrated under "Share".
 | X-4 | Extension keyboard shortcuts | Chrome `commands` API |
 | C-2 | Granular sharing permissions | Extend existing RBAC |
 | B-3 | SIEM integration | Expose audit logs via REST |
-| B-4 | Security policies | Add org policy tables/settings |
+| B-4 | Security policies | Add team policy tables/settings |
 | P-2 | CLI tool | Developer-focused differentiation |
 | V-6 | Nested tags | Hierarchy via `/` style path representation |
 | U-4 | Secure note templates | Mostly schema/template additions |
@@ -461,7 +461,7 @@ Feature-category coverage:
 
 - ML-KEM hybrid PQC (emergency access) — rare among competitors
 - Fully self-hosted + SAML 2.0 SSO — uncommon outside Bitwarden
-- Coexistence of org vault + personal E2E vault
+- Coexistence of team vault + personal E2E vault
 - Strong audit-log surface (36 action types)
 - Send (temporary text/file sharing) parity with Bitwarden
 - Strong vault management: folder hierarchy + entry history + duplicate detection
@@ -475,7 +475,7 @@ Feature-category coverage:
 
 **Improvements since previous report (2026-02-17):**
 
-- ~~Missing folders/hierarchy~~ -> implemented (personal + org, max depth 5)
+- ~~Missing folders/hierarchy~~ -> implemented (personal + team, max depth 5)
 - ~~No extension TOTP autofill~~ -> implemented (SHA1/256/512)
 - Added: clipboard auto-clear, master-password reprompt, duplicate detection, expiration, Send
 - Watchtower score now includes duplicates + expiration

@@ -10,6 +10,7 @@ const {
   mockExtTokenUpdateMany,
   mockExtTokenCreate,
   mockTransaction,
+  mockWithUserTenantRls,
 } = vi.hoisted(() => ({
   mockValidateExtensionToken: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue(true),
@@ -17,6 +18,7 @@ const {
   mockExtTokenUpdateMany: vi.fn(),
   mockExtTokenCreate: vi.fn(),
   mockTransaction: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/lib/extension-token", () => ({
@@ -46,6 +48,9 @@ vi.mock("@/lib/rate-limit", () => ({
 vi.mock("@/lib/redis", () => ({
   getRedis: () => null,
   validateRedisConfig: () => {},
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { POST } from "./route";

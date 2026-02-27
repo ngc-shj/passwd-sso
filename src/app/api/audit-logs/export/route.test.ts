@@ -1,35 +1,45 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockRequireOrgPermission, OrgAuthError, mockLogAudit } = vi.hoisted(() => {
-  class _OrgAuthError extends Error {
+const {
+  mockAuth,
+  mockRequireTeamPermission,
+  TeamAuthError,
+  mockLogAudit,
+  mockWithUserTenantRls,
+} = vi.hoisted(() => {
+  class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
-      this.name = "OrgAuthError";
+      this.name = "TeamAuthError";
       this.status = status;
     }
   }
   return {
     mockAuth: vi.fn(),
-    mockRequireOrgPermission: vi.fn(),
-    OrgAuthError: _OrgAuthError,
+    mockRequireTeamPermission: vi.fn(),
+    TeamAuthError: _TeamAuthError,
     mockLogAudit: vi.fn(),
+    mockWithUserTenantRls: vi.fn(),
   };
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/org-auth", () => ({
-  requireOrgPermission: mockRequireOrgPermission,
-  OrgAuthError,
+vi.mock("@/lib/team-auth", () => ({
+  requireTeamPermission: mockRequireTeamPermission,
+  TeamAuthError,
 }));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
 }));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
+}));
 
 import { POST } from "./route";
-import { AUDIT_ACTION, AUDIT_SCOPE, ORG_PERMISSION, ORG_ROLE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE, TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 
 const URL = "http://localhost:3000/api/audit-logs/export";
 
@@ -37,7 +47,10 @@ describe("POST /api/audit-logs/export", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireOrgPermission.mockResolvedValue({ role: ORG_ROLE.MEMBER });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
+    mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => Promise<unknown>) =>
+      fn(),
+    );
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -69,7 +82,7 @@ describe("POST /api/audit-logs/export", () => {
     expect(json.error).toBe("INVALID_BODY");
   });
 
-  it("logs personal export when no orgId", async () => {
+  it("logs personal export when no teamId", async () => {
     const res = await POST(
       createRequest("POST", URL, { body: { entryCount: 10, format: "csv" } })
     );
@@ -84,7 +97,7 @@ describe("POST /api/audit-logs/export", () => {
         metadata: { entryCount: 10, format: "csv" },
       })
     );
-    expect(mockRequireOrgPermission).not.toHaveBeenCalled();
+    expect(mockRequireTeamPermission).not.toHaveBeenCalled();
   });
 
   it("logs filename when provided", async () => {
@@ -95,7 +108,7 @@ describe("POST /api/audit-logs/export", () => {
           format: "json",
           filename: "passwd-sso-export-20260214.json",
           encrypted: true,
-          includeOrgs: true,
+          includeTeams: true,
         },
       })
     );
@@ -107,37 +120,37 @@ describe("POST /api/audit-logs/export", () => {
           format: "json",
           filename: "passwd-sso-export-20260214.json",
           encrypted: true,
-          includeOrgs: true,
+          includeTeams: true,
         },
       })
     );
   });
 
-  it("logs org export when orgId provided and user is member", async () => {
+  it("logs team export when teamId is provided and user is member", async () => {
     const res = await POST(
       createRequest("POST", URL, {
-        body: { orgId: "org-1", entryCount: 3, format: "json" },
+        body: { teamId: "team-1", entryCount: 3, format: "json" },
       })
     );
     expect(res.status).toBe(200);
-    expect(mockRequireOrgPermission).toHaveBeenCalledWith(
+    expect(mockRequireTeamPermission).toHaveBeenCalledWith(
       "user-1",
-      "org-1",
-      ORG_PERMISSION.ORG_UPDATE
+      "team-1",
+      TEAM_PERMISSION.TEAM_UPDATE
     );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        scope: AUDIT_SCOPE.ORG,
-        orgId: "org-1",
+        scope: AUDIT_SCOPE.TEAM,
+        teamId: "team-1",
       })
     );
   });
 
-  it("returns 403 when user lacks org:update permission", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+  it("returns 403 when user lacks team:update permission", async () => {
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const res = await POST(
       createRequest("POST", URL, {
-        body: { orgId: "org-1", entryCount: 1, format: "csv" },
+        body: { teamId: "team-1", entryCount: 1, format: "csv" },
       })
     );
     expect(res.status).toBe(403);
@@ -146,11 +159,11 @@ describe("POST /api/audit-logs/export", () => {
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
-  it("returns 404 when orgId specified but user is not a member", async () => {
-    mockRequireOrgPermission.mockRejectedValue(new OrgAuthError("NOT_FOUND", 404));
+  it("returns 404 when teamId is specified but user is not a member", async () => {
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
     const res = await POST(
       createRequest("POST", URL, {
-        body: { orgId: "org-other", entryCount: 1, format: "csv" },
+        body: { teamId: "team-other", entryCount: 1, format: "csv" },
       })
     );
     expect(res.status).toBe(404);
@@ -158,4 +171,5 @@ describe("POST /api/audit-logs/export", () => {
     expect(json.error).toBe("NOT_FOUND");
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
+
 });

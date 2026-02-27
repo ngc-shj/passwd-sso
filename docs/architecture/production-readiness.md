@@ -88,7 +88,7 @@ Areas already considered at production level.
 - Docker multi-stage build + non-root runtime
 - Browser-extension token lifecycle controls
 - Input validation (486 LOC Zod schemas, 40 API touchpoints)
-- Audit logs (personal + org, filter/export supported)
+- Audit logs (personal + team, filter/export supported)
 - External audit-log forwarding (pino + Fluent Bit sidecar)
 - Environment validation (26 vars, startup-time schema check)
 - CI/CD pipeline (4 parallel GitHub Actions jobs, ESLint + Vitest + Next.js build)

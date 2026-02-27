@@ -26,13 +26,13 @@ import {
   decryptBinary,
 } from "./crypto-client";
 import { createKeyEscrow } from "./crypto-emergency";
-import { OrgVaultProvider } from "./org-vault-context";
+import { TeamVaultProvider } from "./team-vault-context";
 import {
   generateECDHKeyPair,
   exportPublicKey,
   exportPrivateKey,
   deriveEcdhWrappingKey,
-} from "./crypto-org";
+} from "./crypto-team";
 import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 
@@ -157,7 +157,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const wrappedKeyRef = useRef<{ ciphertext: string; iv: string; authTag: string } | null>(null);
   const lastActivityRef = useRef(Date.now());
   const hiddenAtRef = useRef<number | null>(null);
-  // ECDH key pair for org E2E encryption
+  // ECDH key pair for team E2E encryption
   const ecdhPrivateKeyBytesRef = useRef<Uint8Array | null>(null);
   const ecdhPublicKeyJwkRef = useRef<string | null>(null);
 
@@ -521,7 +521,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         authTag: vaultData.secretKeyAuthTag,
       };
 
-      // 6b. Restore ECDH private key if available (org E2E)
+      // 6b. Restore ECDH private key if available (team E2E)
       if (vaultData.encryptedEcdhPrivateKey && vaultData.ecdhPrivateKeyIv && vaultData.ecdhPrivateKeyAuthTag) {
         try {
           const ecdhWrapKey = await deriveEcdhWrappingKey(secretKey);
@@ -536,13 +536,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           ecdhPrivateKeyBytesRef.current = new Uint8Array(ecdhPrivDecrypted);
           ecdhPublicKeyJwkRef.current = vaultData.ecdhPublicKey ?? null;
         } catch {
-          // ECDH restoration failure is non-fatal — org features will be unavailable
+          // ECDH restoration failure is non-fatal — team features will be unavailable
         }
       }
 
       secretKey.fill(0);
 
-      // 7. Auto-confirm pending emergency access grants (fire-and-forget)
+      // 7. Auto-confirm pending emergency access grants (async nonblocking)
       const userId = session?.user?.id;
       if (userId && secretKeyRef.current) {
         confirmPendingEmergencyGrants(secretKeyRef.current, userId, keyVersionRef.current).catch(() => {
@@ -668,13 +668,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         getEcdhPublicKeyJwk,
       }}
     >
-      <OrgVaultProvider
+      <TeamVaultProvider
         getEcdhPrivateKeyBytes={getEcdhPrivateKeyBytes}
         getUserId={getUserId}
         vaultUnlocked={vaultStatus === VAULT_STATUS.UNLOCKED}
       >
         {children}
-      </OrgVaultProvider>
+      </TeamVaultProvider>
     </VaultContext.Provider>
   );
 }

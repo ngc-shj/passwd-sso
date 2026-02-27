@@ -9,6 +9,7 @@ import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { checkLockout, recordFailure, resetLockout } from "@/lib/account-lockout";
+import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -68,19 +69,21 @@ async function handlePOST(request: NextRequest) {
     );
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: {
-      vaultSetupAt: true,
-      masterPasswordServerHash: true,
-      masterPasswordServerSalt: true,
-      encryptedSecretKey: true,
-      secretKeyIv: true,
-      secretKeyAuthTag: true,
-      accountSalt: true,
-      keyVersion: true,
-    },
-  });
+  const user = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        vaultSetupAt: true,
+        masterPasswordServerHash: true,
+        masterPasswordServerSalt: true,
+        encryptedSecretKey: true,
+        secretKeyIv: true,
+        secretKeyAuthTag: true,
+        accountSalt: true,
+        keyVersion: true,
+      },
+    }),
+  );
 
   if (!user?.vaultSetupAt) {
     return NextResponse.json(
@@ -125,33 +128,38 @@ async function handlePOST(request: NextRequest) {
   await unlockLimiter.clear(rateKey);
 
   // Backfill passphrase verifier for existing users (transparent migration)
-  if (parsed.data.verifierHash) {
-    await prisma.user.updateMany({
-      where: {
-        id: session.user.id,
-        passphraseVerifierHmac: null,
-      },
-      data: {
-        passphraseVerifierHmac: hmacVerifier(parsed.data.verifierHash),
-        passphraseVerifierVersion: VERIFIER_VERSION,
-      },
-    });
+  const verifierHash = parsed.data.verifierHash;
+  if (verifierHash) {
+    await withUserTenantRls(session.user.id, async () =>
+      prisma.user.updateMany({
+        where: {
+          id: session.user.id,
+          passphraseVerifierHmac: null,
+        },
+        data: {
+          passphraseVerifierHmac: hmacVerifier(verifierHash),
+          passphraseVerifierVersion: VERIFIER_VERSION,
+        },
+      }),
+    );
   }
 
   // Fetch verification artifact
-  const vaultKey = await prisma.vaultKey.findUnique({
-    where: {
-      userId_version: {
-        userId: session.user.id,
-        version: user.keyVersion,
+  const vaultKey = await withUserTenantRls(session.user.id, async () =>
+    prisma.vaultKey.findUnique({
+      where: {
+        userId_version: {
+          userId: session.user.id,
+          version: user.keyVersion,
+        },
       },
-    },
-    select: {
-      verificationCiphertext: true,
-      verificationIv: true,
-      verificationAuthTag: true,
-    },
-  });
+      select: {
+        verificationCiphertext: true,
+        verificationIv: true,
+        verificationAuthTag: true,
+      },
+    }),
+  );
 
   getLogger().info({ userId: session.user.id }, "vault.unlock.success");
 

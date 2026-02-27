@@ -11,11 +11,14 @@ import {
   type ParentNode,
 } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
-function getPersonalParent(id: string): Promise<ParentNode | null> {
-  return prisma.folder
-    .findUnique({ where: { id }, select: { parentId: true, userId: true } })
-    .then((f) => (f ? { parentId: f.parentId, ownerId: f.userId } : null));
+function getPersonalParent(userId: string, id: string): Promise<ParentNode | null> {
+  return withUserTenantRls(userId, async () =>
+    prisma.folder
+      .findUnique({ where: { id }, select: { parentId: true, userId: true } })
+      .then((f) => (f ? { parentId: f.parentId, ownerId: f.userId } : null)),
+  );
 }
 
 // PUT /api/folders/[id] - Update a folder
@@ -30,7 +33,9 @@ export async function PUT(
 
   const { id } = await params;
 
-  const existing = await prisma.folder.findUnique({ where: { id } });
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.folder.findUnique({ where: { id } }),
+  );
   if (!existing) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
@@ -67,7 +72,11 @@ export async function PUT(
       if (newParentId) {
         // Parent ownership + existence check
         try {
-          await validateParentFolder(newParentId, session.user.id, getPersonalParent);
+          await validateParentFolder(
+            newParentId,
+            session.user.id,
+            (parentId) => getPersonalParent(session.user.id, parentId),
+          );
         } catch {
           return NextResponse.json(
             { error: API_ERROR.NOT_FOUND },
@@ -86,7 +95,7 @@ export async function PUT(
         const isCircular = await checkCircularReference(
           id,
           newParentId,
-          getPersonalParent,
+          (parentId) => getPersonalParent(session.user.id, parentId),
         );
         if (isCircular) {
           return NextResponse.json(
@@ -100,7 +109,7 @@ export async function PUT(
         await validateFolderDepth(
           newParentId,
           session.user.id,
-          getPersonalParent,
+          (parentId) => getPersonalParent(session.user.id, parentId),
         );
       } catch {
         return NextResponse.json(
@@ -122,15 +131,17 @@ export async function PUT(
 
   if (finalName !== existing.name || finalParentId !== existing.parentId) {
     if (finalParentId) {
-      const dup = await prisma.folder.findUnique({
-        where: {
-          name_parentId_userId: {
-            name: finalName,
-            parentId: finalParentId,
-            userId: session.user.id,
+      const dup = await withUserTenantRls(session.user.id, async () =>
+        prisma.folder.findUnique({
+          where: {
+            name_parentId_userId: {
+              name: finalName,
+              parentId: finalParentId,
+              userId: session.user.id,
+            },
           },
-        },
-      });
+        }),
+      );
       if (dup && dup.id !== id) {
         return NextResponse.json(
           { error: API_ERROR.FOLDER_ALREADY_EXISTS },
@@ -138,9 +149,11 @@ export async function PUT(
         );
       }
     } else {
-      const rootDup = await prisma.folder.findFirst({
-        where: { name: finalName, parentId: null, userId: session.user.id },
-      });
+      const rootDup = await withUserTenantRls(session.user.id, async () =>
+        prisma.folder.findFirst({
+          where: { name: finalName, parentId: null, userId: session.user.id },
+        }),
+      );
       if (rootDup && rootDup.id !== id) {
         return NextResponse.json(
           { error: API_ERROR.FOLDER_ALREADY_EXISTS },
@@ -150,10 +163,12 @@ export async function PUT(
     }
   }
 
-  const folder = await prisma.folder.update({
-    where: { id },
-    data: updateData,
-  });
+  const folder = await withUserTenantRls(session.user.id, async () =>
+    prisma.folder.update({
+      where: { id },
+      data: updateData,
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
@@ -186,7 +201,9 @@ export async function DELETE(
 
   const { id } = await params;
 
-  const existing = await prisma.folder.findUnique({ where: { id } });
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.folder.findUnique({ where: { id } }),
+  );
   if (!existing) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
@@ -197,15 +214,19 @@ export async function DELETE(
   // Collect children and detect name conflicts at the target parent level.
   // The deleted folder still occupies a name slot during the transaction,
   // so we must include it when computing used names.
-  const children = await prisma.folder.findMany({
-    where: { parentId: id },
-    select: { id: true, name: true },
-  });
+  const children = await withUserTenantRls(session.user.id, async () =>
+    prisma.folder.findMany({
+      where: { parentId: id },
+      select: { id: true, name: true },
+    }),
+  );
 
-  const siblingsAtTarget = await prisma.folder.findMany({
-    where: { parentId: existing.parentId, userId: session.user.id },
-    select: { id: true, name: true },
-  });
+  const siblingsAtTarget = await withUserTenantRls(session.user.id, async () =>
+    prisma.folder.findMany({
+      where: { parentId: existing.parentId, userId: session.user.id },
+      select: { id: true, name: true },
+    }),
+  );
 
   const usedNames = new Set(
     siblingsAtTarget
@@ -235,26 +256,28 @@ export async function DELETE(
     }
   }
 
-  await prisma.$transaction(async (tx) => {
-    // Promote children individually, renaming conflicts in the same update
-    for (const child of children) {
-      const rename = renames.find((r) => r.childId === child.id);
-      await tx.folder.update({
-        where: { id: child.id },
-        data: {
-          parentId: existing.parentId,
-          ...(rename ? { name: rename.newName } : {}),
-        },
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.$transaction(async (tx) => {
+      // Promote children individually, renaming conflicts in the same update
+      for (const child of children) {
+        const rename = renames.find((r) => r.childId === child.id);
+        await tx.folder.update({
+          where: { id: child.id },
+          data: {
+            parentId: existing.parentId,
+            ...(rename ? { name: rename.newName } : {}),
+          },
+        });
+      }
+      // Unassign entries from this folder
+      await tx.passwordEntry.updateMany({
+        where: { folderId: id },
+        data: { folderId: null },
       });
-    }
-    // Unassign entries from this folder
-    await tx.passwordEntry.updateMany({
-      where: { folderId: id },
-      data: { folderId: null },
-    });
-    // Delete the folder
-    await tx.folder.delete({ where: { id } });
-  });
+      // Delete the folder
+      await tx.folder.delete({ where: { id } });
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,

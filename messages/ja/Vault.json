@@ -40,7 +40,7 @@
   "changePassphraseFailed": "パスフレーズの変更に失敗しました。",
   "verifierNotSetHint": "パスフレーズを変更するには、一度保管庫をロックしてアンロックしてください。",
   "verifierVersionUnsupported": "パスフレーズを変更するには、アプリを更新してください。",
-  "forgotPassphrase": "パスフレーズを忘れた場合",
+  "recoverPassphrase": "パスフレーズを忘れた場合",
   "resetVault": "保管庫をリセット",
   "recoveryKey": "回復キー",
   "recoveryKeyBannerMessage": "パスフレーズを忘れた場合に備えて回復キーを設定しましょう。",

@@ -28,7 +28,7 @@ Because competitor capabilities vary by plan and deployment model, always verify
 | Feature | passwd-sso | 1Password | Bitwarden | Notes |
 |---|---|---|---|---|
 | E2E encryption | Done | Yes | Yes | Personal vault is E2E |
-| Server-side encryption (organization) | Done | Yes | Yes | For sharing use cases |
+| Server-side encryption (team) | Done | Yes | Yes | For sharing use cases |
 | Auto-lock | Done | Yes | Yes | 15 min idle / 5 min hidden tab |
 | Key rotation | --- (prepared) | Yes | No | |
 | Multiple vaults | --- | Yes | Yes | |
@@ -44,19 +44,19 @@ Because competitor capabilities vary by plan and deployment model, always verify
 | SSH keys | --- | Yes | No | |
 | Boolean custom field | --- | No | Yes | |
 
-## 4. Sharing & Organization
+## 4. Sharing & Team
 
 | Feature | passwd-sso | 1Password | Bitwarden | Notes |
 |---|---|---|---|---|
 | Expiring link sharing | Done | Yes | No | Access logs + rate limiting |
-| Organization / team vault | Done | Yes | Yes | RBAC |
+| Team / team vault | Done | Yes | Yes | RBAC |
 | Emergency Access | Done | Yes | No | |
 
 ## 5. Audit / Monitoring
 
 | Feature | passwd-sso | 1Password | Bitwarden | Notes |
 |---|---|---|---|---|
-| Audit logs (personal + org) | Done | Yes | Yes | |
+| Audit logs (personal + team) | Done | Yes | Yes | |
 | Breach/weak/reuse checks | Done | Yes | Yes | |
 
 ## 6. Import / Export

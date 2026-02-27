@@ -1,13 +1,14 @@
 /**
  * Server-side audit logging helpers.
  *
- * logAudit() is fire-and-forget — it never throws and never blocks the response.
+ * logAudit() is async nonblocking — it never throws and never blocks the response.
  * Dual-write: PostgreSQL AuditLog table + structured JSON to stdout (via pino).
  * extractRequestMeta() extracts IP and User-Agent from NextRequest headers.
  */
 
 import { prisma } from "@/lib/prisma";
 import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
+import { withBypassRls } from "@/lib/tenant-rls";
 import type { AuditAction, AuditScope } from "@prisma/client";
 import type { NextRequest } from "next/server";
 
@@ -17,7 +18,8 @@ export interface AuditLogParams {
   scope: AuditScope;
   action: AuditAction;
   userId: string;
-  orgId?: string;
+  tenantId?: string;
+  teamId?: string;
   targetType?: string;
   targetId?: string;
   metadata?: Record<string, unknown>;
@@ -52,14 +54,14 @@ export function sanitizeMetadata(value: unknown): unknown {
 }
 
 /**
- * Write an audit log entry. Fire-and-forget: errors are silently caught.
+ * Write an audit log entry. Async nonblocking: errors are silently caught.
  *
  * Dual-write:
  * 1. PostgreSQL AuditLog table (existing, unchanged)
  * 2. Structured JSON to stdout via pino (for Fluent Bit forwarding)
  */
 export function logAudit(params: AuditLogParams): void {
-  const { scope, action, userId, orgId, targetType, targetId, metadata, ip, userAgent } = params;
+  const { scope, action, userId, tenantId, teamId, targetType, targetId, metadata, ip, userAgent } = params;
 
   // Truncate metadata if too large
   let safeMetadata: Record<string, unknown> | undefined;
@@ -75,23 +77,43 @@ export function logAudit(params: AuditLogParams): void {
   const safeUserAgent = userAgent?.slice(0, 512) ?? null;
 
   // --- DB write (existing, unchanged) ---
-  prisma.auditLog
-    .create({
-      data: {
-        scope,
-        action,
-        userId,
-        orgId: orgId ?? null,
-        targetType: targetType ?? null,
-        targetId: targetId ?? null,
-        metadata: safeMetadata as never ?? undefined,
-        ip: ip ?? null,
-        userAgent: safeUserAgent,
-      },
-    })
-    .catch(() => {
-      // Silently swallow — audit logging must never break the app
+  void (async () => {
+    await withBypassRls(prisma, async () => {
+      let resolvedTenantId = tenantId ?? null;
+      if (!resolvedTenantId && teamId) {
+        const team = await prisma.team.findUnique({
+          where: { id: teamId },
+          select: { tenantId: true },
+        });
+        resolvedTenantId = team?.tenantId ?? null;
+      }
+      if (!resolvedTenantId) {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { tenantId: true },
+        });
+        resolvedTenantId = user?.tenantId ?? null;
+      }
+      if (!resolvedTenantId) return;
+
+      await prisma.auditLog.create({
+        data: {
+          scope,
+          action,
+          userId,
+          tenantId: resolvedTenantId,
+          teamId: teamId ?? null,
+          targetType: targetType ?? null,
+          targetId: targetId ?? null,
+          metadata: safeMetadata as never ?? undefined,
+          ip: ip ?? null,
+          userAgent: safeUserAgent,
+        },
+      });
     });
+  })().catch(() => {
+    // Silently swallow — audit logging must never break the app
+  });
 
   // --- Structured JSON emit for external forwarding ---
   // auditLogger.enabled is false when AUDIT_LOG_FORWARD !== "true",
@@ -103,7 +125,7 @@ export function logAudit(params: AuditLogParams): void {
           scope,
           action,
           userId,
-          orgId: orgId ?? null,
+          teamId: teamId ?? null,
           targetType: targetType ?? null,
           targetId: targetId ?? null,
           metadata: sanitizeMetadata(safeMetadata),

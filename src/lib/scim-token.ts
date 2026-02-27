@@ -2,10 +2,12 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
 import { SCIM_TOKEN_PREFIX } from "@/lib/scim/token-utils";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { getLogger } from "@/lib/logger";
 
 // ─── Constants ────────────────────────────────────────────────
 
-/** Fallback userId for audit logs when token creator has left the org. */
+/** Fallback userId for audit logs when token creator has left the team. */
 export const SCIM_SYSTEM_USER_ID = "system:scim";
 
 /** Minimum interval (ms) between lastUsedAt updates to reduce DB writes. */
@@ -15,7 +17,8 @@ const LAST_USED_AT_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
 
 export interface ValidatedScimToken {
   tokenId: string;
-  orgId: string;
+  teamId: string;
+  tenantId: string;
   createdById: string | null;
   /** Always non-null: createdById ?? SCIM_SYSTEM_USER_ID. */
   auditUserId: string;
@@ -50,7 +53,7 @@ function extractBearer(req: NextRequest): string | null {
  * 3. SHA-256 hash → DB lookup
  * 4. Check revokedAt / expiresAt
  * 5. Best-effort lastUsedAt update (throttled to 5-min intervals)
- * 6. Return orgId + auditUserId (with SCIM_SYSTEM_USER_ID fallback)
+ * 6. Return teamId + auditUserId (with SCIM_SYSTEM_USER_ID fallback)
  */
 export async function validateScimToken(
   req: NextRequest,
@@ -67,17 +70,23 @@ export async function validateScimToken(
 
   const tokenHash = hashToken(plaintext);
 
-  const token = await prisma.scimToken.findUnique({
-    where: { tokenHash },
-    select: {
-      id: true,
-      orgId: true,
-      createdById: true,
-      revokedAt: true,
-      expiresAt: true,
-      lastUsedAt: true,
-    },
-  });
+  const token = await withBypassRls(prisma, async () =>
+    prisma.scimToken.findUnique({
+      where: { tokenHash },
+      select: {
+        id: true,
+        teamId: true,
+        tenantId: true,
+        createdById: true,
+        revokedAt: true,
+        expiresAt: true,
+        lastUsedAt: true,
+        team: {
+          select: { tenantId: true },
+        },
+      },
+    }),
+  );
 
   if (!token) {
     return { ok: false, error: "SCIM_TOKEN_INVALID" };
@@ -88,26 +97,31 @@ export async function validateScimToken(
   if (token.expiresAt && token.expiresAt.getTime() <= Date.now()) {
     return { ok: false, error: "SCIM_TOKEN_EXPIRED" };
   }
+  const tenantId = token.tenantId ?? token.team?.tenantId;
+  if (!tenantId) {
+    return { ok: false, error: "SCIM_TOKEN_INVALID" };
+  }
 
   // Best-effort lastUsedAt update — throttled to reduce DB writes
   const now = Date.now();
   const lastUsed = token.lastUsedAt?.getTime() ?? 0;
   if (now - lastUsed >= LAST_USED_AT_THROTTLE_MS) {
-    void prisma.scimToken
-      .update({
+    void withBypassRls(prisma, async () => {
+      await prisma.scimToken.update({
         where: { id: token.id },
         data: { lastUsedAt: new Date(now) },
-      })
-      .catch((err) => {
-        console.warn("Failed to update SCIM token lastUsedAt:", err);
       });
+    }).catch((err) => {
+      getLogger().warn({ err }, "scim.token.lastUsedAt.update_failed");
+    });
   }
 
   return {
     ok: true,
     data: {
       tokenId: token.id,
-      orgId: token.orgId,
+      teamId: token.teamId,
+      tenantId,
       createdById: token.createdById,
       auditUserId: token.createdById ?? SCIM_SYSTEM_USER_ID,
     },

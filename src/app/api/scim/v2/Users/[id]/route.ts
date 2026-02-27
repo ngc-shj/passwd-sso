@@ -10,49 +10,45 @@ import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { AuditAction } from "@prisma/client";
-import { ORG_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
+import { withTenantRls } from "@/lib/tenant-rls";
 
 type Params = { params: Promise<{ id: string }> };
 
-/** Resolve SCIM id → userId. The id could be a userId directly or via ScimExternalMapping. */
-async function resolveUserId(orgId: string, scimId: string): Promise<string | null> {
+async function resolveUserId(tenantId: string, scimId: string): Promise<string | null> {
   if (scimId.length > 255) return null;
 
-  // First try as direct userId (OrgMember.userId)
-  const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId, userId: scimId } },
+  const member = await prisma.tenantMember.findUnique({
+    where: { tenantId_userId: { tenantId, userId: scimId } },
     select: { userId: true },
   });
   if (member) return member.userId;
 
-  // Try via ScimExternalMapping (scimId may be an externalId from the IdP)
-  const mapping = await prisma.scimExternalMapping.findUnique({
+  const mapping = await prisma.scimExternalMapping.findFirst({
     where: {
-      orgId_externalId_resourceType: {
-        orgId,
-        externalId: scimId,
-        resourceType: "User",
-      },
+      tenantId,
+      externalId: scimId,
+      resourceType: "User",
     },
     select: { internalId: true },
   });
   return mapping?.internalId ?? null;
 }
 
-async function fetchUserResource(
-  orgId: string,
-  userId: string,
-  baseUrl: string,
-) {
-  const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId, userId } },
+async function fetchUserResource(tenantId: string, userId: string, baseUrl: string) {
+  const member = await prisma.tenantMember.findUnique({
+    where: { tenantId_userId: { tenantId, userId } },
     include: { user: { select: { id: true, email: true, name: true } } },
   });
-  if (!member || !member.user.email) return null;
+  if (!member || !member.user?.email) return null;
 
   const extMapping = await prisma.scimExternalMapping.findFirst({
-    where: { orgId, internalId: userId, resourceType: "User" },
+    where: {
+      tenantId,
+      internalId: userId,
+      resourceType: "User",
+    },
     select: { externalId: true },
   });
 
@@ -73,43 +69,38 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId } = result.data;
+  const { tenantId } = result.data;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
-  const { id } = await params;
-  const userId = await resolveUserId(orgId, id);
-  if (!userId) {
-    return scimError(404, "User not found");
-  }
+  return withTenantRls(prisma, tenantId, async () => {
+    const { id } = await params;
+    const userId = await resolveUserId(tenantId, id);
+    if (!userId) {
+      return scimError(404, "User not found");
+    }
 
-  const baseUrl = getScimBaseUrl();
-  const resource = await fetchUserResource(orgId, userId, baseUrl);
-  if (!resource) {
-    return scimError(404, "User not found");
-  }
+    const resource = await fetchUserResource(tenantId, userId, getScimBaseUrl());
+    if (!resource) {
+      return scimError(404, "User not found");
+    }
 
-  return scimResponse(resource);
+    return scimResponse(resource);
+  });
 }
 
-// PUT /api/scim/v2/Users/[id] — Full replace (update OrgMember attributes only)
+// PUT /api/scim/v2/Users/[id] — Full replace
 export async function PUT(req: NextRequest, { params }: Params) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, auditUserId } = result.data;
+  const { teamId: scopedTeamId, tenantId, auditUserId } = result.data;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
-  }
-
-  const { id } = await params;
-  const userId = await resolveUserId(orgId, id);
-  if (!userId) {
-    return scimError(404, "User not found");
   }
 
   let body: unknown;
@@ -126,87 +117,105 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   const { active, externalId, name } = parsed.data;
 
-  // OWNER protection
-  const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId, userId } },
-    select: { id: true, role: true, deactivatedAt: true, userId: true },
-  });
-  if (!member) {
-    return scimError(404, "User not found");
-  }
-  if (member.role === ORG_ROLE.OWNER && active === false) {
-    return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
-  }
+  const { id } = await params;
+  const resultResponse = await withTenantRls(prisma, tenantId, async () => {
+    const userId = await resolveUserId(tenantId, id);
+    if (!userId) {
+      return { error: scimError(404, "User not found") };
+    }
 
-  // Determine audit action based on active state change
-  let auditAction: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
-  if (active === false && member.deactivatedAt === null) {
-    auditAction = AUDIT_ACTION.SCIM_USER_DEACTIVATE;
-  } else if (active !== false && member.deactivatedAt !== null) {
-    auditAction = AUDIT_ACTION.SCIM_USER_REACTIVATE;
-  }
+    const member = await prisma.tenantMember.findUnique({
+      where: { tenantId_userId: { tenantId, userId } },
+      select: { id: true, role: true, deactivatedAt: true },
+    });
+    if (!member) {
+      return { error: scimError(404, "User not found") };
+    }
+    if (member.role === "OWNER" && active === false) {
+      return { error: scimError(403, API_ERROR.SCIM_OWNER_PROTECTED) };
+    }
 
-  // Atomic update: OrgMember + externalId mapping
-  try {
-    await prisma.$transaction(async (tx) => {
-      // Update OrgMember attributes
-      await tx.orgMember.update({
-        where: { id: member.id },
-        data: {
-          deactivatedAt: active === false ? (member.deactivatedAt ?? new Date()) : null,
-          scimManaged: true,
-        },
-      });
+    let auditAction: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
+    if (active === false && member.deactivatedAt === null) {
+      auditAction = AUDIT_ACTION.SCIM_USER_DEACTIVATE;
+    } else if (active !== false && member.deactivatedAt !== null) {
+      auditAction = AUDIT_ACTION.SCIM_USER_REACTIVATE;
+    }
 
-      // Update external mapping if provided; clear if omitted (PUT = full replace)
-      if (externalId) {
-        const existingMapping = await tx.scimExternalMapping.findUnique({
-          where: {
-            orgId_externalId_resourceType: { orgId, externalId, resourceType: "User" },
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.tenantMember.update({
+          where: { id: member.id },
+          data: {
+            deactivatedAt: active === false ? (member.deactivatedAt ?? new Date()) : null,
+            scimManaged: true,
+            provisioningSource: "SCIM",
+            lastScimSyncedAt: new Date(),
           },
         });
-        if (existingMapping && existingMapping.internalId !== userId) {
-          throw new Error("SCIM_EXTERNAL_ID_CONFLICT");
-        }
-        if (!existingMapping) {
-          // Delete stale mapping for this user (handles externalId change: ext-A → ext-B)
+
+        if (externalId) {
+          const existingMapping = await tx.scimExternalMapping.findFirst({
+            where: {
+              tenantId,
+              externalId,
+              resourceType: "User",
+            },
+          });
+          if (existingMapping && existingMapping.internalId !== userId) {
+            throw new Error("SCIM_EXTERNAL_ID_CONFLICT");
+          }
+          if (!existingMapping) {
+            await tx.scimExternalMapping.deleteMany({
+              where: {
+                tenantId,
+                internalId: userId,
+                resourceType: "User",
+              },
+            });
+            await tx.scimExternalMapping.create({
+              data: { teamId: scopedTeamId, tenantId, externalId, resourceType: "User", internalId: userId },
+            });
+          }
+        } else {
           await tx.scimExternalMapping.deleteMany({
-            where: { orgId, internalId: userId, resourceType: "User" },
-          });
-          await tx.scimExternalMapping.create({
-            data: { orgId, externalId, resourceType: "User", internalId: userId },
+            where: {
+              tenantId,
+              internalId: userId,
+              resourceType: "User",
+            },
           });
         }
-      } else {
-        // PUT is a full replace — no externalId means clear any existing mapping
-        await tx.scimExternalMapping.deleteMany({
-          where: { orgId, internalId: userId, resourceType: "User" },
-        });
+      });
+    } catch (e) {
+      if (e instanceof Error && e.message === "SCIM_EXTERNAL_ID_CONFLICT") {
+        return { error: scimError(409, "externalId is already mapped to a different resource", "uniqueness") };
       }
-    });
-  } catch (e) {
-    if (e instanceof Error && e.message === "SCIM_EXTERNAL_ID_CONFLICT") {
-      return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
+      if (isScimExternalMappingUniqueViolation(e)) {
+        return { error: scimError(409, "externalId is already mapped to a different resource", "uniqueness") };
+      }
+      throw e;
     }
-    if (isScimExternalMappingUniqueViolation(e)) {
-      return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
-    }
-    throw e;
+
+    const resource = await fetchUserResource(tenantId, userId, getScimBaseUrl());
+    return { resource, userId, auditAction };
+  });
+  if ("error" in resultResponse) {
+    return resultResponse.error;
   }
+  const { resource, userId, auditAction } = resultResponse;
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: auditAction,
     userId: auditUserId,
-    orgId,
-    targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
+    teamId: scopedTeamId,
+    targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
     metadata: { active, externalId, name: name?.formatted },
     ...extractRequestMeta(req),
   });
 
-  const baseUrl = getScimBaseUrl();
-  const resource = await fetchUserResource(orgId, userId, baseUrl);
   return scimResponse(resource!);
 }
 
@@ -216,16 +225,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, auditUserId } = result.data;
+  const { teamId: scopedTeamId, tenantId, auditUserId } = result.data;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
-  }
-
-  const { id } = await params;
-  const userId = await resolveUserId(orgId, id);
-  if (!userId) {
-    return scimError(404, "User not found");
   }
 
   let body: unknown;
@@ -250,120 +253,147 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId, userId } },
-  });
-  if (!member) {
-    return scimError(404, "User not found");
-  }
+  const { id } = await params;
+  const resultResponse = await withTenantRls(prisma, tenantId, async () => {
+    const userId = await resolveUserId(tenantId, id);
+    if (!userId) {
+      return { error: scimError(404, "User not found") };
+    }
 
-  // OWNER protection
-  if (member.role === ORG_ROLE.OWNER && patchResult.active === false) {
-    return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
-  }
+    const member = await prisma.tenantMember.findUnique({
+      where: { tenantId_userId: { tenantId, userId } },
+    });
+    if (!member) {
+      return { error: scimError(404, "User not found") };
+    }
 
-  // Build update data
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const updateData: Record<string, any> = {};
-  let auditAction: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
+    if (member.role === "OWNER" && patchResult.active === false) {
+      return { error: scimError(403, API_ERROR.SCIM_OWNER_PROTECTED) };
+    }
 
-  if (patchResult.active !== undefined) {
-    if (patchResult.active) {
-      updateData.deactivatedAt = null;
-      if (member.deactivatedAt !== null) {
-        auditAction = AUDIT_ACTION.SCIM_USER_REACTIVATE;
-      }
-    } else {
-      updateData.deactivatedAt = member.deactivatedAt ?? new Date();
-      if (member.deactivatedAt === null) {
-        auditAction = AUDIT_ACTION.SCIM_USER_DEACTIVATE;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updateData: Record<string, any> = {
+      scimManaged: true,
+      provisioningSource: "SCIM",
+      lastScimSyncedAt: new Date(),
+    };
+
+    let auditAction: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
+
+    if (patchResult.active !== undefined) {
+      if (patchResult.active) {
+        updateData.deactivatedAt = null;
+        if (member.deactivatedAt !== null) {
+          auditAction = AUDIT_ACTION.SCIM_USER_REACTIVATE;
+        }
+      } else {
+        updateData.deactivatedAt = member.deactivatedAt ?? new Date();
+        if (member.deactivatedAt === null) {
+          auditAction = AUDIT_ACTION.SCIM_USER_DEACTIVATE;
+        }
       }
     }
-  }
 
-  // Always mark as SCIM-managed when touched via PATCH
-  updateData.scimManaged = true;
+    await prisma.tenantMember.update({
+      where: { id: member.id },
+      data: updateData,
+    });
 
-  await prisma.orgMember.update({
-    where: { id: member.id },
-    data: updateData,
+    const resource = await fetchUserResource(tenantId, userId, getScimBaseUrl());
+    return { resource, userId, auditAction };
   });
-
-  // Update User.name if requested (OrgMember attribute, not User table — per plan)
-  // Note: name.formatted maps to User.name, but per plan we only update User table at first provision.
-  // For PATCH, we skip User.name updates to avoid multi-org side effects.
+  if ("error" in resultResponse) {
+    return resultResponse.error;
+  }
+  const { resource, userId, auditAction } = resultResponse;
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: auditAction,
     userId: auditUserId,
-    orgId,
-    targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
+    teamId: scopedTeamId,
+    targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
     metadata: { active: patchResult.active, name: patchResult.name },
     ...extractRequestMeta(req),
   });
 
-  const baseUrl = getScimBaseUrl();
-  const resource = await fetchUserResource(orgId, userId, baseUrl);
   return scimResponse(resource!);
 }
 
-// DELETE /api/scim/v2/Users/[id] — Hard delete OrgMember + OrgMemberKey + ScimExternalMapping
+// DELETE /api/scim/v2/Users/[id] — Remove from tenant
 export async function DELETE(req: NextRequest, { params }: Params) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId, auditUserId } = result.data;
+  const { teamId: scopedTeamId, tenantId, auditUserId } = result.data;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
   const { id } = await params;
-  const userId = await resolveUserId(orgId, id);
-  if (!userId) {
-    return scimError(404, "User not found");
-  }
-
-  const member = await prisma.orgMember.findUnique({
-    where: { orgId_userId: { orgId, userId } },
-    include: { user: { select: { email: true } } },
-  });
-  if (!member) {
-    return scimError(404, "User not found");
-  }
-
-  // OWNER protection
-  if (member.role === ORG_ROLE.OWNER) {
-    return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
-  }
-
-  // Atomic delete: OrgMemberKey + ScimExternalMapping + OrgMember
-  try {
-    await prisma.$transaction([
-      prisma.orgMemberKey.deleteMany({ where: { orgId, userId } }),
-      prisma.scimExternalMapping.deleteMany({
-        where: { orgId, internalId: userId, resourceType: "User" },
-      }),
-      prisma.orgMember.delete({ where: { id: member.id } }),
-    ]);
-  } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {
-      return scimError(409, "Cannot delete user: related resources exist");
+  const resultResponse = await withTenantRls(prisma, tenantId, async () => {
+    const userId = await resolveUserId(tenantId, id);
+    if (!userId) {
+      return { error: scimError(404, "User not found") };
     }
-    throw e;
+
+    const member = await prisma.tenantMember.findUnique({
+      where: { tenantId_userId: { tenantId, userId } },
+      include: { user: { select: { email: true } } },
+    });
+    if (!member) {
+      return { error: scimError(404, "User not found") };
+    }
+
+    if (member.role === "OWNER") {
+      return { error: scimError(403, API_ERROR.SCIM_OWNER_PROTECTED) };
+    }
+
+    try {
+      await prisma.$transaction([
+        prisma.teamMemberKey.deleteMany({ where: { tenantId, userId } }),
+        prisma.scimExternalMapping.deleteMany({
+          where: {
+            tenantId,
+            internalId: userId,
+            resourceType: "User",
+          },
+        }),
+        prisma.teamMember.deleteMany({ where: { tenantId, userId } }),
+        prisma.tenantMember.delete({
+          where: {
+            tenantId_userId: {
+              tenantId,
+              userId,
+            },
+          },
+        }),
+      ]);
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {
+        return { error: scimError(409, "Cannot delete user: related resources exist") };
+      }
+      throw e;
+    }
+
+    return { userId, member };
+  });
+  if ("error" in resultResponse) {
+    return resultResponse.error;
   }
+  const { userId, member } = resultResponse;
 
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.SCIM_USER_DELETE,
     userId: auditUserId,
-    orgId,
-    targetType: AUDIT_TARGET_TYPE.ORG_MEMBER,
+    teamId: scopedTeamId,
+    targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
-    metadata: { email: member.user.email, role: member.role },
+    metadata: { email: member.user?.email ?? null },
     ...extractRequestMeta(req),
   });
 

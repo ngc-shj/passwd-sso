@@ -86,19 +86,19 @@ interface PasswordCardProps {
   onDelete: (id: string) => void;
   onToggleExpand: (id: string) => void;
   onRefresh: () => void;
-  // Optional: data providers for org mode (skip E2E decryption)
+  // Optional: data providers for team mode (skip E2E decryption)
   getPassword?: () => Promise<string>;
   getDetail?: () => Promise<InlineDetailData>;
   getUrl?: () => Promise<string | null>;
-  // Optional: custom edit handler (e.g. org edit dialog)
+  // Optional: custom edit handler (e.g. team edit dialog)
   onEditClick?: () => void;
   // Optional: RBAC permission control
   canEdit?: boolean;
   canDelete?: boolean;
   // Optional: additional info display
   createdBy?: string | null;
-  // Optional: org context for share dialog
-  orgId?: string;
+  // Optional: team context
+  teamId?: string;
   // Optional: reprompt indicator
   requireReprompt?: boolean;
   // Optional: expiration date
@@ -188,11 +188,12 @@ export function PasswordCard({
   canEdit = true,
   canDelete = true,
   createdBy,
-  orgId,
+  teamId,
   requireReprompt = false,
   expiresAt,
 }: PasswordCardProps) {
-  const isOrgMode = !!getPasswordProp;
+  const scopedTeamId = teamId;
+  const isTeamMode = !!getPasswordProp;
   const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
   const isCreditCard = entryType === ENTRY_TYPE.CREDIT_CARD;
   const isIdentity = entryType === ENTRY_TYPE.IDENTITY;
@@ -276,7 +277,7 @@ export function PasswordCard({
     setDetailLoading(true);
 
     if (getDetailProp) {
-      // Org mode: use provided data fetcher
+      // Team mode: use provided data fetcher
       getDetailProp()
         .then((detail) => {
           if (!cancelled) setDetailData(detail);
@@ -548,12 +549,12 @@ export function PasswordCard({
                   )}
                 </>
               )}
-              {createdBy && isOrgMode && (
+              {createdBy && isTeamMode && (
                 <span className="truncate text-xs font-medium">
                   {createdBy} / {entryTypeLabel}
                 </span>
               )}
-              {createdBy && !isOrgMode && (
+              {createdBy && !isTeamMode && (
                 <span className="truncate text-xs">
                   {createdBy}
                 </span>
@@ -648,7 +649,7 @@ export function PasswordCard({
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onSelect={async () => {
-                  if (!isOrgMode) {
+                  if (!isTeamMode) {
                     // Personal: decrypt entry data, strip TOTP
                     try {
                       const { entry } = await fetchDecryptedEntry();
@@ -660,7 +661,7 @@ export function PasswordCard({
                       return;
                     }
                   } else if (getDetailProp) {
-                    // Org: decrypt via getDetail, strip TOTP/internal fields
+                    // Team: decrypt via getDetail, strip TOTP/internal fields
                     try {
                       const detail = await getDetailProp();
                       // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -746,14 +747,14 @@ export function PasswordCard({
                   setDetailData(null);
                   onRefresh();
                 }}
-                orgId={orgId}
+                teamId={scopedTeamId}
               />
             </div>
           ) : null
         )}
       </Card>
 
-      {!isOrgMode && (
+      {!isTeamMode && (
         <PasswordEditDialog
           id={id}
           open={editDialogOpen}
@@ -768,10 +769,10 @@ export function PasswordCard({
       <ShareDialog
         open={shareDialogOpen}
         onOpenChange={setShareDialogOpen}
-        passwordEntryId={isOrgMode ? undefined : id}
-        orgPasswordEntryId={isOrgMode ? id : undefined}
+        passwordEntryId={isTeamMode ? undefined : id}
+        teamPasswordEntryId={isTeamMode ? id : undefined}
         decryptedData={shareData}
-        entryType={isOrgMode ? entryType : undefined}
+        entryType={isTeamMode ? entryType : undefined}
       />
 
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

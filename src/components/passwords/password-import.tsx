@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
-import { useOrgVaultOptional } from "@/lib/org-vault-context";
+import { useTeamVaultOptional } from "@/lib/team-vault-context";
 import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
 import { FileUp } from "lucide-react";
@@ -23,29 +23,29 @@ import { useImportExecution } from "@/components/passwords/use-import-execution"
 
 interface ImportPanelContentProps {
   onComplete: () => void;
-  orgId?: string;
+  teamId?: string;
 }
 
-function ImportPanelContent({ onComplete, orgId }: ImportPanelContentProps) {
+function ImportPanelContent({ onComplete, teamId: scopedTeamId }: ImportPanelContentProps) {
   const t = useTranslations("Import");
   const { encryptionKey, userId } = useVault();
-  const orgVault = useOrgVaultOptional();
-  const isOrgImport = Boolean(orgId);
-  const tagsPath = orgId ? apiPath.orgTags(orgId) : API_PATH.TAGS;
-  const passwordsPath = orgId ? apiPath.orgPasswords(orgId) : API_PATH.PASSWORDS;
+  const teamVault = useTeamVaultOptional();
+  const isTeamImport = Boolean(scopedTeamId);
+  const tagsPath = scopedTeamId ? apiPath.teamTags(scopedTeamId) : API_PATH.TAGS;
+  const passwordsPath = scopedTeamId ? apiPath.teamPasswords(scopedTeamId) : API_PATH.PASSWORDS;
 
-  // Resolve org encryption key for org imports
-  const [orgEncryptionKey, setOrgEncryptionKey] = useState<CryptoKey | undefined>();
-  const [orgKeyVersion, setOrgKeyVersion] = useState<number | undefined>();
+  // Resolve team encryption key for team imports
+  const [teamEncryptionKey, setTeamEncryptionKey] = useState<CryptoKey | undefined>();
+  const [teamKeyVersion, setTeamKeyVersion] = useState<number | undefined>();
   useEffect(() => {
-    if (!isOrgImport || !orgId || !orgVault) return;
-    orgVault.getOrgKeyInfo(orgId).then((info) => {
+    if (!isTeamImport || !scopedTeamId || !teamVault) return;
+    teamVault.getTeamKeyInfo(scopedTeamId).then((info) => {
       if (info) {
-        setOrgEncryptionKey(info.key);
-        setOrgKeyVersion(info.keyVersion);
+        setTeamEncryptionKey(info.key);
+        setTeamKeyVersion(info.keyVersion);
       }
     });
-  }, [isOrgImport, orgId, orgVault]);
+  }, [isTeamImport, scopedTeamId, teamVault]);
 
   const {
     fileRef,
@@ -75,16 +75,16 @@ function ImportPanelContent({ onComplete, orgId }: ImportPanelContentProps) {
   } = useImportExecution({
     t,
     onComplete,
-    isOrgImport,
+    isTeamImport,
     tagsPath,
     passwordsPath,
     sourceFilename,
     encryptedInput,
     userId: userId ?? undefined,
     encryptionKey: encryptionKey ?? undefined,
-    orgEncryptionKey,
-    orgKeyVersion,
-    orgId,
+    teamEncryptionKey,
+    teamKeyVersion,
+    teamId: scopedTeamId,
   });
 
   const reset = () => {
@@ -147,10 +147,10 @@ function ImportPanelContent({ onComplete, orgId }: ImportPanelContentProps) {
 
 interface ImportPagePanelProps {
   onComplete: () => void;
-  orgId?: string;
+  teamId?: string;
 }
 
-export function ImportPagePanel({ onComplete, orgId }: ImportPagePanelProps) {
+export function ImportPagePanel({ onComplete, teamId }: ImportPagePanelProps) {
   const t = useTranslations("Import");
   return (
     <PagePane
@@ -162,16 +162,16 @@ export function ImportPagePanel({ onComplete, orgId }: ImportPagePanelProps) {
         />
       }
     >
-      <ImportPanelContent onComplete={onComplete} orgId={orgId} />
+      <ImportPanelContent onComplete={onComplete} teamId={teamId} />
     </PagePane>
   );
 }
 
-interface OrgImportPagePanelProps {
-  orgId: string;
+interface TeamImportPagePanelProps {
+  teamId?: string;
   onComplete: () => void;
 }
 
-export function OrgImportPagePanel({ orgId, onComplete }: OrgImportPagePanelProps) {
-  return <ImportPagePanel onComplete={onComplete} orgId={orgId} />;
+export function TeamImportPagePanel({ teamId, onComplete }: TeamImportPagePanelProps) {
+  return <ImportPagePanel onComplete={onComplete} teamId={teamId} />;
 }

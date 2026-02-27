@@ -9,6 +9,7 @@ import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -72,15 +73,17 @@ async function handlePOST(request: NextRequest) {
 
   const data = parsed.data;
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: {
-      vaultSetupAt: true,
-      passphraseVerifierHmac: true,
-      passphraseVerifierVersion: true,
-      recoveryKeySetAt: true,
-    },
-  });
+  const user = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        vaultSetupAt: true,
+        passphraseVerifierHmac: true,
+        passphraseVerifierVersion: true,
+        recoveryKeySetAt: true,
+      },
+    }),
+  );
 
   if (!user?.vaultSetupAt) {
     return NextResponse.json(
@@ -117,17 +120,19 @@ async function handlePOST(request: NextRequest) {
   }
 
   // Store recovery key data
-  await prisma.user.update({
-    where: { id: session.user.id },
-    data: {
-      recoveryEncryptedSecretKey: data.encryptedSecretKey,
-      recoverySecretKeyIv: data.secretKeyIv,
-      recoverySecretKeyAuthTag: data.secretKeyAuthTag,
-      recoveryHkdfSalt: data.hkdfSalt,
-      recoveryVerifierHmac: hmacVerifier(data.verifierHash),
-      recoveryKeySetAt: new Date(),
-    },
-  });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.user.update({
+      where: { id: session.user.id },
+      data: {
+        recoveryEncryptedSecretKey: data.encryptedSecretKey,
+        recoverySecretKeyIv: data.secretKeyIv,
+        recoverySecretKeyAuthTag: data.secretKeyAuthTag,
+        recoveryHkdfSalt: data.hkdfSalt,
+        recoveryVerifierHmac: hmacVerifier(data.verifierHash),
+        recoveryKeySetAt: new Date(),
+      },
+    }),
+  );
 
   // Audit log
   const isRegeneration = !!user.recoveryKeySetAt;

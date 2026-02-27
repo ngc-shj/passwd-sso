@@ -5,12 +5,18 @@ const { mockValidateScimToken, mockCheckScimRateLimit } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
 }));
+const { mockWithTenantRls } = vi.hoisted(() => ({
+  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
+}));
 
 vi.mock("@/lib/scim-token", () => ({
   validateScimToken: mockValidateScimToken,
 }));
 vi.mock("@/lib/scim/rate-limit", () => ({
   checkScimRateLimit: mockCheckScimRateLimit,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withTenantRls: mockWithTenantRls,
 }));
 
 import { GET } from "./route";
@@ -24,7 +30,7 @@ describe("GET /api/scim/v2/ServiceProviderConfig", () => {
     vi.clearAllMocks();
     mockValidateScimToken.mockResolvedValue({
       ok: true,
-      data: { tokenId: "t1", orgId: "org-1", createdById: "u1", auditUserId: "u1" },
+      data: { tokenId: "t1", teamId: "team-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
     });
     mockCheckScimRateLimit.mockResolvedValue(true);
   });
@@ -52,5 +58,7 @@ describe("GET /api/scim/v2/ServiceProviderConfig", () => {
     expect(body.patch.supported).toBe(true);
     expect(body.filter.supported).toBe(true);
     expect(body.bulk.supported).toBe(false);
+    expect(body.documentationUri).toBe("https://tools.ietf.org/html/rfc7644");
+    expect(body.authenticationSchemes[0].specUri).toBe("https://tools.ietf.org/html/rfc6750");
   });
 });

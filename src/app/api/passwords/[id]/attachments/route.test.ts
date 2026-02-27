@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: {
     findUnique: vi.fn(),
@@ -11,6 +11,7 @@ const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment } = vi.hoisted((
     count: vi.fn(),
     create: vi.fn(),
   },
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -20,6 +21,9 @@ vi.mock("@/lib/prisma", () => ({
     attachment: mockPrismaAttachment,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { GET, POST } from "./route";

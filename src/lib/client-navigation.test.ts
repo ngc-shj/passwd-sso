@@ -14,12 +14,12 @@ describe("resolveNavigationTarget", () => {
 
   it("treats relative href as internal", () => {
     const result = resolveNavigationTarget(
-      "/ja/dashboard/orgs",
+      "/ja/dashboard/teams",
       "https://example.com",
       "ja"
     );
     expect(result.isInternal).toBe(true);
-    expect(result.internalPath).toBe("/dashboard/orgs");
+    expect(result.internalPath).toBe("/dashboard/teams");
   });
 
   it("keeps external href for cross-origin urls", () => {

@@ -10,16 +10,16 @@ import { fireImportAudit } from "@/components/passwords/password-import-steps";
 interface UseImportExecutionParams {
   t: ImportTranslator;
   onComplete: () => void;
-  isOrgImport: boolean;
+  isTeamImport: boolean;
   tagsPath: string;
   passwordsPath: string;
   sourceFilename: string;
   encryptedInput: boolean;
   userId?: string;
   encryptionKey?: CryptoKey;
-  orgEncryptionKey?: CryptoKey;
-  orgKeyVersion?: number;
-  orgId?: string;
+  teamEncryptionKey?: CryptoKey;
+  teamKeyVersion?: number;
+  teamId?: string;
 }
 
 interface ImportResult {
@@ -39,16 +39,16 @@ interface UseImportExecutionResult {
 export function useImportExecution({
   t,
   onComplete,
-  isOrgImport,
+  isTeamImport,
   tagsPath,
   passwordsPath,
   sourceFilename,
   encryptedInput,
   userId,
   encryptionKey,
-  orgEncryptionKey,
-  orgKeyVersion,
-  orgId,
+  teamEncryptionKey,
+  teamKeyVersion,
+  teamId,
 }: UseImportExecutionParams): UseImportExecutionResult {
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
@@ -64,30 +64,30 @@ export function useImportExecution({
 
   const runImport = async (entries: ParsedEntry[]) => {
     if (entries.length === 0) return;
-    if (!isOrgImport && !encryptionKey) return;
-    if (isOrgImport && !orgEncryptionKey) return;
+    if (!isTeamImport && !encryptionKey) return;
+    if (isTeamImport && !teamEncryptionKey) return;
 
     setImporting(true);
     setProgress({ current: 0, total: entries.length });
     try {
       const { successCount, failedCount } = await runImportEntries({
         entries,
-        isOrgImport,
+        isTeamImport,
         tagsPath,
         passwordsPath,
         sourceFilename,
         userId,
         encryptionKey: encryptionKey ?? undefined,
-        orgEncryptionKey: orgEncryptionKey ?? undefined,
-        orgKeyVersion,
-        orgId,
+        teamEncryptionKey: teamEncryptionKey ?? undefined,
+        teamKeyVersion,
+        teamId,
         onProgress: (current, total) => setProgress({ current, total }),
       });
 
       setDone(true);
       setResult({ success: successCount, failed: failedCount });
 
-      if (!isOrgImport) {
+      if (!isTeamImport) {
         fireImportAudit(entries.length, successCount, failedCount, sourceFilename, encryptedInput);
       }
 

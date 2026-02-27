@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
-import { ENTRY_TYPE, ORG_ROLE } from "@/lib/constants";
+import { ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
 
-const { mockAuth, mockFindMany } = vi.hoisted(() => ({
+const { mockAuth, mockFindMany, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
-const { mockRequireOrgMember } = vi.hoisted(() => ({
-  mockRequireOrgMember: vi.fn(),
+const { mockRequireTeamMember } = vi.hoisted(() => ({
+  mockRequireTeamMember: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -17,15 +18,18 @@ vi.mock("@/lib/prisma", () => ({
     passwordShare: { findMany: mockFindMany },
   },
 }));
-vi.mock("@/lib/org-auth", () => ({
-  requireOrgMember: mockRequireOrgMember,
-  OrgAuthError: class extends Error {
+vi.mock("@/lib/team-auth", () => ({
+  requireTeamMember: mockRequireTeamMember,
+  TeamAuthError: class extends Error {
     status: number;
     constructor(message: string, status: number) {
       super(message);
       this.status = status;
     }
   },
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { GET } from "@/app/api/share-links/mine/route";
@@ -46,9 +50,9 @@ function makeShare(overrides: Record<string, unknown> = {}) {
     createdById: DEFAULT_SESSION.user.id,
     createdBy: { id: DEFAULT_SESSION.user.id, name: "Alice", email: "alice@example.com" },
     passwordEntryId: "pe-1",
-    orgPasswordEntryId: null,
+    teamPasswordEntryId: null,
     passwordEntry: { id: "pe-1" },
-    orgPasswordEntry: null,
+    teamPasswordEntry: null,
     ...overrides,
   };
 }
@@ -56,7 +60,7 @@ function makeShare(overrides: Record<string, unknown> = {}) {
 describe("GET /api/share-links/mine", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.ADMIN });
+    mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.ADMIN });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -84,7 +88,7 @@ describe("GET /api/share-links/mine", () => {
     expect(json.items[0].id).toBe("share-1");
     expect(json.items[0].isActive).toBe(true);
     expect(json.items[0].hasPersonalEntry).toBe(true);
-    expect(json.items[0].orgName).toBeNull();
+    expect(json.items[0].teamName).toBeNull();
     expect(json.items[0].sharedBy).toBe("Alice");
     expect(json.items[0].canRevoke).toBe(true);
     expect(json.nextCursor).toBeNull();
@@ -129,15 +133,15 @@ describe("GET /api/share-links/mine", () => {
     expect(json.items[0].isActive).toBe(false);
   });
 
-  it("includes orgName from orgPasswordEntry", async () => {
+  it("includes teamName from team password entry relation", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindMany.mockResolvedValue([
       makeShare({
         passwordEntryId: null,
-        orgPasswordEntryId: "ope-1",
+        teamPasswordEntryId: "ope-1",
         createdBy: { id: "user-2", name: "Bob", email: "bob@example.com" },
         passwordEntry: null,
-        orgPasswordEntry: { id: "ope-1", org: { name: "Acme Corp" } },
+        teamPasswordEntry: { id: "ope-1", team: { name: "Acme Corp" } },
       }),
     ]);
 
@@ -145,7 +149,7 @@ describe("GET /api/share-links/mine", () => {
     const res = await GET(req as never);
     const { json } = await parseResponse(res);
 
-    expect(json.items[0].orgName).toBe("Acme Corp");
+    expect(json.items[0].teamName).toBe("Acme Corp");
     expect(json.items[0].hasPersonalEntry).toBe(false);
     expect(json.items[0].sharedBy).toBe("Bob");
     expect(json.items[0].canRevoke).toBe(false);
@@ -249,25 +253,25 @@ describe("GET /api/share-links/mine", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           createdById: DEFAULT_SESSION.user.id,
-          orgPasswordEntryId: null,
+          teamPasswordEntryId: null,
         }),
       })
     );
-    expect(mockRequireOrgMember).not.toHaveBeenCalled();
+    expect(mockRequireTeamMember).not.toHaveBeenCalled();
   });
 
-  it("requires org membership and filters by org when org query is provided", async () => {
+  it("requires team membership and filters by team when team query is provided", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindMany.mockResolvedValue([]);
 
-    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?team=team-1");
     await GET(req as never);
 
-    expect(mockRequireOrgMember).toHaveBeenCalledWith(DEFAULT_SESSION.user.id, "org-1");
+    expect(mockRequireTeamMember).toHaveBeenCalledWith(DEFAULT_SESSION.user.id, "team-1");
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          orgPasswordEntry: { orgId: "org-1" },
+          teamPasswordEntry: { teamId: "team-1" },
         }),
       })
     );
@@ -280,12 +284,12 @@ describe("GET /api/share-links/mine", () => {
     );
   });
 
-  it("returns OrgAuthError status when org membership check fails", async () => {
+  it("returns TeamAuthError status when team membership check fails", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    const { OrgAuthError } = await import("@/lib/org-auth");
-    mockRequireOrgMember.mockRejectedValue(new OrgAuthError("FORBIDDEN", 403));
+    const { TeamAuthError } = await import("@/lib/team-auth");
+    mockRequireTeamMember.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
 
-    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?team=team-1");
     const res = await GET(req as never);
     const { status, json } = await parseResponse(res);
 
@@ -294,36 +298,36 @@ describe("GET /api/share-links/mine", () => {
     expect(mockFindMany).not.toHaveBeenCalled();
   });
 
-  it("limits org scoped list to self-created links for VIEWER", async () => {
+  it("limits team scoped list to self-created links for VIEWER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.VIEWER });
+    mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.VIEWER });
     mockFindMany.mockResolvedValue([]);
 
-    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?team=team-1");
     await GET(req as never);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          orgPasswordEntry: { orgId: "org-1" },
+          teamPasswordEntry: { teamId: "team-1" },
           createdById: DEFAULT_SESSION.user.id,
         }),
       })
     );
   });
 
-  it("does not limit org scoped list to self-created links for MEMBER", async () => {
+  it("does not limit team scoped list to self-created links for MEMBER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.MEMBER });
+    mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.MEMBER });
     mockFindMany.mockResolvedValue([]);
 
-    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?team=team-1");
     await GET(req as never);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          orgPasswordEntry: { orgId: "org-1" },
+          teamPasswordEntry: { teamId: "team-1" },
         }),
       })
     );
@@ -336,18 +340,18 @@ describe("GET /api/share-links/mine", () => {
     );
   });
 
-  it("does not limit org scoped list to self-created links for OWNER", async () => {
+  it("does not limit team scoped list to self-created links for OWNER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireOrgMember.mockResolvedValue({ id: "member-1", role: ORG_ROLE.OWNER });
+    mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.OWNER });
     mockFindMany.mockResolvedValue([]);
 
-    const req = createRequest("GET", "http://localhost/api/share-links/mine?org=org-1");
+    const req = createRequest("GET", "http://localhost/api/share-links/mine?team=team-1");
     await GET(req as never);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          orgPasswordEntry: { orgId: "org-1" },
+          teamPasswordEntry: { teamId: "team-1" },
         }),
       })
     );
@@ -400,12 +404,12 @@ describe("GET /api/share-links/mine", () => {
     );
   });
 
-  it("returns empty for shareType=send with org context", async () => {
+  it("returns empty for shareType=send with team context", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
 
     const req = createRequest(
       "GET",
-      "http://localhost/api/share-links/mine?org=org-1&shareType=send"
+      "http://localhost/api/share-links/mine?team=team-1&shareType=send"
     );
     const res = await GET(req as never);
     const { status, json } = await parseResponse(res);

@@ -8,15 +8,15 @@ describe("audit log page group values", () => {
       join(process.cwd(), "src/app/[locale]/dashboard/audit-logs/page.tsx"),
       "utf8"
     );
-    const orgPage = readFileSync(
+    const teamPage = readFileSync(
       join(
         process.cwd(),
-        "src/app/[locale]/dashboard/orgs/[orgId]/audit-logs/page.tsx"
+        "src/app/[locale]/dashboard/teams/[teamId]/audit-logs/page.tsx"
       ),
       "utf8"
     );
 
     expect(personalPage).not.toMatch(/value:\s*"group:[^"]+"/);
-    expect(orgPage).not.toMatch(/value:\s*"group:[^"]+"/);
+    expect(teamPage).not.toMatch(/value:\s*"group:[^"]+"/);
   });
 });

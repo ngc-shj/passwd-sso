@@ -5,6 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // POST /api/passwords/[id]/restore - Restore from trash
 async function handlePOST(
@@ -18,9 +19,11 @@ async function handlePOST(
 
   const { id } = await params;
 
-  const existing = await prisma.passwordEntry.findUnique({
-    where: { id },
-  });
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.findUnique({
+      where: { id },
+    }),
+  );
 
   if (!existing) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -34,10 +37,12 @@ async function handlePOST(
     return NextResponse.json({ error: API_ERROR.NOT_IN_TRASH }, { status: 400 });
   }
 
-  await prisma.passwordEntry.update({
-    where: { id },
-    data: { deletedAt: null },
-  });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.update({
+      where: { id },
+      data: { deletedAt: null },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,

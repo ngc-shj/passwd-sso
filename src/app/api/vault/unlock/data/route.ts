@@ -4,6 +4,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { authOrToken } from "@/lib/auth-or-token";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 export const runtime = "nodejs";
 
@@ -34,25 +35,27 @@ async function handleGET(req: NextRequest) {
 
   const isExtensionToken = authResult.type === "token";
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      vaultSetupAt: true,
-      accountSalt: true,
-      encryptedSecretKey: true,
-      secretKeyIv: true,
-      secretKeyAuthTag: true,
-      keyVersion: true,
-      passphraseVerifierHmac: true,
-      // ECDH fields for org E2E (excluded for extension tokens)
-      ...(!isExtensionToken && {
-        ecdhPublicKey: true,
-        encryptedEcdhPrivateKey: true,
-        ecdhPrivateKeyIv: true,
-        ecdhPrivateKeyAuthTag: true,
-      }),
-    },
-  });
+  const user = await withUserTenantRls(userId, async () =>
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        vaultSetupAt: true,
+        accountSalt: true,
+        encryptedSecretKey: true,
+        secretKeyIv: true,
+        secretKeyAuthTag: true,
+        keyVersion: true,
+        passphraseVerifierHmac: true,
+        // ECDH fields for team E2E (excluded for extension tokens)
+        ...(!isExtensionToken && {
+          ecdhPublicKey: true,
+          encryptedEcdhPrivateKey: true,
+          ecdhPrivateKeyIv: true,
+          ecdhPrivateKeyAuthTag: true,
+        }),
+      },
+    }),
+  );
 
   if (!user?.vaultSetupAt) {
     return NextResponse.json(
@@ -61,19 +64,21 @@ async function handleGET(req: NextRequest) {
     );
   }
 
-  const vaultKey = await prisma.vaultKey.findUnique({
-    where: {
-      userId_version: {
-        userId,
-        version: user.keyVersion,
+  const vaultKey = await withUserTenantRls(userId, async () =>
+    prisma.vaultKey.findUnique({
+      where: {
+        userId_version: {
+          userId,
+          version: user.keyVersion,
+        },
       },
-    },
-    select: {
-      verificationCiphertext: true,
-      verificationIv: true,
-      verificationAuthTag: true,
-    },
-  });
+      select: {
+        verificationCiphertext: true,
+        verificationIv: true,
+        verificationAuthTag: true,
+      },
+    }),
+  );
 
   // Build ECDH fields only for session-based auth (not extension tokens)
   const ecdhFields = !isExtensionToken && "ecdhPublicKey" in user

@@ -13,6 +13,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -32,10 +33,12 @@ async function handleGET(
 
   const { id } = await params;
 
-  const entry = await prisma.passwordEntry.findUnique({
-    where: { id },
-    select: { userId: true },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.findUnique({
+      where: { id },
+      select: { userId: true, tenantId: true },
+    }),
+  );
 
   if (!entry) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -44,17 +47,19 @@ async function handleGET(
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
-  const attachments = await prisma.attachment.findMany({
-    where: { passwordEntryId: id },
-    select: {
-      id: true,
-      filename: true,
-      contentType: true,
-      sizeBytes: true,
-      createdAt: true,
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const attachments = await withUserTenantRls(session.user.id, async () =>
+    prisma.attachment.findMany({
+      where: { passwordEntryId: id },
+      select: {
+        id: true,
+        filename: true,
+        contentType: true,
+        sizeBytes: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+  );
 
   return NextResponse.json(attachments);
 }
@@ -71,10 +76,12 @@ async function handlePOST(
 
   const { id } = await params;
 
-  const entry = await prisma.passwordEntry.findUnique({
-    where: { id },
-    select: { userId: true },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.findUnique({
+      where: { id },
+      select: { userId: true, tenantId: true },
+    }),
+  );
 
   if (!entry) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -84,9 +91,11 @@ async function handlePOST(
   }
 
   // Check attachment count limit
-  const count = await prisma.attachment.count({
-    where: { passwordEntryId: id },
-  });
+  const count = await withUserTenantRls(session.user.id, async () =>
+    prisma.attachment.count({
+      where: { passwordEntryId: id },
+    }),
+  );
   if (count >= MAX_ATTACHMENTS_PER_ENTRY) {
     return NextResponse.json(
       { error: API_ERROR.ATTACHMENT_LIMIT_EXCEEDED },
@@ -190,28 +199,31 @@ async function handlePOST(
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 0;
   let attachment;
   try {
-    attachment = await prisma.attachment.create({
-      data: {
-        id: attachmentId,
-        filename: sanitizedFilename,
-        contentType,
-        sizeBytes: originalSize,
-        encryptedData: Buffer.from(storedBlob),
-        iv,
-        authTag,
-        keyVersion: keyVersion ? parseInt(keyVersion, 10) : null,
-        aadVersion,
-        passwordEntryId: id,
-        createdById: session.user.id,
-      },
-      select: {
-        id: true,
-        filename: true,
-        contentType: true,
-        sizeBytes: true,
-        createdAt: true,
-      },
-    });
+    attachment = await withUserTenantRls(session.user.id, async () =>
+      prisma.attachment.create({
+        data: {
+          id: attachmentId,
+          filename: sanitizedFilename,
+          contentType,
+          sizeBytes: originalSize,
+          encryptedData: Buffer.from(storedBlob),
+          iv,
+          authTag,
+          keyVersion: keyVersion ? parseInt(keyVersion, 10) : null,
+          aadVersion,
+          tenantId: entry.tenantId,
+          passwordEntryId: id,
+          createdById: session.user.id,
+        },
+        select: {
+          id: true,
+          filename: true,
+          contentType: true,
+          sizeBytes: true,
+          createdAt: true,
+        },
+      }),
+    );
   } catch (error) {
     await blobStore.deleteObject(storedBlob, blobContext).catch(() => {});
     throw error;

@@ -63,7 +63,7 @@ describe("runImportEntries", () => {
     vi.clearAllMocks();
   });
 
-  it("imports org entries and reports success/failed counts", async () => {
+  it("imports team entries and reports success/failed counts", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(response(true)) // GET tags
@@ -80,13 +80,13 @@ describe("runImportEntries", () => {
     const progress = vi.fn();
     const result = await runImportEntries({
       entries: [makeEntry({ title: "a" }), makeEntry({ title: "b" })],
-      isOrgImport: true,
-      tagsPath: "/api/org/tags",
-      passwordsPath: "/api/org/passwords",
-      sourceFilename: "org.csv",
-      orgEncryptionKey: {} as CryptoKey,
-      orgKeyVersion: 1,
-      orgId: "org-1",
+      isTeamImport: true,
+      tagsPath: "/api/teams/tags",
+      passwordsPath: "/api/teams/passwords",
+      sourceFilename: "team.csv",
+      teamEncryptionKey: {} as CryptoKey,
+      teamKeyVersion: 1,
+      teamId: "team-1",
       onProgress: progress,
     });
 
@@ -94,7 +94,7 @@ describe("runImportEntries", () => {
     expect(progress).toHaveBeenNthCalledWith(1, 1, 2);
     expect(progress).toHaveBeenNthCalledWith(2, 2, 2);
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    // Org import now encrypts client-side (blob + overview per entry)
+    // Team import now encrypts client-side (blob + overview per entry)
     expect(mockEncryptData).toHaveBeenCalledTimes(4);
   });
 
@@ -111,7 +111,7 @@ describe("runImportEntries", () => {
 
     const result = await runImportEntries({
       entries: [makeEntry()],
-      isOrgImport: false,
+      isTeamImport: false,
       tagsPath: "/api/tags",
       passwordsPath: "/api/passwords",
       sourceFilename: "personal.json",

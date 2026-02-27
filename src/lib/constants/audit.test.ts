@@ -3,7 +3,7 @@ import {
   AUDIT_ACTION,
   AUDIT_ACTION_EMERGENCY_PREFIX,
   AUDIT_ACTION_GROUP,
-  AUDIT_ACTION_GROUPS_ORG,
+  AUDIT_ACTION_GROUPS_TEAM,
   AUDIT_ACTION_GROUPS_PERSONAL,
   AUDIT_ACTION_VALUES,
 } from "@/lib/constants";
@@ -17,11 +17,11 @@ describe("audit constants", () => {
     expect(new Set(valuesFromArray)).toEqual(new Set(valuesFromObject));
   });
 
-  it("has only valid actions in personal and org action groups", () => {
+  it("has only valid actions in personal and team action groups", () => {
     const valid = new Set(Object.values(AUDIT_ACTION));
     const grouped = [
       ...Object.values(AUDIT_ACTION_GROUPS_PERSONAL).flat(),
-      ...Object.values(AUDIT_ACTION_GROUPS_ORG).flat(),
+      ...Object.values(AUDIT_ACTION_GROUPS_TEAM).flat(),
     ];
 
     for (const action of grouped) {
@@ -48,10 +48,10 @@ describe("audit constants", () => {
       AUDIT_ACTION.ENTRY_IMPORT,
       AUDIT_ACTION.ENTRY_EXPORT,
     ]);
-    expect(AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.TRANSFER]).toEqual([
+    expect(AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.TRANSFER]).toEqual([
       AUDIT_ACTION.ENTRY_EXPORT,
     ]);
-    expect(AUDIT_ACTION_GROUPS_ORG[AUDIT_ACTION_GROUP.BULK]).toEqual([
+    expect(AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.BULK]).toEqual([
       AUDIT_ACTION.ENTRY_BULK_TRASH,
       AUDIT_ACTION.ENTRY_EMPTY_TRASH,
       AUDIT_ACTION.ENTRY_BULK_ARCHIVE,
