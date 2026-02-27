@@ -58,6 +58,21 @@ async function resolveGroupMapping(tenantId: string, scimId: string) {
   });
 }
 
+async function resolveActiveTenantMemberId(
+  tx: Pick<typeof prisma, "tenantMember">,
+  tenantId: string,
+  userId: string,
+): Promise<string | null> {
+  const tenantMember = await tx.tenantMember.findUnique({
+    where: { tenantId_userId: { tenantId, userId } },
+    select: { id: true, deactivatedAt: true },
+  });
+  if (!tenantMember || tenantMember.deactivatedAt !== null) {
+    return null;
+  }
+  return tenantMember.id;
+}
+
 async function buildResourceFromMapping(
   mapping: {
     externalGroupId: string;
@@ -168,7 +183,24 @@ export async function PUT(req: NextRequest, { params }: Params) {
             select: { id: true, role: true },
           });
           if (!member) {
-            throw new Error(`SCIM_NO_SUCH_MEMBER:${userId}`);
+            const tenantMemberId = await resolveActiveTenantMemberId(
+              tx,
+              tenantId,
+              userId,
+            );
+            if (!tenantMemberId) {
+              throw new Error(`SCIM_NO_SUCH_MEMBER:${userId}`);
+            }
+            await tx.teamMember.create({
+              data: {
+                teamId: mapping.teamId,
+                userId,
+                tenantId,
+                role: mapping.role,
+                scimManaged: true,
+              },
+            });
+            continue;
           }
           if (member.role === TEAM_ROLE.OWNER) {
             throw new Error("SCIM_OWNER_PROTECTED");
@@ -274,16 +306,38 @@ export async function PATCH(req: NextRequest, { params }: Params) {
             where: { teamId_userId: { teamId: mapping.teamId, userId: action.userId } },
             select: { id: true, role: true },
           });
-          if (!member) {
-            throw new Error(`SCIM_NO_SUCH_MEMBER:${action.userId}`);
-          }
-          if (member.role === TEAM_ROLE.OWNER) {
-            throw new Error("SCIM_OWNER_PROTECTED");
-          }
-
           if (action.op === "add") {
+            if (!member) {
+              const tenantMemberId = await resolveActiveTenantMemberId(
+                tx,
+                tenantId,
+                action.userId,
+              );
+              if (!tenantMemberId) {
+                throw new Error(`SCIM_NO_SUCH_MEMBER:${action.userId}`);
+              }
+              await tx.teamMember.create({
+                data: {
+                  teamId: mapping.teamId,
+                  userId: action.userId,
+                  tenantId,
+                  role: mapping.role,
+                  scimManaged: true,
+                },
+              });
+              continue;
+            }
+            if (member.role === TEAM_ROLE.OWNER) {
+              throw new Error("SCIM_OWNER_PROTECTED");
+            }
             await tx.teamMember.update({ where: { id: member.id }, data: { role: mapping.role } });
           } else if (action.op === "remove") {
+            if (!member) {
+              throw new Error(`SCIM_NO_SUCH_MEMBER:${action.userId}`);
+            }
+            if (member.role === TEAM_ROLE.OWNER) {
+              throw new Error("SCIM_OWNER_PROTECTED");
+            }
             if (member.role === mapping.role) {
               await tx.teamMember.update({ where: { id: member.id }, data: { role: TEAM_ROLE.MEMBER } });
             }

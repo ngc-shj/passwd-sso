@@ -7,6 +7,7 @@ const {
   mockLogAudit,
   mockScimGroupMapping,
   mockTeamMember,
+  mockTenantMember,
   mockTransaction,
   mockWithTenantRls,
 } = vi.hoisted(() => ({
@@ -14,7 +15,8 @@ const {
   mockCheckScimRateLimit: vi.fn(),
   mockLogAudit: vi.fn(),
   mockScimGroupMapping: { findUnique: vi.fn() },
-  mockTeamMember: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+  mockTeamMember: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn(), create: vi.fn() },
+  mockTenantMember: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
 }));
@@ -29,6 +31,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     scimGroupMapping: mockScimGroupMapping,
     teamMember: mockTeamMember,
+    tenantMember: mockTenantMember,
     $transaction: mockTransaction,
   },
 }));
@@ -93,7 +96,9 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
     mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
-    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn({ teamMember: mockTeamMember }));
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({ teamMember: mockTeamMember, tenantMember: mockTenantMember }),
+    );
   });
 
   it("adds a member", async () => {
@@ -123,7 +128,9 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
     mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
-    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn({ teamMember: mockTeamMember }));
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({ teamMember: mockTeamMember, tenantMember: mockTenantMember }),
+    );
   });
 
   it("replaces role members", async () => {
@@ -146,6 +153,38 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     );
 
     expect(res.status).toBe(200);
+  });
+
+  it("creates team member when user exists in tenant but not in team", async () => {
+    mockTeamMember.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "tm-created", userId: "user-2", role: "ADMIN", user: { id: "user-2", email: "u2@example.com" } }]);
+    mockTeamMember.findUnique.mockResolvedValue(null);
+    mockTenantMember.findUnique.mockResolvedValue({ id: "tenmem-2", deactivatedAt: null });
+    mockTeamMember.create.mockResolvedValue({});
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:ADMIN",
+          members: [{ value: "user-2" }],
+        },
+      }),
+      makeParams("grp-1"),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockTeamMember.create).toHaveBeenCalledWith({
+      data: {
+        teamId: "team-1",
+        userId: "user-2",
+        tenantId: "tenant-1",
+        role: "ADMIN",
+        scimManaged: true,
+      },
+    });
   });
 });
 

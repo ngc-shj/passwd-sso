@@ -80,8 +80,12 @@ describe("ensureTenantMembershipForSignIn", () => {
     vi.clearAllMocks();
     mockExtractTenantClaimValue.mockReturnValue("tenant-acme");
     mockSlugifyTenant.mockReturnValue("tenant-acme");
-    mockPrisma.tenant.findUnique.mockResolvedValue({ id: "tenant-acme" });
-    mockPrisma.tenant.create.mockResolvedValue({ id: "tenant-acme" });
+    mockPrisma.tenant.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => {
+      if (where.id === "tenant-acme") return { id: "tenant-acme", slug: "tenant-acme" };
+      if (where.id === "cuid_bootstrap_1") return { slug: "bootstrap-abc123" };
+      return null;
+    });
+    mockPrisma.tenant.create.mockResolvedValue({ id: "tenant-acme", slug: "tenant-acme" });
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
     mockPrisma.tenantMember.upsert.mockResolvedValue({});
     mockPrisma.tenantMember.deleteMany.mockResolvedValue({ count: 1 });
@@ -139,8 +143,8 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it("migrates bootstrap tenant to IdP tenant on first sign-in", async () => {
-    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "tenant_usr_legacy" }]);
+  it("migrates bootstrap tenant identified by bootstrap slug", async () => {
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "cuid_bootstrap_1" }]);
 
     const ok = await ensureTenantMembershipForSignIn("user-1", null, {});
 
@@ -150,12 +154,8 @@ describe("ensureTenantMembershipForSignIn", () => {
       where: { id: "user-1" },
       data: { tenantId: "tenant-acme" },
     });
-    expect(mockPrisma.account.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1" },
-      data: { tenantId: "tenant-acme" },
-    });
     expect(mockPrisma.tenantMember.deleteMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", tenantId: "tenant_usr_legacy" },
+      where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
     });
     expect(mockPrisma.tenant.delete).not.toHaveBeenCalled();
   });

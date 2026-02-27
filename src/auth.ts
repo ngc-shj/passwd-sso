@@ -41,7 +41,7 @@ export async function ensureTenantMembershipForSignIn(
   const tenant = await withBypassRls(prisma, async () => {
     let found = await prisma.tenant.findUnique({
       where: { id: tenantClaim },
-      select: { id: true },
+      select: { id: true, slug: true },
     });
 
     if (!found) {
@@ -52,7 +52,7 @@ export async function ensureTenantMembershipForSignIn(
             name: tenantClaim,
             slug: tenantSlug,
           },
-          select: { id: true },
+          select: { id: true, slug: true },
         });
       } catch (e) {
         if (
@@ -61,7 +61,7 @@ export async function ensureTenantMembershipForSignIn(
         ) {
           found = await prisma.tenant.findUnique({
             where: { id: tenantClaim },
-            select: { id: true },
+            select: { id: true, slug: true },
           });
         } else {
           throw e;
@@ -75,7 +75,11 @@ export async function ensureTenantMembershipForSignIn(
 
     // Single-tenant sign-in policy: reject cross-tenant login.
     if (existingTenantId && existingTenantId !== found.id) {
-      const isBootstrapTenant = existingTenantId.startsWith("tenant_usr_");
+      const existingTenant = await prisma.tenant.findUnique({
+        where: { id: existingTenantId },
+        select: { slug: true },
+      });
+      const isBootstrapTenant = !!existingTenant?.slug?.startsWith("bootstrap-");
       // Allow one-time migration from bootstrap tenant to IdP tenant.
       if (isBootstrapTenant) {
         await prisma.$transaction(async (tx) => {
