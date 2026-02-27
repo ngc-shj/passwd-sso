@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaTransaction, mockAuditCreate } = vi.hoisted(() => ({
+const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaTransaction, mockAuditCreate, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockAuthOrToken: vi.fn(),
   mockPrismaPasswordEntry: {
@@ -17,6 +17,7 @@ const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockPrismaHistory, m
   },
   mockPrismaTransaction: vi.fn(),
   mockAuditCreate: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
@@ -27,6 +28,9 @@ vi.mock("@/lib/prisma", () => ({
     auditLog: { create: mockAuditCreate },
     $transaction: mockPrismaTransaction,
   },
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { GET, PUT, DELETE } from "./route";

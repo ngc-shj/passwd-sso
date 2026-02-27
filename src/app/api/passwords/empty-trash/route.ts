@@ -5,6 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // POST /api/passwords/empty-trash - Permanently delete all entries in trash
 async function handlePOST(req: NextRequest) {
@@ -13,22 +14,26 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const entries = await prisma.passwordEntry.findMany({
-    where: {
-      userId: session.user.id,
-      deletedAt: { not: null },
-    },
-    select: { id: true },
-  });
+  const entries = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.findMany({
+      where: {
+        userId: session.user.id,
+        deletedAt: { not: null },
+      },
+      select: { id: true },
+    }),
+  );
   const entryIds = entries.map((entry) => entry.id);
 
-  const result = await prisma.passwordEntry.deleteMany({
-    where: {
-      userId: session.user.id,
-      id: { in: entryIds },
-      deletedAt: { not: null },
-    },
-  });
+  const result = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.deleteMany({
+      where: {
+        userId: session.user.id,
+        id: { in: entryIds },
+        deletedAt: { not: null },
+      },
+    }),
+  );
 
   const requestMeta = extractRequestMeta(req);
 

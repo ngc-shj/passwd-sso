@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // POST /api/passwords/[id]/history/[historyId]/restore - Restore a history version
 export async function POST(
@@ -17,9 +18,11 @@ export async function POST(
 
   const { id, historyId } = await params;
 
-  const entry = await prisma.passwordEntry.findUnique({
-    where: { id },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.findUnique({
+      where: { id },
+    }),
+  );
 
   if (!entry) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -28,16 +31,19 @@ export async function POST(
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
-  const history = await prisma.passwordEntryHistory.findUnique({
-    where: { id: historyId },
-  });
+  const history = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntryHistory.findUnique({
+      where: { id: historyId },
+    }),
+  );
 
   if (!history || history.entryId !== id) {
     return NextResponse.json({ error: API_ERROR.HISTORY_NOT_FOUND }, { status: 404 });
   }
 
   // Snapshot current blob, then overwrite with history version
-  await prisma.$transaction(async (tx) => {
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.$transaction(async (tx) => {
     // Save current as new history
     await tx.passwordEntryHistory.create({
       data: {
@@ -73,7 +79,8 @@ export async function POST(
         aadVersion: history.aadVersion,
       },
     });
-  });
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,

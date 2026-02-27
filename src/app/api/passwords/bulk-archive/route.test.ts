@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate } = vi.hoisted(() => ({
+const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
   mockUpdateMany: vi.fn(),
   mockAuditCreate: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -19,6 +20,9 @@ vi.mock("@/lib/prisma", () => ({
       create: mockAuditCreate,
     },
   },
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { POST } from "./route";

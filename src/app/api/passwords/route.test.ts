@@ -9,6 +9,7 @@ const {
   mockExtTokenUpdate,
   mockAuditCreate,
   mockWithUserTenantRls,
+  mockWithBypassRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: {
@@ -20,6 +21,7 @@ const {
   mockExtTokenUpdate: vi.fn(),
   mockAuditCreate: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -34,6 +36,9 @@ vi.mock("@/lib/crypto-server", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/logger", () => {
   const noop = vi.fn();
