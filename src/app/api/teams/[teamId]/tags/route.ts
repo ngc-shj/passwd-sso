@@ -9,6 +9,7 @@ import {
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -22,7 +23,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamMember(session.user.id, teamId);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamMember(session.user.id, teamId),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -30,19 +33,21 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const tags = await prisma.teamTag.findMany({
-    where: { teamId: teamId },
-    orderBy: { name: "asc" },
-    include: {
-      _count: {
-        select: {
-          passwords: {
-            where: { deletedAt: null, isArchived: false },
+  const tags = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamTag.findMany({
+      where: { teamId: teamId },
+      orderBy: { name: "asc" },
+      include: {
+        _count: {
+          select: {
+            passwords: {
+              where: { deletedAt: null, isArchived: false },
+            },
           },
         },
       },
-    },
-  });
+    }),
+  );
 
   return NextResponse.json(
     tags.map((t) => ({
@@ -64,7 +69,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -89,9 +96,11 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const { name, color } = parsed.data;
 
-  const existing = await prisma.teamTag.findUnique({
-    where: { name_teamId: { name, teamId: teamId } },
-  });
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamTag.findUnique({
+      where: { name_teamId: { name, teamId: teamId } },
+    }),
+  );
   if (existing) {
     return NextResponse.json(
       { error: API_ERROR.TAG_ALREADY_EXISTS },
@@ -99,13 +108,15 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  const tag = await prisma.teamTag.create({
-    data: {
-      name,
-      color: color || null,
-      teamId: teamId,
-    },
-  });
+  const tag = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamTag.create({
+      data: {
+        name,
+        color: color || null,
+        teamId: teamId,
+      },
+    }),
+  );
 
   return NextResponse.json(
     { id: tag.id, name: tag.name, color: tag.color, count: 0 },

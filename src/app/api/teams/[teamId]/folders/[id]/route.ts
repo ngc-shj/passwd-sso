@@ -12,13 +12,16 @@ import {
   type ParentNode,
 } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
-function getTeamParent(id: string): Promise<ParentNode | null> {
-  return prisma.teamFolder
-    .findUnique({ where: { id }, select: { parentId: true, teamId: true } })
-    .then((f) => (f ? { parentId: f.parentId, ownerId: f.teamId } : null));
+function getTeamParent(userId: string, id: string): Promise<ParentNode | null> {
+  return withUserTenantRls(userId, async () =>
+    prisma.teamFolder
+      .findUnique({ where: { id }, select: { parentId: true, teamId: true } })
+      .then((f) => (f ? { parentId: f.parentId, ownerId: f.teamId } : null)),
+  );
 }
 
 // PUT /api/teams/[teamId]/folders/[id] - Update a team folder
@@ -31,7 +34,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -39,7 +44,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const existing = await prisma.teamFolder.findUnique({ where: { id } });
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamFolder.findUnique({ where: { id } }),
+  );
   if (!existing || existing.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
@@ -72,7 +79,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
       if (newParentId) {
         // Parent ownership + existence check
         try {
-          await validateParentFolder(newParentId, teamId, getTeamParent);
+          await validateParentFolder(
+            newParentId,
+            teamId,
+            (parentIdValue) => getTeamParent(session.user.id, parentIdValue),
+          );
         } catch {
           return NextResponse.json(
             { error: API_ERROR.NOT_FOUND },
@@ -87,7 +98,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
           );
         }
 
-        const isCircular = await checkCircularReference(id, newParentId, getTeamParent);
+        const isCircular = await checkCircularReference(
+          id,
+          newParentId,
+          (parentIdValue) => getTeamParent(session.user.id, parentIdValue),
+        );
         if (isCircular) {
           return NextResponse.json(
             { error: API_ERROR.FOLDER_CIRCULAR_REFERENCE },
@@ -97,7 +112,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
       }
 
       try {
-        await validateFolderDepth(newParentId, teamId, getTeamParent);
+        await validateFolderDepth(
+          newParentId,
+          teamId,
+          (parentIdValue) => getTeamParent(session.user.id, parentIdValue),
+        );
       } catch {
         return NextResponse.json(
           { error: API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED },
@@ -117,9 +136,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   if (finalName !== existing.name || finalParentId !== existing.parentId) {
     if (finalParentId) {
-      const dup = await prisma.teamFolder.findUnique({
-        where: { name_parentId_teamId: { name: finalName, parentId: finalParentId, teamId: teamId } },
-      });
+      const dup = await withUserTenantRls(session.user.id, async () =>
+        prisma.teamFolder.findUnique({
+          where: { name_parentId_teamId: { name: finalName, parentId: finalParentId, teamId: teamId } },
+        }),
+      );
       if (dup && dup.id !== id) {
         return NextResponse.json(
           { error: API_ERROR.FOLDER_ALREADY_EXISTS },
@@ -127,9 +148,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
         );
       }
     } else {
-      const rootDup = await prisma.teamFolder.findFirst({
-        where: { name: finalName, parentId: null, teamId: teamId },
-      });
+      const rootDup = await withUserTenantRls(session.user.id, async () =>
+        prisma.teamFolder.findFirst({
+          where: { name: finalName, parentId: null, teamId: teamId },
+        }),
+      );
       if (rootDup && rootDup.id !== id) {
         return NextResponse.json(
           { error: API_ERROR.FOLDER_ALREADY_EXISTS },
@@ -139,10 +162,12 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
   }
 
-  const folder = await prisma.teamFolder.update({
-    where: { id },
-    data: updateData,
-  });
+  const folder = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamFolder.update({
+      where: { id },
+      data: updateData,
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,
@@ -174,7 +199,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -182,21 +209,27 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const existing = await prisma.teamFolder.findUnique({ where: { id } });
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamFolder.findUnique({ where: { id } }),
+  );
   if (!existing || existing.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   // Collect children and detect name conflicts at the target parent level.
-  const children = await prisma.teamFolder.findMany({
-    where: { parentId: id },
-    select: { id: true, name: true },
-  });
+  const children = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamFolder.findMany({
+      where: { parentId: id },
+      select: { id: true, name: true },
+    }),
+  );
 
-  const siblingsAtTarget = await prisma.teamFolder.findMany({
-    where: { parentId: existing.parentId, teamId: teamId },
-    select: { id: true, name: true },
-  });
+  const siblingsAtTarget = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamFolder.findMany({
+      where: { parentId: existing.parentId, teamId: teamId },
+      select: { id: true, name: true },
+    }),
+  );
 
   const usedNames = new Set(
     siblingsAtTarget
@@ -223,23 +256,25 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     }
   }
 
-  await prisma.$transaction(async (tx) => {
-    for (const child of children) {
-      const rename = renames.find((r) => r.childId === child.id);
-      await tx.teamFolder.update({
-        where: { id: child.id },
-        data: {
-          parentId: existing.parentId,
-          ...(rename ? { name: rename.newName } : {}),
-        },
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.$transaction(async (tx) => {
+      for (const child of children) {
+        const rename = renames.find((r) => r.childId === child.id);
+        await tx.teamFolder.update({
+          where: { id: child.id },
+          data: {
+            parentId: existing.parentId,
+            ...(rename ? { name: rename.newName } : {}),
+          },
+        });
+      }
+      await tx.teamPasswordEntry.updateMany({
+        where: { teamFolderId: id },
+        data: { teamFolderId: null },
       });
-    }
-    await tx.teamPasswordEntry.updateMany({
-      where: { teamFolderId: id },
-      data: { teamFolderId: null },
-    });
-    await tx.teamFolder.delete({ where: { id } });
-  });
+      await tx.teamFolder.delete({ where: { id } });
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,

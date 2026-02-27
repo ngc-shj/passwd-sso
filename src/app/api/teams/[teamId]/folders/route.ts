@@ -11,13 +11,16 @@ import {
 import { API_ERROR } from "@/lib/api-error-codes";
 import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
-function getTeamParent(id: string): Promise<ParentNode | null> {
-  return prisma.teamFolder
-    .findUnique({ where: { id }, select: { parentId: true, teamId: true } })
-    .then((f) => (f ? { parentId: f.parentId, ownerId: f.teamId } : null));
+function getTeamParent(userId: string, id: string): Promise<ParentNode | null> {
+  return withUserTenantRls(userId, async () =>
+    prisma.teamFolder
+      .findUnique({ where: { id }, select: { parentId: true, teamId: true } })
+      .then((f) => (f ? { parentId: f.parentId, ownerId: f.teamId } : null)),
+  );
 }
 
 // GET /api/teams/[teamId]/folders - List team folders with entry count
@@ -30,7 +33,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamMember(session.user.id, teamId);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamMember(session.user.id, teamId),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -38,19 +43,21 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const folders = await prisma.teamFolder.findMany({
-    where: { teamId: teamId },
-    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    include: {
-      _count: {
-        select: {
-          entries: {
-            where: { deletedAt: null },
+  const folders = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamFolder.findMany({
+      where: { teamId: teamId },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      include: {
+        _count: {
+          select: {
+            entries: {
+              where: { deletedAt: null },
+            },
           },
         },
       },
-    },
-  });
+    }),
+  );
 
   return NextResponse.json(
     folders.map((f) => ({
@@ -75,7 +82,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -103,7 +112,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Parent ownership + existence check
   if (parentId) {
     try {
-      await validateParentFolder(parentId, teamId, getTeamParent);
+      await validateParentFolder(
+        parentId,
+        teamId,
+        (parentIdValue) => getTeamParent(session.user.id, parentIdValue),
+      );
     } catch {
       return NextResponse.json(
         { error: API_ERROR.NOT_FOUND },
@@ -113,7 +126,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   try {
-    await validateFolderDepth(parentId ?? null, teamId, getTeamParent);
+    await validateFolderDepth(
+      parentId ?? null,
+      teamId,
+      (parentIdValue) => getTeamParent(session.user.id, parentIdValue),
+    );
   } catch {
     return NextResponse.json(
       { error: API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED },
@@ -122,9 +139,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   if (parentId) {
-    const dup = await prisma.teamFolder.findUnique({
-      where: { name_parentId_teamId: { name, parentId, teamId: teamId } },
-    });
+    const dup = await withUserTenantRls(session.user.id, async () =>
+      prisma.teamFolder.findUnique({
+        where: { name_parentId_teamId: { name, parentId, teamId: teamId } },
+      }),
+    );
     if (dup) {
       return NextResponse.json(
         { error: API_ERROR.FOLDER_ALREADY_EXISTS },
@@ -132,9 +151,11 @@ export async function POST(req: NextRequest, { params }: Params) {
       );
     }
   } else {
-    const rootDup = await prisma.teamFolder.findFirst({
-      where: { name, parentId: null, teamId: teamId },
-    });
+    const rootDup = await withUserTenantRls(session.user.id, async () =>
+      prisma.teamFolder.findFirst({
+        where: { name, parentId: null, teamId: teamId },
+      }),
+    );
     if (rootDup) {
       return NextResponse.json(
         { error: API_ERROR.FOLDER_ALREADY_EXISTS },
@@ -143,14 +164,16 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
   }
 
-  const folder = await prisma.teamFolder.create({
-    data: {
-      name,
-      parentId: parentId ?? null,
-      teamId: teamId,
-      sortOrder: sortOrder ?? 0,
-    },
-  });
+  const folder = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamFolder.create({
+      data: {
+        name,
+        parentId: parentId ?? null,
+        teamId: teamId,
+        sortOrder: sortOrder ?? 0,
+      },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,

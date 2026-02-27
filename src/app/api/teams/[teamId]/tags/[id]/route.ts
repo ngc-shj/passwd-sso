@@ -5,6 +5,7 @@ import { createTeamTagSchema } from "@/lib/validations";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -18,7 +19,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -26,7 +29,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const tag = await prisma.teamTag.findUnique({ where: { id } });
+  const tag = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamTag.findUnique({ where: { id } }),
+  );
   if (!tag || tag.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
@@ -46,13 +51,15 @@ export async function PUT(req: NextRequest, { params }: Params) {
     );
   }
 
-  const updated = await prisma.teamTag.update({
-    where: { id },
-    data: {
-      name: parsed.data.name,
-      color: parsed.data.color || null,
-    },
-  });
+  const updated = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamTag.update({
+      where: { id },
+      data: {
+        name: parsed.data.name,
+        color: parsed.data.color || null,
+      },
+    }),
+  );
 
   return NextResponse.json({
     id: updated.id,
@@ -71,7 +78,9 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -79,12 +88,16 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const tag = await prisma.teamTag.findUnique({ where: { id } });
+  const tag = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamTag.findUnique({ where: { id } }),
+  );
   if (!tag || tag.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  await prisma.teamTag.delete({ where: { id } });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.teamTag.delete({ where: { id } }),
+  );
 
   return NextResponse.json({ success: true });
 }
