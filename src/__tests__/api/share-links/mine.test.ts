@@ -3,9 +3,10 @@ import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
 import { ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
 
-const { mockAuth, mockFindMany } = vi.hoisted(() => ({
+const { mockAuth, mockFindMany, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 const { mockRequireTeamMember } = vi.hoisted(() => ({
   mockRequireTeamMember: vi.fn(),
@@ -26,6 +27,9 @@ vi.mock("@/lib/team-auth", () => ({
       this.status = status;
     }
   },
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { GET } from "@/app/api/share-links/mine/route";

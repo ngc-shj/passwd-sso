@@ -2,10 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, createParams, parseResponse } from "../../helpers/request-builder";
 
-const { mockAuth, mockFindUnique, mockUpdate } = vi.hoisted(() => ({
+const { mockAuth, mockFindUnique, mockUpdate, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindUnique: vi.fn(),
   mockUpdate: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -18,6 +19,9 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { DELETE } from "@/app/api/share-links/[id]/route";

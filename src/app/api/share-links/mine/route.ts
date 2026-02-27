@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { TEAM_ROLE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // GET /api/share-links/mine
 // - Personal context (no `team`): links created by current user, personal entries only
@@ -25,7 +26,9 @@ export async function GET(req: NextRequest) {
   if (teamId) {
     let membershipRole: string | undefined;
     try {
-      const membership = await requireTeamMember(session.user.id, teamId);
+      const membership = await withUserTenantRls(session.user.id, async () =>
+        requireTeamMember(session.user.id, teamId),
+      );
       membershipRole = membership.role;
     } catch (e) {
       if (e instanceof TeamAuthError) {
@@ -69,23 +72,25 @@ export async function GET(req: NextRequest) {
 
   let shares;
   try {
-    shares = await prisma.passwordShare.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: limit + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      include: {
-        createdBy: {
-          select: { id: true, name: true, email: true },
+    shares = await withUserTenantRls(session.user.id, async () =>
+      prisma.passwordShare.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limit + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        include: {
+          createdBy: {
+            select: { id: true, name: true, email: true },
+          },
+          passwordEntry: {
+            select: { id: true },
+          },
+          teamPasswordEntry: {
+            select: { id: true, team: { select: { name: true } } },
+          },
         },
-        passwordEntry: {
-          select: { id: true },
-        },
-        teamPasswordEntry: {
-          select: { id: true, team: { select: { name: true } } },
-        },
-      },
-    });
+      }),
+    );
   } catch {
     return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
   }

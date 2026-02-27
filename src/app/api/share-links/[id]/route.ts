@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -16,16 +17,18 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
-  const share = await prisma.passwordShare.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      shareType: true,
-      createdById: true,
-      revokedAt: true,
-      teamPasswordEntryId: true,
-    },
-  });
+  const share = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordShare.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        shareType: true,
+        createdById: true,
+        revokedAt: true,
+        teamPasswordEntryId: true,
+      },
+    }),
+  );
 
   if (!share || share.createdById !== session.user.id) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -37,10 +40,12 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   const teamPasswordEntryId = share.teamPasswordEntryId;
 
-  await prisma.passwordShare.update({
-    where: { id },
-    data: { revokedAt: new Date() },
-  });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordShare.update({
+      where: { id },
+      data: { revokedAt: new Date() },
+    }),
+  );
 
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);
@@ -52,10 +57,12 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     userId: session.user.id,
     teamId: teamPasswordEntryId
       ? (
-          await prisma.teamPasswordEntry.findUnique({
-            where: { id: teamPasswordEntryId },
-            select: { teamId: true },
-          })
+          await withUserTenantRls(session.user.id, async () =>
+            prisma.teamPasswordEntry.findUnique({
+              where: { id: teamPasswordEntryId },
+              select: { teamId: true },
+            }),
+          )
         )?.teamId
       : undefined,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
