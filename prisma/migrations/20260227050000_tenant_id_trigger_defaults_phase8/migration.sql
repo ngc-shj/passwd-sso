@@ -198,8 +198,9 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  -- Bootstrap users (auto-created tenant_usr_*) get OWNER membership automatically.
-  IF NEW.tenant_id LIKE 'tenant_usr_%' THEN
+  -- Bootstrap users get OWNER membership only when tenant_id matches
+  -- the deterministic bootstrap tenant derived from this user id.
+  IF NEW.tenant_id = CONCAT('tenant_usr_', SUBSTRING(MD5(NEW.id) FROM 1 FOR 20)) THEN
     INSERT INTO "tenant_members" ("id", "tenant_id", "user_id", "role", "created_at", "updated_at")
     VALUES (
       CONCAT('tm_', SUBSTRING(MD5(NEW.tenant_id || ':' || NEW.id) FROM 1 FOR 24)),
