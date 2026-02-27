@@ -1,6 +1,6 @@
 # passwd-sso Production-Readiness ToDo
 
-Last updated: 2026-02-17  
+Last updated: 2026-02-27
 Baseline: `main` branch
 
 ---
@@ -79,8 +79,8 @@ Areas already considered at production level.
 
 - Crypto design: PBKDF2 600k + HKDF domain separation + AAD binding
 - Type safety: `any` count 0, `as any` count 1, `@ts-ignore` count 0, `strict: true`
-- Test ratio: app 38,646 LOC vs tests 20,280 LOC (~52%, 119 files / 1,152 tests)
-- Security review: all 6 sections PASS in `../security/security-review.md`
+- Test ratio: app ~50k LOC vs tests ~30k LOC (295 files / 2,575 tests)
+- Security review: all 7 sections PASS in `../security/security-review.md` (Section 7: tenant RLS added 2026-02-27)
 - CSP + nonce enforcement + violation reporting
 - Rate limiting (Redis + in-memory fallback)
 - i18n (en/ja 884-key parity, APP_NAME env support)
@@ -91,7 +91,7 @@ Areas already considered at production level.
 - Audit logs (personal + team, filter/export supported)
 - External audit-log forwarding (pino + Fluent Bit sidecar)
 - Environment validation (26 vars, startup-time schema check)
-- CI/CD pipeline (4 parallel GitHub Actions jobs, ESLint + Vitest + Next.js build)
+- CI/CD pipeline (4 parallel GitHub Actions jobs, ESLint + Vitest + Next.js build + RLS guard scripts)
 - Structured app logging (pino + withRequestLog + CSP-report sanitization)
 - Health checks (`/api/health/live` liveness + `/api/health/ready` readiness, DB/Redis checks, timeout protection)
 - Monitoring/alerting (CloudWatch metric filters + alarms + ECS stop EventBridge + SNS)
@@ -103,6 +103,8 @@ Areas already considered at production level.
 - DB connection pool tuning (env tuning + maxLifetimeSeconds + graceful shutdown + RDS connection alarm)
 - Load testing (k6 6 scenarios, triple-guard seed script, initial SLOs, threshold pass/fail)
 - Dependency license audit (allowlist JSON 17 entries, strict CI enforcement, expiry checks, policy docs)
+- Multi-tenant isolation (FORCE RLS on 28 tables, `withBypassRls` CI allowlist guard, nested auth CI guard)
+- SCIM 2.0 provisioning (Users + Groups, tenant-scoped tokens, RFC 7644)
 - Production code `console.log`: 0, `TODO/FIXME`: 0
 
 ---

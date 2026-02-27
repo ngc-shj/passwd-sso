@@ -15,9 +15,9 @@ SSO 認証とエンドツーエンド暗号化を備えたセルフホスト型�
 - **セキュリティ監査（Watchtower）** - 漏洩（HIBP）、弱い、再利用、古い、HTTP URL の検出とスコア表示
 - **インポート / エクスポート** - Bitwarden、1Password、Chrome CSV インポート; CSV/JSON エクスポート（互換 / passwd-sso 完全復元プロファイル）
 - **パスワード保護エクスポート** - AES-256-GCM + PBKDF2（600k）で暗号化
-- **ファイル添付** - 暗号化ファイル添付（個人/組織とも E2E）
+- **ファイル添付** - 暗号化ファイル添付（個人/チームとも E2E）
 - **共有リンク** - 期限付きの読み取り専用共有 + アクセスログ
-- **監査ログ** - 個人/組織の監査ログ（フィルタ、エクスポートイベント記録）
+- **監査ログ** - 個人/チームの監査ログ（フィルタ、エクスポートイベント記録）
 - **緊急アクセス** - 鍵交換による一時的な Vault アクセスの申請/承認
 - **セッション管理** - アクティブセッション一覧と個別/全体失効
 - **セキュリティ通知** - 緊急アクセスイベントのメール通知
@@ -26,12 +26,14 @@ SSO 認証とエンドツーエンド暗号化を備えたセルフホスト型�
 - **キーボードショートカット** - `/ or Cmd+K` 検索、`n` 新規、`?` ヘルプ、`Esc` クリア
 - **多言語対応** - 日本語・英語（next-intl）
 - **ダークモード** - ライト / ダーク / システム（next-themes）
-- **組織 Vault** - チームでのパスワード共有（E2E 暗号化、RBAC: Owner/Admin/Member/Viewer）
+- **チーム Vault** - チームでのパスワード共有（E2E 暗号化、RBAC: Owner/Admin/Member/Viewer）
 - **回復キー** - 256 ビット回復キー（HKDF + AES-256-GCM）、Base32 エンコード + チェックサム; パスフレーズなしで Vault を復旧
 - **Vault リセット** - 最終手段としての全データ削除（確認トークン "DELETE MY VAULT"）
 - **アカウントロックアウト** - 段階的ロックアウト（5 回→15 分、10 回→1 時間、15 回→24 時間）+ 監査ログ
 - **レート制限** - Redis による Vault アンロック試行制限
 - **CSP & セキュリティヘッダー** - nonce ベースの Content Security Policy、CSP 違反レポート
+- **SCIM 2.0 プロビジョニング** - テナントスコープのユーザー/グループ同期（RFC 7644）、Bearer トークン認証
+- **マルチテナント分離** - PostgreSQL FORCE ROW LEVEL SECURITY（28 テーブル）、IdP クレームによるテナント解決
 - **セルフホスト** - Docker Compose（PostgreSQL + SAML Jackson + Redis）
 - **ブラウザ拡張（Chrome/Edge, MV3）** - 手動補完、インライン候補、AWS 3 フィールド補完（Account ID/Alias + IAM username + Password）
 
@@ -53,7 +55,7 @@ SSO 認証とエンドツーエンド暗号化を備えたセルフホスト型�
 
 ```
 ブラウザ (Web Crypto API)
-  │  ← 個人/組織 Vault: AES-256-GCM E2E 暗号化/復号
+  │  ← 個人/チーム Vault: AES-256-GCM E2E 暗号化/復号
   ▼
 Next.js アプリ (SSR / API Routes)
   │  ← Auth.js セッション、ルート保護、RBAC
@@ -67,7 +69,7 @@ SAML Jackson (Docker) ← SAML 2.0 IdP (HENNGE, Okta, Azure AD 等)
 
 **個人 Vault** — すべてのパスワードデータは**クライアントサイドで暗号化**されてからサーバーに送信されます。サーバーは暗号文のみを保存し、復号はユーザーのマスターパスフレーズから導出された鍵を使ってブラウザ内でのみ行われます。
 
-**組織 Vault** — 共有パスワードは**クライアントサイド E2E**で暗号化されます。組織鍵配布は ECDH-P256 によるメンバー鍵交換で行います。
+**チーム Vault** — 共有パスワードは**クライアントサイド E2E**で暗号化されます。チーム鍵配布は ECDH-P256 によるメンバー鍵交換で行います。
 
 ## セットアップ
 
@@ -249,6 +251,7 @@ src/
 │   ├── emergency-access/     # 緊急アクセスワークフロー
 │   ├── watchtower/           # セキュリティ監査（HIBP、分析）
 │   ├── health/               # ヘルスチェック（liveness + readiness）
+│   ├── scim/v2/              # SCIM 2.0 プロビジョニング（Users / Groups）
 │   └── csp-report/           # CSP 違反レポート
 ├── components/
 │   ├── layout/               # Header, Sidebar, SearchBar
@@ -301,7 +304,7 @@ extension/
 - **セッションセキュリティ** - データベースセッション（JWT ではない）、8 時間タイムアウト + 1 時間延長
 - **自動ロック** - 15 分無操作または 5 分タブ非表示で Vault をロック
 - **クリップボードクリア** - コピーしたパスワードは 30 秒後に自動消去
-- **組織 Vault** - E2E 暗号化（ECDH-P256）+ メンバーごとの鍵配布
+- **チーム Vault** - E2E 暗号化（ECDH-P256）+ メンバーごとの鍵配布
 - **RBAC** - Owner / Admin / Member / Viewer のロールベースアクセス制御
 - **回復キー** - 256 ビットランダム → HKDF → AES-256-GCM で秘密鍵をラップ; サーバーは HMAC(pepper, verifierHash) のみ保存
 - **Vault リセット** - 最終手段としての全データ削除（固定確認トークン）
@@ -309,6 +312,8 @@ extension/
 - **レート制限** - Redis による機密操作 API の制限（Vault アンロックを含む）
 - **CSRF 防御** - JSON body + SameSite Cookie + CSP + Origin ヘッダー検証（破壊的エンドポイント）
 - **CSP** - nonce ベースの Content Security Policy と違反レポート
+- **マルチテナント分離** - PostgreSQL FORCE RLS（28 テーブル）+ CI ガードスクリプトで意図しない RLS バイパスを防止
+- **SCIM 2.0** - テナントスコープ Bearer トークン、Users/Groups エンドポイント（RFC 7644）
 
 ## デプロイガイド
 

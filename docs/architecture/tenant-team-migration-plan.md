@@ -8,18 +8,16 @@ Migrate from current `Team`-centric model to:
 
 without service interruption.
 
-## Current State
+## Current State — ✅ Migration Complete (2026-02-27)
 
-- Auth is IdP-driven (tenant/company contract boundary in practice)
-- App domain is `Team`-scoped
-- SCIM is currently `team`-scoped
+All phases have been implemented and merged to `main` via PR #119.
 
-## Target State
+## Target State — Achieved
 
-1. Tenant-scoped identity lifecycle and SCIM token scope
-2. Team-scoped collaboration and role assignment
-3. Tenant-aware authorization and data constraints
-4. Optional PostgreSQL RLS after tenant context is fully stable
+1. ✅ Tenant-scoped identity lifecycle and SCIM token scope
+2. ✅ Team-scoped collaboration and role assignment
+3. ✅ Tenant-aware authorization and data constraints
+4. ✅ PostgreSQL FORCE ROW LEVEL SECURITY on all 28 tenant-scoped tables
 
 ## Migration Principles
 
@@ -30,85 +28,69 @@ without service interruption.
 
 ## Phases
 
-### Phase 0: Design Freeze
+### Phase 0: Design Freeze — ✅ Complete
 
 Deliverables:
-- tenant/team vocabulary and ownership matrix
-- SCIM behavior contract (`Users` = tenant lifecycle, `Groups` = team/role mapping)
-- rollout/rollback playbook draft
+- ✅ tenant/team vocabulary and ownership matrix
+- ✅ SCIM behavior contract (`Users` = tenant lifecycle, `Groups` = team/role mapping)
+- ✅ rollout/rollback playbook draft
 
-Exit criteria:
-- architecture docs approved
-
-### Phase 1: Additive Schema
+### Phase 1: Additive Schema — ✅ Complete
 
 Deliverables:
-- new tables: `tenants`, `tenant_members`
-- nullable `tenant_id` on tenant-scoped tables
-- additive indexes/FKs only
+- ✅ new tables: `tenants`, `tenant_members`
+- ✅ nullable `tenant_id` on tenant-scoped tables
+- ✅ additive indexes/FKs only
 
 Reference:
 - `tenant-team-migration-phase1.md`
 - `tenant-team-phase1-additive.sql`
 
-Exit criteria:
-- migration applied in staging/prod without behavior change
-
-### Phase 2: Backfill + Validation
+### Phase 2: Backfill + Validation — ✅ Complete
 
 Deliverables:
-- backfill script: initial `1 team -> 1 tenant`
-- populate `tenant_id` on teams/scim tables
-- validation SQL (null/orphan/duplicate checks)
+- ✅ backfill script: initial `1 team -> 1 tenant`
+- ✅ populate `tenant_id` on teams/scim tables
+- ✅ validation SQL (null/orphan/duplicate checks)
 
-Exit criteria:
-- 0 null `tenant_id` in backfill scope
-- no orphan/duplicate violations
-
-### Phase 3: Application Cutover
+### Phase 3: Application Cutover — ✅ Complete
 
 Deliverables:
-- tenant context resolver in auth/API layer
-- SCIM context switched from team-scoped to tenant-scoped
-- compatibility layer for existing team-era data paths
+- ✅ tenant context resolver in auth/API layer
+- ✅ SCIM context switched from team-scoped to tenant-scoped
+- ✅ compatibility layer for existing team-era data paths
 
-Exit criteria:
-- tenant-aware read/write paths stable in production
-- no elevated 4xx/5xx on SCIM and team/team APIs
-
-### Phase 4: Constraint Tightening
+### Phase 4: Constraint Tightening — ✅ Complete
 
 Deliverables:
-- make `tenant_id` required where intended
-- replace legacy uniqueness with tenant-aware uniqueness
-- remove transitional write paths
+- ✅ `tenant_id` required where intended
+- ✅ tenant-aware uniqueness constraints
+- ✅ transitional write paths removed
 
-Exit criteria:
-- schema constraints aligned with target model
-- compatibility flags removable
-
-### Phase 5: RLS (Optional but Recommended)
-
-Prerequisite:
-- tenant context fully reliable in DB session context
+### Phase 5: RLS — ✅ Complete (FORCE RLS)
 
 Deliverables:
-- RLS policies on tenant-scoped tables
-- session setting strategy (e.g., `SET app.tenant_id = ...`)
-- service-role bypass policy for trusted jobs
+- ✅ FORCE ROW LEVEL SECURITY on all 28 tenant-scoped tables
+- ✅ session setting strategy (`SET LOCAL app.tenant_id = ...`)
+- ✅ service-role bypass via `withBypassRls` (CI guard allowlist)
+- ✅ CI guard scripts (`check-bypass-rls.mjs`, `check-team-auth-rls.mjs`)
 
-Exit criteria:
-- RLS enabled in staging then prod
-- policy tests and operational runbooks in place
-
-### Phase 6: Cleanup + Terminology Alignment
+### Phase 6: Cleanup + Terminology Alignment — ✅ Complete
 
 Deliverables:
-- deprecate team-era naming in API/docs/UI where appropriate
-- keep DB table rename as optional final step (not required for correctness)
+- ✅ org-to-team rename across DB schema, API routes, UI, i18n, tests
+- ✅ DB table mapping updated (organizations → teams)
+- ✅ docs and runtime terms aligned (`tenant`/`team`)
 
-Exit criteria:
-- docs and runtime terms aligned (`tenant`/`team`)
+### Phase 7-9: Security Hardening — ✅ Complete (PR #119)
+
+Additional deliverables beyond original plan:
+- ✅ `externalId` column for IdP claim isolation (prevents tenant ID spoofing)
+- ✅ `isBootstrap` flag replacing fragile slug-prefix detection
+- ✅ Full C0/C1/DEL control character sanitization on tenant claims
+- ✅ Reserved slug prefix collision prevention
+- ✅ P2002 slug collision retry with random suffix fallback
+- ✅ Bootstrap migration covers all 15 tenant-scoped tables
 
 ## RLS Positioning
 

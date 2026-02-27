@@ -1,6 +1,6 @@
 # Feature Gap Analysis Report
 
-Last updated: 2026-02-20
+Last updated: 2026-02-27
 
 ## Purpose
 
@@ -26,6 +26,7 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 
 - E2E encryption (PBKDF2 600k -> HKDF -> AES-256-GCM)
 - Team vault E2E encryption (ECDH-P256 key distribution)
+- Multi-tenant isolation (FORCE ROW LEVEL SECURITY on 28 tables)
 - Auto-lock (15 min idle / 5 min hidden tab)
 - Account lockout (progressive: 5 -> 15 min, 10 -> 1h, 15 -> 24h)
 - Rate limiting (Redis + in-memory fallback)
@@ -61,6 +62,7 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 - Team vault (RBAC: OWNER, ADMIN, MEMBER, VIEWER)
 - Invitation flow (token + expiry)
 - Team-scoped tags, favorites, and folders
+- SCIM 2.0 provisioning (Users + Groups, tenant-scoped tokens)
 
 ### Emergency Access
 
@@ -255,18 +257,15 @@ Audit events: `SEND_CREATE`, `SEND_REVOKE`. Sidebar integrated under "Share".
 
 | # | Feature | 1P | BW | LP | DL | KP | PP | NP | Impact | Implementation Effort |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B-1 | SCIM provisioning | Yes | Yes | Yes | Yes | - | Yes | Yes | High | High |
+| ~~B-1~~ | ~~SCIM provisioning~~ | Yes | Yes | Yes | Yes | - | Yes | Yes | — | — |
 | B-2 | Directory sync (AD/Azure AD/LDAP) | Yes | Yes | Yes | Yes | - | - | - | Medium | High |
 | B-3 | SIEM integration (events API) | Yes | Yes | Yes | Yes | - | - | - | Medium | Medium |
 | B-4 | Security policies (enforce 2FA/password requirements) | Yes | Yes | Yes | Yes | - | Yes | Yes | Medium | Medium |
 | B-5 | Admin password reset | Yes | Yes | Yes | - | - | - | Yes | Low | Medium |
 
-#### B-1 SCIM provisioning
+#### ~~B-1 SCIM provisioning~~ — Implemented (2026-02-27)
 
-- Current: team membership is manual invitation only
-- Competitors: enterprise products broadly support SCIM 2.0
-- Proposal: add `/api/scim/v2/Users` and `/api/scim/v2/Groups`, integrate with Okta/Azure AD/Google Workspace
-- Reference: existing notes in `docs/archive/scim-provisioning.md`
+Implemented SCIM 2.0 provisioning scoped to tenant level. Endpoints: `/api/scim/v2/Users` (CRUD), `/api/scim/v2/Groups` (CRUD), `/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas`. Bearer token auth with tenant-scoped token management. Groups map to team membership roles. Rate limiting and RFC 7644 compliant error responses included.
 
 #### B-3 SIEM integration
 
@@ -340,7 +339,7 @@ Audit events: `SEND_CREATE`, `SEND_REVOKE`. Sidebar integrated under "Share".
 | X-5 | New-login detect & save | Not started |
 | N-1 | Email notification foundation | Not started |
 | N-4 | Emergency-access notification (email) | Not started (depends on N-1) |
-| B-1 | SCIM provisioning | Not started |
+| ~~B-1~~ | ~~SCIM provisioning~~ | ✅ 2026-02-27 |
 
 ### P2: Start early (medium impact x low/medium effort)
 
@@ -374,7 +373,7 @@ Audit events: `SEND_CREATE`, `SEND_REVOKE`. Sidebar integrated under "Share".
 | E-1 | SSH keys + SSH Agent | New entry type + native process integration |
 | D-1 | SSH Agent integration | Depends on desktop/CLI direction |
 | D-2 | Secrets management | Depends on CLI + API maturity |
-| B-2 | Directory sync | Better considered after SCIM |
+| B-2 | Directory sync | SCIM foundation in place; can build on top |
 | V-5 | Multiple vaults | Significant key-management redesign |
 | U-1 | Email aliases | Requires mail infra integration |
 | U-3 | Travel Mode | Niche feature |
@@ -418,13 +417,14 @@ Remaining: N-1, N-4
 10. **N-4** Emergency-access request notifications
 11. ~~**C-1** Send (temporary sharing)~~ ✅
 
-### Phase 4: Enterprise readiness (P1 + P2)
+### Phase 4: Enterprise readiness (P1 + P2) — Partially complete
 
 ```
 Goal: Add controls needed for enterprise use
+Completed: B-1 SCIM
 ```
 
-1. **B-1** SCIM provisioning
+1. ~~**B-1** SCIM provisioning~~ ✅
 2. **B-4** Security policies
 3. **B-3** SIEM integration
 4. **S-5** Session management
@@ -455,12 +455,14 @@ Feature-category coverage:
 | KeePassXC | 7/11 | Fully local, SSH Agent, Auto-Type |
 | Proton Pass | 8/11 | Email aliases, Swiss jurisdiction, ecosystem |
 | NordPass | 7/11 | XChaCha20, email masking, offline mode |
-| **passwd-sso** | **8/11** | E2E encryption, PQC-ready, self-hosted, SAML SSO, Send |
+| **passwd-sso** | **9/11** | E2E encryption, PQC-ready, self-hosted, SAML SSO, Send, SCIM, tenant RLS |
 
 **passwd-sso differentiators:**
 
 - ML-KEM hybrid PQC (emergency access) — rare among competitors
 - Fully self-hosted + SAML 2.0 SSO — uncommon outside Bitwarden
+- Multi-tenant isolation with FORCE ROW LEVEL SECURITY (28 tables)
+- SCIM 2.0 provisioning (tenant-scoped, team-level group mapping)
 - Coexistence of team vault + personal E2E vault
 - Strong audit-log surface (36 action types)
 - Send (temporary text/file sharing) parity with Bitwarden
@@ -470,15 +472,15 @@ Feature-category coverage:
 
 - No mobile / desktop apps
 - No general email notification foundation (breach/emergency/device alerts)
-- Enterprise controls (SCIM, SIEM, policy engine)
+- Enterprise controls (SIEM, policy engine) — SCIM now implemented
 - Extension gaps: new-login detect/save prompt, card/address autofill
 
-**Improvements since previous report (2026-02-17):**
+**Improvements since previous report (2026-02-20):**
 
-- ~~Missing folders/hierarchy~~ -> implemented (personal + team, max depth 5)
-- ~~No extension TOTP autofill~~ -> implemented (SHA1/256/512)
-- Added: clipboard auto-clear, master-password reprompt, duplicate detection, expiration, Send
-- Watchtower score now includes duplicates + expiration
+- ~~No SCIM~~ -> implemented (Users + Groups, tenant-scoped tokens, RFC 7644)
+- Multi-tenant model with FORCE ROW LEVEL SECURITY on all 28 tenant-scoped tables
+- Org-to-team rename completed (DB, API, UI, i18n)
+- CI guard scripts for RLS bypass allowlist and nested auth detection
 
 ---
 
