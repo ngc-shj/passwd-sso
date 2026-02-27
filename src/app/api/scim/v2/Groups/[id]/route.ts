@@ -14,6 +14,7 @@ import { parseGroupPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { withTenantRls } from "@/lib/tenant-rls";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -82,15 +83,17 @@ export async function GET(req: NextRequest, { params }: Params) {
     return scimError(429, "Too many requests");
   }
 
-  const { id } = await params;
-  const role = await resolveGroupRole(scopedTeamId, tenantId, id);
-  if (!role) {
-    return scimError(404, "Group not found");
-  }
+  return withTenantRls(prisma, tenantId, async () => {
+    const { id } = await params;
+    const role = await resolveGroupRole(scopedTeamId, tenantId, id);
+    if (!role) {
+      return scimError(404, "Group not found");
+    }
 
-  const baseUrl = getScimBaseUrl();
-  const resource = await buildGroupResource(scopedTeamId, role, baseUrl);
-  return scimResponse(resource);
+    const baseUrl = getScimBaseUrl();
+    const resource = await buildGroupResource(scopedTeamId, role, baseUrl);
+    return scimResponse(resource);
+  });
 }
 
 // PUT /api/scim/v2/Groups/[id] — Full member replacement
@@ -105,12 +108,6 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return scimError(429, "Too many requests");
   }
 
-  const { id } = await params;
-  const role = await resolveGroupRole(scopedTeamId, tenantId, id);
-  if (!role) {
-    return scimError(404, "Group not found");
-  }
-
   let body: unknown;
   try {
     body = await req.json();
@@ -123,75 +120,91 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return scimError(400, parsed.error.issues.map((i) => i.message).join("; "));
   }
 
-  const requestedUserIds = new Set(parsed.data.members.map((m) => m.value));
+  const { id } = await params;
+  const resultResponse = await withTenantRls(prisma, tenantId, async () => {
+    const role = await resolveGroupRole(scopedTeamId, tenantId, id);
+    if (!role) {
+      return { error: scimError(404, "Group not found") };
+    }
 
-  // Get current members in this role
-  const currentMembers = await prisma.teamMember.findMany({
-    where: { teamId: scopedTeamId, role, deactivatedAt: null },
-    select: { id: true, userId: true, role: true },
-  });
-  const currentUserIds = new Set(currentMembers.map((m) => m.userId));
+    const requestedUserIds = new Set(parsed.data.members.map((m) => m.value));
 
-  // Members to add to this role
-  const toAdd = [...requestedUserIds].filter((uid) => !currentUserIds.has(uid));
-  // Members to remove from this role (will become MEMBER)
-  const toRemove = currentMembers.filter((m) => !requestedUserIds.has(m.userId));
+    // Get current members in this role
+    const currentMembers = await prisma.teamMember.findMany({
+      where: { teamId: scopedTeamId, role, deactivatedAt: null },
+      select: { id: true, userId: true, role: true },
+    });
+    const currentUserIds = new Set(currentMembers.map((m) => m.userId));
 
-  // Block adding members to OWNER role (OWNER role is not a SCIM group, but guard anyway)
-  // Note: SCIM_GROUP_ROLES excludes OWNER, so this shouldn't happen, but defensive check
-  if (role === TEAM_ROLE.OWNER) {
-    return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
-  }
+    // Members to add to this role
+    const toAdd = [...requestedUserIds].filter((uid) => !currentUserIds.has(uid));
+    // Members to remove from this role (will become MEMBER)
+    const toRemove = currentMembers.filter((m) => !requestedUserIds.has(m.userId));
 
-  // Apply changes atomically — all OWNER checks inside tx to avoid TOCTOU
-  try {
-    await prisma.$transaction(async (tx) => {
-      for (const userId of toAdd) {
-        const member = await tx.teamMember.findUnique({
-          where: { teamId_userId: { teamId: scopedTeamId, userId } },
-          select: { id: true, role: true },
-        });
-        if (!member) {
-          throw new Error(`SCIM_NO_SUCH_MEMBER:${userId}`);
-        }
-        if (member.role === TEAM_ROLE.OWNER) {
-          throw new Error("SCIM_OWNER_PROTECTED");
-        }
-        await tx.teamMember.update({
-          where: { id: member.id },
-          data: { role },
-        });
-      }
+    // Block adding members to OWNER role (OWNER role is not a SCIM group, but guard anyway)
+    // Note: SCIM_GROUP_ROLES excludes OWNER, so this shouldn't happen, but defensive check
+    if (role === TEAM_ROLE.OWNER) {
+      return { error: scimError(403, API_ERROR.SCIM_OWNER_PROTECTED) };
+    }
 
-      for (const m of toRemove) {
-        // Re-check role inside tx to avoid TOCTOU
-        const fresh = await tx.teamMember.findUnique({
-          where: { id: m.id },
-          select: { role: true },
-        });
-        if (fresh?.role === TEAM_ROLE.OWNER) {
-          throw new Error("SCIM_OWNER_PROTECTED");
-        }
-        // Only demote if member is still in the target role (avoids overwriting concurrent changes)
-        if (fresh?.role === role) {
+    // Apply changes atomically — all OWNER checks inside tx to avoid TOCTOU
+    try {
+      await prisma.$transaction(async (tx) => {
+        for (const userId of toAdd) {
+          const member = await tx.teamMember.findUnique({
+            where: { teamId_userId: { teamId: scopedTeamId, userId } },
+            select: { id: true, role: true },
+          });
+          if (!member) {
+            throw new Error(`SCIM_NO_SUCH_MEMBER:${userId}`);
+          }
+          if (member.role === TEAM_ROLE.OWNER) {
+            throw new Error("SCIM_OWNER_PROTECTED");
+          }
           await tx.teamMember.update({
-            where: { id: m.id },
-            data: { role: TEAM_ROLE.MEMBER },
+            where: { id: member.id },
+            data: { role },
           });
         }
+
+        for (const m of toRemove) {
+          // Re-check role inside tx to avoid TOCTOU
+          const fresh = await tx.teamMember.findUnique({
+            where: { id: m.id },
+            select: { role: true },
+          });
+          if (fresh?.role === TEAM_ROLE.OWNER) {
+            throw new Error("SCIM_OWNER_PROTECTED");
+          }
+          // Only demote if member is still in the target role (avoids overwriting concurrent changes)
+          if (fresh?.role === role) {
+            await tx.teamMember.update({
+              where: { id: m.id },
+              data: { role: TEAM_ROLE.MEMBER },
+            });
+          }
+        }
+      });
+    } catch (e) {
+      if (e instanceof Error) {
+        if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
+          return { error: scimError(400, "Referenced member does not exist in this team") };
+        }
+        if (e.message === "SCIM_OWNER_PROTECTED") {
+          return { error: scimError(403, API_ERROR.SCIM_OWNER_PROTECTED) };
+        }
       }
-    });
-  } catch (e) {
-    if (e instanceof Error) {
-      if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
-        return scimError(400, "Referenced member does not exist in this team");
-      }
-      if (e.message === "SCIM_OWNER_PROTECTED") {
-        return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
-      }
+      throw e;
     }
-    throw e;
+
+    const baseUrl = getScimBaseUrl();
+    const resource = await buildGroupResource(scopedTeamId, role, baseUrl);
+    return { resource, role, toAdd, toRemove };
+  });
+  if ("error" in resultResponse) {
+    return resultResponse.error;
   }
+  const { resource, role, toAdd, toRemove } = resultResponse;
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,
@@ -204,8 +217,6 @@ export async function PUT(req: NextRequest, { params }: Params) {
     ...extractRequestMeta(req),
   });
 
-  const baseUrl = getScimBaseUrl();
-  const resource = await buildGroupResource(scopedTeamId, role, baseUrl);
   return scimResponse(resource);
 }
 
@@ -219,12 +230,6 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
-  }
-
-  const { id } = await params;
-  const role = await resolveGroupRole(scopedTeamId, tenantId, id);
-  if (!role) {
-    return scimError(404, "Group not found");
   }
 
   let body: unknown;
@@ -249,49 +254,65 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  try {
-    await prisma.$transaction(async (tx) => {
-      for (const action of actions) {
-        const member = await tx.teamMember.findUnique({
-          where: { teamId_userId: { teamId: scopedTeamId, userId: action.userId } },
-          select: { id: true, role: true },
-        });
-        if (!member) {
-          throw new Error(`SCIM_NO_SUCH_MEMBER:${action.userId}`);
-        }
+  const { id } = await params;
+  const resultResponse = await withTenantRls(prisma, tenantId, async () => {
+    const role = await resolveGroupRole(scopedTeamId, tenantId, id);
+    if (!role) {
+      return { error: scimError(404, "Group not found") };
+    }
 
-        // OWNER protection
-        if (member.role === TEAM_ROLE.OWNER) {
-          throw new Error("SCIM_OWNER_PROTECTED");
-        }
-
-        if (action.op === "add") {
-          await tx.teamMember.update({
-            where: { id: member.id },
-            data: { role },
+    try {
+      await prisma.$transaction(async (tx) => {
+        for (const action of actions) {
+          const member = await tx.teamMember.findUnique({
+            where: { teamId_userId: { teamId: scopedTeamId, userId: action.userId } },
+            select: { id: true, role: true },
           });
-        } else if (action.op === "remove") {
-          // When removed from a group, default to MEMBER
-          if (member.role === role) {
+          if (!member) {
+            throw new Error(`SCIM_NO_SUCH_MEMBER:${action.userId}`);
+          }
+
+          // OWNER protection
+          if (member.role === TEAM_ROLE.OWNER) {
+            throw new Error("SCIM_OWNER_PROTECTED");
+          }
+
+          if (action.op === "add") {
             await tx.teamMember.update({
               where: { id: member.id },
-              data: { role: TEAM_ROLE.MEMBER },
+              data: { role },
             });
+          } else if (action.op === "remove") {
+            // When removed from a group, default to MEMBER
+            if (member.role === role) {
+              await tx.teamMember.update({
+                where: { id: member.id },
+                data: { role: TEAM_ROLE.MEMBER },
+              });
+            }
           }
         }
+      });
+    } catch (e) {
+      if (e instanceof Error) {
+        if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
+          return { error: scimError(400, "Referenced member does not exist in this team") };
+        }
+        if (e.message === "SCIM_OWNER_PROTECTED") {
+          return { error: scimError(403, API_ERROR.SCIM_OWNER_PROTECTED) };
+        }
       }
-    });
-  } catch (e) {
-    if (e instanceof Error) {
-      if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
-        return scimError(400, "Referenced member does not exist in this team");
-      }
-      if (e.message === "SCIM_OWNER_PROTECTED") {
-        return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
-      }
+      throw e;
     }
-    throw e;
+
+    const baseUrl = getScimBaseUrl();
+    const resource = await buildGroupResource(scopedTeamId, role, baseUrl);
+    return { resource, role };
+  });
+  if ("error" in resultResponse) {
+    return resultResponse.error;
   }
+  const { resource, role } = resultResponse;
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,
@@ -307,8 +328,6 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     ...extractRequestMeta(req),
   });
 
-  const baseUrl = getScimBaseUrl();
-  const resource = await buildGroupResource(scopedTeamId, role, baseUrl);
   return scimResponse(resource);
 }
 

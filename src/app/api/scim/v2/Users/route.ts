@@ -152,10 +152,8 @@ export async function POST(req: NextRequest) {
 
   // Transaction: find/create user + create TeamMember + create ScimExternalMapping
   try {
-    const created = await prisma.$transaction(async (tx) => {
-      if (typeof tx.$executeRaw === "function") {
-        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
-      }
+    const created = await withTenantRls(prisma, tenantId, async () =>
+      prisma.$transaction(async (tx) => {
 
       // Find or create User by email
       let user = await tx.user.findUnique({ where: { email: userName } });
@@ -239,8 +237,9 @@ export async function POST(req: NextRequest) {
         where: { teamId_userId: { teamId: scopedTeamId, userId: user.id } },
       });
 
-      return { user, member: member!, externalId, reactivated: !!existingMember };
-    });
+        return { user, member: member!, externalId, reactivated: !!existingMember };
+      }),
+    );
 
     logAudit({
       scope: AUDIT_SCOPE.TEAM,

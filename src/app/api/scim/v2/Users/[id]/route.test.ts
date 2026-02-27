@@ -10,6 +10,7 @@ const {
   mockScimExternalMapping,
   mockTeamMemberKey,
   mockTransaction,
+  mockWithTenantRls,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
@@ -19,6 +20,7 @@ const {
   mockScimExternalMapping: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   mockTeamMemberKey: { deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
+  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/lib/scim-token", () => ({
@@ -39,6 +41,9 @@ vi.mock("@/lib/prisma", () => ({
     teamMemberKey: mockTeamMemberKey,
     $transaction: mockTransaction,
   },
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withTenantRls: mockWithTenantRls,
 }));
 
 import { GET, PUT, PATCH, DELETE } from "./route";
@@ -452,7 +457,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
 
 describe("PATCH /api/scim/v2/Users/[id]", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
   });
@@ -593,7 +598,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
 
 describe("DELETE /api/scim/v2/Users/[id]", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
   });
