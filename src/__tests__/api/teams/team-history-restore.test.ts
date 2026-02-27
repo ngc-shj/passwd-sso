@@ -1,0 +1,157 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_SESSION } from "../../helpers/mock-auth";
+import { createRequest, createParams, parseResponse } from "../../helpers/request-builder";
+
+const {
+  mockAuth,
+  mockRequireTeamPermission,
+  mockEntryFindUnique,
+  mockHistoryFindUnique,
+  mockTransaction,
+  mockWithUserTenantRls,
+} = vi.hoisted(() => ({
+  mockAuth: vi.fn(),
+  mockRequireTeamPermission: vi.fn(),
+  mockEntryFindUnique: vi.fn(),
+  mockHistoryFindUnique: vi.fn(),
+  mockTransaction: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+}));
+
+vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/team-auth", () => {
+  class TeamAuthError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
+  }
+  return {
+    requireTeamPermission: mockRequireTeamPermission,
+    TeamAuthError,
+  };
+});
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    teamPasswordEntry: { findUnique: mockEntryFindUnique },
+    teamPasswordEntryHistory: { findUnique: mockHistoryFindUnique },
+    $transaction: mockTransaction,
+  },
+}));
+vi.mock("@/lib/audit", () => ({
+  logAudit: vi.fn(),
+  extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
+}));
+
+import { POST } from "@/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route";
+import { TeamAuthError } from "@/lib/team-auth";
+
+describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns 401 when not authenticated", async () => {
+    mockAuth.mockResolvedValue(null);
+    const req = createRequest("POST");
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(401);
+    expect(json.error).toBe("UNAUTHORIZED");
+  });
+
+  it("returns 403 when lacking permission", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
+    const req = createRequest("POST");
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    const { status } = await parseResponse(res);
+    expect(status).toBe(403);
+  });
+
+  it("returns 404 when entry not found", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue(null);
+    const req = createRequest("POST");
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(404);
+    expect(json.error).toBe("NOT_FOUND");
+  });
+
+  it("returns 404 when entry belongs to different team", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "other-team" });
+    const req = createRequest("POST");
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    const { status } = await parseResponse(res);
+    expect(status).toBe(404);
+  });
+
+  it("returns 404 when history not found", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "o1" });
+    mockHistoryFindUnique.mockResolvedValue(null);
+    const req = createRequest("POST");
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(404);
+    expect(json.error).toBe("HISTORY_NOT_FOUND");
+  });
+
+  it("returns 404 when history belongs to different entry", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "o1" });
+    mockHistoryFindUnique.mockResolvedValue({ id: "h1", entryId: "other-entry" });
+    const req = createRequest("POST");
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    const { status } = await parseResponse(res);
+    expect(status).toBe(404);
+  });
+
+  it("restores history version successfully", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue({
+      id: "p1",
+      teamId: "o1",
+      encryptedBlob: "cur",
+      blobIv: "curIv",
+      blobAuthTag: "curTag",
+      aadVersion: 1,
+      teamKeyVersion: 3,
+    });
+    mockHistoryFindUnique.mockResolvedValue({
+      id: "h1",
+      entryId: "p1",
+      encryptedBlob: "old",
+      blobIv: "oldIv",
+      blobAuthTag: "oldTag",
+      aadVersion: 0,
+      teamKeyVersion: 2,
+      changedAt: new Date("2025-01-01"),
+    });
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
+      await fn({
+        teamPasswordEntryHistory: {
+          create: vi.fn(),
+          findMany: vi.fn().mockResolvedValue([]),
+          deleteMany: vi.fn(),
+        },
+        teamPasswordEntry: { update: vi.fn() },
+      });
+    });
+
+    const req = createRequest("POST");
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(200);
+    expect(json.success).toBe(true);
+  });
+});

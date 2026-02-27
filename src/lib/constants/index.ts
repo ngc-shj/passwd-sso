@@ -11,10 +11,15 @@ export type { TotpAlgorithm } from "./totp";
 export { CUSTOM_FIELD_TYPE, CUSTOM_FIELD_TYPE_VALUES } from "./custom-field";
 export type { CustomFieldType } from "./custom-field";
 
-export { ORG_ROLE, ORG_ROLE_VALUES, INVITE_ROLE_VALUES } from "./org";
-export type { OrgRoleValue } from "./org";
-export { ORG_PERMISSION } from "./org-permission";
-export type { OrgPermissionValue } from "./org-permission";
+export {
+  TEAM_ROLE,
+  TEAM_ROLE_VALUES,
+  TEAM_INVITE_ROLE_VALUES,
+  INVITE_ROLE_VALUES,
+} from "./team-role";
+export type { TeamRoleValue } from "./team-role";
+export { TEAM_PERMISSION } from "./team-permission";
+export type { TeamPermissionValue } from "./team-permission";
 
 export { EA_STATUS } from "./emergency-access";
 export type { EaStatusValue } from "./emergency-access";
@@ -38,7 +43,7 @@ export {
   AUDIT_ACTION_VALUES,
   AUDIT_ACTION_GROUP,
   AUDIT_ACTION_GROUPS_PERSONAL,
-  AUDIT_ACTION_GROUPS_ORG,
+  AUDIT_ACTION_GROUPS_TEAM,
   AUDIT_ACTION_EMERGENCY_PREFIX,
   AUDIT_METADATA_KEY,
 } from "./audit";

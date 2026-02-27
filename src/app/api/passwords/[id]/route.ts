@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { authOrToken } from "@/lib/auth-or-token";
 import { withRequestLog } from "@/lib/with-request-log";
 import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // GET /api/passwords/[id] - Get password detail (returns encrypted blob)
 async function handleGET(
@@ -27,10 +28,12 @@ async function handleGET(
 
   const { id } = await params;
 
-  const entry = await prisma.passwordEntry.findUnique({
-    where: { id },
-    include: { tags: { select: { id: true } } },
-  });
+  const entry = await withUserTenantRls(userId, async () =>
+    prisma.passwordEntry.findUnique({
+      where: { id },
+      include: { tags: { select: { id: true } } },
+    }),
+  );
 
   if (!entry) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -85,9 +88,11 @@ async function handlePUT(
 
   const { id } = await params;
 
-  const existing = await prisma.passwordEntry.findUnique({
-    where: { id },
-  });
+  const existing = await withUserTenantRls(userId, async () =>
+    prisma.passwordEntry.findUnique({
+      where: { id },
+    }),
+  );
 
   if (!existing) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -116,7 +121,9 @@ async function handlePUT(
 
   // Verify folder ownership
   if (folderId) {
-    const folder = await prisma.folder.findFirst({ where: { id: folderId, userId } });
+    const folder = await withUserTenantRls(userId, async () =>
+      prisma.folder.findFirst({ where: { id: folderId, userId } }),
+    );
     if (!folder) {
       return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid folderId" }, { status: 400 });
     }
@@ -124,7 +131,9 @@ async function handlePUT(
 
   // Verify tag ownership
   if (tagIds?.length) {
-    const ownedCount = await prisma.tag.count({ where: { id: { in: tagIds }, userId } });
+    const ownedCount = await withUserTenantRls(userId, async () =>
+      prisma.tag.count({ where: { id: { in: tagIds }, userId } }),
+    );
     if (ownedCount !== tagIds.length) {
       return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid tagIds" }, { status: 400 });
     }
@@ -134,10 +143,12 @@ async function handlePUT(
 
   // If encryptedBlob is changing, snapshot the current version to history
   if (encryptedBlob) {
-    await prisma.$transaction(async (tx) => {
+    await withUserTenantRls(userId, async () =>
+      prisma.$transaction(async (tx) => {
       await tx.passwordEntryHistory.create({
         data: {
           entryId: id,
+          tenantId: existing.tenantId,
           encryptedBlob: existing.encryptedBlob,
           blobIv: existing.blobIv,
           blobAuthTag: existing.blobAuthTag,
@@ -156,7 +167,8 @@ async function handlePUT(
           where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
         });
       }
-    });
+      }),
+    );
 
     updateData.encryptedBlob = encryptedBlob.ciphertext;
     updateData.blobIv = encryptedBlob.iv;
@@ -179,11 +191,13 @@ async function handlePUT(
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
   }
 
-  const updated = await prisma.passwordEntry.update({
-    where: { id },
-    data: updateData,
-    include: { tags: { select: { id: true } } },
-  });
+  const updated = await withUserTenantRls(userId, async () =>
+    prisma.passwordEntry.update({
+      where: { id },
+      data: updateData,
+      include: { tags: { select: { id: true } } },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
@@ -226,9 +240,11 @@ async function handleDELETE(
   const { searchParams } = new URL(req.url);
   const permanent = searchParams.get("permanent") === "true";
 
-  const existing = await prisma.passwordEntry.findUnique({
-    where: { id },
-  });
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.findUnique({
+      where: { id },
+    }),
+  );
 
   if (!existing) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -239,12 +255,16 @@ async function handleDELETE(
   }
 
   if (permanent) {
-    await prisma.passwordEntry.delete({ where: { id } });
+    await withUserTenantRls(session.user.id, async () =>
+      prisma.passwordEntry.delete({ where: { id } }),
+    );
   } else {
-    await prisma.passwordEntry.update({
-      where: { id },
-      data: { deletedAt: new Date() },
-    });
+    await withUserTenantRls(session.user.id, async () =>
+      prisma.passwordEntry.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      }),
+    );
   }
 
   logAudit({

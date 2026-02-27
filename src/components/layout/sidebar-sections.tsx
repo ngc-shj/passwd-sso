@@ -13,7 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { SidebarOrganizeTagItem } from "@/hooks/use-sidebar-data";
+import type { SidebarTeamTagItem } from "@/hooks/use-sidebar-data";
 import { type VaultContext } from "@/hooks/use-vault-context";
 import {
   Tag,
@@ -50,19 +50,20 @@ export function VaultSection({
   isSelectedVaultFavorites,
   onNavigate,
 }: VaultSectionProps) {
-  const isOrg = vaultContext.type === "org";
+  const isTeam = vaultContext.type === "team";
+  const scopedTeamId = isTeam ? (vaultContext.teamId) : "";
 
   return (
     <div className="space-y-1">
       <Button variant={isSelectedVaultAll ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-        <Link href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}` : "/dashboard"} onClick={onNavigate}>
+        <Link href={isTeam ? `/dashboard/teams/${scopedTeamId}` : "/dashboard"} onClick={onNavigate}>
           <KeyRound className="h-4 w-4" />
           {t("passwords")}
         </Link>
       </Button>
       <Button variant={isSelectedVaultFavorites ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
         <Link
-          href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=favorites` : "/dashboard/favorites"}
+          href={isTeam ? `/dashboard/teams/${scopedTeamId}?scope=favorites` : "/dashboard/favorites"}
           onClick={onNavigate}
         >
           <Star className="h-4 w-4" />
@@ -90,6 +91,8 @@ export function CategoriesSection({
   selectedTypeFilter,
   onNavigate,
 }: CategoriesSectionProps) {
+  const scopedTeamId =
+    vaultContext.type === "team" ? (vaultContext.teamId) : "";
   const categories = [
     { type: ENTRY_TYPE.LOGIN, labelKey: "catLogin", icon: KeyRound },
     { type: ENTRY_TYPE.SECURE_NOTE, labelKey: "catSecureNote", icon: FileText },
@@ -106,8 +109,8 @@ export function CategoriesSection({
           {categories.map((category) => {
             const Icon = category.icon;
             const href =
-              vaultContext.type === "org"
-                ? `/dashboard/orgs/${vaultContext.orgId}?type=${category.type}`
+              vaultContext.type === "team"
+                ? `/dashboard/teams/${scopedTeamId}?type=${category.type}`
                 : `/dashboard?type=${category.type}`;
             return (
               <Button
@@ -129,7 +132,7 @@ export function CategoriesSection({
   );
 }
 
-interface OrganizeSectionProps {
+interface ManageSectionProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
@@ -139,20 +142,20 @@ interface OrganizeSectionProps {
   activeFolderId: string | null;
   linkHref: (folderId: string) => string;
   showFolderMenu: boolean;
-  tags: SidebarOrganizeTagItem[];
+  tags: SidebarTeamTagItem[];
   activeTagId: string | null;
   tagHref: (tagId: string) => string;
   onCreateFolder: () => void;
   onCreateTag: () => void;
   onEditFolder: (folder: SidebarFolderItem) => void;
   onDeleteFolder: (folder: SidebarFolderItem) => void;
-  onEditTag: (tag: SidebarOrganizeTagItem) => void;
-  onDeleteTag: (tag: SidebarOrganizeTagItem) => void;
+  onEditTag: (tag: SidebarTeamTagItem) => void;
+  onDeleteTag: (tag: SidebarTeamTagItem) => void;
   showTagMenu: boolean;
   onNavigate: () => void;
 }
 
-export function OrganizeSection({
+export function ManageSection({
   isOpen,
   onOpenChange,
   t,
@@ -173,13 +176,13 @@ export function OrganizeSection({
   onDeleteTag,
   showTagMenu,
   onNavigate,
-}: OrganizeSectionProps) {
+}: ManageSectionProps) {
   return (
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
       <div className="flex items-center">
         <div className="flex-1">
           <CollapsibleSectionHeader icon={<Tag className="h-3 w-3" />} isOpen={isOpen}>
-            {t("organize")}
+            {t("manage")}
           </CollapsibleSectionHeader>
         </div>
         <DropdownMenu>
@@ -293,7 +296,7 @@ interface VaultManagementSectionProps {
   isSelectedVaultTrash: boolean;
   isShareLinks: boolean;
   isPersonalAuditLog: boolean;
-  activeAuditOrgId: string | null;
+  activeAuditTeamId: string | null;
   onNavigate: () => void;
 }
 
@@ -304,18 +307,19 @@ export function VaultManagementSection({
   isSelectedVaultTrash,
   isShareLinks,
   isPersonalAuditLog,
-  activeAuditOrgId,
+  activeAuditTeamId,
   onNavigate,
 }: VaultManagementSectionProps) {
-  const isOrg = vaultContext.type === "org";
-  const shareLinksHref = isOrg
-    ? `/dashboard/share-links?org=${encodeURIComponent(vaultContext.orgId)}`
+  const isTeam = vaultContext.type === "team";
+  const scopedTeamId = isTeam ? (vaultContext.teamId) : "";
+  const shareLinksHref = isTeam
+    ? `/dashboard/share-links?team=${encodeURIComponent(scopedTeamId)}`
     : "/dashboard/share-links";
-  const auditLogHref = isOrg
-    ? `/dashboard/orgs/${vaultContext.orgId}/audit-logs`
+  const auditLogHref = isTeam
+    ? `/dashboard/teams/${scopedTeamId}/audit-logs`
     : "/dashboard/audit-logs";
-  const isAuditActive = isOrg
-    ? activeAuditOrgId === vaultContext.orgId
+  const isAuditActive = isTeam
+    ? activeAuditTeamId === scopedTeamId
     : isPersonalAuditLog;
 
   return (
@@ -326,7 +330,7 @@ export function VaultManagementSection({
         asChild
       >
         <Link
-          href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=archive` : "/dashboard/archive"}
+          href={isTeam ? `/dashboard/teams/${scopedTeamId}?scope=archive` : "/dashboard/archive"}
           onClick={onNavigate}
         >
           <Archive className="h-4 w-4" />
@@ -339,7 +343,7 @@ export function VaultManagementSection({
         asChild
       >
         <Link
-          href={isOrg ? `/dashboard/orgs/${vaultContext.orgId}?scope=trash` : "/dashboard/trash"}
+          href={isTeam ? `/dashboard/teams/${scopedTeamId}?scope=trash` : "/dashboard/trash"}
           onClick={onNavigate}
         >
           <Trash2 className="h-4 w-4" />

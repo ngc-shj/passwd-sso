@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // GET /api/passwords/[id]/history - List entry history (encrypted blobs)
 export async function GET(
@@ -15,10 +16,12 @@ export async function GET(
 
   const { id } = await params;
 
-  const entry = await prisma.passwordEntry.findUnique({
-    where: { id },
-    select: { userId: true },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.findUnique({
+      where: { id },
+      select: { userId: true },
+    }),
+  );
 
   if (!entry) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -27,10 +30,12 @@ export async function GET(
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
-  const histories = await prisma.passwordEntryHistory.findMany({
-    where: { entryId: id },
-    orderBy: { changedAt: "desc" },
-  });
+  const histories = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntryHistory.findMany({
+      where: { entryId: id },
+      orderBy: { changedAt: "desc" },
+    }),
+  );
 
   return NextResponse.json(
     histories.map((h) => ({

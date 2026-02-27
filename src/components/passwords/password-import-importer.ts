@@ -1,5 +1,5 @@
 import { encryptData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD, buildOrgEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
+import { buildPersonalEntryAAD, buildTeamEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import {
   buildPersonalImportBlobs,
   resolveEntryTagIds,
@@ -9,15 +9,15 @@ import {
 
 interface RunImportParams {
   entries: ParsedEntry[];
-  isOrgImport: boolean;
+  isTeamImport: boolean;
   tagsPath: string;
   passwordsPath: string;
   sourceFilename: string;
   userId?: string;
   encryptionKey?: CryptoKey;
-  orgEncryptionKey?: CryptoKey;
-  orgKeyVersion?: number;
-  orgId?: string;
+  teamEncryptionKey?: CryptoKey;
+  teamKeyVersion?: number;
+  teamId?: string;
   onProgress?: (current: number, total: number) => void;
 }
 
@@ -36,22 +36,22 @@ function importRequestHeaders(sourceFilename: string): HeadersInit {
 
 export async function runImportEntries({
   entries,
-  isOrgImport,
+  isTeamImport,
   tagsPath,
   passwordsPath,
   sourceFilename,
   userId,
   encryptionKey,
-  orgEncryptionKey,
-  orgKeyVersion,
-  orgId,
+  teamEncryptionKey,
+  teamKeyVersion,
+  teamId,
   onProgress,
 }: RunImportParams): Promise<RunImportResult> {
-  if (!isOrgImport && !encryptionKey) {
+  if (!isTeamImport && !encryptionKey) {
     throw new Error("encryptionKey is required for personal import");
   }
-  if (isOrgImport && (!orgEncryptionKey || !orgId)) {
-    throw new Error("orgEncryptionKey and orgId are required for org import");
+  if (isTeamImport && (!teamEncryptionKey || !teamId)) {
+    throw new Error("teamEncryptionKey and teamId are required for team import");
   }
 
   let successCount = 0;
@@ -66,13 +66,13 @@ export async function runImportEntries({
       const tagIds = resolveEntryTagIds(entry, tagNameToId);
       let res: Response;
 
-      if (isOrgImport) {
+      if (isTeamImport) {
         const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
         const entryId = crypto.randomUUID();
-        const blobAad = buildOrgEntryAAD(orgId!, entryId, "blob");
-        const overviewAad = buildOrgEntryAAD(orgId!, entryId, "overview");
-        const encryptedBlob = await encryptData(fullBlob, orgEncryptionKey!, blobAad);
-        const encryptedOverview = await encryptData(overviewBlob, orgEncryptionKey!, overviewAad);
+        const blobAad = buildTeamEntryAAD(teamId!, entryId, "blob");
+        const overviewAad = buildTeamEntryAAD(teamId!, entryId, "overview");
+        const encryptedBlob = await encryptData(fullBlob, teamEncryptionKey!, blobAad);
+        const encryptedOverview = await encryptData(overviewBlob, teamEncryptionKey!, overviewAad);
 
         res = await fetch(passwordsPath, {
           method: "POST",
@@ -83,7 +83,7 @@ export async function runImportEntries({
             encryptedOverview,
             entryType: entry.entryType,
             aadVersion: AAD_VERSION,
-            orgKeyVersion: orgKeyVersion ?? 1,
+            teamKeyVersion: teamKeyVersion ?? 1,
             tagIds,
           }),
         });

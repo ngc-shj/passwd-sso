@@ -51,8 +51,8 @@ interface ShareLinkItem {
   revokedAt: string | null;
   createdAt: string;
   passwordEntryId: string | null;
-  orgPasswordEntryId: string | null;
-  orgName: string | null;
+  teamPasswordEntryId: string | null;
+  teamName: string | null;
   hasPersonalEntry: boolean;
   sharedBy: string | null;
   canRevoke: boolean;
@@ -71,7 +71,7 @@ export default function ShareLinksPage() {
   const tShare = useTranslations("Share");
   const locale = useLocale();
   const searchParams = useSearchParams();
-  const orgFilter = searchParams.get("org");
+  const teamFilter = searchParams.get("team");
   const typeParam = searchParams.get("type");
   const [links, setLinks] = useState<ShareLinkItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,14 +99,14 @@ export default function ShareLinksPage() {
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (typeFilter !== "all") params.set("shareType", typeFilter);
-      if (orgFilter) params.set("org", orgFilter);
+      if (teamFilter) params.set("team", teamFilter);
       if (cursor) params.set("cursor", cursor);
 
       const res = await fetch(`${API_PATH.SHARE_LINKS_MINE}?${params.toString()}`);
       if (!res.ok) return null;
       return res.json();
     },
-    [statusFilter, typeFilter, orgFilter]
+    [statusFilter, typeFilter, teamFilter]
   );
 
   useEffect(() => {
@@ -236,7 +236,7 @@ export default function ShareLinksPage() {
               <p className="text-sm text-muted-foreground">{t("description")}</p>
             </div>
           </div>
-          {!orgFilter && (
+          {!teamFilter && (
             <Button onClick={() => setSendDialogOpen(true)} className="shrink-0">
               <Send className="h-4 w-4 mr-2" />
               {t("newSend")}
@@ -269,7 +269,7 @@ export default function ShareLinksPage() {
               <SelectContent>
                 <SelectItem value="all">{t("allTypes")}</SelectItem>
                 <SelectItem value="entry">{t("entryShares")}</SelectItem>
-                {!orgFilter && (
+                {!teamFilter && (
                   <SelectItem value="send">{t("sends")}</SelectItem>
                 )}
               </SelectContent>
@@ -351,7 +351,7 @@ export default function ShareLinksPage() {
                         <span className="text-muted-foreground italic">
                           {t("personalEntry")}
                         </span>
-                      ) : link.shareType === "ENTRY_SHARE" && !link.orgPasswordEntryId ? (
+                      ) : link.shareType === "ENTRY_SHARE" && !link.teamPasswordEntryId ? (
                         <span className="text-muted-foreground italic">
                           {t("deletedEntry")}
                         </span>

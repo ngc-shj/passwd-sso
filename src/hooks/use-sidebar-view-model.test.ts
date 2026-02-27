@@ -6,14 +6,14 @@ import { useSidebarViewModel } from "./use-sidebar-view-model";
 function makeParams() {
   return {
     t: (k: string) => k,
-    tOrg: (k: string) => k,
+    tTeam: (k: string) => k,
     router: { push: vi.fn() },
     onOpenChange: vi.fn(),
     vaultContext: { type: "personal" as const },
-    orgs: [{ id: "org-1", name: "Acme", slug: "acme", role: "ADMIN" }],
-    selectedOrg: null,
-    selectedOrgCanManageFolders: false,
-    selectedOrgCanManageTags: false,
+    teams: [{ id: "team-1", name: "Acme", slug: "acme", role: "ADMIN" }],
+    selectedTeam: null,
+    selectedTeamCanManageFolders: false,
+    selectedTeamCanManageTags: false,
     selectedTypeFilter: null,
     selectedFolderId: null,
     selectedTagId: null,
@@ -25,7 +25,7 @@ function makeParams() {
     isShareLinks: false,
     isEmergencyAccess: false,
     isPersonalAuditLog: false,
-    activeAuditOrgId: null,
+    activeAuditTeamId: null,
     selectedFolders: [],
     selectedTags: [],
     isOpen: vi.fn(() => true),
@@ -52,15 +52,15 @@ describe("useSidebarViewModel", () => {
     expect(params.onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("navigates to org vault and closes sidebar", () => {
+  it("navigates to team vault and closes sidebar", () => {
     const params = makeParams();
     const { result } = renderHook(() => useSidebarViewModel(params));
 
     act(() => {
-      result.current.onVaultChange("org-1");
+      result.current.onVaultChange("team-1");
     });
 
-    expect(params.router.push).toHaveBeenCalledWith("/dashboard/orgs/org-1");
+    expect(params.router.push).toHaveBeenCalledWith("/dashboard/teams/team-1");
     expect(params.onOpenChange).toHaveBeenCalledWith(false);
   });
 
@@ -95,12 +95,12 @@ describe("useSidebarViewModel", () => {
 
     // Pass-through props
     expect(result.current.t).toBe(params.t);
-    expect(result.current.tOrg).toBe(params.tOrg);
+    expect(result.current.tTeam).toBe(params.tTeam);
     expect(result.current.vaultContext).toBe(params.vaultContext);
-    expect(result.current.orgs).toBe(params.orgs);
-    expect(result.current.selectedOrg).toBe(params.selectedOrg);
-    expect(result.current.selectedOrgCanManageFolders).toBe(false);
-    expect(result.current.selectedOrgCanManageTags).toBe(false);
+    expect(result.current.teams).toBe(params.teams);
+    expect(result.current.selectedTeam).toBe(params.selectedTeam);
+    expect(result.current.selectedTeamCanManageFolders).toBe(false);
+    expect(result.current.selectedTeamCanManageTags).toBe(false);
     expect(result.current.selectedTypeFilter).toBeNull();
     expect(result.current.selectedFolderId).toBeNull();
     expect(result.current.selectedTagId).toBeNull();
@@ -112,6 +112,6 @@ describe("useSidebarViewModel", () => {
     expect(result.current.isShareLinks).toBe(false);
     expect(result.current.isEmergencyAccess).toBe(false);
     expect(result.current.isPersonalAuditLog).toBe(false);
-    expect(result.current.activeAuditOrgId).toBeNull();
+    expect(result.current.activeAuditTeamId).toBeNull();
   });
 });

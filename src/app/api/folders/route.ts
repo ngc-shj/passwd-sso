@@ -6,6 +6,7 @@ import { createFolderSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 function getPersonalParent(id: string): Promise<ParentNode | null> {
   return prisma.folder
@@ -20,19 +21,21 @@ export async function GET() {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const folders = await prisma.folder.findMany({
-    where: { userId: session.user.id },
-    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    include: {
-      _count: {
-        select: {
-          entries: {
-            where: { deletedAt: null },
+  const folders = await withUserTenantRls(session.user.id, async () =>
+    prisma.folder.findMany({
+      where: { userId: session.user.id },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      include: {
+        _count: {
+          select: {
+            entries: {
+              where: { deletedAt: null },
+            },
           },
         },
       },
-    },
-  });
+    }),
+  );
 
   return NextResponse.json(
     folders.map((f) => ({
@@ -70,11 +73,22 @@ export async function POST(req: NextRequest) {
   }
 
   const { name, parentId, sortOrder } = parsed.data;
+  const actor = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { tenantId: true },
+    }),
+  );
+  if (!actor) {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
 
   // Parent ownership + existence check
   if (parentId) {
     try {
-      await validateParentFolder(parentId, session.user.id, getPersonalParent);
+      await withUserTenantRls(session.user.id, async () =>
+        validateParentFolder(parentId, session.user.id, getPersonalParent),
+      );
     } catch {
       return NextResponse.json(
         { error: API_ERROR.NOT_FOUND },
@@ -85,7 +99,9 @@ export async function POST(req: NextRequest) {
 
   // Depth check
   try {
-    await validateFolderDepth(parentId ?? null, session.user.id, getPersonalParent);
+    await withUserTenantRls(session.user.id, async () =>
+      validateFolderDepth(parentId ?? null, session.user.id, getPersonalParent),
+    );
   } catch {
     return NextResponse.json(
       { error: API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED },
@@ -96,11 +112,13 @@ export async function POST(req: NextRequest) {
   // Duplicate check — use Prisma unique constraint for non-null parentId,
   // manual check for root folders (partial index enforces at DB level too)
   if (parentId) {
-    const dup = await prisma.folder.findUnique({
-      where: {
-        name_parentId_userId: { name, parentId, userId: session.user.id },
-      },
-    });
+    const dup = await withUserTenantRls(session.user.id, async () =>
+      prisma.folder.findUnique({
+        where: {
+          name_parentId_userId: { name, parentId, userId: session.user.id },
+        },
+      }),
+    );
     if (dup) {
       return NextResponse.json(
         { error: API_ERROR.FOLDER_ALREADY_EXISTS },
@@ -108,9 +126,11 @@ export async function POST(req: NextRequest) {
       );
     }
   } else {
-    const rootDup = await prisma.folder.findFirst({
-      where: { name, parentId: null, userId: session.user.id },
-    });
+    const rootDup = await withUserTenantRls(session.user.id, async () =>
+      prisma.folder.findFirst({
+        where: { name, parentId: null, userId: session.user.id },
+      }),
+    );
     if (rootDup) {
       return NextResponse.json(
         { error: API_ERROR.FOLDER_ALREADY_EXISTS },
@@ -119,14 +139,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const folder = await prisma.folder.create({
-    data: {
-      name,
-      parentId: parentId ?? null,
-      userId: session.user.id,
-      sortOrder: sortOrder ?? 0,
-    },
-  });
+  const folder = await withUserTenantRls(session.user.id, async () =>
+    prisma.folder.create({
+      data: {
+        name,
+        parentId: parentId ?? null,
+        userId: session.user.id,
+        tenantId: actor.tenantId,
+        sortOrder: sortOrder ?? 0,
+      },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,

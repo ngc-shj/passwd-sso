@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaFolder, mockPrismaPasswordEntry, mockPrismaTransaction, mockLogAudit } =
+const { mockAuth, mockPrismaFolder, mockPrismaPasswordEntry, mockPrismaTransaction, mockLogAudit, mockWithUserTenantRls } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockPrismaFolder: {
@@ -17,6 +17,7 @@ const { mockAuth, mockPrismaFolder, mockPrismaPasswordEntry, mockPrismaTransacti
     },
     mockPrismaTransaction: vi.fn(),
     mockLogAudit: vi.fn(),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -30,6 +31,9 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 vi.mock("@/lib/folder-utils", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/folder-utils")>();

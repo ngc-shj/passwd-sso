@@ -101,7 +101,7 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.PASSWORDS) ||
     pathname.startsWith(API_PATH.TAGS) ||
     pathname.startsWith(`${API_PATH.API_ROOT}/watchtower`) ||
-    pathname.startsWith(API_PATH.ORGS) ||
+    pathname.startsWith(API_PATH.TEAMS) ||
     pathname.startsWith(API_PATH.AUDIT_LOGS) ||
     pathname.startsWith(API_PATH.SHARE_LINKS) ||
     pathname.startsWith(API_PATH.SENDS) ||

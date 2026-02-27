@@ -135,7 +135,7 @@ export function VaultLockScreen() {
 
             <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
               <Link href="/recovery" className="hover:underline">
-                {t("forgotPassphrase")}
+                {t("recoverPassphrase")}
               </Link>
               <span>|</span>
               <Link href="/vault-reset" className="hover:underline">

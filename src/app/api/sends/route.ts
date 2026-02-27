@@ -16,6 +16,7 @@ import {
   AUDIT_SCOPE,
   SEND_EXPIRY_MAP,
 } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const sendTextLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
@@ -58,22 +59,34 @@ export async function POST(req: NextRequest) {
   const tokenHash = hashToken(token);
 
   const expiresAt = new Date(Date.now() + SEND_EXPIRY_MAP[expiresIn]);
+  const actor = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { tenantId: true },
+    }),
+  );
+  if (!actor) {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
 
-  const share = await prisma.passwordShare.create({
-    data: {
-      tokenHash,
-      shareType: "TEXT",
-      entryType: null,
-      sendName: name,
-      encryptedData: encrypted.ciphertext,
-      dataIv: encrypted.iv,
-      dataAuthTag: encrypted.authTag,
-      masterKeyVersion: encrypted.masterKeyVersion,
-      expiresAt,
-      maxViews: maxViews ?? null,
-      createdById: session.user.id,
-    },
-  });
+  const share = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordShare.create({
+      data: {
+        tokenHash,
+        shareType: "TEXT",
+        entryType: null,
+        sendName: name,
+        encryptedData: encrypted.ciphertext,
+        dataIv: encrypted.iv,
+        dataAuthTag: encrypted.authTag,
+        masterKeyVersion: encrypted.masterKeyVersion,
+        expiresAt,
+        maxViews: maxViews ?? null,
+        createdById: session.user.id,
+        tenantId: actor.tenantId,
+      },
+    }),
+  );
 
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);

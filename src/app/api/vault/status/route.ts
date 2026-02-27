@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 export const runtime = "nodejs";
 
@@ -17,15 +18,17 @@ async function handleGET(_request: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: {
-      vaultSetupAt: true,
-      accountSalt: true,
-      keyVersion: true,
-      recoveryKeySetAt: true,
-    },
-  });
+  const user = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        vaultSetupAt: true,
+        accountSalt: true,
+        keyVersion: true,
+        recoveryKeySetAt: true,
+      },
+    }),
+  );
 
   if (!user) {
     return NextResponse.json({ error: API_ERROR.USER_NOT_FOUND }, { status: 404 });

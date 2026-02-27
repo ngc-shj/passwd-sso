@@ -7,6 +7,7 @@ import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-acc
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { routing } from "@/i18n/routing";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // POST /api/emergency-access/[id]/decline — Decline a grant by ID (authenticated grantee)
 export async function POST(
@@ -20,9 +21,11 @@ export async function POST(
 
   const { id } = await params;
 
-  const grant = await prisma.emergencyAccessGrant.findUnique({
-    where: { id },
-  });
+  const grant = await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.findUnique({
+      where: { id },
+    }),
+  );
 
   if (!grant) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -36,10 +39,12 @@ export async function POST(
     return NextResponse.json({ error: API_ERROR.NOT_AUTHORIZED_FOR_GRANT }, { status: 403 });
   }
 
-  await prisma.emergencyAccessGrant.update({
-    where: { id },
-    data: { status: EA_STATUS.REJECTED },
-  });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.update({
+      where: { id },
+      data: { status: EA_STATUS.REJECTED },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
@@ -51,10 +56,12 @@ export async function POST(
     ...extractRequestMeta(req),
   });
 
-  const owner = await prisma.user.findUnique({
-    where: { id: grant.ownerId },
-    select: { email: true, name: true },
-  });
+  const owner = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: grant.ownerId },
+      select: { email: true, name: true },
+    }),
+  );
   if (owner?.email) {
     const granteeName = session.user.name ?? session.user.email ?? "";
     const { subject, html, text } = emergencyGrantDeclinedEmail(routing.defaultLocale, granteeName);

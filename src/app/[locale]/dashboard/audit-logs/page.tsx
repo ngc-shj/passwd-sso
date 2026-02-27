@@ -92,9 +92,9 @@ const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
   [AUDIT_ACTION.ENTRY_EXPORT]: <Download className="h-4 w-4" />,
   [AUDIT_ACTION.ATTACHMENT_UPLOAD]: <Upload className="h-4 w-4" />,
   [AUDIT_ACTION.ATTACHMENT_DELETE]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.ORG_MEMBER_INVITE]: <UserPlus className="h-4 w-4" />,
-  [AUDIT_ACTION.ORG_MEMBER_REMOVE]: <UserMinus className="h-4 w-4" />,
-  [AUDIT_ACTION.ORG_ROLE_UPDATE]: <ShieldCheck className="h-4 w-4" />,
+  [AUDIT_ACTION.TEAM_MEMBER_INVITE]: <UserPlus className="h-4 w-4" />,
+  [AUDIT_ACTION.TEAM_MEMBER_REMOVE]: <UserMinus className="h-4 w-4" />,
+  [AUDIT_ACTION.TEAM_ROLE_UPDATE]: <ShieldCheck className="h-4 w-4" />,
   [AUDIT_ACTION.SHARE_CREATE]: <LinkIcon className="h-4 w-4" />,
   [AUDIT_ACTION.SHARE_REVOKE]: <Link2Off className="h-4 w-4" />,
   [AUDIT_ACTION.EMERGENCY_GRANT_CREATE]: <HeartPulse className="h-4 w-4" />,
@@ -125,7 +125,7 @@ const ACTION_GROUPS = [
     actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.TRANSFER],
   },
   { label: "groupAttachment", value: AUDIT_ACTION_GROUP.ATTACHMENT, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ATTACHMENT] },
-  { label: "groupOrg", value: AUDIT_ACTION_GROUP.ORG, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ORG] },
+  { label: "groupTeam", value: AUDIT_ACTION_GROUP.TEAM, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.TEAM] },
   { label: "groupShare", value: AUDIT_ACTION_GROUP.SHARE, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.SHARE] },
   { label: "groupSend", value: AUDIT_ACTION_GROUP.SEND, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.SEND] },
   {
@@ -363,7 +363,7 @@ export default function AuditLogsPage() {
     if (log.action === AUDIT_ACTION.ENTRY_EXPORT && meta) {
       const filename = typeof meta.filename === "string" ? meta.filename : null;
       const encrypted = meta.encrypted === true;
-      const includeOrgs = meta.includeOrgs === true;
+      const includeTeams = meta.includeTeams === true;
       const format = typeof meta.format === "string" ? meta.format : "-";
       const entryCount = typeof meta.entryCount === "number" ? meta.entryCount : 0;
       return t("exportMeta", {
@@ -371,7 +371,7 @@ export default function AuditLogsPage() {
         format,
         entryCount,
         encrypted: encrypted ? t("yes") : t("no"),
-        orgs: includeOrgs ? t("included") : t("notIncluded"),
+        teams: includeTeams ? t("included") : t("notIncluded"),
       });
     }
 
@@ -417,7 +417,7 @@ export default function AuditLogsPage() {
     }
 
     // Role updates: show role change
-    if (log.action === AUDIT_ACTION.ORG_ROLE_UPDATE && meta?.previousRole && meta?.newRole) {
+    if (log.action === AUDIT_ACTION.TEAM_ROLE_UPDATE && meta?.previousRole && meta?.newRole) {
       return t("roleChange", {
         from: String(meta.previousRole),
         to: String(meta.newRole),

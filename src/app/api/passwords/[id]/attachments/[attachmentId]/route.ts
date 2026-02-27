@@ -6,6 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type RouteContext = {
   params: Promise<{ id: string; attachmentId: string }>;
@@ -23,10 +24,12 @@ async function handleGET(
 
   const { id, attachmentId } = await params;
 
-  const entry = await prisma.passwordEntry.findUnique({
-    where: { id },
-    select: { userId: true },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.findUnique({
+      where: { id },
+      select: { userId: true },
+    }),
+  );
 
   if (!entry) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -35,9 +38,11 @@ async function handleGET(
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
-  const attachment = await prisma.attachment.findUnique({
-    where: { id: attachmentId, passwordEntryId: id },
-  });
+  const attachment = await withUserTenantRls(session.user.id, async () =>
+    prisma.attachment.findUnique({
+      where: { id: attachmentId, passwordEntryId: id },
+    }),
+  );
 
   if (!attachment) {
     return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
@@ -74,10 +79,12 @@ async function handleDELETE(
 
   const { id, attachmentId } = await params;
 
-  const entry = await prisma.passwordEntry.findUnique({
-    where: { id },
-    select: { userId: true },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.findUnique({
+      where: { id },
+      select: { userId: true },
+    }),
+  );
 
   if (!entry) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -86,10 +93,12 @@ async function handleDELETE(
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
-  const attachment = await prisma.attachment.findUnique({
-    where: { id: attachmentId, passwordEntryId: id },
-    select: { id: true, filename: true, encryptedData: true },
-  });
+  const attachment = await withUserTenantRls(session.user.id, async () =>
+    prisma.attachment.findUnique({
+      where: { id: attachmentId, passwordEntryId: id },
+      select: { id: true, filename: true, encryptedData: true },
+    }),
+  );
 
   if (!attachment) {
     return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
@@ -101,9 +110,11 @@ async function handleDELETE(
     entryId: id,
   });
 
-  await prisma.attachment.delete({
-    where: { id: attachmentId },
-  });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.attachment.delete({
+      where: { id: attachmentId },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,

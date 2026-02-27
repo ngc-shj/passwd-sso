@@ -16,11 +16,11 @@ describe("API_PATH", () => {
     expect(API_PATH.PASSWORDS_EMPTY_TRASH).toBe("/api/passwords/empty-trash");
     expect(API_PATH.PASSWORDS_GENERATE).toBe("/api/passwords/generate");
     expect(API_PATH.TAGS).toBe("/api/tags");
-    expect(API_PATH.ORGS).toBe("/api/orgs");
-    expect(API_PATH.ORGS_ARCHIVED).toBe("/api/orgs/archived");
-    expect(API_PATH.ORGS_FAVORITES).toBe("/api/orgs/favorites");
-    expect(API_PATH.ORGS_TRASH).toBe("/api/orgs/trash");
-    expect(API_PATH.ORGS_INVITATIONS_ACCEPT).toBe("/api/orgs/invitations/accept");
+    expect(API_PATH.TEAMS).toBe("/api/teams");
+    expect(API_PATH.TEAMS_ARCHIVED).toBe("/api/teams/archived");
+    expect(API_PATH.TEAMS_FAVORITES).toBe("/api/teams/favorites");
+    expect(API_PATH.TEAMS_TRASH).toBe("/api/teams/trash");
+    expect(API_PATH.TEAMS_INVITATIONS_ACCEPT).toBe("/api/teams/invitations/accept");
     expect(API_PATH.AUDIT_LOGS).toBe("/api/audit-logs");
     expect(API_PATH.SHARE_LINKS).toBe("/api/share-links");
     expect(API_PATH.SHARE_LINKS_MINE).toBe("/api/share-links/mine");
@@ -74,34 +74,34 @@ describe("API_PATH", () => {
     );
   });
 
-  it("builds org and emergency paths", () => {
-    expect(apiPath.orgById("org-1")).toBe("/api/orgs/org-1");
-    expect(apiPath.orgMembers("org-1")).toBe("/api/orgs/org-1/members");
-    expect(apiPath.orgMemberById("org-1", "mem-1")).toBe(
-      "/api/orgs/org-1/members/mem-1"
+  it("builds team and emergency paths", () => {
+    expect(apiPath.teamById("team-1")).toBe("/api/teams/team-1");
+    expect(apiPath.teamMembers("team-1")).toBe("/api/teams/team-1/members");
+    expect(apiPath.teamMemberById("team-1", "mem-1")).toBe(
+      "/api/teams/team-1/members/mem-1"
     );
-    expect(apiPath.orgInvitations("org-1")).toBe("/api/orgs/org-1/invitations");
-    expect(apiPath.orgInvitationById("org-1", "inv-1")).toBe(
-      "/api/orgs/org-1/invitations/inv-1"
+    expect(apiPath.teamInvitations("team-1")).toBe("/api/teams/team-1/invitations");
+    expect(apiPath.teamInvitationById("team-1", "inv-1")).toBe(
+      "/api/teams/team-1/invitations/inv-1"
     );
-    expect(apiPath.orgPasswords("org-1")).toBe("/api/orgs/org-1/passwords");
-    expect(apiPath.orgPasswordById("org-1", "pw-1")).toBe(
-      "/api/orgs/org-1/passwords/pw-1"
+    expect(apiPath.teamPasswords("team-1")).toBe("/api/teams/team-1/passwords");
+    expect(apiPath.teamPasswordById("team-1", "pw-1")).toBe(
+      "/api/teams/team-1/passwords/pw-1"
     );
-    expect(apiPath.orgPasswordFavorite("org-1", "pw-1")).toBe(
-      "/api/orgs/org-1/passwords/pw-1/favorite"
+    expect(apiPath.teamPasswordFavorite("team-1", "pw-1")).toBe(
+      "/api/teams/team-1/passwords/pw-1/favorite"
     );
-    expect(apiPath.orgPasswordRestore("org-1", "pw-1")).toBe(
-      "/api/orgs/org-1/passwords/pw-1/restore"
+    expect(apiPath.teamPasswordRestore("team-1", "pw-1")).toBe(
+      "/api/teams/team-1/passwords/pw-1/restore"
     );
-    expect(apiPath.orgPasswordAttachments("org-1", "pw-1")).toBe(
-      "/api/orgs/org-1/passwords/pw-1/attachments"
+    expect(apiPath.teamPasswordAttachments("team-1", "pw-1")).toBe(
+      "/api/teams/team-1/passwords/pw-1/attachments"
     );
-    expect(apiPath.orgPasswordAttachmentById("org-1", "pw-1", "att-1")).toBe(
-      "/api/orgs/org-1/passwords/pw-1/attachments/att-1"
+    expect(apiPath.teamPasswordAttachmentById("team-1", "pw-1", "att-1")).toBe(
+      "/api/teams/team-1/passwords/pw-1/attachments/att-1"
     );
-    expect(apiPath.orgTags("org-1")).toBe("/api/orgs/org-1/tags");
-    expect(apiPath.orgAuditLogs("org-1")).toBe("/api/orgs/org-1/audit-logs");
+    expect(apiPath.teamTags("team-1")).toBe("/api/teams/team-1/tags");
+    expect(apiPath.teamAuditLogs("team-1")).toBe("/api/teams/team-1/audit-logs");
     expect(apiPath.emergencyGrantById("gr-1")).toBe("/api/emergency-access/gr-1");
     expect(apiPath.emergencyGrantAction("gr-1", "approve")).toBe(
       "/api/emergency-access/gr-1/approve"

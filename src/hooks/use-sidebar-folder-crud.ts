@@ -3,11 +3,11 @@
 import { useState } from "react";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { showSidebarCrudError } from "@/hooks/sidebar-crud-error";
-import type { SidebarFolderItem, SidebarOrgFolderGroup } from "@/hooks/use-sidebar-data";
+import type { SidebarFolderItem, SidebarTeamFolderGroup } from "@/hooks/use-sidebar-data";
 
 interface UseSidebarFolderCrudParams {
   folders: SidebarFolderItem[];
-  orgFolderGroups: SidebarOrgFolderGroup[];
+  teamFolderGroups: SidebarTeamFolderGroup[];
   refreshData: () => void;
   tErrors: (key: string) => string;
 }
@@ -19,29 +19,29 @@ interface FolderSubmitPayload {
 
 export function useSidebarFolderCrud({
   folders,
-  orgFolderGroups,
+  teamFolderGroups,
   refreshData,
   tErrors,
 }: UseSidebarFolderCrudParams) {
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
   const [editingFolder, setEditingFolder] = useState<SidebarFolderItem | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<SidebarFolderItem | null>(null);
-  const [folderOrgId, setFolderOrgId] = useState<string | null>(null);
+  const [folderTeamId, setFolderTeamId] = useState<string | null>(null);
 
-  const handleFolderCreate = (orgId?: string) => {
-    setFolderOrgId(orgId ?? null);
+  const handleFolderCreate = (teamId?: string) => {
+    setFolderTeamId(teamId ?? null);
     setEditingFolder(null);
     setFolderDialogOpen(true);
   };
 
-  const handleFolderEdit = (folder: SidebarFolderItem, orgId?: string) => {
-    setFolderOrgId(orgId ?? null);
+  const handleFolderEdit = (folder: SidebarFolderItem, teamId?: string) => {
+    setFolderTeamId(teamId ?? null);
     setEditingFolder(folder);
     setFolderDialogOpen(true);
   };
 
-  const handleFolderDeleteClick = (folder: SidebarFolderItem, orgId?: string) => {
-    setFolderOrgId(orgId ?? null);
+  const handleFolderDeleteClick = (folder: SidebarFolderItem, teamId?: string) => {
+    setFolderTeamId(teamId ?? null);
     setDeletingFolder(folder);
   };
 
@@ -50,13 +50,13 @@ export function useSidebarFolderCrud({
   };
 
   const handleFolderSubmit = async (data: FolderSubmitPayload) => {
-    const isOrg = folderOrgId !== null;
+    const isTeam = folderTeamId !== null;
     const url = editingFolder
-      ? isOrg
-        ? apiPath.orgFolderById(folderOrgId, editingFolder.id)
+      ? isTeam
+        ? apiPath.teamFolderById(folderTeamId, editingFolder.id)
         : apiPath.folderById(editingFolder.id)
-      : isOrg
-        ? apiPath.orgFolders(folderOrgId)
+      : isTeam
+        ? apiPath.teamFolders(folderTeamId)
         : API_PATH.FOLDERS;
     const method = editingFolder ? "PUT" : "POST";
 
@@ -74,8 +74,8 @@ export function useSidebarFolderCrud({
 
   const handleFolderDelete = async () => {
     if (!deletingFolder) return;
-    const url = folderOrgId
-      ? apiPath.orgFolderById(folderOrgId, deletingFolder.id)
+    const url = folderTeamId
+      ? apiPath.teamFolderById(folderTeamId, deletingFolder.id)
       : apiPath.folderById(deletingFolder.id);
     const res = await fetch(url, { method: "DELETE" });
     if (!res.ok) {
@@ -87,8 +87,8 @@ export function useSidebarFolderCrud({
     refreshData();
   };
 
-  const dialogFolders = folderOrgId
-    ? orgFolderGroups.find((g) => g.orgId === folderOrgId)?.folders ?? []
+  const dialogFolders = folderTeamId
+    ? teamFolderGroups.find((g) => g.teamId === folderTeamId)?.folders ?? []
     : folders;
 
   return {

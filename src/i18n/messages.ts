@@ -41,7 +41,7 @@ export const NAMESPACES = [
   "Watchtower",
   "TOTP",
   "Shortcuts",
-  "Org",
+  "Team",
   "AuditLog",
   "Share",
   "EmergencyAccess",

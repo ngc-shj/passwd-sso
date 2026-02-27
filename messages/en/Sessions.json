@@ -1,4 +1,8 @@
 {
+  "settingsTitle": "Settings",
+  "settingsDescription": "Manage personal settings and tenant settings.",
+  "tabPersonal": "Personal",
+  "tabTenant": "Tenant",
   "title": "Sessions",
   "description": "Manage your active sessions. You can revoke sessions you no longer need.",
   "current": "Current",

@@ -84,7 +84,7 @@ export const METADATA_BLOCKLIST = new Set([
   "encryptedOverview",
   "encryptedData",
   "encryptedSecretKey",
-  "encryptedOrgKey",
+  "encryptedTeamKey",
   "masterPasswordServerHash",
   "token",
   "tokenHash",

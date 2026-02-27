@@ -5,6 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 interface BulkRestoreBody {
   ids: string[];
@@ -38,26 +39,30 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
   }
 
-  const entriesToRestore = await prisma.passwordEntry.findMany({
-    where: {
-      userId: session.user.id,
-      id: { in: ids },
-      deletedAt: { not: null },
-    },
-    select: { id: true },
-  });
+  const entriesToRestore = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.findMany({
+      where: {
+        userId: session.user.id,
+        id: { in: ids },
+        deletedAt: { not: null },
+      },
+      select: { id: true },
+    }),
+  );
   const entryIds = entriesToRestore.map((entry) => entry.id);
 
-  const result = await prisma.passwordEntry.updateMany({
-    where: {
-      userId: session.user.id,
-      id: { in: entryIds },
-      deletedAt: { not: null },
-    },
-    data: {
-      deletedAt: null,
-    },
-  });
+  const result = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.updateMany({
+      where: {
+        userId: session.user.id,
+        id: { in: entryIds },
+        deletedAt: { not: null },
+      },
+      data: {
+        deletedAt: null,
+      },
+    }),
+  );
 
   const requestMeta = extractRequestMeta(req);
 

@@ -9,6 +9,7 @@ const {
   mockFolderFindMany,
   mockFolderFindFirst,
   mockTransaction,
+  mockWithUserTenantRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFolderFindUnique: vi.fn(),
@@ -16,6 +17,7 @@ const {
   mockFolderFindMany: vi.fn(),
   mockFolderFindFirst: vi.fn(),
   mockTransaction: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -38,6 +40,9 @@ vi.mock("@/lib/folder-utils", () => ({
   validateParentFolder: vi.fn(),
   validateFolderDepth: vi.fn(),
   checkCircularReference: vi.fn().mockResolvedValue(false),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { PUT, DELETE } from "@/app/api/folders/[id]/route";

@@ -4,7 +4,7 @@
  * Revokes share links encrypted with old master key versions.
  *
  * Note:
- * - Organization vault encryption is E2E-only; server-side org key re-wrap is removed.
+ * - Team vault encryption is E2E-only; server-side team key re-wrap is removed.
  * - This endpoint now validates the target master key version and optionally
  *   revokes old-version PasswordShare rows.
  * Authenticated via ADMIN_API_TOKEN bearer token (not session).
@@ -23,6 +23,7 @@ import {
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
+import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
 
 const HEX64_RE = /^[0-9a-fA-F]{64}$/;
 
@@ -109,10 +110,12 @@ export async function POST(req: NextRequest) {
   }
 
   // Verify operatorId is a valid user
-  const operator = await prisma.user.findUnique({
-    where: { id: operatorId },
-    select: { id: true },
-  });
+  const operator = await withBypassRls(prisma, async () =>
+    prisma.user.findUnique({
+      where: { id: operatorId },
+      select: { id: true, tenantId: true },
+    }),
+  );
   if (!operator) {
     return NextResponse.json(
       { error: "operatorId does not match an existing user" },
@@ -123,21 +126,24 @@ export async function POST(req: NextRequest) {
   // Revoke old-version shares if requested
   let revokedShares = 0;
   if (revokeShares) {
-    const result = await prisma.passwordShare.updateMany({
-      where: {
-        masterKeyVersion: { lt: targetVersion },
-        revokedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      data: { revokedAt: new Date() },
-    });
+    const result = await withTenantRls(prisma, operator.tenantId, async () =>
+      prisma.passwordShare.updateMany({
+        where: {
+          tenantId: operator.tenantId,
+          masterKeyVersion: { lt: targetVersion },
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        data: { revokedAt: new Date() },
+      }),
+    );
     revokedShares = result.count;
   }
 
-  // Audit log (fire-and-forget; logAudit handles errors internally)
+  // Audit log (async nonblocking; logAudit handles errors internally)
   const { ip } = extractRequestMeta(req);
   logAudit({
-    scope: AUDIT_SCOPE.ORG,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.MASTER_KEY_ROTATION,
     userId: operatorId,
     metadata: {

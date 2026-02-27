@@ -61,7 +61,7 @@ describe("userToScimUser", () => {
 describe("roleToScimGroup", () => {
   it("serializes a group with members", () => {
     const result = roleToScimGroup(
-      "org-1",
+      "team-1",
       "ADMIN",
       [{ userId: "user-1", email: "admin@example.com" }],
       BASE_URL,
@@ -80,21 +80,21 @@ describe("roleToScimGroup", () => {
 });
 
 describe("roleGroupId", () => {
-  it("returns deterministic UUID for the same org+role", () => {
-    const id1 = roleGroupId("org-1", "ADMIN");
-    const id2 = roleGroupId("org-1", "ADMIN");
+  it("returns deterministic UUID for the same team+role", () => {
+    const id1 = roleGroupId("team-1", "ADMIN");
+    const id2 = roleGroupId("team-1", "ADMIN");
     expect(id1).toBe(id2);
   });
 
   it("returns different UUIDs for different roles", () => {
-    const id1 = roleGroupId("org-1", "ADMIN");
-    const id2 = roleGroupId("org-1", "MEMBER");
+    const id1 = roleGroupId("team-1", "ADMIN");
+    const id2 = roleGroupId("team-1", "MEMBER");
     expect(id1).not.toBe(id2);
   });
 
-  it("returns different UUIDs for different orgs", () => {
-    const id1 = roleGroupId("org-1", "ADMIN");
-    const id2 = roleGroupId("org-2", "ADMIN");
+  it("returns different UUIDs for different teams", () => {
+    const id1 = roleGroupId("team-1", "ADMIN");
+    const id2 = roleGroupId("team-2", "ADMIN");
     expect(id1).not.toBe(id2);
   });
 });

@@ -15,10 +15,10 @@ export default defineConfig({
       provider: "v8",
       include: [
         "src/app/api/**/*.ts",
-        "src/lib/org-auth.ts",
+        "src/lib/team-auth.ts",
         "src/lib/crypto-server.ts",
-        "src/lib/crypto-org.ts",
-        "src/lib/org-vault-context.tsx",
+        "src/lib/crypto-team.ts",
+        "src/lib/team-vault-core.tsx",
         "src/lib/password-generator.ts",
         "src/lib/email/**/*.ts",
         "src/lib/auth-adapter.ts",

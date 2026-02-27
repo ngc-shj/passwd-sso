@@ -5,6 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 interface BulkArchiveBody {
   ids: string[];
@@ -44,28 +45,32 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
   }
 
-  const entriesToProcess = await prisma.passwordEntry.findMany({
-    where: {
-      userId: session.user.id,
-      id: { in: ids },
-      deletedAt: null,
-      isArchived: !toArchived,
-    },
-    select: { id: true },
-  });
+  const entriesToProcess = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.findMany({
+      where: {
+        userId: session.user.id,
+        id: { in: ids },
+        deletedAt: null,
+        isArchived: !toArchived,
+      },
+      select: { id: true },
+    }),
+  );
   const entryIds = entriesToProcess.map((entry) => entry.id);
 
-  const result = await prisma.passwordEntry.updateMany({
-    where: {
-      userId: session.user.id,
-      id: { in: entryIds },
-      deletedAt: null,
-      isArchived: !toArchived,
-    },
-    data: {
-      isArchived: toArchived,
-    },
-  });
+  const result = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntry.updateMany({
+      where: {
+        userId: session.user.id,
+        id: { in: entryIds },
+        deletedAt: null,
+        isArchived: !toArchived,
+      },
+      data: {
+        isArchived: toArchived,
+      },
+    }),
+  );
 
   const requestMeta = extractRequestMeta(req);
 

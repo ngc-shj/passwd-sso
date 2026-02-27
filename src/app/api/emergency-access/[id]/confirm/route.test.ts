@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant, mockPrismaUser } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockPrismaUser, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
@@ -10,6 +10,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser } = vi.hoisted(() => ({
   mockPrismaUser: {
     findUnique: vi.fn(),
   },
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -26,6 +27,9 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/crypto-emergency", () => ({
   SUPPORTED_WRAP_VERSIONS: new Set([1]),
   SUPPORTED_KEY_ALGORITHMS: { 1: ["ECDH-P256"] },
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { POST } from "./route";

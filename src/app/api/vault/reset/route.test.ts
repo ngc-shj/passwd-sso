@@ -3,8 +3,8 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag,
-  mockPrismaEmergencyGrant, mockPrismaOrgMemberKey, mockPrismaOrgMember,
-  mockPrismaTransaction, mockRateLimiter, mockLogAudit,
+  mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
+  mockPrismaTransaction, mockRateLimiter, mockLogAudit, mockWithUserTenantRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: { update: vi.fn() },
@@ -14,11 +14,12 @@ const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaVaultKey: { deleteMany: vi.fn() },
   mockPrismaTag: { deleteMany: vi.fn() },
   mockPrismaEmergencyGrant: { updateMany: vi.fn() },
-  mockPrismaOrgMemberKey: { deleteMany: vi.fn() },
-  mockPrismaOrgMember: { updateMany: vi.fn() },
+  mockPrismaTeamMemberKey: { deleteMany: vi.fn() },
+  mockPrismaTeamMember: { updateMany: vi.fn() },
   mockPrismaTransaction: vi.fn(),
   mockRateLimiter: { check: vi.fn() },
   mockLogAudit: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -31,8 +32,8 @@ vi.mock("@/lib/prisma", () => ({
     vaultKey: mockPrismaVaultKey,
     tag: mockPrismaTag,
     emergencyAccessGrant: mockPrismaEmergencyGrant,
-    orgMemberKey: mockPrismaOrgMemberKey,
-    orgMember: mockPrismaOrgMember,
+    teamMemberKey: mockPrismaTeamMemberKey,
+    teamMember: mockPrismaTeamMember,
     $transaction: mockPrismaTransaction,
   },
 }));
@@ -45,6 +46,9 @@ vi.mock("@/lib/csrf", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -119,22 +123,22 @@ describe("POST /api/vault/reset", () => {
     expect(res.status).toBe(400);
   });
 
-  it("includes ECDH cleanup, OrgMemberKey deletion, and keyDistributed reset in transaction", async () => {
+  it("includes ECDH cleanup, TeamMemberKey deletion, and keyDistributed reset in transaction", async () => {
     const res = await POST(createRequest("POST", URL, {
       body: { confirmation: "DELETE MY VAULT" },
     }));
     expect(res.status).toBe(200);
 
-    // Transaction includes OrgMemberKey deleteMany and OrgMember updateMany
+    // Transaction includes TeamMemberKey deleteMany and TeamMember updateMany
     const txArray = mockPrismaTransaction.mock.calls[0][0];
 
-    // Verify OrgMemberKey.deleteMany was included
-    expect(mockPrismaOrgMemberKey.deleteMany).toHaveBeenCalledWith({
+    // Verify TeamMemberKey.deleteMany was included
+    expect(mockPrismaTeamMemberKey.deleteMany).toHaveBeenCalledWith({
       where: { userId: "user-1" },
     });
 
-    // Verify OrgMember.updateMany was included (reset keyDistributed)
-    expect(mockPrismaOrgMember.updateMany).toHaveBeenCalledWith({
+    // Verify TeamMember.updateMany was included (reset keyDistributed)
+    expect(mockPrismaTeamMember.updateMany).toHaveBeenCalledWith({
       where: { userId: "user-1" },
       data: { keyDistributed: false },
     });

@@ -49,10 +49,10 @@ interface ShareDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   passwordEntryId?: string;
-  orgPasswordEntryId?: string;
+  teamPasswordEntryId?: string;
   /** Decrypted data to share (TOTP excluded by caller) */
   decryptedData?: Record<string, unknown>;
-  /** Entry type (required for org entries) */
+  /** Entry type (required for team entries) */
   entryType?: string;
 }
 
@@ -105,7 +105,7 @@ export function ShareDialog({
   open,
   onOpenChange,
   passwordEntryId,
-  orgPasswordEntryId,
+  teamPasswordEntryId,
   decryptedData,
   entryType,
 }: ShareDialogProps) {
@@ -129,7 +129,7 @@ export function ShareDialog({
 
   const entryParam = passwordEntryId
     ? `passwordEntryId=${passwordEntryId}`
-    : `orgPasswordEntryId=${orgPasswordEntryId}`;
+    : `teamPasswordEntryId=${teamPasswordEntryId}`;
 
   const fetchLinks = useCallback(async () => {
     setLoadingLinks(true);
@@ -169,13 +169,13 @@ export function ShareDialog({
         body.passwordEntryId = passwordEntryId;
         body.data = safeData;
       } else {
-        // Org entry: E2E — encrypt with random share key
+        // Team entry: E2E — encrypt with random share key
         if (!decryptedData) {
           toast.error(t("createError"));
           return;
         }
         const encrypted = await encryptForShare(safeData);
-        body.orgPasswordEntryId = orgPasswordEntryId;
+        body.teamPasswordEntryId = teamPasswordEntryId;
         body.encryptedShareData = {
           ciphertext: encrypted.ciphertext,
           iv: encrypted.iv,

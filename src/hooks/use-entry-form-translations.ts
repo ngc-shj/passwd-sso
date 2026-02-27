@@ -9,7 +9,7 @@ import type { EntryFormTranslationsBundle } from "@/hooks/entry-form-translation
 
 export {
   toPersonalPasswordFormTranslations,
-  toOrgPasswordFormTranslations,
+  toTeamPasswordFormTranslations,
 } from "@/hooks/entry-form-translations";
 
 export function useEntryFormTranslations() {

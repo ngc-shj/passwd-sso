@@ -7,6 +7,7 @@ import { SUPPORTED_KEY_ALGORITHMS } from "@/lib/crypto-emergency";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // POST /api/emergency-access/[id]/confirm — Owner performs key escrow
 export async function POST(
@@ -20,9 +21,11 @@ export async function POST(
 
   const { id } = await params;
 
-  const grant = await prisma.emergencyAccessGrant.findUnique({
-    where: { id },
-  });
+  const grant = await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.findUnique({
+      where: { id },
+    }),
+  );
 
   if (!grant || grant.ownerId !== session.user.id) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -36,10 +39,12 @@ export async function POST(
   }
 
   // Fetch owner's current keyVersion from DB (server-authoritative)
-  const owner = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { keyVersion: true },
-  });
+  const owner = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { keyVersion: true },
+    }),
+  );
 
   if (!owner) {
     return NextResponse.json({ error: API_ERROR.USER_NOT_FOUND }, { status: 404 });
@@ -71,19 +76,21 @@ export async function POST(
   // Use server-fetched keyVersion, ignore client-sent value
   const serverKeyVersion = owner.keyVersion;
 
-  await prisma.emergencyAccessGrant.update({
-    where: { id },
-    data: {
-      status: EA_STATUS.IDLE,
-      ownerEphemeralPublicKey,
-      encryptedSecretKey,
-      secretKeyIv,
-      secretKeyAuthTag,
-      hkdfSalt,
-      wrapVersion,
-      keyVersion: serverKeyVersion,
-    },
-  });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.update({
+      where: { id },
+      data: {
+        status: EA_STATUS.IDLE,
+        ownerEphemeralPublicKey,
+        encryptedSecretKey,
+        secretKeyIv,
+        secretKeyAuthTag,
+        hkdfSalt,
+        wrapVersion,
+        keyVersion: serverKeyVersion,
+      },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,

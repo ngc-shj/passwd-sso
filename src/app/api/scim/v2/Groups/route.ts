@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import type { OrgRole } from "@prisma/client";
+import type { TeamRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { validateScimToken } from "@/lib/scim-token";
 import {
@@ -8,88 +8,133 @@ import {
   scimListResponse,
   getScimBaseUrl,
 } from "@/lib/scim/response";
-import {
-  roleToScimGroup,
-  roleGroupId,
-  type ScimGroupMemberInput,
-} from "@/lib/scim/serializers";
+import type { ScimGroupMemberInput, ScimGroupResource } from "@/lib/scim/serializers";
 import { scimGroupSchema } from "@/lib/scim/validations";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_ROLE } from "@/lib/constants";
-import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
+import { TEAM_ROLE } from "@/lib/constants";
+import { withTenantRls } from "@/lib/tenant-rls";
 
-/** Non-OWNER roles exposed as SCIM Groups. */
-const SCIM_GROUP_ROLES: OrgRole[] = [
-  ORG_ROLE.ADMIN,
-  ORG_ROLE.MEMBER,
-  ORG_ROLE.VIEWER,
+const SCIM_GROUP_ROLES: TeamRole[] = [
+  TEAM_ROLE.ADMIN,
+  TEAM_ROLE.MEMBER,
+  TEAM_ROLE.VIEWER,
 ];
 
-// GET /api/scim/v2/Groups — List all role-based groups
+function toDisplayName(teamSlug: string | null | undefined, role: TeamRole): string {
+  return teamSlug ? `${teamSlug}:${role}` : role;
+}
+
+function parseRoleFromDisplayName(displayName: string, expectedTeamSlug: string | null | undefined): TeamRole | null {
+  if (!expectedTeamSlug) return null;
+  const separator = displayName.indexOf(":");
+  if (separator < 1) return null;
+  const slugPart = displayName.slice(0, separator).trim();
+  const rolePart = displayName.slice(separator + 1).trim();
+  if (slugPart !== expectedTeamSlug) return null;
+  const matchedRole = SCIM_GROUP_ROLES.find((r) => r.toLowerCase() === rolePart.toLowerCase());
+  return matchedRole ?? null;
+}
+
+function buildGroupResource(
+  externalGroupId: string,
+  displayName: string,
+  members: ScimGroupMemberInput[],
+  baseUrl: string,
+): ScimGroupResource {
+  return {
+    schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+    id: externalGroupId,
+    displayName,
+    members: members.map((m) => ({
+      value: m.userId,
+      display: m.email,
+      $ref: `${baseUrl}/Users/${m.userId}`,
+    })),
+    meta: {
+      resourceType: "Group",
+      location: `${baseUrl}/Groups/${externalGroupId}`,
+    },
+  };
+}
+
+async function loadGroupMembers(teamId: string, role: TeamRole): Promise<ScimGroupMemberInput[]> {
+  const members = await prisma.teamMember.findMany({
+    where: { teamId, role, deactivatedAt: null },
+    include: { user: { select: { id: true, email: true } } },
+  });
+
+  return members
+    .filter((m) => m.user.email != null)
+    .map((m) => ({ userId: m.userId, email: m.user.email! }));
+}
+
+// GET /api/scim/v2/Groups — List all tenant mappings
 export async function GET(req: NextRequest) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId } = result.data;
+  const { tenantId } = result.data;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
-  const baseUrl = getScimBaseUrl();
+  return withTenantRls(prisma, tenantId, async () => {
+    const baseUrl = getScimBaseUrl();
 
-  // Fetch all active members grouped by role
-  const members = await prisma.orgMember.findMany({
-    where: { orgId, deactivatedAt: null },
-    include: { user: { select: { id: true, email: true } } },
-  });
+    const mappings = await prisma.scimGroupMapping.findMany({
+      where: { tenantId },
+      select: {
+        externalGroupId: true,
+        role: true,
+        teamId: true,
+        team: { select: { slug: true } },
+      },
+      orderBy: [{ createdAt: "asc" }],
+    });
 
-  const membersByRole = new Map<OrgRole, ScimGroupMemberInput[]>();
-  for (const role of SCIM_GROUP_ROLES) {
-    membersByRole.set(role, []);
-  }
-  for (const m of members) {
-    if (!m.user.email) continue;
-    const list = membersByRole.get(m.role);
-    if (list) {
-      list.push({ userId: m.userId, email: m.user.email });
-    }
-  }
-
-  const groups = SCIM_GROUP_ROLES.map((role) =>
-    roleToScimGroup(orgId, role, membersByRole.get(role) ?? [], baseUrl),
-  );
-
-  // Support filter by displayName (only supported filter for Groups)
-  const filterParam = req.nextUrl.searchParams.get("filter");
-  if (filterParam) {
-    if (filterParam.length > 256) {
-      return scimError(400, "Filter exceeds maximum length of 256 characters");
-    }
-    const match = filterParam.match(/displayName\s+eq\s+"([^"]+)"/i);
-    if (!match) {
-      return scimError(400, "Only 'displayName eq' filter is supported for Groups");
-    }
-    const filtered = groups.filter(
-      (g) => g.displayName.toLowerCase() === match[1].toLowerCase(),
+    const groups = await Promise.all(
+      mappings.map(async (mapping) => {
+        const members = await loadGroupMembers(mapping.teamId, mapping.role);
+        return buildGroupResource(
+          mapping.externalGroupId,
+          toDisplayName(mapping.team.slug, mapping.role),
+          members,
+          baseUrl,
+        );
+      }),
     );
-    return scimListResponse(filtered, filtered.length);
-  }
 
-  return scimListResponse(groups, groups.length);
+    const filterParam = req.nextUrl.searchParams.get("filter");
+    if (filterParam) {
+      if (filterParam.length > 256) {
+        return scimError(400, "Filter exceeds maximum length of 256 characters");
+      }
+      const match = filterParam.match(/displayName\s+eq\s+"([^"]+)"/i);
+      if (!match) {
+        return scimError(400, "Only 'displayName eq' filter is supported for Groups");
+      }
+      const filtered = groups.filter(
+        (g) => g.displayName.toLowerCase() === match[1].toLowerCase(),
+      );
+      return scimListResponse(filtered, filtered.length);
+    }
+
+    return scimListResponse(groups, groups.length);
+  });
 }
 
-// POST /api/scim/v2/Groups — Register external mapping for a role group
+// POST /api/scim/v2/Groups — Register tenant group mapping
 export async function POST(req: NextRequest) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { orgId } = result.data;
+  const { teamId: scopedTeamId, tenantId } = result.data;
 
-  if (!(await checkScimRateLimit(orgId))) {
+  if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
 
@@ -107,59 +152,59 @@ export async function POST(req: NextRequest) {
 
   const { displayName, externalId } = parsed.data;
 
-  // Validate displayName matches an existing role
-  const matchedRole = SCIM_GROUP_ROLES.find(
-    (r) => r.toLowerCase() === displayName.toLowerCase(),
-  );
-  if (!matchedRole) {
-    return scimError(400, `Unknown group displayName. Valid names: ${SCIM_GROUP_ROLES.join(", ")}`);
+  if (!externalId || externalId.trim().length === 0) {
+    return scimError(400, "externalId is required for tenant group mapping");
   }
 
-  const groupId = roleGroupId(orgId, matchedRole);
+  return withTenantRls(prisma, tenantId, async () => {
+    const team = await prisma.team.findUnique({
+      where: { id: scopedTeamId },
+      select: { slug: true },
+    });
+    const matchedRole = parseRoleFromDisplayName(displayName, team?.slug);
+    if (!matchedRole) {
+      return scimError(400, "displayName must be in the format '<teamSlug>:<ROLE>' for the scoped team");
+    }
 
-  // Register external mapping if externalId provided
-  if (externalId) {
-    const existingMapping = await prisma.scimExternalMapping.findUnique({
+    const existing = await prisma.scimGroupMapping.findUnique({
       where: {
-        orgId_externalId_resourceType: { orgId, externalId, resourceType: "Group" },
+        tenantId_externalGroupId: {
+          tenantId,
+          externalGroupId: externalId,
+        },
+      },
+      select: {
+        id: true,
+        teamId: true,
+        role: true,
       },
     });
-    if (existingMapping && existingMapping.internalId !== groupId) {
-      return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
-    }
-    if (!existingMapping) {
-      try {
-        // Delete stale mapping for this group (handles externalId reassignment)
-        await prisma.scimExternalMapping.deleteMany({
-          where: { orgId, internalId: groupId, resourceType: "Group" },
-        });
-        await prisma.scimExternalMapping.create({
-          data: { orgId, externalId, resourceType: "Group", internalId: groupId },
-        });
-      } catch (e) {
-        if (isScimExternalMappingUniqueViolation(e)) {
-          return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
-        }
-        throw e;
-      }
-    }
-  }
 
-  const baseUrl = getScimBaseUrl();
+    if (existing && (existing.teamId !== scopedTeamId || existing.role !== matchedRole)) {
+      return scimError(409, "externalId is already mapped to a different group", "uniqueness");
+    }
 
-  // Fetch current members for this role
-  const members = await prisma.orgMember.findMany({
-    where: { orgId, role: matchedRole, deactivatedAt: null },
-    include: { user: { select: { id: true, email: true } } },
+    if (!existing) {
+      await prisma.scimGroupMapping.create({
+        data: {
+          tenantId,
+          teamId: scopedTeamId,
+          externalGroupId: externalId,
+          role: matchedRole,
+        },
+      });
+    }
+
+    const members = await loadGroupMembers(scopedTeamId, matchedRole);
+
+    return scimResponse(
+      buildGroupResource(
+        externalId,
+        toDisplayName(team?.slug, matchedRole),
+        members,
+        getScimBaseUrl(),
+      ),
+      201,
+    );
   });
-
-  const memberInputs: ScimGroupMemberInput[] = members
-    .filter((m) => m.user.email != null)
-    .map((m) => ({
-      userId: m.userId,
-      email: m.user.email!,
-    }));
-
-  const resource = roleToScimGroup(orgId, matchedRole, memberInputs, baseUrl);
-  return scimResponse(resource, 201);
 }

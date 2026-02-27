@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -15,10 +16,12 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { id } = await params;
 
   // Verify the share link belongs to the current user
-  const share = await prisma.passwordShare.findUnique({
-    where: { id },
-    select: { createdById: true },
-  });
+  const share = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordShare.findUnique({
+      where: { id },
+      select: { createdById: true },
+    }),
+  );
 
   if (!share || share.createdById !== session.user.id) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -30,18 +33,20 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   let logs;
   try {
-    logs = await prisma.shareAccessLog.findMany({
-      where: { shareId: id },
-      orderBy: { createdAt: "desc" },
-      take: limit + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      select: {
-        id: true,
-        ip: true,
-        userAgent: true,
-        createdAt: true,
-      },
-    });
+    logs = await withUserTenantRls(session.user.id, async () =>
+      prisma.shareAccessLog.findMany({
+        where: { shareId: id },
+        orderBy: { createdAt: "desc" },
+        take: limit + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        select: {
+          id: true,
+          ip: true,
+          userAgent: true,
+          createdAt: true,
+        },
+      }),
+    );
   } catch {
     return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
   }

@@ -17,14 +17,14 @@ import { useSidebarFolderCrud } from "./use-sidebar-folder-crud";
 const personalFolders = [
   { id: "f1", name: "Personal", parentId: null, sortOrder: 0, entryCount: 1 },
 ];
-const orgFolders = [
-  { id: "of1", name: "Org", parentId: null, sortOrder: 0, entryCount: 2 },
+const teamFolders = [
+  { id: "of1", name: "Team", parentId: null, sortOrder: 0, entryCount: 2 },
 ];
 
 function makeParams() {
   return {
     folders: personalFolders,
-    orgFolderGroups: [{ orgId: "org-1", orgName: "Acme", orgRole: "ADMIN", folders: orgFolders }],
+    teamFolderGroups: [{ teamId: "team-1", teamName: "Acme", teamRole: "ADMIN", folders: teamFolders }],
     refreshData: vi.fn(),
     tErrors: (key: string) => key,
   };
@@ -35,7 +35,7 @@ describe("useSidebarFolderCrud", () => {
     vi.clearAllMocks();
   });
 
-  it("opens create dialog for personal and org contexts", () => {
+  it("opens create dialog for personal and team contexts", () => {
     const { result } = renderHook(() => useSidebarFolderCrud(makeParams()));
 
     act(() => {
@@ -46,9 +46,9 @@ describe("useSidebarFolderCrud", () => {
     expect(result.current.dialogFolders).toEqual(personalFolders);
 
     act(() => {
-      result.current.handleFolderCreate("org-1");
+      result.current.handleFolderCreate("team-1");
     });
-    expect(result.current.dialogFolders).toEqual(orgFolders);
+    expect(result.current.dialogFolders).toEqual(teamFolders);
   });
 
   it("submits personal create and refreshes data", async () => {
@@ -66,7 +66,7 @@ describe("useSidebarFolderCrud", () => {
     expect(params.refreshData).toHaveBeenCalledTimes(1);
   });
 
-  it("submits org edit using org endpoint", async () => {
+  it("submits team edit using team endpoint", async () => {
     const params = makeParams();
     const fetchMock = vi.fn(async () => ({ ok: true })) as Mock;
     globalThis.fetch = fetchMock;
@@ -74,7 +74,7 @@ describe("useSidebarFolderCrud", () => {
     const { result } = renderHook(() => useSidebarFolderCrud(params));
 
     act(() => {
-      result.current.handleFolderEdit(orgFolders[0], "org-1");
+      result.current.handleFolderEdit(teamFolders[0], "team-1");
     });
 
     await act(async () => {
@@ -82,7 +82,7 @@ describe("useSidebarFolderCrud", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/orgs/org-1/folders/of1",
+      "/api/teams/team-1/folders/of1",
       expect.objectContaining({ method: "PUT" }),
     );
   });

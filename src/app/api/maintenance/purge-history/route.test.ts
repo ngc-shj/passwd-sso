@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaHistory, mockRateLimiter, mockLogAudit } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaHistory, mockRateLimiter, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaHistory: {
     deleteMany: vi.fn(),
@@ -11,6 +11,7 @@ const { mockAuth, mockPrismaHistory, mockRateLimiter, mockLogAudit } = vi.hoiste
     clear: vi.fn(),
   },
   mockLogAudit: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -23,6 +24,9 @@ vi.mock("@/lib/rate-limit", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { POST } from "./route";

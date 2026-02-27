@@ -37,6 +37,7 @@ export default async function SharePage({ params }: Props) {
     where: { tokenHash },
     select: {
       id: true,
+      tenantId: true,
       shareType: true,
       entryType: true,
       encryptedData: true,
@@ -77,20 +78,21 @@ export default async function SharePage({ params }: Props) {
     return <ShareError reason="maxViews" />;
   }
 
-  // Record access log (fire-and-forget)
+  // Record access log (async nonblocking)
   const ip = rateLimitIp === "unknown" ? null : rateLimitIp;
   const ua = headersList.get("user-agent");
   prisma.shareAccessLog
     .create({
       data: {
         shareId: share.id,
+        tenantId: share.tenantId,
         ip,
         userAgent: ua?.slice(0, 512) ?? null,
       },
     })
     .catch(() => {});
 
-  // E2E share (org entries): client-side decryption via URL fragment key
+  // E2E share (team entries): client-side decryption via URL fragment key
   if (share.masterKeyVersion === 0) {
     return (
       <ShareE2EEntryView

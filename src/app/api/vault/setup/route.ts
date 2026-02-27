@@ -9,6 +9,7 @@ import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 export const runtime = "nodejs";
 
@@ -26,7 +27,7 @@ const setupSchema = z.object({
     iv: z.string().regex(/^[0-9a-f]{24}$/),
     authTag: z.string().regex(/^[0-9a-f]{32}$/),
   }),
-  // ECDH key pair for org E2E encryption
+  // ECDH key pair for team E2E encryption
   ecdhPublicKey: z.string().min(1),
   encryptedEcdhPrivateKey: z.string().min(1),
   ecdhPrivateKeyIv: z.string().regex(/^[0-9a-f]{24}$/),
@@ -52,10 +53,15 @@ async function handlePOST(request: Request) {
   }
 
   // Prevent re-setup
-  const existingUser = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { vaultSetupAt: true },
-  });
+  const existingUser = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { vaultSetupAt: true, tenantId: true },
+    }),
+  );
+  if (!existingUser) {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
   if (existingUser?.vaultSetupAt) {
     return NextResponse.json(
       { error: API_ERROR.VAULT_ALREADY_SETUP },
@@ -87,37 +93,40 @@ async function handlePOST(request: Request) {
     .update(data.authHash + serverSalt)
     .digest("hex");
 
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: session.user.id },
-      data: {
-        vaultSetupAt: new Date(),
-        accountSalt: data.accountSalt,
-        encryptedSecretKey: data.encryptedSecretKey,
-        secretKeyIv: data.secretKeyIv,
-        secretKeyAuthTag: data.secretKeyAuthTag,
-        masterPasswordServerHash: serverHash,
-        masterPasswordServerSalt: serverSalt,
-        keyVersion: 1,
-        passphraseVerifierHmac: hmacVerifier(data.verifierHash),
-        passphraseVerifierVersion: VERIFIER_VERSION,
-        // ECDH key pair for org E2E encryption
-        ecdhPublicKey: data.ecdhPublicKey,
-        encryptedEcdhPrivateKey: data.encryptedEcdhPrivateKey,
-        ecdhPrivateKeyIv: data.ecdhPrivateKeyIv,
-        ecdhPrivateKeyAuthTag: data.ecdhPrivateKeyAuthTag,
-      },
-    }),
-    prisma.vaultKey.create({
-      data: {
-        userId: session.user.id,
-        version: 1,
-        verificationCiphertext: data.verificationArtifact.ciphertext,
-        verificationIv: data.verificationArtifact.iv,
-        verificationAuthTag: data.verificationArtifact.authTag,
-      },
-    }),
-  ]);
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.$transaction([
+      prisma.user.update({
+        where: { id: session.user.id },
+        data: {
+          vaultSetupAt: new Date(),
+          accountSalt: data.accountSalt,
+          encryptedSecretKey: data.encryptedSecretKey,
+          secretKeyIv: data.secretKeyIv,
+          secretKeyAuthTag: data.secretKeyAuthTag,
+          masterPasswordServerHash: serverHash,
+          masterPasswordServerSalt: serverSalt,
+          keyVersion: 1,
+          passphraseVerifierHmac: hmacVerifier(data.verifierHash),
+          passphraseVerifierVersion: VERIFIER_VERSION,
+          // ECDH key pair for team E2E encryption
+          ecdhPublicKey: data.ecdhPublicKey,
+          encryptedEcdhPrivateKey: data.encryptedEcdhPrivateKey,
+          ecdhPrivateKeyIv: data.ecdhPrivateKeyIv,
+          ecdhPrivateKeyAuthTag: data.ecdhPrivateKeyAuthTag,
+        },
+      }),
+      prisma.vaultKey.create({
+        data: {
+          userId: session.user.id,
+          tenantId: existingUser.tenantId,
+          version: 1,
+          verificationCiphertext: data.verificationArtifact.ciphertext,
+          verificationIv: data.verificationArtifact.iv,
+          verificationAuthTag: data.verificationArtifact.authTag,
+        },
+      }),
+    ]),
+  );
 
   getLogger().info({ userId: session.user.id }, "vault.setup.success");
 

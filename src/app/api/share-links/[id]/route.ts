@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -16,16 +17,18 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
-  const share = await prisma.passwordShare.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      shareType: true,
-      createdById: true,
-      revokedAt: true,
-      orgPasswordEntryId: true,
-    },
-  });
+  const share = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordShare.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        shareType: true,
+        createdById: true,
+        revokedAt: true,
+        teamPasswordEntryId: true,
+      },
+    }),
+  );
 
   if (!share || share.createdById !== session.user.id) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -35,26 +38,32 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.ALREADY_REVOKED }, { status: 409 });
   }
 
-  await prisma.passwordShare.update({
-    where: { id },
-    data: { revokedAt: new Date() },
-  });
+  const teamPasswordEntryId = share.teamPasswordEntryId;
+
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordShare.update({
+      where: { id },
+      data: { revokedAt: new Date() },
+    }),
+  );
 
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);
   logAudit({
-    scope: share.orgPasswordEntryId ? AUDIT_SCOPE.ORG : AUDIT_SCOPE.PERSONAL,
+    scope: teamPasswordEntryId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: share.shareType === "TEXT" || share.shareType === "FILE"
       ? AUDIT_ACTION.SEND_REVOKE
       : AUDIT_ACTION.SHARE_REVOKE,
     userId: session.user.id,
-    orgId: share.orgPasswordEntryId
+    teamId: teamPasswordEntryId
       ? (
-          await prisma.orgPasswordEntry.findUnique({
-            where: { id: share.orgPasswordEntryId },
-            select: { orgId: true },
-          })
-        )?.orgId
+          await withUserTenantRls(session.user.id, async () =>
+            prisma.teamPasswordEntry.findUnique({
+              where: { id: teamPasswordEntryId },
+              select: { teamId: true },
+            }),
+          )
+        )?.teamId
       : undefined,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,

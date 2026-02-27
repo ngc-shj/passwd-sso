@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { requireOrgPermission, OrgAuthError } from "@/lib/org-auth";
+import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { z } from "zod/v4";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { ORG_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 const bodySchema = z.object({
-  orgId: z.string().optional(),
+  teamId: z.string().optional(),
   entryCount: z.number().int().min(0),
   format: z.enum(["csv", "json"]),
   filename: z.string().trim().min(1).max(255).optional(),
   encrypted: z.boolean().optional(),
-  includeOrgs: z.boolean().optional(),
+  includeTeams: z.boolean().optional(),
 });
 
 // POST /api/audit-logs/export — Record export audit event
@@ -34,14 +34,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
   }
 
-  const { orgId, entryCount, format, filename, encrypted, includeOrgs } = result.data;
+  const {
+    teamId,
+    entryCount,
+    format,
+    filename,
+    encrypted,
+    includeTeams,
+  } = result.data;
 
-  // Verify org membership when orgId is specified
-  if (orgId) {
+  // Verify team membership when teamId is specified
+  if (teamId) {
     try {
-      await requireOrgPermission(session.user.id, orgId, ORG_PERMISSION.ORG_UPDATE);
+      await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
     } catch (e) {
-      if (e instanceof OrgAuthError) {
+      if (e instanceof TeamAuthError) {
         return NextResponse.json({ error: e.message }, { status: e.status });
       }
       throw e;
@@ -49,16 +56,16 @@ export async function POST(req: NextRequest) {
   }
 
   logAudit({
-    scope: orgId ? AUDIT_SCOPE.ORG : AUDIT_SCOPE.PERSONAL,
+    scope: teamId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.ENTRY_EXPORT,
     userId: session.user.id,
-    orgId: orgId ?? undefined,
+    teamId: teamId ?? undefined,
     metadata: {
       entryCount,
       format,
       ...(filename ? { filename } : {}),
       ...(typeof encrypted === "boolean" ? { encrypted } : {}),
-      ...(typeof includeOrgs === "boolean" ? { includeOrgs } : {}),
+      ...(typeof includeTeams === "boolean" ? { includeTeams } : {}),
     },
     ...extractRequestMeta(req),
   });

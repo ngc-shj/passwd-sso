@@ -4,7 +4,7 @@ import {
   createE2EPasswordSchema,
   updateE2EPasswordSchema,
   createShareLinkSchema,
-  orgMemberKeySchema,
+  teamMemberKeySchema,
 } from "./validations";
 import { ENTRY_TYPE } from "@/lib/constants";
 
@@ -207,38 +207,38 @@ describe("createShareLinkSchema – passkey fields", () => {
   });
 });
 
-describe("orgMemberKeySchema", () => {
+describe("teamMemberKeySchema", () => {
   const validKey = {
-    encryptedOrgKey: "enc-key-data",
-    orgKeyIv: "a".repeat(24),
-    orgKeyAuthTag: "b".repeat(32),
+    encryptedTeamKey: "enc-key-data",
+    teamKeyIv: "a".repeat(24),
+    teamKeyAuthTag: "b".repeat(32),
     ephemeralPublicKey: '{"kty":"EC"}',
     hkdfSalt: "c".repeat(64),
     keyVersion: 1,
   };
 
-  it("accepts valid org member key", () => {
-    expect(orgMemberKeySchema.safeParse(validKey).success).toBe(true);
+  it("accepts valid team member key", () => {
+    expect(teamMemberKeySchema.safeParse(validKey).success).toBe(true);
   });
 
-  it("rejects encryptedOrgKey exceeding max length (1000)", () => {
-    const result = orgMemberKeySchema.safeParse({
+  it("rejects encryptedTeamKey exceeding max length (1000)", () => {
+    const result = teamMemberKeySchema.safeParse({
       ...validKey,
-      encryptedOrgKey: "x".repeat(1001),
+      encryptedTeamKey: "x".repeat(1001),
     });
     expect(result.success).toBe(false);
   });
 
-  it("accepts encryptedOrgKey at max length (1000)", () => {
-    const result = orgMemberKeySchema.safeParse({
+  it("accepts encryptedTeamKey at max length (1000)", () => {
+    const result = teamMemberKeySchema.safeParse({
       ...validKey,
-      encryptedOrgKey: "x".repeat(1000),
+      encryptedTeamKey: "x".repeat(1000),
     });
     expect(result.success).toBe(true);
   });
 
   it("rejects ephemeralPublicKey exceeding max length (500)", () => {
-    const result = orgMemberKeySchema.safeParse({
+    const result = teamMemberKeySchema.safeParse({
       ...validKey,
       ephemeralPublicKey: "x".repeat(501),
     });
@@ -246,23 +246,23 @@ describe("orgMemberKeySchema", () => {
   });
 
   it("accepts ephemeralPublicKey at max length (500)", () => {
-    const result = orgMemberKeySchema.safeParse({
+    const result = teamMemberKeySchema.safeParse({
       ...validKey,
       ephemeralPublicKey: "x".repeat(500),
     });
     expect(result.success).toBe(true);
   });
 
-  it("rejects invalid orgKeyIv format", () => {
-    const result = orgMemberKeySchema.safeParse({
+  it("rejects invalid teamKeyIv format", () => {
+    const result = teamMemberKeySchema.safeParse({
       ...validKey,
-      orgKeyIv: "not-hex-24",
+      teamKeyIv: "not-hex-24",
     });
     expect(result.success).toBe(false);
   });
 
   it("rejects invalid hkdfSalt format", () => {
-    const result = orgMemberKeySchema.safeParse({
+    const result = teamMemberKeySchema.safeParse({
       ...validKey,
       hkdfSalt: "not-hex-64",
     });
@@ -270,7 +270,7 @@ describe("orgMemberKeySchema", () => {
   });
 
   it("defaults wrapVersion to 1 when omitted", () => {
-    const result = orgMemberKeySchema.safeParse(validKey);
+    const result = teamMemberKeySchema.safeParse(validKey);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.wrapVersion).toBe(1);
@@ -278,12 +278,12 @@ describe("orgMemberKeySchema", () => {
   });
 
   it("accepts wrapVersion=1", () => {
-    const result = orgMemberKeySchema.safeParse({ ...validKey, wrapVersion: 1 });
+    const result = teamMemberKeySchema.safeParse({ ...validKey, wrapVersion: 1 });
     expect(result.success).toBe(true);
   });
 
   it("rejects wrapVersion=2 (unsupported)", () => {
-    const result = orgMemberKeySchema.safeParse({ ...validKey, wrapVersion: 2 });
+    const result = teamMemberKeySchema.safeParse({ ...validKey, wrapVersion: 2 });
     expect(result.success).toBe(false);
   });
 });

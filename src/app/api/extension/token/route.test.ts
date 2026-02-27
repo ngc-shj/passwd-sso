@@ -9,19 +9,25 @@ const {
   mockCreate,
   mockFindMany,
   mockFindUnique,
+  mockUserFindUnique,
   mockUpdateMany,
   mockUpdate,
   mockTransaction,
   mockCheck,
+  mockWithUserTenantRls,
+  mockWithBypassRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockCreate: vi.fn(),
   mockFindMany: vi.fn(),
   mockFindUnique: vi.fn(),
+  mockUserFindUnique: vi.fn(),
   mockUpdateMany: vi.fn(),
   mockUpdate: vi.fn(),
   mockTransaction: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue(true),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -33,6 +39,9 @@ vi.mock("@/lib/prisma", () => ({
       create: mockCreate,
       updateMany: mockUpdateMany,
       update: mockUpdate,
+    },
+    user: {
+      findUnique: mockUserFindUnique,
     },
     $transaction: mockTransaction,
   },
@@ -48,6 +57,12 @@ vi.mock("@/lib/redis", () => ({
   getRedis: () => null,
   validateRedisConfig: () => {},
 }));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
+}));
 
 import { POST, DELETE } from "./route";
 
@@ -56,6 +71,7 @@ import { POST, DELETE } from "./route";
 describe("POST /api/extension/token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     // Default: transaction executes the callback with the mock prisma
     mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
       cb({

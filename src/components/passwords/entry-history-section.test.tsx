@@ -9,13 +9,13 @@ const {
   mockRepromptDialog,
   mockEncryptionKey,
   mockDecryptData,
-  mockGetOrgEncryptionKey,
+  mockGetTeamEncryptionKey,
 } = vi.hoisted(() => ({
   mockRequireVerification: vi.fn(),
   mockRepromptDialog: null as React.ReactNode,
   mockEncryptionKey: {} as CryptoKey,
   mockDecryptData: vi.fn(),
-  mockGetOrgEncryptionKey: vi.fn().mockResolvedValue({} as CryptoKey),
+  mockGetTeamEncryptionKey: vi.fn().mockResolvedValue({} as CryptoKey),
 }));
 
 vi.mock("next-intl", () => ({
@@ -41,15 +41,15 @@ vi.mock("@/lib/crypto-client", () => ({
   decryptData: mockDecryptData,
 }));
 
-vi.mock("@/lib/org-vault-context", () => ({
-  useOrgVault: () => ({
-    getOrgEncryptionKey: mockGetOrgEncryptionKey,
+vi.mock("@/lib/team-vault-context", () => ({
+  useTeamVault: () => ({
+    getTeamEncryptionKey: mockGetTeamEncryptionKey,
   }),
 }));
 
 vi.mock("@/lib/crypto-aad", () => ({
   buildPersonalEntryAAD: vi.fn().mockReturnValue("test-aad"),
-  buildOrgEntryAAD: vi.fn().mockReturnValue("test-org-aad"),
+  buildTeamEntryAAD: vi.fn().mockReturnValue("test-team-aad"),
 }));
 
 vi.mock("sonner", () => ({
@@ -264,9 +264,9 @@ describe("EntryHistorySection", () => {
     );
   });
 
-  it("fetches from orgPasswordHistoryById for org entries on View", async () => {
+  it("fetches from teamPasswordHistoryById for team entries on View", async () => {
     mockDecryptData.mockResolvedValue(
-      JSON.stringify({ title: "Org PW", password: "secret" }),
+      JSON.stringify({ title: "Team PW", password: "secret" }),
     );
 
     const fetchMock = vi.fn((url: string) => {
@@ -280,7 +280,7 @@ describe("EntryHistorySection", () => {
                   blobIv: "encrypted-iv",
                   blobAuthTag: "encrypted-tag",
                   aadVersion: 1,
-                  orgKeyVersion: 1,
+                  teamKeyVersion: 1,
                 }
               : HISTORY_ITEMS,
           ),
@@ -290,7 +290,7 @@ describe("EntryHistorySection", () => {
 
     await act(async () => {
       render(
-        <EntryHistorySection entryId="entry-1" orgId="org-1" />
+        <EntryHistorySection entryId="entry-1" teamId="team-1" />
       );
     });
 
@@ -306,10 +306,10 @@ describe("EntryHistorySection", () => {
     });
 
     await waitFor(() => {
-      // Verify fetch was called with org history detail URL
+      // Verify fetch was called with team history detail URL
       const calls = (fetchMock as ReturnType<typeof vi.fn>).mock.calls;
       const viewCall = calls.find(
-        (c: [string]) => c[0].includes("/orgs/org-1/passwords/entry-1/history/h1"),
+        (c: [string]) => c[0].includes("/teams/team-1/passwords/entry-1/history/h1"),
       );
       expect(viewCall).toBeDefined();
       // Verify client-side decryption was called

@@ -25,7 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useVaultContext } from "@/hooks/use-vault-context";
+import { useTeamVaultContext } from "@/hooks/use-vault-context";
 import { useSetActiveVault } from "@/lib/active-vault-context";
 
 interface SidebarProps {
@@ -39,12 +39,12 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const router = useRouter();
   const t = useTranslations("Dashboard");
   const tCommon = useTranslations("Common");
-  const tOrg = useTranslations("Org");
+  const tTeam = useTranslations("Team");
   const tErrors = useTranslations("ApiErrors");
 
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { tags, folders, orgs, orgTagGroups, orgFolderGroups, refreshData } =
+  const { tags, folders, teams, teamTagGroups, teamFolderGroups, refreshData } =
     useSidebarData(pathname);
   const {
     folderDialogOpen,
@@ -60,7 +60,12 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     clearDeletingFolder,
   } = useSidebarFolderCrud({
     folders,
-    orgFolderGroups,
+    teamFolderGroups: teamFolderGroups.map((group) => ({
+      teamId: group.teamId,
+      teamName: group.teamName,
+      teamRole: group.teamRole,
+      folders: group.folders,
+    })),
     refreshData,
     tErrors,
   });
@@ -80,21 +85,21 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     tErrors,
   });
 
-  const vaultContext = useVaultContext(orgs);
+  const vaultContext = useTeamVaultContext(teams);
   const setActiveVault = useSetActiveVault();
   useEffect(() => {
     setActiveVault(vaultContext);
   }, [vaultContext, setActiveVault]);
   const {
-    activeAuditOrgId,
+    activeAuditTeamId,
     isWatchtower,
     isShareLinks,
     isEmergencyAccess,
     isAuditLog,
     isPersonalAuditLog,
-    selectedOrg,
-    selectedOrgCanManageFolders,
-    selectedOrgCanManageTags,
+    selectedTeam,
+    selectedTeamCanManageFolders,
+    selectedTeamCanManageTags,
     selectedTypeFilter,
     selectedFolderId,
     selectedTagId,
@@ -108,11 +113,11 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     pathname,
     searchParams,
     vaultContext,
-    orgs,
+    teams,
     folders,
     tags,
-    orgFolderGroups,
-    orgTagGroups,
+    teamFolderGroups,
+    teamTagGroups,
   });
 
   const { isOpen, toggleSection } = useSidebarSectionsState({
@@ -128,14 +133,14 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 
   const sidebarContentProps = useSidebarViewModel({
     t,
-    tOrg,
+    tTeam,
     router,
     onOpenChange,
     vaultContext,
-    orgs,
-    selectedOrg,
-    selectedOrgCanManageFolders,
-    selectedOrgCanManageTags,
+    teams,
+    selectedTeam,
+    selectedTeamCanManageFolders,
+    selectedTeamCanManageTags,
     selectedTypeFilter,
     selectedFolderId,
     selectedTagId,
@@ -147,7 +152,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isShareLinks,
     isEmergencyAccess,
     isPersonalAuditLog,
-    activeAuditOrgId,
+    activeAuditTeamId,
     selectedFolders,
     selectedTags,
     isOpen,

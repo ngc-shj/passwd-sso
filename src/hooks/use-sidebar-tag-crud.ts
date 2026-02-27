@@ -24,22 +24,22 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [editingTag, setEditingTag] = useState<SidebarTagItem | null>(null);
   const [deletingTag, setDeletingTag] = useState<SidebarTagItem | null>(null);
-  const [tagOrgId, setTagOrgId] = useState<string | null>(null);
+  const [tagTeamId, setTagTeamId] = useState<string | null>(null);
 
-  const handleTagCreate = (orgId?: string) => {
-    setTagOrgId(orgId ?? null);
+  const handleTagCreate = (teamId?: string) => {
+    setTagTeamId(teamId ?? null);
     setEditingTag(null);
     setTagDialogOpen(true);
   };
 
-  const handleTagEdit = (tag: SidebarTagItem, orgId?: string) => {
-    setTagOrgId(orgId ?? null);
+  const handleTagEdit = (tag: SidebarTagItem, teamId?: string) => {
+    setTagTeamId(teamId ?? null);
     setEditingTag(tag);
     setTagDialogOpen(true);
   };
 
-  const handleTagDeleteClick = (tag: SidebarTagItem, orgId?: string) => {
-    setTagOrgId(orgId ?? null);
+  const handleTagDeleteClick = (tag: SidebarTagItem, teamId?: string) => {
+    setTagTeamId(teamId ?? null);
     setDeletingTag(tag);
   };
 
@@ -50,8 +50,8 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
   const handleTagSubmit = async (data: TagSubmitPayload) => {
     const isEdit = !!editingTag;
     const url = isEdit
-      ? (tagOrgId ? `${apiPath.orgTags(tagOrgId)}/${editingTag.id}` : `${API_PATH.TAGS}/${editingTag.id}`)
-      : (tagOrgId ? apiPath.orgTags(tagOrgId) : API_PATH.TAGS);
+      ? (tagTeamId ? `${apiPath.teamTags(tagTeamId)}/${editingTag.id}` : `${API_PATH.TAGS}/${editingTag.id}`)
+      : (tagTeamId ? apiPath.teamTags(tagTeamId) : API_PATH.TAGS);
     const method = isEdit ? "PUT" : "POST";
 
     const res = await fetch(url, {
@@ -72,8 +72,8 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
   const handleTagDelete = async () => {
     if (!deletingTag) return;
 
-    const url = tagOrgId
-      ? `${apiPath.orgTags(tagOrgId)}/${deletingTag.id}`
+    const url = tagTeamId
+      ? `${apiPath.teamTags(tagTeamId)}/${deletingTag.id}`
       : `${API_PATH.TAGS}/${deletingTag.id}`;
 
     const res = await fetch(url, { method: "DELETE" });

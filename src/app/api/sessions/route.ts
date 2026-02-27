@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getSessionToken } from "./helpers";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const revokeAllLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
 
@@ -24,27 +25,31 @@ async function handleGET(request: NextRequest) {
   // Look up current session ID without loading all tokens into memory
   let currentSessionId: string | null = null;
   if (currentToken) {
-    const current = await prisma.session.findUnique({
-      where: { sessionToken: currentToken },
-      select: { id: true },
-    });
+    const current = await withUserTenantRls(session.user.id, async () =>
+      prisma.session.findUnique({
+        where: { sessionToken: currentToken },
+        select: { id: true },
+      }),
+    );
     currentSessionId = current?.id ?? null;
   }
 
-  const sessions = await prisma.session.findMany({
-    where: {
-      userId: session.user.id,
-      expires: { gt: new Date() },
-    },
-    select: {
-      id: true,
-      createdAt: true,
-      lastActiveAt: true,
-      ipAddress: true,
-      userAgent: true,
-    },
-    orderBy: { lastActiveAt: "desc" },
-  });
+  const sessions = await withUserTenantRls(session.user.id, async () =>
+    prisma.session.findMany({
+      where: {
+        userId: session.user.id,
+        expires: { gt: new Date() },
+      },
+      select: {
+        id: true,
+        createdAt: true,
+        lastActiveAt: true,
+        ipAddress: true,
+        userAgent: true,
+      },
+      orderBy: { lastActiveAt: "desc" },
+    }),
+  );
 
   const result = sessions.map((s) => ({
     id: s.id,
@@ -84,12 +89,14 @@ async function handleDELETE(request: NextRequest) {
     );
   }
 
-  const result = await prisma.session.deleteMany({
-    where: {
-      userId: session.user.id,
-      sessionToken: { not: currentToken },
-    },
-  });
+  const result = await withUserTenantRls(session.user.id, async () =>
+    prisma.session.deleteMany({
+      where: {
+        userId: session.user.id,
+        sessionToken: { not: currentToken },
+      },
+    }),
+  );
 
   const meta = extractRequestMeta(request);
   logAudit({

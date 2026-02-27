@@ -32,6 +32,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     where: { tokenHash },
     select: {
       id: true,
+      tenantId: true,
       shareType: true,
       sendFilename: true,
       sendContentType: true,
@@ -60,13 +61,14 @@ export async function GET(req: NextRequest, { params }: Params) {
     return new NextResponse(null, { status: 404 });
   }
 
-  // Record access log (fire-and-forget)
+  // Record access log (async nonblocking)
   const accessIp = ip === "unknown" ? null : ip;
   const ua = req.headers.get("user-agent");
   prisma.shareAccessLog
     .create({
       data: {
         shareId: share.id,
+        tenantId: share.tenantId,
         ip: accessIp,
         userAgent: ua?.slice(0, 512) ?? null,
       },

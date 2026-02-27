@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { updateTagSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // PUT /api/tags/[id] - Update a tag
 export async function PUT(
@@ -16,7 +17,9 @@ export async function PUT(
 
   const { id } = await params;
 
-  const existing = await prisma.tag.findUnique({ where: { id } });
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.tag.findUnique({ where: { id } }),
+  );
   if (!existing) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
@@ -46,14 +49,16 @@ export async function PUT(
 
   // Check for duplicate name if name is being changed
   if (updateData.name && updateData.name !== existing.name) {
-    const duplicate = await prisma.tag.findUnique({
-      where: {
-        name_userId: {
-          name: updateData.name as string,
-          userId: session.user.id,
+    const duplicate = await withUserTenantRls(session.user.id, async () =>
+      prisma.tag.findUnique({
+        where: {
+          name_userId: {
+            name: updateData.name as string,
+            userId: session.user.id,
+          },
         },
-      },
-    });
+      }),
+    );
     if (duplicate) {
       return NextResponse.json(
         { error: API_ERROR.TAG_ALREADY_EXISTS },
@@ -62,10 +67,12 @@ export async function PUT(
     }
   }
 
-  const tag = await prisma.tag.update({
-    where: { id },
-    data: updateData,
-  });
+  const tag = await withUserTenantRls(session.user.id, async () =>
+    prisma.tag.update({
+      where: { id },
+      data: updateData,
+    }),
+  );
 
   return NextResponse.json({ id: tag.id, name: tag.name, color: tag.color });
 }
@@ -82,7 +89,9 @@ export async function DELETE(
 
   const { id } = await params;
 
-  const existing = await prisma.tag.findUnique({ where: { id } });
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.tag.findUnique({ where: { id } }),
+  );
   if (!existing) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
@@ -90,7 +99,9 @@ export async function DELETE(
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
-  await prisma.tag.delete({ where: { id } });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.tag.delete({ where: { id } }),
+  );
 
   return NextResponse.json({ success: true });
 }

@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import { getLogger } from "@/lib/logger";
+import { getTenantRlsContext } from "@/lib/tenant-rls";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -129,7 +130,39 @@ const result = globalForPrisma.prisma
   ? { client: globalForPrisma.prisma, pool: globalForPrisma.pool! }
   : createPrismaClient();
 
-export const prisma = result.client;
+const baseClient = result.client;
+export const prismaBase = baseClient;
+
+export const prisma = new Proxy(baseClient, {
+  get(target, prop, receiver) {
+    const ctx = getTenantRlsContext();
+    const active = ctx?.tx;
+
+    if (active) {
+      // Keep nested transaction calls inside the current tenant-scoped tx context.
+      if (prop === "$transaction") {
+        return async (
+          arg:
+            | ((tx: typeof active) => unknown)
+            | Array<Promise<unknown>>,
+        ) => {
+          if (typeof arg === "function") {
+            return arg(active);
+          }
+          return Promise.all(arg);
+        };
+      }
+
+      if (prop in active) {
+        const value = Reflect.get(active, prop, active);
+        return typeof value === "function" ? value.bind(active) : value;
+      }
+    }
+
+    const value = Reflect.get(target, prop, receiver);
+    return typeof value === "function" ? value.bind(target) : value;
+  },
+}) as PrismaClient;
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = result.client;

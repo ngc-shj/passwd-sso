@@ -84,6 +84,7 @@ const envSchema = z
     AUTH_JACKSON_SECRET: nonEmpty.optional(),
     JACKSON_URL: nonEmpty.optional(),
     GOOGLE_WORKSPACE_DOMAIN: z.string().optional(),
+    AUTH_TENANT_CLAIM_KEYS: z.string().optional(),
     SAML_PROVIDER_NAME: z.string().default("SSO"),
 
     // --- Optional with defaults ---

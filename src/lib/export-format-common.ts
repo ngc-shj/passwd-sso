@@ -113,7 +113,7 @@ export const PERSONAL_EXPORT_OPTIONS: FormatExportOptions = {
   },
 };
 
-export const ORG_EXPORT_OPTIONS: FormatExportOptions = {
+export const TEAM_EXPORT_OPTIONS: FormatExportOptions = {
   csv: {
     includePasskeyType: true,
     includeReprompt: false,

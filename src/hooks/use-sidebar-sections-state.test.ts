@@ -5,7 +5,7 @@ import { renderHook, act } from "@testing-library/react";
 const mockSetCollapsed = vi.fn();
 const mockCollapsed = {
   categories: true,
-  organize: true,
+  manage: true,
   security: true,
   utilities: true,
 };
@@ -64,7 +64,7 @@ describe("useSidebarSectionsState", () => {
     const next = updater(mockCollapsed);
 
     expect(next.categories).toBe(false);
-    expect(next.organize).toBe(false);
+    expect(next.manage).toBe(false);
     expect(next.security).toBe(false);
   });
 });

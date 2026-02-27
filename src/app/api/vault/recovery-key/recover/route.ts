@@ -8,6 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -102,18 +103,20 @@ async function handleVerify(body: unknown, userId: string) {
     );
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      recoveryVerifierHmac: true,
-      recoveryEncryptedSecretKey: true,
-      recoverySecretKeyIv: true,
-      recoverySecretKeyAuthTag: true,
-      recoveryHkdfSalt: true,
-      accountSalt: true,
-      keyVersion: true,
-    },
-  });
+  const user = await withUserTenantRls(userId, async () =>
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        recoveryVerifierHmac: true,
+        recoveryEncryptedSecretKey: true,
+        recoverySecretKeyIv: true,
+        recoverySecretKeyAuthTag: true,
+        recoveryHkdfSalt: true,
+        accountSalt: true,
+        keyVersion: true,
+      },
+    }),
+  );
 
   if (!user?.recoveryVerifierHmac) {
     return NextResponse.json(
@@ -154,13 +157,15 @@ async function handleReset(body: unknown, userId: string, request: NextRequest) 
   const data = parsed.data;
 
   // Re-verify recovery key (verifierHash serves as implicit token)
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      recoveryVerifierHmac: true,
-      keyVersion: true,
-    },
-  });
+  const user = await withUserTenantRls(userId, async () =>
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        recoveryVerifierHmac: true,
+        keyVersion: true,
+      },
+    }),
+  );
 
   if (!user?.recoveryVerifierHmac) {
     return NextResponse.json(
@@ -177,28 +182,30 @@ async function handleReset(body: unknown, userId: string, request: NextRequest) 
   }
 
   // Update passphrase + recovery key data in a single transaction
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      // New passphrase-wrapped secret key
-      encryptedSecretKey: data.encryptedSecretKey,
-      secretKeyIv: data.secretKeyIv,
-      secretKeyAuthTag: data.secretKeyAuthTag,
-      accountSalt: data.accountSalt,
-      passphraseVerifierHmac: hmacVerifier(data.newVerifierHash),
-      // Re-wrapped recovery key data
-      recoveryEncryptedSecretKey: data.recoveryEncryptedSecretKey,
-      recoverySecretKeyIv: data.recoverySecretKeyIv,
-      recoverySecretKeyAuthTag: data.recoverySecretKeyAuthTag,
-      recoveryHkdfSalt: data.recoveryHkdfSalt,
-      recoveryVerifierHmac: hmacVerifier(data.recoveryVerifierHash),
-      recoveryKeySetAt: new Date(),
-      // Reset lockout
-      failedUnlockAttempts: 0,
-      lastFailedUnlockAt: null,
-      accountLockedUntil: null,
-    },
-  });
+  await withUserTenantRls(userId, async () =>
+    prisma.user.update({
+      where: { id: userId },
+      data: {
+        // New passphrase-wrapped secret key
+        encryptedSecretKey: data.encryptedSecretKey,
+        secretKeyIv: data.secretKeyIv,
+        secretKeyAuthTag: data.secretKeyAuthTag,
+        accountSalt: data.accountSalt,
+        passphraseVerifierHmac: hmacVerifier(data.newVerifierHash),
+        // Re-wrapped recovery key data
+        recoveryEncryptedSecretKey: data.recoveryEncryptedSecretKey,
+        recoverySecretKeyIv: data.recoverySecretKeyIv,
+        recoverySecretKeyAuthTag: data.recoverySecretKeyAuthTag,
+        recoveryHkdfSalt: data.recoveryHkdfSalt,
+        recoveryVerifierHmac: hmacVerifier(data.recoveryVerifierHash),
+        recoveryKeySetAt: new Date(),
+        // Reset lockout
+        failedUnlockAttempts: 0,
+        lastFailedUnlockAt: null,
+        accountLockedUntil: null,
+      },
+    }),
+  );
 
   const { ip, userAgent } = extractRequestMeta(request);
   logAudit({

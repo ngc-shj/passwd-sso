@@ -15,18 +15,18 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Security Audit (Watchtower)** - Breached (HIBP), weak, reused, old, and HTTP-URL detection with security score
 - **Import / Export** - Bitwarden, 1Password, Chrome CSV import; CSV/JSON export profiles: compatible and passwd-sso (full-fidelity)
 - **Password-Protected Export** - AES-256-GCM encrypted exports with PBKDF2 (600k)
-- **Attachments** - Encrypted file attachments (personal and org E2E)
+- **Attachments** - Encrypted file attachments (personal and team E2E)
 - **Share Links** - Time-limited read-only sharing with access logs
-- **Audit Logs** - Personal and org audit logs with filters and export events
+- **Audit Logs** - Personal and team audit logs with filters and export events
 - **Emergency Access** - Request/approve temporary vault access with key exchange
 - **Session Management** - List active sessions and revoke single/all sessions
 - **Security Notifications** - Email notifications for emergency-access events
 - **Key Rotation** - Rotate vault encryption key with passphrase verification
-- **Tags & Organization** - Color-coded tags, favorites, archive, soft-delete trash (30-day auto-purge)
+- **Tags & Team** - Color-coded tags, favorites, archive, soft-delete trash (30-day auto-purge)
 - **Keyboard Shortcuts** - `/ or Cmd+K` search, `n` new, `?` help, `Esc` clear
 - **i18n** - English and Japanese (next-intl)
 - **Dark Mode** - Light / dark / system (next-themes)
-- **Organization Vault** - Team password sharing with E2E encryption (ECDH-P256) and RBAC (Owner/Admin/Member/Viewer)
+- **Team Vault** - Team password sharing with E2E encryption (ECDH-P256) and RBAC (Owner/Admin/Member/Viewer)
 - **Recovery Key** - 256-bit recovery key (HKDF + AES-256-GCM) with Base32 encoding and checksum; recover vault access without passphrase
 - **Vault Reset** - Last-resort full vault deletion with explicit confirmation ("DELETE MY VAULT")
 - **Account Lockout** - Progressive lockout (5→15min, 10→1h, 15→24h) with audit logging
@@ -53,7 +53,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 
 ```
 Browser (Web Crypto API)
-  │  ← Personal & org vault: AES-256-GCM E2E encrypt/decrypt
+  │  ← Personal & team vault: AES-256-GCM E2E encrypt/decrypt
   ▼
 Next.js App (SSR / API Routes)
   │  ← Auth.js sessions, route protection, RBAC
@@ -67,7 +67,7 @@ SAML Jackson (Docker) ← SAML 2.0 IdP (HENNGE, Okta, Azure AD, etc.)
 
 **Personal vault** — All password data is encrypted **client-side** before being sent to the server. The server stores only ciphertext. Decryption happens exclusively in the browser using a key derived from the user's master passphrase.
 
-**Organization vault** — Shared passwords are encrypted **end-to-end (client-side)**. Organization key distribution uses ECDH-P256 member-key exchange.
+**Team vault** — Shared passwords are encrypted **end-to-end (client-side)**. Team key distribution uses ECDH-P256 member-key exchange.
 
 ## Getting Started
 
@@ -100,6 +100,7 @@ Edit `.env.local` and fill in:
 | `AUTH_GOOGLE_ID` | Google OAuth client ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth client secret |
 | `GOOGLE_WORKSPACE_DOMAIN` | (Optional) Restrict to a Google Workspace domain |
+| `AUTH_TENANT_CLAIM_KEYS` | (Optional) Comma-separated IdP claim keys used to resolve tenant (e.g. `tenant_id,organization`) |
 | `JACKSON_URL` | SAML Jackson URL (default: `http://localhost:5225`) |
 | `AUTH_JACKSON_ID` | Jackson OIDC client ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC client secret |
@@ -235,14 +236,14 @@ Lifecycle scripts (not listed under `available via npm run`):
 src/
 ├── app/[locale]/
 │   ├── page.tsx              # Landing / Sign-in
-│   ├── dashboard/            # Personal vault, org vault, watchtower, etc.
+│   ├── dashboard/            # Personal vault, team vault, watchtower, etc.
 │   └── auth/                 # Auth pages
 ├── app/api/
 │   ├── auth/                 # Auth.js handlers
 │   ├── passwords/            # Password CRUD + generation
 │   ├── tags/                 # Tag CRUD
 │   ├── vault/                # Setup, unlock, status, key rotation, recovery key, reset
-│   ├── orgs/                 # Organization management
+│   ├── teams/                # Team management API
 │   ├── share-links/          # Share link CRUD + access
 │   ├── audit-logs/           # Audit log queries
 │   ├── emergency-access/     # Emergency access workflows
@@ -252,7 +253,7 @@ src/
 ├── components/
 │   ├── layout/               # Header, Sidebar, SearchBar
 │   ├── passwords/            # PasswordList, PasswordForm, Generator, entry type forms
-│   ├── org/                  # Org vault UI (list, form, settings, invitations)
+│   ├── team/                 # Team vault UI (list, form, settings, invitations)
 │   ├── emergency-access/     # Emergency access UI
 │   ├── share/                # Share link UI
 │   ├── watchtower/           # Security audit dashboard
@@ -266,10 +267,10 @@ src/
 │   ├── crypto-recovery.ts    # Recovery Key crypto (HKDF + AES-256-GCM wrap)
 │   ├── crypto-server.ts      # Server-side crypto for share links/sends + verifier HMAC
 │   ├── crypto-aad.ts         # Additional Authenticated Data for encryption
-│   ├── crypto-org.ts         # Org E2E cryptography (ECDH-P256 key exchange)
+│   ├── crypto-team.ts        # Team E2E cryptography (ECDH-P256 key exchange)
 │   ├── crypto-emergency.ts   # Emergency access key exchange
 │   ├── export-crypto.ts      # Password-protected export encryption
-│   ├── org-auth.ts           # Org RBAC authorization helpers
+│   ├── team-auth.ts          # Team RBAC authorization helpers
 │   ├── audit.ts              # Audit log helpers
 │   ├── vault-context.tsx     # Vault lock/unlock state
 │   ├── password-generator.ts # Server-side secure generation
@@ -300,8 +301,8 @@ extension/
 - **Session security** - Database sessions (not JWT), 8-hour timeout with 1-hour extension
 - **Auto-lock** - Vault locks after 15 min idle or 5 min tab hidden
 - **Clipboard clear** - Copied passwords auto-clear after 30 seconds
-- **Organization vault** - End-to-end encryption (ECDH-P256) with per-member key distribution
-- **RBAC** - Owner / Admin / Member / Viewer role-based access control for organizations
+- **Team vault** - End-to-end encryption (ECDH-P256) with per-member key distribution
+- **RBAC** - Owner / Admin / Member / Viewer role-based access control for teams
 - **Recovery Key** - 256-bit random → HKDF → AES-256-GCM wrap of secret key; server stores only HMAC(pepper, verifierHash)
 - **Vault Reset** - Last-resort full data deletion with fixed confirmation token
 - **Account lockout** - Progressive lockout (5→15min, 10→1h, 15→24h) with DB persistence and audit logging

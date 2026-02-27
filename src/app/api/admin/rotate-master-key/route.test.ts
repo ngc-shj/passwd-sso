@@ -11,11 +11,15 @@ const {
   mockUserFindUnique,
   mockCheck,
   mockLogAudit,
+  mockWithBypassRls,
+  mockWithTenantRls,
 } = vi.hoisted(() => ({
   mockShareUpdateMany: vi.fn(),
   mockUserFindUnique: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue(true),
   mockLogAudit: vi.fn(),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -30,6 +34,10 @@ vi.mock("@/lib/rate-limit", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: () => ({ ip: "10.0.0.1", userAgent: "Test" }),
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
+  withTenantRls: mockWithTenantRls,
 }));
 
 // Set up env before importing route
@@ -148,7 +156,7 @@ describe("POST /api/admin/rotate-master-key", () => {
   });
 
   it("returns 200 with targetVersion and revokedShares=0 when no shares to revoke", async () => {
-    mockUserFindUnique.mockResolvedValue({ id: "user-1" });
+    mockUserFindUnique.mockResolvedValue({ id: "user-1", tenantId: "tenant-1" });
 
     const req = createRequest(
       { targetVersion: 2, operatorId: "user-1" },
@@ -175,7 +183,7 @@ describe("POST /api/admin/rotate-master-key", () => {
   });
 
   it("revokes old shares when revokeShares is true", async () => {
-    mockUserFindUnique.mockResolvedValue({ id: "user-1" });
+    mockUserFindUnique.mockResolvedValue({ id: "user-1", tenantId: "tenant-1" });
     mockShareUpdateMany.mockResolvedValue({ count: 3 });
 
     const req = createRequest(
@@ -191,6 +199,7 @@ describe("POST /api/admin/rotate-master-key", () => {
     expect(mockShareUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
+          tenantId: "tenant-1",
           masterKeyVersion: { lt: 2 },
           revokedAt: null,
         }),
@@ -199,7 +208,7 @@ describe("POST /api/admin/rotate-master-key", () => {
   });
 
   it("does not call shareUpdateMany when revokeShares is false", async () => {
-    mockUserFindUnique.mockResolvedValue({ id: "user-1" });
+    mockUserFindUnique.mockResolvedValue({ id: "user-1", tenantId: "tenant-1" });
 
     const req = createRequest(
       { targetVersion: 2, operatorId: "user-1", revokeShares: false },

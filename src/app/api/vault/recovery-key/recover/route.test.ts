@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaUser, mockRateLimiter, mockLogAudit } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaUser, mockRateLimiter, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
   mockRateLimiter: { check: vi.fn() },
   mockLogAudit: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -25,6 +26,9 @@ vi.mock("@/lib/csrf", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },

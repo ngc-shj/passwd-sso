@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "check:team-auth-rls": "node scripts/check-team-auth-rls.mjs",
+    "check:bypass-rls": "node scripts/check-bypass-rls.mjs",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
@@ -83,7 +85,7 @@
   },
   "overrides": {
     "qs": "6.14.2",
-    "hono": "4.12.1",
+    "hono": "4.12.3",
     "lodash": "4.17.23"
   }
 }

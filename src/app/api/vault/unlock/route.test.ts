@@ -10,6 +10,7 @@ const {
   mockCheckLockout,
   mockRecordFailure,
   mockResetLockout,
+  mockWithUserTenantRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn(), updateMany: vi.fn() },
@@ -18,6 +19,7 @@ const {
   mockCheckLockout: vi.fn(),
   mockRecordFailure: vi.fn(),
   mockResetLockout: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -41,6 +43,9 @@ vi.mock("@/lib/account-lockout", () => ({
   checkLockout: mockCheckLockout,
   recordFailure: mockRecordFailure,
   resetLockout: mockResetLockout,
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { POST } from "./route";

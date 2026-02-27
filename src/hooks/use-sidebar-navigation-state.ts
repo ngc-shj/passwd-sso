@@ -1,13 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
-import { ORG_ROLE } from "@/lib/constants";
+import { TEAM_ROLE } from "@/lib/constants";
 import { stripLocalePrefix } from "@/i18n/locale-utils";
 import type {
   SidebarFolderItem,
-  SidebarOrgFolderGroup,
-  SidebarOrgItem,
-  SidebarOrgTagGroup,
+  SidebarTeamFolderGroup,
+  SidebarTeamItem,
+  SidebarTeamTagGroup,
   SidebarTagItem,
 } from "@/hooks/use-sidebar-data";
 import type { VaultContext } from "@/hooks/use-vault-context";
@@ -16,23 +16,26 @@ interface UseSidebarNavigationStateParams {
   pathname: string;
   searchParams: URLSearchParams;
   vaultContext: VaultContext;
-  orgs: SidebarOrgItem[];
+  teams: SidebarTeamItem[];
   folders: SidebarFolderItem[];
   tags: SidebarTagItem[];
-  orgFolderGroups: SidebarOrgFolderGroup[];
-  orgTagGroups: SidebarOrgTagGroup[];
+  teamFolderGroups: SidebarTeamFolderGroup[];
+  teamTagGroups: SidebarTeamTagGroup[];
 }
 
 export function useSidebarNavigationState({
   pathname,
   searchParams,
   vaultContext,
-  orgs,
+  teams,
   folders,
   tags,
-  orgFolderGroups,
-  orgTagGroups,
+  teamFolderGroups,
+  teamTagGroups,
 }: UseSidebarNavigationStateParams) {
+  const teamItems = teams;
+  const scopedFolderGroups = teamFolderGroups;
+  const scopedTagGroups = teamTagGroups;
   return useMemo(() => {
     const cleanPath = stripLocalePrefix(pathname);
 
@@ -44,83 +47,83 @@ export function useSidebarNavigationState({
     const isWatchtower = cleanPath === "/dashboard/watchtower";
     const isAuditLog = cleanPath === "/dashboard/audit-logs" || cleanPath.endsWith("/audit-logs");
     const isPersonalAuditLog = cleanPath === "/dashboard/audit-logs";
-    const auditOrgMatch = cleanPath.match(/^\/dashboard\/orgs\/([^/]+)\/audit-logs$/);
-    const activeAuditOrgId = auditOrgMatch ? auditOrgMatch[1] : null;
+    const auditTeamMatch = cleanPath.match(/^\/dashboard\/teams\/([^/]+)\/audit-logs$/);
+    const activeAuditTeamId = auditTeamMatch ? auditTeamMatch[1] : null;
     const tagMatch = cleanPath.match(/^\/dashboard\/tags\/([^/]+)/);
     const activeTagId = tagMatch ? tagMatch[1] : null;
     const folderMatch = cleanPath.match(/^\/dashboard\/folders\/([^/]+)/);
     const activeFolderId = folderMatch ? folderMatch[1] : null;
-    const orgMatch = cleanPath.match(/^\/dashboard\/orgs\/([^/]+)/);
-    const activeOrgId = orgMatch && !isAuditLog ? orgMatch[1] : null;
-    const activeOrgTagId = activeOrgId ? searchParams.get("tag") : null;
-    const activeOrgFolderId = activeOrgId ? searchParams.get("folder") : null;
-    const activeOrgTypeFilter = activeOrgId ? searchParams.get("type") : null;
-    const activeOrgScope = activeOrgId ? searchParams.get("scope") : null;
-    const isOrgsManage = cleanPath === "/dashboard/orgs";
+    const teamMatch = cleanPath.match(/^\/dashboard\/teams\/([^/]+)/);
+    const activeTeamId = teamMatch && !isAuditLog ? teamMatch[1] : null;
+    const activeTeamTagId = activeTeamId ? searchParams.get("tag") : null;
+    const activeTeamFolderId = activeTeamId ? searchParams.get("folder") : null;
+    const activeTeamTypeFilter = activeTeamId ? searchParams.get("type") : null;
+    const activeTeamScope = activeTeamId ? searchParams.get("scope") : null;
+    const isTeamsManage = cleanPath === "/dashboard/teams";
     const isShareLinks = cleanPath === "/dashboard/share-links";
     const isEmergencyAccess =
       cleanPath === "/dashboard/emergency-access" ||
       cleanPath.startsWith("/dashboard/emergency-access/");
 
-    const selectedOrgId = vaultContext.type === "org" ? vaultContext.orgId : null;
-    const selectedOrg = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId) ?? null : null;
-    const selectedOrgFolderGroup = selectedOrgId
-      ? orgFolderGroups.find((group) => group.orgId === selectedOrgId)
+    const selectedTeamId = vaultContext.type === "team" ? vaultContext.teamId : null;
+    const selectedTeam = selectedTeamId ? teamItems.find((team) => team.id === selectedTeamId) ?? null : null;
+    const selectedTeamFolderGroup = selectedTeamId
+      ? scopedFolderGroups.find((group) => group.teamId === selectedTeamId)
       : null;
-    const selectedOrgTagGroup = selectedOrgId
-      ? orgTagGroups.find((group) => group.orgId === selectedOrgId)
+    const selectedTeamTagGroup = selectedTeamId
+      ? scopedTagGroups.find((group) => group.teamId === selectedTeamId)
       : null;
 
-    const selectedOrgCanManageFolders = selectedOrg
-      ? selectedOrg.role !== ORG_ROLE.VIEWER
+    const selectedTeamCanManageFolders = selectedTeam
+      ? selectedTeam.role !== TEAM_ROLE.VIEWER
       : false;
-    const selectedOrgCanManageTags = selectedOrg
-      ? selectedOrg.role !== ORG_ROLE.VIEWER
+    const selectedTeamCanManageTags = selectedTeam
+      ? selectedTeam.role !== TEAM_ROLE.VIEWER
       : false;
 
-    const selectedOrgTypeFilter =
-      selectedOrgId && activeOrgId === selectedOrgId ? activeOrgTypeFilter : null;
-    const selectedOrgScope = selectedOrgId && activeOrgId === selectedOrgId ? activeOrgScope : null;
-    const selectedOrgFolderId =
-      selectedOrgId && activeOrgId === selectedOrgId ? activeOrgFolderId : null;
-    const selectedOrgTagId = selectedOrgId && activeOrgId === selectedOrgId ? activeOrgTagId : null;
+    const selectedTeamTypeFilter =
+      selectedTeamId && activeTeamId === selectedTeamId ? activeTeamTypeFilter : null;
+    const selectedTeamScope = selectedTeamId && activeTeamId === selectedTeamId ? activeTeamScope : null;
+    const selectedTeamFolderId =
+      selectedTeamId && activeTeamId === selectedTeamId ? activeTeamFolderId : null;
+    const selectedTeamTagId = selectedTeamId && activeTeamId === selectedTeamId ? activeTeamTagId : null;
 
     const selectedTypeFilter =
-      vaultContext.type === "org" ? selectedOrgTypeFilter : activeTypeFilter;
+      vaultContext.type === "team" ? selectedTeamTypeFilter : activeTypeFilter;
     const selectedFolderId =
-      vaultContext.type === "org" ? selectedOrgFolderId : activeFolderId;
-    const selectedTagId = vaultContext.type === "org" ? selectedOrgTagId : activeTagId;
+      vaultContext.type === "team" ? selectedTeamFolderId : activeFolderId;
+    const selectedTagId = vaultContext.type === "team" ? selectedTeamTagId : activeTagId;
 
     const isSelectedVaultAll =
-      vaultContext.type === "org"
-        ? activeOrgId === selectedOrgId &&
-          !selectedOrgTypeFilter &&
-          !selectedOrgScope &&
-          !selectedOrgTagId &&
-          !selectedOrgFolderId
+      vaultContext.type === "team"
+        ? activeTeamId === selectedTeamId &&
+          !selectedTeamTypeFilter &&
+          !selectedTeamScope &&
+          !selectedTeamTagId &&
+          !selectedTeamFolderId
         : isVaultAll;
 
     const isSelectedVaultFavorites =
-      vaultContext.type === "org"
-        ? activeOrgId === selectedOrgId && selectedOrgScope === "favorites"
+      vaultContext.type === "team"
+        ? activeTeamId === selectedTeamId && selectedTeamScope === "favorites"
         : isVaultFavorites;
 
     const isSelectedVaultArchive =
-      vaultContext.type === "org"
-        ? activeOrgId === selectedOrgId && selectedOrgScope === "archive"
+      vaultContext.type === "team"
+        ? activeTeamId === selectedTeamId && selectedTeamScope === "archive"
         : isVaultArchive;
 
     const isSelectedVaultTrash =
-      vaultContext.type === "org"
-        ? activeOrgId === selectedOrgId && selectedOrgScope === "trash"
+      vaultContext.type === "team"
+        ? activeTeamId === selectedTeamId && selectedTeamScope === "trash"
         : isVaultTrash;
 
     const selectedFolders =
-      vaultContext.type === "org" ? selectedOrgFolderGroup?.folders ?? [] : folders;
+      vaultContext.type === "team" ? selectedTeamFolderGroup?.folders ?? [] : folders;
 
     const selectedTags =
-      vaultContext.type === "org"
-        ? selectedOrgTagGroup?.tags.map((tag) => ({
+      vaultContext.type === "team"
+        ? selectedTeamTagGroup?.tags.map((tag) => ({
             id: tag.id,
             name: tag.name,
             color: tag.color,
@@ -134,18 +137,18 @@ export function useSidebarNavigationState({
             }));
 
     return {
-      activeOrgId,
-      activeAuditOrgId,
-      isOrgsManage,
+      activeTeamId,
+      activeAuditTeamId,
+      isTeamsManage,
       isWatchtower,
       isShareLinks,
       isEmergencyAccess,
       isAuditLog,
       isPersonalAuditLog,
-      selectedOrgId,
-      selectedOrg,
-      selectedOrgCanManageFolders,
-      selectedOrgCanManageTags,
+      selectedTeamId,
+      selectedTeam,
+      selectedTeamCanManageFolders,
+      selectedTeamCanManageTags,
       selectedTypeFilter,
       selectedFolderId,
       selectedTagId,
@@ -156,5 +159,5 @@ export function useSidebarNavigationState({
       selectedFolders,
       selectedTags,
     };
-  }, [pathname, searchParams, vaultContext, orgs, folders, tags, orgFolderGroups, orgTagGroups]);
+  }, [pathname, searchParams, vaultContext, teamItems, folders, tags, scopedFolderGroups, scopedTagGroups]);
 }

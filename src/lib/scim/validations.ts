@@ -72,7 +72,7 @@ export const scimGroupSchema = z.object({
   members: z
     .array(
       z.object({
-        value: z.string(),
+        value: z.string().min(1).max(255),
       }),
     )
     .max(1000)

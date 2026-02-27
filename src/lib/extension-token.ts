@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
+import { withBypassRls } from "@/lib/tenant-rls";
 import {
   EXTENSION_TOKEN_SCOPE,
   type ExtensionTokenScope,
@@ -73,16 +74,18 @@ export async function validateExtensionToken(
 
   const tokenHash = hashToken(plaintext);
 
-  const token = await prisma.extensionToken.findUnique({
-    where: { tokenHash },
-    select: {
-      id: true,
-      userId: true,
-      scope: true,
-      expiresAt: true,
-      revokedAt: true,
-    },
-  });
+  const token = await withBypassRls(prisma, async () =>
+    prisma.extensionToken.findUnique({
+      where: { tokenHash },
+      select: {
+        id: true,
+        userId: true,
+        scope: true,
+        expiresAt: true,
+        revokedAt: true,
+      },
+    }),
+  );
 
   if (!token) {
     return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
@@ -95,12 +98,12 @@ export async function validateExtensionToken(
   }
 
   // Best-effort lastUsedAt update (non-blocking)
-  void prisma.extensionToken
-    .update({
+  void withBypassRls(prisma, async () =>
+    prisma.extensionToken.update({
       where: { id: token.id },
       data: { lastUsedAt: new Date() },
-    })
-    .catch(() => {});
+    }),
+  ).catch(() => {});
 
   return {
     ok: true,

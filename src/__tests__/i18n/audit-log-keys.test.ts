@@ -34,7 +34,7 @@ describe("audit log i18n keys", () => {
       "fromAction",
       "importMeta",
       "exportMeta",
-      "exportMetaOrg",
+      "exportMetaTeam",
     ];
 
     for (const key of required) {

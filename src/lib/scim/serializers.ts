@@ -1,4 +1,4 @@
-import type { OrgRole } from "@prisma/client";
+import type { TeamRole } from "@prisma/client";
 import { v5 as uuid5 } from "uuid";
 
 // App-specific UUID v5 namespace for SCIM Group IDs — do NOT change once deployed
@@ -9,7 +9,7 @@ const SCIM_GROUP_NAMESPACE = "125b7a5b-23f9-495c-bd0a-369bae10337e";
  * Keeps the serializer decoupled from Prisma's generated types.
  */
 export interface ScimUserInput {
-  /** OrgMember.userId */
+  /** TeamMember.userId (stored in legacy teamMember table for backward compatibility) */
   userId: string;
   email: string;
   name: string | null;
@@ -35,7 +35,7 @@ export interface ScimUserResource {
 /**
  * Convert a DB user + membership to a SCIM User resource.
  *
- * @param input - Joined OrgMember + User + optional ScimExternalMapping data
+ * @param input - Joined team membership + User + optional ScimExternalMapping data
  * @param baseUrl - SCIM base URL, e.g. `https://example.com/api/scim/v2`
  */
 export function userToScimUser(
@@ -81,11 +81,11 @@ export interface ScimGroupResource {
 }
 
 /**
- * Deterministic UUID for a (orgId, roleName) pair.
+ * Deterministic UUID for a (teamId, roleName) pair.
  * IdP expects stable Group IDs across requests.
  */
-export function roleGroupId(orgId: string, role: OrgRole): string {
-  return uuid5(`${orgId}:${role}`, SCIM_GROUP_NAMESPACE);
+export function roleGroupId(teamId: string, role: TeamRole): string {
+  return uuid5(`${teamId}:${role}`, SCIM_GROUP_NAMESPACE);
 }
 
 /** Member data needed by `roleToScimGroup()`. */
@@ -95,15 +95,15 @@ export interface ScimGroupMemberInput {
 }
 
 /**
- * Convert an OrgRole to a SCIM Group resource.
+ * Convert a team role to a SCIM Group resource.
  */
 export function roleToScimGroup(
-  orgId: string,
-  role: OrgRole,
+  teamId: string,
+  role: TeamRole,
   members: ScimGroupMemberInput[],
   baseUrl: string,
 ): ScimGroupResource {
-  const id = roleGroupId(orgId, role);
+  const id = roleGroupId(teamId, role);
   return {
     schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
     id,

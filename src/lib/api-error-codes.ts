@@ -65,9 +65,9 @@ export const API_ERROR = {
   INVALID_IV_FORMAT: "INVALID_IV_FORMAT",
   INVALID_AUTH_TAG_FORMAT: "INVALID_AUTH_TAG_FORMAT",
 
-  // ── Orgs ──────────────────────────────────────────────────
+  // ── Teams ─────────────────────────────────────────────────
   SLUG_ALREADY_TAKEN: "SLUG_ALREADY_TAKEN",
-  ORG_NOT_FOUND: "ORG_NOT_FOUND",
+  TEAM_NOT_FOUND: "TEAM_NOT_FOUND",
   MEMBER_NOT_FOUND: "MEMBER_NOT_FOUND",
   ALREADY_A_MEMBER: "ALREADY_A_MEMBER",
   OWNER_ONLY: "OWNER_ONLY",
@@ -79,11 +79,11 @@ export const API_ERROR = {
   KEY_ALREADY_DISTRIBUTED: "KEY_ALREADY_DISTRIBUTED",
   MEMBER_KEY_NOT_FOUND: "MEMBER_KEY_NOT_FOUND",
   VAULT_NOT_READY: "VAULT_NOT_READY",
-  ORG_KEY_VERSION_MISMATCH: "ORG_KEY_VERSION_MISMATCH",
+  TEAM_KEY_VERSION_MISMATCH: "TEAM_KEY_VERSION_MISMATCH",
   ENTRY_COUNT_MISMATCH: "ENTRY_COUNT_MISMATCH",
   ONLY_OWN_ENTRIES: "ONLY_OWN_ENTRIES",
   INVALID_DATE_RANGE: "INVALID_DATE_RANGE",
-  // ── Org Invitations ───────────────────────────────────────
+  // ── Team Invitations ───────────────────────────────────────
   TOKEN_REQUIRED: "TOKEN_REQUIRED",
   INVALID_INVITATION: "INVALID_INVITATION",
   INVITATION_ALREADY_USED: "INVITATION_ALREADY_USED",
@@ -184,7 +184,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   INVALID_IV_FORMAT: "invalidRequest",
   INVALID_AUTH_TAG_FORMAT: "invalidRequest",
   SLUG_ALREADY_TAKEN: "slugAlreadyTaken",
-  ORG_NOT_FOUND: "orgNotFound",
+  TEAM_NOT_FOUND: "teamNotFound",
   MEMBER_NOT_FOUND: "memberNotFound",
   ALREADY_A_MEMBER: "alreadyAMember",
   OWNER_ONLY: "ownerOnly",
@@ -196,7 +196,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   KEY_ALREADY_DISTRIBUTED: "keyAlreadyDistributed",
   MEMBER_KEY_NOT_FOUND: "memberKeyNotFound",
   VAULT_NOT_READY: "vaultNotReady",
-  ORG_KEY_VERSION_MISMATCH: "orgKeyVersionMismatch",
+  TEAM_KEY_VERSION_MISMATCH: "teamKeyVersionMismatch",
   ENTRY_COUNT_MISMATCH: "entryCountMismatch",
   ONLY_OWN_ENTRIES: "onlyOwnEntries",
   INVALID_DATE_RANGE: "invalidDateRange",

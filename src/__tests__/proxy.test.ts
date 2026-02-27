@@ -90,11 +90,11 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(res.status).toBe(401);
   });
 
-  it("does NOT bypass for Bearer + /api/orgs (not in allowlist)", async () => {
+  it("does NOT bypass for Bearer + /api/teams (not in allowlist)", async () => {
     const res = await proxy(
-      createApiRequest("/api/orgs", {
+      createApiRequest("/api/teams", {
         Authorization: "Bearer tok123",
-        Cookie: "authjs.session-token=sess-orgs",
+        Cookie: "authjs.session-token=sess-teams",
       }),
       dummyOptions,
     );
@@ -160,6 +160,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(res.status).toBe(200);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
 });
 
 describe("proxy — CORS preflight and headers", () => {

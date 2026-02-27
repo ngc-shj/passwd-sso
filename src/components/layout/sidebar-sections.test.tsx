@@ -46,7 +46,7 @@ import {
   CategoriesSection,
   VaultSection,
   VaultManagementSection,
-  OrganizeSection,
+  ManageSection,
 } from "./sidebar-sections";
 
 describe("VaultSection", () => {
@@ -65,21 +65,21 @@ describe("VaultSection", () => {
     expect(screen.getByRole("link", { name: "favorites" })).toHaveAttribute("href", "/dashboard/favorites");
   });
 
-  it("renders org vault links", () => {
+  it("renders team vault links", () => {
     render(
       <VaultSection
         t={(k) => k}
-        vaultContext={{ type: "org", orgId: "org-1" }}
+        vaultContext={{ type: "team", teamId: "team-1" }}
         isSelectedVaultAll={false}
         isSelectedVaultFavorites
         onNavigate={() => {}}
       />
     );
 
-    expect(screen.getByRole("link", { name: "passwords" })).toHaveAttribute("href", "/dashboard/orgs/org-1");
+    expect(screen.getByRole("link", { name: "passwords" })).toHaveAttribute("href", "/dashboard/teams/team-1");
     expect(screen.getByRole("link", { name: "favorites" })).toHaveAttribute(
       "href",
-      "/dashboard/orgs/org-1?scope=favorites"
+      "/dashboard/teams/team-1?scope=favorites"
     );
   });
 });
@@ -104,13 +104,13 @@ describe("CategoriesSection", () => {
     expect(screen.getByRole("link", { name: "catPasskey" })).toHaveAttribute("href", "/dashboard?type=PASSKEY");
   });
 
-  it("renders org scoped category links", () => {
+  it("renders team scoped category links", () => {
     render(
       <CategoriesSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        vaultContext={{ type: "org", orgId: "org-1" }}
+        vaultContext={{ type: "team", teamId: "team-1" }}
         selectedTypeFilter={null}
         onNavigate={() => {}}
       />
@@ -118,7 +118,7 @@ describe("CategoriesSection", () => {
 
     expect(screen.getByRole("link", { name: "catLogin" })).toHaveAttribute(
       "href",
-      "/dashboard/orgs/org-1?type=LOGIN"
+      "/dashboard/teams/team-1?type=LOGIN"
     );
   });
 });
@@ -133,7 +133,7 @@ describe("VaultManagementSection", () => {
         isSelectedVaultTrash={false}
         isShareLinks={false}
         isPersonalAuditLog={false}
-        activeAuditOrgId={null}
+        activeAuditTeamId={null}
         onNavigate={() => {}}
       />
     );
@@ -144,33 +144,33 @@ describe("VaultManagementSection", () => {
     expect(screen.getByRole("link", { name: "auditLog" })).toHaveAttribute("href", "/dashboard/audit-logs");
   });
 
-  it("renders org scoped links", () => {
+  it("renders team scoped links", () => {
     render(
       <VaultManagementSection
         t={(k) => k}
-        vaultContext={{ type: "org", orgId: "org-1" }}
+        vaultContext={{ type: "team", teamId: "team-1" }}
         isSelectedVaultArchive={false}
         isSelectedVaultTrash={false}
         isShareLinks={false}
         isPersonalAuditLog={false}
-        activeAuditOrgId="org-1"
+        activeAuditTeamId="team-1"
         onNavigate={() => {}}
       />
     );
 
-    expect(screen.getByRole("link", { name: "archive" })).toHaveAttribute("href", "/dashboard/orgs/org-1?scope=archive");
-    expect(screen.getByRole("link", { name: "trash" })).toHaveAttribute("href", "/dashboard/orgs/org-1?scope=trash");
-    expect(screen.getByRole("link", { name: "shareLinks" })).toHaveAttribute("href", "/dashboard/share-links?org=org-1");
-    expect(screen.getByRole("link", { name: "auditLog" })).toHaveAttribute("href", "/dashboard/orgs/org-1/audit-logs");
+    expect(screen.getByRole("link", { name: "archive" })).toHaveAttribute("href", "/dashboard/teams/team-1?scope=archive");
+    expect(screen.getByRole("link", { name: "trash" })).toHaveAttribute("href", "/dashboard/teams/team-1?scope=trash");
+    expect(screen.getByRole("link", { name: "shareLinks" })).toHaveAttribute("href", "/dashboard/share-links?team=team-1");
+    expect(screen.getByRole("link", { name: "auditLog" })).toHaveAttribute("href", "/dashboard/teams/team-1/audit-logs");
   });
 });
 
-describe("OrganizeSection", () => {
+describe("ManageSection", () => {
   it("calls onCreateFolder when plus button is clicked", () => {
     const onCreateFolder = vi.fn();
 
     render(
-      <OrganizeSection
+      <ManageSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
@@ -202,7 +202,7 @@ describe("OrganizeSection", () => {
     const onCreateTag = vi.fn();
 
     render(
-      <OrganizeSection
+      <ManageSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
@@ -235,7 +235,7 @@ describe("OrganizeSection", () => {
     const onDeleteTag = vi.fn();
 
     render(
-      <OrganizeSection
+      <ManageSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}

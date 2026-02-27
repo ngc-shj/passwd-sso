@@ -4,7 +4,7 @@ import {
   type ExportEntry,
   formatExportCsv,
   formatExportJson,
-  ORG_EXPORT_OPTIONS,
+  TEAM_EXPORT_OPTIONS,
   PERSONAL_EXPORT_OPTIONS,
 } from "@/lib/export-format-common";
 
@@ -101,25 +101,24 @@ describe("export-format-common", () => {
     expect(parsed.entries[0].passwdSso.requireReprompt).toBe(true);
   });
 
-  it("exports passkey type for org CSV", () => {
+  it("exports passkey type for team CSV", () => {
     const csv = formatExportCsv(
       [{ ...sampleLoginEntry, entryType: ENTRY_TYPE.PASSKEY }],
       "compatible",
-      ORG_EXPORT_OPTIONS.csv
+      TEAM_EXPORT_OPTIONS.csv
     );
     const row = csv.split("\n")[1];
     expect(row.split(",")[2]).toBe("passkey");
   });
 
-  it("exports passwd-sso envelope for org JSON", () => {
+  it("exports passwd-sso envelope for team JSON", () => {
     const json = formatExportJson(
       [sampleLoginEntry],
       "passwd-sso",
-      ORG_EXPORT_OPTIONS.json
+      TEAM_EXPORT_OPTIONS.json
     );
     const parsed = JSON.parse(json);
     expect(parsed.format).toBe("passwd-sso");
     expect(parsed.entries[0].passwdSso).toBeDefined();
   });
 });
-

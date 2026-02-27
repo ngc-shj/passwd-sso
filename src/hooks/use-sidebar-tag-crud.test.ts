@@ -45,13 +45,13 @@ describe("useSidebarTagCrud", () => {
     expect(refreshData).toHaveBeenCalledTimes(1);
   });
 
-  it("submits org tag update to /api/orgs/:orgId/tags/:id", async () => {
+  it("submits team tag update to /api/teams/:teamId/tags/:id", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as never;
 
     const { result } = renderHook(() => useSidebarTagCrud({ refreshData, tErrors }));
 
     act(() => {
-      result.current.handleTagEdit({ id: "tag-1", name: "Old", color: null }, "org-1");
+      result.current.handleTagEdit({ id: "tag-1", name: "Old", color: null }, "team-1");
     });
 
     await act(async () => {
@@ -59,7 +59,7 @@ describe("useSidebarTagCrud", () => {
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "/api/orgs/org-1/tags/tag-1",
+      "/api/teams/team-1/tags/tag-1",
       expect.objectContaining({ method: "PUT" })
     );
   });
@@ -87,21 +87,21 @@ describe("useSidebarTagCrud", () => {
     expect(refreshData).toHaveBeenCalledTimes(1);
   });
 
-  it("submits org tag creation via POST to /api/orgs/:orgId/tags", async () => {
+  it("submits team tag creation via POST to /api/teams/:teamId/tags", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as never;
 
     const { result } = renderHook(() => useSidebarTagCrud({ refreshData, tErrors }));
 
     act(() => {
-      result.current.handleTagCreate("org-1");
+      result.current.handleTagCreate("team-1");
     });
 
     await act(async () => {
-      await result.current.handleTagSubmit({ name: "Org Tag", color: "#00ff00" });
+      await result.current.handleTagSubmit({ name: "Team Tag", color: "#00ff00" });
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "/api/orgs/org-1/tags",
+      "/api/teams/team-1/tags",
       expect.objectContaining({ method: "POST" })
     );
   });
