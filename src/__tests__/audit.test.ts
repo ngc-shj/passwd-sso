@@ -2,15 +2,23 @@ import { describe, it, expect, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
-const { mockCreate, mockAuditInfo } = vi.hoisted(() => ({
+const { mockCreate, mockAuditInfo, mockTeamFindUnique, mockUserFindUnique, mockWithBypassRls } = vi.hoisted(() => ({
   mockCreate: vi.fn(),
   mockAuditInfo: vi.fn(),
+  mockTeamFindUnique: vi.fn(),
+  mockUserFindUnique: vi.fn(),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     auditLog: { create: mockCreate },
+    team: { findUnique: mockTeamFindUnique },
+    user: { findUnique: mockUserFindUnique },
   },
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
 vi.mock("@/lib/audit-logger", () => ({
@@ -26,8 +34,14 @@ vi.mock("@/lib/audit-logger", () => ({
 
 import { logAudit, sanitizeMetadata, extractRequestMeta } from "@/lib/audit";
 
+async function flushAsyncWork() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 describe("logAudit", () => {
-  it("creates an audit log entry", () => {
+  it("creates an audit log entry", async () => {
+    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockCreate.mockResolvedValue({});
 
     logAudit({
@@ -35,6 +49,7 @@ describe("logAudit", () => {
       action: AUDIT_ACTION.AUTH_LOGIN,
       userId: "user-1",
     });
+    await flushAsyncWork();
 
     expect(mockCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -50,7 +65,8 @@ describe("logAudit", () => {
     });
   });
 
-  it("passes optional fields when provided", () => {
+  it("passes optional fields when provided", async () => {
+    mockTeamFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockCreate.mockResolvedValue({});
 
     logAudit({
@@ -64,12 +80,14 @@ describe("logAudit", () => {
       ip: "192.168.1.1",
       userAgent: "TestAgent/1.0",
     });
+    await flushAsyncWork();
 
     expect(mockCreate).toHaveBeenCalledWith({
       data: {
         scope: AUDIT_SCOPE.TEAM,
         action: AUDIT_ACTION.ENTRY_CREATE,
         userId: "user-1",
+        tenantId: "tenant-1",
         teamId: "team-1",
         targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
         targetId: "entry-1",
@@ -80,7 +98,8 @@ describe("logAudit", () => {
     });
   });
 
-  it("truncates metadata larger than 10KB", () => {
+  it("truncates metadata larger than 10KB", async () => {
+    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockCreate.mockResolvedValue({});
 
     const largeMetadata: Record<string, unknown> = {
@@ -93,6 +112,7 @@ describe("logAudit", () => {
       userId: "user-1",
       metadata: largeMetadata,
     });
+    await flushAsyncWork();
 
     expect(mockCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -104,7 +124,8 @@ describe("logAudit", () => {
     });
   });
 
-  it("truncates user-agent to 512 chars", () => {
+  it("truncates user-agent to 512 chars", async () => {
+    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockCreate.mockResolvedValue({});
 
     const longUA = "A".repeat(1000);
@@ -115,6 +136,7 @@ describe("logAudit", () => {
       userId: "user-1",
       userAgent: longUA,
     });
+    await flushAsyncWork();
 
     expect(mockCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -136,7 +158,8 @@ describe("logAudit", () => {
     ).not.toThrow();
   });
 
-  it("calls auditLogger.info alongside DB write", () => {
+  it("calls auditLogger.info alongside DB write", async () => {
+    mockTeamFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockCreate.mockResolvedValue({});
     mockAuditInfo.mockReturnValue(undefined);
 
@@ -151,6 +174,7 @@ describe("logAudit", () => {
       ip: "10.0.0.1",
       userAgent: "TestAgent/2.0",
     });
+    await flushAsyncWork();
 
     // DB write
     expect(mockCreate).toHaveBeenCalled();

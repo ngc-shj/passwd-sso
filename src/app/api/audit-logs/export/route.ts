@@ -5,6 +5,7 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { z } from "zod/v4";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const bodySchema = z.object({
   teamId: z.string().optional(),
@@ -46,7 +47,9 @@ export async function POST(req: NextRequest) {
   // Verify team membership when teamId is specified
   if (teamId) {
     try {
-      await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
+      await withUserTenantRls(session.user.id, async () =>
+        requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE),
+      );
     } catch (e) {
       if (e instanceof TeamAuthError) {
         return NextResponse.json({ error: e.message }, { status: e.status });

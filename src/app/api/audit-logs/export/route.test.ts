@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockRequireTeamPermission, TeamAuthError, mockLogAudit } = vi.hoisted(() => {
+const {
+  mockAuth,
+  mockRequireTeamPermission,
+  TeamAuthError,
+  mockLogAudit,
+  mockWithUserTenantRls,
+} = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -15,6 +21,7 @@ const { mockAuth, mockRequireTeamPermission, TeamAuthError, mockLogAudit } = vi.
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
     mockLogAudit: vi.fn(),
+    mockWithUserTenantRls: vi.fn(),
   };
 });
 
@@ -27,6 +34,9 @@ vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
 }));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
+}));
 
 import { POST } from "./route";
 import { AUDIT_ACTION, AUDIT_SCOPE, TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
@@ -38,6 +48,9 @@ describe("POST /api/audit-logs/export", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
+    mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => Promise<unknown>) =>
+      fn(),
+    );
   });
 
   it("returns 401 when unauthenticated", async () => {

@@ -8,6 +8,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
+import { withBypassRls } from "@/lib/tenant-rls";
 import type { AuditAction, AuditScope } from "@prisma/client";
 import type { NextRequest } from "next/server";
 
@@ -77,36 +78,38 @@ export function logAudit(params: AuditLogParams): void {
 
   // --- DB write (existing, unchanged) ---
   void (async () => {
-    let resolvedTenantId = tenantId ?? null;
-    if (!resolvedTenantId && teamId) {
-      const team = await prisma.team.findUnique({
-        where: { id: teamId },
-        select: { tenantId: true },
-      });
-      resolvedTenantId = team?.tenantId ?? null;
-    }
-    if (!resolvedTenantId) {
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { tenantId: true },
-      });
-      resolvedTenantId = user?.tenantId ?? null;
-    }
-    if (!resolvedTenantId) return;
+    await withBypassRls(prisma, async () => {
+      let resolvedTenantId = tenantId ?? null;
+      if (!resolvedTenantId && teamId) {
+        const team = await prisma.team.findUnique({
+          where: { id: teamId },
+          select: { tenantId: true },
+        });
+        resolvedTenantId = team?.tenantId ?? null;
+      }
+      if (!resolvedTenantId) {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { tenantId: true },
+        });
+        resolvedTenantId = user?.tenantId ?? null;
+      }
+      if (!resolvedTenantId) return;
 
-    await prisma.auditLog.create({
-      data: {
-        scope,
-        action,
-        userId,
-        tenantId: resolvedTenantId,
-        teamId: teamId ?? null,
-        targetType: targetType ?? null,
-        targetId: targetId ?? null,
-        metadata: safeMetadata as never ?? undefined,
-        ip: ip ?? null,
-        userAgent: safeUserAgent,
-      },
+      await prisma.auditLog.create({
+        data: {
+          scope,
+          action,
+          userId,
+          tenantId: resolvedTenantId,
+          teamId: teamId ?? null,
+          targetType: targetType ?? null,
+          targetId: targetId ?? null,
+          metadata: safeMetadata as never ?? undefined,
+          ip: ip ?? null,
+          userAgent: safeUserAgent,
+        },
+      });
     });
   })().catch(() => {
     // Silently swallow — audit logging must never break the app
