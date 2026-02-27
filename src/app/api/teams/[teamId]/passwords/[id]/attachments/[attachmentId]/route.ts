@@ -6,6 +6,7 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type RouteContext = {
   params: Promise<{ teamId: string; id: string; attachmentId: string }>;
@@ -24,7 +25,9 @@ export async function GET(
   const { teamId, id, attachmentId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -32,18 +35,22 @@ export async function GET(
     throw e;
   }
 
-  const entry = await prisma.teamPasswordEntry.findUnique({
-    where: { id },
-    select: { teamId: true },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.findUnique({
+      where: { id },
+      select: { teamId: true },
+    }),
+  );
 
   if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const attachment = await prisma.attachment.findUnique({
-    where: { id: attachmentId, teamPasswordEntryId: id },
-  });
+  const attachment = await withUserTenantRls(session.user.id, async () =>
+    prisma.attachment.findUnique({
+      where: { id: attachmentId, teamPasswordEntryId: id },
+    }),
+  );
 
   if (!attachment) {
     return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
@@ -83,7 +90,9 @@ export async function DELETE(
   const { teamId, id, attachmentId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -91,19 +100,23 @@ export async function DELETE(
     throw e;
   }
 
-  const entry = await prisma.teamPasswordEntry.findUnique({
-    where: { id },
-    select: { teamId: true },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.findUnique({
+      where: { id },
+      select: { teamId: true },
+    }),
+  );
 
   if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const attachment = await prisma.attachment.findUnique({
-    where: { id: attachmentId, teamPasswordEntryId: id },
-    select: { id: true, filename: true, encryptedData: true },
-  });
+  const attachment = await withUserTenantRls(session.user.id, async () =>
+    prisma.attachment.findUnique({
+      where: { id: attachmentId, teamPasswordEntryId: id },
+      select: { id: true, filename: true, encryptedData: true },
+    }),
+  );
 
   if (!attachment) {
     return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
@@ -116,9 +129,11 @@ export async function DELETE(
     teamId,
   });
 
-  await prisma.attachment.delete({
-    where: { id: attachmentId },
-  });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.attachment.delete({
+      where: { id: attachmentId },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,

@@ -11,6 +11,7 @@ import {
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -24,7 +25,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -32,18 +35,20 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await prisma.teamPasswordEntry.findUnique({
-    where: { id },
-    include: {
-      tags: { select: { id: true, name: true, color: true } },
-      createdBy: { select: { id: true, name: true, image: true } },
-      updatedBy: { select: { id: true, name: true } },
-      favorites: {
-        where: { userId: session.user.id },
-        select: { id: true },
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.findUnique({
+      where: { id },
+      include: {
+        tags: { select: { id: true, name: true, color: true } },
+        createdBy: { select: { id: true, name: true, image: true } },
+        updatedBy: { select: { id: true, name: true } },
+        favorites: {
+          where: { userId: session.user.id },
+          select: { id: true },
+        },
       },
-    },
-  });
+    }),
+  );
 
   if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -82,7 +87,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   let membership;
   try {
-    membership = await requireTeamMember(session.user.id, teamId);
+    membership = await withUserTenantRls(session.user.id, async () =>
+      requireTeamMember(session.user.id, teamId),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -90,18 +97,20 @@ export async function PUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await prisma.teamPasswordEntry.findUnique({
-    where: { id },
-    select: {
-      teamId: true,
-      createdById: true,
-      encryptedBlob: true,
-      blobIv: true,
-      blobAuthTag: true,
-      aadVersion: true,
-      teamKeyVersion: true,
-    },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.findUnique({
+      where: { id },
+      select: {
+        teamId: true,
+        createdById: true,
+        encryptedBlob: true,
+        blobIv: true,
+        blobAuthTag: true,
+        aadVersion: true,
+        teamKeyVersion: true,
+      },
+    }),
+  );
 
   if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -141,10 +150,12 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // Validate teamKeyVersion matches current team key version (F-13)
   if (isFullUpdate) {
-    const team = await prisma.team.findUnique({
-      where: { id: teamId },
-      select: { teamKeyVersion: true },
-    });
+    const team = await withUserTenantRls(session.user.id, async () =>
+      prisma.team.findUnique({
+        where: { id: teamId },
+        select: { teamKeyVersion: true },
+      }),
+    );
     if (!team || teamKeyVersion !== team.teamKeyVersion) {
       return NextResponse.json(
         { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
@@ -155,10 +166,12 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // Validate teamFolderId belongs to this team
   if (teamFolderId) {
-    const folder = await prisma.teamFolder.findUnique({
-      where: { id: teamFolderId },
-      select: { teamId: true },
-    });
+    const folder = await withUserTenantRls(session.user.id, async () =>
+      prisma.teamFolder.findUnique({
+        where: { id: teamFolderId },
+        select: { teamId: true },
+      }),
+    );
     if (!folder || folder.teamId !== teamId) {
       return NextResponse.json({ error: API_ERROR.FOLDER_NOT_FOUND }, { status: 400 });
     }
@@ -186,39 +199,41 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   // Snapshot + update in a single transaction for atomicity (F-9)
-  const updated = await prisma.$transaction(async (tx) => {
-    if (isFullUpdate) {
-      await tx.teamPasswordEntryHistory.create({
-        data: {
-          entryId: id,
-          encryptedBlob: entry.encryptedBlob,
-          blobIv: entry.blobIv,
-          blobAuthTag: entry.blobAuthTag,
-          aadVersion: entry.aadVersion,
-          teamKeyVersion: entry.teamKeyVersion,
-          changedById: session.user.id,
+  const updated = await withUserTenantRls(session.user.id, async () =>
+    prisma.$transaction(async (tx) => {
+      if (isFullUpdate) {
+        await tx.teamPasswordEntryHistory.create({
+          data: {
+            entryId: id,
+            encryptedBlob: entry.encryptedBlob,
+            blobIv: entry.blobIv,
+            blobAuthTag: entry.blobAuthTag,
+            aadVersion: entry.aadVersion,
+            teamKeyVersion: entry.teamKeyVersion,
+            changedById: session.user.id,
+          },
+        });
+        const all = await tx.teamPasswordEntryHistory.findMany({
+          where: { entryId: id },
+          orderBy: [{ changedAt: "asc" }, { id: "asc" }],
+          select: { id: true },
+        });
+        if (all.length > 20) {
+          await tx.teamPasswordEntryHistory.deleteMany({
+            where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+          });
+        }
+      }
+
+      return tx.teamPasswordEntry.update({
+        where: { id, teamId: teamId },
+        data: updateData,
+        include: {
+          tags: { select: { id: true, name: true, color: true } },
         },
       });
-      const all = await tx.teamPasswordEntryHistory.findMany({
-        where: { entryId: id },
-        orderBy: [{ changedAt: "asc" }, { id: "asc" }],
-        select: { id: true },
-      });
-      if (all.length > 20) {
-        await tx.teamPasswordEntryHistory.deleteMany({
-          where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
-        });
-      }
-    }
-
-    return tx.teamPasswordEntry.update({
-      where: { id, teamId: teamId },
-      data: updateData,
-      include: {
-        tags: { select: { id: true, name: true, color: true } },
-      },
-    });
-  });
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,
@@ -248,7 +263,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -256,9 +273,11 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const existing = await prisma.teamPasswordEntry.findUnique({
-    where: { id },
-  });
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.findUnique({
+      where: { id },
+    }),
+  );
 
   if (!existing || existing.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -268,12 +287,16 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const permanent = searchParams.get("permanent") === "true";
 
   if (permanent) {
-    await prisma.teamPasswordEntry.delete({ where: { id } });
+    await withUserTenantRls(session.user.id, async () =>
+      prisma.teamPasswordEntry.delete({ where: { id } }),
+    );
   } else {
-    await prisma.teamPasswordEntry.update({
-      where: { id },
-      data: { deletedAt: new Date() },
-    });
+    await withUserTenantRls(session.user.id, async () =>
+      prisma.teamPasswordEntry.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      }),
+    );
   }
 
   logAudit({

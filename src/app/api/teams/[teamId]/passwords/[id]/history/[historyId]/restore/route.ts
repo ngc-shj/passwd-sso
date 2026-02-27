@@ -5,6 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY, TEAM_PERMISSION } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; id: string; historyId: string }> };
 
@@ -18,7 +19,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { teamId, id, historyId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -26,23 +29,28 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await prisma.teamPasswordEntry.findUnique({
-    where: { id },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.findUnique({
+      where: { id },
+    }),
+  );
 
   if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const history = await prisma.teamPasswordEntryHistory.findUnique({
-    where: { id: historyId },
-  });
+  const history = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntryHistory.findUnique({
+      where: { id: historyId },
+    }),
+  );
 
   if (!history || history.entryId !== id) {
     return NextResponse.json({ error: API_ERROR.HISTORY_NOT_FOUND }, { status: 404 });
   }
 
-  await prisma.$transaction(async (tx) => {
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.$transaction(async (tx) => {
     // Snapshot current
     await tx.teamPasswordEntryHistory.create({
       data: {
@@ -83,7 +91,8 @@ export async function POST(req: NextRequest, { params }: Params) {
         updatedById: session.user.id,
       },
     });
-  });
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,

@@ -6,6 +6,7 @@ const {
   mockRequireTeamPermission,
   mockRequireTeamMember, mockHasTeamPermission, TeamAuthError,
   mockPrismaTransaction,
+  mockWithUserTenantRls,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
@@ -30,6 +31,7 @@ const {
     mockHasTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
     mockPrismaTransaction: vi.fn(),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   };
 });
 
@@ -48,6 +50,9 @@ vi.mock("@/lib/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
   hasTeamPermission: mockHasTeamPermission,
   TeamAuthError,
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { GET, PUT, DELETE } from "./route";

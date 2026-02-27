@@ -7,6 +7,7 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -22,7 +23,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -39,43 +42,47 @@ export async function GET(req: NextRequest, { params }: Params) {
   const trashOnly = searchParams.get("trash") === "true";
   const archivedOnly = searchParams.get("archived") === "true";
 
-  const passwords = await prisma.teamPasswordEntry.findMany({
-    where: {
-      teamId: teamId,
-      ...(trashOnly
-        ? { deletedAt: { not: null } }
-        : { deletedAt: null }),
-      ...(archivedOnly
-        ? { isArchived: true }
-        : trashOnly ? {} : { isArchived: false }),
-      ...(favoritesOnly
-        ? { favorites: { some: { userId: session.user.id } } }
-        : {}),
-      ...(tagId ? { tags: { some: { id: tagId } } } : {}),
-      ...(folderId ? { teamFolderId: folderId } : {}),
-      ...(entryType ? { entryType } : {}),
-    },
-    include: {
-      tags: { select: { id: true, name: true, color: true } },
-      createdBy: { select: { id: true, name: true, image: true } },
-      updatedBy: { select: { id: true, name: true } },
-      favorites: {
-        where: { userId: session.user.id },
-        select: { id: true },
+  const passwords = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.findMany({
+      where: {
+        teamId: teamId,
+        ...(trashOnly
+          ? { deletedAt: { not: null } }
+          : { deletedAt: null }),
+        ...(archivedOnly
+          ? { isArchived: true }
+          : trashOnly ? {} : { isArchived: false }),
+        ...(favoritesOnly
+          ? { favorites: { some: { userId: session.user.id } } }
+          : {}),
+        ...(tagId ? { tags: { some: { id: tagId } } } : {}),
+        ...(folderId ? { teamFolderId: folderId } : {}),
+        ...(entryType ? { entryType } : {}),
       },
-    },
-    orderBy: { updatedAt: "desc" },
-  });
+      include: {
+        tags: { select: { id: true, name: true, color: true } },
+        createdBy: { select: { id: true, name: true, image: true } },
+        updatedBy: { select: { id: true, name: true } },
+        favorites: {
+          where: { userId: session.user.id },
+          select: { id: true },
+        },
+      },
+      orderBy: { updatedAt: "desc" },
+    }),
+  );
 
   // Auto-purge items deleted more than 30 days ago (async nonblocking, F-20)
   if (!trashOnly) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    prisma.teamPasswordEntry.deleteMany({
-      where: {
-        teamId: teamId,
-        deletedAt: { lt: thirtyDaysAgo },
-      },
-    }).catch(() => {});
+    withUserTenantRls(session.user.id, async () =>
+      prisma.teamPasswordEntry.deleteMany({
+        where: {
+          teamId: teamId,
+          deletedAt: { lt: thirtyDaysAgo },
+        },
+      }),
+    ).catch(() => {});
   }
 
   const entries = passwords.map((entry) => ({
@@ -115,7 +122,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_CREATE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_CREATE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -141,10 +150,12 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, entryType, tagIds, teamFolderId } = parsed.data;
 
   // Validate teamKeyVersion matches current team key version
-  const team = await prisma.team.findUnique({
-    where: { id: teamId },
-    select: { teamKeyVersion: true },
-  });
+  const team = await withUserTenantRls(session.user.id, async () =>
+    prisma.team.findUnique({
+      where: { id: teamId },
+      select: { teamKeyVersion: true },
+    }),
+  );
   if (!team || teamKeyVersion !== team.teamKeyVersion) {
     return NextResponse.json(
       { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
@@ -154,10 +165,12 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // Validate teamFolderId belongs to this team
   if (teamFolderId) {
-    const folder = await prisma.teamFolder.findUnique({
-      where: { id: teamFolderId },
-      select: { teamId: true },
-    });
+    const folder = await withUserTenantRls(session.user.id, async () =>
+      prisma.teamFolder.findUnique({
+        where: { id: teamFolderId },
+        select: { teamId: true },
+      }),
+    );
     if (!folder || folder.teamId !== teamId) {
       return NextResponse.json({ error: API_ERROR.FOLDER_NOT_FOUND }, { status: 400 });
     }
@@ -166,30 +179,32 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Use client-provided ID (bound into AAD during encryption) or generate one
   const entryId = clientId ?? crypto.randomUUID();
 
-  const entry = await prisma.teamPasswordEntry.create({
-    data: {
-      id: entryId,
-      encryptedBlob: encryptedBlob.ciphertext,
-      blobIv: encryptedBlob.iv,
-      blobAuthTag: encryptedBlob.authTag,
-      encryptedOverview: encryptedOverview.ciphertext,
-      overviewIv: encryptedOverview.iv,
-      overviewAuthTag: encryptedOverview.authTag,
-      aadVersion,
-      teamKeyVersion: teamKeyVersion,
-      entryType,
-      teamId: teamId,
-      createdById: session.user.id,
-      updatedById: session.user.id,
-      ...(teamFolderId ? { teamFolderId: teamFolderId } : {}),
-      ...(tagIds?.length
-        ? { tags: { connect: tagIds.map((id) => ({ id })) } }
-        : {}),
-    },
-    include: {
-      tags: { select: { id: true, name: true, color: true } },
-    },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.create({
+      data: {
+        id: entryId,
+        encryptedBlob: encryptedBlob.ciphertext,
+        blobIv: encryptedBlob.iv,
+        blobAuthTag: encryptedBlob.authTag,
+        encryptedOverview: encryptedOverview.ciphertext,
+        overviewIv: encryptedOverview.iv,
+        overviewAuthTag: encryptedOverview.authTag,
+        aadVersion,
+        teamKeyVersion: teamKeyVersion,
+        entryType,
+        teamId: teamId,
+        createdById: session.user.id,
+        updatedById: session.user.id,
+        ...(teamFolderId ? { teamFolderId: teamFolderId } : {}),
+        ...(tagIds?.length
+          ? { tags: { connect: tagIds.map((id) => ({ id })) } }
+          : {}),
+      },
+      include: {
+        tags: { select: { id: true, name: true, color: true } },
+      },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,

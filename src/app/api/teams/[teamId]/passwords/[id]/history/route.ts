@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -16,7 +17,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamMember(session.user.id, teamId);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamMember(session.user.id, teamId),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -24,20 +27,24 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await prisma.teamPasswordEntry.findUnique({
-    where: { id },
-    select: { teamId: true },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.findUnique({
+      where: { id },
+      select: { teamId: true },
+    }),
+  );
 
   if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const histories = await prisma.teamPasswordEntryHistory.findMany({
-    where: { entryId: id },
-    orderBy: { changedAt: "desc" },
-    include: { changedBy: { select: { id: true, name: true, email: true } } },
-  });
+  const histories = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntryHistory.findMany({
+      where: { entryId: id },
+      orderBy: { changedAt: "desc" },
+      include: { changedBy: { select: { id: true, name: true, email: true } } },
+    }),
+  );
 
   return NextResponse.json(
     histories.map((h) => ({

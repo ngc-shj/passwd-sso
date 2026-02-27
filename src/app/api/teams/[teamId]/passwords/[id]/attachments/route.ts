@@ -6,6 +6,7 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -33,7 +34,9 @@ export async function GET(
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -41,26 +44,30 @@ export async function GET(
     throw e;
   }
 
-  const entry = await prisma.teamPasswordEntry.findUnique({
-    where: { id },
-    select: { teamId: true },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.findUnique({
+      where: { id },
+      select: { teamId: true },
+    }),
+  );
 
   if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const attachments = await prisma.attachment.findMany({
-    where: { teamPasswordEntryId: id },
-    select: {
-      id: true,
-      filename: true,
-      contentType: true,
-      sizeBytes: true,
-      createdAt: true,
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const attachments = await withUserTenantRls(session.user.id, async () =>
+    prisma.attachment.findMany({
+      where: { teamPasswordEntryId: id },
+      select: {
+        id: true,
+        filename: true,
+        contentType: true,
+        sizeBytes: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+  );
 
   return NextResponse.json(attachments);
 }
@@ -78,7 +85,9 @@ export async function POST(
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -86,19 +95,23 @@ export async function POST(
     throw e;
   }
 
-  const entry = await prisma.teamPasswordEntry.findUnique({
-    where: { id },
-    select: { teamId: true },
-  });
+  const entry = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.findUnique({
+      where: { id },
+      select: { teamId: true },
+    }),
+  );
 
   if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
   // Check attachment count limit
-  const count = await prisma.attachment.count({
-    where: { teamPasswordEntryId: id },
-  });
+  const count = await withUserTenantRls(session.user.id, async () =>
+    prisma.attachment.count({
+      where: { teamPasswordEntryId: id },
+    }),
+  );
   if (count >= MAX_ATTACHMENTS_PER_ENTRY) {
     return NextResponse.json(
       { error: API_ERROR.ATTACHMENT_LIMIT_EXCEEDED },
@@ -199,10 +212,12 @@ export async function POST(
   const teamKeyVersion = teamKeyVersionStr ? parseInt(teamKeyVersionStr, 10) : 1;
 
   // Validate teamKeyVersion matches current team key version (S-20/F-23)
-  const team = await prisma.team.findUnique({
-    where: { id: teamId },
-    select: { teamKeyVersion: true },
-  });
+  const team = await withUserTenantRls(session.user.id, async () =>
+    prisma.team.findUnique({
+      where: { id: teamId },
+      select: { teamKeyVersion: true },
+    }),
+  );
   if (!team || teamKeyVersion !== team.teamKeyVersion) {
     return NextResponse.json(
       { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
@@ -217,28 +232,30 @@ export async function POST(
 
   let attachment;
   try {
-    attachment = await prisma.attachment.create({
-      data: {
-        id: attachmentId,
-        filename: sanitizedFilename,
-        contentType,
-        sizeBytes: originalSize,
-        encryptedData: Buffer.from(storedBlob),
-        iv,
-        authTag,
-        aadVersion,
-        keyVersion: teamKeyVersion,
-        teamPasswordEntryId: id,
-        createdById: session.user.id,
-      },
-      select: {
-        id: true,
-        filename: true,
-        contentType: true,
-        sizeBytes: true,
-        createdAt: true,
-      },
-    });
+    attachment = await withUserTenantRls(session.user.id, async () =>
+      prisma.attachment.create({
+        data: {
+          id: attachmentId,
+          filename: sanitizedFilename,
+          contentType,
+          sizeBytes: originalSize,
+          encryptedData: Buffer.from(storedBlob),
+          iv,
+          authTag,
+          aadVersion,
+          keyVersion: teamKeyVersion,
+          teamPasswordEntryId: id,
+          createdById: session.user.id,
+        },
+        select: {
+          id: true,
+          filename: true,
+          contentType: true,
+          sizeBytes: true,
+          createdAt: true,
+        },
+      }),
+    );
   } catch (error) {
     await blobStore.deleteObject(storedBlob, blobContext).catch(() => {});
     throw error;

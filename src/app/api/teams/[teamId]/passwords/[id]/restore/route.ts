@@ -5,6 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -18,7 +19,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -26,9 +29,11 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const existing = await prisma.teamPasswordEntry.findUnique({
-    where: { id },
-  });
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.findUnique({
+      where: { id },
+    }),
+  );
 
   if (!existing || existing.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
@@ -41,10 +46,12 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  await prisma.teamPasswordEntry.update({
-    where: { id },
-    data: { deletedAt: null },
-  });
+  await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.update({
+      where: { id },
+      data: { deletedAt: null },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,
