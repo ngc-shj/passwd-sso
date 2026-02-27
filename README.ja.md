@@ -35,7 +35,7 @@ SSO 認証とエンドツーエンド暗号化を備えたセルフホスト型�
 - **SCIM 2.0 プロビジョニング** - テナントスコープのユーザー/グループ同期（RFC 7644）、Bearer トークン認証
 - **マルチテナント分離** - PostgreSQL FORCE ROW LEVEL SECURITY（28 テーブル）、IdP クレームによるテナント解決
 - **セルフホスト** - Docker Compose（PostgreSQL + SAML Jackson + Redis）
-- **ブラウザ拡張（Chrome/Edge, MV3）** - 手動補完、インライン候補、AWS 3 フィールド補完（Account ID/Alias + IAM username + Password）
+- **ブラウザ拡張（Chrome/Edge, MV3）** - 手動補完、インライン候補、AWS 3 フィールド補完、コンテキストメニュー、キーボードショートカット、新規ログイン検出 & 保存
 
 ## 技術スタック
 
