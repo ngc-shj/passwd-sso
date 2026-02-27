@@ -165,4 +165,14 @@ describe("POST /api/vault/rotate-key", () => {
     expect(json.keyVersion).toBe(6);
     expect(mockMarkStale).toHaveBeenCalledWith("user-1", 6);
   });
+
+  it("runs key rotation and EA stale within withUserTenantRls scope", async () => {
+    await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
+    );
+    // withUserTenantRls should be called twice: once for findUnique, once for rotation+stale
+    expect(mockWithUserTenantRls).toHaveBeenCalledTimes(2);
+    expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(1, "user-1", expect.any(Function));
+    expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(2, "user-1", expect.any(Function));
+  });
 });

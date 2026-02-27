@@ -87,6 +87,7 @@ jobs:
 
       - run: npm run lint
       - run: npm run check:team-auth-rls
+      - run: npm run check:bypass-rls
       - run: npm test
       - run: npm run build
 

@@ -83,4 +83,43 @@ describe("tenant-claim", () => {
   it("slugifies tenant strings", () => {
     expect(slugifyTenant(" ACME Corp. ")).toBe("acme-corp");
   });
+
+  it("returns null for non-string claim values (number, boolean, object)", () => {
+    process.env.AUTH_TENANT_CLAIM_KEYS = "tenant_id";
+    const account = { provider: "saml-jackson", type: "oidc" as const, providerAccountId: "x" };
+    expect(extractTenantClaimValue(account, { tenant_id: 42 })).toBeNull();
+    expect(extractTenantClaimValue(account, { tenant_id: true })).toBeNull();
+    expect(extractTenantClaimValue(account, { tenant_id: { nested: "value" } })).toBeNull();
+  });
+
+  it("returns null for whitespace-only claim values", () => {
+    process.env.AUTH_TENANT_CLAIM_KEYS = "tenant_id";
+    const v = extractTenantClaimValue(
+      { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
+      { tenant_id: "   " },
+    );
+    expect(v).toBeNull();
+  });
+
+  it("strips control characters from claim values (boundary)", () => {
+    process.env.AUTH_TENANT_CLAIM_KEYS = "tenant_id";
+    const v = extractTenantClaimValue(
+      { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
+      { tenant_id: "\0abc\x1f\x7f\x9fdef\0" },
+    );
+    expect(v).toBe("abcdef");
+  });
+
+  it("slugifyTenant generates SHA-256 fallback for empty-after-strip input", () => {
+    const slug = slugifyTenant("日本語テスト");
+    expect(slug).toMatch(/^[0-9a-f]{24}$/);
+  });
+
+  it("slugifyTenant prepends t- for reserved bootstrap- prefix", () => {
+    expect(slugifyTenant("Bootstrap-Corp")).toBe("t-bootstrap-corp");
+  });
+
+  it("slugifyTenant prepends t- for reserved u- prefix", () => {
+    expect(slugifyTenant("U-Corp")).toBe("t-u-corp");
+  });
 });

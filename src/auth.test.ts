@@ -49,6 +49,21 @@ const {
     vaultKey: {
       updateMany: vi.fn(),
     },
+    emergencyAccessGrant: {
+      updateMany: vi.fn(),
+    },
+    emergencyAccessKeyPair: {
+      updateMany: vi.fn(),
+    },
+    passwordShare: {
+      updateMany: vi.fn(),
+    },
+    shareAccessLog: {
+      updateMany: vi.fn(),
+    },
+    attachment: {
+      updateMany: vi.fn(),
+    },
     team: {
       count: vi.fn(),
     },
@@ -124,6 +139,11 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockPrisma.passwordEntryHistory.updateMany.mockResolvedValue({ count: 0 });
     mockPrisma.auditLog.updateMany.mockResolvedValue({ count: 0 });
     mockPrisma.vaultKey.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.emergencyAccessGrant.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.emergencyAccessKeyPair.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.passwordShare.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.shareAccessLog.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.attachment.updateMany.mockResolvedValue({ count: 0 });
     mockPrisma.team.count.mockResolvedValue(0);
     mockPrisma.tenantMember.count.mockResolvedValue(0);
     mockPrisma.tenant.delete.mockResolvedValue({});
@@ -208,6 +228,27 @@ describe("ensureTenantMembershipForSignIn", () => {
     });
     expect(mockPrisma.vaultKey.updateMany).toHaveBeenCalledWith({
       where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
+      data: { tenantId: "cuid_acme_1" },
+    });
+    // Emergency access, password shares, attachments
+    expect(mockPrisma.emergencyAccessGrant.updateMany).toHaveBeenCalledWith({
+      where: { ownerId: "user-1", tenantId: "cuid_bootstrap_1" },
+      data: { tenantId: "cuid_acme_1" },
+    });
+    expect(mockPrisma.emergencyAccessKeyPair.updateMany).toHaveBeenCalledWith({
+      where: { tenantId: "cuid_bootstrap_1" },
+      data: { tenantId: "cuid_acme_1" },
+    });
+    expect(mockPrisma.passwordShare.updateMany).toHaveBeenCalledWith({
+      where: { createdById: "user-1", tenantId: "cuid_bootstrap_1" },
+      data: { tenantId: "cuid_acme_1" },
+    });
+    expect(mockPrisma.shareAccessLog.updateMany).toHaveBeenCalledWith({
+      where: { tenantId: "cuid_bootstrap_1" },
+      data: { tenantId: "cuid_acme_1" },
+    });
+    expect(mockPrisma.attachment.updateMany).toHaveBeenCalledWith({
+      where: { createdById: "user-1", tenantId: "cuid_bootstrap_1" },
       data: { tenantId: "cuid_acme_1" },
     });
     expect(mockPrisma.tenantMember.deleteMany).toHaveBeenCalledWith({
@@ -304,5 +345,39 @@ describe("ensureTenantMembershipForSignIn", () => {
 
     expect(ok).toBe(true);
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries with fallback slug when P2002 is slug collision (not externalId)", async () => {
+    const { Prisma } = await import("@prisma/client");
+    // findUnique returns null both times (externalId not found)
+    mockPrisma.tenant.findUnique.mockResolvedValue(null);
+    // First create fails with P2002 (slug collision)
+    mockPrisma.tenant.create
+      .mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError("unique", {
+          code: "P2002",
+          clientVersion: "7.0.0",
+        }),
+      )
+      // Second create with fallback slug succeeds
+      .mockResolvedValueOnce({ id: "cuid_acme_2" });
+
+    const ok = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(ok).toBe(true);
+    expect(mockPrisma.tenant.create).toHaveBeenCalledTimes(2);
+    // Second create should have a slug with random suffix
+    const secondCreate = mockPrisma.tenant.create.mock.calls[1][0];
+    expect(secondCreate.data.slug).toMatch(/^tenant-acme-[0-9a-f]{8}$/);
+    expect(secondCreate.data.externalId).toBe("tenant-acme");
+  });
+
+  it("returns false when slugifyTenant returns empty string", async () => {
+    mockSlugifyTenant.mockReturnValue("");
+
+    const ok = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(ok).toBe(false);
+    expect(mockWithBypassRls).not.toHaveBeenCalled();
   });
 });

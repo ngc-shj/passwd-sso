@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { extractTenantClaimValue, slugifyTenant } from "@/lib/tenant-claim";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { randomBytes } from "node:crypto";
 import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
 import authConfig from "./auth.config";
 
@@ -63,6 +64,18 @@ export async function ensureTenantMembershipForSignIn(
             where: { externalId: tenantClaim },
             select: { id: true },
           });
+          // P2002 on slug (not externalId) — retry with unique suffix
+          if (!found) {
+            const suffix = randomBytes(4).toString("hex");
+            found = await prisma.tenant.create({
+              data: {
+                externalId: tenantClaim,
+                name: tenantClaim,
+                slug: `${tenantSlug}-${suffix}`,
+              },
+              select: { id: true },
+            });
+          }
         } else {
           throw e;
         }
@@ -125,6 +138,26 @@ export async function ensureTenantMembershipForSignIn(
           });
           await tx.auditLog.updateMany({
             where: { userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.emergencyAccessGrant.updateMany({
+            where: { ownerId: userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.emergencyAccessKeyPair.updateMany({
+            where: { tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.passwordShare.updateMany({
+            where: { createdById: userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.shareAccessLog.updateMany({
+            where: { tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.attachment.updateMany({
+            where: { createdById: userId, tenantId: existingTenantId },
             data: { tenantId: found.id },
           });
 
