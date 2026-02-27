@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { hasTeamPermission } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // GET /api/teams/favorites — Get all team passwords favorited by current user
 export async function GET() {
@@ -13,25 +14,29 @@ export async function GET() {
   }
 
   // Build role map for permission check + UI display
-  const memberships = await prisma.teamMember.findMany({
-    where: { userId: session.user.id, deactivatedAt: null },
-    select: { teamId: true, role: true },
-  });
+  const memberships = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamMember.findMany({
+      where: { userId: session.user.id, deactivatedAt: null },
+      select: { teamId: true, role: true },
+    }),
+  );
   const roleMap = new Map(memberships.map((m) => [m.teamId, m.role]));
 
-  const favorites = await prisma.teamPasswordFavorite.findMany({
-    where: { userId: session.user.id },
-    include: {
-      teamPasswordEntry: {
-        include: {
-          team: { select: { id: true, name: true } },
-          tags: { select: { id: true, name: true, color: true } },
-          createdBy: { select: { id: true, name: true, image: true } },
-          updatedBy: { select: { id: true, name: true } },
+  const favorites = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordFavorite.findMany({
+      where: { userId: session.user.id },
+      include: {
+        teamPasswordEntry: {
+          include: {
+            team: { select: { id: true, name: true } },
+            tags: { select: { id: true, name: true, color: true } },
+            createdBy: { select: { id: true, name: true, image: true } },
+            updatedBy: { select: { id: true, name: true } },
+          },
         },
       },
-    },
-  });
+    }),
+  );
 
   // Filter out deleted/archived entries and entries user can no longer read
   const active = favorites.filter((f) => {

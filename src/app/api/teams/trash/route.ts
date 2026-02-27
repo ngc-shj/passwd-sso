@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { hasTeamPermission } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 // GET /api/teams/trash — Get all trashed team passwords across all teams
 export async function GET() {
@@ -13,10 +14,12 @@ export async function GET() {
   }
 
   // Find all teams the user is a member of (with role for permission check)
-  const memberships = await prisma.teamMember.findMany({
-    where: { userId: session.user.id, deactivatedAt: null },
-    select: { teamId: true, role: true },
-  });
+  const memberships = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamMember.findMany({
+      where: { userId: session.user.id, deactivatedAt: null },
+      select: { teamId: true, role: true },
+    }),
+  );
 
   // Only include teams where user has password:read permission
   const readable = memberships.filter((m) =>
@@ -30,27 +33,29 @@ export async function GET() {
   }
 
   // Find all trashed team password entries (deletedAt is set)
-  const trashedEntries = await prisma.teamPasswordEntry.findMany({
-    where: {
-      teamId: { in: teamIds },
-      deletedAt: { not: null },
-    },
-    include: {
-      team: {
-        select: {
-          id: true,
-          name: true,
+  const trashedEntries = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamPasswordEntry.findMany({
+      where: {
+        teamId: { in: teamIds },
+        deletedAt: { not: null },
+      },
+      include: {
+        team: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        tags: { select: { id: true, name: true, color: true } },
+        createdBy: { select: { id: true, name: true, image: true } },
+        updatedBy: { select: { id: true, name: true } },
+        favorites: {
+          where: { userId: session.user.id },
+          select: { id: true },
         },
       },
-      tags: { select: { id: true, name: true, color: true } },
-      createdBy: { select: { id: true, name: true, image: true } },
-      updatedBy: { select: { id: true, name: true } },
-      favorites: {
-        where: { userId: session.user.id },
-        select: { id: true },
-      },
-    },
-  });
+    }),
+  );
 
   const entries = trashedEntries.map((entry) => ({
     id: entry.id,

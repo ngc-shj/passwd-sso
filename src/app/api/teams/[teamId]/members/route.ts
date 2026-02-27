@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -16,7 +17,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamMember(session.user.id, teamId);
+    await withUserTenantRls(session.user.id, async () =>
+      requireTeamMember(session.user.id, teamId),
+    );
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -24,15 +27,17 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const members = await prisma.teamMember.findMany({
-    where: { teamId: teamId, deactivatedAt: null },
-    include: {
-      user: {
-        select: { id: true, name: true, email: true, image: true },
+  const members = await withUserTenantRls(session.user.id, async () =>
+    prisma.teamMember.findMany({
+      where: { teamId: teamId, deactivatedAt: null },
+      include: {
+        user: {
+          select: { id: true, name: true, email: true, image: true },
+        },
       },
-    },
-    orderBy: [{ role: "asc" }, { createdAt: "asc" }],
-  });
+      orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+    }),
+  );
 
   return NextResponse.json(
     members.map((m) => ({

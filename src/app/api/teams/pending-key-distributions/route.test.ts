@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockAuth, mockPrismaTeamMember } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamMember, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamMember: { findMany: vi.fn() },
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -10,6 +11,9 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamMember: mockPrismaTeamMember,
   },
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import { GET } from "./route";
