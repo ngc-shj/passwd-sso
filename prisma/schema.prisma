@@ -306,6 +306,11 @@ enum TenantRole {
   MEMBER
 }
 
+enum ProvisioningSource {
+  MANUAL
+  SCIM
+}
+
 enum InvitationStatus {
   PENDING
   ACCEPTED
@@ -335,6 +340,7 @@ model Team {
   memberKeys           TeamMemberKey[]
   scimTokens           ScimToken[]
   scimExternalMappings ScimExternalMapping[]
+  scimGroupMappings    ScimGroupMapping[]
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
@@ -376,17 +382,22 @@ model Tenant {
   emergencyAccessKeyPairs    EmergencyAccessKeyPair[]
   scimTokens                 ScimToken[]
   scimExternalMappings       ScimExternalMapping[]
+  scimGroupMappings          ScimGroupMapping[]
 
   @@map("tenants")
 }
 
 model TenantMember {
-  id        String     @id @default(cuid())
-  tenantId  String     @map("tenant_id")
-  userId    String     @map("user_id")
-  role      TenantRole @default(MEMBER)
-  createdAt DateTime   @default(now()) @map("created_at")
-  updatedAt DateTime   @updatedAt @map("updated_at")
+  id                 String             @id @default(cuid())
+  tenantId           String             @map("tenant_id")
+  userId             String             @map("user_id")
+  role               TenantRole         @default(MEMBER)
+  deactivatedAt      DateTime?          @map("deactivated_at")
+  scimManaged        Boolean            @default(false) @map("scim_managed")
+  provisioningSource ProvisioningSource @default(MANUAL) @map("provisioning_source")
+  lastScimSyncedAt   DateTime?          @map("last_scim_synced_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -394,6 +405,24 @@ model TenantMember {
   @@unique([tenantId, userId])
   @@index([userId])
   @@map("tenant_members")
+}
+
+model ScimGroupMapping {
+  id              String   @id @default(cuid())
+  tenantId        String   @map("tenant_id")
+  teamId          String   @map("team_id")
+  externalGroupId String   @map("external_group_id")
+  role            TeamRole @default(MEMBER)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, externalGroupId])
+  @@index([tenantId])
+  @@index([teamId])
+  @@map("scim_group_mappings")
 }
 
 model TeamMember {

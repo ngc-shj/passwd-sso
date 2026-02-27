@@ -113,6 +113,11 @@ describe("GET /api/teams/[teamId]/scim-tokens", () => {
     const body = await res.json();
     expect(body).toHaveLength(1);
     expect(body[0].description).toBe("Test token");
+    expect(mockScimToken.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId: "tenant-1" },
+      }),
+    );
   });
 
   it("returns 404 when tenant cannot be resolved while listing tokens", async () => {
@@ -163,6 +168,7 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
     expect(mockScimToken.count).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
+          tenantId: "tenant-1",
           revokedAt: null,
           OR: expect.arrayContaining([
             { expiresAt: null },

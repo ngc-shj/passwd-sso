@@ -10,28 +10,21 @@ import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { AuditAction } from "@prisma/client";
-import { TEAM_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
 
 type Params = { params: Promise<{ id: string }> };
 
-/** Resolve SCIM id → userId. The id could be a userId directly or via ScimExternalMapping. */
-async function resolveUserId(
-  teamId: string,
-  tenantId: string,
-  scimId: string,
-): Promise<string | null> {
+async function resolveUserId(tenantId: string, scimId: string): Promise<string | null> {
   if (scimId.length > 255) return null;
 
-  // First try as direct userId (TeamMember.userId / teamMember table)
-  const member = await prisma.teamMember.findUnique({
-    where: { teamId_userId: { teamId: teamId, userId: scimId } },
+  const member = await prisma.tenantMember.findUnique({
+    where: { tenantId_userId: { tenantId, userId: scimId } },
     select: { userId: true },
   });
   if (member) return member.userId;
 
-  // Try via ScimExternalMapping (scimId may be an externalId from the IdP)
   const mapping = await prisma.scimExternalMapping.findFirst({
     where: {
       tenantId,
@@ -43,14 +36,9 @@ async function resolveUserId(
   return mapping?.internalId ?? null;
 }
 
-async function fetchUserResource(
-  teamId: string,
-  tenantId: string,
-  userId: string,
-  baseUrl: string,
-) {
-  const member = await prisma.teamMember.findUnique({
-    where: { teamId_userId: { teamId: teamId, userId } },
+async function fetchUserResource(tenantId: string, userId: string, baseUrl: string) {
+  const member = await prisma.tenantMember.findUnique({
+    where: { tenantId_userId: { tenantId, userId } },
     include: { user: { select: { id: true, email: true, name: true } } },
   });
   if (!member || !member.user?.email) return null;
@@ -81,7 +69,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId: scopedTeamId, tenantId } = result.data;
+  const { tenantId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -89,13 +77,12 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   return withTenantRls(prisma, tenantId, async () => {
     const { id } = await params;
-    const userId = await resolveUserId(scopedTeamId, tenantId, id);
+    const userId = await resolveUserId(tenantId, id);
     if (!userId) {
       return scimError(404, "User not found");
     }
 
-    const baseUrl = getScimBaseUrl();
-    const resource = await fetchUserResource(scopedTeamId, tenantId, userId, baseUrl);
+    const resource = await fetchUserResource(tenantId, userId, getScimBaseUrl());
     if (!resource) {
       return scimError(404, "User not found");
     }
@@ -104,7 +91,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   });
 }
 
-// PUT /api/scim/v2/Users/[id] — Full replace (update team member attributes only)
+// PUT /api/scim/v2/Users/[id] — Full replace
 export async function PUT(req: NextRequest, { params }: Params) {
   const result = await validateScimToken(req);
   if (!result.ok) {
@@ -132,24 +119,22 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const resultResponse = await withTenantRls(prisma, tenantId, async () => {
-    const userId = await resolveUserId(scopedTeamId, tenantId, id);
+    const userId = await resolveUserId(tenantId, id);
     if (!userId) {
       return { error: scimError(404, "User not found") };
     }
 
-    // OWNER protection
-    const member = await prisma.teamMember.findUnique({
-      where: { teamId_userId: { teamId: scopedTeamId, userId } },
-      select: { id: true, role: true, deactivatedAt: true, userId: true },
+    const member = await prisma.tenantMember.findUnique({
+      where: { tenantId_userId: { tenantId, userId } },
+      select: { id: true, role: true, deactivatedAt: true },
     });
     if (!member) {
       return { error: scimError(404, "User not found") };
     }
-    if (member.role === TEAM_ROLE.OWNER && active === false) {
+    if (member.role === "OWNER" && active === false) {
       return { error: scimError(403, API_ERROR.SCIM_OWNER_PROTECTED) };
     }
 
-    // Determine audit action based on active state change
     let auditAction: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
     if (active === false && member.deactivatedAt === null) {
       auditAction = AUDIT_ACTION.SCIM_USER_DEACTIVATE;
@@ -157,19 +142,18 @@ export async function PUT(req: NextRequest, { params }: Params) {
       auditAction = AUDIT_ACTION.SCIM_USER_REACTIVATE;
     }
 
-    // Atomic update: team member + externalId mapping
     try {
       await prisma.$transaction(async (tx) => {
-        // Update team member attributes
-        await tx.teamMember.update({
+        await tx.tenantMember.update({
           where: { id: member.id },
           data: {
             deactivatedAt: active === false ? (member.deactivatedAt ?? new Date()) : null,
             scimManaged: true,
+            provisioningSource: "SCIM",
+            lastScimSyncedAt: new Date(),
           },
         });
 
-        // Update external mapping if provided; clear if omitted (PUT = full replace)
         if (externalId) {
           const existingMapping = await tx.scimExternalMapping.findFirst({
             where: {
@@ -182,7 +166,6 @@ export async function PUT(req: NextRequest, { params }: Params) {
             throw new Error("SCIM_EXTERNAL_ID_CONFLICT");
           }
           if (!existingMapping) {
-            // Delete stale mapping for this user (handles externalId change: ext-A → ext-B)
             await tx.scimExternalMapping.deleteMany({
               where: {
                 tenantId,
@@ -195,7 +178,6 @@ export async function PUT(req: NextRequest, { params }: Params) {
             });
           }
         } else {
-          // PUT is a full replace — no externalId means clear any existing mapping
           await tx.scimExternalMapping.deleteMany({
             where: {
               tenantId,
@@ -215,8 +197,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       throw e;
     }
 
-    const baseUrl = getScimBaseUrl();
-    const resource = await fetchUserResource(scopedTeamId, tenantId, userId, baseUrl);
+    const resource = await fetchUserResource(tenantId, userId, getScimBaseUrl());
     return { resource, userId, auditAction };
   });
   if ("error" in resultResponse) {
@@ -274,26 +255,29 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const resultResponse = await withTenantRls(prisma, tenantId, async () => {
-    const userId = await resolveUserId(scopedTeamId, tenantId, id);
+    const userId = await resolveUserId(tenantId, id);
     if (!userId) {
       return { error: scimError(404, "User not found") };
     }
 
-    const member = await prisma.teamMember.findUnique({
-      where: { teamId_userId: { teamId: scopedTeamId, userId } },
+    const member = await prisma.tenantMember.findUnique({
+      where: { tenantId_userId: { tenantId, userId } },
     });
     if (!member) {
       return { error: scimError(404, "User not found") };
     }
 
-    // OWNER protection
-    if (member.role === TEAM_ROLE.OWNER && patchResult.active === false) {
+    if (member.role === "OWNER" && patchResult.active === false) {
       return { error: scimError(403, API_ERROR.SCIM_OWNER_PROTECTED) };
     }
 
-    // Build update data
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateData: Record<string, any> = {};
+    const updateData: Record<string, any> = {
+      scimManaged: true,
+      provisioningSource: "SCIM",
+      lastScimSyncedAt: new Date(),
+    };
+
     let auditAction: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
 
     if (patchResult.active !== undefined) {
@@ -310,26 +294,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       }
     }
 
-    // Always mark as SCIM-managed when touched via PATCH
-    updateData.scimManaged = true;
-
-    await prisma.teamMember.update({
+    await prisma.tenantMember.update({
       where: { id: member.id },
       data: updateData,
     });
 
-    const baseUrl = getScimBaseUrl();
-    const resource = await fetchUserResource(scopedTeamId, tenantId, userId, baseUrl);
+    const resource = await fetchUserResource(tenantId, userId, getScimBaseUrl());
     return { resource, userId, auditAction };
   });
   if ("error" in resultResponse) {
     return resultResponse.error;
   }
   const { resource, userId, auditAction } = resultResponse;
-
-  // Update User.name if requested (team member attribute, not User table — per plan)
-  // Note: name.formatted maps to User.name, but per plan we only update User table at first provision.
-  // For PATCH, we skip User.name updates to avoid multi-team side effects.
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,
@@ -345,7 +321,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   return scimResponse(resource!);
 }
 
-// DELETE /api/scim/v2/Users/[id] — Hard delete team member + member keys + external mapping
+// DELETE /api/scim/v2/Users/[id] — Remove from tenant
 export async function DELETE(req: NextRequest, { params }: Params) {
   const result = await validateScimToken(req);
   if (!result.ok) {
@@ -359,28 +335,26 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const resultResponse = await withTenantRls(prisma, tenantId, async () => {
-    const userId = await resolveUserId(scopedTeamId, tenantId, id);
+    const userId = await resolveUserId(tenantId, id);
     if (!userId) {
       return { error: scimError(404, "User not found") };
     }
 
-    const member = await prisma.teamMember.findUnique({
-      where: { teamId_userId: { teamId: scopedTeamId, userId } },
+    const member = await prisma.tenantMember.findUnique({
+      where: { tenantId_userId: { tenantId, userId } },
       include: { user: { select: { email: true } } },
     });
     if (!member) {
       return { error: scimError(404, "User not found") };
     }
 
-    // OWNER protection
-    if (member.role === TEAM_ROLE.OWNER) {
+    if (member.role === "OWNER") {
       return { error: scimError(403, API_ERROR.SCIM_OWNER_PROTECTED) };
     }
 
-    // Atomic delete: member keys + external mapping + team member
     try {
       await prisma.$transaction([
-        prisma.teamMemberKey.deleteMany({ where: { teamId: scopedTeamId, userId } }),
+        prisma.teamMemberKey.deleteMany({ where: { tenantId, userId } }),
         prisma.scimExternalMapping.deleteMany({
           where: {
             tenantId,
@@ -388,7 +362,15 @@ export async function DELETE(req: NextRequest, { params }: Params) {
             resourceType: "User",
           },
         }),
-        prisma.teamMember.delete({ where: { id: member.id } }),
+        prisma.teamMember.deleteMany({ where: { tenantId, userId } }),
+        prisma.tenantMember.delete({
+          where: {
+            tenantId_userId: {
+              tenantId,
+              userId,
+            },
+          },
+        }),
       ]);
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {
@@ -411,7 +393,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     teamId: scopedTeamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
-    metadata: { email: member.user?.email ?? null, role: member.role },
+    metadata: { email: member.user?.email ?? null },
     ...extractRequestMeta(req),
   });
 

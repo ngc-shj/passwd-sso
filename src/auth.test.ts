@@ -142,9 +142,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(mockPrisma.tenantMember.deleteMany).toHaveBeenCalledWith({
       where: { userId: "user-1", tenantId: "tenant_usr_legacy" },
     });
-    expect(mockPrisma.tenant.delete).toHaveBeenCalledWith({
-      where: { id: "tenant_usr_legacy" },
-    });
+    expect(mockPrisma.tenant.delete).not.toHaveBeenCalled();
   });
 
   it("keeps existing tenant when already in target tenant", async () => {

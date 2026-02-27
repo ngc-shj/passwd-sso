@@ -272,8 +272,6 @@ describe("DELETE /api/teams/[teamId]", () => {
   it("deletes team successfully", async () => {
     mockPrismaTeam.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockPrismaTeam.delete.mockResolvedValue({});
-    mockPrismaTeam.count.mockResolvedValue(0);
-    mockPrismaTenant.delete.mockResolvedValue({});
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}`),
       createParams({ teamId: TEAM_ID }),
@@ -282,7 +280,7 @@ describe("DELETE /api/teams/[teamId]", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockPrismaTeam.delete).toHaveBeenCalledWith({ where: { id: TEAM_ID } });
-    expect(mockPrismaTenant.delete).toHaveBeenCalledWith({ where: { id: "tenant-1" } });
+    expect(mockPrismaTenant.delete).not.toHaveBeenCalled();
   });
 
   it("returns 404 when tenant cannot be resolved during delete", async () => {

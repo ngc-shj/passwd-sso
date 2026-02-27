@@ -28,6 +28,16 @@ function handleTeamTenantError(e: unknown): NextResponse | null {
   return null;
 }
 
+async function resolveTeamTenantId(teamId: string): Promise<string | null> {
+  const team = await withTeamTenantRls(teamId, async () =>
+    prisma.team.findUnique({
+      where: { id: teamId },
+      select: { tenantId: true },
+    }),
+  );
+  return team?.tenantId ?? null;
+}
+
 // GET /api/teams/[teamId]/scim-tokens — List SCIM tokens
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();
@@ -49,9 +59,17 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   let tokens;
   try {
+    const tenantId = await resolveTeamTenantId(teamId);
+    if (!tenantId) {
+      return NextResponse.json(
+        { error: API_ERROR.SCIM_TOKEN_INVALID },
+        { status: 409 },
+      );
+    }
+
     tokens = await withTeamTenantRls(teamId, async () =>
       prisma.scimToken.findMany({
-        where: { teamId: teamId },
+        where: { tenantId },
         select: {
           id: true,
           description: true,
@@ -107,13 +125,29 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  // Limit active (non-revoked, non-expired) tokens per team (max 10)
+  let tenantId: string;
+  try {
+    const resolvedTenantId = await resolveTeamTenantId(teamId);
+    if (!resolvedTenantId) {
+      return NextResponse.json(
+        { error: API_ERROR.SCIM_TOKEN_INVALID },
+        { status: 409 },
+      );
+    }
+    tenantId = resolvedTenantId;
+  } catch (e) {
+    const err = handleTeamTenantError(e);
+    if (err) return err;
+    throw e;
+  }
+
+  // Limit active (non-revoked, non-expired) tokens per tenant (max 10)
   let tokenCount;
   try {
     tokenCount = await withTeamTenantRls(teamId, async () =>
       prisma.scimToken.count({
         where: {
-          teamId: teamId,
+          tenantId,
           revokedAt: null,
           OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
         },
@@ -138,33 +172,13 @@ export async function POST(req: NextRequest, { params }: Params) {
     ? new Date(Date.now() + parsed.data.expiresInDays * 24 * 60 * 60 * 1000)
     : null;
 
-  let team;
-  try {
-    team = await withTeamTenantRls(teamId, async () =>
-      prisma.team.findUnique({
-        where: { id: teamId },
-        select: { tenantId: true },
-      }),
-    );
-  } catch (e) {
-    const err = handleTeamTenantError(e);
-    if (err) return err;
-    throw e;
-  }
-  if (!team?.tenantId) {
-    return NextResponse.json(
-      { error: API_ERROR.SCIM_TOKEN_INVALID },
-      { status: 409 },
-    );
-  }
-
   let token;
   try {
     token = await withTeamTenantRls(teamId, async () =>
       prisma.scimToken.create({
         data: {
           teamId: teamId,
-          tenantId: team.tenantId,
+          tenantId,
           tokenHash,
           description: parsed.data.description ?? null,
           expiresAt,

@@ -18,17 +18,17 @@ import {
 import { scimUserSchema } from "@/lib/scim/validations";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { TEAM_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
 
-// GET /api/scim/v2/Users — List/filter users in the team
+// GET /api/scim/v2/Users — List/filter users in the tenant
 export async function GET(req: NextRequest) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId: scopedTeamId, tenantId } = result.data;
+  const { tenantId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -40,20 +40,15 @@ export async function GET(req: NextRequest) {
     const count = Math.min(200, Math.max(1, parseInt(url.searchParams.get("count") ?? "100", 10) || 100));
     const filterParam = url.searchParams.get("filter");
 
-    // Build Prisma where clause.
-    // No deactivatedAt filter by default — RFC 7644 §3.4.2 requires unfiltered
-    // GET to return all resources. The `active` field distinguishes state.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let prismaWhere: Record<string, any> = { teamId: scopedTeamId, user: { email: { not: null } } };
+    let prismaWhere: Record<string, any> = { tenantId, user: { is: { email: { not: null } } } };
 
     if (filterParam) {
       try {
         const ast = parseScimFilter(filterParam);
 
-      // Pre-resolve externalId via ScimExternalMapping before building WHERE.
         const extIdValue = extractExternalIdValue(ast);
 
-      // Reject externalId in OR expressions — semantics are ambiguous
         if (extIdValue !== null && "or" in ast) {
           return scimError(400, "externalId filter is not supported in OR expressions");
         }
@@ -83,7 +78,7 @@ export async function GET(req: NextRequest) {
     }
 
     const [members, totalResults] = await Promise.all([
-      prisma.teamMember.findMany({
+      prisma.tenantMember.findMany({
         where: prismaWhere,
         include: {
           user: { select: { id: true, email: true, name: true } },
@@ -92,12 +87,11 @@ export async function GET(req: NextRequest) {
         take: count,
         orderBy: { createdAt: "asc" },
       }),
-      prisma.teamMember.count({ where: prismaWhere }),
+      prisma.tenantMember.count({ where: prismaWhere }),
     ]);
 
     const baseUrl = getScimBaseUrl();
 
-    // Batch-fetch external IDs for the result set
     const userIds = members.map((m) => m.userId);
     const mappings = await prisma.scimExternalMapping.findMany({
       where: {
@@ -124,7 +118,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-// POST /api/scim/v2/Users — Create (provision) a user in the team
+// POST /api/scim/v2/Users — Create tenant user
 export async function POST(req: NextRequest) {
   const result = await validateScimToken(req);
   if (!result.ok) {
@@ -150,100 +144,78 @@ export async function POST(req: NextRequest) {
 
   const { userName, name, externalId, active } = parsed.data;
 
-  // Transaction: find/create user + create TeamMember + create ScimExternalMapping
   try {
     const created = await withTenantRls(prisma, tenantId, async () =>
       prisma.$transaction(async (tx) => {
-
-      // Find or create User by email
-      let user = await tx.user.findUnique({ where: { email: userName } });
-      if (!user) {
-        user = await tx.user.create({
-          data: {
-            email: userName,
-            name: name?.formatted ?? null,
-          },
-        });
-      }
-
-      // Check for existing TeamMember
-      const existingMember = await tx.teamMember.findUnique({
-        where: { teamId_userId: { teamId: scopedTeamId, userId: user.id } },
-      });
-
-      if (existingMember) {
-        if (existingMember.deactivatedAt !== null) {
-          // Re-activate deactivated member
-          await tx.teamMember.update({
-            where: { id: existingMember.id },
+        let user = await tx.user.findUnique({ where: { email: userName } });
+        if (!user) {
+          user = await tx.user.create({
             data: {
-              deactivatedAt: active === false ? new Date() : null,
-              scimManaged: true,
+              tenantId,
+              email: userName,
+              name: name?.formatted ?? null,
             },
           });
-        } else {
-          // Already active — 409 uniqueness conflict
+        }
+
+        const existingMember = await tx.tenantMember.findUnique({
+          where: { tenantId_userId: { tenantId, userId: user.id } },
+        });
+
+        if (existingMember) {
           throw new Error("SCIM_RESOURCE_EXISTS");
         }
-      } else {
-        // Create new TeamMember
-        await tx.teamMember.create({
-          data: {
-            teamId: scopedTeamId,
-            userId: user.id,
-            role: TEAM_ROLE.MEMBER,
-            scimManaged: true,
-            keyDistributed: false,
-            deactivatedAt: active === false ? new Date() : null,
-          },
-        });
-      }
 
-      // Create external mapping (if externalId provided)
-      if (externalId) {
-        const existing = await tx.scimExternalMapping.findFirst({
-          where: {
+        const member = await tx.tenantMember.create({
+          data: {
             tenantId,
-            externalId,
-            resourceType: "User",
+            userId: user.id,
+            role: "MEMBER",
+            deactivatedAt: active === false ? new Date() : null,
+            scimManaged: true,
+            provisioningSource: "SCIM",
+            lastScimSyncedAt: new Date(),
           },
         });
-        if (existing && existing.internalId !== user.id) {
-          throw new Error("SCIM_EXTERNAL_ID_CONFLICT");
-        }
-        if (!existing) {
-          // Delete stale mapping for this user (handles externalId change on re-activation)
-          await tx.scimExternalMapping.deleteMany({
+
+        if (externalId) {
+          const existing = await tx.scimExternalMapping.findFirst({
             where: {
-              tenantId,
-              internalId: user.id,
-              resourceType: "User",
-            },
-          });
-          await tx.scimExternalMapping.create({
-            data: {
-              teamId: scopedTeamId,
               tenantId,
               externalId,
               resourceType: "User",
-              internalId: user.id,
             },
           });
+          if (existing && existing.internalId !== user.id) {
+            throw new Error("SCIM_EXTERNAL_ID_CONFLICT");
+          }
+          if (!existing) {
+            await tx.scimExternalMapping.deleteMany({
+              where: {
+                tenantId,
+                internalId: user.id,
+                resourceType: "User",
+              },
+            });
+            await tx.scimExternalMapping.create({
+              data: {
+                teamId: scopedTeamId,
+                tenantId,
+                externalId,
+                resourceType: "User",
+                internalId: user.id,
+              },
+            });
+          }
         }
-      }
 
-      // Re-fetch to get latest state
-      const member = await tx.teamMember.findUnique({
-        where: { teamId_userId: { teamId: scopedTeamId, userId: user.id } },
-      });
-
-        return { user, member: member!, externalId, reactivated: !!existingMember };
+        return { user, member, externalId };
       }),
     );
 
     logAudit({
       scope: AUDIT_SCOPE.TEAM,
-      action: created.reactivated ? AUDIT_ACTION.SCIM_USER_REACTIVATE : AUDIT_ACTION.SCIM_USER_CREATE,
+      action: AUDIT_ACTION.SCIM_USER_CREATE,
       userId: auditUserId,
       teamId: scopedTeamId,
       targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
@@ -256,7 +228,7 @@ export async function POST(req: NextRequest) {
     const resource = userToScimUser(
       {
         userId: created.user.id,
-        email: userName, // already validated by Zod
+        email: userName,
         name: created.user.name,
         deactivatedAt: created.member.deactivatedAt,
         externalId: created.externalId,
@@ -267,7 +239,7 @@ export async function POST(req: NextRequest) {
     return scimResponse(resource, 201);
   } catch (e) {
     if (e instanceof Error && e.message === "SCIM_RESOURCE_EXISTS") {
-      return scimError(409, "User already exists in this team", "uniqueness");
+      return scimError(409, "User already exists in this tenant", "uniqueness");
     }
     if (e instanceof Error && e.message === "SCIM_EXTERNAL_ID_CONFLICT") {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");

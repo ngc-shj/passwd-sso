@@ -104,15 +104,6 @@ export async function ensureTenantMembershipForSignIn(
           await tx.tenantMember.deleteMany({
             where: { userId, tenantId: existingMembership.tenantId },
           });
-
-          const stillReferenced = await Promise.all([
-            tx.user.count({ where: { tenantId: existingMembership.tenantId } }),
-            tx.team.count({ where: { tenantId: existingMembership.tenantId } }),
-            tx.tenantMember.count({ where: { tenantId: existingMembership.tenantId } }),
-          ]);
-          if (stillReferenced.every((n) => n === 0)) {
-            await tx.tenant.delete({ where: { id: existingMembership.tenantId } });
-          }
         });
       } else {
         return null;

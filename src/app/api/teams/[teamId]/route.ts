@@ -171,14 +171,5 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     prisma.team.delete({ where: { id: teamId } }),
   );
 
-  const remainingTeams = await withTenantRls(prisma, team.tenantId, async () =>
-    prisma.team.count({
-      where: { tenantId: team.tenantId },
-    }),
-  );
-  if (remainingTeams === 0) {
-    await prisma.tenant.delete({ where: { id: team.tenantId } });
-  }
-
   return NextResponse.json({ success: true });
 }
