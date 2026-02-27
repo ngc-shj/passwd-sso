@@ -5,6 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY } from "@/lib/constants";
+import { withUserTenantRls } from "@/lib/tenant-context";
 
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -32,12 +33,14 @@ export async function POST(req: NextRequest) {
 
   const ninetyDaysAgo = new Date(Date.now() - NINETY_DAYS_MS);
 
-  const deleted = await prisma.passwordEntryHistory.deleteMany({
-    where: {
-      entry: { userId: session.user.id },
-      changedAt: { lt: ninetyDaysAgo },
-    },
-  });
+  const deleted = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntryHistory.deleteMany({
+      where: {
+        entry: { userId: session.user.id },
+        changedAt: { lt: ninetyDaysAgo },
+      },
+    }),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
