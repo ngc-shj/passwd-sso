@@ -32,6 +32,8 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Account Lockout** - Progressive lockout (5→15min, 10→1h, 15→24h) with audit logging
 - **Rate Limiting** - Redis-backed vault unlock rate limiting
 - **CSP & Security Headers** - Content Security Policy with nonce, CSP violation reporting
+- **SCIM 2.0 Provisioning** - Tenant-scoped user/group sync (RFC 7644) with Bearer token auth
+- **Multi-Tenant Isolation** - PostgreSQL FORCE ROW LEVEL SECURITY on 28 tables with IdP claim-based tenant resolution
 - **Self-Hosted** - Docker Compose with PostgreSQL, SAML Jackson, and Redis
 - **Browser Extension (Chrome/Edge, MV3)** - Manual autofill, inline suggestions, and AWS 3-field fill (Account ID/Alias + IAM username + password)
 
@@ -249,6 +251,7 @@ src/
 │   ├── emergency-access/     # Emergency access workflows
 │   ├── watchtower/           # Security audit (HIBP, analysis)
 │   ├── health/               # Health check (liveness + readiness)
+│   ├── scim/v2/              # SCIM 2.0 provisioning (Users / Groups)
 │   └── csp-report/           # CSP violation reporting
 ├── components/
 │   ├── layout/               # Header, Sidebar, SearchBar
@@ -309,6 +312,8 @@ extension/
 - **Rate limiting** - Redis-backed rate limiting on sensitive endpoints (including vault unlock)
 - **CSRF defense** - JSON body + SameSite cookie + CSP + Origin header validation on destructive endpoints
 - **CSP** - Content Security Policy with nonce-based script control and violation reporting
+- **Multi-tenant isolation** - PostgreSQL FORCE RLS on 28 tables with CI guard scripts to prevent accidental RLS bypass
+- **SCIM 2.0** - Tenant-scoped Bearer tokens, Users/Groups endpoints (RFC 7644)
 
 ## Deployment Guides
 

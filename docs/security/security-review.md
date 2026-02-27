@@ -1,7 +1,7 @@
 # Security Review
 
-Last updated: 2026-02-14
-Branch baseline: `main` (includes merged fixes from `fix/security-review-proxy-import`)
+Last updated: 2026-02-27
+Branch baseline: `main` (includes merged fixes from `fix/security-review-proxy-import` and `feat/tenant-team-scim-spec`)
 
 ## 1. Authentication / Authorization Boundary
 
@@ -217,6 +217,7 @@ Evidence:
 ### Result summary
 - Section 1/2/3 findings are now covered with targeted tests.
 - No immediate critical gap remains for the issues raised in this review cycle.
+- Section 7 (tenant/RLS) added 2026-02-27 with full review coverage.
 
 ### Covered by tests
 - Proxy Bearer bypass scope and non-bypass behavior: `src/__tests__/proxy.test.ts`.
@@ -231,3 +232,61 @@ Evidence:
 ### Final conclusion
 - Current state is acceptable for continuing development.
 - `vaultSecretKey` persistence policy is fixed: keep `chrome.storage.session` for extension UX.
+- All 7 sections PASS (Section 7 added 2026-02-27).
+
+## 7. Multi-Tenant Isolation / Row Level Security (2026-02-27)
+
+### Scope checked
+- FORCE ROW LEVEL SECURITY on all tenant-scoped tables
+- Tenant context propagation (`SET LOCAL app.tenant_id`)
+- `withBypassRls` allowlist enforcement
+- IdP claim sanitization and tenant lookup
+- Bootstrap tenant migration
+
+### Checklist and result
+
+1. FORCE RLS applied to all 28 tenant-scoped tables
+Status: `PASS`
+Evidence:
+- Migration applies `ALTER TABLE ... FORCE ROW LEVEL SECURITY` to all 28 tables.
+- `scripts/check-bypass-rls.mjs` CI guard enforces allowlist (8 files) for `withBypassRls` usage.
+- `scripts/check-team-auth-rls.mjs` CI guard prevents nested team-auth under RLS wrappers.
+
+2. Tenant context is set via session-local variable
+Status: `PASS`
+Evidence:
+- `src/lib/tenant-rls.ts` uses `SET LOCAL app.tenant_id` within transaction scope.
+- `src/lib/prisma.ts` Proxy (L143-153) correctly handles nested `$transaction` by reusing active RLS-scoped tx.
+
+3. IdP claim values are sanitized before use as tenant identifiers
+Status: `PASS`
+Evidence:
+- `src/lib/tenant-claim.ts` strips C0/C1/DEL control characters (`[\x00-\x1f\x7f-\x9f]`).
+- Length limit: 255 characters max.
+- Whitespace-only values rejected.
+- Non-string types rejected.
+- Reserved slug prefixes (`bootstrap-`, `u-`) get `t-` prepended.
+
+4. Tenant lookup uses `externalId` (not user-controlled `id`)
+Status: `PASS`
+Evidence:
+- `src/auth.ts` uses `where: { externalId: tenantClaim }` for tenant lookup/creation.
+- `externalId` is `@unique @db.VarChar(255)` with dedicated index.
+- P2002 (unique constraint) collision handled with retry + random suffix fallback.
+
+5. Bootstrap tenant migration is complete and uses `isBootstrap` flag
+Status: `PASS`
+Evidence:
+- `src/auth.ts` checks `existingTenant?.isBootstrap` (not slug prefix).
+- Bootstrap migration covers all 15 tenant-scoped data tables.
+- `src/lib/auth-adapter.ts` sets `isBootstrap: true` on bootstrap tenant creation.
+
+### Notes / residual risk
+- `withBypassRls` is used in 8 files (allowlisted). Each bypasses RLS intentionally for cross-tenant operations (audit writes, tenant resolution, admin key rotation).
+- `tenants` table itself has no RLS (intentional: it is the tenant resolution entry point).
+- Bootstrap tenant migration assumes single-user tenants. Multi-user bootstrap tenants are not supported.
+
+### Conclusion (Section 7)
+- Multi-tenant isolation is enforced at DB level via FORCE RLS with CI guard scripts.
+- IdP claim sanitization prevents injection and spoofing vectors.
+- No blocking issue found.

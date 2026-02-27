@@ -81,8 +81,17 @@ Because competitor capabilities vary by plan and deployment model, always verify
 | Feature | passwd-sso | 1Password | Bitwarden | Notes |
 |---|---|---|---|---|
 | Self-hosted | Done | No | Yes | Docker/Terraform |
-| API / integration | Done | Varies | Yes | Webhook/SCIM not yet implemented |
+| SCIM 2.0 provisioning | Done | Yes | Yes | Tenant-scoped tokens, team-level group mapping |
+| API / integration | Done | Varies | Yes | SCIM implemented; Webhook not yet |
+
+## 9. Multi-Tenant / Isolation
+
+| Feature | passwd-sso | 1Password | Bitwarden | Notes |
+|---|---|---|---|---|
+| Tenant isolation | Done | Yes | Yes | FORCE ROW LEVEL SECURITY on 28 tables |
+| Bootstrap tenant migration | Done | N/A | N/A | Auto-migrate from personal to IdP tenant |
+| CI RLS guard scripts | Done | N/A | N/A | Prevent accidental RLS bypass |
 
 ---
 
-*Last updated: 2026-02-14*
+*Last updated: 2026-02-27*
