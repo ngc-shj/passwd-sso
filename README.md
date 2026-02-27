@@ -35,7 +35,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **SCIM 2.0 Provisioning** - Tenant-scoped user/group sync (RFC 7644) with Bearer token auth
 - **Multi-Tenant Isolation** - PostgreSQL FORCE ROW LEVEL SECURITY on 28 tables with IdP claim-based tenant resolution
 - **Self-Hosted** - Docker Compose with PostgreSQL, SAML Jackson, and Redis
-- **Browser Extension (Chrome/Edge, MV3)** - Manual autofill, inline suggestions, and AWS 3-field fill (Account ID/Alias + IAM username + password)
+- **Browser Extension (Chrome/Edge, MV3)** - Manual autofill, inline suggestions, AWS 3-field fill, context menu, keyboard shortcuts, new-login detect & save
 
 ## Tech Stack
 
