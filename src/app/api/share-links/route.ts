@@ -67,13 +67,14 @@ export async function POST(req: NextRequest) {
   let masterKeyVersion: number;
   let entryType: EntryTypeValue;
   let teamId: string | undefined;
+  let tenantId: string;
 
   if (passwordEntryId) {
     // Personal entry — verify ownership
     const entry = await withUserTenantRls(session.user.id, async () =>
       prisma.passwordEntry.findUnique({
         where: { id: passwordEntryId },
-        select: { userId: true, entryType: true },
+        select: { userId: true, entryType: true, tenantId: true },
       }),
     );
     if (!entry || entry.userId !== session.user.id) {
@@ -83,6 +84,7 @@ export async function POST(req: NextRequest) {
     // `data` is required by schema when `passwordEntryId` is set.
     // TOTP is already stripped by Zod shareDataSchema (no totp field defined)
     entryType = entry.entryType;
+    tenantId = entry.tenantId;
     const plaintext = JSON.stringify(data);
 
     // Encrypt share data with master key
@@ -96,7 +98,7 @@ export async function POST(req: NextRequest) {
     const teamEntry = await withUserTenantRls(session.user.id, async () =>
       prisma.teamPasswordEntry.findUnique({
         where: { id: teamPasswordEntryId! },
-        select: { teamId: true, entryType: true },
+        select: { teamId: true, entryType: true, tenantId: true },
       }),
     );
     if (!teamEntry) {
@@ -125,6 +127,7 @@ export async function POST(req: NextRequest) {
     masterKeyVersion = 0;
     entryType = teamEntry.entryType as EntryTypeValue;
     teamId = teamEntry.teamId;
+    tenantId = teamEntry.tenantId;
   }
 
   // Generate token
@@ -145,6 +148,7 @@ export async function POST(req: NextRequest) {
         expiresAt,
         maxViews: maxViews ?? null,
         createdById: session.user.id,
+        tenantId,
         passwordEntryId: passwordEntryId ?? null,
         teamPasswordEntryId: teamPasswordEntryId ?? null,
       },

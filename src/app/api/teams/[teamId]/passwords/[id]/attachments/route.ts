@@ -47,7 +47,7 @@ export async function GET(
   const entry = await withUserTenantRls(session.user.id, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
-      select: { teamId: true },
+      select: { teamId: true, tenantId: true },
     }),
   );
 
@@ -98,7 +98,7 @@ export async function POST(
   const entry = await withUserTenantRls(session.user.id, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
-      select: { teamId: true },
+      select: { teamId: true, tenantId: true },
     }),
   );
 
@@ -244,6 +244,7 @@ export async function POST(
           authTag,
           aadVersion,
           keyVersion: teamKeyVersion,
+          tenantId: entry.tenantId,
           teamPasswordEntryId: id,
           createdById: session.user.id,
         },

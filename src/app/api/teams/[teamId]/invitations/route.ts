@@ -142,11 +142,21 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  const team = await withUserTenantRls(session.user.id, async () =>
+    prisma.team.findUnique({
+      where: { id: teamId },
+      select: { tenantId: true },
+    }),
+  );
+  if (!team) {
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+  }
 
   const invitation = await withUserTenantRls(session.user.id, async () =>
     prisma.teamInvitation.create({
       data: {
         teamId: teamId,
+        tenantId: team.tenantId,
         email,
         role,
         token,

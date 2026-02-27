@@ -61,6 +61,15 @@ export async function POST(req: NextRequest) {
   }
 
   const { name, color } = parsed.data;
+  const actor = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { tenantId: true },
+    }),
+  );
+  if (!actor) {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
 
   // Check for duplicate name per user
   const existing = await withUserTenantRls(session.user.id, async () =>
@@ -81,6 +90,7 @@ export async function POST(req: NextRequest) {
         name,
         color: color || null,
         userId: session.user.id,
+        tenantId: actor.tenantId,
       },
     }),
   );

@@ -55,6 +55,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     await tx.teamPasswordEntryHistory.create({
       data: {
         entryId: id,
+        tenantId: entry.tenantId,
         encryptedBlob: entry.encryptedBlob,
         blobIv: entry.blobIv,
         blobAuthTag: entry.blobAuthTag,

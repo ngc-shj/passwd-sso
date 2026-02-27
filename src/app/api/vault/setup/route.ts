@@ -56,9 +56,12 @@ async function handlePOST(request: Request) {
   const existingUser = await withUserTenantRls(session.user.id, async () =>
     prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { vaultSetupAt: true },
+      select: { vaultSetupAt: true, tenantId: true },
     }),
   );
+  if (!existingUser) {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
   if (existingUser?.vaultSetupAt) {
     return NextResponse.json(
       { error: API_ERROR.VAULT_ALREADY_SETUP },
@@ -115,6 +118,7 @@ async function handlePOST(request: Request) {
       prisma.vaultKey.create({
         data: {
           userId: session.user.id,
+          tenantId: existingUser.tenantId,
           version: 1,
           verificationCiphertext: data.verificationArtifact.ciphertext,
           verificationIv: data.verificationArtifact.iv,

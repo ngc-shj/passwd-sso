@@ -145,6 +145,15 @@ export async function POST(req: NextRequest) {
 
   const expiresAt = new Date(Date.now() + SEND_EXPIRY_MAP[meta.expiresIn]);
   const contentType = detected?.mime ?? file.type ?? "application/octet-stream";
+  const actor = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { tenantId: true },
+    }),
+  );
+  if (!actor) {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
 
   const share = await withUserTenantRls(session.user.id, async () =>
     prisma.passwordShare.create({
@@ -166,6 +175,7 @@ export async function POST(req: NextRequest) {
         expiresAt,
         maxViews: meta.maxViews ?? null,
         createdById: session.user.id,
+        tenantId: actor.tenantId,
       },
     }),
   );

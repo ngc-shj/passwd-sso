@@ -32,7 +32,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
   const entry = await withUserTenantRls(session.user.id, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
-      select: { teamId: true },
+      select: { teamId: true, tenantId: true },
     }),
   );
 
@@ -65,6 +65,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
         data: {
           userId: session.user.id,
           teamPasswordEntryId: id,
+          tenantId: entry.tenantId,
         },
       }),
     );

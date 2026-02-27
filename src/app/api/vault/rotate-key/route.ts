@@ -68,6 +68,7 @@ async function handlePOST(request: Request) {
     prisma.user.findUnique({
       where: { id: session.user.id },
       select: {
+        tenantId: true,
         vaultSetupAt: true,
         masterPasswordServerHash: true,
         masterPasswordServerSalt: true,
@@ -119,6 +120,7 @@ async function handlePOST(request: Request) {
       prisma.vaultKey.create({
         data: {
           userId: session.user.id,
+          tenantId: user.tenantId,
           version: newKeyVersion,
           verificationCiphertext: parsed.data.verificationArtifact.ciphertext,
           verificationIv: parsed.data.verificationArtifact.iv,

@@ -73,6 +73,15 @@ export async function POST(req: NextRequest) {
   }
 
   const { name, parentId, sortOrder } = parsed.data;
+  const actor = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { tenantId: true },
+    }),
+  );
+  if (!actor) {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
 
   // Parent ownership + existence check
   if (parentId) {
@@ -136,6 +145,7 @@ export async function POST(req: NextRequest) {
         name,
         parentId: parentId ?? null,
         userId: session.user.id,
+        tenantId: actor.tenantId,
         sortOrder: sortOrder ?? 0,
       },
     }),

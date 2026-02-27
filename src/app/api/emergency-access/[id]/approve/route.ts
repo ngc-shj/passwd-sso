@@ -59,10 +59,11 @@ export async function POST(
     ...extractRequestMeta(req),
   });
 
-  if (grant.granteeId) {
+  const granteeId = grant.granteeId;
+  if (granteeId) {
     const grantee = await withUserTenantRls(session.user.id, async () =>
       prisma.user.findUnique({
-        where: { id: grant.granteeId },
+        where: { id: granteeId },
         select: { email: true, name: true },
       }),
     );

@@ -148,6 +148,7 @@ async function handlePUT(
       await tx.passwordEntryHistory.create({
         data: {
           entryId: id,
+          tenantId: existing.tenantId,
           encryptedBlob: existing.encryptedBlob,
           blobIv: existing.blobIv,
           blobAuthTag: existing.blobAuthTag,

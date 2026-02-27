@@ -37,6 +37,7 @@ export default async function SharePage({ params }: Props) {
     where: { tokenHash },
     select: {
       id: true,
+      tenantId: true,
       shareType: true,
       entryType: true,
       encryptedData: true,
@@ -84,6 +85,7 @@ export default async function SharePage({ params }: Props) {
     .create({
       data: {
         shareId: share.id,
+        tenantId: share.tenantId,
         ip,
         userAgent: ua?.slice(0, 512) ?? null,
       },

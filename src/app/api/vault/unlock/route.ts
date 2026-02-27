@@ -128,7 +128,8 @@ async function handlePOST(request: NextRequest) {
   await unlockLimiter.clear(rateKey);
 
   // Backfill passphrase verifier for existing users (transparent migration)
-  if (parsed.data.verifierHash) {
+  const verifierHash = parsed.data.verifierHash;
+  if (verifierHash) {
     await withUserTenantRls(session.user.id, async () =>
       prisma.user.updateMany({
         where: {
@@ -136,7 +137,7 @@ async function handlePOST(request: NextRequest) {
           passphraseVerifierHmac: null,
         },
         data: {
-          passphraseVerifierHmac: hmacVerifier(parsed.data.verifierHash),
+          passphraseVerifierHmac: hmacVerifier(verifierHash),
           passphraseVerifierVersion: VERIFIER_VERSION,
         },
       }),

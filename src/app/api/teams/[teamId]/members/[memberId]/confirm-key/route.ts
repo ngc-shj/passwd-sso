@@ -103,7 +103,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       // Verify keyVersion matches current team key version (F-16)
       const team = await tx.team.findUnique({
         where: { id: teamId },
-        select: { teamKeyVersion: true },
+        select: { teamKeyVersion: true, tenantId: true },
       });
       if (!team || data.keyVersion !== team.teamKeyVersion) {
         return "version_mismatch" as const;
@@ -119,6 +119,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         },
         create: {
           teamId: teamId,
+          tenantId: team.tenantId,
           userId: targetMember.userId,
           encryptedTeamKey: data.encryptedTeamKey,
           teamKeyIv: data.teamKeyIv,

@@ -48,6 +48,7 @@ export async function POST(
     await tx.passwordEntryHistory.create({
       data: {
         entryId: id,
+        tenantId: entry.tenantId,
         encryptedBlob: entry.encryptedBlob,
         blobIv: entry.blobIv,
         blobAuthTag: entry.blobAuthTag,

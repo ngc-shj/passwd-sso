@@ -65,7 +65,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const team = await withUserTenantRls(session.user.id, async () =>
     prisma.team.findUnique({
       where: { id: teamId },
-      select: { teamKeyVersion: true },
+      select: { teamKeyVersion: true, tenantId: true },
     }),
   );
 
@@ -186,6 +186,7 @@ export async function POST(req: NextRequest, { params }: Params) {
               tx.teamMemberKey.create({
                 data: {
                   teamId: teamId,
+                  tenantId: team.tenantId,
                   userId: k.userId,
                   encryptedTeamKey: k.encryptedTeamKey,
                   teamKeyIv: k.teamKeyIv,

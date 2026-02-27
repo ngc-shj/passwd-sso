@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   const invitation = await withUserTenantRls(session.user.id, async () =>
     prisma.teamInvitation.findUnique({
       where: { token },
-      include: { team: { select: { id: true, name: true, slug: true } } },
+      include: { team: { select: { id: true, name: true, slug: true, tenantId: true } } },
     }),
   );
 
@@ -138,6 +138,7 @@ export async function POST(req: NextRequest) {
         create: {
           teamId: invitation.teamId,
           userId: session.user.id,
+          tenantId: invitation.team.tenantId,
           role: invitation.role,
           keyDistributed: false,
         },

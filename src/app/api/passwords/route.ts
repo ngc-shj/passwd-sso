@@ -146,6 +146,15 @@ async function handlePOST(req: NextRequest) {
       return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid tagIds" }, { status: 400 });
     }
   }
+  const actor = await withUserTenantRls(userId, async () =>
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { tenantId: true },
+    }),
+  );
+  if (!actor) {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
 
   const entry = await withUserTenantRls(userId, async () =>
     prisma.passwordEntry.create({
@@ -164,6 +173,7 @@ async function handlePOST(req: NextRequest) {
         ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
         ...(folderId ? { folderId } : {}),
         userId,
+        tenantId: actor.tenantId,
         ...(tagIds?.length
           ? { tags: { connect: tagIds.map((id) => ({ id })) } }
           : {}),

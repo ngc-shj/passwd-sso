@@ -85,6 +85,7 @@ export async function POST(
       prisma.emergencyAccessKeyPair.create({
         data: {
           grantId: id,
+          tenantId: grant.tenantId,
           encryptedPrivateKey: encryptedPrivateKey.ciphertext,
           privateKeyIv: encryptedPrivateKey.iv,
           privateKeyAuthTag: encryptedPrivateKey.authTag,

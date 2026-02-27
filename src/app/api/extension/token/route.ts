@@ -45,6 +45,18 @@ export async function POST() {
   const plaintext = generateShareToken();
   const tokenHash = hashToken(plaintext);
   const scopeCsv = EXTENSION_TOKEN_DEFAULT_SCOPES.join(",");
+  const actor = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { tenantId: true },
+    }),
+  );
+  if (!actor) {
+    return NextResponse.json(
+      { error: API_ERROR.UNAUTHORIZED },
+      { status: 401 },
+    );
+  }
 
   const created = await withUserTenantRls(session.user.id, async () =>
     prisma.$transaction(async (tx) => {
@@ -66,7 +78,7 @@ export async function POST() {
       }
 
       return tx.extensionToken.create({
-        data: { userId: session.user.id, tokenHash, scope: scopeCsv, expiresAt },
+        data: { userId: session.user.id, tenantId: actor.tenantId, tokenHash, scope: scopeCsv, expiresAt },
         select: { id: true, expiresAt: true, scope: true },
       });
     }),

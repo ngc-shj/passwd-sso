@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
         userId,
         expires: { gt: new Date() },
       },
-      select: { id: true },
+      select: { id: true, tenantId: true },
     }),
   );
 
@@ -78,6 +78,7 @@ export async function POST(req: NextRequest) {
       await tx.extensionToken.create({
         data: {
           userId,
+          tenantId: activeSession.tenantId,
           tokenHash: newTokenHash,
           scope: scopeCsv,
           expiresAt,

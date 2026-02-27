@@ -164,12 +164,23 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
   }
 
+  const team = await withUserTenantRls(session.user.id, async () =>
+    prisma.team.findUnique({
+      where: { id: teamId },
+      select: { tenantId: true },
+    }),
+  );
+  if (!team) {
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+  }
+
   const folder = await withUserTenantRls(session.user.id, async () =>
     prisma.teamFolder.create({
       data: {
         name,
         parentId: parentId ?? null,
         teamId: teamId,
+        tenantId: team.tenantId,
         sortOrder: sortOrder ?? 0,
       },
     }),

@@ -32,6 +32,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     where: { tokenHash },
     select: {
       id: true,
+      tenantId: true,
       shareType: true,
       sendFilename: true,
       sendContentType: true,
@@ -67,6 +68,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     .create({
       data: {
         shareId: share.id,
+        tenantId: share.tenantId,
         ip: accessIp,
         userAgent: ua?.slice(0, 512) ?? null,
       },

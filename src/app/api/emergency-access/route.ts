@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id || !session.user.email) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
+  const sessionEmail = session.user.email;
 
   if (!(await createLimiter.check(`rl:ea_create:${session.user.id}`))) {
     return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest) {
   const { granteeEmail, waitDays } = parsed.data;
 
   // Cannot grant to self
-  if (granteeEmail.toLowerCase() === session.user.email.toLowerCase()) {
+  if (granteeEmail.toLowerCase() === sessionEmail.toLowerCase()) {
     return NextResponse.json(
       { error: API_ERROR.CANNOT_GRANT_SELF },
       { status: 400 }
@@ -67,11 +68,21 @@ export async function POST(req: NextRequest) {
 
   const token = generateShareToken();
   const tokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const operator = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { tenantId: true },
+    }),
+  );
+  if (!operator) {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
 
   const grant = await withUserTenantRls(session.user.id, async () =>
     prisma.emergencyAccessGrant.create({
       data: {
         ownerId: session.user.id,
+        tenantId: operator.tenantId,
         granteeEmail,
         waitDays,
         tokenHash: hashToken(token),
@@ -111,6 +122,7 @@ export async function GET() {
   if (!session?.user?.id || !session.user.email) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
+  const sessionEmail = session.user.email;
 
   const grants = await withUserTenantRls(session.user.id, async () =>
     prisma.emergencyAccessGrant.findMany({
@@ -119,7 +131,7 @@ export async function GET() {
           { ownerId: session.user.id },
           { granteeId: session.user.id },
           {
-            granteeEmail: { equals: session.user.email, mode: "insensitive" },
+            granteeEmail: { equals: sessionEmail, mode: "insensitive" },
             status: EA_STATUS.PENDING,
           },
         ],

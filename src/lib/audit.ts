@@ -17,6 +17,7 @@ export interface AuditLogParams {
   scope: AuditScope;
   action: AuditAction;
   userId: string;
+  tenantId?: string;
   teamId?: string;
   targetType?: string;
   targetId?: string;
@@ -59,7 +60,7 @@ export function sanitizeMetadata(value: unknown): unknown {
  * 2. Structured JSON to stdout via pino (for Fluent Bit forwarding)
  */
 export function logAudit(params: AuditLogParams): void {
-  const { scope, action, userId, teamId, targetType, targetId, metadata, ip, userAgent } = params;
+  const { scope, action, userId, tenantId, teamId, targetType, targetId, metadata, ip, userAgent } = params;
 
   // Truncate metadata if too large
   let safeMetadata: Record<string, unknown> | undefined;
@@ -75,12 +76,30 @@ export function logAudit(params: AuditLogParams): void {
   const safeUserAgent = userAgent?.slice(0, 512) ?? null;
 
   // --- DB write (existing, unchanged) ---
-  prisma.auditLog
-    .create({
+  void (async () => {
+    let resolvedTenantId = tenantId ?? null;
+    if (!resolvedTenantId && teamId) {
+      const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        select: { tenantId: true },
+      });
+      resolvedTenantId = team?.tenantId ?? null;
+    }
+    if (!resolvedTenantId) {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { tenantId: true },
+      });
+      resolvedTenantId = user?.tenantId ?? null;
+    }
+    if (!resolvedTenantId) return;
+
+    await prisma.auditLog.create({
       data: {
         scope,
         action,
         userId,
+        tenantId: resolvedTenantId,
         teamId: teamId ?? null,
         targetType: targetType ?? null,
         targetId: targetId ?? null,
@@ -88,10 +107,10 @@ export function logAudit(params: AuditLogParams): void {
         ip: ip ?? null,
         userAgent: safeUserAgent,
       },
-    })
-    .catch(() => {
-      // Silently swallow — audit logging must never break the app
     });
+  })().catch(() => {
+    // Silently swallow — audit logging must never break the app
+  });
 
   // --- Structured JSON emit for external forwarding ---
   // auditLogger.enabled is false when AUDIT_LOG_FORWARD !== "true",

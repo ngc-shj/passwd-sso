@@ -135,6 +135,7 @@ export async function POST(req: NextRequest) {
           members: {
             create: {
               userId: session.user.id,
+              tenantId,
               role: TEAM_ROLE.OWNER,
               keyDistributed: true,
             },
@@ -142,6 +143,7 @@ export async function POST(req: NextRequest) {
           memberKeys: {
             create: {
               userId: session.user.id,
+              tenantId,
               encryptedTeamKey: teamMemberKey.encryptedTeamKey,
               teamKeyIv: teamMemberKey.teamKeyIv,
               teamKeyAuthTag: teamMemberKey.teamKeyAuthTag,

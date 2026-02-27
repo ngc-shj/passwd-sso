@@ -95,6 +95,15 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const { name, color } = parsed.data;
+  const team = await withUserTenantRls(session.user.id, async () =>
+    prisma.team.findUnique({
+      where: { id: teamId },
+      select: { tenantId: true },
+    }),
+  );
+  if (!team) {
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+  }
 
   const existing = await withUserTenantRls(session.user.id, async () =>
     prisma.teamTag.findUnique({
@@ -114,6 +123,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         name,
         color: color || null,
         teamId: teamId,
+        tenantId: team.tenantId,
       },
     }),
   );

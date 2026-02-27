@@ -102,6 +102,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       where: { id },
       select: {
         teamId: true,
+        tenantId: true,
         createdById: true,
         encryptedBlob: true,
         blobIv: true,
@@ -205,6 +206,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
         await tx.teamPasswordEntryHistory.create({
           data: {
             entryId: id,
+            tenantId: entry.tenantId,
             encryptedBlob: entry.encryptedBlob,
             blobIv: entry.blobIv,
             blobAuthTag: entry.blobAuthTag,
