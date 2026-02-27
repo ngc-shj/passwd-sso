@@ -45,12 +45,11 @@ Responsibility:
 - synchronize team assignment and team role mapping
 - map IdP groups to passwd-sso team/role targets
 
-Mapping options (choose per tenant policy):
-1. Role Groups mode
-- IdP groups map to predefined roles (`ADMIN`, `MEMBER`, `VIEWER`) within target team
-
-2. Team Groups mode
-- IdP groups map directly to team identity, then role is fixed or derived
+Mapping:
+- IdP group `externalId` -> tenant-scoped mapping (`scim_group_mappings`)
+- each mapping targets exactly one `(teamId, role)` pair
+- `displayName` contract is `<teamSlug>:<ROLE>` (e.g. `core:ADMIN`)
+- supported roles are `ADMIN`, `MEMBER`, `VIEWER`
 
 Rules:
 - all group operations are validated within tenant boundary
@@ -76,6 +75,7 @@ Rules:
 2. Token operations
 - create/revoke/list under tenant settings
 - hash-at-rest, one-time plaintext reveal, expirations supported
+- revocation is tenant-scoped (can revoke tenant token even if created from another team context)
 
 3. Operational controls
 - per-tenant token count limit
@@ -116,12 +116,8 @@ Rules:
 
 ## Open Decisions
 
-1. Group mapping mode default per tenant
-- role groups vs team groups
-
-2. SCIM delete semantics
+1. SCIM delete semantics
 - deactivate-only vs configurable hard-delete
 
-3. User record strategy
+2. User record strategy
 - keep globally shared `users` row vs tenant-local shadow user model
-

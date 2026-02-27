@@ -5,8 +5,9 @@ Run a quick SCIM 2.0 connectivity check using `curl` against this app directly.
 ## Prerequisites
 
 - App is running locally (default: `http://localhost:3000`)
-- A valid SCIM token issued from Org Settings
+- A valid SCIM token issued from Team Settings (tenant-scoped)
 - `curl` and `jq` installed
+- `SMOKE_GROUP_DISPLAY_NAME` set to `<teamSlug>:ADMIN` when no ADMIN mapping exists yet
 
 ## Run
 
@@ -24,6 +25,8 @@ SCIM_TOKEN='scim_xxx' npm run scim:smoke
 - `SMOKE_USER_NAME`
 - `SMOKE_USER_EXTERNAL_ID`
 - `SMOKE_GROUP_EXTERNAL_ID`
+- `SMOKE_GROUP_DISPLAY_NAME`
+  - default: empty (auto-detect existing `*:ADMIN` group mapping)
 
 Example:
 
@@ -39,6 +42,6 @@ npm run scim:smoke
 1. Discovery endpoints (`ServiceProviderConfig`, `ResourceTypes`, `Schemas`)
 2. User lifecycle (`POST -> GET(filter) -> PATCH(active false/true) -> DELETE`)
 3. Group membership PATCH (`add` / `remove` in `ADMIN`)
-4. Group mapping registration (`POST /Groups`)
+4. Group mapping registration (`POST /Groups`) with `displayName=<teamSlug>:ADMIN`
 
 This covers the app-side SCIM behavior without Okta/Azure wiring.
