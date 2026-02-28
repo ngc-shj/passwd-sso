@@ -53,6 +53,8 @@ export interface TeamPasswordFormInitialValues {
   purchaseDate: string;
   expirationDate: string;
   teamFolderId: string | null;
+  requireReprompt: boolean;
+  expiresAt: string | null;
 }
 
 export function buildTeamPasswordFormInitialValues(
@@ -106,5 +108,7 @@ export function buildTeamPasswordFormInitialValues(
     purchaseDate: editData?.purchaseDate ?? "",
     expirationDate: editData?.expirationDate ?? "",
     teamFolderId: editData?.teamFolderId ?? null,
+    requireReprompt: editData?.requireReprompt ?? false,
+    expiresAt: editData?.expiresAt ?? null,
   };
 }

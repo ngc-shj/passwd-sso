@@ -86,6 +86,8 @@ export interface SubmitTeamPasswordFormArgs {
   licensee: string;
   purchaseDate: string;
   expirationDate: string;
+  requireReprompt: boolean;
+  expiresAt: string | null;
   cardNumberValid: boolean;
   isIdentity: boolean;
   isBankAccount: boolean;
@@ -156,6 +158,8 @@ export async function submitTeamPasswordForm({
   licensee,
   purchaseDate,
   expirationDate,
+  requireReprompt,
+  expiresAt,
   cardNumberValid,
   isIdentity,
   isSoftwareLicense,
@@ -250,6 +254,8 @@ export async function submitTeamPasswordForm({
     entryType: effectiveEntryType,
     tagIds,
     teamFolderId,
+    requireReprompt,
+    expiresAt,
     t,
     setSaving,
     handleOpenChange,

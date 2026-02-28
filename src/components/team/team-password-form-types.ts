@@ -64,6 +64,8 @@ export interface TeamPasswordFormEditData {
   purchaseDate?: string | null;
   expirationDate?: string | null;
   teamFolderId?: string | null;
+  requireReprompt?: boolean;
+  expiresAt?: string | null;
 }
 
 export interface TeamPasswordFormProps {

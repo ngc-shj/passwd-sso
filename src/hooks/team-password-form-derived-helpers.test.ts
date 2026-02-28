@@ -106,6 +106,8 @@ describe("team-password-form-derived-helpers snapshot helpers", () => {
         licensee: "",
         purchaseDate: "",
         expirationDate: "",
+        requireReprompt: false,
+        expiresAt: null,
       },
     });
 
@@ -263,6 +265,8 @@ describe("team-password-form-derived-helpers snapshot helpers", () => {
         licensee: "",
         purchaseDate: "",
         expirationDate: "",
+        requireReprompt: false,
+        expiresAt: null,
       },
     });
 
@@ -344,5 +348,101 @@ describe("team-password-form-derived-helpers snapshot helpers", () => {
     expect(parsed.softwareLicense.version).toBe("2026");
     expect(parsed.login).toBeNull();
     expect(parsed.bankAccount).toBeNull();
+  });
+
+  it("includes requireReprompt and expiresAt at root level in baseline snapshot", () => {
+    const snapshot = buildBaselineSnapshot({
+      effectiveEntryType: ENTRY_TYPE.LOGIN,
+      editData: {
+        id: "entry-rp",
+        title: "Test",
+        username: "u",
+        password: "p",
+        requireReprompt: true,
+        expiresAt: "2026-12-31T00:00:00Z",
+      },
+      entryKindState: {
+        entryKind: "password",
+        isLoginEntry: true,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: false,
+      },
+    });
+
+    const parsed = JSON.parse(snapshot);
+    expect(parsed.requireReprompt).toBe(true);
+    expect(parsed.expiresAt).toBe("2026-12-31T00:00:00Z");
+  });
+
+  it("includes requireReprompt and expiresAt at root level in current snapshot", () => {
+    const snapshot = buildCurrentSnapshot({
+      effectiveEntryType: ENTRY_TYPE.LOGIN,
+      entryKindState: {
+        entryKind: "password",
+        isLoginEntry: true,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: false,
+      },
+      entryValues: {
+        title: "Test",
+        notes: "",
+        selectedTags: [],
+        teamFolderId: null,
+        username: "u",
+        password: "p",
+        url: "",
+        customFields: [],
+        totp: null,
+        content: "",
+        cardholderName: "",
+        cardNumber: "",
+        brand: "",
+        expiryMonth: "",
+        expiryYear: "",
+        cvv: "",
+        fullName: "",
+        address: "",
+        phone: "",
+        email: "",
+        dateOfBirth: "",
+        nationality: "",
+        idNumber: "",
+        issueDate: "",
+        expiryDate: "",
+        relyingPartyId: "",
+        relyingPartyName: "",
+        credentialId: "",
+        creationDate: "",
+        deviceInfo: "",
+        bankName: "",
+        accountType: "",
+        accountHolderName: "",
+        accountNumber: "",
+        routingNumber: "",
+        swiftBic: "",
+        iban: "",
+        branchName: "",
+        softwareName: "",
+        licenseKey: "",
+        version: "",
+        licensee: "",
+        purchaseDate: "",
+        expirationDate: "",
+        requireReprompt: true,
+        expiresAt: "2026-06-15T00:00:00Z",
+      },
+    });
+
+    const parsed = JSON.parse(snapshot);
+    expect(parsed.requireReprompt).toBe(true);
+    expect(parsed.expiresAt).toBe("2026-06-15T00:00:00Z");
   });
 });

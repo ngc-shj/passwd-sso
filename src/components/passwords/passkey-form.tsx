@@ -18,6 +18,8 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
+import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
@@ -39,6 +41,8 @@ interface PasskeyFormProps {
     notes: string | null;
     tags: TagData[];
     folderId?: string | null;
+    requireReprompt?: boolean;
+    expiresAt?: string | null;
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
@@ -52,6 +56,8 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
   const { encryptionKey, userId } = useVault();
   const [submitting, setSubmitting] = useState(false);
   const [showCredentialId, setShowCredentialId] = useState(false);
+  const [requireReprompt, setRequireReprompt] = useState(initialData?.requireReprompt ?? false);
+  const [expiresAt, setExpiresAt] = useState<string | null>(initialData?.expiresAt ?? null);
 
   const [title, setTitle] = useState(initialData?.title ?? "");
   const [relyingPartyId, setRelyingPartyId] = useState(initialData?.relyingPartyId ?? "");
@@ -80,6 +86,8 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
         notes: initialData?.notes ?? "",
         selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
         folderId: initialData?.folderId ?? null,
+        requireReprompt: initialData?.requireReprompt ?? false,
+        expiresAt: initialData?.expiresAt ?? null,
       }),
     [initialData]
   );
@@ -97,6 +105,8 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
         notes,
         selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
         folderId,
+        requireReprompt,
+        expiresAt,
       }),
     [
       title,
@@ -109,6 +119,8 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
       notes,
       selectedTags,
       folderId,
+      requireReprompt,
+      expiresAt,
     ]
   );
 
@@ -150,6 +162,8 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
       tagIds: toTagIds(selectedTags),
       folderId: folderId ?? null,
       entryType: ENTRY_TYPE.PASSKEY,
+      requireReprompt,
+      expiresAt,
       setSubmitting,
       t,
       router,
@@ -275,6 +289,22 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
         folders={folders}
         folderId={folderId}
         onFolderChange={setFolderId}
+        sectionCardClass={dialogSectionClass}
+      />
+
+      <EntryRepromptSection
+        checked={requireReprompt}
+        onCheckedChange={setRequireReprompt}
+        title={tPw("requireReprompt")}
+        description={tPw("requireRepromptHelp")}
+        sectionCardClass={dialogSectionClass}
+      />
+
+      <EntryExpirationSection
+        value={expiresAt}
+        onChange={setExpiresAt}
+        title={tPw("expirationTitle")}
+        description={tPw("expirationDescription")}
         sectionCardClass={dialogSectionClass}
       />
 

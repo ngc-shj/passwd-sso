@@ -18,6 +18,8 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
+import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
@@ -40,6 +42,8 @@ interface SoftwareLicenseFormProps {
     notes: string | null;
     tags: TagData[];
     folderId?: string | null;
+    requireReprompt?: boolean;
+    expiresAt?: string | null;
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
@@ -54,6 +58,8 @@ export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSav
   const [submitting, setSubmitting] = useState(false);
   const [showLicenseKey, setShowLicenseKey] = useState(false);
   const [expirationError, setExpirationError] = useState<string | null>(null);
+  const [requireReprompt, setRequireReprompt] = useState(initialData?.requireReprompt ?? false);
+  const [expiresAt, setExpiresAt] = useState<string | null>(initialData?.expiresAt ?? null);
 
   const [title, setTitle] = useState(initialData?.title ?? "");
   const [softwareName, setSoftwareName] = useState(initialData?.softwareName ?? "");
@@ -85,6 +91,8 @@ export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSav
         notes: initialData?.notes ?? "",
         selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
         folderId: initialData?.folderId ?? null,
+        requireReprompt: initialData?.requireReprompt ?? false,
+        expiresAt: initialData?.expiresAt ?? null,
       }),
     [initialData]
   );
@@ -103,10 +111,13 @@ export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSav
         notes,
         selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
         folderId,
+        requireReprompt,
+        expiresAt,
       }),
     [
       title, softwareName, licenseKey, version, licensee, email,
       purchaseDate, expirationDate, notes, selectedTags, folderId,
+      requireReprompt, expiresAt,
     ]
   );
 
@@ -163,6 +174,8 @@ export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSav
       tagIds: toTagIds(selectedTags),
       folderId: folderId ?? null,
       entryType: ENTRY_TYPE.SOFTWARE_LICENSE,
+      requireReprompt,
+      expiresAt,
       setSubmitting,
       t,
       router,
@@ -311,6 +324,22 @@ export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSav
         folders={folders}
         folderId={folderId}
         onFolderChange={setFolderId}
+        sectionCardClass={dialogSectionClass}
+      />
+
+      <EntryRepromptSection
+        checked={requireReprompt}
+        onCheckedChange={setRequireReprompt}
+        title={tPw("requireReprompt")}
+        description={tPw("requireRepromptHelp")}
+        sectionCardClass={dialogSectionClass}
+      />
+
+      <EntryExpirationSection
+        value={expiresAt}
+        onChange={setExpiresAt}
+        title={tPw("expirationTitle")}
+        description={tPw("expirationDescription")}
         sectionCardClass={dialogSectionClass}
       />
 

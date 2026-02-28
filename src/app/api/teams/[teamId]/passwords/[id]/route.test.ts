@@ -192,6 +192,22 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
     expect(json.error).toBe("NOT_FOUND");
   });
 
+  it("returns requireReprompt and expiresAt in GET response", async () => {
+    const expiresDate = new Date("2026-12-31T00:00:00Z");
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(
+      makeEntryForGET({ requireReprompt: true, expiresAt: expiresDate }),
+    );
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.requireReprompt).toBe(true);
+    expect(json.expiresAt).toBe(expiresDate.toISOString());
+  });
+
   it("returns teamFolderId in GET response when entry has a folder", async () => {
     const FOLDER_CUID = "cm1234567890abcdefghijkl1";
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(
@@ -492,6 +508,27 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
         data: expect.objectContaining({
           isArchived: true,
           tags: { set: [{ id: TAG_CUID }] },
+        }),
+      }),
+    );
+  });
+
+  it("updates requireReprompt and expiresAt as metadata-only (no history snapshot)", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
+        body: { requireReprompt: true, expiresAt: "2026-12-31T00:00:00+00:00" },
+      }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(txMock.teamPasswordEntryHistory.create).not.toHaveBeenCalled();
+    expect(txMock.teamPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          requireReprompt: true,
+          expiresAt: new Date("2026-12-31T00:00:00+00:00"),
         }),
       }),
     );

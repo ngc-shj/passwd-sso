@@ -25,6 +25,8 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
+import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
@@ -48,6 +50,8 @@ interface BankAccountFormProps {
     notes: string | null;
     tags: TagData[];
     folderId?: string | null;
+    requireReprompt?: boolean;
+    expiresAt?: string | null;
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
@@ -67,6 +71,8 @@ export function BankAccountForm({ mode, initialData, variant = "page", onSaved }
   const [submitting, setSubmitting] = useState(false);
   const [showAccountNumber, setShowAccountNumber] = useState(false);
   const [showRoutingNumber, setShowRoutingNumber] = useState(false);
+  const [requireReprompt, setRequireReprompt] = useState(initialData?.requireReprompt ?? false);
+  const [expiresAt, setExpiresAt] = useState<string | null>(initialData?.expiresAt ?? null);
 
   const [title, setTitle] = useState(initialData?.title ?? "");
   const [bankName, setBankName] = useState(initialData?.bankName ?? "");
@@ -99,6 +105,8 @@ export function BankAccountForm({ mode, initialData, variant = "page", onSaved }
         notes: initialData?.notes ?? "",
         selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
         folderId: initialData?.folderId ?? null,
+        requireReprompt: initialData?.requireReprompt ?? false,
+        expiresAt: initialData?.expiresAt ?? null,
       }),
     [initialData]
   );
@@ -118,11 +126,13 @@ export function BankAccountForm({ mode, initialData, variant = "page", onSaved }
         notes,
         selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
         folderId,
+        requireReprompt,
+        expiresAt,
       }),
     [
       title, bankName, accountType, accountHolderName,
       accountNumber, routingNumber, swiftBic, iban, branchName,
-      notes, selectedTags, folderId,
+      notes, selectedTags, folderId, requireReprompt, expiresAt,
     ]
   );
 
@@ -169,6 +179,8 @@ export function BankAccountForm({ mode, initialData, variant = "page", onSaved }
       tagIds: toTagIds(selectedTags),
       folderId: folderId ?? null,
       entryType: ENTRY_TYPE.BANK_ACCOUNT,
+      requireReprompt,
+      expiresAt,
       setSubmitting,
       t,
       router,
@@ -340,6 +352,22 @@ export function BankAccountForm({ mode, initialData, variant = "page", onSaved }
         folders={folders}
         folderId={folderId}
         onFolderChange={setFolderId}
+        sectionCardClass={dialogSectionClass}
+      />
+
+      <EntryRepromptSection
+        checked={requireReprompt}
+        onCheckedChange={setRequireReprompt}
+        title={tPw("requireReprompt")}
+        description={tPw("requireRepromptHelp")}
+        sectionCardClass={dialogSectionClass}
+      />
+
+      <EntryExpirationSection
+        value={expiresAt}
+        onChange={setExpiresAt}
+        title={tPw("expirationTitle")}
+        description={tPw("expirationDescription")}
         sectionCardClass={dialogSectionClass}
       />
 

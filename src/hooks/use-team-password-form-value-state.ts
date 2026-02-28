@@ -54,6 +54,8 @@ export function useTeamPasswordFormValueState(initial: TeamPasswordFormInitialVa
   const [purchaseDate, setPurchaseDate] = useState(initial.purchaseDate);
   const [expirationDate, setExpirationDate] = useState(initial.expirationDate);
   const [teamFolderId, setTeamFolderId] = useState<string | null>(initial.teamFolderId);
+  const [requireReprompt, setRequireReprompt] = useState(initial.requireReprompt);
+  const [expiresAt, setExpiresAt] = useState<string | null>(initial.expiresAt);
 
   return {
     values: {
@@ -106,6 +108,8 @@ export function useTeamPasswordFormValueState(initial: TeamPasswordFormInitialVa
       purchaseDate,
       expirationDate,
       teamFolderId,
+      requireReprompt,
+      expiresAt,
     },
     setters: {
       setTitle,
@@ -157,6 +161,8 @@ export function useTeamPasswordFormValueState(initial: TeamPasswordFormInitialVa
       setPurchaseDate,
       setExpirationDate,
       setTeamFolderId,
+      setRequireReprompt,
+      setExpiresAt,
     },
   };
 }

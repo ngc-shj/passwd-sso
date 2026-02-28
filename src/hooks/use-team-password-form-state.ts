@@ -76,6 +76,8 @@ export interface TeamEntryFieldValues {
   licensee: string;
   purchaseDate: string;
   expirationDate: string;
+  requireReprompt: boolean;
+  expiresAt: string | null;
 }
 
 export function selectTeamEntryFieldValues(values: TeamPasswordFormValues): TeamEntryFieldValues {
@@ -124,5 +126,7 @@ export function selectTeamEntryFieldValues(values: TeamPasswordFormValues): Team
     licensee: values.licensee,
     purchaseDate: values.purchaseDate,
     expirationDate: values.expirationDate,
+    requireReprompt: values.requireReprompt,
+    expiresAt: values.expiresAt,
   };
 }

@@ -490,6 +490,31 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     expect(json.error).toBe("FOLDER_NOT_FOUND");
   });
 
+  it("creates entry with requireReprompt and expiresAt", async () => {
+    mockPrismaTeamPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      entryType: "LOGIN",
+      tags: [],
+      createdAt: now,
+    });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
+        body: { ...validE2EBody, requireReprompt: true, expiresAt: "2026-12-31T00:00:00+00:00" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(201);
+    expect(mockPrismaTeamPasswordEntry.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          requireReprompt: true,
+          expiresAt: new Date("2026-12-31T00:00:00+00:00"),
+        }),
+      }),
+    );
+  });
+
   it("creates entry without folder validation when teamFolderId is not provided", async () => {
     mockPrismaTeamPasswordEntry.create.mockResolvedValue({
       id: "new-pw",

@@ -317,6 +317,8 @@ export function PasswordEditDialog({
               notes: data.notes,
               tags: data.tags,
               folderId: data.folderId ?? null,
+              requireReprompt: data.requireReprompt ?? false,
+              expiresAt: data.expiresAt ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -337,6 +339,8 @@ export function PasswordEditDialog({
               notes: data.notes,
               tags: data.tags,
               folderId: data.folderId ?? null,
+              requireReprompt: data.requireReprompt ?? false,
+              expiresAt: data.expiresAt ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -356,6 +360,8 @@ export function PasswordEditDialog({
               notes: data.notes || null,
               tags: data.tags,
               folderId: data.folderId ?? null,
+              requireReprompt: data.requireReprompt ?? false,
+              expiresAt: data.expiresAt ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -378,6 +384,8 @@ export function PasswordEditDialog({
               notes: data.notes,
               tags: data.tags,
               folderId: data.folderId ?? null,
+              requireReprompt: data.requireReprompt ?? false,
+              expiresAt: data.expiresAt ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -397,6 +405,8 @@ export function PasswordEditDialog({
               notes: data.notes,
               tags: data.tags,
               folderId: data.folderId ?? null,
+              requireReprompt: data.requireReprompt ?? false,
+              expiresAt: data.expiresAt ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -410,6 +420,8 @@ export function PasswordEditDialog({
               content: data.content,
               tags: data.tags,
               folderId: data.folderId ?? null,
+              requireReprompt: data.requireReprompt ?? false,
+              expiresAt: data.expiresAt ?? null,
             }}
             onSaved={handleSaved}
           />

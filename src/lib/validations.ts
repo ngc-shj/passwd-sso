@@ -148,6 +148,8 @@ export const createTeamE2EPasswordSchema = z.object({
   entryType: entryTypeSchema.optional().default(ENTRY_TYPE.LOGIN),
   tagIds: z.array(z.string().cuid()).optional(),
   teamFolderId: z.string().cuid().nullable().optional(),
+  requireReprompt: z.boolean().optional(),
+  expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
 });
 
 /** Schema for E2E team password update — full blob replacement or metadata-only update */
@@ -159,6 +161,8 @@ export const updateTeamE2EPasswordSchema = z.object({
   tagIds: z.array(z.string().cuid()).optional(),
   teamFolderId: z.string().cuid().nullable().optional(),
   isArchived: z.boolean().optional(),
+  requireReprompt: z.boolean().optional(),
+  expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
 }).refine(
   (data) => {
     const hasBlob = data.encryptedBlob !== undefined;

@@ -22,6 +22,8 @@ export function buildBaselineSnapshot({
     notes: editData?.notes ?? "",
     selectedTagIds: (editData?.tags ?? []).map((tag) => tag.id).sort(),
     teamFolderId: editData?.teamFolderId ?? null,
+    requireReprompt: editData?.requireReprompt ?? false,
+    expiresAt: editData?.expiresAt ?? null,
     login: isLoginEntry
       ? {
           username: editData?.username ?? "",
@@ -151,6 +153,8 @@ export function buildCurrentSnapshot({
     licensee,
     purchaseDate,
     expirationDate,
+    requireReprompt,
+    expiresAt,
   } = entryValues;
   return JSON.stringify({
     entryType: effectiveEntryType,
@@ -158,6 +162,8 @@ export function buildCurrentSnapshot({
     notes,
     selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
     teamFolderId,
+    requireReprompt,
+    expiresAt,
     login: isLoginEntry ? { username, password, url, customFields, totp } : null,
     secureNote: isNote ? { content } : null,
     creditCard: isCreditCard

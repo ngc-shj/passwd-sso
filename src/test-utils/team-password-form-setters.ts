@@ -54,6 +54,8 @@ export function createTeamPasswordFormLifecycleSettersMock(): TeamPasswordFormLi
     setPurchaseDate: noop,
     setExpirationDate: noop,
     setTeamFolderId: noop,
+    setRequireReprompt: noop,
+    setExpiresAt: noop,
     setShowPassword: noop,
     setShowGenerator: noop,
     setShowCardNumber: noop,

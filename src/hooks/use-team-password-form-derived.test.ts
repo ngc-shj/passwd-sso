@@ -67,6 +67,8 @@ function baseEntryValues(): TeamEntryFieldValues {
     licensee: "",
     purchaseDate: "",
     expirationDate: "",
+    requireReprompt: false,
+    expiresAt: null,
   };
 }
 
