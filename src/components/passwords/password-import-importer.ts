@@ -94,6 +94,12 @@ export async function runImportEntries({
             aadVersion: AAD_VERSION,
             teamKeyVersion: teamKeyVersion ?? 1,
             tagIds,
+            ...(entry.requireReprompt ? { requireReprompt: true } : {}),
+            ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
+            ...(() => {
+              const fid = resolveEntryFolderId(entry, folderPathToId);
+              return fid ? { teamFolderId: fid } : {};
+            })(),
           }),
         });
       } else {

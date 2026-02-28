@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { ParsedEntry } from "@/components/passwords/password-import-types";
 
@@ -78,6 +78,10 @@ function makeEntry(overrides: Partial<ParsedEntry> = {}): ParsedEntry {
 describe("runImportEntries", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("imports team entries and reports success/failed counts", async () => {

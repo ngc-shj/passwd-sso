@@ -9,6 +9,7 @@ interface ExistingFolder {
 type FetchLike = typeof fetch;
 
 const PATH_SEPARATOR = " / ";
+const MAX_IMPORT_FOLDERS = 200;
 
 /**
  * Split a folder path string ("Parent / Child / Grandchild") into trimmed segments.
@@ -54,6 +55,7 @@ export async function resolveFolderPathsForImport(
     }
   }
   if (uniquePaths.size === 0) return pathToId;
+  if (uniquePaths.size > MAX_IMPORT_FOLDERS) return pathToId;
 
   // Fetch existing folders
   const folders: ExistingFolder[] = [];

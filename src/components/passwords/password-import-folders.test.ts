@@ -211,6 +211,41 @@ describe("resolveFolderPathsForImport", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("creates all folders when initial GET fails", async () => {
+    const fetcher = vi.fn()
+      .mockRejectedValueOnce(new Error("network")) // GET throws
+      .mockResolvedValueOnce(jsonResponse({ id: "f1" })); // POST "Work"
+
+    const result = await resolveFolderPathsForImport(
+      [makeEntry("Work")],
+      "/api/folders",
+      fetcher,
+    );
+
+    expect(result.get("Work")).toBe("f1");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("resolves 3-level nested path correctly", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([])) // GET: empty
+      .mockResolvedValueOnce(jsonResponse({ id: "a1" })) // POST A
+      .mockResolvedValueOnce(jsonResponse({ id: "b1" })) // POST B
+      .mockResolvedValueOnce(jsonResponse({ id: "c1" })); // POST C
+
+    const result = await resolveFolderPathsForImport(
+      [makeEntry("A / B / C")],
+      "/api/folders",
+      fetcher,
+    );
+
+    expect(result.get("A / B / C")).toBe("c1");
+    const postB = fetcher.mock.calls[2];
+    expect(JSON.parse(postB[1].body)).toEqual({ name: "B", parentId: "a1" });
+    const postC = fetcher.mock.calls[3];
+    expect(JSON.parse(postC[1].body)).toEqual({ name: "C", parentId: "b1" });
+  });
+
   it("skips path on POST failure", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(jsonResponse([])) // GET: empty

@@ -128,8 +128,50 @@ export function parseCsvLine(line: string): string[] {
   return fields;
 }
 
+/**
+ * Split CSV text into rows respecting RFC 4180 quoted fields
+ * (newlines inside double-quoted fields are preserved, not treated as row breaks).
+ */
+export function splitCsvRows(text: string): string[] {
+  const rows: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (i + 1 < text.length && text[i + 1] === '"') {
+          current += '""';
+          i++;
+        } else {
+          inQuotes = false;
+          current += char;
+        }
+      } else {
+        current += char;
+      }
+    } else {
+      if (char === '"') {
+        inQuotes = true;
+        current += char;
+      } else if (char === "\n") {
+        if (current.trim()) rows.push(current);
+        current = "";
+      } else if (char === "\r") {
+        // skip \r, the following \n (if any) will trigger row break
+      } else {
+        current += char;
+      }
+    }
+  }
+  if (current.trim()) rows.push(current);
+  return rows;
+}
+
 export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  const lines = splitCsvRows(text);
   if (lines.length < 2) return { entries: [], format: "unknown" };
 
   const headers = parseCsvLine(lines[0]);

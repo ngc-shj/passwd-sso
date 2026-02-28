@@ -4,10 +4,12 @@ import {
   parsePasswdSsoPayload,
   detectFormat,
   parseCsvLine,
+  splitCsvRows,
   parseCsv,
   parseJson,
   formatLabels,
 } from "./password-import-parsers";
+import { formatExportCsv, type ExportEntry } from "@/lib/export-format-common";
 
 // ─── parsePasswdSsoPayload ───────────────────────────────────
 
@@ -114,6 +116,40 @@ describe("detectFormat", () => {
 
   it("is case-insensitive", () => {
     expect(detectFormat(["NAME", "LOGIN_USERNAME", "LOGIN_PASSWORD"])).toBe("bitwarden");
+  });
+});
+
+// ─── splitCsvRows ───────────────────────────────────────────
+
+describe("splitCsvRows", () => {
+  it("splits simple rows by newline", () => {
+    expect(splitCsvRows("a,b\nc,d")).toEqual(["a,b", "c,d"]);
+  });
+
+  it("handles CRLF line endings", () => {
+    expect(splitCsvRows("a,b\r\nc,d")).toEqual(["a,b", "c,d"]);
+  });
+
+  it("preserves newlines inside quoted fields", () => {
+    const csv = 'name,notes\n"Alice","Line 1\nLine 2"';
+    const rows = splitCsvRows(csv);
+    expect(rows).toEqual(["name,notes", '"Alice","Line 1\nLine 2"']);
+  });
+
+  it("preserves multiple newlines inside quoted fields", () => {
+    const csv = 'h1,h2\n"a","one\ntwo\nthree",c';
+    const rows = splitCsvRows(csv);
+    expect(rows).toEqual(["h1,h2", '"a","one\ntwo\nthree",c']);
+  });
+
+  it("handles escaped quotes inside multi-line fields", () => {
+    const csv = 'h1,h2\n"say ""hello""\nworld",b';
+    const rows = splitCsvRows(csv);
+    expect(rows).toEqual(["h1,h2", '"say ""hello""\nworld",b']);
+  });
+
+  it("skips empty lines", () => {
+    expect(splitCsvRows("a,b\n\nc,d\n")).toEqual(["a,b", "c,d"]);
   });
 });
 
@@ -269,6 +305,30 @@ describe("parseCsv", () => {
     const result = parseCsv(csv);
     expect(result.entries[0].folderPath).toBe("");
     expect(result.entries[0].isFavorite).toBe(false);
+  });
+
+  it("handles multi-line notes inside quoted fields", () => {
+    const csv =
+      'name,login_username,login_password,type,notes\n' +
+      'VPN Notes,,,securenote,"Line 1 of note.\nLine 2 of note."';
+
+    const result = parseCsv(csv);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].entryType).toBe(ENTRY_TYPE.SECURE_NOTE);
+    expect(result.entries[0].content).toBe("Line 1 of note.\nLine 2 of note.");
+  });
+
+  it("handles multi-line notes followed by more rows", () => {
+    const csv =
+      'name,login_username,login_password,type,notes\n' +
+      'Note,,,securenote,"Line 1\nLine 2"\n' +
+      'Login,user,pass123,,simple';
+
+    const result = parseCsv(csv);
+    expect(result.entries).toHaveLength(2);
+    expect(result.entries[0].content).toBe("Line 1\nLine 2");
+    expect(result.entries[1].title).toBe("Login");
+    expect(result.entries[1].password).toBe("pass123");
   });
 });
 
@@ -455,6 +515,71 @@ describe("parseJson", () => {
     expect(result.entries[0].folderPath).toBe("");
     expect(result.entries[0].isFavorite).toBe(false);
     expect(result.entries[0].expiresAt).toBeNull();
+  });
+
+  it("type-specific fields override passwdSso empty defaults (passkey)", () => {
+    const json = JSON.stringify({
+      format: "passwd-sso",
+      entries: [
+        {
+          type: "passkey",
+          name: "Key",
+          passkey: { relyingPartyId: "github.com", credentialId: "cred-1", username: "alice" },
+          passwdSso: {
+            entryType: "PASSKEY",
+            relyingPartyId: "",
+            credentialId: "",
+            deviceInfo: "",
+          },
+        },
+      ],
+    });
+    const result = parseJson(json);
+    expect(result.entries[0].relyingPartyId).toBe("github.com");
+    expect(result.entries[0].credentialId).toBe("cred-1");
+  });
+
+  it("type-specific fields override passwdSso empty defaults (identity)", () => {
+    const json = JSON.stringify({
+      format: "passwd-sso",
+      entries: [
+        {
+          type: "identity",
+          name: "ID",
+          identity: { fullName: "Alice", email: "a@b.com" },
+          passwdSso: { entryType: "IDENTITY", fullName: "", email: "" },
+        },
+      ],
+    });
+    const result = parseJson(json);
+    expect(result.entries[0].fullName).toBe("Alice");
+    expect(result.entries[0].email).toBe("a@b.com");
+  });
+
+  it("type-specific fields override passwdSso empty defaults (card)", () => {
+    const json = JSON.stringify({
+      format: "passwd-sso",
+      entries: [
+        {
+          type: "card",
+          name: "Visa",
+          card: { cardholderName: "ALICE", number: "4111", brand: "VISA", expMonth: "12", expYear: "2030", code: "123" },
+          passwdSso: { entryType: "CREDIT_CARD", cardholderName: "", cardNumber: "", brand: "" },
+        },
+      ],
+    });
+    const result = parseJson(json);
+    expect(result.entries[0].cardholderName).toBe("ALICE");
+    expect(result.entries[0].cardNumber).toBe("4111");
+    expect(result.entries[0].brand).toBe("VISA");
+  });
+
+  it("reads folderPath from item.folderPath key", () => {
+    const json = JSON.stringify([
+      { name: "Site", folderPath: "Work / Email", login: { username: "u", password: "p" } },
+    ]);
+    const result = parseJson(json);
+    expect(result.entries[0].folderPath).toBe("Work / Email");
   });
 
   it("preserves passkey fields when passwdSso envelope is present", () => {
@@ -805,5 +930,74 @@ describe("formatLabels", () => {
     expect(formatLabels.chrome).toBe("Chrome");
     expect(formatLabels["passwd-sso"]).toBe("passwd-sso");
     expect(formatLabels.unknown).toBe("CSV");
+  });
+});
+
+// ─── CSV roundtrip ──────────────────────────────────────────
+
+describe("CSV export → import roundtrip", () => {
+  function makeExportEntry(overrides: Partial<ExportEntry> = {}): ExportEntry {
+    return {
+      entryType: ENTRY_TYPE.LOGIN,
+      title: "Site",
+      username: "user",
+      password: "pass",
+      content: null,
+      url: "https://example.com",
+      notes: null,
+      totp: null,
+      cardholderName: null, cardNumber: null, brand: null,
+      expiryMonth: null, expiryYear: null, cvv: null,
+      fullName: null, address: null, phone: null, email: null,
+      dateOfBirth: null, nationality: null, idNumber: null,
+      issueDate: null, expiryDate: null,
+      relyingPartyId: null, relyingPartyName: null,
+      credentialId: null, creationDate: null, deviceInfo: null,
+      bankName: null, accountType: null, accountHolderName: null,
+      accountNumber: null, routingNumber: null, swiftBic: null,
+      iban: null, branchName: null,
+      softwareName: null, licenseKey: null, version: null,
+      licensee: null, purchaseDate: null, expirationDate: null,
+      tags: [], customFields: [], totpConfig: null,
+      generatorSettings: null, passwordHistory: [],
+      requireReprompt: false, folderPath: "", isFavorite: false, expiresAt: null,
+      ...overrides,
+    };
+  }
+
+  it("preserves folderPath, isFavorite, requireReprompt in passwd-sso CSV roundtrip", () => {
+    const entry = makeExportEntry({
+      folderPath: "Work / Email",
+      isFavorite: true,
+      requireReprompt: true,
+      expiresAt: "2027-01-01T00:00:00.000Z",
+    });
+    const csv = formatExportCsv([entry], "passwd-sso", {
+      includePasskeyType: true,
+      includeReprompt: true,
+      includeRequireRepromptInPasswdSso: true,
+      includePasskeyFieldsInPasswdSso: true,
+    });
+
+    const result = parseCsv(csv);
+    expect(result.entries).toHaveLength(1);
+    const e = result.entries[0];
+    expect(e.folderPath).toBe("Work / Email");
+    expect(e.isFavorite).toBe(true);
+    expect(e.requireReprompt).toBe(true);
+    expect(e.expiresAt).toBe("2027-01-01T00:00:00.000Z");
+  });
+
+  it("passwdSso.isFavorite wins over CSV favorite column when they conflict", () => {
+    // Build CSV where favorite column = "1" but passwdSso has isFavorite: false
+    const payload = JSON.stringify({ entryType: "LOGIN", isFavorite: false });
+    const csv = [
+      "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp,passwd_sso",
+      `Work,1,login,Site,,,,https://example.com,user,pass,,"${payload.replace(/"/g, '""')}"`,
+    ].join("\n");
+
+    const result = parseCsv(csv);
+    // passwdSso is applied last in CSV parser, so isFavorite: false wins
+    expect(result.entries[0].isFavorite).toBe(false);
   });
 });
