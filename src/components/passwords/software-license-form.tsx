@@ -96,7 +96,7 @@ export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSav
         requireReprompt: initialData?.requireReprompt ?? false,
         expiresAt: initialData?.expiresAt ?? null,
       }),
-    [initialData]
+    [initialData, defaultFolderId, defaultTags]
   );
 
   const currentSnapshot = useMemo(

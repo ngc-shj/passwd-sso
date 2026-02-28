@@ -102,7 +102,7 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved, def
         requireReprompt: initialData?.requireReprompt ?? false,
         expiresAt: initialData?.expiresAt ?? null,
       }),
-    [initialData]
+    [initialData, defaultFolderId, defaultTags]
   );
 
   const currentSnapshot = useMemo(

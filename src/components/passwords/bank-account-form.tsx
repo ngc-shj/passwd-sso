@@ -110,7 +110,7 @@ export function BankAccountForm({ mode, initialData, variant = "page", onSaved, 
         requireReprompt: initialData?.requireReprompt ?? false,
         expiresAt: initialData?.expiresAt ?? null,
       }),
-    [initialData]
+    [initialData, defaultFolderId, defaultTags]
   );
 
   const currentSnapshot = useMemo(

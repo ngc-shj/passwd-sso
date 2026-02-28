@@ -91,7 +91,7 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved, defa
         requireReprompt: initialData?.requireReprompt ?? false,
         expiresAt: initialData?.expiresAt ?? null,
       }),
-    [initialData]
+    [initialData, defaultFolderId, defaultTags]
   );
 
   const currentSnapshot = useMemo(

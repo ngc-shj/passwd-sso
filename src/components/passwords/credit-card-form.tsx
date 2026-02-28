@@ -114,7 +114,7 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved, d
         requireReprompt: initialData?.requireReprompt ?? false,
         expiresAt: initialData?.expiresAt ?? null,
       }),
-    [initialData]
+    [initialData, defaultFolderId, defaultTags]
   );
 
   const currentSnapshot = useMemo(
