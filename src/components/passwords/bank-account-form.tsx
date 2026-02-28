@@ -55,6 +55,8 @@ interface BankAccountFormProps {
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  defaultFolderId?: string | null;
+  defaultTags?: TagData[];
 }
 
 function deriveAccountNumberLast4(accountNumber: string): string | null {
@@ -62,7 +64,7 @@ function deriveAccountNumberLast4(accountNumber: string): string | null {
   return digits.length >= 4 ? digits.slice(-4) : null;
 }
 
-export function BankAccountForm({ mode, initialData, variant = "page", onSaved }: BankAccountFormProps) {
+export function BankAccountForm({ mode, initialData, variant = "page", onSaved, defaultFolderId, defaultTags }: BankAccountFormProps) {
   const t = useTranslations("BankAccountForm");
   const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
@@ -85,9 +87,9 @@ export function BankAccountForm({ mode, initialData, variant = "page", onSaved }
   const [branchName, setBranchName] = useState(initialData?.branchName ?? "");
   const [notes, setNotes] = useState(initialData?.notes ?? "");
   const [selectedTags, setSelectedTags] = useState<TagData[]>(
-    initialData?.tags ?? []
+    initialData?.tags ?? defaultTags ?? []
   );
-  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
+  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? defaultFolderId ?? null);
   const { folders } = usePersonalFolders();
 
   const baselineSnapshot = useMemo(
@@ -103,12 +105,12 @@ export function BankAccountForm({ mode, initialData, variant = "page", onSaved }
         iban: initialData?.iban ?? "",
         branchName: initialData?.branchName ?? "",
         notes: initialData?.notes ?? "",
-        selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
-        folderId: initialData?.folderId ?? null,
+        selectedTagIds: (initialData?.tags ?? defaultTags ?? []).map((tag) => tag.id).sort(),
+        folderId: initialData?.folderId ?? defaultFolderId ?? null,
         requireReprompt: initialData?.requireReprompt ?? false,
         expiresAt: initialData?.expiresAt ?? null,
       }),
-    [initialData]
+    [initialData, defaultFolderId, defaultTags]
   );
 
   const currentSnapshot = useMemo(

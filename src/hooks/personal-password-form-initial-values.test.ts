@@ -34,4 +34,54 @@ describe("buildPersonalPasswordFormInitialValues", () => {
     expect(result.requireReprompt).toBe(true);
     expect(result.showTotpInput).toBe(true);
   });
+
+  it("uses defaultFolderId when initialData is undefined", () => {
+    const result = buildPersonalPasswordFormInitialValues(undefined, {
+      defaultFolderId: "folder-x",
+    });
+    expect(result.folderId).toBe("folder-x");
+  });
+
+  it("uses defaultTags when initialData is undefined", () => {
+    const tag = { id: "t1", name: "work", color: null };
+    const result = buildPersonalPasswordFormInitialValues(undefined, {
+      defaultTags: [tag],
+    });
+    expect(result.selectedTags).toEqual([tag]);
+  });
+
+  it("initialData.folderId takes priority over defaultFolderId", () => {
+    const result = buildPersonalPasswordFormInitialValues(
+      {
+        id: "entry-1",
+        title: "t",
+        username: "u",
+        password: "p",
+        url: "",
+        notes: "",
+        tags: [],
+        folderId: "from-initial",
+      },
+      { defaultFolderId: "from-defaults" },
+    );
+    expect(result.folderId).toBe("from-initial");
+  });
+
+  it("initialData.tags takes priority over defaultTags", () => {
+    const initialTag = { id: "t1", name: "init", color: null };
+    const defaultTag = { id: "t2", name: "default", color: "#ff0000" };
+    const result = buildPersonalPasswordFormInitialValues(
+      {
+        id: "entry-1",
+        title: "t",
+        username: "u",
+        password: "p",
+        url: "",
+        notes: "",
+        tags: [initialTag],
+      },
+      { defaultTags: [defaultTag] },
+    );
+    expect(result.selectedTags).toEqual([initialTag]);
+  });
 });

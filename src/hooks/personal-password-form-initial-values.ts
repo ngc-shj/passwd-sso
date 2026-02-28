@@ -24,6 +24,7 @@ export interface PersonalPasswordFormInitialValues {
 
 export function buildPersonalPasswordFormInitialValues(
   initialData?: PersonalPasswordFormInitialData,
+  defaults?: { defaultFolderId?: string | null; defaultTags?: TagData[] },
 ): PersonalPasswordFormInitialValues {
   return {
     title: initialData?.title ?? "",
@@ -31,13 +32,13 @@ export function buildPersonalPasswordFormInitialValues(
     password: initialData?.password ?? "",
     url: initialData?.url ?? "",
     notes: initialData?.notes ?? "",
-    selectedTags: initialData?.tags ?? [],
+    selectedTags: initialData?.tags ?? defaults?.defaultTags ?? [],
     generatorSettings: initialData?.generatorSettings ?? { ...DEFAULT_GENERATOR_SETTINGS },
     customFields: initialData?.customFields ?? [],
     totp: initialData?.totp ?? null,
     showTotpInput: Boolean(initialData?.totp),
     requireReprompt: initialData?.requireReprompt ?? false,
     expiresAt: initialData?.expiresAt ?? null,
-    folderId: initialData?.folderId ?? null,
+    folderId: initialData?.folderId ?? defaults?.defaultFolderId ?? null,
   };
 }

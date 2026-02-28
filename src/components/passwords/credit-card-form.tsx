@@ -63,9 +63,11 @@ interface CreditCardFormProps {
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  defaultFolderId?: string | null;
+  defaultTags?: TagData[];
 }
 
-export function CreditCardForm({ mode, initialData, variant = "page", onSaved }: CreditCardFormProps) {
+export function CreditCardForm({ mode, initialData, variant = "page", onSaved, defaultFolderId, defaultTags }: CreditCardFormProps) {
   const t = useTranslations("CreditCardForm");
   const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
@@ -91,9 +93,9 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
   const [cvv, setCvv] = useState(initialData?.cvv ?? "");
   const [notes, setNotes] = useState(initialData?.notes ?? "");
   const [selectedTags, setSelectedTags] = useState<TagData[]>(
-    initialData?.tags ?? []
+    initialData?.tags ?? defaultTags ?? []
   );
-  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
+  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? defaultFolderId ?? null);
   const { folders } = usePersonalFolders();
 
   const baselineSnapshot = useMemo(
@@ -107,12 +109,12 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved }:
         expiryYear: initialData?.expiryYear ?? "",
         cvv: initialData?.cvv ?? "",
         notes: initialData?.notes ?? "",
-        selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
-        folderId: initialData?.folderId ?? null,
+        selectedTagIds: (initialData?.tags ?? defaultTags ?? []).map((tag) => tag.id).sort(),
+        folderId: initialData?.folderId ?? defaultFolderId ?? null,
         requireReprompt: initialData?.requireReprompt ?? false,
         expiresAt: initialData?.expiresAt ?? null,
       }),
-    [initialData]
+    [initialData, defaultFolderId, defaultTags]
   );
 
   const currentSnapshot = useMemo(
