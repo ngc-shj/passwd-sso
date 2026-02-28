@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DISPLAY_KEYS, SENSITIVE_KEYS } from "./entry-history-keys";
+import { DISPLAY_KEYS, SENSITIVE_KEYS, DATE_KEYS, TRANSLATED_VALUE_KEYS } from "./entry-history-keys";
 
 /**
  * Expected fullBlob fields per entry type.
@@ -69,6 +69,41 @@ describe("SENSITIVE_KEYS coverage", () => {
   it("every sensitive key is also in DISPLAY_KEYS", () => {
     const displayKeySet = new Set(DISPLAY_KEYS);
     const orphaned = [...SENSITIVE_KEYS].filter((f) => !displayKeySet.has(f));
+    expect(orphaned).toEqual([]);
+  });
+});
+
+/** Date fields that should be formatted with locale-aware date formatting. */
+const EXPECTED_DATE_KEYS = [
+  "dateOfBirth", "issueDate", "expiryDate",
+  "creationDate", "purchaseDate", "expirationDate",
+];
+
+describe("DATE_KEYS coverage", () => {
+  it("contains all expected date fields", () => {
+    const missing = EXPECTED_DATE_KEYS.filter((f) => !DATE_KEYS.has(f));
+    expect(missing).toEqual([]);
+  });
+
+  it("every date key is also in DISPLAY_KEYS", () => {
+    const displayKeySet = new Set<string>(DISPLAY_KEYS);
+    const orphaned = [...DATE_KEYS].filter((f) => !displayKeySet.has(f));
+    expect(orphaned).toEqual([]);
+  });
+});
+
+describe("TRANSLATED_VALUE_KEYS coverage", () => {
+  it("accountType has all expected values", () => {
+    expect(TRANSLATED_VALUE_KEYS.accountType).toEqual({
+      checking: "accountTypeChecking",
+      savings: "accountTypeSavings",
+      other: "accountTypeOther",
+    });
+  });
+
+  it("every translated key is also in DISPLAY_KEYS", () => {
+    const displayKeySet = new Set<string>(DISPLAY_KEYS);
+    const orphaned = Object.keys(TRANSLATED_VALUE_KEYS).filter((f) => !displayKeySet.has(f));
     expect(orphaned).toEqual([]);
   });
 });

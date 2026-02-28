@@ -19,7 +19,7 @@ import {
   Landmark,
   KeySquare,
 } from "lucide-react";
-import { formatDateTime } from "@/lib/format-datetime";
+import { formatDateTime, formatDate } from "@/lib/format-datetime";
 
 const REVEAL_TIMEOUT = 30_000;
 
@@ -290,11 +290,11 @@ export function ShareEntryView({
       {renderField(t("address"), data.address)}
       {renderField(t("phone"), data.phone)}
       {renderField(t("email"), data.email)}
-      {renderField(t("dateOfBirth"), data.dateOfBirth)}
+      {renderField(t("dateOfBirth"), data.dateOfBirth ? formatDate(data.dateOfBirth, locale) : null)}
       {renderField(t("nationality"), data.nationality)}
       {renderSensitiveField(t("idNumber"), data.idNumber, "idNumber")}
-      {renderField(t("issueDate"), data.issueDate)}
-      {renderField(t("expiryDate"), data.expiryDate)}
+      {renderField(t("issueDate"), data.issueDate ? formatDate(data.issueDate, locale) : null)}
+      {renderField(t("expiryDate"), data.expiryDate ? formatDate(data.expiryDate, locale) : null)}
       {renderNotes(data.notes)}
     </>
   );
@@ -305,7 +305,7 @@ export function ShareEntryView({
       {renderField(t("relyingPartyName"), data.relyingPartyName)}
       {renderField(t("username"), data.username)}
       {renderSensitiveField(t("credentialId"), data.credentialId, "credentialId")}
-      {renderField(t("creationDate"), data.creationDate)}
+      {renderField(t("creationDate"), data.creationDate ? formatDate(data.creationDate, locale) : null)}
       {renderField(t("deviceInfo"), data.deviceInfo)}
       {renderNotes(data.notes)}
     </>
@@ -332,8 +332,8 @@ export function ShareEntryView({
       {renderField(t("version"), data.version)}
       {renderField(t("licensee"), data.licensee)}
       {renderField(t("email"), data.email)}
-      {renderField(t("purchaseDate"), data.purchaseDate)}
-      {renderField(t("expirationDate"), data.expirationDate)}
+      {renderField(t("purchaseDate"), data.purchaseDate ? formatDate(data.purchaseDate, locale) : null)}
+      {renderField(t("expirationDate"), data.expirationDate ? formatDate(data.expirationDate, locale) : null)}
       {renderNotes(data.notes)}
     </>
   );

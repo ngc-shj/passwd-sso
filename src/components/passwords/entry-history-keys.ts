@@ -31,3 +31,24 @@ export const SENSITIVE_KEYS = new Set([
   "password", "cvv", "cardNumber", "idNumber",
   "accountNumber", "routingNumber", "iban", "licenseKey", "credentialId",
 ]);
+
+/**
+ * Fields that store ISO date strings and should be formatted with locale.
+ * e.g. "2026-01-15" → "2026年1月15日" (ja) / "Jan 15, 2026" (en)
+ */
+export const DATE_KEYS = new Set([
+  "dateOfBirth", "issueDate", "expiryDate",
+  "creationDate", "purchaseDate", "expirationDate",
+]);
+
+/**
+ * Fields whose raw value is a code that needs translation via PasswordDetail i18n.
+ * Map: field key → { rawValue → translationKey }
+ */
+export const TRANSLATED_VALUE_KEYS: Record<string, Record<string, string>> = {
+  accountType: {
+    checking: "accountTypeChecking",
+    savings: "accountTypeSavings",
+    other: "accountTypeOther",
+  },
+};

@@ -28,7 +28,8 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { useReprompt } from "@/hooks/use-reprompt";
-import { DISPLAY_KEYS, SENSITIVE_KEYS } from "./entry-history-keys";
+import { formatDateTime, formatDate } from "@/lib/format-datetime";
+import { DISPLAY_KEYS, SENSITIVE_KEYS, DATE_KEYS, TRANSLATED_VALUE_KEYS } from "./entry-history-keys";
 
 interface HistoryEntry {
   id: string;
@@ -47,22 +48,21 @@ interface EntryHistorySectionProps {
   onRestore?: () => void;
 }
 
-function formatDateTime(dateStr: string, locale: string) {
-  return new Date(dateStr).toLocaleString(locale, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function ViewContent({ data }: { data: Record<string, unknown> }) {
   const t = useTranslations("PasswordDetail");
+  const locale = useLocale();
   const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
   const entries = DISPLAY_KEYS
     .filter((key) => data[key] != null && data[key] !== "")
-    .map((key) => [key, String(data[key])]);
+    .map((key) => {
+      let value = String(data[key]);
+      if (DATE_KEYS.has(key)) {
+        value = formatDate(value, locale);
+      } else if (TRANSLATED_VALUE_KEYS[key]?.[value]) {
+        value = t(TRANSLATED_VALUE_KEYS[key][value]);
+      }
+      return [key, value];
+    });
 
   const toggleReveal = (key: string) => {
     setRevealedKeys((prev) => {

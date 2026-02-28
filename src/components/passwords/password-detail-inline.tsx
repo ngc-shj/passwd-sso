@@ -19,7 +19,7 @@ import type {
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { apiPath } from "@/lib/constants";
-import { formatDateTime } from "@/lib/format-datetime";
+import { formatDateTime, formatDate } from "@/lib/format-datetime";
 import { useReprompt } from "@/hooks/use-reprompt";
 import {
   Edit,
@@ -434,7 +434,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
           {data.purchaseDate && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("purchaseDate")}</label>
-              <p className="text-sm">{data.purchaseDate}</p>
+              <p className="text-sm">{formatDate(data.purchaseDate, locale)}</p>
             </div>
           )}
 
@@ -442,7 +442,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
           {data.expirationDate && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("expirationDate")}</label>
-              <p className="text-sm">{data.expirationDate}</p>
+              <p className="text-sm">{formatDate(data.expirationDate, locale)}</p>
             </div>
           )}
 
@@ -519,7 +519,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
           {data.creationDate && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("creationDate")}</label>
-              <p className="text-sm">{data.creationDate}</p>
+              <p className="text-sm">{formatDate(data.creationDate, locale)}</p>
             </div>
           )}
 
@@ -591,7 +591,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
           {data.dateOfBirth && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("dateOfBirth")}</label>
-              <p className="text-sm">{data.dateOfBirth}</p>
+              <p className="text-sm">{formatDate(data.dateOfBirth, locale)}</p>
             </div>
           )}
 
@@ -634,7 +634,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
           {data.issueDate && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("issueDate")}</label>
-              <p className="text-sm">{data.issueDate}</p>
+              <p className="text-sm">{formatDate(data.issueDate, locale)}</p>
             </div>
           )}
 
@@ -642,7 +642,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
           {data.expiryDate && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("expiryDate")}</label>
-              <p className="text-sm">{data.expiryDate}</p>
+              <p className="text-sm">{formatDate(data.expiryDate, locale)}</p>
             </div>
           )}
 
@@ -903,7 +903,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                     </span>
                   ) : field.type === CUSTOM_FIELD_TYPE.DATE ? (
                     <span className="text-sm">
-                      {field.value ? formatDateTime(field.value, locale) : field.value}
+                      {field.value ? formatDate(field.value, locale) : field.value}
                     </span>
                   ) : field.type === CUSTOM_FIELD_TYPE.MONTH_YEAR ? (
                     <span className="text-sm">
