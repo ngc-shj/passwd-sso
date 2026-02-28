@@ -63,7 +63,7 @@ describe("buildFolderPath", () => {
     expect(buildFolderPath("f5", folders)).toBe("L1 / L2 / L3 / L4 / L5");
   });
 
-  it("truncates at MAX_FOLDER_DEPTH when hierarchy is deeper", () => {
+  it("truncates parent side with '...' when hierarchy exceeds MAX_FOLDER_DEPTH", () => {
     const folders = [
       mkFolder("f1", "L1"),
       mkFolder("f2", "L2", "f1"),
@@ -72,7 +72,7 @@ describe("buildFolderPath", () => {
       mkFolder("f5", "L5", "f4"),
       mkFolder("f6", "L6", "f5"),
     ];
-    // 6 levels from f6: parts start with ['L6'], can add 4 ancestors -> L2..L5
-    expect(buildFolderPath("f6", folders)).toBe("L2 / L3 / L4 / L5 / L6");
+    // 6 levels: keep last 4 segments + "..." prefix
+    expect(buildFolderPath("f6", folders)).toBe("... / L3 / L4 / L5 / L6");
   });
 });
