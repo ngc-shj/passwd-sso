@@ -39,10 +39,12 @@ Because competitor capabilities vary by plan and deployment model, always verify
 | Feature | passwd-sso | 1Password | Bitwarden | Notes |
 |---|---|---|---|---|
 | Password / note / card / identity | Done | Yes | Yes | |
+| Bank account | Done | Yes | No | |
+| Software license | Done | Yes | No | |
 | TOTP storage | Done | Yes | Yes | |
 | File attachments | Done | Yes | Yes | |
 | SSH keys | --- | Yes | No | |
-| Boolean custom field | --- | No | Yes | |
+| Custom fields (TEXT, HIDDEN, URL, BOOLEAN, DATE, MONTH_YEAR) | Done | Partial | Partial | |
 
 ## 4. Sharing & Team
 
@@ -94,4 +96,4 @@ Because competitor capabilities vary by plan and deployment model, always verify
 
 ---
 
-*Last updated: 2026-02-27*
+*Last updated: 2026-02-28*
