@@ -8,7 +8,7 @@ const {
   mockRequireTeamPermission,
   mockTeamEntryFindMany,
   TeamAuthError,
-  mockWithUserTenantRls,
+  mockWithTeamTenantRls,
 } = vi.hoisted(() => {
     class TeamAuthError extends Error {
       status: number;
@@ -24,7 +24,7 @@ const {
       mockRequireTeamPermission: vi.fn(),
       mockTeamEntryFindMany: vi.fn(),
       TeamAuthError,
-      mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+      mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
     };
   });
 
@@ -40,7 +40,7 @@ vi.mock("@/lib/team-auth", () => ({
   TeamAuthError,
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+  withTeamTenantRls: mockWithTeamTenantRls,
 }));
 
 import { GET } from "@/app/api/teams/[teamId]/audit-logs/route";

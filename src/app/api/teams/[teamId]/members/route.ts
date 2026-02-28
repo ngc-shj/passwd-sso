@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -25,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const members = await withUserTenantRls(session.user.id, async () =>
+  const members = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.findMany({
       where: { teamId: teamId, deactivatedAt: null },
       include: {

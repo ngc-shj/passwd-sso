@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeamPasswordFavorite, mockHasTeamPermission, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeamPasswordFavorite, mockHasTeamPermission, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamMember: { findMany: vi.fn() },
   mockPrismaTeamPasswordFavorite: { findMany: vi.fn() },
   mockHasTeamPermission: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -18,8 +18,8 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/team-auth", () => ({
   hasTeamPermission: mockHasTeamPermission,
 }));
-vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { GET } from "./route";

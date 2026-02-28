@@ -6,6 +6,7 @@ import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
 import { resolveUserTenantId, withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 
 // GET /api/teams — List teams the user belongs to
 export async function GET() {
@@ -15,7 +16,7 @@ export async function GET() {
   }
 
   try {
-    const memberships = await withUserTenantRls(session.user.id, async () =>
+    const memberships = await withBypassRls(prisma, async () =>
       prisma.teamMember.findMany({
         where: { userId: session.user.id, deactivatedAt: null },
         include: {

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { hasTeamPermission } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 
 // GET /api/teams/archived — Get all archived team passwords across all teams
 export async function GET() {
@@ -14,7 +14,7 @@ export async function GET() {
   }
 
   // Find all teams the user is a member of (with role for permission check)
-  const memberships = await withUserTenantRls(session.user.id, async () =>
+  const memberships = await withBypassRls(prisma, async () =>
     prisma.teamMember.findMany({
       where: { userId: session.user.id, deactivatedAt: null },
       select: { teamId: true, role: true },
@@ -33,7 +33,7 @@ export async function GET() {
   }
 
   // Find all archived (not trashed) team password entries
-  const archivedEntries = await withUserTenantRls(session.user.id, async () =>
+  const archivedEntries = await withBypassRls(prisma, async () =>
     prisma.teamPasswordEntry.findMany({
       where: {
         teamId: { in: teamIds },

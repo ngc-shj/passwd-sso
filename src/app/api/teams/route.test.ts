@@ -2,11 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, mockResolveUserTenantId } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, mockWithBypassRls, mockResolveUserTenantId } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamMember: { findMany: vi.fn() },
   mockPrismaTeam: { findUnique: vi.fn(), create: vi.fn() },
   mockWithUserTenantRls: vi.fn(),
+  mockWithBypassRls: vi.fn(),
   mockResolveUserTenantId: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -20,6 +21,9 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
   resolveUserTenantId: mockResolveUserTenantId,
 }));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
+}));
 
 import { GET, POST } from "./route";
 import { TEAM_ROLE } from "@/lib/constants";
@@ -30,7 +34,7 @@ describe("GET /api/teams", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => unknown) => fn());
+    mockWithBypassRls.mockImplementation(async (_prisma: unknown, fn: () => unknown) => fn());
     mockResolveUserTenantId.mockResolvedValue("tenant-1");
   });
 

@@ -11,7 +11,7 @@ import {
   AUDIT_TARGET_TYPE,
 } from "@/lib/constants";
 import type { AuditAction } from "@prisma/client";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -76,7 +76,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   let logs;
   try {
-    logs = await withUserTenantRls(session.user.id, async () =>
+    logs = await withTeamTenantRls(teamId, async () =>
       prisma.auditLog.findMany({
         where,
         include: {
@@ -113,7 +113,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   }> = {};
 
   if (entryIds.length > 0) {
-    const entries = await withUserTenantRls(session.user.id, async () =>
+    const entries = await withTeamTenantRls(teamId, async () =>
       prisma.teamPasswordEntry.findMany({
         where: { id: { in: entryIds } },
         select: {

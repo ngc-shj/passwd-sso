@@ -7,7 +7,7 @@ import { inviteSchema } from "@/lib/validations";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { INVITATION_STATUS, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -29,7 +29,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const invitations = await withUserTenantRls(session.user.id, async () =>
+  const invitations = await withTeamTenantRls(teamId, async () =>
     prisma.teamInvitation.findMany({
       where: { teamId: teamId, status: INVITATION_STATUS.PENDING },
       include: {
@@ -91,13 +91,13 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { email, role } = parsed.data;
 
   // Check if already a member
-  const existingUser = await withUserTenantRls(session.user.id, async () =>
+  const existingUser = await withTeamTenantRls(teamId, async () =>
     prisma.user.findUnique({
       where: { email },
     }),
   );
   if (existingUser) {
-    const existingMember = await withUserTenantRls(session.user.id, async () =>
+    const existingMember = await withTeamTenantRls(teamId, async () =>
       prisma.teamMember.findUnique({
         where: {
           teamId_userId: { teamId: teamId, userId: existingUser.id },
@@ -124,7 +124,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   // Check for existing pending invitation
-  const existingInv = await withUserTenantRls(session.user.id, async () =>
+  const existingInv = await withTeamTenantRls(teamId, async () =>
     prisma.teamInvitation.findFirst({
       where: { teamId: teamId, email, status: INVITATION_STATUS.PENDING },
     }),
@@ -138,7 +138,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
-  const team = await withUserTenantRls(session.user.id, async () =>
+  const team = await withTeamTenantRls(teamId, async () =>
     prisma.team.findUnique({
       where: { id: teamId },
       select: { tenantId: true },
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const invitation = await withUserTenantRls(session.user.id, async () =>
+  const invitation = await withTeamTenantRls(teamId, async () =>
     prisma.teamInvitation.create({
       data: {
         teamId: teamId,

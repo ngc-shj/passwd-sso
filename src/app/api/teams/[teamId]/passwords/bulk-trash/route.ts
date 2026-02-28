@@ -6,7 +6,7 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 interface BulkTrashBody {
   ids: string[];
@@ -49,7 +49,7 @@ async function handlePOST(
     return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
   }
 
-  const entriesToTrash = await withUserTenantRls(session.user.id, async () =>
+  const entriesToTrash = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findMany({
       where: {
         teamId,
@@ -62,7 +62,7 @@ async function handlePOST(
   const entryIds = entriesToTrash.map((entry) => entry.id);
 
   const deletedAt = new Date();
-  const result = await withUserTenantRls(session.user.id, async () =>
+  const result = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.updateMany({
       where: {
         teamId,
@@ -74,7 +74,7 @@ async function handlePOST(
       },
     }),
   );
-  const movedEntries = await withUserTenantRls(session.user.id, async () =>
+  const movedEntries = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findMany({
       where: {
         teamId,

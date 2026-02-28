@@ -7,7 +7,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { teamMemberKeySchema } from "@/lib/validations";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const team = await withUserTenantRls(session.user.id, async () =>
+  const team = await withTeamTenantRls(teamId, async () =>
     prisma.team.findUnique({
       where: { id: teamId },
       select: { teamKeyVersion: true, tenantId: true },
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Interactive transaction with optimistic lock on teamKeyVersion (S-17)
   // Member list verification is inside transaction to prevent TOCTOU (F-26)
   try {
-    await withUserTenantRls(session.user.id, async () =>
+    await withTeamTenantRls(teamId, async () =>
       prisma.$transaction(async (tx) => {
         // Re-verify teamKeyVersion hasn't changed since pre-read
         const currentTeam = await tx.team.findUnique({

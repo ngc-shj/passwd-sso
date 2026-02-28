@@ -7,7 +7,7 @@ const {
   mockPrismaTeamPasswordEntryHistory,
   mockRequireTeamMember,
   TeamAuthError,
-  mockWithUserTenantRls,
+  mockWithTeamTenantRls,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
@@ -23,7 +23,7 @@ const {
     mockPrismaTeamPasswordEntryHistory: { findUnique: vi.fn() },
     mockRequireTeamMember: vi.fn(),
     TeamAuthError: _TeamAuthError,
-    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
   };
 });
 
@@ -39,7 +39,7 @@ vi.mock("@/lib/team-auth", () => ({
   TeamAuthError,
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+  withTeamTenantRls: mockWithTeamTenantRls,
 }));
 
 import { GET } from "./route";
