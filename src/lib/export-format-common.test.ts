@@ -63,6 +63,9 @@ const sampleLoginEntry: ExportEntry = {
   generatorSettings: { length: 20 },
   passwordHistory: [{ password: "old-secret", changedAt: "2026-02-14T00:00:00.000Z" }],
   requireReprompt: false,
+  folderPath: "",
+  isFavorite: false,
+  expiresAt: null,
 };
 
 describe("export-format-common", () => {
@@ -277,6 +280,85 @@ describe("export-format-common", () => {
     expect(imported.branchName).toBe("Main Street");
   });
 
+  it("exports folderPath and isFavorite in CSV folder/favorite columns", () => {
+    const csv = formatExportCsv(
+      [{ ...sampleLoginEntry, folderPath: "Work / Email", isFavorite: true }],
+      "compatible",
+      PERSONAL_EXPORT_OPTIONS.csv
+    );
+    const [header, row] = csv.split("\n");
+    const cols = row.split(",");
+    const folderIdx = header.split(",").indexOf("folder");
+    const favIdx = header.split(",").indexOf("favorite");
+    expect(cols[folderIdx]).toBe("Work / Email");
+    expect(cols[favIdx]).toBe("1");
+  });
+
+  it("exports empty folder and favorite when not set", () => {
+    const csv = formatExportCsv(
+      [sampleLoginEntry],
+      "compatible",
+      PERSONAL_EXPORT_OPTIONS.csv
+    );
+    const [header, row] = csv.split("\n");
+    const cols = row.split(",");
+    const folderIdx = header.split(",").indexOf("folder");
+    const favIdx = header.split(",").indexOf("favorite");
+    expect(cols[folderIdx]).toBe("");
+    expect(cols[favIdx]).toBe("");
+  });
+
+  it("exports folderPath and isFavorite in JSON", () => {
+    const json = formatExportJson(
+      [{ ...sampleLoginEntry, folderPath: "Work", isFavorite: true }],
+      "passwd-sso",
+      PERSONAL_EXPORT_OPTIONS.json
+    );
+    const parsed = JSON.parse(json);
+    expect(parsed.entries[0].folder).toBe("Work");
+    expect(parsed.entries[0].favorite).toBe(true);
+  });
+
+  it("exports expiresAt in passwd-sso JSON passwdSso envelope", () => {
+    const json = formatExportJson(
+      [{ ...sampleLoginEntry, expiresAt: "2027-01-01T00:00:00.000Z" }],
+      "passwd-sso",
+      PERSONAL_EXPORT_OPTIONS.json
+    );
+    const parsed = JSON.parse(json);
+    expect(parsed.entries[0].passwdSso.expiresAt).toBe("2027-01-01T00:00:00.000Z");
+  });
+
+  it("exports isFavorite in passwd-sso CSV passwdSso payload", () => {
+    const csv = formatExportCsv(
+      [{ ...sampleLoginEntry, isFavorite: true }],
+      "passwd-sso",
+      PERSONAL_EXPORT_OPTIONS.csv
+    );
+    const [header, row] = csv.split("\n");
+    const psIdx = header.split(",").indexOf("passwd_sso");
+    // passwd_sso column is JSON-escaped — extract from the row
+    const cols = row.split(",");
+    // The passwd_sso column may be quoted due to CSV escaping
+    const rawPayload = cols.slice(psIdx).join(",").replace(/^"/, "").replace(/"$/, "").replace(/""/g, '"');
+    const payload = JSON.parse(rawPayload);
+    expect(payload.isFavorite).toBe(true);
+  });
+
+  it("exports expiresAt in passwd-sso CSV passwdSso payload", () => {
+    const csv = formatExportCsv(
+      [{ ...sampleLoginEntry, expiresAt: "2027-06-01T00:00:00.000Z" }],
+      "passwd-sso",
+      PERSONAL_EXPORT_OPTIONS.csv
+    );
+    const [header, row] = csv.split("\n");
+    const psIdx = header.split(",").indexOf("passwd_sso");
+    const cols = row.split(",");
+    const rawPayload = cols.slice(psIdx).join(",").replace(/^"/, "").replace(/"$/, "").replace(/""/g, '"');
+    const payload = JSON.parse(rawPayload);
+    expect(payload.expiresAt).toBe("2027-06-01T00:00:00.000Z");
+  });
+
   it("round-trips SOFTWARE_LICENSE through export JSON and parseJson", () => {
     const licenseEntry: ExportEntry = {
       ...sampleLoginEntry,
@@ -308,5 +390,99 @@ describe("export-format-common", () => {
     expect(imported.email).toBe("jane@example.com");
     expect(imported.purchaseDate).toBe("2026-01-15");
     expect(imported.expirationDate).toBe("2027-01-15");
+  });
+});
+
+// ─── Field coverage guard ─────────────────────────────────
+// These tests break when a DB column or encrypted blob field is added
+// but not reflected in ExportEntry / ParsedEntry.
+// Update the lists below when adding new fields.
+
+describe("field coverage guard", () => {
+  // All columns from PasswordEntry Prisma model.
+  // null = excluded from export (infrastructure).
+  // string = the corresponding ExportEntry key it maps to.
+  const PASSWORD_ENTRY_DB_COLUMNS: Record<string, string | null> = {
+    // Primary key / infrastructure
+    id: null,
+    encryptedBlob: null,
+    blobIv: null,
+    blobAuthTag: null,
+    encryptedOverview: null,
+    overviewIv: null,
+    overviewAuthTag: null,
+    keyVersion: null,
+    aadVersion: null,
+    userId: null,
+    tenantId: null,
+    createdAt: null,
+    updatedAt: null,
+    deletedAt: null,       // soft delete
+    isArchived: null,      // excluded from GET response
+    // Metadata columns that ARE exported
+    entryType: "entryType",
+    isFavorite: "isFavorite",
+    requireReprompt: "requireReprompt",
+    expiresAt: "expiresAt",
+    folderId: "folderPath", // transformed: folderId → folder path string
+    // Relation: tags → tags array (in encrypted blob)
+  };
+
+  // Fields stored inside the encrypted blob (decrypted on export).
+  // Each must have a corresponding key in ExportEntry.
+  const ENCRYPTED_BLOB_FIELDS: string[] = [
+    "title", "username", "password", "content", "url", "notes",
+    "totp",
+    "cardholderName", "cardNumber", "brand", "expiryMonth", "expiryYear", "cvv",
+    "fullName", "address", "phone", "email", "dateOfBirth", "nationality",
+    "idNumber", "issueDate", "expiryDate",
+    "relyingPartyId", "relyingPartyName", "credentialId", "creationDate", "deviceInfo",
+    "bankName", "accountType", "accountHolderName", "accountNumber",
+    "routingNumber", "swiftBic", "iban", "branchName",
+    "softwareName", "licenseKey", "version", "licensee",
+    "purchaseDate", "expirationDate",
+    "tags", "customFields", "totpConfig", "generatorSettings", "passwordHistory",
+  ];
+
+  // The full expected key set of ExportEntry.
+  // When ExportEntry gains a new field, add it here.
+  const EXPECTED_EXPORT_ENTRY_KEYS: string[] = [
+    // from encrypted blob
+    ...ENCRYPTED_BLOB_FIELDS,
+    // from DB metadata
+    "entryType", "requireReprompt", "folderPath", "isFavorite", "expiresAt",
+  ].sort();
+
+  const actualKeys = Object.keys(sampleLoginEntry).sort();
+
+  it("sampleLoginEntry covers all expected ExportEntry keys", () => {
+    // If a field is added to EXPECTED_EXPORT_ENTRY_KEYS but not to
+    // sampleLoginEntry, this test fails.
+    for (const key of EXPECTED_EXPORT_ENTRY_KEYS) {
+      expect(actualKeys, `missing key: ${key}`).toContain(key);
+    }
+  });
+
+  it("sampleLoginEntry has no unexpected keys", () => {
+    // If sampleLoginEntry has a key not in the expected list, it means
+    // EXPECTED_EXPORT_ENTRY_KEYS needs updating.
+    for (const key of actualKeys) {
+      expect(EXPECTED_EXPORT_ENTRY_KEYS, `unexpected key: ${key}`).toContain(key);
+    }
+  });
+
+  it("all exported DB metadata columns map to an ExportEntry key", () => {
+    const mapped = Object.entries(PASSWORD_ENTRY_DB_COLUMNS)
+      .filter(([, v]) => v !== null)
+      .map(([, v]) => v as string);
+    for (const field of mapped) {
+      expect(actualKeys, `DB column mapping missing in ExportEntry: ${field}`).toContain(field);
+    }
+  });
+
+  it("all encrypted blob fields are in ExportEntry", () => {
+    for (const field of ENCRYPTED_BLOB_FIELDS) {
+      expect(actualKeys, `blob field missing in ExportEntry: ${field}`).toContain(field);
+    }
   });
 });

@@ -125,7 +125,7 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, entryType, requireReprompt, expiresAt } = parsed.data;
+  const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, isFavorite, entryType, requireReprompt, expiresAt } = parsed.data;
 
   const createResult = await withUserTenantRls(userId, async () => {
     // Verify folder ownership
@@ -164,6 +164,7 @@ async function handlePOST(req: NextRequest) {
         keyVersion,
         aadVersion,
         entryType,
+        ...(isFavorite !== undefined ? { isFavorite } : {}),
         ...(requireReprompt !== undefined ? { requireReprompt } : {}),
         ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
         ...(folderId ? { folderId } : {}),

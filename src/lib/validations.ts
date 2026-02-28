@@ -43,6 +43,7 @@ export const createE2EPasswordSchema = z.object({
   aadVersion: z.number().int().min(0).max(1).optional().default(1),
   tagIds: z.array(z.string().cuid()).optional(),
   folderId: z.string().cuid().optional().nullable(),
+  isFavorite: z.boolean().optional(),
   entryType: entryTypeSchema.optional().default(ENTRY_TYPE.LOGIN),
   requireReprompt: z.boolean().optional(),
   expiresAt: z.string().datetime({ offset: true }).optional().nullable(),

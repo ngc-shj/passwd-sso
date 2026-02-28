@@ -69,6 +69,24 @@ describe("parsePasswdSsoPayload", () => {
     const result = parsePasswdSsoPayload(payload);
     expect(result.requireReprompt).toBe(true);
   });
+
+  it("parses isFavorite boolean", () => {
+    const payload = JSON.stringify({ isFavorite: true });
+    const result = parsePasswdSsoPayload(payload);
+    expect(result.isFavorite).toBe(true);
+  });
+
+  it("parses expiresAt string", () => {
+    const payload = JSON.stringify({ expiresAt: "2027-01-01T00:00:00.000Z" });
+    const result = parsePasswdSsoPayload(payload);
+    expect(result.expiresAt).toBe("2027-01-01T00:00:00.000Z");
+  });
+
+  it("ignores non-string expiresAt", () => {
+    const payload = JSON.stringify({ expiresAt: 12345 });
+    const result = parsePasswdSsoPayload(payload);
+    expect(result.expiresAt).toBeUndefined();
+  });
 });
 
 // ─── detectFormat ────────────────────────────────────────────
@@ -221,6 +239,37 @@ describe("parseCsv", () => {
     const result = parseCsv(csv);
     expect(result.entries[0].requireReprompt).toBe(true);
   });
+
+  it("reads folder column into folderPath", () => {
+    const csv = [
+      "folder,name,login_username,login_password",
+      "Work / Email,Gmail,user@gmail.com,pass123",
+    ].join("\n");
+
+    const result = parseCsv(csv);
+    expect(result.entries[0].folderPath).toBe("Work / Email");
+  });
+
+  it("reads favorite column into isFavorite", () => {
+    const csv = [
+      "favorite,name,login_username,login_password",
+      "1,Gmail,user@gmail.com,pass123",
+    ].join("\n");
+
+    const result = parseCsv(csv);
+    expect(result.entries[0].isFavorite).toBe(true);
+  });
+
+  it("defaults folderPath to empty and isFavorite to false", () => {
+    const csv = [
+      "name,login_username,login_password",
+      "Site,user,pass123",
+    ].join("\n");
+
+    const result = parseCsv(csv);
+    expect(result.entries[0].folderPath).toBe("");
+    expect(result.entries[0].isFavorite).toBe(false);
+  });
 });
 
 // ─── parseJson ───────────────────────────────────────────────
@@ -361,6 +410,51 @@ describe("parseJson", () => {
 
     const result = parseJson(json);
     expect(result.entries[0].totp).toEqual({ secret: "JBSWY3DPEHPK3PXP" });
+  });
+
+  it("reads folder and favorite from top-level fields", () => {
+    const json = JSON.stringify([
+      {
+        name: "Site",
+        folder: "Work / Email",
+        favorite: true,
+        login: { username: "u", password: "p" },
+      },
+    ]);
+
+    const result = parseJson(json);
+    expect(result.entries[0].folderPath).toBe("Work / Email");
+    expect(result.entries[0].isFavorite).toBe(true);
+  });
+
+  it("reads expiresAt from passwdSso envelope", () => {
+    const json = JSON.stringify({
+      format: "passwd-sso",
+      entries: [
+        {
+          name: "Site",
+          login: { username: "u", password: "p" },
+          passwdSso: { expiresAt: "2027-06-01T00:00:00.000Z" },
+        },
+      ],
+    });
+
+    const result = parseJson(json);
+    expect(result.entries[0].expiresAt).toBe("2027-06-01T00:00:00.000Z");
+  });
+
+  it("defaults folderPath/isFavorite/expiresAt when absent", () => {
+    const json = JSON.stringify([
+      {
+        name: "Site",
+        login: { username: "u", password: "p" },
+      },
+    ]);
+
+    const result = parseJson(json);
+    expect(result.entries[0].folderPath).toBe("");
+    expect(result.entries[0].isFavorite).toBe(false);
+    expect(result.entries[0].expiresAt).toBeNull();
   });
 });
 

@@ -12,6 +12,7 @@ interface UseImportExecutionParams {
   onComplete: () => void;
   isTeamImport: boolean;
   tagsPath: string;
+  foldersPath: string;
   passwordsPath: string;
   sourceFilename: string;
   encryptedInput: boolean;
@@ -41,6 +42,7 @@ export function useImportExecution({
   onComplete,
   isTeamImport,
   tagsPath,
+  foldersPath,
   passwordsPath,
   sourceFilename,
   encryptedInput,
@@ -74,6 +76,7 @@ export function useImportExecution({
         entries,
         isTeamImport,
         tagsPath,
+        foldersPath,
         passwordsPath,
         sourceFilename,
         userId,

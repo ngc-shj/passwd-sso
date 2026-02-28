@@ -128,6 +128,10 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
             totpConfig: data.totp ?? null,
             generatorSettings: data.generatorSettings ?? null,
             passwordHistory: Array.isArray(data.passwordHistory) ? data.passwordHistory : [],
+            requireReprompt: false,
+            folderPath: "",
+            isFavorite: false,
+            expiresAt: null,
           });
         } catch {
           skippedCount++;
