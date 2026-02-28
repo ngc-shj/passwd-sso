@@ -63,6 +63,7 @@ function buildValues(overrides: Partial<{ title: string }> = {}) {
     customFields: [],
     totp: null,
     requireReprompt: false,
+    expiresAt: null,
     folderId: null,
   };
 }

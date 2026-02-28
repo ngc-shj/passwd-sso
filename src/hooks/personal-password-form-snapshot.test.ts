@@ -11,6 +11,7 @@ describe("personal-password-form-derived snapshot helpers", () => {
     expect(snapshot.title).toBe("");
     expect(snapshot.tags).toEqual([]);
     expect(snapshot.requireReprompt).toBe(false);
+    expect(snapshot.expiresAt).toBeNull();
     expect(snapshot.folderId).toBeNull();
   });
 
@@ -27,6 +28,7 @@ describe("personal-password-form-derived snapshot helpers", () => {
         customFields: [],
         totp: null,
         requireReprompt: true,
+        expiresAt: "2026-06-01T23:59:59.999Z",
         folderId: "folder-1",
       }),
     );
@@ -34,6 +36,7 @@ describe("personal-password-form-derived snapshot helpers", () => {
     expect(snapshot.title).toBe("Title");
     expect(snapshot.username).toBe("user@example.com");
     expect(snapshot.requireReprompt).toBe(true);
+    expect(snapshot.expiresAt).toBe("2026-06-01T23:59:59.999Z");
     expect(snapshot.folderId).toBe("folder-1");
   });
 });

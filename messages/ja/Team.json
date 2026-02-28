@@ -72,6 +72,8 @@
   "newCreditCard": "クレジットカード",
   "newIdentity": "ID情報",
   "newPasskey": "パスキー",
+  "newBankAccount": "銀行口座",
+  "newSoftwareLicense": "ソフトウェアライセンス",
   "noPasswordsDesc": "「新規パスワード」をクリックして最初のエントリを追加してください。",
   "createdBy": "{name} が作成",
   "updatedBy": "{name} が更新",

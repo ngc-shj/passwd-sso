@@ -30,7 +30,7 @@ export function useTeamPasswordFormPresenter({
   translations,
   formState,
 }: TeamPasswordFormPresenterArgs) {
-  const { t, ti, tn, tcc, tpk, tGen } = translations;
+  const { t, ti, tn, tcc, tpk, tba, tsl, tGen } = translations;
   const { values, setters } = formState;
   const entryValues = selectTeamEntryFieldValues(values);
   const {
@@ -59,9 +59,9 @@ export function useTeamPasswordFormPresenter({
       buildTeamEntryCopy({
         isEdit,
         entryKind,
-        copyByKind: buildTeamEntryCopyData({ t, tn, tcc, ti, tpk }),
+        copyByKind: buildTeamEntryCopyData({ t, tn, tcc, ti, tpk, tba, tsl }),
       }),
-    [isEdit, entryKind, t, tn, tcc, ti, tpk],
+    [isEdit, entryKind, t, tn, tcc, ti, tpk, tba, tsl],
   );
 
   const cardPresentation = buildTeamCardPresentationProps({
@@ -73,7 +73,7 @@ export function useTeamPasswordFormPresenter({
   const entrySpecificFieldsProps = buildTeamEntrySpecificFieldsPropsFromState({
     entryKind,
     entryCopy,
-    translations: { t, tn, tcc, ti, tpk },
+    translations: { t, tn, tcc, ti, tpk, tba, tsl },
     values,
     setters,
     generatorSummary,

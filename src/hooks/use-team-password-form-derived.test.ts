@@ -16,6 +16,8 @@ function baseEntryKindState(): TeamEntryKindState {
     isCreditCard: false,
     isIdentity: false,
     isPasskey: false,
+    isBankAccount: false,
+    isSoftwareLicense: false,
   };
 }
 
@@ -51,6 +53,22 @@ function baseEntryValues(): TeamEntryFieldValues {
     credentialId: "",
     creationDate: "",
     deviceInfo: "",
+    bankName: "",
+    accountType: "",
+    accountHolderName: "",
+    accountNumber: "",
+    routingNumber: "",
+    swiftBic: "",
+    iban: "",
+    branchName: "",
+    softwareName: "",
+    licenseKey: "",
+    version: "",
+    licensee: "",
+    purchaseDate: "",
+    expirationDate: "",
+    requireReprompt: false,
+    expiresAt: null,
   };
 }
 
@@ -128,6 +146,8 @@ describe("buildTeamSubmitDisabled", () => {
         isCreditCard: false,
         isIdentity: false,
         isPasskey: true,
+        isBankAccount: false,
+        isSoftwareLicense: false,
       },
       entryValues: { title: "PK", password: "", relyingPartyId: "  " },
       cardNumberValid: true,
@@ -144,6 +164,8 @@ describe("buildTeamSubmitDisabled", () => {
         isCreditCard: true,
         isIdentity: false,
         isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: false,
       },
       entryValues: { title: "CC", password: "", relyingPartyId: "" },
       cardNumberValid: false,
@@ -160,10 +182,84 @@ describe("buildTeamSubmitDisabled", () => {
         isCreditCard: false,
         isIdentity: false,
         isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: false,
       },
       entryValues: { title: "Note", password: "", relyingPartyId: "" },
       cardNumberValid: true,
     });
     expect(result).toBe(false);
+  });
+
+  it("returns false for bank account with only title (password not required)", () => {
+    const result = buildTeamSubmitDisabled({
+      entryKindState: {
+        entryKind: "bankAccount",
+        isLoginEntry: false,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: true,
+        isSoftwareLicense: false,
+      },
+      entryValues: { title: "My Bank", password: "", relyingPartyId: "" },
+      cardNumberValid: true,
+    });
+    expect(result).toBe(false);
+  });
+
+  it("returns true for bank account when title is empty", () => {
+    const result = buildTeamSubmitDisabled({
+      entryKindState: {
+        entryKind: "bankAccount",
+        isLoginEntry: false,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: true,
+        isSoftwareLicense: false,
+      },
+      entryValues: { title: "  ", password: "", relyingPartyId: "" },
+      cardNumberValid: true,
+    });
+    expect(result).toBe(true);
+  });
+
+  it("returns false for software license with only title (password not required)", () => {
+    const result = buildTeamSubmitDisabled({
+      entryKindState: {
+        entryKind: "softwareLicense",
+        isLoginEntry: false,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: true,
+      },
+      entryValues: { title: "License", password: "", relyingPartyId: "" },
+      cardNumberValid: true,
+    });
+    expect(result).toBe(false);
+  });
+
+  it("returns true for software license when title is empty", () => {
+    const result = buildTeamSubmitDisabled({
+      entryKindState: {
+        entryKind: "softwareLicense",
+        isLoginEntry: false,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: true,
+      },
+      entryValues: { title: "", password: "", relyingPartyId: "" },
+      cardNumberValid: true,
+    });
+    expect(result).toBe(true);
   });
 });

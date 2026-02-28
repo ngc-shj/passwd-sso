@@ -1,4 +1,5 @@
 import type {
+  BankAccountFormTranslator,
   CommonTranslator,
   CreditCardFormTranslator,
   IdentityFormTranslator,
@@ -6,6 +7,7 @@ import type {
   PasswordGeneratorTranslator,
   PasskeyFormTranslator,
   SecureNoteFormTranslator,
+  SoftwareLicenseFormTranslator,
 } from "@/lib/translation-types";
 
 export interface PersonalPasswordFormTranslations {
@@ -21,6 +23,8 @@ export interface TeamPasswordFormTranslations {
   tcc: CreditCardFormTranslator;
   ti: IdentityFormTranslator;
   tpk: PasskeyFormTranslator;
+  tba: BankAccountFormTranslator;
+  tsl: SoftwareLicenseFormTranslator;
 }
 
 export interface EntryFormTranslationsBundle {
@@ -31,6 +35,8 @@ export interface EntryFormTranslationsBundle {
   tcc: CreditCardFormTranslator;
   ti: IdentityFormTranslator;
   tpk: PasskeyFormTranslator;
+  tba: BankAccountFormTranslator;
+  tsl: SoftwareLicenseFormTranslator;
 }
 
 export function toPersonalPasswordFormTranslations(
@@ -53,5 +59,7 @@ export function toTeamPasswordFormTranslations(
     tcc: translations.tcc,
     ti: translations.ti,
     tpk: translations.tpk,
+    tba: translations.tba,
+    tsl: translations.tsl,
   };
 }

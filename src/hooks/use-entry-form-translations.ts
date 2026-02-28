@@ -20,6 +20,8 @@ export function useEntryFormTranslations() {
   const tcc = useTranslations("CreditCardForm");
   const ti = useTranslations("IdentityForm");
   const tpk = useTranslations("PasskeyForm");
+  const tba = useTranslations("BankAccountForm");
+  const tsl = useTranslations("SoftwareLicenseForm");
 
   return {
     t,
@@ -29,5 +31,7 @@ export function useEntryFormTranslations() {
     tcc,
     ti,
     tpk,
+    tba,
+    tsl,
   } satisfies EntryFormTranslationsBundle;
 }

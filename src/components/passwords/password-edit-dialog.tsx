@@ -16,6 +16,8 @@ import { SecureNoteForm } from "./secure-note-form";
 import { CreditCardForm } from "./credit-card-form";
 import { IdentityForm } from "./identity-form";
 import { PasskeyForm } from "./passkey-form";
+import { BankAccountForm } from "./bank-account-form";
+import { SoftwareLicenseForm } from "./software-license-form";
 import { AttachmentSection, type AttachmentMeta } from "./attachment-section";
 import type { TagData } from "@/components/tags/tag-input";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
@@ -61,6 +63,20 @@ interface VaultEntryFull {
   credentialId?: string | null;
   creationDate?: string | null;
   deviceInfo?: string | null;
+  bankName?: string | null;
+  accountType?: string | null;
+  accountHolderName?: string | null;
+  accountNumber?: string | null;
+  routingNumber?: string | null;
+  swiftBic?: string | null;
+  iban?: string | null;
+  branchName?: string | null;
+  softwareName?: string | null;
+  licenseKey?: string | null;
+  version?: string | null;
+  licensee?: string | null;
+  purchaseDate?: string | null;
+  expirationDate?: string | null;
 }
 
 interface FormData {
@@ -97,6 +113,20 @@ interface FormData {
   credentialId?: string | null;
   creationDate?: string | null;
   deviceInfo?: string | null;
+  bankName?: string | null;
+  accountType?: string | null;
+  accountHolderName?: string | null;
+  accountNumber?: string | null;
+  routingNumber?: string | null;
+  swiftBic?: string | null;
+  iban?: string | null;
+  branchName?: string | null;
+  softwareName?: string | null;
+  licenseKey?: string | null;
+  version?: string | null;
+  licensee?: string | null;
+  purchaseDate?: string | null;
+  expirationDate?: string | null;
   requireReprompt?: boolean;
   expiresAt?: string | null;
   folderId?: string | null;
@@ -120,6 +150,8 @@ export function PasswordEditDialog({
   const tcc = useTranslations("CreditCardForm");
   const ti = useTranslations("IdentityForm");
   const tpk = useTranslations("PasskeyForm");
+  const tba = useTranslations("BankAccountForm");
+  const tsl = useTranslations("SoftwareLicenseForm");
   const td = useTranslations("PasswordDetail");
   const { encryptionKey, userId } = useVault();
   const [data, setData] = useState<FormData | null>(null);
@@ -198,6 +230,20 @@ export function PasswordEditDialog({
           credentialId: entry.credentialId,
           creationDate: entry.creationDate,
           deviceInfo: entry.deviceInfo,
+          bankName: entry.bankName,
+          accountType: entry.accountType,
+          accountHolderName: entry.accountHolderName,
+          accountNumber: entry.accountNumber,
+          routingNumber: entry.routingNumber,
+          swiftBic: entry.swiftBic,
+          iban: entry.iban,
+          branchName: entry.branchName,
+          softwareName: entry.softwareName,
+          licenseKey: entry.licenseKey,
+          version: entry.version,
+          licensee: entry.licensee,
+          purchaseDate: entry.purchaseDate,
+          expirationDate: entry.expirationDate,
           requireReprompt: raw.requireReprompt ?? false,
           expiresAt: raw.expiresAt ?? null,
           folderId: raw.folderId ?? null,
@@ -224,8 +270,14 @@ export function PasswordEditDialog({
   const isCreditCard = data?.entryType === ENTRY_TYPE.CREDIT_CARD;
   const isIdentity = data?.entryType === ENTRY_TYPE.IDENTITY;
   const isPasskey = data?.entryType === ENTRY_TYPE.PASSKEY;
+  const isBankAccount = data?.entryType === ENTRY_TYPE.BANK_ACCOUNT;
+  const isSoftwareLicense = data?.entryType === ENTRY_TYPE.SOFTWARE_LICENSE;
 
-  const dialogTitle = isPasskey
+  const dialogTitle = isBankAccount
+    ? tba("editBankAccount")
+    : isSoftwareLicense
+    ? tsl("editLicense")
+    : isPasskey
     ? tpk("editPasskey")
     : isIdentity
       ? ti("editIdentity")
@@ -247,6 +299,51 @@ export function PasswordEditDialog({
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
+        ) : isBankAccount ? (
+          <BankAccountForm
+            mode="edit"
+            variant="dialog"
+            initialData={{
+              id: data.id,
+              title: data.title,
+              bankName: data.bankName ?? null,
+              accountType: data.accountType ?? null,
+              accountHolderName: data.accountHolderName ?? null,
+              accountNumber: data.accountNumber ?? null,
+              routingNumber: data.routingNumber ?? null,
+              swiftBic: data.swiftBic ?? null,
+              iban: data.iban ?? null,
+              branchName: data.branchName ?? null,
+              notes: data.notes,
+              tags: data.tags,
+              folderId: data.folderId ?? null,
+              requireReprompt: data.requireReprompt ?? false,
+              expiresAt: data.expiresAt ?? null,
+            }}
+            onSaved={handleSaved}
+          />
+        ) : isSoftwareLicense ? (
+          <SoftwareLicenseForm
+            mode="edit"
+            variant="dialog"
+            initialData={{
+              id: data.id,
+              title: data.title,
+              softwareName: data.softwareName ?? null,
+              licenseKey: data.licenseKey ?? null,
+              version: data.version ?? null,
+              licensee: data.licensee ?? null,
+              email: data.email ?? null,
+              purchaseDate: data.purchaseDate ?? null,
+              expirationDate: data.expirationDate ?? null,
+              notes: data.notes,
+              tags: data.tags,
+              folderId: data.folderId ?? null,
+              requireReprompt: data.requireReprompt ?? false,
+              expiresAt: data.expiresAt ?? null,
+            }}
+            onSaved={handleSaved}
+          />
         ) : isPasskey ? (
           <PasskeyForm
             mode="edit"
@@ -263,6 +360,8 @@ export function PasswordEditDialog({
               notes: data.notes || null,
               tags: data.tags,
               folderId: data.folderId ?? null,
+              requireReprompt: data.requireReprompt ?? false,
+              expiresAt: data.expiresAt ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -285,6 +384,8 @@ export function PasswordEditDialog({
               notes: data.notes,
               tags: data.tags,
               folderId: data.folderId ?? null,
+              requireReprompt: data.requireReprompt ?? false,
+              expiresAt: data.expiresAt ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -304,6 +405,8 @@ export function PasswordEditDialog({
               notes: data.notes,
               tags: data.tags,
               folderId: data.folderId ?? null,
+              requireReprompt: data.requireReprompt ?? false,
+              expiresAt: data.expiresAt ?? null,
             }}
             onSaved={handleSaved}
           />
@@ -317,6 +420,8 @@ export function PasswordEditDialog({
               content: data.content,
               tags: data.tags,
               folderId: data.folderId ?? null,
+              requireReprompt: data.requireReprompt ?? false,
+              expiresAt: data.expiresAt ?? null,
             }}
             onSaved={handleSaved}
           />

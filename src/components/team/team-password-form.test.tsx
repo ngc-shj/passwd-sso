@@ -1,6 +1,15 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
+
+// Radix Checkbox (used by EntryRepromptSection) requires ResizeObserver
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+}
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import React from "react";
 

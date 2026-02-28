@@ -17,6 +17,7 @@ import { TOTPField } from "@/components/passwords/totp-field";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import { Switch } from "@/components/ui/switch";
 import { Plus, Rows3, ShieldCheck, X } from "lucide-react";
 
 interface EntryCustomFieldsTotpSectionProps {
@@ -88,12 +89,23 @@ export function EntryCustomFieldsTotpSection({
                   onValueChange={(v: CustomFieldType) =>
                     setCustomFields((prev) =>
                       prev.map((f, i) =>
-                        i === idx ? { ...f, type: v } : f
+                        i === idx
+                          ? {
+                              ...f,
+                              type: v,
+                              value:
+                                v === CUSTOM_FIELD_TYPE.BOOLEAN
+                                  ? "false"
+                                  : v === CUSTOM_FIELD_TYPE.DATE || v === CUSTOM_FIELD_TYPE.MONTH_YEAR
+                                    ? ""
+                                    : f.value,
+                            }
+                          : f
                       )
                     )
                   }
                 >
-                  <SelectTrigger className="h-8 w-28 text-xs">
+                  <SelectTrigger className="h-8 w-32 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -106,28 +118,59 @@ export function EntryCustomFieldsTotpSection({
                     <SelectItem value={CUSTOM_FIELD_TYPE.URL}>
                       {t("fieldUrl")}
                     </SelectItem>
+                    <SelectItem value={CUSTOM_FIELD_TYPE.BOOLEAN}>
+                      {t("fieldBoolean")}
+                    </SelectItem>
+                    <SelectItem value={CUSTOM_FIELD_TYPE.DATE}>
+                      {t("fieldDate")}
+                    </SelectItem>
+                    <SelectItem value={CUSTOM_FIELD_TYPE.MONTH_YEAR}>
+                      {t("fieldMonthYear")}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <Input
-                type={
-                  field.type === CUSTOM_FIELD_TYPE.HIDDEN
-                    ? "password"
-                    : field.type === CUSTOM_FIELD_TYPE.URL
-                      ? "url"
-                      : "text"
-                }
-                value={field.value}
-                onChange={(e) =>
-                  setCustomFields((prev) =>
-                    prev.map((f, i) =>
-                      i === idx ? { ...f, value: e.target.value } : f
+              {field.type === CUSTOM_FIELD_TYPE.BOOLEAN ? (
+                <div className="flex items-center gap-2 h-8">
+                  <Switch
+                    checked={field.value === "true"}
+                    onCheckedChange={(checked) =>
+                      setCustomFields((prev) =>
+                        prev.map((f, i) =>
+                          i === idx ? { ...f, value: String(checked) } : f
+                        )
+                      )
+                    }
+                  />
+                  <span className="text-sm text-muted-foreground">
+                    {field.value === "true" ? t("booleanTrue") : t("booleanFalse")}
+                  </span>
+                </div>
+              ) : (
+                <Input
+                  type={
+                    field.type === CUSTOM_FIELD_TYPE.HIDDEN
+                      ? "password"
+                      : field.type === CUSTOM_FIELD_TYPE.URL
+                        ? "url"
+                        : field.type === CUSTOM_FIELD_TYPE.DATE
+                          ? "date"
+                          : field.type === CUSTOM_FIELD_TYPE.MONTH_YEAR
+                            ? "month"
+                            : "text"
+                  }
+                  value={field.value}
+                  onChange={(e) =>
+                    setCustomFields((prev) =>
+                      prev.map((f, i) =>
+                        i === idx ? { ...f, value: e.target.value } : f
+                      )
                     )
-                  )
-                }
-                placeholder={t("fieldValue")}
-                className="h-8 text-sm"
-              />
+                  }
+                  placeholder={t("fieldValue")}
+                  className="h-8 text-sm"
+                />
+              )}
             </div>
             <Button
               type="button"

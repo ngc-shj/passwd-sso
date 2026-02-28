@@ -41,6 +41,10 @@ interface DecryptedOverview {
   fullName?: string | null;
   idNumberLast4?: string | null;
   relyingPartyId?: string | null;
+  bankName?: string | null;
+  accountNumberLast4?: string | null;
+  softwareName?: string | null;
+  licensee?: string | null;
   requireReprompt?: boolean;
   tags: EntryTagNameColor[];
 }
@@ -58,6 +62,10 @@ interface DisplayEntry {
   fullName: string | null;
   idNumberLast4: string | null;
   relyingPartyId: string | null;
+  bankName: string | null;
+  accountNumberLast4: string | null;
+  softwareName: string | null;
+  licensee: string | null;
   tags: EntryTagNameColor[];
   isFavorite: boolean;
   isArchived: boolean;
@@ -162,7 +170,11 @@ export function PasswordList({
               (overview.cardholderName?.toLowerCase().includes(q) ?? false) ||
               (overview.fullName?.toLowerCase().includes(q) ?? false) ||
               (overview.idNumberLast4?.includes(q) ?? false) ||
-              (overview.relyingPartyId?.toLowerCase().includes(q) ?? false);
+              (overview.relyingPartyId?.toLowerCase().includes(q) ?? false) ||
+              (overview.bankName?.toLowerCase().includes(q) ?? false) ||
+              (overview.accountNumberLast4?.includes(q) ?? false) ||
+              (overview.softwareName?.toLowerCase().includes(q) ?? false) ||
+              (overview.licensee?.toLowerCase().includes(q) ?? false);
             if (!matches) continue;
           }
 
@@ -179,6 +191,10 @@ export function PasswordList({
             fullName: overview.fullName ?? null,
             idNumberLast4: overview.idNumberLast4 ?? null,
             relyingPartyId: overview.relyingPartyId ?? null,
+            bankName: overview.bankName ?? null,
+            accountNumberLast4: overview.accountNumberLast4 ?? null,
+            softwareName: overview.softwareName ?? null,
+            licensee: overview.licensee ?? null,
             tags: overview.tags ?? [],
             isFavorite: entry.isFavorite ?? false,
             isArchived: entry.isArchived ?? false,
@@ -403,6 +419,10 @@ export function PasswordList({
                 fullName={entry.fullName}
                 idNumberLast4={entry.idNumberLast4}
                 relyingPartyId={entry.relyingPartyId}
+                bankName={entry.bankName}
+                accountNumberLast4={entry.accountNumberLast4}
+                softwareName={entry.softwareName}
+                licensee={entry.licensee}
                 tags={entry.tags}
                 isFavorite={entry.isFavorite}
                 isArchived={entry.isArchived}
@@ -432,6 +452,10 @@ export function PasswordList({
             fullName={entry.fullName}
             idNumberLast4={entry.idNumberLast4}
             relyingPartyId={entry.relyingPartyId}
+            bankName={entry.bankName}
+            accountNumberLast4={entry.accountNumberLast4}
+            softwareName={entry.softwareName}
+            licensee={entry.licensee}
             tags={entry.tags}
             isFavorite={entry.isFavorite}
             isArchived={entry.isArchived}

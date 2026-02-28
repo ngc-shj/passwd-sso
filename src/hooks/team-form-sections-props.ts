@@ -3,6 +3,8 @@
 import type { ComponentProps } from "react";
 import { EntryActionBar } from "@/components/passwords/entry-form-ui";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
+import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import type { TeamFolderItem } from "@/components/team/team-password-form-types";
 import type { TeamPasswordFormState } from "@/hooks/use-team-password-form-state";
@@ -11,6 +13,8 @@ import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";
 type TeamTagsAndFolderSectionProps = ComponentProps<typeof TeamTagsAndFolderSection>;
 type EntryCustomFieldsTotpSectionProps = ComponentProps<typeof EntryCustomFieldsTotpSection>;
 type EntryActionBarProps = ComponentProps<typeof EntryActionBar>;
+type EntryRepromptSectionProps = ComponentProps<typeof EntryRepromptSection>;
+type EntryExpirationSectionProps = ComponentProps<typeof EntryExpirationSection>;
 
 interface UseTeamFormSectionsPropsArgs {
   teamId?: string;
@@ -26,20 +30,26 @@ interface UseTeamFormSectionsPropsArgs {
   cancelLabel: string;
   statusUnsavedLabel: string;
   statusSavedLabel: string;
+  repromptTitle: string;
+  repromptDescription: string;
+  expirationTitle: string;
+  expirationDescription: string;
   onCancel: () => void;
   values: Pick<
     TeamPasswordFormState["values"],
-    "selectedTags" | "teamFolderId" | "customFields" | "totp" | "showTotpInput"
+    "selectedTags" | "teamFolderId" | "customFields" | "totp" | "showTotpInput" | "requireReprompt" | "expiresAt"
   >;
   setters: Pick<
     TeamPasswordFormState["setters"],
-    "setSelectedTags" | "setTeamFolderId" | "setCustomFields" | "setTotp" | "setShowTotpInput"
+    "setSelectedTags" | "setTeamFolderId" | "setCustomFields" | "setTotp" | "setShowTotpInput" | "setRequireReprompt" | "setExpiresAt"
   >;
 }
 
 interface TeamFormSectionsPropsResult {
   tagsAndFolderProps: TeamTagsAndFolderSectionProps;
   customFieldsTotpProps: EntryCustomFieldsTotpSectionProps | null;
+  repromptSectionProps: EntryRepromptSectionProps;
+  expirationSectionProps: EntryExpirationSectionProps;
   actionBarProps: EntryActionBarProps;
 }
 
@@ -57,6 +67,10 @@ export function buildTeamFormSectionsProps({
   cancelLabel,
   statusUnsavedLabel,
   statusSavedLabel,
+  repromptTitle,
+  repromptDescription,
+  expirationTitle,
+  expirationDescription,
   onCancel,
   values,
   setters,
@@ -85,6 +99,20 @@ export function buildTeamFormSectionsProps({
           sectionCardClass,
         }
       : null,
+    repromptSectionProps: {
+      checked: values.requireReprompt,
+      onCheckedChange: setters.setRequireReprompt,
+      title: repromptTitle,
+      description: repromptDescription,
+      sectionCardClass,
+    },
+    expirationSectionProps: {
+      value: values.expiresAt,
+      onChange: setters.setExpiresAt,
+      title: expirationTitle,
+      description: expirationDescription,
+      sectionCardClass,
+    },
     actionBarProps: buildEntryActionBarProps({
       hasChanges,
       submitting: saving,

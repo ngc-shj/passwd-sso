@@ -15,13 +15,15 @@ export function buildBaselineSnapshot({
   editData,
   entryKindState,
 }: TeamSnapshotBaselineArgs): string {
-  const { isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey } = entryKindState;
+  const { isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey, isBankAccount, isSoftwareLicense } = entryKindState;
   return JSON.stringify({
     entryType: effectiveEntryType,
     title: editData?.title ?? "",
     notes: editData?.notes ?? "",
     selectedTagIds: (editData?.tags ?? []).map((tag) => tag.id).sort(),
     teamFolderId: editData?.teamFolderId ?? null,
+    requireReprompt: editData?.requireReprompt ?? false,
+    expiresAt: editData?.expiresAt ?? null,
     login: isLoginEntry
       ? {
           username: editData?.username ?? "",
@@ -69,6 +71,28 @@ export function buildBaselineSnapshot({
           deviceInfo: editData?.deviceInfo ?? "",
         }
       : null,
+    bankAccount: isBankAccount
+      ? {
+          bankName: editData?.bankName ?? "",
+          accountType: editData?.accountType ?? "",
+          accountHolderName: editData?.accountHolderName ?? "",
+          accountNumber: editData?.accountNumber ?? "",
+          routingNumber: editData?.routingNumber ?? "",
+          swiftBic: editData?.swiftBic ?? "",
+          iban: editData?.iban ?? "",
+          branchName: editData?.branchName ?? "",
+        }
+      : null,
+    softwareLicense: isSoftwareLicense
+      ? {
+          softwareName: editData?.softwareName ?? "",
+          licenseKey: editData?.licenseKey ?? "",
+          version: editData?.version ?? "",
+          licensee: editData?.licensee ?? "",
+          purchaseDate: editData?.purchaseDate ?? "",
+          expirationDate: editData?.expirationDate ?? "",
+        }
+      : null,
   });
 }
 
@@ -83,7 +107,7 @@ export function buildCurrentSnapshot({
   entryKindState,
   entryValues,
 }: BuildCurrentSnapshotArgs): string {
-  const { isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey } = entryKindState;
+  const { isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey, isBankAccount, isSoftwareLicense } = entryKindState;
   const {
     title,
     notes,
@@ -115,6 +139,22 @@ export function buildCurrentSnapshot({
     credentialId,
     creationDate,
     deviceInfo,
+    bankName,
+    accountType,
+    accountHolderName,
+    accountNumber,
+    routingNumber,
+    swiftBic,
+    iban,
+    branchName,
+    softwareName,
+    licenseKey,
+    version,
+    licensee,
+    purchaseDate,
+    expirationDate,
+    requireReprompt,
+    expiresAt,
   } = entryValues;
   return JSON.stringify({
     entryType: effectiveEntryType,
@@ -122,6 +162,8 @@ export function buildCurrentSnapshot({
     notes,
     selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
     teamFolderId,
+    requireReprompt,
+    expiresAt,
     login: isLoginEntry ? { username, password, url, customFields, totp } : null,
     secureNote: isNote ? { content } : null,
     creditCard: isCreditCard
@@ -150,6 +192,28 @@ export function buildCurrentSnapshot({
           deviceInfo,
         }
       : null,
+    bankAccount: isBankAccount
+      ? {
+          bankName,
+          accountType,
+          accountHolderName,
+          accountNumber,
+          routingNumber,
+          swiftBic,
+          iban,
+          branchName,
+        }
+      : null,
+    softwareLicense: isSoftwareLicense
+      ? {
+          softwareName,
+          licenseKey,
+          version,
+          licensee,
+          purchaseDate,
+          expirationDate,
+        }
+      : null,
   });
 }
 
@@ -162,7 +226,10 @@ export function buildTeamSubmitDisabled({
   entryValues: Pick<TeamEntryFieldValues, "title" | "password" | "relyingPartyId">;
   cardNumberValid: boolean;
 }): boolean {
-  const { isPasskey, isLoginEntry, isCreditCard } = entryKindState;
+  const { isPasskey, isLoginEntry, isCreditCard, isBankAccount, isSoftwareLicense } = entryKindState;
+  if (isBankAccount || isSoftwareLicense) {
+    return !entryValues.title.trim();
+  }
   return (
     !entryValues.title.trim() ||
     (isPasskey && !entryValues.relyingPartyId.trim()) ||

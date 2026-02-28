@@ -15,6 +15,8 @@ interface ExecuteTeamEntrySubmitArgs {
   entryType?: EntryTypeValue;
   tagIds: string[];
   teamFolderId?: string | null;
+  requireReprompt?: boolean;
+  expiresAt?: string | null;
   t: PasswordFormTranslator;
   setSaving: (value: boolean) => void;
   handleOpenChange: (open: boolean) => void;
@@ -32,6 +34,8 @@ export async function executeTeamEntrySubmit({
   entryType,
   tagIds,
   teamFolderId,
+  requireReprompt,
+  expiresAt,
   t,
   setSaving,
   handleOpenChange,
@@ -50,6 +54,8 @@ export async function executeTeamEntrySubmit({
       entryType,
       tagIds,
       teamFolderId,
+      requireReprompt,
+      expiresAt,
     });
 
     if (!res.ok) throw new Error("Failed");

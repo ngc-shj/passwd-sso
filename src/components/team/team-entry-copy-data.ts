@@ -1,11 +1,13 @@
 import type { EntryLocaleCopy } from "@/components/team/team-entry-copy";
 import type { TeamEntryKind } from "@/components/team/team-password-form-types";
 import type {
+  BankAccountFormTranslator,
   CreditCardFormTranslator,
   IdentityFormTranslator,
   PasswordFormTranslator,
   PasskeyFormTranslator,
   SecureNoteFormTranslator,
+  SoftwareLicenseFormTranslator,
 } from "@/lib/translation-types";
 
 interface BuildTeamEntryCopyDataArgs {
@@ -14,6 +16,8 @@ interface BuildTeamEntryCopyDataArgs {
   tcc: CreditCardFormTranslator;
   ti: IdentityFormTranslator;
   tpk: PasskeyFormTranslator;
+  tba: BankAccountFormTranslator;
+  tsl: SoftwareLicenseFormTranslator;
 }
 
 export function buildTeamEntryCopyData({
@@ -22,6 +26,8 @@ export function buildTeamEntryCopyData({
   tcc,
   ti,
   tpk,
+  tba,
+  tsl,
 }: BuildTeamEntryCopyDataArgs): Record<TeamEntryKind, EntryLocaleCopy> {
   return {
     passkey: {
@@ -68,6 +74,24 @@ export function buildTeamEntryCopyData({
       notesLabel: t("notes"),
       notesPlaceholder: t("notesPlaceholder"),
       tagsTitle: t("tags"),
+    },
+    bankAccount: {
+      edit: tba("editBankAccount"),
+      create: tba("newBankAccount"),
+      titleLabel: tba("title"),
+      titlePlaceholder: tba("titlePlaceholder"),
+      notesLabel: tba("notes"),
+      notesPlaceholder: tba("notesPlaceholder"),
+      tagsTitle: tba("tags"),
+    },
+    softwareLicense: {
+      edit: tsl("editLicense"),
+      create: tsl("newLicense"),
+      titleLabel: tsl("title"),
+      titlePlaceholder: tsl("titlePlaceholder"),
+      notesLabel: tsl("notes"),
+      notesPlaceholder: tsl("notesPlaceholder"),
+      tagsTitle: tsl("tags"),
     },
   };
 }

@@ -8,7 +8,7 @@ export type TeamEntrySpecificFieldsProps = ComponentProps<typeof TeamEntrySpecif
 
 export type TeamEntrySpecificFieldTranslations = Pick<
   TeamPasswordFormTranslations,
-  "t" | "tn" | "tcc" | "ti" | "tpk"
+  "t" | "tn" | "tcc" | "ti" | "tpk" | "tba" | "tsl"
 >;
 
 export type TeamEntrySpecificComputedProps =
@@ -47,7 +47,24 @@ export type TeamEntrySpecificComputedProps =
   | "relyingPartyNamePlaceholder"
   | "credentialIdPlaceholder"
   | "deviceInfoPlaceholder"
-  | "passkeyLabels";
+  | "passkeyLabels"
+  | "bankNamePlaceholder"
+  | "accountTypePlaceholder"
+  | "accountTypeCheckingLabel"
+  | "accountTypeSavingsLabel"
+  | "accountTypeOtherLabel"
+  | "accountHolderNamePlaceholder"
+  | "accountNumberPlaceholder"
+  | "routingNumberPlaceholder"
+  | "swiftBicPlaceholder"
+  | "ibanPlaceholder"
+  | "branchNamePlaceholder"
+  | "bankAccountLabels"
+  | "softwareNamePlaceholder"
+  | "licenseKeyPlaceholder"
+  | "versionPlaceholder"
+  | "licenseePlaceholder"
+  | "softwareLicenseLabels";
 
 export type TeamEntrySpecificFieldsBuilderArgs = Omit<
   TeamEntrySpecificFieldsProps,

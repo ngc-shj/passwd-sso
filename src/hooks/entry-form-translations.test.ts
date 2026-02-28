@@ -14,6 +14,8 @@ function createBundle(): EntryFormTranslationsBundle {
     tcc: ((key: string) => `cc:${key}`) as EntryFormTranslationsBundle["tcc"],
     ti: ((key: string) => `id:${key}`) as EntryFormTranslationsBundle["ti"],
     tpk: ((key: string) => `pk:${key}`) as EntryFormTranslationsBundle["tpk"],
+    tba: ((key: string) => `ba:${key}`) as EntryFormTranslationsBundle["tba"],
+    tsl: ((key: string) => `sl:${key}`) as EntryFormTranslationsBundle["tsl"],
   };
 }
 
@@ -40,6 +42,8 @@ describe("toTeamPasswordFormTranslations", () => {
     expect(result.tcc).toBe(bundle.tcc);
     expect(result.ti).toBe(bundle.ti);
     expect(result.tpk).toBe(bundle.tpk);
-    expect(Object.keys(result)).toEqual(["t", "tGen", "tn", "tcc", "ti", "tpk"]);
+    expect(result.tba).toBe(bundle.tba);
+    expect(result.tsl).toBe(bundle.tsl);
+    expect(Object.keys(result)).toEqual(["t", "tGen", "tn", "tcc", "ti", "tpk", "tba", "tsl"]);
   });
 });

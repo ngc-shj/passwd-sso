@@ -18,6 +18,8 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
+import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
@@ -42,6 +44,8 @@ interface IdentityFormProps {
     notes: string | null;
     tags: TagData[];
     folderId?: string | null;
+    requireReprompt?: boolean;
+    expiresAt?: string | null;
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
@@ -55,6 +59,8 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
   const { encryptionKey, userId } = useVault();
   const [submitting, setSubmitting] = useState(false);
   const [showIdNumber, setShowIdNumber] = useState(false);
+  const [requireReprompt, setRequireReprompt] = useState(initialData?.requireReprompt ?? false);
+  const [expiresAt, setExpiresAt] = useState<string | null>(initialData?.expiresAt ?? null);
 
   const [title, setTitle] = useState(initialData?.title ?? "");
   const [fullName, setFullName] = useState(initialData?.fullName ?? "");
@@ -91,6 +97,8 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
         notes: initialData?.notes ?? "",
         selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
         folderId: initialData?.folderId ?? null,
+        requireReprompt: initialData?.requireReprompt ?? false,
+        expiresAt: initialData?.expiresAt ?? null,
       }),
     [initialData]
   );
@@ -111,6 +119,8 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
         notes,
         selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
         folderId,
+        requireReprompt,
+        expiresAt,
       }),
     [
       title,
@@ -126,6 +136,8 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
       notes,
       selectedTags,
       folderId,
+      requireReprompt,
+      expiresAt,
     ]
   );
 
@@ -186,6 +198,8 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
       tagIds: toTagIds(selectedTags),
       folderId: folderId ?? null,
       entryType: ENTRY_TYPE.IDENTITY,
+      requireReprompt,
+      expiresAt,
       setSubmitting,
       t,
       router,
@@ -363,6 +377,22 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
         folders={folders}
         folderId={folderId}
         onFolderChange={setFolderId}
+        sectionCardClass={dialogSectionClass}
+      />
+
+      <EntryRepromptSection
+        checked={requireReprompt}
+        onCheckedChange={setRequireReprompt}
+        title={tPw("requireReprompt")}
+        description={tPw("requireRepromptHelp")}
+        sectionCardClass={dialogSectionClass}
+      />
+
+      <EntryExpirationSection
+        value={expiresAt}
+        onChange={setExpiresAt}
+        title={tPw("expirationTitle")}
+        description={tPw("expirationDescription")}
         sectionCardClass={dialogSectionClass}
       />
 

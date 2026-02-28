@@ -40,6 +40,8 @@ export function applyTeamEditDataToForm(
   setters.setCreationDate(data.creationDate ?? "");
   setters.setDeviceInfo(data.deviceInfo ?? "");
   setters.setTeamFolderId(data.teamFolderId ?? null);
+  setters.setRequireReprompt(data.requireReprompt ?? false);
+  setters.setExpiresAt(data.expiresAt ?? null);
 }
 
 export function resetTeamFormForClose(setters: TeamPasswordFormSetters): void {
@@ -82,5 +84,7 @@ export function resetTeamFormForClose(setters: TeamPasswordFormSetters): void {
   setters.setShowCredentialId(false);
   setters.setAttachments([]);
   setters.setTeamFolderId(null);
+  setters.setRequireReprompt(false);
+  setters.setExpiresAt(null);
   setters.setSaving(false);
 }

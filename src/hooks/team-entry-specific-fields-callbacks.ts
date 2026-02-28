@@ -59,5 +59,28 @@ export function buildTeamEntrySpecificCallbacks(
     onToggleCredentialId: () => setters.setShowCredentialId(!values.showCredentialId),
     onCreationDateChange: setters.setCreationDate,
     onDeviceInfoChange: setters.setDeviceInfo,
+    onBankNameChange: setters.setBankName,
+    onAccountTypeChange: setters.setAccountType,
+    onAccountHolderNameChange: setters.setAccountHolderName,
+    onAccountNumberChange: setters.setAccountNumber,
+    onToggleAccountNumber: () => setters.setShowAccountNumber(!values.showAccountNumber),
+    onRoutingNumberChange: setters.setRoutingNumber,
+    onToggleRoutingNumber: () => setters.setShowRoutingNumber(!values.showRoutingNumber),
+    onSwiftBicChange: setters.setSwiftBic,
+    onIbanChange: setters.setIban,
+    onBranchNameChange: setters.setBranchName,
+    onSoftwareNameChange: setters.setSoftwareName,
+    onLicenseKeyChange: setters.setLicenseKey,
+    onToggleLicenseKey: () => setters.setShowLicenseKey(!values.showLicenseKey),
+    onVersionChange: setters.setVersion,
+    onLicenseeChange: setters.setLicensee,
+    onPurchaseDateChange: (value: string) => {
+      setters.setPurchaseDate(value);
+      setters.setExpiryError(null);
+    },
+    onExpirationDateChange: (value: string) => {
+      setters.setExpirationDate(value);
+      setters.setExpiryError(null);
+    },
   };
 }

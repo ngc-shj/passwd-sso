@@ -285,6 +285,8 @@ enum EntryType {
   CREDIT_CARD
   IDENTITY
   PASSKEY
+  BANK_ACCOUNT
+  SOFTWARE_LICENSE
 }
 
 enum ShareType {
@@ -490,9 +492,10 @@ model TeamPasswordEntry {
   entryType         EntryType @default(LOGIN) @map("entry_type")
 
   // Metadata (unencrypted)
-  isArchived Boolean   @default(false) @map("is_archived")
-  expiresAt  DateTime? @map("expires_at")
-  deletedAt  DateTime? @map("deleted_at")
+  isArchived     Boolean   @default(false) @map("is_archived")
+  requireReprompt Boolean  @default(false) @map("require_reprompt")
+  expiresAt      DateTime? @map("expires_at")
+  deletedAt      DateTime? @map("deleted_at")
 
   teamId       String  @map("team_id")
   tenantId     String  @map("tenant_id")

@@ -36,6 +36,20 @@ export interface ExportEntry {
   credentialId?: string | null;
   creationDate?: string | null;
   deviceInfo?: string | null;
+  bankName?: string | null;
+  accountType?: string | null;
+  accountHolderName?: string | null;
+  accountNumber?: string | null;
+  routingNumber?: string | null;
+  swiftBic?: string | null;
+  iban?: string | null;
+  branchName?: string | null;
+  softwareName?: string | null;
+  licenseKey?: string | null;
+  version?: string | null;
+  licensee?: string | null;
+  purchaseDate?: string | null;
+  expirationDate?: string | null;
   tags: EntryTagNameColor[];
   customFields: EntryCustomFieldPortable[];
   totpConfig: EntryTotpPortable | null;
@@ -73,11 +87,13 @@ interface CsvTypeOptions {
 export function csvEntryType(
   entryType: EntryTypeValue,
   options: CsvTypeOptions
-): "passkey" | "identity" | "card" | "securenote" | "login" {
+): "passkey" | "identity" | "card" | "securenote" | "bankaccount" | "softwarelicense" | "login" {
   if (options.includePasskeyType && entryType === ENTRY_TYPE.PASSKEY) return "passkey";
   if (entryType === ENTRY_TYPE.IDENTITY) return "identity";
   if (entryType === ENTRY_TYPE.CREDIT_CARD) return "card";
   if (entryType === ENTRY_TYPE.SECURE_NOTE) return "securenote";
+  if (entryType === ENTRY_TYPE.BANK_ACCOUNT) return "bankaccount";
+  if (entryType === ENTRY_TYPE.SOFTWARE_LICENSE) return "softwarelicense";
   return "login";
 }
 
@@ -232,6 +248,51 @@ export function formatExportJson(
           };
         }
 
+        if (e.entryType === ENTRY_TYPE.BANK_ACCOUNT) {
+          return {
+            type: "bankaccount",
+            name: e.title,
+            bankAccount: {
+              bankName: e.bankName,
+              accountType: e.accountType,
+              accountHolderName: e.accountHolderName,
+              accountNumber: e.accountNumber,
+              routingNumber: e.routingNumber,
+              swiftBic: e.swiftBic,
+              iban: e.iban,
+              branchName: e.branchName,
+            },
+            notes: e.notes,
+            ...withReprompt(e, options.includeReprompt),
+            ...withPasswdSsoMeta(
+              profile,
+              basePasswdSsoMeta(e, options.includeRequireRepromptInPasswdSso)
+            ),
+          };
+        }
+
+        if (e.entryType === ENTRY_TYPE.SOFTWARE_LICENSE) {
+          return {
+            type: "softwarelicense",
+            name: e.title,
+            softwareLicense: {
+              softwareName: e.softwareName,
+              licenseKey: e.licenseKey,
+              version: e.version,
+              licensee: e.licensee,
+              email: e.email,
+              purchaseDate: e.purchaseDate,
+              expirationDate: e.expirationDate,
+            },
+            notes: e.notes,
+            ...withReprompt(e, options.includeReprompt),
+            ...withPasswdSsoMeta(
+              profile,
+              basePasswdSsoMeta(e, options.includeRequireRepromptInPasswdSso)
+            ),
+          };
+        }
+
         if (e.entryType === ENTRY_TYPE.SECURE_NOTE) {
           return {
             type: "securenote",
@@ -312,6 +373,20 @@ function passwdSsoCsvPayload(
           deviceInfo: entry.deviceInfo,
         }
       : {}),
+    bankName: entry.bankName,
+    accountType: entry.accountType,
+    accountHolderName: entry.accountHolderName,
+    accountNumber: entry.accountNumber,
+    routingNumber: entry.routingNumber,
+    swiftBic: entry.swiftBic,
+    iban: entry.iban,
+    branchName: entry.branchName,
+    softwareName: entry.softwareName,
+    licenseKey: entry.licenseKey,
+    version: entry.version,
+    licensee: entry.licensee,
+    purchaseDate: entry.purchaseDate,
+    expirationDate: entry.expirationDate,
   });
 }
 
@@ -326,10 +401,12 @@ export function formatExportCsv(
     const isCard = entry.entryType === ENTRY_TYPE.CREDIT_CARD;
     const isIdentity = entry.entryType === ENTRY_TYPE.IDENTITY;
     const isPasskey = entry.entryType === ENTRY_TYPE.PASSKEY;
+    const isBankAccount = entry.entryType === ENTRY_TYPE.BANK_ACCOUNT;
+    const isSoftwareLicense = entry.entryType === ENTRY_TYPE.SOFTWARE_LICENSE;
     const type = csvEntryType(entry.entryType, {
       includePasskeyType: options.includePasskeyType,
     });
-    const isLogin = !isNote && !isCard && !isIdentity && !isPasskey;
+    const isLogin = !isNote && !isCard && !isIdentity && !isPasskey && !isBankAccount && !isSoftwareLicense;
     const passwdSso = passwdSsoCsvPayload(entry, {
       includeRequireRepromptInPasswdSso:
         options.includeRequireRepromptInPasswdSso,

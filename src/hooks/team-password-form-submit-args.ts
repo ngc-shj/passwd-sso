@@ -51,11 +51,16 @@ export function buildTeamSubmitArgs({
     ...entryValues,
     cardNumberValid,
     isIdentity: entryKindState.isIdentity,
+    isBankAccount: entryKindState.isBankAccount,
+    isSoftwareLicense: entryKindState.isSoftwareLicense,
     setDobError: setters.setDobError,
     setExpiryError: setters.setExpiryError,
     identityErrorCopy: {
       dobFuture: translations.ti("dobFuture"),
       expiryBeforeIssue: translations.ti("expiryBeforeIssue"),
+    },
+    softwareLicenseErrorCopy: {
+      expirationBeforePurchase: translations.tsl("expirationBeforePurchase"),
     },
     t: translations.t,
     setSaving: setters.setSaving,

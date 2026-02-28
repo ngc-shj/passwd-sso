@@ -9,6 +9,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
+import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamAttachmentSection } from "./team-attachment-section";
 import { TeamEntrySpecificFields } from "@/components/team/team-entry-specific-fields";
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
@@ -58,7 +60,7 @@ export function TeamPasswordForm({
     setters: { setTitle },
   } = formState;
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
-  const { tagsAndFolderProps, customFieldsTotpProps, actionBarProps } = buildTeamFormSectionsProps({
+  const { tagsAndFolderProps, customFieldsTotpProps, repromptSectionProps, expirationSectionProps, actionBarProps } = buildTeamFormSectionsProps({
     teamId: scopedId,
     tagsTitle: entryCopy.tagsTitle,
     tagsHint: t("tagsHint"),
@@ -72,6 +74,10 @@ export function TeamPasswordForm({
     cancelLabel: tc("cancel"),
     statusUnsavedLabel: t("statusUnsaved"),
     statusSavedLabel: t("statusSaved"),
+    repromptTitle: t("requireReprompt"),
+    repromptDescription: t("requireRepromptHelp"),
+    expirationTitle: t("expirationTitle"),
+    expirationDescription: t("expirationDescription"),
     onCancel: () => handleOpenChange(false),
     values: formState.values,
     setters: formState.setters,
@@ -109,6 +115,9 @@ export function TeamPasswordForm({
           {customFieldsTotpProps && (
             <EntryCustomFieldsTotpSection {...customFieldsTotpProps} />
           )}
+
+          <EntryRepromptSection {...repromptSectionProps} />
+          <EntryExpirationSection {...expirationSectionProps} />
 
           <EntryActionBar {...actionBarProps} />
         </form>

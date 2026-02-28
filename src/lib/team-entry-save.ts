@@ -14,6 +14,8 @@ interface SaveTeamEntryParams {
   entryType?: EntryTypeValue;
   tagIds: string[];
   teamFolderId?: string | null;
+  requireReprompt?: boolean;
+  expiresAt?: string | null;
 }
 
 export async function saveTeamEntry({
@@ -27,6 +29,8 @@ export async function saveTeamEntry({
   entryType,
   tagIds,
   teamFolderId,
+  requireReprompt,
+  expiresAt,
 }: SaveTeamEntryParams): Promise<Response> {
   if (mode === "edit" && !initialId) {
     throw new Error("initialId is required for edit mode");
@@ -53,6 +57,8 @@ export async function saveTeamEntry({
 
   if (entryType !== undefined) body.entryType = entryType;
   if (teamFolderId !== undefined) body.teamFolderId = teamFolderId;
+  if (requireReprompt !== undefined) body.requireReprompt = requireReprompt;
+  if (expiresAt !== undefined) body.expiresAt = expiresAt;
 
   const endpoint = mode === "create"
     ? apiPath.teamPasswords(teamId)

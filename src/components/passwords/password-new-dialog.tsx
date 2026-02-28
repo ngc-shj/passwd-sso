@@ -6,6 +6,8 @@ import { SecureNoteForm } from "./secure-note-form";
 import { CreditCardForm } from "./credit-card-form";
 import { IdentityForm } from "./identity-form";
 import { PasskeyForm } from "./passkey-form";
+import { BankAccountForm } from "./bank-account-form";
+import { SoftwareLicenseForm } from "./software-license-form";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import {
@@ -33,6 +35,8 @@ export function PasswordNewDialog({
   const tcc = useTranslations("CreditCardForm");
   const ti = useTranslations("IdentityForm");
   const tpk = useTranslations("PasskeyForm");
+  const tba = useTranslations("BankAccountForm");
+  const tsl = useTranslations("SoftwareLicenseForm");
 
   const handleSaved = () => {
     onOpenChange(false);
@@ -43,8 +47,14 @@ export function PasswordNewDialog({
   const isCreditCard = entryType === ENTRY_TYPE.CREDIT_CARD;
   const isIdentity = entryType === ENTRY_TYPE.IDENTITY;
   const isPasskey = entryType === ENTRY_TYPE.PASSKEY;
+  const isBankAccount = entryType === ENTRY_TYPE.BANK_ACCOUNT;
+  const isSoftwareLicense = entryType === ENTRY_TYPE.SOFTWARE_LICENSE;
 
-  const dialogTitle = isPasskey
+  const dialogTitle = isBankAccount
+    ? tba("newBankAccount")
+    : isSoftwareLicense
+    ? tsl("newLicense")
+    : isPasskey
     ? tpk("newPasskey")
     : isIdentity
       ? ti("newIdentity")
@@ -60,7 +70,19 @@ export function PasswordNewDialog({
         <DialogHeader>
           <DialogTitle>{dialogTitle}</DialogTitle>
         </DialogHeader>
-        {isPasskey ? (
+        {isBankAccount ? (
+          <BankAccountForm
+            mode="create"
+            variant="dialog"
+            onSaved={handleSaved}
+          />
+        ) : isSoftwareLicense ? (
+          <SoftwareLicenseForm
+            mode="create"
+            variant="dialog"
+            onSaved={handleSaved}
+          />
+        ) : isPasskey ? (
           <PasskeyForm
             mode="create"
             variant="dialog"

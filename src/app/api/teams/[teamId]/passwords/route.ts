@@ -99,6 +99,8 @@ export async function GET(req: NextRequest, { params }: Params) {
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
     deletedAt: entry.deletedAt,
+    requireReprompt: entry.requireReprompt,
+    expiresAt: entry.expiresAt,
   }));
 
   // Sort: favorites first, then by updatedAt desc
@@ -143,7 +145,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, entryType, tagIds, teamFolderId } = parsed.data;
+  const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, entryType, tagIds, teamFolderId, requireReprompt, expiresAt } = parsed.data;
 
   // Validate teamKeyVersion matches current team key version
   const team = await withUserTenantRls(session.user.id, async () =>
@@ -192,6 +194,8 @@ export async function POST(req: NextRequest, { params }: Params) {
         tenantId: team.tenantId,
         createdById: session.user.id,
         updatedById: session.user.id,
+        ...(requireReprompt !== undefined ? { requireReprompt } : {}),
+        ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
         ...(teamFolderId ? { teamFolderId: teamFolderId } : {}),
         ...(tagIds?.length
           ? { tags: { connect: tagIds.map((id) => ({ id })) } }
