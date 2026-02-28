@@ -16,24 +16,28 @@ import {
 } from "@/hooks/use-entry-form-translations";
 import { usePersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
 
-type PersonalPasswordFormModelInput = Pick<PasswordFormProps, "mode" | "initialData" | "onSaved">;
+type PersonalPasswordFormModelInput = Pick<PasswordFormProps, "mode" | "initialData" | "onSaved" | "defaultFolderId" | "defaultTags">;
 
 export function usePersonalPasswordFormModel({
   mode,
   initialData,
   onSaved,
+  defaultFolderId,
+  defaultTags,
 }: PersonalPasswordFormModelInput) {
   const translationBundle = useEntryFormTranslations();
   const translations = toPersonalPasswordFormTranslations(translationBundle);
   const router = useRouter();
   const { encryptionKey, userId } = useVault();
-  const formState = usePersonalPasswordFormState(initialData);
+  const formState = usePersonalPasswordFormState(initialData, { defaultFolderId, defaultTags });
   const { folders } = usePersonalFolders();
 
   const { values, hasChanges, loginMainFieldsProps } = buildPersonalPasswordFormPresenter({
     initialData,
     formState,
     translations,
+    defaultFolderId,
+    defaultTags,
   });
   const { handleSubmit, handleCancel, handleBack } = buildPersonalPasswordFormController({
     mode,

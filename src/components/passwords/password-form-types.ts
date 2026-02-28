@@ -24,4 +24,6 @@ export interface PasswordFormProps {
   initialData?: PersonalPasswordFormInitialData;
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  defaultFolderId?: string | null;
+  defaultTags?: TagData[];
 }

@@ -69,8 +69,9 @@ export interface PersonalPasswordFormState {
 
 export function usePersonalPasswordFormState(
   initialData?: PersonalPasswordFormInitialData,
+  defaults?: { defaultFolderId?: string | null; defaultTags?: TagData[] },
 ): PersonalPasswordFormState {
-  const initial = buildPersonalPasswordFormInitialValues(initialData);
+  const initial = buildPersonalPasswordFormInitialValues(initialData, defaults);
   const uiState = usePersonalPasswordFormUiState();
   const valueState = usePersonalPasswordFormValueState(initial);
 

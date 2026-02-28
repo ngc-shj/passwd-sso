@@ -10,6 +10,7 @@ import { BankAccountForm } from "./bank-account-form";
 import { SoftwareLicenseForm } from "./software-license-form";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
+import type { TagData } from "@/components/tags/tag-input";
 import {
   Dialog,
   DialogContent,
@@ -22,6 +23,8 @@ interface PasswordNewDialogProps {
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
   entryType?: EntryTypeValue;
+  defaultFolderId?: string | null;
+  defaultTags?: TagData[];
 }
 
 export function PasswordNewDialog({
@@ -29,6 +32,8 @@ export function PasswordNewDialog({
   onOpenChange,
   onSaved,
   entryType = ENTRY_TYPE.LOGIN,
+  defaultFolderId,
+  defaultTags,
 }: PasswordNewDialogProps) {
   const tp = useTranslations("PasswordForm");
   const tn = useTranslations("SecureNoteForm");
@@ -75,42 +80,56 @@ export function PasswordNewDialog({
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            defaultFolderId={defaultFolderId}
+            defaultTags={defaultTags}
           />
         ) : isSoftwareLicense ? (
           <SoftwareLicenseForm
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            defaultFolderId={defaultFolderId}
+            defaultTags={defaultTags}
           />
         ) : isPasskey ? (
           <PasskeyForm
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            defaultFolderId={defaultFolderId}
+            defaultTags={defaultTags}
           />
         ) : isIdentity ? (
           <IdentityForm
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            defaultFolderId={defaultFolderId}
+            defaultTags={defaultTags}
           />
         ) : isCreditCard ? (
           <CreditCardForm
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            defaultFolderId={defaultFolderId}
+            defaultTags={defaultTags}
           />
         ) : isNote ? (
           <SecureNoteForm
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            defaultFolderId={defaultFolderId}
+            defaultTags={defaultTags}
           />
         ) : (
           <PasswordForm
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            defaultFolderId={defaultFolderId}
+            defaultTags={defaultTags}
           />
         )}
       </DialogContent>

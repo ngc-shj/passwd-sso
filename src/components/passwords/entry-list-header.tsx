@@ -8,6 +8,7 @@ interface EntryListHeaderProps {
   title: string;
   subtitle?: string;
   showSubtitle?: boolean;
+  truncateStart?: boolean;
   titleExtra?: ReactNode;
   actions?: ReactNode;
 }
@@ -17,6 +18,7 @@ export function EntryListHeader({
   title,
   subtitle,
   showSubtitle = false,
+  truncateStart = false,
   titleExtra,
   actions,
 }: EntryListHeaderProps) {
@@ -26,7 +28,11 @@ export function EntryListHeader({
         <div className="min-w-0 space-y-1">
           <div className="flex min-w-0 items-center gap-3">
             {icon}
-            <h1 className="truncate text-2xl font-bold tracking-tight">{title}</h1>
+            <h1
+              className={`truncate text-2xl font-bold tracking-tight${truncateStart ? " direction-rtl" : ""}`}
+            >
+              {truncateStart ? <bdi>{title}</bdi> : title}
+            </h1>
             {titleExtra}
           </div>
           {showSubtitle && subtitle && (

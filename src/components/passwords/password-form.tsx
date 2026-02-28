@@ -16,7 +16,7 @@ import type { PasswordFormProps } from "@/components/passwords/password-form-typ
 import { usePersonalPasswordFormModel } from "@/hooks/use-personal-password-form-model";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
 
-export function PasswordForm({ mode, initialData, variant = "page", onSaved }: PasswordFormProps) {
+export function PasswordForm({ mode, initialData, variant = "page", onSaved, defaultFolderId, defaultTags }: PasswordFormProps) {
   const {
     t,
     tc,
@@ -31,6 +31,8 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved }: P
     mode,
     initialData,
     onSaved,
+    defaultFolderId,
+    defaultTags,
   });
   const { values, setters } = formState;
   const isDialogVariant = variant === "dialog";

@@ -49,9 +49,11 @@ interface IdentityFormProps {
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  defaultFolderId?: string | null;
+  defaultTags?: TagData[];
 }
 
-export function IdentityForm({ mode, initialData, variant = "page", onSaved }: IdentityFormProps) {
+export function IdentityForm({ mode, initialData, variant = "page", onSaved, defaultFolderId, defaultTags }: IdentityFormProps) {
   const t = useTranslations("IdentityForm");
   const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
@@ -76,9 +78,9 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
   const [dobError, setDobError] = useState<string | null>(null);
   const [expiryError, setExpiryError] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<TagData[]>(
-    initialData?.tags ?? []
+    initialData?.tags ?? defaultTags ?? []
   );
-  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
+  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? defaultFolderId ?? null);
   const { folders } = usePersonalFolders();
 
   const baselineSnapshot = useMemo(
@@ -95,12 +97,12 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved }: I
         issueDate: initialData?.issueDate ?? "",
         expiryDate: initialData?.expiryDate ?? "",
         notes: initialData?.notes ?? "",
-        selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
-        folderId: initialData?.folderId ?? null,
+        selectedTagIds: (initialData?.tags ?? defaultTags ?? []).map((tag) => tag.id).sort(),
+        folderId: initialData?.folderId ?? defaultFolderId ?? null,
         requireReprompt: initialData?.requireReprompt ?? false,
         expiresAt: initialData?.expiresAt ?? null,
       }),
-    [initialData]
+    [initialData, defaultFolderId, defaultTags]
   );
 
   const currentSnapshot = useMemo(
