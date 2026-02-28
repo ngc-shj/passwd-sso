@@ -57,6 +57,7 @@ export function ShareEntryView({
   maxViews,
 }: ShareEntryViewProps) {
   const t = useTranslations("Share");
+  const tc = useTranslations("Common");
   const locale = useLocale();
   const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
 
@@ -183,7 +184,7 @@ export function ShareEntryView({
                 </label>
                 <div className="flex items-center gap-2">
                   <span className="text-sm">
-                    {f.value === "true" ? "Yes" : "No"}
+                    {f.value === "true" ? tc("yes") : tc("no")}
                   </span>
                 </div>
               </div>
@@ -313,12 +314,12 @@ export function ShareEntryView({
   const renderBankAccountFields = () => (
     <>
       {renderField(t("bankName"), data.bankName)}
-      {renderField(t("accountType"), data.accountType)}
+      {renderField(t("accountType"), data.accountType === "checking" ? t("accountTypeChecking") : data.accountType === "savings" ? t("accountTypeSavings") : data.accountType === "other" ? t("accountTypeOther") : data.accountType)}
       {renderField(t("accountHolderName"), data.accountHolderName)}
       {renderSensitiveField(t("accountNumber"), data.accountNumber, "accountNumber")}
       {renderSensitiveField(t("routingNumber"), data.routingNumber, "routingNumber")}
       {renderField(t("swiftBic"), data.swiftBic)}
-      {renderField(t("iban"), data.iban)}
+      {renderSensitiveField(t("iban"), data.iban, "iban")}
       {renderField(t("branchName"), data.branchName)}
       {renderNotes(data.notes)}
     </>
@@ -330,6 +331,7 @@ export function ShareEntryView({
       {renderSensitiveField(t("licenseKey"), data.licenseKey, "licenseKey")}
       {renderField(t("version"), data.version)}
       {renderField(t("licensee"), data.licensee)}
+      {renderField(t("email"), data.email)}
       {renderField(t("purchaseDate"), data.purchaseDate)}
       {renderField(t("expirationDate"), data.expirationDate)}
       {renderNotes(data.notes)}

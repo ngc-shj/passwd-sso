@@ -180,4 +180,24 @@ describe("buildTeamEntrySpecificCallbacks", () => {
     expect(setters.setExpiryError).toHaveBeenNthCalledWith(1, null);
     expect(setters.setExpiryError).toHaveBeenNthCalledWith(2, null);
   });
+
+  it("toggles bank account visibility flags", () => {
+    const { values, setters } = createState();
+    const callbacks = buildTeamEntrySpecificCallbacks(values, setters);
+
+    callbacks.onToggleAccountNumber();
+    callbacks.onToggleRoutingNumber();
+
+    expect(setters.setShowAccountNumber).toHaveBeenCalledWith(false);
+    expect(setters.setShowRoutingNumber).toHaveBeenCalledWith(false);
+  });
+
+  it("toggles software license visibility flag", () => {
+    const { values, setters } = createState();
+    const callbacks = buildTeamEntrySpecificCallbacks(values, setters);
+
+    callbacks.onToggleLicenseKey();
+
+    expect(setters.setShowLicenseKey).toHaveBeenCalledWith(false);
+  });
 });

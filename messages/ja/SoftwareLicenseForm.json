@@ -22,5 +22,6 @@
   "updated": "ソフトウェアライセンスを更新しました",
   "failedToSave": "保存に失敗しました",
   "networkError": "ネットワークエラー",
+  "invalidEmail": "有効なメールアドレスを入力してください",
   "expirationBeforePurchase": "有効期限は購入日より後の日付を指定してください"
 }

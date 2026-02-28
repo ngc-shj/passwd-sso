@@ -110,6 +110,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
   const [showCredentialId, setShowCredentialId] = useState(false);
   const [showAccountNumber, setShowAccountNumber] = useState(false);
   const [showRoutingNumber, setShowRoutingNumber] = useState(false);
+  const [showIban, setShowIban] = useState(false);
   const [showLicenseKey, setShowLicenseKey] = useState(false);
 
   // Attachment state
@@ -196,6 +197,13 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
+  const handleRevealIban = useCallback(() => {
+    requireVerification(data.id, data.requireReprompt ?? false, () => {
+      setShowIban(true);
+      setTimeout(() => setShowIban(false), REVEAL_TIMEOUT);
+    });
+  }, [data.id, data.requireReprompt, requireVerification]);
+
   const handleRevealLicenseKey = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
       setShowLicenseKey(true);
@@ -233,7 +241,12 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
           {data.accountType && (
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">{t("accountType")}</label>
-              <p className="text-sm">{data.accountType}</p>
+              <p className="text-sm">
+                {data.accountType === "checking" ? t("accountTypeChecking")
+                  : data.accountType === "savings" ? t("accountTypeSavings")
+                  : data.accountType === "other" ? t("accountTypeOther")
+                  : data.accountType}
+              </p>
             </div>
           )}
 
@@ -304,11 +317,27 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
 
           {/* IBAN */}
           {data.iban && (
-            <div className="space-y-1">
+            <div className="col-span-2 space-y-1">
               <label className="text-sm text-muted-foreground">{t("iban")}</label>
               <div className="flex items-center gap-2">
-                <span className="font-mono text-sm">{data.iban}</span>
-                <CopyButton getValue={() => data.iban ?? ""} />
+                <span className="font-mono text-sm">
+                  {showIban ? data.iban : "••••••••"}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={showIban ? () => setShowIban(false) : handleRevealIban}
+                >
+                  {showIban ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <CopyButton
+                  getValue={createGuardedGetter(
+                    data.id,
+                    data.requireReprompt ?? false,
+                    () => data.iban ?? "",
+                  )}
+                />
               </div>
             </div>
           )}

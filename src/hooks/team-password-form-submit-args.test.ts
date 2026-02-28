@@ -223,4 +223,47 @@ describe("buildTeamSubmitArgs", () => {
     expect(args.effectiveEntryType).toBe(ENTRY_TYPE.SECURE_NOTE);
     expect(args.isIdentity).toBe(false);
   });
+
+  it("maps bank account entry type with isBankAccount=true", () => {
+    const args = buildTeamSubmitArgs(buildDefaultParams({
+      effectiveEntryType: ENTRY_TYPE.BANK_ACCOUNT,
+      entryKindState: {
+        entryKind: "bankAccount",
+        isLoginEntry: false,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: true,
+        isSoftwareLicense: false,
+      },
+    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
+    expect(args.effectiveEntryType).toBe(ENTRY_TYPE.BANK_ACCOUNT);
+    expect(args.isBankAccount).toBe(true);
+    expect(args.isIdentity).toBe(false);
+    expect(args.isSoftwareLicense).toBe(false);
+  });
+
+  it("maps software license entry type with isSoftwareLicense=true", () => {
+    const args = buildTeamSubmitArgs(buildDefaultParams({
+      effectiveEntryType: ENTRY_TYPE.SOFTWARE_LICENSE,
+      entryKindState: {
+        entryKind: "softwareLicense",
+        isLoginEntry: false,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: true,
+      },
+    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
+    expect(args.effectiveEntryType).toBe(ENTRY_TYPE.SOFTWARE_LICENSE);
+    expect(args.isSoftwareLicense).toBe(true);
+    expect(args.isBankAccount).toBe(false);
+    expect(args.isIdentity).toBe(false);
+    expect(args.softwareLicenseErrorCopy).toEqual({
+      expirationBeforePurchase: "sl.expirationBeforePurchase",
+    });
+  });
 });

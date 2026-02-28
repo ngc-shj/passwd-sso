@@ -8,6 +8,7 @@ import {
   TEAM_EXPORT_OPTIONS,
   PERSONAL_EXPORT_OPTIONS,
 } from "@/lib/export-format-common";
+import { parseJson } from "@/components/passwords/password-import-parsers";
 
 const nullBankLicenseFields = {
   bankName: null,
@@ -203,8 +204,13 @@ describe("export-format-common", () => {
     const entry = parsed.entries[0];
     expect(entry.type).toBe("bankaccount");
     expect(entry.bankAccount.bankName).toBe("Acme Bank");
+    expect(entry.bankAccount.accountType).toBe("checking");
+    expect(entry.bankAccount.accountHolderName).toBe("Jane");
     expect(entry.bankAccount.accountNumber).toBe("123456789");
     expect(entry.bankAccount.routingNumber).toBe("021000021");
+    expect(entry.bankAccount.swiftBic).toBe("BOFAUS3N");
+    expect(entry.bankAccount.iban).toBe("DE89370400440532013000");
+    expect(entry.bankAccount.branchName).toBe("Main");
   });
 
   it("exports software license JSON with softwareLicense fields", () => {
@@ -215,6 +221,7 @@ describe("export-format-common", () => {
       licenseKey: "ABCD-EFGH",
       version: "2026",
       licensee: "Jane",
+      email: "jane@example.com",
       purchaseDate: "2026-01-01",
       expirationDate: "2027-01-01",
     };
@@ -228,6 +235,78 @@ describe("export-format-common", () => {
     expect(entry.type).toBe("softwarelicense");
     expect(entry.softwareLicense.softwareName).toBe("Adobe CC");
     expect(entry.softwareLicense.licenseKey).toBe("ABCD-EFGH");
+    expect(entry.softwareLicense.version).toBe("2026");
+    expect(entry.softwareLicense.licensee).toBe("Jane");
+    expect(entry.softwareLicense.email).toBe("jane@example.com");
     expect(entry.softwareLicense.purchaseDate).toBe("2026-01-01");
+    expect(entry.softwareLicense.expirationDate).toBe("2027-01-01");
+  });
+
+  it("round-trips BANK_ACCOUNT through export JSON and parseJson", () => {
+    const bankEntry: ExportEntry = {
+      ...sampleLoginEntry,
+      entryType: ENTRY_TYPE.BANK_ACCOUNT,
+      bankName: "Acme Bank",
+      accountType: "checking",
+      accountHolderName: "Jane Doe",
+      accountNumber: "123456789",
+      routingNumber: "021000021",
+      swiftBic: "BOFAUS3N",
+      iban: "DE89370400440532013000",
+      branchName: "Main Street",
+    };
+    const json = formatExportJson(
+      [bankEntry],
+      "passwd-sso",
+      PERSONAL_EXPORT_OPTIONS.json
+    );
+    const result = parseJson(json);
+
+    expect(result.format).toBe("passwd-sso");
+    expect(result.entries).toHaveLength(1);
+    const imported = result.entries[0];
+    expect(imported.entryType).toBe(ENTRY_TYPE.BANK_ACCOUNT);
+    expect(imported.title).toBe("AWS Console");
+    expect(imported.bankName).toBe("Acme Bank");
+    expect(imported.accountType).toBe("checking");
+    expect(imported.accountHolderName).toBe("Jane Doe");
+    expect(imported.accountNumber).toBe("123456789");
+    expect(imported.routingNumber).toBe("021000021");
+    expect(imported.swiftBic).toBe("BOFAUS3N");
+    expect(imported.iban).toBe("DE89370400440532013000");
+    expect(imported.branchName).toBe("Main Street");
+  });
+
+  it("round-trips SOFTWARE_LICENSE through export JSON and parseJson", () => {
+    const licenseEntry: ExportEntry = {
+      ...sampleLoginEntry,
+      entryType: ENTRY_TYPE.SOFTWARE_LICENSE,
+      softwareName: "Adobe CC",
+      licenseKey: "ABCD-EFGH-IJKL",
+      version: "2026",
+      licensee: "Jane Doe",
+      email: "jane@example.com",
+      purchaseDate: "2026-01-15",
+      expirationDate: "2027-01-15",
+    };
+    const json = formatExportJson(
+      [licenseEntry],
+      "passwd-sso",
+      PERSONAL_EXPORT_OPTIONS.json
+    );
+    const result = parseJson(json);
+
+    expect(result.format).toBe("passwd-sso");
+    expect(result.entries).toHaveLength(1);
+    const imported = result.entries[0];
+    expect(imported.entryType).toBe(ENTRY_TYPE.SOFTWARE_LICENSE);
+    expect(imported.title).toBe("AWS Console");
+    expect(imported.softwareName).toBe("Adobe CC");
+    expect(imported.licenseKey).toBe("ABCD-EFGH-IJKL");
+    expect(imported.version).toBe("2026");
+    expect(imported.licensee).toBe("Jane Doe");
+    expect(imported.email).toBe("jane@example.com");
+    expect(imported.purchaseDate).toBe("2026-01-15");
+    expect(imported.expirationDate).toBe("2027-01-15");
   });
 });

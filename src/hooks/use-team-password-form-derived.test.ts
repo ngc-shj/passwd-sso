@@ -188,4 +188,76 @@ describe("buildTeamSubmitDisabled", () => {
     });
     expect(result).toBe(false);
   });
+
+  it("returns false for bank account with only title (password not required)", () => {
+    const result = buildTeamSubmitDisabled({
+      entryKindState: {
+        entryKind: "bankAccount",
+        isLoginEntry: false,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: true,
+        isSoftwareLicense: false,
+      },
+      entryValues: { title: "My Bank", password: "", relyingPartyId: "" },
+      cardNumberValid: true,
+    });
+    expect(result).toBe(false);
+  });
+
+  it("returns true for bank account when title is empty", () => {
+    const result = buildTeamSubmitDisabled({
+      entryKindState: {
+        entryKind: "bankAccount",
+        isLoginEntry: false,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: true,
+        isSoftwareLicense: false,
+      },
+      entryValues: { title: "  ", password: "", relyingPartyId: "" },
+      cardNumberValid: true,
+    });
+    expect(result).toBe(true);
+  });
+
+  it("returns false for software license with only title (password not required)", () => {
+    const result = buildTeamSubmitDisabled({
+      entryKindState: {
+        entryKind: "softwareLicense",
+        isLoginEntry: false,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: true,
+      },
+      entryValues: { title: "License", password: "", relyingPartyId: "" },
+      cardNumberValid: true,
+    });
+    expect(result).toBe(false);
+  });
+
+  it("returns true for software license when title is empty", () => {
+    const result = buildTeamSubmitDisabled({
+      entryKindState: {
+        entryKind: "softwareLicense",
+        isLoginEntry: false,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: true,
+      },
+      entryValues: { title: "", password: "", relyingPartyId: "" },
+      cardNumberValid: true,
+    });
+    expect(result).toBe(true);
+  });
 });

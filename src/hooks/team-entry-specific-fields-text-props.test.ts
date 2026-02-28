@@ -28,5 +28,9 @@ describe("buildTeamEntrySpecificTextProps", () => {
     expect(props.creditCardLabels.cardNumber).toBe("tcc.cardNumber");
     expect(props.identityLabels.fullName).toBe("ti.fullName");
     expect(props.passkeyLabels.credentialId).toBe("tpk.credentialId");
+    expect(props.bankAccountLabels.bankName).toBe("tba.bankName");
+    expect(props.bankAccountLabels.accountNumber).toBe("tba.accountNumber");
+    expect(props.softwareLicenseLabels.softwareName).toBe("tsl.softwareName");
+    expect(props.softwareLicenseLabels.licenseKey).toBe("tsl.licenseKey");
   });
 });

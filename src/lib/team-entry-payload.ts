@@ -122,6 +122,7 @@ export function buildTeamEntryPayload(
         licenseKey: input.licenseKey?.trim() || null,
         version: input.version?.trim() || null,
         licensee: input.licensee?.trim() || null,
+        email: input.email?.trim() || null,
         purchaseDate: input.purchaseDate || null,
         expirationDate: input.expirationDate || null,
       };

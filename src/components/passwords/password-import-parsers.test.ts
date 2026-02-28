@@ -445,6 +445,8 @@ describe("parseJson — bank account / software license", () => {
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0].entryType).toBe(ENTRY_TYPE.BANK_ACCOUNT);
     expect(result.entries[0].title).toBe("My Bank");
+    expect(result.entries[0].bankName).toBe("Acme Bank");
+    expect(result.entries[0].accountNumber).toBe("123456789");
   });
 
   it("parses software license entry in passwd-sso JSON format", () => {
@@ -469,6 +471,9 @@ describe("parseJson — bank account / software license", () => {
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0].entryType).toBe(ENTRY_TYPE.SOFTWARE_LICENSE);
     expect(result.entries[0].title).toBe("Adobe CC");
+    expect(result.entries[0].softwareName).toBe("Adobe Creative Cloud");
+    expect(result.entries[0].licenseKey).toBe("ABCD-EFGH");
+    expect(result.entries[0].version).toBe("2026");
   });
 });
 

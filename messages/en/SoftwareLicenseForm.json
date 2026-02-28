@@ -22,5 +22,6 @@
   "updated": "Software license updated",
   "failedToSave": "Failed to save",
   "networkError": "Network error",
+  "invalidEmail": "Please enter a valid email address",
   "expirationBeforePurchase": "Expiration date must be after purchase date"
 }

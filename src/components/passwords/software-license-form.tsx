@@ -61,6 +61,7 @@ export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSav
   const [version, setVersion] = useState(initialData?.version ?? "");
   const [licensee, setLicensee] = useState(initialData?.licensee ?? "");
   const [email, setEmail] = useState(initialData?.email ?? "");
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [purchaseDate, setPurchaseDate] = useState(initialData?.purchaseDate ?? "");
   const [expirationDate, setExpirationDate] = useState(initialData?.expirationDate ?? "");
   const [notes, setNotes] = useState(initialData?.notes ?? "");
@@ -118,6 +119,12 @@ export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSav
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!encryptionKey) return;
+
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setEmailError(t("invalidEmail"));
+      return;
+    }
+    setEmailError(null);
 
     if (purchaseDate && expirationDate && purchaseDate >= expirationDate) {
       setExpirationError(t("expirationBeforePurchase"));
@@ -245,10 +252,11 @@ export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSav
           id="email"
           type="email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => { setEmail(e.target.value); setEmailError(null); }}
           placeholder={t("emailPlaceholder")}
           autoComplete="off"
         />
+        {emailError && <p className="text-destructive text-sm">{emailError}</p>}
       </div>
 
       <div className="grid grid-cols-2 gap-4">

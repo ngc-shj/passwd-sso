@@ -280,6 +280,7 @@ export function formatExportJson(
               licenseKey: e.licenseKey,
               version: e.version,
               licensee: e.licensee,
+              email: e.email,
               purchaseDate: e.purchaseDate,
               expirationDate: e.expirationDate,
             },

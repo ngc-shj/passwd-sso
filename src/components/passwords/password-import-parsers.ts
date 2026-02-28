@@ -330,6 +330,8 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           ...identityDefaults,
           ...passkeyDefaults,
           ...softwareLicenseDefaults,
+          ...extraDefaults(),
+          ...passwdSso,
           bankName: bank.bankName ?? "",
           accountType: bank.accountType ?? "",
           accountHolderName: bank.accountHolderName ?? "",
@@ -338,8 +340,6 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           swiftBic: bank.swiftBic ?? "",
           iban: bank.iban ?? "",
           branchName: bank.branchName ?? "",
-          ...extraDefaults(),
-          ...passwdSso,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -359,14 +359,15 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           ...identityDefaults,
           ...passkeyDefaults,
           ...bankAccountDefaults,
+          ...extraDefaults(),
+          ...passwdSso,
           softwareName: license.softwareName ?? "",
           licenseKey: license.licenseKey ?? "",
           version: license.version ?? "",
           licensee: license.licensee ?? "",
+          email: license.email ?? "",
           purchaseDate: license.purchaseDate ?? "",
           expirationDate: license.expirationDate ?? "",
-          ...extraDefaults(),
-          ...passwdSso,
         };
         if (entry.title) entries.push(entry);
         continue;

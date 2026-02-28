@@ -83,7 +83,8 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
   }
 
   if (entry.entryType === ENTRY_TYPE.BANK_ACCOUNT) {
-    const accountNumberLast4 = entry.accountNumber ? entry.accountNumber.slice(-4) : null;
+    const acctDigits = entry.accountNumber ? entry.accountNumber.replace(/\D/g, "") : "";
+    const accountNumberLast4 = acctDigits.length >= 4 ? acctDigits.slice(-4) : null;
     return {
       fullBlob: JSON.stringify({
         title: entry.title,
@@ -116,6 +117,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         licenseKey: entry.licenseKey || null,
         version: entry.version || null,
         licensee: entry.licensee || null,
+        email: entry.email || null,
         purchaseDate: entry.purchaseDate || null,
         expirationDate: entry.expirationDate || null,
         notes: entry.notes || null,
