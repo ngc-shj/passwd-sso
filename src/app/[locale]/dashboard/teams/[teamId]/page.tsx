@@ -57,6 +57,8 @@ interface TeamPasswordEntry {
   accountNumberLast4: string | null;
   softwareName: string | null;
   licensee: string | null;
+  requireReprompt: boolean;
+  expiresAt: string | null;
   isFavorite: boolean;
   isArchived: boolean;
   tags: { id: string; name: string; color: string | null }[];
@@ -138,6 +140,8 @@ export default function TeamDashboardPage({
     purchaseDate?: string | null;
     expirationDate?: string | null;
     teamFolderId?: string | null;
+    requireReprompt?: boolean;
+    expiresAt?: string | null;
   } | null>(null);
   const isTeamArchive = activeScope === "archive";
   const isTeamTrash = activeScope === "trash";
@@ -216,6 +220,8 @@ export default function TeamDashboardPage({
               accountNumberLast4: overview.accountNumberLast4 ?? null,
               softwareName: overview.softwareName ?? null,
               licensee: overview.licensee ?? null,
+              requireReprompt: entry.requireReprompt ?? false,
+              expiresAt: entry.expiresAt ?? null,
               isFavorite: entry.isFavorite,
               isArchived: entry.isArchived,
               tags: entry.tags,
@@ -242,6 +248,8 @@ export default function TeamDashboardPage({
               accountNumberLast4: null,
               softwareName: null,
               licensee: null,
+              requireReprompt: (entry.requireReprompt as boolean) ?? false,
+              expiresAt: (entry.expiresAt as string | null) ?? null,
               isFavorite: entry.isFavorite as boolean,
               isArchived: entry.isArchived as boolean,
               tags: (entry.tags ?? []) as TeamPasswordEntry["tags"],
@@ -450,6 +458,8 @@ export default function TeamDashboardPage({
         purchaseDate: blob.purchaseDate as string | null | undefined,
         expirationDate: blob.expirationDate as string | null | undefined,
         teamFolderId: (raw.teamFolderId as string) ?? null,
+        requireReprompt: raw.requireReprompt ?? false,
+        expiresAt: raw.expiresAt ?? null,
       });
       setFormOpen(true);
     } catch {
@@ -734,6 +744,8 @@ export default function TeamDashboardPage({
                 accountNumberLast4={entry.accountNumberLast4}
                 softwareName={entry.softwareName}
                 licensee={entry.licensee}
+                requireReprompt={entry.requireReprompt}
+                expiresAt={entry.expiresAt}
                 tags={entry.tags}
                 isFavorite={entry.isFavorite}
                 isArchived={entry.isArchived}

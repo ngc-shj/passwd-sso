@@ -209,4 +209,24 @@
 ### R3-6（低）: `team-password-form-submit-args.test.ts` pass-through未検証
 
 ## 対応状況
-（修正後に追記）
+
+- **R3-1** makeEntryForGET デフォルト追加 — `requireReprompt: false, expiresAt: null` をデフォルト値に追加（route.test.ts）
+- **R3-2** Team GETリスト レスポンステスト追加 — `requireReprompt: true, expiresAt` を含むモックでリストレスポンステスト追加（route.test.ts）
+- **R3-3** Team PUT expiresAt:null クリアテスト追加 — メタデータのみ更新のテストケース追加（[id]/route.test.ts）
+- **R3-4** Team POST/PUT 不正フォーマットバリデーションテスト追加 — `expiresAt: "not-a-date"` で 400 レスポンステスト（route.test.ts, [id]/route.test.ts）
+- **R3-5** テストフィクスチャの型整合性修正 — 6ファイルの values/setters mock に新フィールド追加
+- **R3-6** submit-args pass-through テスト追加 — `requireReprompt: true, expiresAt` のパススルー検証追加
+
+コミット: cfaab25 "review: improve test coverage for requireReprompt/expiresAt"
+
+---
+
+## レビュー4回目（最終）
+
+日時: 2026-02-28T18:00:00+09:00
+
+機能観点: **指摘なし。**
+セキュリティ観点: **指摘なし。**
+テスト観点: **指摘なし。**
+
+全3観点クリア。レビュー完了。

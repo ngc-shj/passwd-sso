@@ -290,11 +290,11 @@ export function ShareEntryView({
       {renderField(t("address"), data.address)}
       {renderField(t("phone"), data.phone)}
       {renderField(t("email"), data.email)}
-      {renderField(t("dateOfBirth"), data.dateOfBirth ? formatDate(data.dateOfBirth, locale) : null)}
+      {renderField(t("dateOfBirth"), typeof data.dateOfBirth === "string" && data.dateOfBirth ? formatDate(data.dateOfBirth, locale) : null)}
       {renderField(t("nationality"), data.nationality)}
       {renderSensitiveField(t("idNumber"), data.idNumber, "idNumber")}
-      {renderField(t("issueDate"), data.issueDate ? formatDate(data.issueDate, locale) : null)}
-      {renderField(t("expiryDate"), data.expiryDate ? formatDate(data.expiryDate, locale) : null)}
+      {renderField(t("issueDate"), typeof data.issueDate === "string" && data.issueDate ? formatDate(data.issueDate, locale) : null)}
+      {renderField(t("expiryDate"), typeof data.expiryDate === "string" && data.expiryDate ? formatDate(data.expiryDate, locale) : null)}
       {renderNotes(data.notes)}
     </>
   );
@@ -305,7 +305,7 @@ export function ShareEntryView({
       {renderField(t("relyingPartyName"), data.relyingPartyName)}
       {renderField(t("username"), data.username)}
       {renderSensitiveField(t("credentialId"), data.credentialId, "credentialId")}
-      {renderField(t("creationDate"), data.creationDate ? formatDate(data.creationDate, locale) : null)}
+      {renderField(t("creationDate"), typeof data.creationDate === "string" && data.creationDate ? formatDate(data.creationDate, locale) : null)}
       {renderField(t("deviceInfo"), data.deviceInfo)}
       {renderNotes(data.notes)}
     </>
@@ -332,8 +332,8 @@ export function ShareEntryView({
       {renderField(t("version"), data.version)}
       {renderField(t("licensee"), data.licensee)}
       {renderField(t("email"), data.email)}
-      {renderField(t("purchaseDate"), data.purchaseDate ? formatDate(data.purchaseDate, locale) : null)}
-      {renderField(t("expirationDate"), data.expirationDate ? formatDate(data.expirationDate, locale) : null)}
+      {renderField(t("purchaseDate"), typeof data.purchaseDate === "string" && data.purchaseDate ? formatDate(data.purchaseDate, locale) : null)}
+      {renderField(t("expirationDate"), typeof data.expirationDate === "string" && data.expirationDate ? formatDate(data.expirationDate, locale) : null)}
       {renderNotes(data.notes)}
     </>
   );
