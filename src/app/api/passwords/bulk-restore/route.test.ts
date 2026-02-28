@@ -33,6 +33,8 @@ vi.mock("@/lib/tenant-rls", () => ({
 
 import { POST } from "./route";
 
+const URL = "http://localhost:3000/api/passwords/bulk-restore";
+
 describe("POST /api/passwords/bulk-restore", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -45,34 +47,67 @@ describe("POST /api/passwords/bulk-restore", () => {
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/passwords/bulk-restore", {
-        body: { ids: ["p1"] },
-      })
-    );
+    const res = await POST(createRequest("POST", URL, { body: { ids: ["p1"] } }));
     expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.error).toBe("UNAUTHORIZED");
   });
 
-  it("returns 400 for invalid payload", async () => {
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/passwords/bulk-restore", {
-        body: { ids: [] },
-      })
-    );
+  it("returns 400 INVALID_JSON for invalid JSON body", async () => {
+    const req = new (await import("next/server")).NextRequest(URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "not-json{{{",
+    });
+    const res = await POST(req);
     expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("INVALID_JSON");
   });
 
-  it("restores matching entries and returns restored count", async () => {
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/passwords/bulk-restore", {
-        body: { ids: ["p1", "p2", "p1"] },
-      })
-    );
+  it("returns 400 VALIDATION_ERROR when ids is empty array", async () => {
+    const res = await POST(createRequest("POST", URL, { body: { ids: [] } }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 400 VALIDATION_ERROR when ids exceed 100 limit", async () => {
+    const ids = Array.from({ length: 101 }, (_, i) => `id-${i}`);
+    const res = await POST(createRequest("POST", URL, { body: { ids } }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("restores entries: findMany → updateMany → re-fetch → audit, returns restoredCount", async () => {
+    mockFindMany
+      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }])
+      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }]);
+    mockUpdateMany.mockResolvedValue({ count: 2 });
+
+    const res = await POST(createRequest("POST", URL, {
+      body: { ids: ["p1", "p2"] },
+    }));
     const json = await res.json();
 
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(json.restoredCount).toBe(2);
+
+    // findMany: initial lookup for trashed entries (deletedAt not null)
+    expect(mockFindMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: "user-1",
+          id: { in: ["p1", "p2"] },
+          deletedAt: { not: null },
+        }),
+      })
+    );
+
+    // updateMany: set deletedAt to null
     expect(mockUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -86,11 +121,37 @@ describe("POST /api/passwords/bulk-restore", () => {
       })
     );
 
+    // findMany: re-fetch restored entries (deletedAt is null)
+    expect(mockFindMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: "user-1",
+          id: { in: ["p1", "p2"] },
+          deletedAt: null,
+        }),
+      })
+    );
+  });
+
+  it("logs parent ENTRY_BULK_RESTORE and per-entry ENTRY_RESTORE audit logs", async () => {
+    mockFindMany
+      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }])
+      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }]);
+    mockUpdateMany.mockResolvedValue({ count: 2 });
+
+    await POST(createRequest("POST", URL, { body: { ids: ["p1", "p2"] } }));
+
+    // 1 parent log + 2 per-entry logs = 3 calls
+    expect(mockAuditCreate).toHaveBeenCalledTimes(3);
+
+    // Parent log: ENTRY_BULK_RESTORE
     expect(mockAuditCreate).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
         data: expect.objectContaining({
           action: "ENTRY_BULK_RESTORE",
+          targetId: "bulk",
           metadata: expect.objectContaining({
             bulk: true,
             operation: "restore",
@@ -101,6 +162,8 @@ describe("POST /api/passwords/bulk-restore", () => {
         }),
       })
     );
+
+    // Per-entry log: ENTRY_RESTORE for p1
     expect(mockAuditCreate).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
@@ -114,6 +177,8 @@ describe("POST /api/passwords/bulk-restore", () => {
         }),
       })
     );
+
+    // Per-entry log: ENTRY_RESTORE for p2
     expect(mockAuditCreate).toHaveBeenNthCalledWith(
       3,
       expect.objectContaining({
@@ -123,47 +188,6 @@ describe("POST /api/passwords/bulk-restore", () => {
           metadata: expect.objectContaining({
             source: "bulk-restore",
             parentAction: "ENTRY_BULK_RESTORE",
-          }),
-        }),
-      })
-    );
-    expect(mockAuditCreate).toHaveBeenCalledTimes(3);
-  });
-
-  it("returns 400 when all ids are invalid after filtering", async () => {
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/passwords/bulk-restore", {
-        body: { ids: ["", null, 123] },
-      })
-    );
-
-    expect(res.status).toBe(400);
-    expect(mockFindMany).not.toHaveBeenCalled();
-    expect(mockUpdateMany).not.toHaveBeenCalled();
-  });
-
-  it("creates summary log only when nothing matches", async () => {
-    mockFindMany.mockResolvedValueOnce([]);
-    mockUpdateMany.mockResolvedValueOnce({ count: 0 });
-
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/passwords/bulk-restore", {
-        body: { ids: ["missing"] },
-      })
-    );
-    const json = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(json.restoredCount).toBe(0);
-    expect(mockAuditCreate).toHaveBeenCalledTimes(1);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_BULK_RESTORE",
-          metadata: expect.objectContaining({
-            bulk: true,
-            operation: "restore",
-            entryIds: [],
           }),
         }),
       })

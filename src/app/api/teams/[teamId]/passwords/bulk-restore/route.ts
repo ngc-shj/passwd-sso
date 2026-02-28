@@ -2,20 +2,35 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 
 interface BulkRestoreBody {
   ids: string[];
 }
 
-// POST /api/passwords/bulk-restore - Restore multiple entries from trash
-async function handlePOST(req: NextRequest) {
+// POST /api/teams/[teamId]/passwords/bulk-restore - Restore multiple team entries from trash
+async function handlePOST(
+  req: NextRequest,
+  { params }: { params: Promise<{ teamId: string }> },
+) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
+
+  const { teamId } = await params;
+
+  try {
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE);
+  } catch (e) {
+    if (e instanceof TeamAuthError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
   }
 
   let body: unknown;
@@ -41,9 +56,9 @@ async function handlePOST(req: NextRequest) {
   }
 
   const entriesToRestore = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.findMany({
+    prisma.teamPasswordEntry.findMany({
       where: {
-        userId: session.user.id,
+        teamId,
         id: { in: ids },
         deletedAt: { not: null },
       },
@@ -53,9 +68,9 @@ async function handlePOST(req: NextRequest) {
   const entryIds = entriesToRestore.map((entry) => entry.id);
 
   const result = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.updateMany({
+    prisma.teamPasswordEntry.updateMany({
       where: {
-        userId: session.user.id,
+        teamId,
         id: { in: entryIds },
         deletedAt: { not: null },
       },
@@ -67,9 +82,9 @@ async function handlePOST(req: NextRequest) {
 
   // Re-fetch to get accurate list of actually restored entries
   const restoredEntries = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.findMany({
+    prisma.teamPasswordEntry.findMany({
       where: {
-        userId: session.user.id,
+        teamId,
         id: { in: entryIds },
         deletedAt: null,
       },
@@ -81,10 +96,11 @@ async function handlePOST(req: NextRequest) {
   const requestMeta = extractRequestMeta(req);
 
   logAudit({
-    scope: AUDIT_SCOPE.PERSONAL,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.ENTRY_BULK_RESTORE,
     userId: session.user.id,
-    targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+    teamId,
+    targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: "bulk",
     metadata: {
       bulk: true,
@@ -98,10 +114,11 @@ async function handlePOST(req: NextRequest) {
 
   for (const entryId of restoredEntryIds) {
     logAudit({
-      scope: AUDIT_SCOPE.PERSONAL,
+      scope: AUDIT_SCOPE.TEAM,
       action: AUDIT_ACTION.ENTRY_RESTORE,
       userId: session.user.id,
-      targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+      teamId,
+      targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
       targetId: entryId,
       metadata: {
         source: "bulk-restore",

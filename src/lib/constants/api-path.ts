@@ -111,4 +111,7 @@ export const apiPath = {
   teamScimTokens: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/scim-tokens`,
   teamScimTokenById: (teamId: string, tokenId: string) =>
     `${API_PATH.TEAMS}/${teamId}/scim-tokens/${tokenId}`,
+  teamPasswordsBulkTrash: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-trash`,
+  teamPasswordsBulkArchive: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-archive`,
+  teamPasswordsBulkRestore: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-restore`,
 } as const;

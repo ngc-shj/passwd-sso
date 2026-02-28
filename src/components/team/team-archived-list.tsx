@@ -1,11 +1,29 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
 import { useTranslations } from "next-intl";
 import { PasswordCard } from "@/components/passwords/password-card";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
+import {
+  reconcileSelectedIds,
+  toggleSelectAllIds,
+  toggleSelectOneId,
+} from "@/components/passwords/password-list-selection";
 import { TeamPasswordForm } from "@/components/team/team-password-form";
-import { Building2 } from "lucide-react";
+import { Building2, Loader2, RotateCcw, Trash2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
@@ -41,20 +59,33 @@ interface TeamArchivedEntry {
   updatedAt: string;
 }
 
+export interface TeamArchivedListHandle {
+  toggleSelectAll: (checked: boolean) => void;
+}
+
 interface TeamArchivedListProps {
   teamId?: string;
   searchQuery: string;
   refreshKey: number;
   sortBy?: EntrySortOption;
+  selectionMode?: boolean;
+  onSelectedCountChange?: (count: number, allSelected: boolean) => void;
 }
 
-export function TeamArchivedList({
-  teamId: scopedTeamId,
-  searchQuery,
-  refreshKey,
-  sortBy = "updatedAt",
-}: TeamArchivedListProps) {
+export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedListProps>(
+  function TeamArchivedList(
+    {
+      teamId: scopedTeamId,
+      searchQuery,
+      refreshKey,
+      sortBy = "updatedAt",
+      selectionMode,
+      onSelectedCountChange,
+    },
+    ref,
+  ) {
   const t = useTranslations("Team");
+  const tl = useTranslations("PasswordList");
   const { getTeamEncryptionKey } = useTeamVault();
   const [entries, setEntries] = useState<TeamArchivedEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,6 +103,12 @@ export function TeamArchivedList({
     customFields?: EntryCustomField[];
     totp?: EntryTotp | null;
   } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkAction, setBulkAction] = useState<"unarchive" | "trash">("unarchive");
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+
+  const effectiveSelectionMode = scopedTeamId ? (selectionMode ?? false) : false;
 
   const fetchArchived = useCallback(async () => {
     setLoading(true);
@@ -160,6 +197,109 @@ export function TeamArchivedList({
   useEffect(() => {
     fetchArchived();
   }, [fetchArchived, refreshKey]);
+
+  const filtered = entries.filter((p) => {
+    if (scopedTeamId && p.teamId !== scopedTeamId) return false;
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      p.title.toLowerCase().includes(q) ||
+      p.username?.toLowerCase().includes(q) ||
+      p.urlHost?.toLowerCase().includes(q) ||
+      p.snippet?.toLowerCase().includes(q) ||
+      p.fullName?.toLowerCase().includes(q) ||
+      p.idNumberLast4?.includes(q) ||
+      p.brand?.toLowerCase().includes(q) ||
+      p.lastFour?.includes(q) ||
+      p.cardholderName?.toLowerCase().includes(q) ||
+      p.teamName.toLowerCase().includes(q)
+    );
+  });
+
+  const sortedFiltered = [...filtered].sort((a, b) =>
+    compareEntriesWithFavorite(a, b, sortBy)
+  );
+
+  // Reconcile stale selectedIds when entries change
+  useEffect(() => {
+    setSelectedIds((prev) =>
+      reconcileSelectedIds(prev, entries.map((e) => e.id))
+    );
+  }, [entries]);
+
+  // Reset selection when leaving selection mode
+  useEffect(() => {
+    if (!effectiveSelectionMode) setSelectedIds(new Set());
+  }, [effectiveSelectionMode]);
+
+  // Sync selected count to parent
+  useEffect(() => {
+    const allSel = sortedFiltered.length > 0 && selectedIds.size === sortedFiltered.length;
+    onSelectedCountChange?.(selectedIds.size, allSel);
+  }, [selectedIds.size, sortedFiltered.length, onSelectedCountChange]);
+
+  // Expose toggleSelectAll to parent
+  useImperativeHandle(ref, () => ({
+    toggleSelectAll: (checked: boolean) => {
+      setSelectedIds(toggleSelectAllIds(sortedFiltered.map((e) => e.id), checked));
+    },
+  }));
+
+  const toggleSelectOne = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => toggleSelectOneId(prev, id, checked));
+  };
+
+  const handleBulkUnarchive = async () => {
+    if (selectedIds.size === 0 || !scopedTeamId) return;
+    setBulkProcessing(true);
+    try {
+      const res = await fetch(apiPath.teamPasswordsBulkArchive(scopedTeamId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedIds), operation: "unarchive" }),
+      });
+      if (!res.ok) throw new Error("bulk unarchive failed");
+      const json = await res.json();
+      toast.success(
+        tl("bulkUnarchived", {
+          count: json.processedCount ?? json.unarchivedCount ?? selectedIds.size,
+        })
+      );
+      setBulkDialogOpen(false);
+      setSelectedIds(new Set());
+      fetchArchived();
+    } catch {
+      toast.error(tl("bulkUnarchiveFailed"));
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
+  const handleBulkTrash = async () => {
+    if (selectedIds.size === 0 || !scopedTeamId) return;
+    setBulkProcessing(true);
+    try {
+      const res = await fetch(apiPath.teamPasswordsBulkTrash(scopedTeamId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+      });
+      if (!res.ok) throw new Error("bulk trash failed");
+      const json = await res.json();
+      toast.success(
+        tl("bulkMovedToTrash", {
+          count: json.movedCount ?? selectedIds.size,
+        })
+      );
+      setBulkDialogOpen(false);
+      setSelectedIds(new Set());
+      fetchArchived();
+    } catch {
+      toast.error(tl("bulkMoveFailed"));
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleToggleFavorite = async (id: string, _current: boolean) => {
@@ -324,28 +464,6 @@ export function TeamArchivedList({
     [decryptFullBlob]
   );
 
-  const filtered = entries.filter((p) => {
-    if (scopedTeamId && p.teamId !== scopedTeamId) return false;
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      p.title.toLowerCase().includes(q) ||
-      p.username?.toLowerCase().includes(q) ||
-      p.urlHost?.toLowerCase().includes(q) ||
-      p.snippet?.toLowerCase().includes(q) ||
-      p.fullName?.toLowerCase().includes(q) ||
-      p.idNumberLast4?.includes(q) ||
-      p.brand?.toLowerCase().includes(q) ||
-      p.lastFour?.includes(q) ||
-      p.cardholderName?.toLowerCase().includes(q) ||
-      p.teamName.toLowerCase().includes(q)
-    );
-  });
-
-  const sortedFiltered = [...filtered].sort((a, b) =>
-    compareEntriesWithFavorite(a, b, sortBy)
-  );
-
   if (loading || sortedFiltered.length === 0) return null;
 
   return (
@@ -359,45 +477,163 @@ export function TeamArchivedList({
         </div>
       )}
       <div className="space-y-2">
-        {sortedFiltered.map((entry) => (
-          <PasswordCard
-            key={entry.id}
-            id={entry.id}
-            entryType={entry.entryType}
-            title={entry.title}
-            username={entry.username}
-            urlHost={entry.urlHost}
-            snippet={entry.snippet}
-            brand={entry.brand}
-            lastFour={entry.lastFour}
-            cardholderName={entry.cardholderName}
-            fullName={entry.fullName}
-            idNumberLast4={entry.idNumberLast4}
-            tags={entry.tags}
-            isFavorite={entry.isFavorite}
-            isArchived={entry.isArchived}
-            expanded={expandedId === entry.id}
-            onToggleFavorite={handleToggleFavorite}
-            onToggleArchive={handleToggleArchive}
-            onDelete={handleDelete}
-            onToggleExpand={(id) =>
-              setExpandedId((prev) => (prev === id ? null : id))
-            }
-            onRefresh={() => {
-              fetchArchived();
-              setExpandedId(null);
-            }}
-            getPassword={createPasswordFetcher(entry)}
-            getDetail={createDetailFetcher(entry)}
-            getUrl={createUrlFetcher(entry)}
-            onEditClick={() => handleEdit(entry.id)}
-            canEdit={entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN || entry.role === TEAM_ROLE.MEMBER}
-            canDelete={entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN}
-            createdBy={entry.teamName}
-            teamId={entry.teamId}
-          />
-        ))}
+        {sortedFiltered.map((entry) =>
+          effectiveSelectionMode ? (
+            <div key={entry.id} className="flex items-start gap-2">
+              <Checkbox
+                className="mt-4"
+                checked={selectedIds.has(entry.id)}
+                onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
+                aria-label={tl("selectEntry", { title: entry.title })}
+              />
+              <div className="flex-1 min-w-0">
+                <PasswordCard
+                  id={entry.id}
+                  entryType={entry.entryType}
+                  title={entry.title}
+                  username={entry.username}
+                  urlHost={entry.urlHost}
+                  snippet={entry.snippet}
+                  brand={entry.brand}
+                  lastFour={entry.lastFour}
+                  cardholderName={entry.cardholderName}
+                  fullName={entry.fullName}
+                  idNumberLast4={entry.idNumberLast4}
+                  tags={entry.tags}
+                  isFavorite={entry.isFavorite}
+                  isArchived={entry.isArchived}
+                  expanded={expandedId === entry.id}
+                  onToggleFavorite={handleToggleFavorite}
+                  onToggleArchive={handleToggleArchive}
+                  onDelete={handleDelete}
+                  onToggleExpand={(id) =>
+                    setExpandedId((prev) => (prev === id ? null : id))
+                  }
+                  onRefresh={() => {
+                    fetchArchived();
+                    setExpandedId(null);
+                  }}
+                  getPassword={createPasswordFetcher(entry)}
+                  getDetail={createDetailFetcher(entry)}
+                  getUrl={createUrlFetcher(entry)}
+                  onEditClick={() => handleEdit(entry.id)}
+                  canEdit={entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN || entry.role === TEAM_ROLE.MEMBER}
+                  canDelete={entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN}
+                  createdBy={entry.teamName}
+                  teamId={entry.teamId}
+                />
+              </div>
+            </div>
+          ) : (
+            <PasswordCard
+              key={entry.id}
+              id={entry.id}
+              entryType={entry.entryType}
+              title={entry.title}
+              username={entry.username}
+              urlHost={entry.urlHost}
+              snippet={entry.snippet}
+              brand={entry.brand}
+              lastFour={entry.lastFour}
+              cardholderName={entry.cardholderName}
+              fullName={entry.fullName}
+              idNumberLast4={entry.idNumberLast4}
+              tags={entry.tags}
+              isFavorite={entry.isFavorite}
+              isArchived={entry.isArchived}
+              expanded={expandedId === entry.id}
+              onToggleFavorite={handleToggleFavorite}
+              onToggleArchive={handleToggleArchive}
+              onDelete={handleDelete}
+              onToggleExpand={(id) =>
+                setExpandedId((prev) => (prev === id ? null : id))
+              }
+              onRefresh={() => {
+                fetchArchived();
+                setExpandedId(null);
+              }}
+              getPassword={createPasswordFetcher(entry)}
+              getDetail={createDetailFetcher(entry)}
+              getUrl={createUrlFetcher(entry)}
+              onEditClick={() => handleEdit(entry.id)}
+              canEdit={entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN || entry.role === TEAM_ROLE.MEMBER}
+              canDelete={entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN}
+              createdBy={entry.teamName}
+              teamId={entry.teamId}
+            />
+          )
+        )}
       </div>
+
+      {effectiveSelectionMode && selectedIds.size > 0 && (
+        <div className="fixed bottom-4 inset-x-0 z-40 flex justify-center px-4 md:pl-60 pointer-events-none">
+          <div className="pointer-events-auto w-full max-w-4xl flex items-center justify-end rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setBulkAction("unarchive");
+                  setBulkDialogOpen(true);
+                }}
+              >
+                <RotateCcw className="mr-1 h-4 w-4" />
+                {tl("moveSelectedToUnarchive")}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  setBulkAction("trash");
+                  setBulkDialogOpen(true);
+                }}
+              >
+                <Trash2 className="mr-1 h-4 w-4" />
+                {tl("moveSelectedToTrash")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <AlertDialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {bulkAction === "unarchive"
+                ? tl("moveSelectedToUnarchive")
+                : tl("moveSelectedToTrash")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {bulkAction === "unarchive"
+                ? tl("bulkUnarchiveConfirm", { count: selectedIds.size })
+                : tl("bulkMoveConfirm", { count: selectedIds.size })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkProcessing}>
+              {tl("cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (bulkAction === "unarchive") {
+                  void handleBulkUnarchive();
+                } else {
+                  void handleBulkTrash();
+                }
+              }}
+              disabled={bulkProcessing}
+            >
+              {bulkProcessing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                tl("confirm")
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {editTeamId && (
         <TeamPasswordForm
@@ -413,4 +649,4 @@ export function TeamArchivedList({
       )}
     </div>
   );
-}
+});

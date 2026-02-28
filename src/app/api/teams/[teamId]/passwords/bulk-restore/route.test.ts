@@ -1,0 +1,186 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
+
+const { mockAuth, mockPrismaTeamPasswordEntry, mockRequireTeamPermission, TeamAuthError, mockWithUserTenantRls, mockLogAudit } = vi.hoisted(() => {
+  class _TeamAuthError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = "TeamAuthError";
+      this.status = status;
+    }
+  }
+  return {
+    mockAuth: vi.fn(),
+    mockPrismaTeamPasswordEntry: {
+      findMany: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    mockRequireTeamPermission: vi.fn(),
+    TeamAuthError: _TeamAuthError,
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockLogAudit: vi.fn(),
+  };
+});
+
+vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/prisma", () => ({
+  prisma: { teamPasswordEntry: mockPrismaTeamPasswordEntry, auditLog: { create: vi.fn().mockResolvedValue({}) } },
+}));
+vi.mock("@/lib/team-auth", () => ({
+  requireTeamPermission: mockRequireTeamPermission,
+  TeamAuthError,
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/audit", () => ({
+  logAudit: mockLogAudit,
+  extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
+}));
+
+import { POST } from "./route";
+import { TEAM_ROLE, AUDIT_SCOPE } from "@/lib/constants";
+
+const TEAM_ID = "team-123";
+const BASE_URL = `http://localhost:3000/api/teams/${TEAM_ID}/passwords/bulk-restore`;
+
+describe("POST /api/teams/[teamId]/passwords/bulk-restore", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
+    mockPrismaTeamPasswordEntry.updateMany.mockResolvedValue({ count: 2 });
+  });
+
+  it("returns 401 when unauthenticated", async () => {
+    mockAuth.mockResolvedValue(null);
+    const res = await POST(
+      createRequest("POST", BASE_URL, { body: { ids: ["p1"] } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns TeamAuthError status when permission denied", async () => {
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
+    const res = await POST(
+      createRequest("POST", BASE_URL, { body: { ids: ["p1"] } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("INSUFFICIENT_PERMISSION");
+  });
+
+  it("rethrows non-TeamAuthError", async () => {
+    mockRequireTeamPermission.mockRejectedValue(new Error("unexpected"));
+    await expect(
+      POST(
+        createRequest("POST", BASE_URL, { body: { ids: ["p1"] } }),
+        createParams({ teamId: TEAM_ID }),
+      ),
+    ).rejects.toThrow("unexpected");
+  });
+
+  it("returns 400 for invalid JSON", async () => {
+    const req = new (await import("next/server")).NextRequest(BASE_URL, {
+      method: "POST",
+      body: "not json",
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req, createParams({ teamId: TEAM_ID }));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for empty ids array", async () => {
+    const res = await POST(
+      createRequest("POST", BASE_URL, { body: { ids: [] } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when ids exceed max limit", async () => {
+    const ids = Array.from({ length: 101 }, (_, i) => `id-${i}`);
+    const res = await POST(
+      createRequest("POST", BASE_URL, { body: { ids } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("restores matching entries and returns restored count", async () => {
+    const res = await POST(
+      createRequest("POST", BASE_URL, { body: { ids: ["p1", "p2", "p1"] } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(json.restoredCount).toBe(2);
+    expect(mockPrismaTeamPasswordEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          teamId: TEAM_ID,
+          id: { in: ["p1", "p2"] },
+          deletedAt: { not: null },
+        }),
+        data: expect.objectContaining({
+          deletedAt: null,
+        }),
+      }),
+    );
+  });
+
+  it("logs audit with scope=TEAM and teamId", async () => {
+    await POST(
+      createRequest("POST", BASE_URL, { body: { ids: ["p1", "p2"] } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: AUDIT_SCOPE.TEAM,
+        action: "ENTRY_BULK_RESTORE",
+        teamId: TEAM_ID,
+        userId: "test-user-id",
+        metadata: expect.objectContaining({
+          bulk: true,
+          operation: "restore",
+          requestedCount: 2,
+          restoredCount: 2,
+          entryIds: ["p1", "p2"],
+        }),
+      }),
+    );
+
+    // Per-entry audit logs
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: AUDIT_SCOPE.TEAM,
+        action: "ENTRY_RESTORE",
+        teamId: TEAM_ID,
+        targetId: "p1",
+        metadata: expect.objectContaining({
+          source: "bulk-restore",
+          parentAction: "ENTRY_BULK_RESTORE",
+        }),
+      }),
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: AUDIT_SCOPE.TEAM,
+        action: "ENTRY_RESTORE",
+        teamId: TEAM_ID,
+        targetId: "p2",
+        metadata: expect.objectContaining({
+          source: "bulk-restore",
+          parentAction: "ENTRY_BULK_RESTORE",
+        }),
+      }),
+    );
+  });
+});
