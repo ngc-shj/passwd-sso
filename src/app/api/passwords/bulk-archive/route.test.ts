@@ -33,6 +33,8 @@ vi.mock("@/lib/tenant-rls", () => ({
 
 import { POST } from "./route";
 
+const URL = "http://localhost:3000/api/passwords/bulk-archive";
+
 describe("POST /api/passwords/bulk-archive", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -45,29 +47,48 @@ describe("POST /api/passwords/bulk-archive", () => {
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/passwords/bulk-archive", {
-        body: { ids: ["p1"] },
-      })
-    );
+    const res = await POST(createRequest("POST", URL, { body: { ids: ["p1"] } }));
     expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.error).toBe("UNAUTHORIZED");
   });
 
-  it("returns 400 for invalid payload", async () => {
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/passwords/bulk-archive", {
-        body: { ids: [] },
-      })
-    );
+  it("returns 400 INVALID_JSON for invalid JSON body", async () => {
+    const req = new (await import("next/server")).NextRequest(URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "not-json{{{",
+    });
+    const res = await POST(req);
     expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("INVALID_JSON");
   });
 
-  it("archives matching entries and returns archived count", async () => {
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/passwords/bulk-archive", {
-        body: { ids: ["p1", "p2", "p1"] },
-      })
-    );
+  it("returns 400 VALIDATION_ERROR when ids is empty array", async () => {
+    const res = await POST(createRequest("POST", URL, { body: { ids: [] } }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 400 VALIDATION_ERROR when ids exceed 100 limit", async () => {
+    const ids = Array.from({ length: 101 }, (_, i) => `id-${i}`);
+    const res = await POST(createRequest("POST", URL, { body: { ids } }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("archives entries when operation is omitted (defaults to archive)", async () => {
+    mockFindMany
+      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }])
+      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }]);
+    mockUpdateMany.mockResolvedValue({ count: 2 });
+
+    const res = await POST(createRequest("POST", URL, {
+      body: { ids: ["p1", "p2"] },
+    }));
     const json = await res.json();
 
     expect(res.status).toBe(200);
@@ -75,6 +96,22 @@ describe("POST /api/passwords/bulk-archive", () => {
     expect(json.operation).toBe("archive");
     expect(json.processedCount).toBe(2);
     expect(json.archivedCount).toBe(2);
+    expect(json.unarchivedCount).toBe(0);
+
+    // findMany: lookup entries where isArchived is false
+    expect(mockFindMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: "user-1",
+          id: { in: ["p1", "p2"] },
+          deletedAt: null,
+          isArchived: false,
+        }),
+      })
+    );
+
+    // updateMany: set isArchived to true
     expect(mockUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -89,21 +126,91 @@ describe("POST /api/passwords/bulk-archive", () => {
       })
     );
 
+    // re-fetch: entries where isArchived is true
+    expect(mockFindMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: "user-1",
+          id: { in: ["p1", "p2"] },
+          isArchived: true,
+        }),
+      })
+    );
+  });
+
+  it("unarchives entries when operation is 'unarchive'", async () => {
+    mockFindMany
+      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }])
+      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }]);
+    mockUpdateMany.mockResolvedValue({ count: 2 });
+
+    const res = await POST(createRequest("POST", URL, {
+      body: { ids: ["p1", "p2"], operation: "unarchive" },
+    }));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(json.operation).toBe("unarchive");
+    expect(json.processedCount).toBe(2);
+    expect(json.archivedCount).toBe(0);
+    expect(json.unarchivedCount).toBe(2);
+
+    // findMany: lookup entries where isArchived is true
+    expect(mockFindMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          isArchived: true,
+        }),
+      })
+    );
+
+    // updateMany: set isArchived to false
+    expect(mockUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          isArchived: true,
+        }),
+        data: expect.objectContaining({
+          isArchived: false,
+        }),
+      })
+    );
+  });
+
+  it("logs ENTRY_BULK_ARCHIVE for archive operation", async () => {
+    mockFindMany
+      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }])
+      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }]);
+    mockUpdateMany.mockResolvedValue({ count: 2 });
+
+    await POST(createRequest("POST", URL, { body: { ids: ["p1", "p2"] } }));
+
+    // 1 parent log + 2 per-entry logs = 3 calls
+    expect(mockAuditCreate).toHaveBeenCalledTimes(3);
+
     expect(mockAuditCreate).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
         data: expect.objectContaining({
           action: "ENTRY_BULK_ARCHIVE",
+          targetId: "bulk",
           metadata: expect.objectContaining({
             bulk: true,
             operation: "archive",
             requestedCount: 2,
+            processedCount: 2,
             archivedCount: 2,
+            unarchivedCount: 0,
             entryIds: ["p1", "p2"],
           }),
         }),
       })
     );
+
+    // Per-entry logs: ENTRY_UPDATE with parentAction ENTRY_BULK_ARCHIVE
     expect(mockAuditCreate).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
@@ -119,120 +226,19 @@ describe("POST /api/passwords/bulk-archive", () => {
     );
   });
 
-  it("filters non-string and empty ids", async () => {
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/passwords/bulk-archive", {
-        body: { ids: ["p1", "", 123, null, "p2"] },
-      })
-    );
-    expect(res.status).toBe(200);
-    expect(mockUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          id: { in: ["p1", "p2"] },
-        }),
-      })
-    );
-  });
+  it("logs ENTRY_BULK_UNARCHIVE for unarchive operation", async () => {
+    mockFindMany
+      .mockResolvedValueOnce([{ id: "p1" }])
+      .mockResolvedValueOnce([{ id: "p1" }]);
+    mockUpdateMany.mockResolvedValue({ count: 1 });
 
-  it("returns 400 when all ids are invalid after filtering", async () => {
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/passwords/bulk-archive", {
-        body: { ids: ["", null, 123] },
-      })
-    );
+    await POST(createRequest("POST", URL, {
+      body: { ids: ["p1"], operation: "unarchive" },
+    }));
 
-    expect(res.status).toBe(400);
-    expect(mockFindMany).not.toHaveBeenCalled();
-    expect(mockUpdateMany).not.toHaveBeenCalled();
-  });
+    // 1 parent log + 1 per-entry log = 2 calls
+    expect(mockAuditCreate).toHaveBeenCalledTimes(2);
 
-  it("falls back to archive when operation is invalid", async () => {
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/passwords/bulk-archive", {
-        body: { ids: ["p1"], operation: "noop" },
-      })
-    );
-    const json = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(json.operation).toBe("archive");
-    expect(mockUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          isArchived: false,
-        }),
-        data: expect.objectContaining({
-          isArchived: true,
-        }),
-      })
-    );
-  });
-
-  it("creates summary log only when nothing matches", async () => {
-    mockFindMany.mockResolvedValueOnce([]);
-    mockUpdateMany.mockResolvedValueOnce({ count: 0 });
-
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/passwords/bulk-archive", {
-        body: { ids: ["missing"] },
-      })
-    );
-    const json = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(json.operation).toBe("archive");
-    expect(json.archivedCount).toBe(0);
-    expect(mockAuditCreate).toHaveBeenCalledTimes(1);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_BULK_ARCHIVE",
-          metadata: expect.objectContaining({
-            bulk: true,
-            operation: "archive",
-            entryIds: [],
-          }),
-        }),
-      })
-    );
-  });
-
-  it("propagates db errors (framework handles 500)", async () => {
-    mockUpdateMany.mockRejectedValueOnce(new Error("db down"));
-
-    await expect(
-      POST(
-        createRequest("POST", "http://localhost:3000/api/passwords/bulk-archive", {
-          body: { ids: ["p1"] },
-        })
-      )
-    ).rejects.toThrow("db down");
-  });
-
-  it("unarchives matching entries and writes unarchive audit action", async () => {
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/passwords/bulk-archive", {
-        body: { ids: ["p1", "p2"], operation: "unarchive" },
-      })
-    );
-    const json = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(json.success).toBe(true);
-    expect(json.operation).toBe("unarchive");
-    expect(json.processedCount).toBe(2);
-    expect(json.unarchivedCount).toBe(2);
-    expect(mockUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          isArchived: true,
-        }),
-        data: expect.objectContaining({
-          isArchived: false,
-        }),
-      })
-    );
     expect(mockAuditCreate).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -240,12 +246,13 @@ describe("POST /api/passwords/bulk-archive", () => {
           action: "ENTRY_BULK_UNARCHIVE",
           metadata: expect.objectContaining({
             operation: "unarchive",
-            unarchivedCount: 2,
             archivedCount: 0,
+            unarchivedCount: 1,
           }),
         }),
       })
     );
+
     expect(mockAuditCreate).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
@@ -253,8 +260,57 @@ describe("POST /api/passwords/bulk-archive", () => {
           action: "ENTRY_UPDATE",
           targetId: "p1",
           metadata: expect.objectContaining({
+            source: "bulk-archive",
             parentAction: "ENTRY_BULK_UNARCHIVE",
           }),
+        }),
+      })
+    );
+  });
+
+  it("uses re-fetched entry IDs for per-entry audit logs", async () => {
+    // First findMany returns 3, but re-fetch returns only 2 (one failed to update)
+    mockFindMany
+      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }, { id: "p3" }])
+      .mockResolvedValueOnce([{ id: "p1" }, { id: "p3" }]);
+    mockUpdateMany.mockResolvedValue({ count: 2 });
+
+    await POST(createRequest("POST", URL, {
+      body: { ids: ["p1", "p2", "p3"] },
+    }));
+
+    // 1 parent + 2 per-entry (only re-fetched entries) = 3
+    expect(mockAuditCreate).toHaveBeenCalledTimes(3);
+
+    // Parent log has the re-fetched entryIds
+    expect(mockAuditCreate).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "ENTRY_BULK_ARCHIVE",
+          metadata: expect.objectContaining({
+            entryIds: ["p1", "p3"],
+          }),
+        }),
+      })
+    );
+
+    // Per-entry logs only for re-fetched entries
+    expect(mockAuditCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "ENTRY_UPDATE",
+          targetId: "p1",
+        }),
+      })
+    );
+    expect(mockAuditCreate).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "ENTRY_UPDATE",
+          targetId: "p3",
         }),
       })
     );

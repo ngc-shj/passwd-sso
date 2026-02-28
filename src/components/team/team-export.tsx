@@ -21,6 +21,8 @@ import {
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto-aad";
+import { buildFolderPath } from "@/lib/folder-path";
+import type { FolderItem } from "@/components/folders/folder-tree";
 
 interface TeamExportPanelContentProps {
   teamId?: string;
@@ -65,10 +67,14 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
     setExporting(true);
 
     try {
-      // Fetch list of all team passwords (overview only)
-      const listRes = await fetch(apiPath.teamPasswords(scopedTeamId));
+      // Fetch list of all team passwords and folders in parallel
+      const [listRes, foldersRes] = await Promise.all([
+        fetch(apiPath.teamPasswords(scopedTeamId)),
+        fetch(apiPath.teamFolders(scopedTeamId)),
+      ]);
       if (!listRes.ok) throw new Error("Failed to fetch list");
       const list: { id: string; entryType: string }[] = await listRes.json();
+      const folders: FolderItem[] = foldersRes.ok ? await foldersRes.json() : [];
 
       // Get team encryption key for decryption
       const teamKey = await getTeamEncryptionKey(scopedTeamId);
@@ -123,11 +129,34 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
             idNumber: data.idNumber ?? null,
             issueDate: data.issueDate ?? null,
             expiryDate: data.expiryDate ?? null,
+            relyingPartyId: data.relyingPartyId ?? null,
+            relyingPartyName: data.relyingPartyName ?? null,
+            credentialId: data.credentialId ?? null,
+            creationDate: data.creationDate ?? null,
+            deviceInfo: data.deviceInfo ?? null,
+            bankName: data.bankName ?? null,
+            accountType: data.accountType ?? null,
+            accountHolderName: data.accountHolderName ?? null,
+            accountNumber: data.accountNumber ?? null,
+            routingNumber: data.routingNumber ?? null,
+            swiftBic: data.swiftBic ?? null,
+            iban: data.iban ?? null,
+            branchName: data.branchName ?? null,
+            softwareName: data.softwareName ?? null,
+            licenseKey: data.licenseKey ?? null,
+            version: data.version ?? null,
+            licensee: data.licensee ?? null,
+            purchaseDate: data.purchaseDate ?? null,
+            expirationDate: data.expirationDate ?? null,
             tags: Array.isArray(raw.tags) ? raw.tags : [],
             customFields: Array.isArray(data.customFields) ? data.customFields : [],
             totpConfig: data.totp ?? null,
             generatorSettings: data.generatorSettings ?? null,
             passwordHistory: Array.isArray(data.passwordHistory) ? data.passwordHistory : [],
+            requireReprompt: raw.requireReprompt ?? false,
+            folderPath: raw.teamFolderId ? (buildFolderPath(raw.teamFolderId, folders) ?? "") : "",
+            isFavorite: raw.isFavorite ?? false,
+            expiresAt: raw.expiresAt ? String(raw.expiresAt) : null,
           });
         } catch {
           skippedCount++;

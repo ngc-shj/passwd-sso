@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, use } from "react";
+import { useEffect, useState, useCallback, useRef, use } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
@@ -10,18 +10,29 @@ import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
 import { SearchBar } from "@/components/layout/search-bar";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { TeamPasswordForm } from "@/components/team/team-password-form";
-import { TeamArchivedList } from "@/components/team/team-archived-list";
-import { TeamTrashList } from "@/components/team/team-trash-list";
+import { TeamArchivedList, type TeamArchivedListHandle } from "@/components/team/team-archived-list";
+import { TeamTrashList, type TeamTrashListHandle } from "@/components/team/team-trash-list";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare, CheckSquare, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -30,6 +41,11 @@ import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-so
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto-aad";
+import {
+  reconcileSelectedIds,
+  toggleSelectAllIds,
+  toggleSelectOneId,
+} from "@/components/passwords/password-list-selection";
 
 interface TeamInfo {
   id: string;
@@ -81,6 +97,7 @@ export default function TeamDashboardPage({
   const activeScope = searchParams.get("scope");
   const t = useTranslations("Team");
   const tDash = useTranslations("Dashboard");
+  const tl = useTranslations("PasswordList");
   const { getTeamEncryptionKey } = useTeamVault();
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [passwords, setPasswords] = useState<TeamPasswordEntry[]>([]);
@@ -143,10 +160,31 @@ export default function TeamDashboardPage({
     requireReprompt?: boolean;
     expiresAt?: string | null;
   } | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkAction, setBulkAction] = useState<"trash" | "archive" | "unarchive">("trash");
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+  const archivedListRef = useRef<TeamArchivedListHandle>(null);
+  const trashListRef = useRef<TeamTrashListHandle>(null);
+  const [childSelectedCount, setChildSelectedCount] = useState(0);
+  const [childAllSelected, setChildAllSelected] = useState(false);
   const isTeamArchive = activeScope === "archive";
   const isTeamTrash = activeScope === "trash";
   const isTeamFavorites = activeScope === "favorites";
   const isTeamSpecialView = isTeamArchive || isTeamTrash;
+
+  // Reset selection mode when view changes (during render, not in effect)
+  const viewKey = `${activeScope}|${activeTagId}|${activeFolderId}|${activeEntryType}`;
+  const [prevViewKey, setPrevViewKey] = useState(viewKey);
+  if (prevViewKey !== viewKey) {
+    setPrevViewKey(viewKey);
+    setSelectionMode(false);
+  }
+
+  const toggleSelectOne = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => toggleSelectOneId(prev, id, checked));
+  };
 
   const fetchTeam = async (): Promise<boolean> => {
     try {
@@ -572,6 +610,88 @@ export default function TeamDashboardPage({
     compareEntriesWithFavorite(a, b, sortBy)
   );
 
+  const allSelected = sortedFiltered.length > 0 && selectedIds.size === sortedFiltered.length;
+
+  const handleToggleSelectAll = (checked: boolean) => {
+    setSelectedIds(toggleSelectAllIds(sortedFiltered.map((e) => e.id), checked));
+  };
+
+  // Reconcile selectedIds when entries change (remove stale IDs)
+  useEffect(() => {
+    setSelectedIds((prev) => reconcileSelectedIds(prev, sortedFiltered.map((e) => e.id)));
+  }, [sortedFiltered.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset selectedIds when leaving selection mode
+  useEffect(() => {
+    if (!selectionMode) setSelectedIds(new Set());
+  }, [selectionMode]);
+
+  // ESC key to exit selection mode
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && selectionMode) {
+        setSelectionMode(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [selectionMode]);
+
+  const handleBulkAction = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkProcessing(true);
+    try {
+      const endpoint =
+        bulkAction === "archive" || bulkAction === "unarchive"
+          ? apiPath.teamPasswordsBulkArchive(teamId)
+          : apiPath.teamPasswordsBulkTrash(teamId);
+      const body =
+        bulkAction === "archive" || bulkAction === "unarchive"
+          ? { ids: Array.from(selectedIds), operation: bulkAction }
+          : { ids: Array.from(selectedIds) };
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) throw new Error("bulk action failed");
+      const json = await res.json();
+      if (bulkAction === "archive") {
+        toast.success(
+          tl("bulkArchived", {
+            count: json.processedCount ?? json.archivedCount ?? selectedIds.size,
+          })
+        );
+      } else if (bulkAction === "unarchive") {
+        toast.success(
+          tl("bulkUnarchived", {
+            count: json.processedCount ?? json.unarchivedCount ?? selectedIds.size,
+          })
+        );
+      } else {
+        toast.success(
+          tl("bulkMovedToTrash", {
+            count: json.movedCount ?? selectedIds.size,
+          })
+        );
+      }
+      setBulkDialogOpen(false);
+      setSelectedIds(new Set());
+      fetchPasswords();
+    } catch {
+      toast.error(
+        bulkAction === "archive"
+          ? tl("bulkArchiveFailed")
+          : bulkAction === "unarchive"
+            ? tl("bulkUnarchiveFailed")
+            : tl("bulkMoveFailed")
+      );
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
   if (loadError) {
     return (
       <div className="flex-1 overflow-auto p-4 md:p-6">
@@ -604,61 +724,104 @@ export default function TeamDashboardPage({
           showSubtitle={!isPrimaryScopeLabel}
           titleExtra={!isPrimaryScopeLabel && team ? <TeamRoleBadge role={team.role} /> : null}
           actions={
-            <>
-              {canCreate && !isTeamSpecialView && (
-                contextualEntryType ? (
-                  <Button
-                    onClick={() => {
-                      setEditData(null);
-                      setNewEntryType(contextualEntryType);
-                      setFormOpen(true);
+            selectionMode ? (
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={isTeamSpecialView ? childAllSelected : allSelected}
+                    onCheckedChange={(v) => {
+                      const checked = Boolean(v);
+                      if (isTeamArchive) {
+                        archivedListRef.current?.toggleSelectAll(checked);
+                      } else if (isTeamTrash) {
+                        trashListRef.current?.toggleSelectAll(checked);
+                      } else {
+                        handleToggleSelectAll(checked);
+                      }
                     }}
+                    aria-label={tDash("selectAll")}
+                  />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">
+                    {(isTeamSpecialView ? childSelectedCount : selectedIds.size) > 0
+                      ? tl("selectedCount", { count: isTeamSpecialView ? childSelectedCount : selectedIds.size })
+                      : tDash("selectAll")}
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectionMode(false)}
+                >
+                  {tDash("close")}
+                </Button>
+              </div>
+            ) : (
+              <>
+                {canDeletePerm && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSelectionMode(true)}
                   >
-                    <Plus className="mr-2 h-4 w-4" />
-                    {t("newItem")}
+                    <CheckSquare className="h-4 w-4 mr-2" />
+                    {tDash("select")}
                   </Button>
-                ) : (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button>
-                        <Plus className="mr-2 h-4 w-4" />
-                        {t("newItem")}
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.LOGIN); setFormOpen(true); }}>
-                        <KeyRound className="mr-2 h-4 w-4" />
-                        {t("newPassword")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setFormOpen(true); }}>
-                        <FileText className="mr-2 h-4 w-4" />
-                        {t("newSecureNote")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setFormOpen(true); }}>
-                        <CreditCard className="mr-2 h-4 w-4" />
-                        {t("newCreditCard")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.IDENTITY); setFormOpen(true); }}>
-                        <IdCard className="mr-2 h-4 w-4" />
-                        {t("newIdentity")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.PASSKEY); setFormOpen(true); }}>
-                        <Fingerprint className="mr-2 h-4 w-4" />
-                        {t("newPasskey")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.BANK_ACCOUNT); setFormOpen(true); }}>
-                        <Landmark className="mr-2 h-4 w-4" />
-                        {t("newBankAccount")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.SOFTWARE_LICENSE); setFormOpen(true); }}>
-                        <KeySquare className="mr-2 h-4 w-4" />
-                        {t("newSoftwareLicense")}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )
-              )}
-            </>
+                )}
+                {canCreate && !isTeamSpecialView && (
+                  contextualEntryType ? (
+                    <Button
+                      onClick={() => {
+                        setEditData(null);
+                        setNewEntryType(contextualEntryType);
+                        setFormOpen(true);
+                      }}
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      {t("newItem")}
+                    </Button>
+                  ) : (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button>
+                          <Plus className="mr-2 h-4 w-4" />
+                          {t("newItem")}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.LOGIN); setFormOpen(true); }}>
+                          <KeyRound className="mr-2 h-4 w-4" />
+                          {t("newPassword")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setFormOpen(true); }}>
+                          <FileText className="mr-2 h-4 w-4" />
+                          {t("newSecureNote")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setFormOpen(true); }}>
+                          <CreditCard className="mr-2 h-4 w-4" />
+                          {t("newCreditCard")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.IDENTITY); setFormOpen(true); }}>
+                          <IdCard className="mr-2 h-4 w-4" />
+                          {t("newIdentity")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.PASSKEY); setFormOpen(true); }}>
+                          <Fingerprint className="mr-2 h-4 w-4" />
+                          {t("newPasskey")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.BANK_ACCOUNT); setFormOpen(true); }}>
+                          <Landmark className="mr-2 h-4 w-4" />
+                          {t("newBankAccount")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.SOFTWARE_LICENSE); setFormOpen(true); }}>
+                          <KeySquare className="mr-2 h-4 w-4" />
+                          {t("newSoftwareLicense")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )
+                )}
+              </>
+            )
           }
         />
 
@@ -695,17 +858,29 @@ export default function TeamDashboardPage({
 
         {isTeamArchive ? (
           <TeamArchivedList
+            ref={archivedListRef}
             teamId={teamId}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
             sortBy={sortBy}
+            selectionMode={selectionMode}
+            onSelectedCountChange={(count, allSel) => {
+              setChildSelectedCount(count);
+              setChildAllSelected(allSel);
+            }}
           />
         ) : isTeamTrash ? (
           <TeamTrashList
+            ref={trashListRef}
             teamId={teamId}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
             sortBy={sortBy}
+            selectionMode={selectionMode}
+            onSelectedCountChange={(count, allSel) => {
+              setChildSelectedCount(count);
+              setChildAllSelected(allSel);
+            }}
           />
         ) : loading ? (
           <div className="flex items-center justify-center py-12">
@@ -726,54 +901,144 @@ export default function TeamDashboardPage({
         ) : (
           <div className="space-y-2">
             {sortedFiltered.map((entry) => (
-              <PasswordCard
-                key={entry.id}
-                id={entry.id}
-                entryType={entry.entryType}
-                title={entry.title}
-                username={entry.username}
-                urlHost={entry.urlHost}
-                snippet={entry.snippet}
-                brand={entry.brand}
-                lastFour={entry.lastFour}
-                cardholderName={entry.cardholderName}
-                fullName={entry.fullName}
-                idNumberLast4={entry.idNumberLast4}
-                relyingPartyId={entry.relyingPartyId}
-                bankName={entry.bankName}
-                accountNumberLast4={entry.accountNumberLast4}
-                softwareName={entry.softwareName}
-                licensee={entry.licensee}
-                requireReprompt={entry.requireReprompt}
-                expiresAt={entry.expiresAt}
-                tags={entry.tags}
-                isFavorite={entry.isFavorite}
-                isArchived={entry.isArchived}
-                expanded={expandedId === entry.id}
-                onToggleFavorite={handleToggleFavorite}
-                onToggleArchive={handleToggleArchive}
-                onDelete={handleDelete}
-                onToggleExpand={(id) =>
-                  setExpandedId((prev) => (prev === id ? null : id))
-                }
-                onRefresh={() => {
-                  fetchPasswords();
-                  setExpandedId(null);
-                }}
-                getPassword={createPasswordFetcher(entry.id)}
-                getDetail={createDetailFetcher(entry.id, entry.entryType)}
-                getUrl={createUrlFetcher(entry.id)}
-                onEditClick={() => handleEdit(entry.id)}
-                canEdit={canEditPerm}
-                canDelete={canDeletePerm}
-                createdBy={
-                  entry.createdBy.name
-                    ? t("createdBy", { name: entry.createdBy.name })
-                    : undefined
-                }
-                teamId={teamId}
-              />
+              selectionMode ? (
+                <div key={entry.id} className="flex items-start gap-2">
+                  <Checkbox
+                    className="mt-4"
+                    checked={selectedIds.has(entry.id)}
+                    onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
+                    aria-label={tl("selectEntry", { title: entry.title })}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <PasswordCard
+                      id={entry.id}
+                      entryType={entry.entryType}
+                      title={entry.title}
+                      username={entry.username}
+                      urlHost={entry.urlHost}
+                      snippet={entry.snippet}
+                      brand={entry.brand}
+                      lastFour={entry.lastFour}
+                      cardholderName={entry.cardholderName}
+                      fullName={entry.fullName}
+                      idNumberLast4={entry.idNumberLast4}
+                      relyingPartyId={entry.relyingPartyId}
+                      bankName={entry.bankName}
+                      accountNumberLast4={entry.accountNumberLast4}
+                      softwareName={entry.softwareName}
+                      licensee={entry.licensee}
+                      requireReprompt={entry.requireReprompt}
+                      expiresAt={entry.expiresAt}
+                      tags={entry.tags}
+                      isFavorite={entry.isFavorite}
+                      isArchived={entry.isArchived}
+                      expanded={expandedId === entry.id}
+                      onToggleFavorite={handleToggleFavorite}
+                      onToggleArchive={handleToggleArchive}
+                      onDelete={handleDelete}
+                      onToggleExpand={(id) =>
+                        setExpandedId((prev) => (prev === id ? null : id))
+                      }
+                      onRefresh={() => {
+                        fetchPasswords();
+                        setExpandedId(null);
+                      }}
+                      getPassword={createPasswordFetcher(entry.id)}
+                      getDetail={createDetailFetcher(entry.id, entry.entryType)}
+                      getUrl={createUrlFetcher(entry.id)}
+                      onEditClick={() => handleEdit(entry.id)}
+                      canEdit={canEditPerm}
+                      canDelete={canDeletePerm}
+                      createdBy={
+                        entry.createdBy.name
+                          ? t("createdBy", { name: entry.createdBy.name })
+                          : undefined
+                      }
+                      teamId={teamId}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <PasswordCard
+                  key={entry.id}
+                  id={entry.id}
+                  entryType={entry.entryType}
+                  title={entry.title}
+                  username={entry.username}
+                  urlHost={entry.urlHost}
+                  snippet={entry.snippet}
+                  brand={entry.brand}
+                  lastFour={entry.lastFour}
+                  cardholderName={entry.cardholderName}
+                  fullName={entry.fullName}
+                  idNumberLast4={entry.idNumberLast4}
+                  relyingPartyId={entry.relyingPartyId}
+                  bankName={entry.bankName}
+                  accountNumberLast4={entry.accountNumberLast4}
+                  softwareName={entry.softwareName}
+                  licensee={entry.licensee}
+                  requireReprompt={entry.requireReprompt}
+                  expiresAt={entry.expiresAt}
+                  tags={entry.tags}
+                  isFavorite={entry.isFavorite}
+                  isArchived={entry.isArchived}
+                  expanded={expandedId === entry.id}
+                  onToggleFavorite={handleToggleFavorite}
+                  onToggleArchive={handleToggleArchive}
+                  onDelete={handleDelete}
+                  onToggleExpand={(id) =>
+                    setExpandedId((prev) => (prev === id ? null : id))
+                  }
+                  onRefresh={() => {
+                    fetchPasswords();
+                    setExpandedId(null);
+                  }}
+                  getPassword={createPasswordFetcher(entry.id)}
+                  getDetail={createDetailFetcher(entry.id, entry.entryType)}
+                  getUrl={createUrlFetcher(entry.id)}
+                  onEditClick={() => handleEdit(entry.id)}
+                  canEdit={canEditPerm}
+                  canDelete={canDeletePerm}
+                  createdBy={
+                    entry.createdBy.name
+                      ? t("createdBy", { name: entry.createdBy.name })
+                      : undefined
+                  }
+                  teamId={teamId}
+                />
+              )
             ))}
+
+            {selectionMode && selectedIds.size > 0 && (
+              <div className="fixed bottom-4 inset-x-0 z-40 flex justify-center px-4 md:pl-60 pointer-events-none">
+                <div className="pointer-events-auto w-full max-w-4xl flex items-center justify-end rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setBulkAction("archive");
+                        setBulkDialogOpen(true);
+                      }}
+                    >
+                      <Archive className="h-4 w-4 mr-2" />
+                      {tl("moveSelectedToArchive")}
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => {
+                        setBulkAction("trash");
+                        setBulkDialogOpen(true);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      {tl("moveSelectedToTrash")}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -790,6 +1055,45 @@ export default function TeamDashboardPage({
         editData={editData}
         entryType={editData?.entryType ?? newEntryType}
       />
+
+      <AlertDialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {bulkAction === "archive"
+                ? tl("moveSelectedToArchive")
+                : bulkAction === "unarchive"
+                  ? tl("moveSelectedToUnarchive")
+                  : tl("moveSelectedToTrash")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {bulkAction === "archive"
+                ? tl("bulkArchiveConfirm", { count: selectedIds.size })
+                : bulkAction === "unarchive"
+                  ? tl("bulkUnarchiveConfirm", { count: selectedIds.size })
+                  : tl("bulkMoveConfirm", { count: selectedIds.size })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkProcessing}>
+              {tl("cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleBulkAction();
+              }}
+              disabled={bulkProcessing}
+            >
+              {bulkProcessing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                tl("confirm")
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

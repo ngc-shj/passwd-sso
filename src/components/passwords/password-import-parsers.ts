@@ -3,7 +3,7 @@ import type { CsvFormat, ParsedEntry } from "@/components/passwords/password-imp
 
 function extraDefaults(): Pick<
   ParsedEntry,
-  "tags" | "customFields" | "totp" | "generatorSettings" | "passwordHistory" | "requireReprompt"
+  "tags" | "customFields" | "totp" | "generatorSettings" | "passwordHistory" | "requireReprompt" | "folderPath" | "isFavorite" | "expiresAt"
 > {
   return {
     tags: [],
@@ -12,6 +12,9 @@ function extraDefaults(): Pick<
     generatorSettings: null,
     passwordHistory: [],
     requireReprompt: false,
+    folderPath: "",
+    isFavorite: false,
+    expiresAt: null,
   };
 }
 
@@ -33,6 +36,8 @@ export function parsePasswdSsoPayload(raw: string | undefined): Partial<ParsedEn
           : null,
       passwordHistory: Array.isArray(parsed.passwordHistory) ? parsed.passwordHistory : [],
       ...("requireReprompt" in parsed ? { requireReprompt: parsed.requireReprompt === true } : {}),
+      ...("isFavorite" in parsed ? { isFavorite: parsed.isFavorite === true } : {}),
+      ...("expiresAt" in parsed && typeof parsed.expiresAt === "string" ? { expiresAt: parsed.expiresAt } : {}),
       cardholderName: typeof parsed.cardholderName === "string" ? parsed.cardholderName : "",
       cardNumber: typeof parsed.cardNumber === "string" ? parsed.cardNumber : "",
       brand: typeof parsed.brand === "string" ? parsed.brand : "",
@@ -123,8 +128,50 @@ export function parseCsvLine(line: string): string[] {
   return fields;
 }
 
+/**
+ * Split CSV text into rows respecting RFC 4180 quoted fields
+ * (newlines inside double-quoted fields are preserved, not treated as row breaks).
+ */
+export function splitCsvRows(text: string): string[] {
+  const rows: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (i + 1 < text.length && text[i + 1] === '"') {
+          current += '""';
+          i++;
+        } else {
+          inQuotes = false;
+          current += char;
+        }
+      } else {
+        current += char;
+      }
+    } else {
+      if (char === '"') {
+        inQuotes = true;
+        current += char;
+      } else if (char === "\n") {
+        if (current.trim()) rows.push(current);
+        current = "";
+      } else if (char === "\r") {
+        // skip \r, the following \n (if any) will trigger row break
+      } else {
+        current += char;
+      }
+    }
+  }
+  if (current.trim()) rows.push(current);
+  return rows;
+}
+
 export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  const lines = splitCsvRows(text);
   if (lines.length < 2) return { entries: [], format: "unknown" };
 
   const headers = parseCsvLine(lines[0]);
@@ -246,6 +293,15 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
     if (!entry.totp && typeof row["login_totp"] === "string" && row["login_totp"]) {
       entry.totp = { secret: row["login_totp"] };
     }
+
+    // folder / favorite columns (Bitwarden-compatible + passwd-sso)
+    if (row["folder"]) {
+      entry.folderPath = row["folder"];
+    }
+    if (row["favorite"] === "1") {
+      entry.isFavorite = true;
+    }
+
     entry = { ...entry, ...passwdSso };
 
     if (!("requireReprompt" in passwdSso)) {
@@ -284,6 +340,21 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           "requireReprompt" in item ? item.requireReprompt === true : item.reprompt === 1;
       }
 
+      // folder / favorite / expiresAt from top-level or passwdSso
+      const folderPath = typeof item.folder === "string" ? item.folder
+        : typeof item.folderPath === "string" ? item.folderPath
+        : (passwdSso as Record<string, unknown>).folderPath as string | undefined
+        ?? "";
+      const isFavorite = item.favorite === true || item.favorite === 1
+        || (passwdSso as Record<string, unknown>).isFavorite === true
+        || false;
+      const expiresAt = typeof item.expiresAt === "string" ? item.expiresAt
+        : typeof (passwdSso as Record<string, unknown>).expiresAt === "string"
+          ? (passwdSso as Record<string, unknown>).expiresAt as string
+        : null;
+
+      const metaOverrides = { folderPath, isFavorite, expiresAt };
+
       const cardDefaults = { cardholderName: "", cardNumber: "", brand: "", expiryMonth: "", expiryYear: "", cvv: "" };
       const identityDefaults = { fullName: "", address: "", phone: "", email: "", dateOfBirth: "", nationality: "", idNumber: "", issueDate: "", expiryDate: "" };
       const passkeyDefaults = { relyingPartyId: "", relyingPartyName: "", credentialId: "", creationDate: "", deviceInfo: "" };
@@ -302,15 +373,16 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           notes: item.notes ?? "",
           ...cardDefaults,
           ...identityDefaults,
+          ...bankAccountDefaults,
+          ...softwareLicenseDefaults,
+          ...extraDefaults(),
+          ...passwdSso,
           relyingPartyId: passkey.relyingPartyId ?? "",
           relyingPartyName: passkey.relyingPartyName ?? "",
           credentialId: passkey.credentialId ?? "",
           creationDate: passkey.creationDate ?? "",
           deviceInfo: passkey.deviceInfo ?? "",
-          ...bankAccountDefaults,
-          ...softwareLicenseDefaults,
-          ...extraDefaults(),
-          ...passwdSso,
+          ...metaOverrides,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -340,6 +412,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           swiftBic: bank.swiftBic ?? "",
           iban: bank.iban ?? "",
           branchName: bank.branchName ?? "",
+          ...metaOverrides,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -368,6 +441,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           email: license.email ?? "",
           purchaseDate: license.purchaseDate ?? "",
           expirationDate: license.expirationDate ?? "",
+          ...metaOverrides,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -387,9 +461,12 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           ...passkeyDefaults,
           ...bankAccountDefaults,
           ...softwareLicenseDefaults,
-          fullName: identity.fullName ?? identity.firstName
-            ? `${identity.firstName ?? ""} ${identity.lastName ?? ""}`.trim()
-            : "",
+          ...extraDefaults(),
+          ...passwdSso,
+          fullName: identity.fullName
+            ?? (identity.firstName
+              ? `${identity.firstName} ${identity.lastName ?? ""}`.trim()
+              : ""),
           address: identity.address ?? identity.address1 ?? "",
           phone: identity.phone ?? "",
           email: identity.email ?? "",
@@ -398,8 +475,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           idNumber: identity.idNumber ?? identity.ssn ?? identity.passportNumber ?? "",
           issueDate: identity.issueDate ?? "",
           expiryDate: identity.expiryDate ?? "",
-          ...extraDefaults(),
-          ...passwdSso,
+          ...metaOverrides,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -415,18 +491,19 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           content: "",
           url: "",
           notes: item.notes ?? "",
-          cardholderName: card.cardholderName ?? "",
-          cardNumber: card.number ?? "",
-          brand: card.brand ?? "",
-          expiryMonth: card.expMonth ?? "",
-          expiryYear: card.expYear ?? "",
-          cvv: card.code ?? "",
           ...identityDefaults,
           ...passkeyDefaults,
           ...bankAccountDefaults,
           ...softwareLicenseDefaults,
           ...extraDefaults(),
           ...passwdSso,
+          cardholderName: card.cardholderName ?? "",
+          cardNumber: card.number ?? "",
+          brand: card.brand ?? "",
+          expiryMonth: card.expMonth ?? "",
+          expiryYear: card.expYear ?? "",
+          cvv: card.code ?? "",
+          ...metaOverrides,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -448,6 +525,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           ...softwareLicenseDefaults,
           ...extraDefaults(),
           ...passwdSso,
+          ...metaOverrides,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -469,8 +547,12 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
         ...bankAccountDefaults,
         ...softwareLicenseDefaults,
         ...extraDefaults(),
-        totp: typeof login.totp === "string" && login.totp ? { secret: login.totp } : null,
         ...passwdSso,
+        // login.totp (bare string) is a fallback; passwdSso.totp (full config) takes priority
+        ...(typeof login.totp === "string" && login.totp && !passwdSso.totp
+          ? { totp: { secret: login.totp } }
+          : {}),
+        ...metaOverrides,
       };
       if (entry.title && entry.password) entries.push(entry);
     }

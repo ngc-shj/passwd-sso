@@ -57,6 +57,9 @@ export interface ParsedEntry {
   generatorSettings: Record<string, unknown> | null;
   passwordHistory: EntryPasswordHistory[];
   requireReprompt: boolean;
+  folderPath: string;
+  isFavorite: boolean;
+  expiresAt: string | null;
 }
 
 export type CsvFormat = "bitwarden" | "onepassword" | "chrome" | "passwd-sso" | "unknown";

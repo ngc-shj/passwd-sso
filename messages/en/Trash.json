@@ -6,6 +6,7 @@
   "deleteConfirm": "Permanently delete \"{title}\"? This cannot be undone.",
   "restored": "Restored",
   "restoreSelected": "Restore selected",
+  "bulkRestoreConfirm": "Restore {count} entries?",
   "bulkRestored": "{count} entries restored",
   "bulkRestoreFailed": "Failed to restore selected entries",
   "deletedPermanently": "Permanently deleted",

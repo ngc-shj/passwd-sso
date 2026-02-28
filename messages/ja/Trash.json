@@ -6,6 +6,7 @@
   "deleteConfirm": "「{title}」を完全に削除しますか？この操作は取り消せません。",
   "restored": "復元しました",
   "restoreSelected": "選択項目を復元",
+  "bulkRestoreConfirm": "{count} 件を復元しますか？",
   "bulkRestored": "{count} 件を復元しました",
   "bulkRestoreFailed": "選択項目の復元に失敗しました",
   "deletedPermanently": "完全に削除しました",

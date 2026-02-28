@@ -12,6 +12,8 @@ import { PageTitleCard } from "@/components/layout/page-title-card";
 import { ExportOptionsPanel } from "@/components/passwords/export-options-panel";
 import { Download, AlertTriangle } from "lucide-react";
 import { API_PATH, ENTRY_TYPE } from "@/lib/constants";
+import { buildFolderPath } from "@/lib/folder-path";
+import type { FolderItem } from "@/components/folders/folder-tree";
 import {
   type ExportFormat,
   type ExportEntry,
@@ -59,10 +61,14 @@ function ExportPanelContent() {
     setExporting(true);
 
     try {
-      // 1. Fetch personal entries (E2E encrypted, decrypt client-side)
-      const res = await fetch(`${API_PATH.PASSWORDS}?include=blob`);
+      // 1. Fetch personal entries and folders in parallel
+      const [res, foldersRes] = await Promise.all([
+        fetch(`${API_PATH.PASSWORDS}?include=blob`),
+        fetch(API_PATH.FOLDERS),
+      ]);
       if (!res.ok) throw new Error("Failed to fetch");
       const rawEntries = await res.json();
+      const folders: FolderItem[] = foldersRes.ok ? await foldersRes.json() : [];
 
       const entries: ExportEntry[] = [];
       let skippedCount = 0;
@@ -127,6 +133,9 @@ function ExportPanelContent() {
             generatorSettings: parsed.generatorSettings ?? null,
             passwordHistory: Array.isArray(parsed.passwordHistory) ? parsed.passwordHistory : [],
             requireReprompt: raw.requireReprompt ?? false,
+            folderPath: raw.folderId ? (buildFolderPath(raw.folderId, folders) ?? "") : "",
+            isFavorite: raw.isFavorite ?? false,
+            expiresAt: raw.expiresAt ? String(raw.expiresAt) : null,
           });
         } catch {
           skippedCount++;
