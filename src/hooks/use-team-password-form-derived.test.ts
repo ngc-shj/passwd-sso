@@ -16,6 +16,8 @@ function baseEntryKindState(): TeamEntryKindState {
     isCreditCard: false,
     isIdentity: false,
     isPasskey: false,
+    isBankAccount: false,
+    isSoftwareLicense: false,
   };
 }
 
@@ -51,6 +53,20 @@ function baseEntryValues(): TeamEntryFieldValues {
     credentialId: "",
     creationDate: "",
     deviceInfo: "",
+    bankName: "",
+    accountType: "",
+    accountHolderName: "",
+    accountNumber: "",
+    routingNumber: "",
+    swiftBic: "",
+    iban: "",
+    branchName: "",
+    softwareName: "",
+    licenseKey: "",
+    version: "",
+    licensee: "",
+    purchaseDate: "",
+    expirationDate: "",
   };
 }
 
@@ -128,6 +144,8 @@ describe("buildTeamSubmitDisabled", () => {
         isCreditCard: false,
         isIdentity: false,
         isPasskey: true,
+        isBankAccount: false,
+        isSoftwareLicense: false,
       },
       entryValues: { title: "PK", password: "", relyingPartyId: "  " },
       cardNumberValid: true,
@@ -144,6 +162,8 @@ describe("buildTeamSubmitDisabled", () => {
         isCreditCard: true,
         isIdentity: false,
         isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: false,
       },
       entryValues: { title: "CC", password: "", relyingPartyId: "" },
       cardNumberValid: false,
@@ -160,6 +180,8 @@ describe("buildTeamSubmitDisabled", () => {
         isCreditCard: false,
         isIdentity: false,
         isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: false,
       },
       entryValues: { title: "Note", password: "", relyingPartyId: "" },
       cardNumberValid: true,

@@ -7,7 +7,9 @@ export type TeamEntryKind =
   | "secureNote"
   | "creditCard"
   | "identity"
-  | "passkey";
+  | "passkey"
+  | "bankAccount"
+  | "softwareLicense";
 
 export interface TeamFolderItem {
   id: string;
@@ -47,6 +49,20 @@ export interface TeamPasswordFormEditData {
   credentialId?: string | null;
   creationDate?: string | null;
   deviceInfo?: string | null;
+  bankName?: string | null;
+  accountType?: string | null;
+  accountHolderName?: string | null;
+  accountNumber?: string | null;
+  routingNumber?: string | null;
+  swiftBic?: string | null;
+  iban?: string | null;
+  branchName?: string | null;
+  softwareName?: string | null;
+  licenseKey?: string | null;
+  version?: string | null;
+  licensee?: string | null;
+  purchaseDate?: string | null;
+  expirationDate?: string | null;
   teamFolderId?: string | null;
 }
 

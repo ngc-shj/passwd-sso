@@ -274,18 +274,34 @@ const shareDataSchema = z.object({
   relyingPartyId: z.string().max(200).nullish(),
   relyingPartyName: z.string().max(200).nullish(),
   credentialId: z.string().max(500).nullish(),
-  creationDate: z.string().nullish(),
+  creationDate: z.string().max(50).nullish(),
   deviceInfo: z.string().max(200).nullish(),
   // IDENTITY
   fullName: z.string().max(200).nullish(),
   address: z.string().max(500).nullish(),
   phone: z.string().max(50).nullish(),
   email: z.string().max(200).nullish(),
-  dateOfBirth: z.string().nullish(),
+  dateOfBirth: z.string().max(50).nullish(),
   nationality: z.string().max(100).nullish(),
   idNumber: z.string().max(100).nullish(),
-  issueDate: z.string().nullish(),
-  expiryDate: z.string().nullish(),
+  issueDate: z.string().max(50).nullish(),
+  expiryDate: z.string().max(50).nullish(),
+  // BANK_ACCOUNT
+  bankName: z.string().max(200).nullish(),
+  accountType: z.string().max(50).nullish(),
+  accountHolderName: z.string().max(200).nullish(),
+  accountNumber: z.string().max(50).nullish(),
+  routingNumber: z.string().max(50).nullish(),
+  swiftBic: z.string().max(20).nullish(),
+  iban: z.string().max(50).nullish(),
+  branchName: z.string().max(200).nullish(),
+  // SOFTWARE_LICENSE
+  softwareName: z.string().max(200).nullish(),
+  licenseKey: z.string().max(500).nullish(),
+  version: z.string().max(50).nullish(),
+  licensee: z.string().max(200).nullish(),
+  purchaseDate: z.string().max(50).nullish(),
+  expirationDate: z.string().max(50).nullish(),
 });
 
 export const createShareLinkSchema = z.object({

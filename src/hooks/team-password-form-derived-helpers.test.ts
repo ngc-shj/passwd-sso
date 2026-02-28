@@ -31,6 +31,8 @@ describe("team-password-form-derived-helpers snapshot helpers", () => {
         isCreditCard: false,
         isIdentity: false,
         isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: false,
       },
     });
 
@@ -53,6 +55,8 @@ describe("team-password-form-derived-helpers snapshot helpers", () => {
         isCreditCard: false,
         isIdentity: false,
         isPasskey: true,
+        isBankAccount: false,
+        isSoftwareLicense: false,
       },
       entryValues: {
         title: "Passkey",
@@ -88,6 +92,20 @@ describe("team-password-form-derived-helpers snapshot helpers", () => {
         credentialId: "cred-123",
         creationDate: "2026-01-01",
         deviceInfo: "YubiKey",
+        bankName: "",
+        accountType: "",
+        accountHolderName: "",
+        accountNumber: "",
+        routingNumber: "",
+        swiftBic: "",
+        iban: "",
+        branchName: "",
+        softwareName: "",
+        licenseKey: "",
+        version: "",
+        licensee: "",
+        purchaseDate: "",
+        expirationDate: "",
       },
     });
 

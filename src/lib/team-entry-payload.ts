@@ -39,6 +39,22 @@ export interface BuildTeamEntryPayloadInput {
   credentialId?: string;
   creationDate?: string;
   deviceInfo?: string;
+
+  bankName?: string;
+  accountType?: string;
+  accountHolderName?: string;
+  accountNumber?: string;
+  routingNumber?: string;
+  swiftBic?: string;
+  iban?: string;
+  branchName?: string;
+
+  softwareName?: string;
+  licenseKey?: string;
+  version?: string;
+  licensee?: string;
+  purchaseDate?: string;
+  expirationDate?: string;
 }
 
 /**
@@ -88,6 +104,28 @@ export function buildTeamEntryPayload(
         cvv: input.cvv || null,
       };
       break;
+    case ENTRY_TYPE.BANK_ACCOUNT:
+      entryFields = {
+        bankName: input.bankName?.trim() || null,
+        accountType: input.accountType || null,
+        accountHolderName: input.accountHolderName?.trim() || null,
+        accountNumber: input.accountNumber?.trim() || null,
+        routingNumber: input.routingNumber?.trim() || null,
+        swiftBic: input.swiftBic?.trim() || null,
+        iban: input.iban?.trim() || null,
+        branchName: input.branchName?.trim() || null,
+      };
+      break;
+    case ENTRY_TYPE.SOFTWARE_LICENSE:
+      entryFields = {
+        softwareName: input.softwareName?.trim() || null,
+        licenseKey: input.licenseKey?.trim() || null,
+        version: input.version?.trim() || null,
+        licensee: input.licensee?.trim() || null,
+        purchaseDate: input.purchaseDate || null,
+        expirationDate: input.expirationDate || null,
+      };
+      break;
     case ENTRY_TYPE.SECURE_NOTE:
       entryFields = {
         content: input.content ?? "",
@@ -115,14 +153,76 @@ export function buildTeamEntryPayload(
     ...entryFields,
   });
 
-  // Overview: minimal summary for list rendering
-  const urlHost = input.url ? parseUrlHost(input.url) : null;
-  const overviewBlob = JSON.stringify({
-    title,
-    username: input.username?.trim() || null,
-    urlHost,
-    tags,
-  });
+  // Overview: minimal summary for list rendering (per-type)
+  let overviewData: Record<string, unknown>;
+
+  switch (input.entryType) {
+    case ENTRY_TYPE.SECURE_NOTE:
+      overviewData = {
+        title,
+        snippet: (input.content ?? "").slice(0, 100) || null,
+        tags,
+      };
+      break;
+    case ENTRY_TYPE.CREDIT_CARD:
+      overviewData = {
+        title,
+        cardholderName: input.cardholderName?.trim() || null,
+        brand: input.brand || null,
+        lastFour: input.cardNumber ? input.cardNumber.replace(/\D/g, "").slice(-4) || null : null,
+        tags,
+      };
+      break;
+    case ENTRY_TYPE.IDENTITY: {
+      const idDigits = (input.idNumber ?? "").replace(/\D/g, "");
+      overviewData = {
+        title,
+        fullName: input.fullName?.trim() || null,
+        idNumberLast4: idDigits.length >= 4 ? idDigits.slice(-4) : null,
+        tags,
+      };
+      break;
+    }
+    case ENTRY_TYPE.PASSKEY:
+      overviewData = {
+        title,
+        relyingPartyId: input.relyingPartyId?.trim() || null,
+        username: input.username?.trim() || null,
+        tags,
+      };
+      break;
+    case ENTRY_TYPE.BANK_ACCOUNT: {
+      const acctDigits = (input.accountNumber ?? "").replace(/\D/g, "");
+      overviewData = {
+        title,
+        bankName: input.bankName?.trim() || null,
+        accountNumberLast4: acctDigits.length >= 4 ? acctDigits.slice(-4) : null,
+        tags,
+      };
+      break;
+    }
+    case ENTRY_TYPE.SOFTWARE_LICENSE:
+      overviewData = {
+        title,
+        softwareName: input.softwareName?.trim() || null,
+        licensee: input.licensee?.trim() || null,
+        tags,
+      };
+      break;
+    case ENTRY_TYPE.LOGIN:
+    default: {
+      const urlHost = input.url ? parseUrlHost(input.url) : null;
+      overviewData = {
+        title,
+        username: input.username?.trim() || null,
+        urlHost,
+        tags,
+      };
+      break;
+    }
+  }
+
+  const overviewBlob = JSON.stringify(overviewData);
 
   return { fullBlob, overviewBlob };
 }

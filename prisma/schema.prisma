@@ -285,6 +285,8 @@ enum EntryType {
   CREDIT_CARD
   IDENTITY
   PASSKEY
+  BANK_ACCOUNT
+  SOFTWARE_LICENSE
 }
 
 enum ShareType {

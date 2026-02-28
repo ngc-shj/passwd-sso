@@ -62,6 +62,20 @@ export interface TeamEntryFieldValues {
   credentialId: string;
   creationDate: string;
   deviceInfo: string;
+  bankName: string;
+  accountType: string;
+  accountHolderName: string;
+  accountNumber: string;
+  routingNumber: string;
+  swiftBic: string;
+  iban: string;
+  branchName: string;
+  softwareName: string;
+  licenseKey: string;
+  version: string;
+  licensee: string;
+  purchaseDate: string;
+  expirationDate: string;
 }
 
 export function selectTeamEntryFieldValues(values: TeamPasswordFormValues): TeamEntryFieldValues {
@@ -96,5 +110,19 @@ export function selectTeamEntryFieldValues(values: TeamPasswordFormValues): Team
     credentialId: values.credentialId,
     creationDate: values.creationDate,
     deviceInfo: values.deviceInfo,
+    bankName: values.bankName,
+    accountType: values.accountType,
+    accountHolderName: values.accountHolderName,
+    accountNumber: values.accountNumber,
+    routingNumber: values.routingNumber,
+    swiftBic: values.swiftBic,
+    iban: values.iban,
+    branchName: values.branchName,
+    softwareName: values.softwareName,
+    licenseKey: values.licenseKey,
+    version: values.version,
+    licensee: values.licensee,
+    purchaseDate: values.purchaseDate,
+    expirationDate: values.expirationDate,
   };
 }

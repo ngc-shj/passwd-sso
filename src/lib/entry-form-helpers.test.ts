@@ -68,6 +68,29 @@ describe("filterNonEmptyCustomFields", () => {
   it("returns empty array for empty input", () => {
     expect(filterNonEmptyCustomFields([])).toEqual([]);
   });
+
+  it("keeps BOOLEAN field with value 'false' (non-empty)", () => {
+    const fields = [
+      { label: "toggle", value: "false", type: "boolean" },
+    ];
+    expect(filterNonEmptyCustomFields(fields)).toHaveLength(1);
+    expect(filterNonEmptyCustomFields(fields)[0].value).toBe("false");
+  });
+
+  it("filters out BOOLEAN field with empty value", () => {
+    const fields = [
+      { label: "toggle", value: "", type: "boolean" },
+    ];
+    expect(filterNonEmptyCustomFields(fields)).toHaveLength(0);
+  });
+
+  it("keeps DATE and MONTH_YEAR fields with values", () => {
+    const fields = [
+      { label: "birthday", value: "2000-01-01", type: "date" },
+      { label: "expiry", value: "2026-03", type: "monthYear" },
+    ];
+    expect(filterNonEmptyCustomFields(fields)).toHaveLength(2);
+  });
 });
 
 // ─── parseUrlHost ────────────────────────────────────────────

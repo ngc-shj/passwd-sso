@@ -2,11 +2,29 @@ import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
 import {
   type ExportEntry,
+  csvEntryType,
   formatExportCsv,
   formatExportJson,
   TEAM_EXPORT_OPTIONS,
   PERSONAL_EXPORT_OPTIONS,
 } from "@/lib/export-format-common";
+
+const nullBankLicenseFields = {
+  bankName: null,
+  accountType: null,
+  accountHolderName: null,
+  accountNumber: null,
+  routingNumber: null,
+  swiftBic: null,
+  iban: null,
+  branchName: null,
+  softwareName: null,
+  licenseKey: null,
+  version: null,
+  licensee: null,
+  purchaseDate: null,
+  expirationDate: null,
+};
 
 const sampleLoginEntry: ExportEntry = {
   entryType: ENTRY_TYPE.LOGIN,
@@ -37,6 +55,7 @@ const sampleLoginEntry: ExportEntry = {
   credentialId: null,
   creationDate: null,
   deviceInfo: null,
+  ...nullBankLicenseFields,
   tags: [{ name: "aws", color: "#ff9900" }],
   customFields: [{ label: "accountId", value: "123456789012", type: "text" }],
   totpConfig: { secret: "JBSWY3DPEHPK3PXP", issuer: "AWS" },
@@ -120,5 +139,95 @@ describe("export-format-common", () => {
     const parsed = JSON.parse(json);
     expect(parsed.format).toBe("passwd-sso");
     expect(parsed.entries[0].passwdSso).toBeDefined();
+  });
+
+  it("csvEntryType returns 'bankaccount' for BANK_ACCOUNT", () => {
+    expect(csvEntryType(ENTRY_TYPE.BANK_ACCOUNT, { includePasskeyType: true })).toBe("bankaccount");
+  });
+
+  it("csvEntryType returns 'softwarelicense' for SOFTWARE_LICENSE", () => {
+    expect(csvEntryType(ENTRY_TYPE.SOFTWARE_LICENSE, { includePasskeyType: true })).toBe("softwarelicense");
+  });
+
+  it("exports bank account type in team CSV", () => {
+    const bankEntry: ExportEntry = {
+      ...sampleLoginEntry,
+      entryType: ENTRY_TYPE.BANK_ACCOUNT,
+      bankName: "Acme Bank",
+      accountNumber: "123456789",
+    };
+    const csv = formatExportCsv(
+      [bankEntry],
+      "compatible",
+      TEAM_EXPORT_OPTIONS.csv
+    );
+    const row = csv.split("\n")[1];
+    expect(row.split(",")[2]).toBe("bankaccount");
+  });
+
+  it("exports software license type in team CSV", () => {
+    const licenseEntry: ExportEntry = {
+      ...sampleLoginEntry,
+      entryType: ENTRY_TYPE.SOFTWARE_LICENSE,
+      softwareName: "Adobe CC",
+      licenseKey: "ABCD-EFGH",
+    };
+    const csv = formatExportCsv(
+      [licenseEntry],
+      "compatible",
+      TEAM_EXPORT_OPTIONS.csv
+    );
+    const row = csv.split("\n")[1];
+    expect(row.split(",")[2]).toBe("softwarelicense");
+  });
+
+  it("exports bank account JSON with bankAccount fields", () => {
+    const bankEntry: ExportEntry = {
+      ...sampleLoginEntry,
+      entryType: ENTRY_TYPE.BANK_ACCOUNT,
+      bankName: "Acme Bank",
+      accountType: "checking",
+      accountHolderName: "Jane",
+      accountNumber: "123456789",
+      routingNumber: "021000021",
+      swiftBic: "BOFAUS3N",
+      iban: "DE89370400440532013000",
+      branchName: "Main",
+    };
+    const json = formatExportJson(
+      [bankEntry],
+      "passwd-sso",
+      PERSONAL_EXPORT_OPTIONS.json
+    );
+    const parsed = JSON.parse(json);
+    const entry = parsed.entries[0];
+    expect(entry.type).toBe("bankaccount");
+    expect(entry.bankAccount.bankName).toBe("Acme Bank");
+    expect(entry.bankAccount.accountNumber).toBe("123456789");
+    expect(entry.bankAccount.routingNumber).toBe("021000021");
+  });
+
+  it("exports software license JSON with softwareLicense fields", () => {
+    const licenseEntry: ExportEntry = {
+      ...sampleLoginEntry,
+      entryType: ENTRY_TYPE.SOFTWARE_LICENSE,
+      softwareName: "Adobe CC",
+      licenseKey: "ABCD-EFGH",
+      version: "2026",
+      licensee: "Jane",
+      purchaseDate: "2026-01-01",
+      expirationDate: "2027-01-01",
+    };
+    const json = formatExportJson(
+      [licenseEntry],
+      "passwd-sso",
+      PERSONAL_EXPORT_OPTIONS.json
+    );
+    const parsed = JSON.parse(json);
+    const entry = parsed.entries[0];
+    expect(entry.type).toBe("softwarelicense");
+    expect(entry.softwareLicense.softwareName).toBe("Adobe CC");
+    expect(entry.softwareLicense.licenseKey).toBe("ABCD-EFGH");
+    expect(entry.softwareLicense.purchaseDate).toBe("2026-01-01");
   });
 });

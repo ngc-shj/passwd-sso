@@ -63,6 +63,20 @@ export interface InlineDetailData {
   credentialId?: string | null;
   creationDate?: string | null;
   deviceInfo?: string | null;
+  bankName?: string | null;
+  accountType?: string | null;
+  accountHolderName?: string | null;
+  accountNumber?: string | null;
+  routingNumber?: string | null;
+  swiftBic?: string | null;
+  iban?: string | null;
+  branchName?: string | null;
+  softwareName?: string | null;
+  licenseKey?: string | null;
+  version?: string | null;
+  licensee?: string | null;
+  purchaseDate?: string | null;
+  expirationDate?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -94,6 +108,9 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
   const [showCvv, setShowCvv] = useState(false);
   const [showIdNumber, setShowIdNumber] = useState(false);
   const [showCredentialId, setShowCredentialId] = useState(false);
+  const [showAccountNumber, setShowAccountNumber] = useState(false);
+  const [showRoutingNumber, setShowRoutingNumber] = useState(false);
+  const [showLicenseKey, setShowLicenseKey] = useState(false);
 
   // Attachment state
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
@@ -155,6 +172,8 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
   const isCreditCard = data.entryType === ENTRY_TYPE.CREDIT_CARD;
   const isIdentity = data.entryType === ENTRY_TYPE.IDENTITY;
   const isPasskey = data.entryType === ENTRY_TYPE.PASSKEY;
+  const isBankAccount = data.entryType === ENTRY_TYPE.BANK_ACCOUNT;
+  const isSoftwareLicense = data.entryType === ENTRY_TYPE.SOFTWARE_LICENSE;
 
   const handleRevealCredentialId = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
@@ -163,9 +182,241 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
+  const handleRevealAccountNumber = useCallback(() => {
+    requireVerification(data.id, data.requireReprompt ?? false, () => {
+      setShowAccountNumber(true);
+      setTimeout(() => setShowAccountNumber(false), REVEAL_TIMEOUT);
+    });
+  }, [data.id, data.requireReprompt, requireVerification]);
+
+  const handleRevealRoutingNumber = useCallback(() => {
+    requireVerification(data.id, data.requireReprompt ?? false, () => {
+      setShowRoutingNumber(true);
+      setTimeout(() => setShowRoutingNumber(false), REVEAL_TIMEOUT);
+    });
+  }, [data.id, data.requireReprompt, requireVerification]);
+
+  const handleRevealLicenseKey = useCallback(() => {
+    requireVerification(data.id, data.requireReprompt ?? false, () => {
+      setShowLicenseKey(true);
+      setTimeout(() => setShowLicenseKey(false), REVEAL_TIMEOUT);
+    });
+  }, [data.id, data.requireReprompt, requireVerification]);
+
   return (
     <div className="space-y-3 border-t pt-3 px-4 pb-3">
-      {isPasskey ? (
+      {isBankAccount ? (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+          {/* Bank Name */}
+          {data.bankName && (
+            <div className="col-span-2 space-y-1">
+              <label className="text-sm text-muted-foreground">{t("bankName")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{data.bankName}</span>
+                <CopyButton getValue={() => data.bankName ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Account Holder Name */}
+          {data.accountHolderName && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("accountHolderName")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{data.accountHolderName}</span>
+                <CopyButton getValue={() => data.accountHolderName ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Account Type */}
+          {data.accountType && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("accountType")}</label>
+              <p className="text-sm">{data.accountType}</p>
+            </div>
+          )}
+
+          {/* Account Number */}
+          {data.accountNumber && (
+            <div className="col-span-2 space-y-1">
+              <label className="text-sm text-muted-foreground">{t("accountNumber")}</label>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm">
+                  {showAccountNumber ? data.accountNumber : "••••••••"}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={showAccountNumber ? () => setShowAccountNumber(false) : handleRevealAccountNumber}
+                >
+                  {showAccountNumber ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <CopyButton
+                  getValue={createGuardedGetter(
+                    data.id,
+                    data.requireReprompt ?? false,
+                    () => data.accountNumber ?? "",
+                  )}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Routing Number */}
+          {data.routingNumber && (
+            <div className="col-span-2 space-y-1">
+              <label className="text-sm text-muted-foreground">{t("routingNumber")}</label>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm">
+                  {showRoutingNumber ? data.routingNumber : "••••••••"}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={showRoutingNumber ? () => setShowRoutingNumber(false) : handleRevealRoutingNumber}
+                >
+                  {showRoutingNumber ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <CopyButton
+                  getValue={createGuardedGetter(
+                    data.id,
+                    data.requireReprompt ?? false,
+                    () => data.routingNumber ?? "",
+                  )}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* SWIFT / BIC */}
+          {data.swiftBic && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("swiftBic")}</label>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm">{data.swiftBic}</span>
+                <CopyButton getValue={() => data.swiftBic ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* IBAN */}
+          {data.iban && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("iban")}</label>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm">{data.iban}</span>
+                <CopyButton getValue={() => data.iban ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Branch Name */}
+          {data.branchName && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("branchName")}</label>
+              <p className="text-sm">{data.branchName}</p>
+            </div>
+          )}
+
+          {/* Notes */}
+          {data.notes && (
+            <div className="col-span-2 space-y-1">
+              <label className="text-sm text-muted-foreground">{t("notes")}</label>
+              <p className="rounded-lg border bg-muted/30 p-3 text-sm whitespace-pre-wrap">
+                {data.notes}
+              </p>
+            </div>
+          )}
+        </div>
+      ) : isSoftwareLicense ? (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+          {/* Software Name */}
+          {data.softwareName && (
+            <div className="col-span-2 space-y-1">
+              <label className="text-sm text-muted-foreground">{t("softwareName")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{data.softwareName}</span>
+                <CopyButton getValue={() => data.softwareName ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* License Key */}
+          {data.licenseKey && (
+            <div className="col-span-2 space-y-1">
+              <label className="text-sm text-muted-foreground">{t("licenseKey")}</label>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm break-all">
+                  {showLicenseKey ? data.licenseKey : "••••••••"}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={showLicenseKey ? () => setShowLicenseKey(false) : handleRevealLicenseKey}
+                >
+                  {showLicenseKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <CopyButton
+                  getValue={createGuardedGetter(
+                    data.id,
+                    data.requireReprompt ?? false,
+                    () => data.licenseKey ?? "",
+                  )}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Version */}
+          {data.version && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("version")}</label>
+              <p className="text-sm">{data.version}</p>
+            </div>
+          )}
+
+          {/* Licensee */}
+          {data.licensee && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("licensee")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{data.licensee}</span>
+                <CopyButton getValue={() => data.licensee ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Purchase Date */}
+          {data.purchaseDate && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("purchaseDate")}</label>
+              <p className="text-sm">{data.purchaseDate}</p>
+            </div>
+          )}
+
+          {/* Expiration Date */}
+          {data.expirationDate && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("expirationDate")}</label>
+              <p className="text-sm">{data.expirationDate}</p>
+            </div>
+          )}
+
+          {/* Notes */}
+          {data.notes && (
+            <div className="col-span-2 space-y-1">
+              <label className="text-sm text-muted-foreground">{t("notes")}</label>
+              <p className="rounded-lg border bg-muted/30 p-3 text-sm whitespace-pre-wrap">
+                {data.notes}
+              </p>
+            </div>
+          )}
+        </div>
+      ) : isPasskey ? (
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           {/* Relying Party ID */}
           {data.relyingPartyId && (
@@ -606,9 +857,22 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                         )}
                       </Button>
                     </>
+                  ) : field.type === CUSTOM_FIELD_TYPE.BOOLEAN ? (
+                    <span className="text-sm">
+                      {field.value === "true" ? tc("yes") : tc("no")}
+                    </span>
+                  ) : field.type === CUSTOM_FIELD_TYPE.DATE ? (
+                    <span className="text-sm">
+                      {field.value ? formatDateTime(field.value, locale) : field.value}
+                    </span>
+                  ) : field.type === CUSTOM_FIELD_TYPE.MONTH_YEAR ? (
+                    <span className="text-sm">
+                      {field.value}
+                    </span>
                   ) : (
                     <span className="text-sm">{field.value}</span>
                   )}
+                  {field.type !== CUSTOM_FIELD_TYPE.BOOLEAN && (
                   <CopyButton
                     getValue={
                       field.type === CUSTOM_FIELD_TYPE.HIDDEN
@@ -620,6 +884,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                         : () => Promise.resolve(field.value)
                     }
                   />
+                  )}
                 </div>
               </div>
             ))}

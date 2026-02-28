@@ -22,7 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, CheckSquare } from "lucide-react";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, CheckSquare, Landmark, KeySquare } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 
@@ -66,6 +66,8 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     CREDIT_CARD: t("catCreditCard"),
     IDENTITY: t("catIdentity"),
     PASSKEY: t("catPasskey"),
+    BANK_ACCOUNT: t("catBankAccount"),
+    SOFTWARE_LICENSE: t("catSoftwareLicense"),
   };
 
   const subtitle = isTrash
@@ -83,6 +85,8 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     CREDIT_CARD: <CreditCard className="h-6 w-6" />,
     IDENTITY: <IdCard className="h-6 w-6" />,
     PASSKEY: <Fingerprint className="h-6 w-6" />,
+    BANK_ACCOUNT: <Landmark className="h-6 w-6" />,
+    SOFTWARE_LICENSE: <KeySquare className="h-6 w-6" />,
   };
 
   const headerIcon = isTrash
@@ -277,6 +281,14 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
                         <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.PASSKEY); setNewDialogOpen(true); }}>
                           <Fingerprint className="h-4 w-4 mr-2" />
                           {t("newPasskey")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.BANK_ACCOUNT); setNewDialogOpen(true); }}>
+                          <Landmark className="h-4 w-4 mr-2" />
+                          {t("newBankAccount")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.SOFTWARE_LICENSE); setNewDialogOpen(true); }}>
+                          <KeySquare className="h-4 w-4 mr-2" />
+                          {t("newSoftwareLicense")}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

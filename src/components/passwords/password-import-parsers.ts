@@ -53,6 +53,20 @@ export function parsePasswdSsoPayload(raw: string | undefined): Partial<ParsedEn
       credentialId: typeof parsed.credentialId === "string" ? parsed.credentialId : "",
       creationDate: typeof parsed.creationDate === "string" ? parsed.creationDate : "",
       deviceInfo: typeof parsed.deviceInfo === "string" ? parsed.deviceInfo : "",
+      bankName: typeof parsed.bankName === "string" ? parsed.bankName : "",
+      accountType: typeof parsed.accountType === "string" ? parsed.accountType : "",
+      accountHolderName: typeof parsed.accountHolderName === "string" ? parsed.accountHolderName : "",
+      accountNumber: typeof parsed.accountNumber === "string" ? parsed.accountNumber : "",
+      routingNumber: typeof parsed.routingNumber === "string" ? parsed.routingNumber : "",
+      swiftBic: typeof parsed.swiftBic === "string" ? parsed.swiftBic : "",
+      iban: typeof parsed.iban === "string" ? parsed.iban : "",
+      branchName: typeof parsed.branchName === "string" ? parsed.branchName : "",
+      softwareName: typeof parsed.softwareName === "string" ? parsed.softwareName : "",
+      licenseKey: typeof parsed.licenseKey === "string" ? parsed.licenseKey : "",
+      version: typeof parsed.version === "string" ? parsed.version : "",
+      licensee: typeof parsed.licensee === "string" ? parsed.licensee : "",
+      purchaseDate: typeof parsed.purchaseDate === "string" ? parsed.purchaseDate : "",
+      expirationDate: typeof parsed.expirationDate === "string" ? parsed.expirationDate : "",
     };
   } catch {
     return {};
@@ -131,6 +145,7 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
     const isNote = rowType === "securenote" || rowType === "note";
     const isCard = rowType === "card";
     const isIdentity = rowType === "identity";
+    const isPasskey = rowType === "passkey";
     const passwdSso = parsePasswdSsoPayload(row["passwd_sso"]);
 
     const cardDefaults = {
@@ -146,6 +161,17 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
       relyingPartyId: "", relyingPartyName: "",
       credentialId: "", creationDate: "", deviceInfo: "",
     };
+    const bankAccountDefaults = {
+      bankName: "", accountType: "", accountHolderName: "",
+      accountNumber: "", routingNumber: "", swiftBic: "",
+      iban: "", branchName: "",
+    };
+    const softwareLicenseDefaults = {
+      softwareName: "", licenseKey: "", version: "",
+      licensee: "", purchaseDate: "", expirationDate: "",
+    };
+    const isBankAccount = rowType === "bankaccount";
+    const isSoftwareLicense = rowType === "softwarelicense";
 
     switch (format) {
       case "bitwarden":
@@ -160,6 +186,8 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
           ...cardDefaults,
           ...identityDefaults,
           ...passkeyDefaults,
+          ...bankAccountDefaults,
+          ...softwareLicenseDefaults,
           ...extraDefaults(),
         };
         break;
@@ -175,6 +203,8 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
           ...cardDefaults,
           ...identityDefaults,
           ...passkeyDefaults,
+          ...bankAccountDefaults,
+          ...softwareLicenseDefaults,
           ...extraDefaults(),
         };
         break;
@@ -190,12 +220,14 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
           ...cardDefaults,
           ...identityDefaults,
           ...passkeyDefaults,
+          ...bankAccountDefaults,
+          ...softwareLicenseDefaults,
           ...extraDefaults(),
         };
         break;
       default:
         entry = {
-          entryType: isIdentity ? ENTRY_TYPE.IDENTITY : isCard ? ENTRY_TYPE.CREDIT_CARD : isNote ? ENTRY_TYPE.SECURE_NOTE : ENTRY_TYPE.LOGIN,
+          entryType: isBankAccount ? ENTRY_TYPE.BANK_ACCOUNT : isSoftwareLicense ? ENTRY_TYPE.SOFTWARE_LICENSE : isPasskey ? ENTRY_TYPE.PASSKEY : isIdentity ? ENTRY_TYPE.IDENTITY : isCard ? ENTRY_TYPE.CREDIT_CARD : isNote ? ENTRY_TYPE.SECURE_NOTE : ENTRY_TYPE.LOGIN,
           title: row["name"] ?? row["title"] ?? fields[0] ?? "",
           username: row["username"] ?? row["login_username"] ?? fields[1] ?? "",
           password: row["password"] ?? row["login_password"] ?? fields[2] ?? "",
@@ -205,6 +237,8 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
           ...cardDefaults,
           ...identityDefaults,
           ...passkeyDefaults,
+          ...bankAccountDefaults,
+          ...softwareLicenseDefaults,
           ...extraDefaults(),
         };
     }
@@ -253,6 +287,8 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
       const cardDefaults = { cardholderName: "", cardNumber: "", brand: "", expiryMonth: "", expiryYear: "", cvv: "" };
       const identityDefaults = { fullName: "", address: "", phone: "", email: "", dateOfBirth: "", nationality: "", idNumber: "", issueDate: "", expiryDate: "" };
       const passkeyDefaults = { relyingPartyId: "", relyingPartyName: "", credentialId: "", creationDate: "", deviceInfo: "" };
+      const bankAccountDefaults = { bankName: "", accountType: "", accountHolderName: "", accountNumber: "", routingNumber: "", swiftBic: "", iban: "", branchName: "" };
+      const softwareLicenseDefaults = { softwareName: "", licenseKey: "", version: "", licensee: "", purchaseDate: "", expirationDate: "" };
 
       if (type === "passkey") {
         const passkey = item.passkey ?? {};
@@ -271,6 +307,64 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           credentialId: passkey.credentialId ?? "",
           creationDate: passkey.creationDate ?? "",
           deviceInfo: passkey.deviceInfo ?? "",
+          ...bankAccountDefaults,
+          ...softwareLicenseDefaults,
+          ...extraDefaults(),
+          ...passwdSso,
+        };
+        if (entry.title) entries.push(entry);
+        continue;
+      }
+
+      if (type === "bankaccount") {
+        const bank = item.bankAccount ?? {};
+        const entry: ParsedEntry = {
+          entryType: ENTRY_TYPE.BANK_ACCOUNT,
+          title: item.name ?? "",
+          username: "",
+          password: "",
+          content: "",
+          url: "",
+          notes: item.notes ?? "",
+          ...cardDefaults,
+          ...identityDefaults,
+          ...passkeyDefaults,
+          ...softwareLicenseDefaults,
+          bankName: bank.bankName ?? "",
+          accountType: bank.accountType ?? "",
+          accountHolderName: bank.accountHolderName ?? "",
+          accountNumber: bank.accountNumber ?? "",
+          routingNumber: bank.routingNumber ?? "",
+          swiftBic: bank.swiftBic ?? "",
+          iban: bank.iban ?? "",
+          branchName: bank.branchName ?? "",
+          ...extraDefaults(),
+          ...passwdSso,
+        };
+        if (entry.title) entries.push(entry);
+        continue;
+      }
+
+      if (type === "softwarelicense") {
+        const license = item.softwareLicense ?? {};
+        const entry: ParsedEntry = {
+          entryType: ENTRY_TYPE.SOFTWARE_LICENSE,
+          title: item.name ?? "",
+          username: "",
+          password: "",
+          content: "",
+          url: "",
+          notes: item.notes ?? "",
+          ...cardDefaults,
+          ...identityDefaults,
+          ...passkeyDefaults,
+          ...bankAccountDefaults,
+          softwareName: license.softwareName ?? "",
+          licenseKey: license.licenseKey ?? "",
+          version: license.version ?? "",
+          licensee: license.licensee ?? "",
+          purchaseDate: license.purchaseDate ?? "",
+          expirationDate: license.expirationDate ?? "",
           ...extraDefaults(),
           ...passwdSso,
         };
@@ -290,6 +384,8 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           notes: item.notes ?? "",
           ...cardDefaults,
           ...passkeyDefaults,
+          ...bankAccountDefaults,
+          ...softwareLicenseDefaults,
           fullName: identity.fullName ?? identity.firstName
             ? `${identity.firstName ?? ""} ${identity.lastName ?? ""}`.trim()
             : "",
@@ -326,6 +422,8 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           cvv: card.code ?? "",
           ...identityDefaults,
           ...passkeyDefaults,
+          ...bankAccountDefaults,
+          ...softwareLicenseDefaults,
           ...extraDefaults(),
           ...passwdSso,
         };
@@ -345,6 +443,8 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           ...cardDefaults,
           ...identityDefaults,
           ...passkeyDefaults,
+          ...bankAccountDefaults,
+          ...softwareLicenseDefaults,
           ...extraDefaults(),
           ...passwdSso,
         };
@@ -365,6 +465,8 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
         ...cardDefaults,
         ...identityDefaults,
         ...passkeyDefaults,
+        ...bankAccountDefaults,
+        ...softwareLicenseDefaults,
         ...extraDefaults(),
         totp: typeof login.totp === "string" && login.totp ? { secret: login.totp } : null,
         ...passwdSso,

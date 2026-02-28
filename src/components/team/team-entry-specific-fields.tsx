@@ -2,10 +2,12 @@
 
 import { CARD_BRANDS } from "@/lib/credit-card";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
+import { TeamBankAccountFields } from "@/components/team/team-bank-account-fields";
 import { TeamCreditCardFields } from "@/components/team/team-credit-card-fields";
 import { TeamIdentityFields } from "@/components/team/team-identity-fields";
 import { TeamPasskeyFields } from "@/components/team/team-passkey-fields";
 import { TeamSecureNoteFields } from "@/components/team/team-secure-note-fields";
+import { TeamSoftwareLicenseFields } from "@/components/team/team-software-license-fields";
 import type { TeamEntryKind } from "@/components/team/team-password-form-types";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 
@@ -149,6 +151,76 @@ interface TeamEntrySpecificFieldsProps {
     creationDate: string;
     deviceInfo: string;
   };
+  // bank account
+  bankName: string;
+  onBankNameChange: (value: string) => void;
+  bankNamePlaceholder: string;
+  accountType: string;
+  onAccountTypeChange: (value: string) => void;
+  accountTypePlaceholder: string;
+  accountTypeCheckingLabel: string;
+  accountTypeSavingsLabel: string;
+  accountTypeOtherLabel: string;
+  accountHolderName: string;
+  onAccountHolderNameChange: (value: string) => void;
+  accountHolderNamePlaceholder: string;
+  accountNumber: string;
+  onAccountNumberChange: (value: string) => void;
+  accountNumberPlaceholder: string;
+  showAccountNumber: boolean;
+  onToggleAccountNumber: () => void;
+  routingNumber: string;
+  onRoutingNumberChange: (value: string) => void;
+  routingNumberPlaceholder: string;
+  showRoutingNumber: boolean;
+  onToggleRoutingNumber: () => void;
+  swiftBic: string;
+  onSwiftBicChange: (value: string) => void;
+  swiftBicPlaceholder: string;
+  iban: string;
+  onIbanChange: (value: string) => void;
+  ibanPlaceholder: string;
+  branchName: string;
+  onBranchNameChange: (value: string) => void;
+  branchNamePlaceholder: string;
+  bankAccountLabels: {
+    bankName: string;
+    accountType: string;
+    accountHolderName: string;
+    accountNumber: string;
+    routingNumber: string;
+    swiftBic: string;
+    iban: string;
+    branchName: string;
+  };
+  // software license
+  softwareName: string;
+  onSoftwareNameChange: (value: string) => void;
+  softwareNamePlaceholder: string;
+  licenseKey: string;
+  onLicenseKeyChange: (value: string) => void;
+  licenseKeyPlaceholder: string;
+  showLicenseKey: boolean;
+  onToggleLicenseKey: () => void;
+  version: string;
+  onVersionChange: (value: string) => void;
+  versionPlaceholder: string;
+  licensee: string;
+  onLicenseeChange: (value: string) => void;
+  licenseePlaceholder: string;
+  purchaseDate: string;
+  onPurchaseDateChange: (value: string) => void;
+  expirationDate: string;
+  onExpirationDateChange: (value: string) => void;
+  softwareLicenseExpiryError: string | null;
+  softwareLicenseLabels: {
+    softwareName: string;
+    licenseKey: string;
+    version: string;
+    licensee: string;
+    purchaseDate: string;
+    expirationDate: string;
+  };
 }
 
 export function TeamEntrySpecificFields({
@@ -263,6 +335,58 @@ export function TeamEntrySpecificFields({
   onDeviceInfoChange,
   deviceInfoPlaceholder,
   passkeyLabels,
+  bankName,
+  onBankNameChange,
+  bankNamePlaceholder,
+  accountType,
+  onAccountTypeChange,
+  accountTypePlaceholder,
+  accountTypeCheckingLabel,
+  accountTypeSavingsLabel,
+  accountTypeOtherLabel,
+  accountHolderName,
+  onAccountHolderNameChange,
+  accountHolderNamePlaceholder,
+  accountNumber,
+  onAccountNumberChange,
+  accountNumberPlaceholder,
+  showAccountNumber,
+  onToggleAccountNumber,
+  routingNumber,
+  onRoutingNumberChange,
+  routingNumberPlaceholder,
+  showRoutingNumber,
+  onToggleRoutingNumber,
+  swiftBic,
+  onSwiftBicChange,
+  swiftBicPlaceholder,
+  iban,
+  onIbanChange,
+  ibanPlaceholder,
+  branchName,
+  onBranchNameChange,
+  branchNamePlaceholder,
+  bankAccountLabels,
+  softwareName,
+  onSoftwareNameChange,
+  softwareNamePlaceholder,
+  licenseKey,
+  onLicenseKeyChange,
+  licenseKeyPlaceholder,
+  showLicenseKey,
+  onToggleLicenseKey,
+  version,
+  onVersionChange,
+  versionPlaceholder,
+  licensee,
+  onLicenseeChange,
+  licenseePlaceholder,
+  purchaseDate,
+  onPurchaseDateChange,
+  expirationDate,
+  onExpirationDateChange,
+  softwareLicenseExpiryError,
+  softwareLicenseLabels,
 }: TeamEntrySpecificFieldsProps) {
   switch (entryKind) {
     case "passkey":
@@ -372,6 +496,76 @@ export function TeamEntrySpecificFields({
           onNotesChange={onNotesChange}
           notesPlaceholder={notesPlaceholder}
           labels={creditCardLabels}
+        />
+      );
+    case "bankAccount":
+      return (
+        <TeamBankAccountFields
+          bankName={bankName}
+          onBankNameChange={onBankNameChange}
+          bankNamePlaceholder={bankNamePlaceholder}
+          accountType={accountType}
+          onAccountTypeChange={onAccountTypeChange}
+          accountTypePlaceholder={accountTypePlaceholder}
+          accountTypeCheckingLabel={accountTypeCheckingLabel}
+          accountTypeSavingsLabel={accountTypeSavingsLabel}
+          accountTypeOtherLabel={accountTypeOtherLabel}
+          accountHolderName={accountHolderName}
+          onAccountHolderNameChange={onAccountHolderNameChange}
+          accountHolderNamePlaceholder={accountHolderNamePlaceholder}
+          accountNumber={accountNumber}
+          onAccountNumberChange={onAccountNumberChange}
+          accountNumberPlaceholder={accountNumberPlaceholder}
+          showAccountNumber={showAccountNumber}
+          onToggleAccountNumber={onToggleAccountNumber}
+          routingNumber={routingNumber}
+          onRoutingNumberChange={onRoutingNumberChange}
+          routingNumberPlaceholder={routingNumberPlaceholder}
+          showRoutingNumber={showRoutingNumber}
+          onToggleRoutingNumber={onToggleRoutingNumber}
+          swiftBic={swiftBic}
+          onSwiftBicChange={onSwiftBicChange}
+          swiftBicPlaceholder={swiftBicPlaceholder}
+          iban={iban}
+          onIbanChange={onIbanChange}
+          ibanPlaceholder={ibanPlaceholder}
+          branchName={branchName}
+          onBranchNameChange={onBranchNameChange}
+          branchNamePlaceholder={branchNamePlaceholder}
+          notesLabel={notesLabel}
+          notes={notes}
+          onNotesChange={onNotesChange}
+          notesPlaceholder={notesPlaceholder}
+          labels={bankAccountLabels}
+        />
+      );
+    case "softwareLicense":
+      return (
+        <TeamSoftwareLicenseFields
+          softwareName={softwareName}
+          onSoftwareNameChange={onSoftwareNameChange}
+          softwareNamePlaceholder={softwareNamePlaceholder}
+          licenseKey={licenseKey}
+          onLicenseKeyChange={onLicenseKeyChange}
+          licenseKeyPlaceholder={licenseKeyPlaceholder}
+          showLicenseKey={showLicenseKey}
+          onToggleLicenseKey={onToggleLicenseKey}
+          version={version}
+          onVersionChange={onVersionChange}
+          versionPlaceholder={versionPlaceholder}
+          licensee={licensee}
+          onLicenseeChange={onLicenseeChange}
+          licenseePlaceholder={licenseePlaceholder}
+          purchaseDate={purchaseDate}
+          onPurchaseDateChange={onPurchaseDateChange}
+          expirationDate={expirationDate}
+          onExpirationDateChange={onExpirationDateChange}
+          expiryError={softwareLicenseExpiryError}
+          notesLabel={notesLabel}
+          notes={notes}
+          onNotesChange={onNotesChange}
+          notesPlaceholder={notesPlaceholder}
+          labels={softwareLicenseLabels}
         />
       );
     case "secureNote":

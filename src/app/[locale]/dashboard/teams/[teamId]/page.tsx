@@ -21,7 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock } from "lucide-react";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -53,6 +53,10 @@ interface TeamPasswordEntry {
   fullName: string | null;
   idNumberLast4: string | null;
   relyingPartyId: string | null;
+  bankName: string | null;
+  accountNumberLast4: string | null;
+  softwareName: string | null;
+  licensee: string | null;
   isFavorite: boolean;
   isArchived: boolean;
   tags: { id: string; name: string; color: string | null }[];
@@ -119,6 +123,20 @@ export default function TeamDashboardPage({
     credentialId?: string | null;
     creationDate?: string | null;
     deviceInfo?: string | null;
+    bankName?: string | null;
+    accountType?: string | null;
+    accountHolderName?: string | null;
+    accountNumber?: string | null;
+    routingNumber?: string | null;
+    swiftBic?: string | null;
+    iban?: string | null;
+    branchName?: string | null;
+    softwareName?: string | null;
+    licenseKey?: string | null;
+    version?: string | null;
+    licensee?: string | null;
+    purchaseDate?: string | null;
+    expirationDate?: string | null;
     teamFolderId?: string | null;
   } | null>(null);
   const isTeamArchive = activeScope === "archive";
@@ -194,6 +212,10 @@ export default function TeamDashboardPage({
               fullName: overview.fullName ?? null,
               idNumberLast4: overview.idNumberLast4 ?? null,
               relyingPartyId: overview.relyingPartyId ?? null,
+              bankName: overview.bankName ?? null,
+              accountNumberLast4: overview.accountNumberLast4 ?? null,
+              softwareName: overview.softwareName ?? null,
+              licensee: overview.licensee ?? null,
               isFavorite: entry.isFavorite,
               isArchived: entry.isArchived,
               tags: entry.tags,
@@ -216,6 +238,10 @@ export default function TeamDashboardPage({
               fullName: null,
               idNumberLast4: null,
               relyingPartyId: null,
+              bankName: null,
+              accountNumberLast4: null,
+              softwareName: null,
+              licensee: null,
               isFavorite: entry.isFavorite as boolean,
               isArchived: entry.isArchived as boolean,
               tags: (entry.tags ?? []) as TeamPasswordEntry["tags"],
@@ -258,6 +284,8 @@ export default function TeamDashboardPage({
         [ENTRY_TYPE.CREDIT_CARD]: tDash("catCreditCard"),
         [ENTRY_TYPE.IDENTITY]: tDash("catIdentity"),
         [ENTRY_TYPE.PASSKEY]: tDash("catPasskey"),
+        [ENTRY_TYPE.BANK_ACCOUNT]: tDash("catBankAccount"),
+        [ENTRY_TYPE.SOFTWARE_LICENSE]: tDash("catSoftwareLicense"),
       } as Record<string, string>)[activeEntryType] ?? activeEntryType
     : null;
   const subtitle = isTeamTrash
@@ -273,6 +301,8 @@ export default function TeamDashboardPage({
     CREDIT_CARD: <CreditCard className="h-6 w-6" />,
     IDENTITY: <IdCard className="h-6 w-6" />,
     PASSKEY: <Fingerprint className="h-6 w-6" />,
+    BANK_ACCOUNT: <Landmark className="h-6 w-6" />,
+    SOFTWARE_LICENSE: <KeySquare className="h-6 w-6" />,
   };
 
   const headerIcon = isTeamTrash
@@ -405,6 +435,20 @@ export default function TeamDashboardPage({
         credentialId: blob.credentialId as string | null | undefined,
         creationDate: blob.creationDate as string | null | undefined,
         deviceInfo: blob.deviceInfo as string | null | undefined,
+        bankName: blob.bankName as string | null | undefined,
+        accountType: blob.accountType as string | null | undefined,
+        accountHolderName: blob.accountHolderName as string | null | undefined,
+        accountNumber: blob.accountNumber as string | null | undefined,
+        routingNumber: blob.routingNumber as string | null | undefined,
+        swiftBic: blob.swiftBic as string | null | undefined,
+        iban: blob.iban as string | null | undefined,
+        branchName: blob.branchName as string | null | undefined,
+        softwareName: blob.softwareName as string | null | undefined,
+        licenseKey: blob.licenseKey as string | null | undefined,
+        version: blob.version as string | null | undefined,
+        licensee: blob.licensee as string | null | undefined,
+        purchaseDate: blob.purchaseDate as string | null | undefined,
+        expirationDate: blob.expirationDate as string | null | undefined,
         teamFolderId: (raw.teamFolderId as string) ?? null,
       });
       setFormOpen(true);
@@ -451,6 +495,20 @@ export default function TeamDashboardPage({
         credentialId: blob.credentialId as string | undefined,
         creationDate: blob.creationDate as string | undefined,
         deviceInfo: blob.deviceInfo as string | undefined,
+        bankName: blob.bankName as string | undefined,
+        accountType: blob.accountType as string | undefined,
+        accountHolderName: blob.accountHolderName as string | undefined,
+        accountNumber: blob.accountNumber as string | undefined,
+        routingNumber: blob.routingNumber as string | undefined,
+        swiftBic: blob.swiftBic as string | undefined,
+        iban: blob.iban as string | undefined,
+        branchName: blob.branchName as string | undefined,
+        softwareName: blob.softwareName as string | undefined,
+        licenseKey: blob.licenseKey as string | undefined,
+        version: blob.version as string | undefined,
+        licensee: blob.licensee as string | undefined,
+        purchaseDate: blob.purchaseDate as string | undefined,
+        expirationDate: blob.expirationDate as string | undefined,
         createdAt: raw.createdAt,
         updatedAt: raw.updatedAt,
       };
@@ -493,7 +551,11 @@ export default function TeamDashboardPage({
       p.cardholderName?.toLowerCase().includes(q) ||
       p.fullName?.toLowerCase().includes(q) ||
       p.idNumberLast4?.toLowerCase().includes(q) ||
-      p.relyingPartyId?.toLowerCase().includes(q)
+      p.relyingPartyId?.toLowerCase().includes(q) ||
+      p.bankName?.toLowerCase().includes(q) ||
+      p.accountNumberLast4?.includes(q) ||
+      p.softwareName?.toLowerCase().includes(q) ||
+      p.licensee?.toLowerCase().includes(q)
     );
   });
   const sortedFiltered = [...filtered].sort((a, b) =>
@@ -573,6 +635,14 @@ export default function TeamDashboardPage({
                       <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.PASSKEY); setFormOpen(true); }}>
                         <Fingerprint className="mr-2 h-4 w-4" />
                         {t("newPasskey")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.BANK_ACCOUNT); setFormOpen(true); }}>
+                        <Landmark className="mr-2 h-4 w-4" />
+                        {t("newBankAccount")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { setEditData(null); setNewEntryType(ENTRY_TYPE.SOFTWARE_LICENSE); setFormOpen(true); }}>
+                        <KeySquare className="mr-2 h-4 w-4" />
+                        {t("newSoftwareLicense")}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -660,6 +730,10 @@ export default function TeamDashboardPage({
                 fullName={entry.fullName}
                 idNumberLast4={entry.idNumberLast4}
                 relyingPartyId={entry.relyingPartyId}
+                bankName={entry.bankName}
+                accountNumberLast4={entry.accountNumberLast4}
+                softwareName={entry.softwareName}
+                licensee={entry.licensee}
                 tags={entry.tags}
                 isFavorite={entry.isFavorite}
                 isArchived={entry.isArchived}

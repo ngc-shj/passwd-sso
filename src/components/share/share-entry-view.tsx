@@ -16,10 +16,20 @@ import {
   CreditCard,
   UserSquare,
   Fingerprint,
+  Landmark,
+  KeySquare,
 } from "lucide-react";
 import { formatDateTime } from "@/lib/format-datetime";
 
 const REVEAL_TIMEOUT = 30_000;
+
+function isSafeHref(url: string): boolean {
+  try {
+    return ["http:", "https:"].includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
 
 const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
   [ENTRY_TYPE.LOGIN]: <KeyRound className="h-5 w-5" />,
@@ -27,6 +37,8 @@ const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
   [ENTRY_TYPE.CREDIT_CARD]: <CreditCard className="h-5 w-5" />,
   [ENTRY_TYPE.IDENTITY]: <UserSquare className="h-5 w-5" />,
   [ENTRY_TYPE.PASSKEY]: <Fingerprint className="h-5 w-5" />,
+  [ENTRY_TYPE.BANK_ACCOUNT]: <Landmark className="h-5 w-5" />,
+  [ENTRY_TYPE.SOFTWARE_LICENSE]: <KeySquare className="h-5 w-5" />,
 };
 
 interface ShareEntryViewProps {
@@ -146,18 +158,63 @@ export function ShareEntryView({
                   {f.label}
                 </label>
                 <div className="flex items-center gap-2">
-                  <a
-                    href={f.value}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-blue-500 hover:underline break-all"
-                  >
-                    {f.value}
-                  </a>
+                  {isSafeHref(f.value) ? (
+                    <a
+                      href={f.value}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-blue-500 hover:underline break-all"
+                    >
+                      {f.value}
+                    </a>
+                  ) : (
+                    <span className="text-sm break-all">{f.value}</span>
+                  )}
                   <CopyButton getValue={() => f.value} />
                 </div>
               </div>
             );
+          }
+          if (f.type === CUSTOM_FIELD_TYPE.BOOLEAN) {
+            return (
+              <div className="space-y-1" key={`custom_${i}`}>
+                <label className="text-sm text-muted-foreground">
+                  {f.label}
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">
+                    {f.value === "true" ? "Yes" : "No"}
+                  </span>
+                </div>
+              </div>
+            );
+          }
+          if (f.type === CUSTOM_FIELD_TYPE.DATE && f.value) {
+            let formatted = f.value;
+            try {
+              formatted = new Intl.DateTimeFormat(locale, {
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              }).format(new Date(f.value));
+            } catch {
+              // keep raw value
+            }
+            return renderField(f.label, formatted, `custom_${i}`);
+          }
+          if (f.type === CUSTOM_FIELD_TYPE.MONTH_YEAR && f.value) {
+            let formatted = f.value;
+            try {
+              // MONTH_YEAR values are typically "YYYY-MM" format
+              const [year, month] = f.value.split("-");
+              formatted = new Intl.DateTimeFormat(locale, {
+                year: "numeric",
+                month: "long",
+              }).format(new Date(Number(year), Number(month) - 1));
+            } catch {
+              // keep raw value
+            }
+            return renderField(f.label, formatted, `custom_${i}`);
           }
           return renderField(f.label, f.value, `custom_${i}`);
         })}
@@ -173,14 +230,18 @@ export function ShareEntryView({
         <div className="space-y-1">
           <label className="text-sm text-muted-foreground">{t("url")}</label>
           <div className="flex items-center gap-2">
-            <a
-              href={String(data.url)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-blue-500 hover:underline break-all"
-            >
-              {String(data.url)}
-            </a>
+            {isSafeHref(String(data.url)) ? (
+              <a
+                href={String(data.url)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-blue-500 hover:underline break-all"
+              >
+                {String(data.url)}
+              </a>
+            ) : (
+              <span className="text-sm break-all">{String(data.url)}</span>
+            )}
             <CopyButton getValue={() => String(data.url)} />
           </div>
         </div>
@@ -249,6 +310,32 @@ export function ShareEntryView({
     </>
   );
 
+  const renderBankAccountFields = () => (
+    <>
+      {renderField(t("bankName"), data.bankName)}
+      {renderField(t("accountType"), data.accountType)}
+      {renderField(t("accountHolderName"), data.accountHolderName)}
+      {renderSensitiveField(t("accountNumber"), data.accountNumber, "accountNumber")}
+      {renderSensitiveField(t("routingNumber"), data.routingNumber, "routingNumber")}
+      {renderField(t("swiftBic"), data.swiftBic)}
+      {renderField(t("iban"), data.iban)}
+      {renderField(t("branchName"), data.branchName)}
+      {renderNotes(data.notes)}
+    </>
+  );
+
+  const renderSoftwareLicenseFields = () => (
+    <>
+      {renderField(t("softwareName"), data.softwareName)}
+      {renderSensitiveField(t("licenseKey"), data.licenseKey, "licenseKey")}
+      {renderField(t("version"), data.version)}
+      {renderField(t("licensee"), data.licensee)}
+      {renderField(t("purchaseDate"), data.purchaseDate)}
+      {renderField(t("expirationDate"), data.expirationDate)}
+      {renderNotes(data.notes)}
+    </>
+  );
+
   const renderFields = () => {
     switch (entryType) {
       case ENTRY_TYPE.SECURE_NOTE:
@@ -259,6 +346,10 @@ export function ShareEntryView({
         return renderIdentityFields();
       case ENTRY_TYPE.PASSKEY:
         return renderPasskeyFields();
+      case ENTRY_TYPE.BANK_ACCOUNT:
+        return renderBankAccountFields();
+      case ENTRY_TYPE.SOFTWARE_LICENSE:
+        return renderSoftwareLicenseFields();
       default:
         return renderLoginFields();
     }

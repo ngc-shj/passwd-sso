@@ -25,6 +25,8 @@ import {
   CreditCard,
   IdCard,
   Fingerprint,
+  Landmark,
+  KeySquare,
   FolderOpen,
   Plus,
   Link as LinkIcon,
@@ -99,6 +101,8 @@ export function CategoriesSection({
     { type: ENTRY_TYPE.CREDIT_CARD, labelKey: "catCreditCard", icon: CreditCard },
     { type: ENTRY_TYPE.IDENTITY, labelKey: "catIdentity", icon: IdCard },
     { type: ENTRY_TYPE.PASSKEY, labelKey: "catPasskey", icon: Fingerprint },
+    { type: ENTRY_TYPE.BANK_ACCOUNT, labelKey: "catBankAccount", icon: Landmark },
+    { type: ENTRY_TYPE.SOFTWARE_LICENSE, labelKey: "catSoftwareLicense", icon: KeySquare },
   ] as const;
 
   return (

@@ -7,3 +7,5 @@ export type SecureNoteFormTranslator = ReturnType<typeof useTranslations<"Secure
 export type CreditCardFormTranslator = ReturnType<typeof useTranslations<"CreditCardForm">>;
 export type IdentityFormTranslator = ReturnType<typeof useTranslations<"IdentityForm">>;
 export type PasskeyFormTranslator = ReturnType<typeof useTranslations<"PasskeyForm">>;
+export type BankAccountFormTranslator = ReturnType<typeof useTranslations<"BankAccountForm">>;
+export type SoftwareLicenseFormTranslator = ReturnType<typeof useTranslations<"SoftwareLicenseForm">>;

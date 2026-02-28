@@ -751,6 +751,92 @@ describe("POST /api/passwords", () => {
     expect(json[0].entryType).toBe("PASSKEY");
   });
 
+  it("creates BANK_ACCOUNT entry (201)", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-bank",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      entryType: "BANK_ACCOUNT",
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: { ...validBody, entryType: "BANK_ACCOUNT" },
+    }));
+    const json = await res.json();
+    expect(res.status).toBe(201);
+    expect(json.entryType).toBe("BANK_ACCOUNT");
+  });
+
+  it("returns BANK_ACCOUNT entryType in GET", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([
+      { ...mockEntry, id: "pw-bank", entryType: "BANK_ACCOUNT" },
+    ]);
+    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    const json = await res.json();
+    expect(json[0].entryType).toBe("BANK_ACCOUNT");
+  });
+
+  it("filters by entryType BANK_ACCOUNT", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      searchParams: { type: "BANK_ACCOUNT" },
+    }));
+    expect(mockPrismaPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ entryType: "BANK_ACCOUNT" }),
+      })
+    );
+  });
+
+  it("creates SOFTWARE_LICENSE entry (201)", async () => {
+    mockPrismaPasswordEntry.create.mockResolvedValue({
+      id: "new-license",
+      encryptedOverview: "over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      entryType: "SOFTWARE_LICENSE",
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: { ...validBody, entryType: "SOFTWARE_LICENSE" },
+    }));
+    const json = await res.json();
+    expect(res.status).toBe(201);
+    expect(json.entryType).toBe("SOFTWARE_LICENSE");
+  });
+
+  it("returns SOFTWARE_LICENSE entryType in GET", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([
+      { ...mockEntry, id: "pw-license", entryType: "SOFTWARE_LICENSE" },
+    ]);
+    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    const json = await res.json();
+    expect(json[0].entryType).toBe("SOFTWARE_LICENSE");
+  });
+
+  it("filters by entryType SOFTWARE_LICENSE", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      searchParams: { type: "SOFTWARE_LICENSE" },
+    }));
+    expect(mockPrismaPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ entryType: "SOFTWARE_LICENSE" }),
+      })
+    );
+  });
+
   it("creates entry with requireReprompt=true (201)", async () => {
     mockPrismaPasswordEntry.create.mockResolvedValue({
       id: "new-reprompt",

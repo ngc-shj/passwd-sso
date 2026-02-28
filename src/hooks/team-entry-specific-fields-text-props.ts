@@ -16,7 +16,7 @@ export function buildTeamEntrySpecificTextProps(
   entryCopy: EntryCopyText,
   lengthHint: string,
 ): Pick<TeamEntrySpecificFieldsProps, TeamEntrySpecificComputedProps> {
-  const { t, tn, tcc, ti, tpk } = translations;
+  const { t, tn, tcc, ti, tpk, tba, tsl } = translations;
 
   return {
     notesLabel: entryCopy.notesLabel,
@@ -77,6 +77,39 @@ export function buildTeamEntrySpecificTextProps(
       credentialId: tpk("credentialId"),
       creationDate: tpk("creationDate"),
       deviceInfo: tpk("deviceInfo"),
+    },
+    bankNamePlaceholder: tba("bankNamePlaceholder"),
+    accountTypePlaceholder: tba("accountTypePlaceholder"),
+    accountTypeCheckingLabel: tba("accountTypeChecking"),
+    accountTypeSavingsLabel: tba("accountTypeSavings"),
+    accountTypeOtherLabel: tba("accountTypeOther"),
+    accountHolderNamePlaceholder: tba("accountHolderNamePlaceholder"),
+    accountNumberPlaceholder: tba("accountNumberPlaceholder"),
+    routingNumberPlaceholder: tba("routingNumberPlaceholder"),
+    swiftBicPlaceholder: tba("swiftBicPlaceholder"),
+    ibanPlaceholder: tba("ibanPlaceholder"),
+    branchNamePlaceholder: tba("branchNamePlaceholder"),
+    bankAccountLabels: {
+      bankName: tba("bankName"),
+      accountType: tba("accountType"),
+      accountHolderName: tba("accountHolderName"),
+      accountNumber: tba("accountNumber"),
+      routingNumber: tba("routingNumber"),
+      swiftBic: tba("swiftBic"),
+      iban: tba("iban"),
+      branchName: tba("branchName"),
+    },
+    softwareNamePlaceholder: tsl("softwareNamePlaceholder"),
+    licenseKeyPlaceholder: tsl("licenseKeyPlaceholder"),
+    versionPlaceholder: tsl("versionPlaceholder"),
+    licenseePlaceholder: tsl("licenseePlaceholder"),
+    softwareLicenseLabels: {
+      softwareName: tsl("softwareName"),
+      licenseKey: tsl("licenseKey"),
+      version: tsl("version"),
+      licensee: tsl("licensee"),
+      purchaseDate: tsl("purchaseDate"),
+      expirationDate: tsl("expirationDate"),
     },
   };
 }

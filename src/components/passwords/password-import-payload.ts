@@ -82,6 +82,55 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
     };
   }
 
+  if (entry.entryType === ENTRY_TYPE.BANK_ACCOUNT) {
+    const accountNumberLast4 = entry.accountNumber ? entry.accountNumber.slice(-4) : null;
+    return {
+      fullBlob: JSON.stringify({
+        title: entry.title,
+        bankName: entry.bankName || null,
+        accountType: entry.accountType || null,
+        accountHolderName: entry.accountHolderName || null,
+        accountNumber: entry.accountNumber || null,
+        routingNumber: entry.routingNumber || null,
+        swiftBic: entry.swiftBic || null,
+        iban: entry.iban || null,
+        branchName: entry.branchName || null,
+        notes: entry.notes || null,
+        tags: entry.tags,
+      }),
+      overviewBlob: JSON.stringify({
+        title: entry.title,
+        bankName: entry.bankName || null,
+        accountNumberLast4,
+        tags: entry.tags,
+        requireReprompt: entry.requireReprompt,
+      }),
+    };
+  }
+
+  if (entry.entryType === ENTRY_TYPE.SOFTWARE_LICENSE) {
+    return {
+      fullBlob: JSON.stringify({
+        title: entry.title,
+        softwareName: entry.softwareName || null,
+        licenseKey: entry.licenseKey || null,
+        version: entry.version || null,
+        licensee: entry.licensee || null,
+        purchaseDate: entry.purchaseDate || null,
+        expirationDate: entry.expirationDate || null,
+        notes: entry.notes || null,
+        tags: entry.tags,
+      }),
+      overviewBlob: JSON.stringify({
+        title: entry.title,
+        softwareName: entry.softwareName || null,
+        licensee: entry.licensee || null,
+        tags: entry.tags,
+        requireReprompt: entry.requireReprompt,
+      }),
+    };
+  }
+
   if (entry.entryType === ENTRY_TYPE.SECURE_NOTE) {
     return {
       fullBlob: JSON.stringify({

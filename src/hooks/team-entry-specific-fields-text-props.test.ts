@@ -10,6 +10,8 @@ describe("buildTeamEntrySpecificTextProps", () => {
         tcc: (k, values) => `tcc.${k}${values ? `:${JSON.stringify(values)}` : ""}`,
         ti: (k) => `ti.${k}`,
         tpk: (k) => `tpk.${k}`,
+        tba: (k) => `tba.${k}`,
+        tsl: (k) => `tsl.${k}`,
       },
       {
         notesLabel: "notes.label",
