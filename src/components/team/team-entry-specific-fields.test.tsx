@@ -21,12 +21,18 @@ vi.mock("@/components/team/team-identity-fields", () => ({
 vi.mock("@/components/team/team-passkey-fields", () => ({
   TeamPasskeyFields: () => <div data-testid="team-passkey-fields" />,
 }));
+vi.mock("@/components/team/team-bank-account-fields", () => ({
+  TeamBankAccountFields: () => <div data-testid="team-bank-account-fields" />,
+}));
+vi.mock("@/components/team/team-software-license-fields", () => ({
+  TeamSoftwareLicenseFields: () => <div data-testid="team-software-license-fields" />,
+}));
 
 const baseGeneratorSettings: GeneratorSettings = {
   ...DEFAULT_GENERATOR_SETTINGS,
 };
 
-function renderSubject(entryKind: "password" | "secureNote" | "creditCard" | "identity" | "passkey") {
+function renderSubject(entryKind: "password" | "secureNote" | "creditCard" | "identity" | "passkey" | "bankAccount" | "softwareLicense") {
   return render(
     <TeamEntrySpecificFields
       entryKind={entryKind}
@@ -162,6 +168,74 @@ function renderSubject(entryKind: "password" | "secureNote" | "creditCard" | "id
         creationDate: "creationDate",
         deviceInfo: "deviceInfo",
       }}
+      bankName=""
+      onBankNameChange={vi.fn()}
+      bankNamePlaceholder="bankNamePlaceholder"
+      accountType=""
+      onAccountTypeChange={vi.fn()}
+      accountTypePlaceholder="accountTypePlaceholder"
+      accountTypeCheckingLabel="Checking"
+      accountTypeSavingsLabel="Savings"
+      accountTypeOtherLabel="Other"
+      accountHolderName=""
+      onAccountHolderNameChange={vi.fn()}
+      accountHolderNamePlaceholder="accountHolderNamePlaceholder"
+      accountNumber=""
+      onAccountNumberChange={vi.fn()}
+      accountNumberPlaceholder="accountNumberPlaceholder"
+      showAccountNumber={false}
+      onToggleAccountNumber={vi.fn()}
+      routingNumber=""
+      onRoutingNumberChange={vi.fn()}
+      routingNumberPlaceholder="routingNumberPlaceholder"
+      showRoutingNumber={false}
+      onToggleRoutingNumber={vi.fn()}
+      swiftBic=""
+      onSwiftBicChange={vi.fn()}
+      swiftBicPlaceholder="swiftBicPlaceholder"
+      iban=""
+      onIbanChange={vi.fn()}
+      ibanPlaceholder="ibanPlaceholder"
+      branchName=""
+      onBranchNameChange={vi.fn()}
+      branchNamePlaceholder="branchNamePlaceholder"
+      bankAccountLabels={{
+        bankName: "bankName",
+        accountType: "accountType",
+        accountHolderName: "accountHolderName",
+        accountNumber: "accountNumber",
+        routingNumber: "routingNumber",
+        swiftBic: "swiftBic",
+        iban: "iban",
+        branchName: "branchName",
+      }}
+      softwareName=""
+      onSoftwareNameChange={vi.fn()}
+      softwareNamePlaceholder="softwareNamePlaceholder"
+      licenseKey=""
+      onLicenseKeyChange={vi.fn()}
+      licenseKeyPlaceholder="licenseKeyPlaceholder"
+      showLicenseKey={false}
+      onToggleLicenseKey={vi.fn()}
+      version=""
+      onVersionChange={vi.fn()}
+      versionPlaceholder="versionPlaceholder"
+      licensee=""
+      onLicenseeChange={vi.fn()}
+      licenseePlaceholder="licenseePlaceholder"
+      purchaseDate=""
+      onPurchaseDateChange={vi.fn()}
+      expirationDate=""
+      onExpirationDateChange={vi.fn()}
+      softwareLicenseExpiryError={null}
+      softwareLicenseLabels={{
+        softwareName: "softwareName",
+        licenseKey: "licenseKey",
+        version: "version",
+        licensee: "licensee",
+        purchaseDate: "purchaseDate",
+        expirationDate: "expirationDate",
+      }}
     />,
   );
 }
@@ -175,5 +249,30 @@ describe("TeamEntrySpecificFields", () => {
   it("renders passkey fields for passkey kind", () => {
     renderSubject("passkey");
     expect(screen.getByTestId("team-passkey-fields")).toBeTruthy();
+  });
+
+  it("renders bank account fields for bankAccount kind", () => {
+    renderSubject("bankAccount");
+    expect(screen.getByTestId("team-bank-account-fields")).toBeTruthy();
+  });
+
+  it("renders software license fields for softwareLicense kind", () => {
+    renderSubject("softwareLicense");
+    expect(screen.getByTestId("team-software-license-fields")).toBeTruthy();
+  });
+
+  it("renders secure note fields for secureNote kind", () => {
+    renderSubject("secureNote");
+    expect(screen.getByTestId("team-secure-note-fields")).toBeTruthy();
+  });
+
+  it("renders credit card fields for creditCard kind", () => {
+    renderSubject("creditCard");
+    expect(screen.getByTestId("team-credit-card-fields")).toBeTruthy();
+  });
+
+  it("renders identity fields for identity kind", () => {
+    renderSubject("identity");
+    expect(screen.getByTestId("team-identity-fields")).toBeTruthy();
   });
 });

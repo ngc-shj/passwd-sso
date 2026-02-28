@@ -72,13 +72,34 @@ export interface SubmitTeamPasswordFormArgs {
   credentialId: string;
   creationDate: string;
   deviceInfo: string;
+  bankName: string;
+  accountType: string;
+  accountHolderName: string;
+  accountNumber: string;
+  routingNumber: string;
+  swiftBic: string;
+  iban: string;
+  branchName: string;
+  softwareName: string;
+  licenseKey: string;
+  version: string;
+  licensee: string;
+  purchaseDate: string;
+  expirationDate: string;
+  requireReprompt: boolean;
+  expiresAt: string | null;
   cardNumberValid: boolean;
   isIdentity: boolean;
+  isBankAccount: boolean;
+  isSoftwareLicense: boolean;
   setDobError: (value: string | null) => void;
   setExpiryError: (value: string | null) => void;
   identityErrorCopy: {
     dobFuture: string;
     expiryBeforeIssue: string;
+  };
+  softwareLicenseErrorCopy: {
+    expirationBeforePurchase: string;
   };
   t: PasswordFormTranslator;
   setSaving: (value: boolean) => void;
@@ -123,11 +144,29 @@ export async function submitTeamPasswordForm({
   credentialId,
   creationDate,
   deviceInfo,
+  bankName,
+  accountType,
+  accountHolderName,
+  accountNumber,
+  routingNumber,
+  swiftBic,
+  iban,
+  branchName,
+  softwareName,
+  licenseKey,
+  version,
+  licensee,
+  purchaseDate,
+  expirationDate,
+  requireReprompt,
+  expiresAt,
   cardNumberValid,
   isIdentity,
+  isSoftwareLicense,
   setDobError,
   setExpiryError,
   identityErrorCopy,
+  softwareLicenseErrorCopy,
   t,
   setSaving,
   handleOpenChange,
@@ -142,10 +181,15 @@ export async function submitTeamPasswordForm({
     dateOfBirth,
     issueDate,
     expiryDate,
+    purchaseDate,
+    expirationDate,
   });
   if (isIdentity) {
     setDobError(validation.dobFuture ? identityErrorCopy.dobFuture : null);
     setExpiryError(validation.expiryBeforeIssue ? identityErrorCopy.expiryBeforeIssue : null);
+  }
+  if (isSoftwareLicense) {
+    setExpiryError(validation.expirationBeforePurchase ? softwareLicenseErrorCopy.expirationBeforePurchase : null);
   }
   if (!validation.ok) return;
 
@@ -183,6 +227,20 @@ export async function submitTeamPasswordForm({
     credentialId,
     creationDate,
     deviceInfo,
+    bankName,
+    accountType,
+    accountHolderName,
+    accountNumber,
+    routingNumber,
+    swiftBic,
+    iban,
+    branchName,
+    softwareName,
+    licenseKey,
+    version,
+    licensee,
+    purchaseDate,
+    expirationDate,
   });
 
   await executeTeamEntrySubmit({
@@ -196,6 +254,8 @@ export async function submitTeamPasswordForm({
     entryType: effectiveEntryType,
     tagIds,
     teamFolderId,
+    requireReprompt,
+    expiresAt,
     t,
     setSaving,
     handleOpenChange,

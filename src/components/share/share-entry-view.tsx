@@ -16,10 +16,20 @@ import {
   CreditCard,
   UserSquare,
   Fingerprint,
+  Landmark,
+  KeySquare,
 } from "lucide-react";
-import { formatDateTime } from "@/lib/format-datetime";
+import { formatDateTime, formatDate } from "@/lib/format-datetime";
 
 const REVEAL_TIMEOUT = 30_000;
+
+function isSafeHref(url: string): boolean {
+  try {
+    return ["http:", "https:"].includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
 
 const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
   [ENTRY_TYPE.LOGIN]: <KeyRound className="h-5 w-5" />,
@@ -27,6 +37,8 @@ const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
   [ENTRY_TYPE.CREDIT_CARD]: <CreditCard className="h-5 w-5" />,
   [ENTRY_TYPE.IDENTITY]: <UserSquare className="h-5 w-5" />,
   [ENTRY_TYPE.PASSKEY]: <Fingerprint className="h-5 w-5" />,
+  [ENTRY_TYPE.BANK_ACCOUNT]: <Landmark className="h-5 w-5" />,
+  [ENTRY_TYPE.SOFTWARE_LICENSE]: <KeySquare className="h-5 w-5" />,
 };
 
 interface ShareEntryViewProps {
@@ -45,6 +57,7 @@ export function ShareEntryView({
   maxViews,
 }: ShareEntryViewProps) {
   const t = useTranslations("Share");
+  const tc = useTranslations("Common");
   const locale = useLocale();
   const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
 
@@ -146,18 +159,63 @@ export function ShareEntryView({
                   {f.label}
                 </label>
                 <div className="flex items-center gap-2">
-                  <a
-                    href={f.value}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-blue-500 hover:underline break-all"
-                  >
-                    {f.value}
-                  </a>
+                  {isSafeHref(f.value) ? (
+                    <a
+                      href={f.value}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-blue-500 hover:underline break-all"
+                    >
+                      {f.value}
+                    </a>
+                  ) : (
+                    <span className="text-sm break-all">{f.value}</span>
+                  )}
                   <CopyButton getValue={() => f.value} />
                 </div>
               </div>
             );
+          }
+          if (f.type === CUSTOM_FIELD_TYPE.BOOLEAN) {
+            return (
+              <div className="space-y-1" key={`custom_${i}`}>
+                <label className="text-sm text-muted-foreground">
+                  {f.label}
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">
+                    {f.value === "true" ? tc("yes") : tc("no")}
+                  </span>
+                </div>
+              </div>
+            );
+          }
+          if (f.type === CUSTOM_FIELD_TYPE.DATE && f.value) {
+            let formatted = f.value;
+            try {
+              formatted = new Intl.DateTimeFormat(locale, {
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              }).format(new Date(f.value));
+            } catch {
+              // keep raw value
+            }
+            return renderField(f.label, formatted, `custom_${i}`);
+          }
+          if (f.type === CUSTOM_FIELD_TYPE.MONTH_YEAR && f.value) {
+            let formatted = f.value;
+            try {
+              // MONTH_YEAR values are typically "YYYY-MM" format
+              const [year, month] = f.value.split("-");
+              formatted = new Intl.DateTimeFormat(locale, {
+                year: "numeric",
+                month: "long",
+              }).format(new Date(Number(year), Number(month) - 1));
+            } catch {
+              // keep raw value
+            }
+            return renderField(f.label, formatted, `custom_${i}`);
           }
           return renderField(f.label, f.value, `custom_${i}`);
         })}
@@ -173,14 +231,18 @@ export function ShareEntryView({
         <div className="space-y-1">
           <label className="text-sm text-muted-foreground">{t("url")}</label>
           <div className="flex items-center gap-2">
-            <a
-              href={String(data.url)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-blue-500 hover:underline break-all"
-            >
-              {String(data.url)}
-            </a>
+            {isSafeHref(String(data.url)) ? (
+              <a
+                href={String(data.url)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-blue-500 hover:underline break-all"
+              >
+                {String(data.url)}
+              </a>
+            ) : (
+              <span className="text-sm break-all">{String(data.url)}</span>
+            )}
             <CopyButton getValue={() => String(data.url)} />
           </div>
         </div>
@@ -228,11 +290,11 @@ export function ShareEntryView({
       {renderField(t("address"), data.address)}
       {renderField(t("phone"), data.phone)}
       {renderField(t("email"), data.email)}
-      {renderField(t("dateOfBirth"), data.dateOfBirth)}
+      {renderField(t("dateOfBirth"), typeof data.dateOfBirth === "string" && data.dateOfBirth ? formatDate(data.dateOfBirth, locale) : null)}
       {renderField(t("nationality"), data.nationality)}
       {renderSensitiveField(t("idNumber"), data.idNumber, "idNumber")}
-      {renderField(t("issueDate"), data.issueDate)}
-      {renderField(t("expiryDate"), data.expiryDate)}
+      {renderField(t("issueDate"), typeof data.issueDate === "string" && data.issueDate ? formatDate(data.issueDate, locale) : null)}
+      {renderField(t("expiryDate"), typeof data.expiryDate === "string" && data.expiryDate ? formatDate(data.expiryDate, locale) : null)}
       {renderNotes(data.notes)}
     </>
   );
@@ -243,8 +305,35 @@ export function ShareEntryView({
       {renderField(t("relyingPartyName"), data.relyingPartyName)}
       {renderField(t("username"), data.username)}
       {renderSensitiveField(t("credentialId"), data.credentialId, "credentialId")}
-      {renderField(t("creationDate"), data.creationDate)}
+      {renderField(t("creationDate"), typeof data.creationDate === "string" && data.creationDate ? formatDate(data.creationDate, locale) : null)}
       {renderField(t("deviceInfo"), data.deviceInfo)}
+      {renderNotes(data.notes)}
+    </>
+  );
+
+  const renderBankAccountFields = () => (
+    <>
+      {renderField(t("bankName"), data.bankName)}
+      {renderField(t("accountType"), data.accountType === "checking" ? t("accountTypeChecking") : data.accountType === "savings" ? t("accountTypeSavings") : data.accountType === "other" ? t("accountTypeOther") : data.accountType)}
+      {renderField(t("accountHolderName"), data.accountHolderName)}
+      {renderSensitiveField(t("accountNumber"), data.accountNumber, "accountNumber")}
+      {renderSensitiveField(t("routingNumber"), data.routingNumber, "routingNumber")}
+      {renderField(t("swiftBic"), data.swiftBic)}
+      {renderSensitiveField(t("iban"), data.iban, "iban")}
+      {renderField(t("branchName"), data.branchName)}
+      {renderNotes(data.notes)}
+    </>
+  );
+
+  const renderSoftwareLicenseFields = () => (
+    <>
+      {renderField(t("softwareName"), data.softwareName)}
+      {renderSensitiveField(t("licenseKey"), data.licenseKey, "licenseKey")}
+      {renderField(t("version"), data.version)}
+      {renderField(t("licensee"), data.licensee)}
+      {renderField(t("email"), data.email)}
+      {renderField(t("purchaseDate"), typeof data.purchaseDate === "string" && data.purchaseDate ? formatDate(data.purchaseDate, locale) : null)}
+      {renderField(t("expirationDate"), typeof data.expirationDate === "string" && data.expirationDate ? formatDate(data.expirationDate, locale) : null)}
       {renderNotes(data.notes)}
     </>
   );
@@ -259,6 +348,10 @@ export function ShareEntryView({
         return renderIdentityFields();
       case ENTRY_TYPE.PASSKEY:
         return renderPasskeyFields();
+      case ENTRY_TYPE.BANK_ACCOUNT:
+        return renderBankAccountFields();
+      case ENTRY_TYPE.SOFTWARE_LICENSE:
+        return renderSoftwareLicenseFields();
       default:
         return renderLoginFields();
     }

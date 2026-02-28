@@ -83,6 +83,8 @@ function makeEntryForGET(overrides = {}) {
     aadVersion: 1,
     teamKeyVersion: 1,
     isArchived: false,
+    requireReprompt: false,
+    expiresAt: null,
     teamFolderId: null,
     tags: [],
     createdBy: { id: "u1", name: "User", image: null },
@@ -190,6 +192,22 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
     expect(res.status).toBe(404);
     const json = await res.json();
     expect(json.error).toBe("NOT_FOUND");
+  });
+
+  it("returns requireReprompt and expiresAt in GET response", async () => {
+    const expiresDate = new Date("2026-12-31T00:00:00Z");
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(
+      makeEntryForGET({ requireReprompt: true, expiresAt: expiresDate }),
+    );
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.requireReprompt).toBe(true);
+    expect(json.expiresAt).toBe(expiresDate.toISOString());
   });
 
   it("returns teamFolderId in GET response when entry has a folder", async () => {
@@ -495,6 +513,56 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
         }),
       }),
     );
+  });
+
+  it("updates requireReprompt and expiresAt as metadata-only (no history snapshot)", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
+        body: { requireReprompt: true, expiresAt: "2026-12-31T00:00:00+00:00" },
+      }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(txMock.teamPasswordEntryHistory.create).not.toHaveBeenCalled();
+    expect(txMock.teamPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          requireReprompt: true,
+          expiresAt: new Date("2026-12-31T00:00:00+00:00"),
+        }),
+      }),
+    );
+  });
+
+  it("clears expiresAt with null in PUT (metadata-only)", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
+        body: { expiresAt: null },
+      }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(txMock.teamPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ expiresAt: null }),
+      }),
+    );
+  });
+
+  it("returns 400 when expiresAt has invalid format in PUT", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
+        body: { expiresAt: "not-a-date" },
+      }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(400);
   });
 
   it("clears teamFolderId when set to null in PUT", async () => {

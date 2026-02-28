@@ -10,6 +10,9 @@ export function useTeamPasswordFormUiState() {
   const [showCvv, setShowCvv] = useState(false);
   const [showIdNumber, setShowIdNumber] = useState(false);
   const [showCredentialId, setShowCredentialId] = useState(false);
+  const [showAccountNumber, setShowAccountNumber] = useState(false);
+  const [showRoutingNumber, setShowRoutingNumber] = useState(false);
+  const [showLicenseKey, setShowLicenseKey] = useState(false);
 
   return {
     values: {
@@ -20,6 +23,9 @@ export function useTeamPasswordFormUiState() {
       showCvv,
       showIdNumber,
       showCredentialId,
+      showAccountNumber,
+      showRoutingNumber,
+      showLicenseKey,
     },
     setters: {
       setSaving,
@@ -29,6 +35,9 @@ export function useTeamPasswordFormUiState() {
       setShowCvv,
       setShowIdNumber,
       setShowCredentialId,
+      setShowAccountNumber,
+      setShowRoutingNumber,
+      setShowLicenseKey,
     },
   };
 }

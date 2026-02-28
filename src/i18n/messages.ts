@@ -23,6 +23,8 @@ export const NAMESPACES = [
   "CreditCardForm",
   "PasskeyForm",
   "IdentityForm",
+  "BankAccountForm",
+  "SoftwareLicenseForm",
   "PasswordDetail",
   "RepromptDialog",
   "PasswordGenerator",

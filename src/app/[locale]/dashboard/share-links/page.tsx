@@ -25,6 +25,9 @@ import {
   FileText,
   CreditCard,
   IdCard,
+  Fingerprint,
+  Landmark,
+  KeySquare,
   User,
   ChevronDown,
   ChevronUp,
@@ -64,6 +67,9 @@ const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
   [ENTRY_TYPE.SECURE_NOTE]: <FileText className="h-4 w-4" />,
   [ENTRY_TYPE.CREDIT_CARD]: <CreditCard className="h-4 w-4" />,
   [ENTRY_TYPE.IDENTITY]: <IdCard className="h-4 w-4" />,
+  [ENTRY_TYPE.PASSKEY]: <Fingerprint className="h-4 w-4" />,
+  [ENTRY_TYPE.BANK_ACCOUNT]: <Landmark className="h-4 w-4" />,
+  [ENTRY_TYPE.SOFTWARE_LICENSE]: <KeySquare className="h-4 w-4" />,
 };
 
 export default function ShareLinksPage() {

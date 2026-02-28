@@ -26,7 +26,7 @@ export function useTeamPasswordFormDerived({
   entryValues,
   cardNumberValid,
 }: TeamPasswordFormDerivedArgs) {
-  const { isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey } = entryKindState;
+  const { isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey, isBankAccount, isSoftwareLicense } = entryKindState;
 
   const baselineSnapshot = useMemo(
     () =>
@@ -36,7 +36,7 @@ export function useTeamPasswordFormDerived({
         entryKindState,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [effectiveEntryType, editData, isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey],
+    [effectiveEntryType, editData, isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey, isBankAccount, isSoftwareLicense],
   );
 
   const entryValuesKey = JSON.stringify(entryValues);
@@ -48,7 +48,7 @@ export function useTeamPasswordFormDerived({
         entryValues,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [effectiveEntryType, isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey, entryValuesKey],
+    [effectiveEntryType, isLoginEntry, isNote, isCreditCard, isIdentity, isPasskey, isBankAccount, isSoftwareLicense, entryValuesKey],
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;

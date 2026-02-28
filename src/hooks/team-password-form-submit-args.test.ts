@@ -16,6 +16,8 @@ function buildDefaultParams(overrides: Record<string, unknown> = {}) {
       isCreditCard: false,
       isIdentity: false,
       isPasskey: false,
+      isBankAccount: false,
+      isSoftwareLicense: false,
     },
     translations: {
       t: (key: string) => `pf.${key}`,
@@ -24,6 +26,8 @@ function buildDefaultParams(overrides: Record<string, unknown> = {}) {
       tcc: (key: string) => key,
       ti: (key: string) => `identity.${key}`,
       tpk: (key: string) => key,
+      tba: (key: string) => key,
+      tsl: (key: string) => `sl.${key}`,
     },
     handleOpenChange: vi.fn(),
     setters: { setDobError: vi.fn(), setExpiryError: vi.fn(), setSaving: vi.fn() },
@@ -38,6 +42,12 @@ function buildDefaultParams(overrides: Record<string, unknown> = {}) {
       issueDate: "", expiryDate: "",
       relyingPartyId: "", relyingPartyName: "", credentialId: "",
       creationDate: "", deviceInfo: "",
+      bankName: "", accountType: "", accountHolderName: "",
+      accountNumber: "", routingNumber: "", swiftBic: "",
+      iban: "", branchName: "",
+      softwareName: "", licenseKey: "", version: "",
+      licensee: "", purchaseDate: "", expirationDate: "",
+      requireReprompt: false, expiresAt: null,
       generatorSettings: {},
     },
     cardNumberValid: true,
@@ -81,6 +91,8 @@ describe("buildTeamSubmitArgs", () => {
         isCreditCard: false,
         isIdentity: true,
         isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: false,
       },
       translations: {
         t: (key) => `pf.${key}`,
@@ -89,6 +101,8 @@ describe("buildTeamSubmitArgs", () => {
         tcc: (key) => key,
         ti: (key) => `identity.${key}`,
         tpk: (key) => key,
+        tba: (key) => key,
+        tsl: (key) => `sl.${key}`,
       },
       handleOpenChange,
       setters: { setDobError, setExpiryError, setSaving },
@@ -123,6 +137,22 @@ describe("buildTeamSubmitArgs", () => {
         credentialId: "",
         creationDate: "",
         deviceInfo: "",
+        bankName: "",
+        accountType: "",
+        accountHolderName: "",
+        accountNumber: "",
+        routingNumber: "",
+        swiftBic: "",
+        iban: "",
+        branchName: "",
+        softwareName: "",
+        licenseKey: "",
+        version: "",
+        licensee: "",
+        purchaseDate: "",
+        expirationDate: "",
+        requireReprompt: false,
+        expiresAt: null,
         generatorSettings: {},
       },
       cardNumberValid: true,
@@ -171,6 +201,8 @@ describe("buildTeamSubmitArgs", () => {
         isCreditCard: true,
         isIdentity: false,
         isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: false,
       },
     }) as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.effectiveEntryType).toBe(ENTRY_TYPE.CREDIT_CARD);
@@ -187,9 +219,66 @@ describe("buildTeamSubmitArgs", () => {
         isCreditCard: false,
         isIdentity: false,
         isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: false,
       },
     }) as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.effectiveEntryType).toBe(ENTRY_TYPE.SECURE_NOTE);
     expect(args.isIdentity).toBe(false);
+  });
+
+  it("maps bank account entry type with isBankAccount=true", () => {
+    const args = buildTeamSubmitArgs(buildDefaultParams({
+      effectiveEntryType: ENTRY_TYPE.BANK_ACCOUNT,
+      entryKindState: {
+        entryKind: "bankAccount",
+        isLoginEntry: false,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: true,
+        isSoftwareLicense: false,
+      },
+    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
+    expect(args.effectiveEntryType).toBe(ENTRY_TYPE.BANK_ACCOUNT);
+    expect(args.isBankAccount).toBe(true);
+    expect(args.isIdentity).toBe(false);
+    expect(args.isSoftwareLicense).toBe(false);
+  });
+
+  it("maps software license entry type with isSoftwareLicense=true", () => {
+    const args = buildTeamSubmitArgs(buildDefaultParams({
+      effectiveEntryType: ENTRY_TYPE.SOFTWARE_LICENSE,
+      entryKindState: {
+        entryKind: "softwareLicense",
+        isLoginEntry: false,
+        isNote: false,
+        isCreditCard: false,
+        isIdentity: false,
+        isPasskey: false,
+        isBankAccount: false,
+        isSoftwareLicense: true,
+      },
+    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
+    expect(args.effectiveEntryType).toBe(ENTRY_TYPE.SOFTWARE_LICENSE);
+    expect(args.isSoftwareLicense).toBe(true);
+    expect(args.isBankAccount).toBe(false);
+    expect(args.isIdentity).toBe(false);
+    expect(args.softwareLicenseErrorCopy).toEqual({
+      expirationBeforePurchase: "sl.expirationBeforePurchase",
+    });
+  });
+
+  it("passes requireReprompt and expiresAt through from entryValues", () => {
+    const args = buildTeamSubmitArgs(buildDefaultParams({
+      entryValues: {
+        ...buildDefaultParams().entryValues,
+        requireReprompt: true,
+        expiresAt: "2026-12-31T00:00:00Z",
+      },
+    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
+    expect(args.requireReprompt).toBe(true);
+    expect(args.expiresAt).toBe("2026-12-31T00:00:00Z");
   });
 });

@@ -36,6 +36,8 @@ export const NS_DASHBOARD_CORE: readonly Namespace[] = [
   "CreditCardForm",
   "IdentityForm",
   "PasskeyForm",
+  "BankAccountForm",
+  "SoftwareLicenseForm",
   "Trash",
   "TOTP",
   "Attachments",

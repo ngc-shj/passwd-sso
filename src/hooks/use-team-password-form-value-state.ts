@@ -39,7 +39,23 @@ export function useTeamPasswordFormValueState(initial: TeamPasswordFormInitialVa
   const [credentialId, setCredentialId] = useState(initial.credentialId);
   const [creationDate, setCreationDate] = useState(initial.creationDate);
   const [deviceInfo, setDeviceInfo] = useState(initial.deviceInfo);
+  const [bankName, setBankName] = useState(initial.bankName);
+  const [accountType, setAccountType] = useState(initial.accountType);
+  const [accountHolderName, setAccountHolderName] = useState(initial.accountHolderName);
+  const [accountNumber, setAccountNumber] = useState(initial.accountNumber);
+  const [routingNumber, setRoutingNumber] = useState(initial.routingNumber);
+  const [swiftBic, setSwiftBic] = useState(initial.swiftBic);
+  const [iban, setIban] = useState(initial.iban);
+  const [branchName, setBranchName] = useState(initial.branchName);
+  const [softwareName, setSoftwareName] = useState(initial.softwareName);
+  const [licenseKey, setLicenseKey] = useState(initial.licenseKey);
+  const [version, setVersion] = useState(initial.version);
+  const [licensee, setLicensee] = useState(initial.licensee);
+  const [purchaseDate, setPurchaseDate] = useState(initial.purchaseDate);
+  const [expirationDate, setExpirationDate] = useState(initial.expirationDate);
   const [teamFolderId, setTeamFolderId] = useState<string | null>(initial.teamFolderId);
+  const [requireReprompt, setRequireReprompt] = useState(initial.requireReprompt);
+  const [expiresAt, setExpiresAt] = useState<string | null>(initial.expiresAt);
 
   return {
     values: {
@@ -77,7 +93,23 @@ export function useTeamPasswordFormValueState(initial: TeamPasswordFormInitialVa
       credentialId,
       creationDate,
       deviceInfo,
+      bankName,
+      accountType,
+      accountHolderName,
+      accountNumber,
+      routingNumber,
+      swiftBic,
+      iban,
+      branchName,
+      softwareName,
+      licenseKey,
+      version,
+      licensee,
+      purchaseDate,
+      expirationDate,
       teamFolderId,
+      requireReprompt,
+      expiresAt,
     },
     setters: {
       setTitle,
@@ -114,7 +146,23 @@ export function useTeamPasswordFormValueState(initial: TeamPasswordFormInitialVa
       setCredentialId,
       setCreationDate,
       setDeviceInfo,
+      setBankName,
+      setAccountType,
+      setAccountHolderName,
+      setAccountNumber,
+      setRoutingNumber,
+      setSwiftBic,
+      setIban,
+      setBranchName,
+      setSoftwareName,
+      setLicenseKey,
+      setVersion,
+      setLicensee,
+      setPurchaseDate,
+      setExpirationDate,
       setTeamFolderId,
+      setRequireReprompt,
+      setExpiresAt,
     },
   };
 }

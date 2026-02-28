@@ -75,7 +75,7 @@ export function EntryActionBar({
           <Button
             type={submitType}
             onClick={onSubmit}
-            disabled={submitting || submitDisabled}
+            disabled={submitting || submitDisabled || !hasChanges}
           >
             {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             {saveLabel}

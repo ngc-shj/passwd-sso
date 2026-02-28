@@ -364,6 +364,168 @@ describe("parseJson", () => {
   });
 });
 
+// ─── Passkey CSV ────────────────────────────────────────────
+
+describe("parseCsv — passkey", () => {
+  it("detects passkey type in passwd-sso CSV", () => {
+    const extra = JSON.stringify({
+      entryType: "PASSKEY",
+      relyingPartyId: "example.com",
+      relyingPartyName: "Example",
+    });
+    const csv = [
+      "name,login_username,login_password,type,passwd_sso",
+      `My Passkey,alice,,passkey,"${extra.replace(/"/g, '""')}"`,
+    ].join("\n");
+
+    const result = parseCsv(csv);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].entryType).toBe(ENTRY_TYPE.PASSKEY);
+    expect(result.entries[0].title).toBe("My Passkey");
+  });
+});
+
+// ─── Bank Account / Software License ────────────────────────
+
+describe("parseCsv — bank account / software license", () => {
+  it("detects bankaccount type in passwd-sso CSV", () => {
+    const extra = JSON.stringify({
+      entryType: "BANK_ACCOUNT",
+      bankName: "Acme Bank",
+      accountNumber: "123456789",
+    });
+    const csv = [
+      "name,login_username,login_password,type,passwd_sso",
+      `My Bank,,,bankaccount,"${extra.replace(/"/g, '""')}"`,
+    ].join("\n");
+
+    const result = parseCsv(csv);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].entryType).toBe(ENTRY_TYPE.BANK_ACCOUNT);
+    expect(result.entries[0].title).toBe("My Bank");
+  });
+
+  it("detects softwarelicense type in passwd-sso CSV", () => {
+    const extra = JSON.stringify({
+      entryType: "SOFTWARE_LICENSE",
+      softwareName: "Adobe CC",
+      licenseKey: "ABCD-EFGH",
+    });
+    const csv = [
+      "name,login_username,login_password,type,passwd_sso",
+      `Adobe,,,softwarelicense,"${extra.replace(/"/g, '""')}"`,
+    ].join("\n");
+
+    const result = parseCsv(csv);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].entryType).toBe(ENTRY_TYPE.SOFTWARE_LICENSE);
+    expect(result.entries[0].title).toBe("Adobe");
+  });
+});
+
+describe("parseJson — bank account / software license", () => {
+  it("parses bank account entry in passwd-sso JSON format", () => {
+    const json = JSON.stringify({
+      format: "passwd-sso",
+      entries: [
+        {
+          type: "bankaccount",
+          name: "My Bank",
+          bankAccount: {
+            bankName: "Acme Bank",
+            accountNumber: "123456789",
+          },
+          notes: "primary account",
+        },
+      ],
+    });
+
+    const result = parseJson(json);
+    expect(result.format).toBe("passwd-sso");
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].entryType).toBe(ENTRY_TYPE.BANK_ACCOUNT);
+    expect(result.entries[0].title).toBe("My Bank");
+    expect(result.entries[0].bankName).toBe("Acme Bank");
+    expect(result.entries[0].accountNumber).toBe("123456789");
+  });
+
+  it("parses software license entry in passwd-sso JSON format", () => {
+    const json = JSON.stringify({
+      format: "passwd-sso",
+      entries: [
+        {
+          type: "softwarelicense",
+          name: "Adobe CC",
+          softwareLicense: {
+            softwareName: "Adobe Creative Cloud",
+            licenseKey: "ABCD-EFGH",
+            version: "2026",
+          },
+          notes: "annual license",
+        },
+      ],
+    });
+
+    const result = parseJson(json);
+    expect(result.format).toBe("passwd-sso");
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].entryType).toBe(ENTRY_TYPE.SOFTWARE_LICENSE);
+    expect(result.entries[0].title).toBe("Adobe CC");
+    expect(result.entries[0].softwareName).toBe("Adobe Creative Cloud");
+    expect(result.entries[0].licenseKey).toBe("ABCD-EFGH");
+    expect(result.entries[0].version).toBe("2026");
+  });
+});
+
+describe("parsePasswdSsoPayload — bank account / software license fields", () => {
+  it("parses bank account fields from payload", () => {
+    const payload = JSON.stringify({
+      bankName: "Test Bank",
+      accountType: "savings",
+      accountHolderName: "John",
+      accountNumber: "9876543210",
+      routingNumber: "021000021",
+      swiftBic: "BOFAUS3N",
+      iban: "DE89370400440532013000",
+      branchName: "Downtown",
+    });
+    const result = parsePasswdSsoPayload(payload);
+    expect(result.bankName).toBe("Test Bank");
+    expect(result.accountType).toBe("savings");
+    expect(result.accountHolderName).toBe("John");
+    expect(result.accountNumber).toBe("9876543210");
+    expect(result.routingNumber).toBe("021000021");
+    expect(result.swiftBic).toBe("BOFAUS3N");
+    expect(result.iban).toBe("DE89370400440532013000");
+    expect(result.branchName).toBe("Downtown");
+  });
+
+  it("parses software license fields from payload", () => {
+    const payload = JSON.stringify({
+      softwareName: "VS Code",
+      licenseKey: "KEY-123",
+      version: "1.90",
+      licensee: "Jane",
+      purchaseDate: "2026-01-01",
+      expirationDate: "2027-01-01",
+    });
+    const result = parsePasswdSsoPayload(payload);
+    expect(result.softwareName).toBe("VS Code");
+    expect(result.licenseKey).toBe("KEY-123");
+    expect(result.version).toBe("1.90");
+    expect(result.licensee).toBe("Jane");
+    expect(result.purchaseDate).toBe("2026-01-01");
+    expect(result.expirationDate).toBe("2027-01-01");
+  });
+
+  it("defaults non-string bank/license fields to empty string", () => {
+    const payload = JSON.stringify({ bankName: 123, softwareName: true });
+    const result = parsePasswdSsoPayload(payload);
+    expect(result.bankName).toBe("");
+    expect(result.softwareName).toBe("");
+  });
+});
+
 // ─── Edge cases ─────────────────────────────────────────────
 
 describe("parseCsvLine — edge cases", () => {

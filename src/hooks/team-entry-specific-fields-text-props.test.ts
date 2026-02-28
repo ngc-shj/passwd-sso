@@ -10,6 +10,8 @@ describe("buildTeamEntrySpecificTextProps", () => {
         tcc: (k, values) => `tcc.${k}${values ? `:${JSON.stringify(values)}` : ""}`,
         ti: (k) => `ti.${k}`,
         tpk: (k) => `tpk.${k}`,
+        tba: (k) => `tba.${k}`,
+        tsl: (k) => `tsl.${k}`,
       },
       {
         notesLabel: "notes.label",
@@ -26,5 +28,9 @@ describe("buildTeamEntrySpecificTextProps", () => {
     expect(props.creditCardLabels.cardNumber).toBe("tcc.cardNumber");
     expect(props.identityLabels.fullName).toBe("ti.fullName");
     expect(props.passkeyLabels.credentialId).toBe("tpk.credentialId");
+    expect(props.bankAccountLabels.bankName).toBe("tba.bankName");
+    expect(props.bankAccountLabels.accountNumber).toBe("tba.accountNumber");
+    expect(props.softwareLicenseLabels.softwareName).toBe("tsl.softwareName");
+    expect(props.softwareLicenseLabels.licenseKey).toBe("tsl.licenseKey");
   });
 });

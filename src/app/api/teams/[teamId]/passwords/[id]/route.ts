@@ -71,6 +71,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
     overviewAuthTag: entry.overviewAuthTag,
     aadVersion: entry.aadVersion,
     teamKeyVersion: entry.teamKeyVersion,
+    requireReprompt: entry.requireReprompt,
+    expiresAt: entry.expiresAt,
   });
 }
 
@@ -142,7 +144,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     );
   }
 
-  const { encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, tagIds, teamFolderId, isArchived } = parsed.data;
+  const { encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, tagIds, teamFolderId, isArchived, requireReprompt, expiresAt } = parsed.data;
   const isFullUpdate = encryptedBlob !== undefined;
 
   // Validate teamKeyVersion matches current team key version (F-13)
@@ -191,6 +193,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   if (teamFolderId !== undefined) updateData.teamFolderId = teamFolderId;
   if (isArchived !== undefined) updateData.isArchived = isArchived;
+  if (requireReprompt !== undefined) updateData.requireReprompt = requireReprompt;
+  if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null;
   if (tagIds !== undefined) {
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
   }

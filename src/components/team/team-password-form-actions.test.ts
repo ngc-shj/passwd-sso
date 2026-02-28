@@ -86,13 +86,32 @@ describe("team-password-form-actions", () => {
       credentialId: "",
       creationDate: "",
       deviceInfo: "",
+      bankName: "",
+      accountType: "",
+      accountHolderName: "",
+      accountNumber: "",
+      routingNumber: "",
+      swiftBic: "",
+      iban: "",
+      branchName: "",
+      softwareName: "",
+      licenseKey: "",
+      version: "",
+      licensee: "",
+      purchaseDate: "",
+      expirationDate: "",
       cardNumberValid: true,
       isIdentity: true,
+      isBankAccount: false,
+      isSoftwareLicense: false,
       setDobError,
       setExpiryError,
       identityErrorCopy: {
         dobFuture: "dob future",
         expiryBeforeIssue: "expiry before issue",
+      },
+      softwareLicenseErrorCopy: {
+        expirationBeforePurchase: "expiration before purchase",
       },
       t: (key) => key,
       setSaving: vi.fn(),
@@ -102,6 +121,81 @@ describe("team-password-form-actions", () => {
 
     expect(setDobError).toHaveBeenCalledWith("dob future");
     expect(setExpiryError).toHaveBeenCalledWith("expiry before issue");
+    expect(executeTeamEntrySubmitMock).not.toHaveBeenCalled();
+  });
+
+  it("stops submit when SOFTWARE_LICENSE expirationDate < purchaseDate", async () => {
+    const setDobError = vi.fn();
+    const setExpiryError = vi.fn();
+
+    await submitTeamPasswordForm({
+      teamId: "team-1",
+      isEdit: false,
+      effectiveEntryType: ENTRY_TYPE.SOFTWARE_LICENSE,
+      title: "Adobe CC",
+      notes: "",
+      selectedTags: [],
+      teamFolderId: null,
+      username: "",
+      password: "",
+      url: "",
+      customFields: [],
+      totp: null,
+      content: "",
+      cardholderName: "",
+      cardNumber: "",
+      brand: "",
+      expiryMonth: "",
+      expiryYear: "",
+      cvv: "",
+      fullName: "",
+      address: "",
+      phone: "",
+      email: "",
+      dateOfBirth: "",
+      nationality: "",
+      idNumber: "",
+      issueDate: "",
+      expiryDate: "",
+      relyingPartyId: "",
+      relyingPartyName: "",
+      credentialId: "",
+      creationDate: "",
+      deviceInfo: "",
+      bankName: "",
+      accountType: "",
+      accountHolderName: "",
+      accountNumber: "",
+      routingNumber: "",
+      swiftBic: "",
+      iban: "",
+      branchName: "",
+      softwareName: "Adobe CC",
+      licenseKey: "ABCD-EFGH",
+      version: "2026",
+      licensee: "Jane",
+      purchaseDate: "2026-06-01",
+      expirationDate: "2025-01-01",
+      cardNumberValid: true,
+      isIdentity: false,
+      isBankAccount: false,
+      isSoftwareLicense: true,
+      setDobError,
+      setExpiryError,
+      identityErrorCopy: {
+        dobFuture: "dob future",
+        expiryBeforeIssue: "expiry before issue",
+      },
+      softwareLicenseErrorCopy: {
+        expirationBeforePurchase: "expiration before purchase",
+      },
+      t: (key) => key,
+      setSaving: vi.fn(),
+      handleOpenChange: vi.fn(),
+      onSaved: vi.fn(),
+    });
+
+    expect(setExpiryError).toHaveBeenCalledWith("expiration before purchase");
     expect(executeTeamEntrySubmitMock).not.toHaveBeenCalled();
   });
 });

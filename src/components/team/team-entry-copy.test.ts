@@ -48,6 +48,24 @@ describe("buildTeamEntryCopy", () => {
       notesPlaceholder: "Passkey notes placeholder",
       tagsTitle: "Passkey tags",
     },
+    bankAccount: {
+      edit: "Edit bank account",
+      create: "Create bank account",
+      titleLabel: "Bank title",
+      titlePlaceholder: "Bank title placeholder",
+      notesLabel: "Bank notes",
+      notesPlaceholder: "Bank notes placeholder",
+      tagsTitle: "Bank tags",
+    },
+    softwareLicense: {
+      edit: "Edit license",
+      create: "Create license",
+      titleLabel: "License title",
+      titlePlaceholder: "License title placeholder",
+      notesLabel: "License notes",
+      notesPlaceholder: "License notes placeholder",
+      tagsTitle: "License tags",
+    },
   } as const;
 
   it("returns edit labels for edit mode", () => {

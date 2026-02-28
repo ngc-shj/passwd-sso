@@ -38,7 +38,23 @@ export interface TeamPasswordFormInitialValues {
   credentialId: string;
   creationDate: string;
   deviceInfo: string;
+  bankName: string;
+  accountType: string;
+  accountHolderName: string;
+  accountNumber: string;
+  routingNumber: string;
+  swiftBic: string;
+  iban: string;
+  branchName: string;
+  softwareName: string;
+  licenseKey: string;
+  version: string;
+  licensee: string;
+  purchaseDate: string;
+  expirationDate: string;
   teamFolderId: string | null;
+  requireReprompt: boolean;
+  expiresAt: string | null;
 }
 
 export function buildTeamPasswordFormInitialValues(
@@ -77,6 +93,22 @@ export function buildTeamPasswordFormInitialValues(
     credentialId: editData?.credentialId ?? "",
     creationDate: editData?.creationDate ?? "",
     deviceInfo: editData?.deviceInfo ?? "",
+    bankName: editData?.bankName ?? "",
+    accountType: editData?.accountType ?? "",
+    accountHolderName: editData?.accountHolderName ?? "",
+    accountNumber: editData?.accountNumber ?? "",
+    routingNumber: editData?.routingNumber ?? "",
+    swiftBic: editData?.swiftBic ?? "",
+    iban: editData?.iban ?? "",
+    branchName: editData?.branchName ?? "",
+    softwareName: editData?.softwareName ?? "",
+    licenseKey: editData?.licenseKey ?? "",
+    version: editData?.version ?? "",
+    licensee: editData?.licensee ?? "",
+    purchaseDate: editData?.purchaseDate ?? "",
+    expirationDate: editData?.expirationDate ?? "",
     teamFolderId: editData?.teamFolderId ?? null,
+    requireReprompt: editData?.requireReprompt ?? false,
+    expiresAt: editData?.expiresAt ?? null,
   };
 }

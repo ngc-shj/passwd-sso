@@ -18,6 +18,9 @@ function createState(): {
       showCvv: true,
       showIdNumber: true,
       showCredentialId: true,
+      showAccountNumber: true,
+      showRoutingNumber: true,
+      showLicenseKey: true,
       title: "",
       username: "",
       password: "",
@@ -52,6 +55,22 @@ function createState(): {
       credentialId: "",
       creationDate: "",
       deviceInfo: "",
+      bankName: "",
+      accountType: "",
+      accountHolderName: "",
+      accountNumber: "",
+      routingNumber: "",
+      swiftBic: "",
+      iban: "",
+      branchName: "",
+      softwareName: "",
+      licenseKey: "",
+      version: "",
+      licensee: "",
+      purchaseDate: "",
+      expirationDate: "",
+      requireReprompt: false,
+      expiresAt: null,
       teamFolderId: null,
     },
     setters: {
@@ -96,6 +115,25 @@ function createState(): {
       setCredentialId: vi.fn(),
       setCreationDate: vi.fn(),
       setDeviceInfo: vi.fn(),
+      setBankName: vi.fn(),
+      setAccountType: vi.fn(),
+      setAccountHolderName: vi.fn(),
+      setAccountNumber: vi.fn(),
+      setShowAccountNumber: vi.fn(),
+      setRoutingNumber: vi.fn(),
+      setShowRoutingNumber: vi.fn(),
+      setSwiftBic: vi.fn(),
+      setIban: vi.fn(),
+      setBranchName: vi.fn(),
+      setSoftwareName: vi.fn(),
+      setLicenseKey: vi.fn(),
+      setShowLicenseKey: vi.fn(),
+      setVersion: vi.fn(),
+      setLicensee: vi.fn(),
+      setPurchaseDate: vi.fn(),
+      setExpirationDate: vi.fn(),
+      setRequireReprompt: vi.fn(),
+      setExpiresAt: vi.fn(),
       setTeamFolderId: vi.fn(),
     },
   };
@@ -145,5 +183,25 @@ describe("buildTeamEntrySpecificCallbacks", () => {
     expect(setters.setExpiryDate).toHaveBeenCalledWith("2030-01-01");
     expect(setters.setExpiryError).toHaveBeenNthCalledWith(1, null);
     expect(setters.setExpiryError).toHaveBeenNthCalledWith(2, null);
+  });
+
+  it("toggles bank account visibility flags", () => {
+    const { values, setters } = createState();
+    const callbacks = buildTeamEntrySpecificCallbacks(values, setters);
+
+    callbacks.onToggleAccountNumber();
+    callbacks.onToggleRoutingNumber();
+
+    expect(setters.setShowAccountNumber).toHaveBeenCalledWith(false);
+    expect(setters.setShowRoutingNumber).toHaveBeenCalledWith(false);
+  });
+
+  it("toggles software license visibility flag", () => {
+    const { values, setters } = createState();
+    const callbacks = buildTeamEntrySpecificCallbacks(values, setters);
+
+    callbacks.onToggleLicenseKey();
+
+    expect(setters.setShowLicenseKey).toHaveBeenCalledWith(false);
   });
 });

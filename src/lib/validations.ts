@@ -148,6 +148,8 @@ export const createTeamE2EPasswordSchema = z.object({
   entryType: entryTypeSchema.optional().default(ENTRY_TYPE.LOGIN),
   tagIds: z.array(z.string().cuid()).optional(),
   teamFolderId: z.string().cuid().nullable().optional(),
+  requireReprompt: z.boolean().optional(),
+  expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
 });
 
 /** Schema for E2E team password update — full blob replacement or metadata-only update */
@@ -159,6 +161,8 @@ export const updateTeamE2EPasswordSchema = z.object({
   tagIds: z.array(z.string().cuid()).optional(),
   teamFolderId: z.string().cuid().nullable().optional(),
   isArchived: z.boolean().optional(),
+  requireReprompt: z.boolean().optional(),
+  expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
 }).refine(
   (data) => {
     const hasBlob = data.encryptedBlob !== undefined;
@@ -274,18 +278,34 @@ const shareDataSchema = z.object({
   relyingPartyId: z.string().max(200).nullish(),
   relyingPartyName: z.string().max(200).nullish(),
   credentialId: z.string().max(500).nullish(),
-  creationDate: z.string().nullish(),
+  creationDate: z.string().max(50).nullish(),
   deviceInfo: z.string().max(200).nullish(),
   // IDENTITY
   fullName: z.string().max(200).nullish(),
   address: z.string().max(500).nullish(),
   phone: z.string().max(50).nullish(),
   email: z.string().max(200).nullish(),
-  dateOfBirth: z.string().nullish(),
+  dateOfBirth: z.string().max(50).nullish(),
   nationality: z.string().max(100).nullish(),
   idNumber: z.string().max(100).nullish(),
-  issueDate: z.string().nullish(),
-  expiryDate: z.string().nullish(),
+  issueDate: z.string().max(50).nullish(),
+  expiryDate: z.string().max(50).nullish(),
+  // BANK_ACCOUNT
+  bankName: z.string().max(200).nullish(),
+  accountType: z.string().max(50).nullish(),
+  accountHolderName: z.string().max(200).nullish(),
+  accountNumber: z.string().max(50).nullish(),
+  routingNumber: z.string().max(50).nullish(),
+  swiftBic: z.string().max(20).nullish(),
+  iban: z.string().max(50).nullish(),
+  branchName: z.string().max(200).nullish(),
+  // SOFTWARE_LICENSE
+  softwareName: z.string().max(200).nullish(),
+  licenseKey: z.string().max(500).nullish(),
+  version: z.string().max(50).nullish(),
+  licensee: z.string().max(200).nullish(),
+  purchaseDate: z.string().max(50).nullish(),
+  expirationDate: z.string().max(50).nullish(),
 });
 
 export const createShareLinkSchema = z.object({
