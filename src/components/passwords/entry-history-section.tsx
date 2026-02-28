@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { useReprompt } from "@/hooks/use-reprompt";
+import { DISPLAY_KEYS, SENSITIVE_KEYS } from "./entry-history-keys";
 
 interface HistoryEntry {
   id: string;
@@ -55,24 +56,6 @@ function formatDateTime(dateStr: string, locale: string) {
     minute: "2-digit",
   });
 }
-
-// Display keys we want to show and their order
-const DISPLAY_KEYS = [
-  "title", "username", "password", "url", "notes",
-  "content",
-  "cardholderName", "cardNumber", "brand", "expiryMonth", "expiryYear", "cvv",
-  "fullName", "address", "phone", "email", "dateOfBirth", "nationality",
-  "idNumber", "issueDate", "expiryDate",
-  "relyingPartyId", "relyingPartyName", "credentialId", "creationDate", "deviceInfo",
-  "bankName", "accountType", "accountHolderName", "accountNumber", "routingNumber",
-  "swiftBic", "iban", "branchName",
-  "softwareName", "licenseKey", "version", "licensee", "purchaseDate", "expirationDate",
-];
-
-const SENSITIVE_KEYS = new Set([
-  "password", "cvv", "cardNumber", "idNumber",
-  "accountNumber", "routingNumber", "iban", "licenseKey", "credentialId",
-]);
 
 function ViewContent({ data }: { data: Record<string, unknown> }) {
   const t = useTranslations("PasswordDetail");
