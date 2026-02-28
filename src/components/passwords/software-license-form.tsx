@@ -47,9 +47,11 @@ interface SoftwareLicenseFormProps {
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  defaultFolderId?: string | null;
+  defaultTags?: TagData[];
 }
 
-export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSaved }: SoftwareLicenseFormProps) {
+export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSaved, defaultFolderId, defaultTags }: SoftwareLicenseFormProps) {
   const t = useTranslations("SoftwareLicenseForm");
   const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
@@ -72,9 +74,9 @@ export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSav
   const [expirationDate, setExpirationDate] = useState(initialData?.expirationDate ?? "");
   const [notes, setNotes] = useState(initialData?.notes ?? "");
   const [selectedTags, setSelectedTags] = useState<TagData[]>(
-    initialData?.tags ?? []
+    initialData?.tags ?? defaultTags ?? []
   );
-  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
+  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? defaultFolderId ?? null);
   const { folders } = usePersonalFolders();
 
   const baselineSnapshot = useMemo(
@@ -89,8 +91,8 @@ export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSav
         purchaseDate: initialData?.purchaseDate ?? "",
         expirationDate: initialData?.expirationDate ?? "",
         notes: initialData?.notes ?? "",
-        selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
-        folderId: initialData?.folderId ?? null,
+        selectedTagIds: (initialData?.tags ?? defaultTags ?? []).map((tag) => tag.id).sort(),
+        folderId: initialData?.folderId ?? defaultFolderId ?? null,
         requireReprompt: initialData?.requireReprompt ?? false,
         expiresAt: initialData?.expiresAt ?? null,
       }),

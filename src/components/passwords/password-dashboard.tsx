@@ -22,9 +22,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, CheckSquare, Landmark, KeySquare } from "lucide-react";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, CheckSquare, Landmark, KeySquare, FolderOpen, Tag } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
+import { usePersonalFolders } from "@/hooks/use-personal-folders";
+import { usePersonalTags } from "@/hooks/use-personal-tags";
+import { buildFolderPath } from "@/lib/folder-path";
+import type { TagData } from "@/components/tags/tag-input";
 
 type VaultView = "all" | "favorites" | "archive" | "trash";
 
@@ -53,6 +57,9 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   const passwordListRef = useRef<PasswordListHandle>(null);
   const trashListRef = useRef<TrashListHandle>(null);
 
+  const { folders } = usePersonalFolders();
+  const { tags } = usePersonalTags();
+
   const isTrash = view === "trash";
   const isFavorites = view === "favorites";
   const isArchive = view === "archive";
@@ -70,6 +77,9 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     SOFTWARE_LICENSE: t("catSoftwareLicense"),
   };
 
+  const folderLabel = folderId ? buildFolderPath(folderId, folders) : null;
+  const tagLabel = tagId ? tags.find((t2) => t2.id === tagId)?.name : undefined;
+
   const subtitle = isTrash
     ? t("trash")
     : isFavorites
@@ -78,7 +88,8 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
         ? t("archive")
         : entryType && ENTRY_TYPE_TITLES[entryType]
           ? ENTRY_TYPE_TITLES[entryType]
-          : t("passwords");
+          : folderLabel ?? tagLabel ?? t("passwords");
+
   const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
     LOGIN: <KeyRound className="h-6 w-6" />,
     SECURE_NOTE: <FileText className="h-6 w-6" />,
@@ -97,7 +108,17 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
         ? <Archive className="h-6 w-6" />
         : entryType && ENTRY_TYPE_ICONS[entryType]
           ? ENTRY_TYPE_ICONS[entryType]
-          : <KeyRound className="h-6 w-6" />;
+          : folderId
+            ? <FolderOpen className="h-6 w-6" />
+            : tagId
+              ? <Tag className="h-6 w-6" />
+              : <KeyRound className="h-6 w-6" />;
+
+  // Build defaultTags for new item dialog (only when tag is loaded)
+  const matchedTag = tagId ? tags.find((t2) => t2.id === tagId) : undefined;
+  const defaultTagData: TagData[] | undefined = matchedTag
+    ? [{ id: matchedTag.id, name: matchedTag.name, color: matchedTag.color }]
+    : undefined;
 
   const isPersonalAll = !isTrash && !isArchive && !isFavorites && !entryType && !tagId && !folderId;
   const isCategorySelected = !!(entryType && ENTRY_TYPE_TITLES[entryType]);
@@ -348,6 +369,8 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
         onOpenChange={setNewDialogOpen}
         onSaved={handleDataChange}
         entryType={newEntryType}
+        defaultFolderId={folderId ?? null}
+        defaultTags={defaultTagData}
       />
 
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>

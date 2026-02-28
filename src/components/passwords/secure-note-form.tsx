@@ -39,9 +39,11 @@ interface SecureNoteFormProps {
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  defaultFolderId?: string | null;
+  defaultTags?: TagData[];
 }
 
-export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }: SecureNoteFormProps) {
+export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, defaultFolderId, defaultTags }: SecureNoteFormProps) {
   const t = useTranslations("SecureNoteForm");
   const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
@@ -54,9 +56,9 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
   const [title, setTitle] = useState(initialData?.title ?? "");
   const [content, setContent] = useState(initialData?.content ?? "");
   const [selectedTags, setSelectedTags] = useState<TagData[]>(
-    initialData?.tags ?? []
+    initialData?.tags ?? defaultTags ?? []
   );
-  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
+  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? defaultFolderId ?? null);
   const { folders } = usePersonalFolders();
 
   const baselineSnapshot = useMemo(
@@ -64,8 +66,8 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved }:
       JSON.stringify({
         title: initialData?.title ?? "",
         content: initialData?.content ?? "",
-        selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
-        folderId: initialData?.folderId ?? null,
+        selectedTagIds: (initialData?.tags ?? defaultTags ?? []).map((tag) => tag.id).sort(),
+        folderId: initialData?.folderId ?? defaultFolderId ?? null,
         requireReprompt: initialData?.requireReprompt ?? false,
         expiresAt: initialData?.expiresAt ?? null,
       }),

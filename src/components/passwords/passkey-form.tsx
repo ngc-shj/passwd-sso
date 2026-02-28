@@ -46,9 +46,11 @@ interface PasskeyFormProps {
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  defaultFolderId?: string | null;
+  defaultTags?: TagData[];
 }
 
-export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: PasskeyFormProps) {
+export function PasskeyForm({ mode, initialData, variant = "page", onSaved, defaultFolderId, defaultTags }: PasskeyFormProps) {
   const t = useTranslations("PasskeyForm");
   const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
@@ -68,9 +70,9 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
   const [deviceInfo, setDeviceInfo] = useState(initialData?.deviceInfo ?? "");
   const [notes, setNotes] = useState(initialData?.notes ?? "");
   const [selectedTags, setSelectedTags] = useState<TagData[]>(
-    initialData?.tags ?? []
+    initialData?.tags ?? defaultTags ?? []
   );
-  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? null);
+  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? defaultFolderId ?? null);
   const { folders } = usePersonalFolders();
 
   const baselineSnapshot = useMemo(
@@ -84,8 +86,8 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved }: Pa
         creationDate: initialData?.creationDate ?? "",
         deviceInfo: initialData?.deviceInfo ?? "",
         notes: initialData?.notes ?? "",
-        selectedTagIds: (initialData?.tags ?? []).map((tag) => tag.id).sort(),
-        folderId: initialData?.folderId ?? null,
+        selectedTagIds: (initialData?.tags ?? defaultTags ?? []).map((tag) => tag.id).sort(),
+        folderId: initialData?.folderId ?? defaultFolderId ?? null,
         requireReprompt: initialData?.requireReprompt ?? false,
         expiresAt: initialData?.expiresAt ?? null,
       }),

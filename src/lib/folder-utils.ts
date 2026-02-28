@@ -8,7 +8,7 @@ export interface ParentNode {
   ownerId: string;
 }
 
-const MAX_FOLDER_DEPTH = 5;
+export const MAX_FOLDER_DEPTH = 5;
 
 /**
  * Validate that `parentId` exists and belongs to the expected owner.
