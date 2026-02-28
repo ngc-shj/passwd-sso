@@ -31,7 +31,7 @@ import {
   Plus,
   Link as LinkIcon,
   ScrollText,
-  MoreHorizontal,
+  MoreVertical,
   Pencil,
   Trash2 as TrashIcon,
 } from "lucide-react";
@@ -235,10 +235,10 @@ export function ManageSection({
           {tags.map((tag) => {
             const colorClass = getTagColorClass(tag.color);
             return (
-              <div key={tag.id} className="flex items-center">
+              <div key={tag.id} className={cn("group/tag flex items-center rounded-md transition-colors", activeTagId === tag.id ? "bg-secondary" : "hover:bg-accent dark:hover:bg-accent/50")}>
                 <Button
                   variant={activeTagId === tag.id ? "secondary" : "ghost"}
-                  className="flex-1 justify-start gap-2 min-w-0"
+                  className="flex-1 justify-start gap-2 min-w-0 rounded-none hover:bg-transparent dark:hover:bg-transparent"
                   asChild
                 >
                   <Link href={tagHref(tag.id)} onClick={onNavigate}>
@@ -250,16 +250,16 @@ export function ManageSection({
                   </Link>
                 </Button>
                 {showTagMenu ? (
-                  <div className="group/tag shrink-0 relative flex items-center justify-center w-7 h-7">
+                  <div className="shrink-0 relative flex items-center justify-center w-7 h-7">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="peer absolute inset-0 h-7 w-7 opacity-0 transition-opacity group-hover/tag:opacity-100 focus:opacity-100"
+                          className="peer absolute inset-0 h-7 w-7 opacity-0 transition-opacity group-hover/tag:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 rounded hover:bg-black/[0.1] dark:hover:bg-white/[0.15]"
                           aria-label={`${tag.name} menu`}
                         >
-                          <MoreHorizontal className="h-3.5 w-3.5" />
+                          <MoreVertical className="h-3.5 w-3.5" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
@@ -274,15 +274,20 @@ export function ManageSection({
                       </DropdownMenuContent>
                     </DropdownMenu>
                     {tag.count > 0 && (
-                      <span className="text-xs text-muted-foreground transition-opacity group-hover/tag:opacity-0 peer-focus:opacity-0 pointer-events-none">
+                      <span className="text-xs text-muted-foreground transition-opacity group-hover/tag:opacity-0 peer-focus-visible:opacity-0 peer-data-[state=open]:opacity-0 pointer-events-none">
                         {tag.count}
                       </span>
                     )}
                   </div>
                 ) : tag.count > 0 ? (
-                  <span className="shrink-0 text-xs text-muted-foreground px-2">
-                    {tag.count}
-                  </span>
+                  <div className="shrink-0 relative flex items-center justify-center w-7 h-7">
+                    <span className="text-xs text-muted-foreground transition-opacity group-hover/tag:opacity-0 pointer-events-none">
+                      {tag.count}
+                    </span>
+                    <span className="absolute inset-0 flex items-center justify-center rounded opacity-0 transition-opacity group-hover/tag:opacity-100 text-muted-foreground pointer-events-none">
+                      <MoreVertical className="h-3.5 w-3.5" />
+                    </span>
+                  </div>
                 ) : null}
               </div>
             );
