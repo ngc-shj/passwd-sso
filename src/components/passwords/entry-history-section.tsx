@@ -63,9 +63,16 @@ const DISPLAY_KEYS = [
   "cardholderName", "cardNumber", "brand", "expiryMonth", "expiryYear", "cvv",
   "fullName", "address", "phone", "email", "dateOfBirth", "nationality",
   "idNumber", "issueDate", "expiryDate",
+  "relyingPartyId", "relyingPartyName", "credentialId", "creationDate", "deviceInfo",
+  "bankName", "accountType", "accountHolderName", "accountNumber", "routingNumber",
+  "swiftBic", "iban", "branchName",
+  "softwareName", "licenseKey", "version", "licensee", "purchaseDate", "expirationDate",
 ];
 
-const SENSITIVE_KEYS = new Set(["password", "cvv", "cardNumber", "idNumber"]);
+const SENSITIVE_KEYS = new Set([
+  "password", "cvv", "cardNumber", "idNumber",
+  "accountNumber", "routingNumber", "iban", "licenseKey", "credentialId",
+]);
 
 function ViewContent({ data }: { data: Record<string, unknown> }) {
   const t = useTranslations("PasswordDetail");

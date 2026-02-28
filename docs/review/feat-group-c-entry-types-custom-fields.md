@@ -1,11 +1,11 @@
 # コードレビュー: feat/group-c-entry-types-custom-fields
 
-日時: 2026-02-28T11:30:00+09:00
-レビュー回数: 1回目
+日時: 2026-02-28T12:00:00+09:00
+レビュー回数: 2回目
 
 ## 前回からの変更
 
-初回レビュー
+1回目のレビュー指摘をすべて修正済み。2回目レビューで F-4 を検出・修正。ユーザーフィードバックで追加修正。
 
 ## 機能観点の指摘
 
@@ -108,6 +108,71 @@
 
 - **推奨対応**: bankAccount/softwareLicense entryKind でのプロパティ構築テスト追加。
 
+## 2回目レビュー結果
+
+### F-4 [低] Software License の `email` が `password-detail-inline.tsx` で表示されない
+
+- **問題**: `isSoftwareLicense` セクションに email フィールドの表示がない
+- **対応**: email 表示ブロックを licensee の後に追加
+
+### セキュリティ観点: 指摘なし
+### テスト観点: 指摘なし
+
+## ユーザーフィードバック
+
+### UF-1 accountType の表示値が翻訳されていない
+
+- **問題**: 一覧・詳細で "checking" が生のまま表示
+- **対応**: PasswordDetail.json / Share.json に accountType 翻訳キーを追加。detail-inline.tsx / share-entry-view.tsx でマッピング
+
+### UF-2 Software License の email バリデーション未実装
+
+- **問題**: email フィールドにフォーマット検証なし
+- **対応**: software-license-form.tsx に正規表現バリデーション + エラー表示追加
+
+### UF-3 変更履歴の表示項目が不足
+
+- **問題**: `entry-history-section.tsx` の `DISPLAY_KEYS` に Bank Account / Software License / Passkey のフィールドが未登録。変更履歴の「表示」でタイトルしか表示されない
+- **対応**: DISPLAY_KEYS に全エントリタイプのフィールドを追加。SENSITIVE_KEYS に accountNumber, routingNumber, iban, licenseKey, credentialId を追加
+
 ## 対応状況
 
-(修正後に追記)
+### F-1 Software License email 欠落
+- 対応: 5ファイルに email フィールド追加
+- 修正ファイル: export-format-common.ts, password-import-payload.ts, team-entry-payload.ts, password-import-parsers.ts, share-entry-view.tsx
+
+### F-2 accountNumberLast4 非数字除去
+- 対応: `replace(/\D/g, "")` + 4桁未満で null
+- 修正ファイル: password-import-payload.ts:86-87
+
+### F-3 i18n ラベル不整合
+- 対応: Share.json (ja/en) のラベルを BankAccountForm.json / PasswordDetail.json と統一
+- 修正ファイル: messages/ja/Share.json, messages/en/Share.json
+
+### S-1 BOOLEAN ハードコード英語
+- 対応: `useTranslations("Common")` で `tc("yes")` / `tc("no")` に変更
+- 修正ファイル: share-entry-view.tsx:60,187
+
+### S-2 IBAN 非マスク
+- 対応: share-entry-view.tsx で renderSensitiveField に変更。detail-inline.tsx で showIban トグル追加
+- 修正ファイル: share-entry-view.tsx:322, password-detail-inline.tsx:113,200-205,313-336
+
+### F-4 Software License email 詳細表示
+- 対応: isSoftwareLicense セクションに email 表示ブロック追加
+- 修正ファイル: password-detail-inline.tsx
+
+### UF-1 accountType 翻訳
+- 対応: 翻訳キー追加 + ternary マッピング
+- 修正ファイル: messages/*/PasswordDetail.json, messages/*/Share.json, password-detail-inline.tsx, share-entry-view.tsx
+
+### UF-2 email バリデーション
+- 対応: regex バリデーション + エラー表示
+- 修正ファイル: software-license-form.tsx, messages/*/SoftwareLicenseForm.json
+
+### UF-3 変更履歴表示
+- 対応: DISPLAY_KEYS / SENSITIVE_KEYS 拡張
+- 修正ファイル: entry-history-section.tsx:60-71
+
+### T-1〜T-12 テスト追加
+- 対応: Export→Import 往復テスト、バリデーションテスト、Import payload テスト等を追加
+- 修正ファイル: export-format-common.test.ts, team-password-form-actions.test.ts, password-import-payload.test.ts, password-import-parsers.test.ts, team-password-form-submit-args.test.ts, use-team-password-form-derived.test.ts, team-password-form-derived-helpers.test.ts, team-entry-specific-fields-callbacks.test.ts, team-entry-specific-fields-text-props.test.ts

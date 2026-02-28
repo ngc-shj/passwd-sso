@@ -419,6 +419,17 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
             </div>
           )}
 
+          {/* Email */}
+          {data.email && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("email")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{data.email}</span>
+                <CopyButton getValue={() => data.email ?? ""} />
+              </div>
+            </div>
+          )}
+
           {/* Purchase Date */}
           {data.purchaseDate && (
             <div className="space-y-1">
