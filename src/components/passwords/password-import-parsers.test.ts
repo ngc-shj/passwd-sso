@@ -456,6 +456,127 @@ describe("parseJson", () => {
     expect(result.entries[0].isFavorite).toBe(false);
     expect(result.entries[0].expiresAt).toBeNull();
   });
+
+  it("preserves passkey fields when passwdSso envelope is present", () => {
+    const json = JSON.stringify({
+      format: "passwd-sso",
+      entries: [
+        {
+          type: "passkey",
+          name: "GitHub Passkey",
+          passkey: {
+            relyingPartyId: "github.com",
+            relyingPartyName: "GitHub",
+            username: "alice",
+            credentialId: "cred-001",
+            creationDate: "2025-10-01T10:00:00.000Z",
+            deviceInfo: "macOS / Touch ID",
+          },
+          notes: "Passkey sample",
+          passwdSso: {
+            entryType: "PASSKEY",
+            tags: [{ name: "passkey", color: "#0ea5e9" }],
+            requireReprompt: false,
+            isFavorite: false,
+          },
+        },
+      ],
+    });
+
+    const result = parseJson(json);
+    expect(result.entries).toHaveLength(1);
+    const e = result.entries[0];
+    expect(e.entryType).toBe(ENTRY_TYPE.PASSKEY);
+    expect(e.relyingPartyId).toBe("github.com");
+    expect(e.relyingPartyName).toBe("GitHub");
+    expect(e.username).toBe("alice");
+    expect(e.credentialId).toBe("cred-001");
+    expect(e.creationDate).toBe("2025-10-01T10:00:00.000Z");
+    expect(e.deviceInfo).toBe("macOS / Touch ID");
+    expect(e.tags).toEqual([{ name: "passkey", color: "#0ea5e9" }]);
+  });
+
+  it("preserves identity fields when passwdSso envelope is present", () => {
+    const json = JSON.stringify({
+      format: "passwd-sso",
+      entries: [
+        {
+          type: "identity",
+          name: "Alice",
+          identity: {
+            fullName: "Alice Example",
+            address: "1-2-3 Chiyoda, Tokyo",
+            phone: "+81-90-1234-5678",
+            email: "alice@example.com",
+            dateOfBirth: "1990-01-02",
+            nationality: "JP",
+            idNumber: "A1234567",
+            issueDate: "2020-01-01",
+            expiryDate: "2030-01-01",
+          },
+          notes: "Identity sample",
+          passwdSso: {
+            entryType: "IDENTITY",
+            tags: [{ name: "identity", color: "#16a34a" }],
+          },
+        },
+      ],
+    });
+
+    const result = parseJson(json);
+    expect(result.entries).toHaveLength(1);
+    const e = result.entries[0];
+    expect(e.entryType).toBe(ENTRY_TYPE.IDENTITY);
+    expect(e.fullName).toBe("Alice Example");
+    expect(e.address).toBe("1-2-3 Chiyoda, Tokyo");
+    expect(e.phone).toBe("+81-90-1234-5678");
+    expect(e.email).toBe("alice@example.com");
+    expect(e.dateOfBirth).toBe("1990-01-02");
+    expect(e.nationality).toBe("JP");
+    expect(e.idNumber).toBe("A1234567");
+    expect(e.issueDate).toBe("2020-01-01");
+    expect(e.expiryDate).toBe("2030-01-01");
+  });
+
+  it("preserves card fields when passwdSso envelope is present", () => {
+    const json = JSON.stringify({
+      format: "passwd-sso",
+      entries: [
+        {
+          type: "card",
+          name: "Corporate VISA",
+          card: {
+            cardholderName: "ALICE EXAMPLE",
+            number: "4111111111111111",
+            brand: "VISA",
+            expMonth: "12",
+            expYear: "2030",
+            code: "123",
+          },
+          notes: "Sample test card",
+          passwdSso: {
+            entryType: "CREDIT_CARD",
+            tags: [{ name: "finance", color: "#8b5cf6" }],
+            requireReprompt: true,
+            isFavorite: true,
+          },
+        },
+      ],
+    });
+
+    const result = parseJson(json);
+    expect(result.entries).toHaveLength(1);
+    const e = result.entries[0];
+    expect(e.entryType).toBe(ENTRY_TYPE.CREDIT_CARD);
+    expect(e.cardholderName).toBe("ALICE EXAMPLE");
+    expect(e.cardNumber).toBe("4111111111111111");
+    expect(e.brand).toBe("VISA");
+    expect(e.expiryMonth).toBe("12");
+    expect(e.expiryYear).toBe("2030");
+    expect(e.cvv).toBe("123");
+    expect(e.requireReprompt).toBe(true);
+    expect(e.isFavorite).toBe(true);
+  });
 });
 
 // ─── Passkey CSV ────────────────────────────────────────────

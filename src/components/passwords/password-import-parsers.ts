@@ -331,15 +331,15 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           notes: item.notes ?? "",
           ...cardDefaults,
           ...identityDefaults,
+          ...bankAccountDefaults,
+          ...softwareLicenseDefaults,
+          ...extraDefaults(),
+          ...passwdSso,
           relyingPartyId: passkey.relyingPartyId ?? "",
           relyingPartyName: passkey.relyingPartyName ?? "",
           credentialId: passkey.credentialId ?? "",
           creationDate: passkey.creationDate ?? "",
           deviceInfo: passkey.deviceInfo ?? "",
-          ...bankAccountDefaults,
-          ...softwareLicenseDefaults,
-          ...extraDefaults(),
-          ...passwdSso,
           ...metaOverrides,
         };
         if (entry.title) entries.push(entry);
@@ -370,6 +370,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           swiftBic: bank.swiftBic ?? "",
           iban: bank.iban ?? "",
           branchName: bank.branchName ?? "",
+          ...metaOverrides,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -398,6 +399,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           email: license.email ?? "",
           purchaseDate: license.purchaseDate ?? "",
           expirationDate: license.expirationDate ?? "",
+          ...metaOverrides,
         };
         if (entry.title) entries.push(entry);
         continue;
@@ -417,9 +419,12 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           ...passkeyDefaults,
           ...bankAccountDefaults,
           ...softwareLicenseDefaults,
-          fullName: identity.fullName ?? identity.firstName
-            ? `${identity.firstName ?? ""} ${identity.lastName ?? ""}`.trim()
-            : "",
+          ...extraDefaults(),
+          ...passwdSso,
+          fullName: identity.fullName
+            ?? (identity.firstName
+              ? `${identity.firstName} ${identity.lastName ?? ""}`.trim()
+              : ""),
           address: identity.address ?? identity.address1 ?? "",
           phone: identity.phone ?? "",
           email: identity.email ?? "",
@@ -428,8 +433,6 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           idNumber: identity.idNumber ?? identity.ssn ?? identity.passportNumber ?? "",
           issueDate: identity.issueDate ?? "",
           expiryDate: identity.expiryDate ?? "",
-          ...extraDefaults(),
-          ...passwdSso,
           ...metaOverrides,
         };
         if (entry.title) entries.push(entry);
@@ -446,18 +449,18 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           content: "",
           url: "",
           notes: item.notes ?? "",
-          cardholderName: card.cardholderName ?? "",
-          cardNumber: card.number ?? "",
-          brand: card.brand ?? "",
-          expiryMonth: card.expMonth ?? "",
-          expiryYear: card.expYear ?? "",
-          cvv: card.code ?? "",
           ...identityDefaults,
           ...passkeyDefaults,
           ...bankAccountDefaults,
           ...softwareLicenseDefaults,
           ...extraDefaults(),
           ...passwdSso,
+          cardholderName: card.cardholderName ?? "",
+          cardNumber: card.number ?? "",
+          brand: card.brand ?? "",
+          expiryMonth: card.expMonth ?? "",
+          expiryYear: card.expYear ?? "",
+          cvv: card.code ?? "",
           ...metaOverrides,
         };
         if (entry.title) entries.push(entry);
@@ -502,8 +505,11 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
         ...bankAccountDefaults,
         ...softwareLicenseDefaults,
         ...extraDefaults(),
-        totp: typeof login.totp === "string" && login.totp ? { secret: login.totp } : null,
         ...passwdSso,
+        // login.totp (bare string) is a fallback; passwdSso.totp (full config) takes priority
+        ...(typeof login.totp === "string" && login.totp && !passwdSso.totp
+          ? { totp: { secret: login.totp } }
+          : {}),
         ...metaOverrides,
       };
       if (entry.title && entry.password) entries.push(entry);
