@@ -48,10 +48,31 @@ describe("buildFolderPath", () => {
       mkFolder("f1", "A", "f2"),
       mkFolder("f2", "B", "f1"),
     ];
-    const result = buildFolderPath("f1", folders);
-    expect(result).toBeTruthy();
-    // Should contain both names without hanging
-    expect(result).toContain("A");
-    expect(result).toContain("B");
+    // f1 start: parts=['A'] -> unshift f2 -> ['B','A'] -> f1 is visited -> break
+    expect(buildFolderPath("f1", folders)).toBe("B / A");
+  });
+
+  it("returns full path for exactly MAX_FOLDER_DEPTH levels (5)", () => {
+    const folders = [
+      mkFolder("f1", "L1"),
+      mkFolder("f2", "L2", "f1"),
+      mkFolder("f3", "L3", "f2"),
+      mkFolder("f4", "L4", "f3"),
+      mkFolder("f5", "L5", "f4"),
+    ];
+    expect(buildFolderPath("f5", folders)).toBe("L1 / L2 / L3 / L4 / L5");
+  });
+
+  it("truncates at MAX_FOLDER_DEPTH when hierarchy is deeper", () => {
+    const folders = [
+      mkFolder("f1", "L1"),
+      mkFolder("f2", "L2", "f1"),
+      mkFolder("f3", "L3", "f2"),
+      mkFolder("f4", "L4", "f3"),
+      mkFolder("f5", "L5", "f4"),
+      mkFolder("f6", "L6", "f5"),
+    ];
+    // 6 levels from f6: parts start with ['L6'], can add 4 ancestors -> L2..L5
+    expect(buildFolderPath("f6", folders)).toBe("L2 / L3 / L4 / L5 / L6");
   });
 });

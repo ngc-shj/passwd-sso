@@ -78,7 +78,8 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   };
 
   const folderLabel = folderId ? buildFolderPath(folderId, folders) : null;
-  const tagLabel = tagId ? tags.find((t2) => t2.id === tagId)?.name : undefined;
+  const matchedTag = tagId ? tags.find((tag) => tag.id === tagId) : undefined;
+  const tagLabel = matchedTag?.name;
 
   const subtitle = isTrash
     ? t("trash")
@@ -114,8 +115,6 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
               ? <Tag className="h-6 w-6" />
               : <KeyRound className="h-6 w-6" />;
 
-  // Build defaultTags for new item dialog (only when tag is loaded)
-  const matchedTag = tagId ? tags.find((t2) => t2.id === tagId) : undefined;
   const defaultTagData: TagData[] | undefined = matchedTag
     ? [{ id: matchedTag.id, name: matchedTag.name, color: matchedTag.color }]
     : undefined;
