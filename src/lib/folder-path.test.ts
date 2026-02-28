@@ -52,7 +52,7 @@ describe("buildFolderPath", () => {
     expect(buildFolderPath("f1", folders)).toBe("B / A");
   });
 
-  it("returns full path for exactly MAX_FOLDER_DEPTH levels (5)", () => {
+  it("returns full path for deep hierarchy", () => {
     const folders = [
       mkFolder("f1", "L1"),
       mkFolder("f2", "L2", "f1"),
@@ -61,18 +61,5 @@ describe("buildFolderPath", () => {
       mkFolder("f5", "L5", "f4"),
     ];
     expect(buildFolderPath("f5", folders)).toBe("L1 / L2 / L3 / L4 / L5");
-  });
-
-  it("truncates parent side with '...' when hierarchy exceeds MAX_FOLDER_DEPTH", () => {
-    const folders = [
-      mkFolder("f1", "L1"),
-      mkFolder("f2", "L2", "f1"),
-      mkFolder("f3", "L3", "f2"),
-      mkFolder("f4", "L4", "f3"),
-      mkFolder("f5", "L5", "f4"),
-      mkFolder("f6", "L6", "f5"),
-    ];
-    // 6 levels: keep last 4 segments + "..." prefix
-    expect(buildFolderPath("f6", folders)).toBe("... / L3 / L4 / L5 / L6");
   });
 });

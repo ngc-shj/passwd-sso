@@ -229,6 +229,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
           title={isPrimaryScopeLabel ? subtitle : t("personalVault")}
           subtitle={subtitle}
           showSubtitle={!isPrimaryScopeLabel}
+          truncateStart={!!folderLabel}
           actions={
             selectionMode ? (
               <div className="flex items-center gap-3">

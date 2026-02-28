@@ -130,6 +130,11 @@
   --border-radius: var(--radius);
 }
 
+.direction-rtl {
+  direction: rtl;
+  text-align: left;
+}
+
 .tag-color {
   color: var(--tag-color);
   border-color: var(--tag-color);
