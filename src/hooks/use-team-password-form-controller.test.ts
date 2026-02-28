@@ -73,6 +73,8 @@ describe("useTeamPasswordFormController", () => {
         creationDate: "",
         deviceInfo: "",
         teamFolderId: null,
+        requireReprompt: false,
+        expiresAt: null,
         generatorSettings: {},
       },
       cardNumberValid: true,
@@ -266,6 +268,8 @@ function buildFormState() {
       licensee: "",
       purchaseDate: "",
       expirationDate: "",
+      requireReprompt: false,
+      expiresAt: null,
     },
     setters: {
       setCardNumber: vi.fn(),
@@ -326,6 +330,8 @@ function buildFormState() {
       setLicensee: vi.fn(),
       setPurchaseDate: vi.fn(),
       setExpirationDate: vi.fn(),
+      setRequireReprompt: vi.fn(),
+      setExpiresAt: vi.fn(),
       setTeamFolderId: vi.fn(),
     },
   };

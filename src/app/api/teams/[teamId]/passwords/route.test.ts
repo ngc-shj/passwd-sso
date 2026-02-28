@@ -267,6 +267,40 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     );
   });
 
+  it("returns requireReprompt and expiresAt in list response", async () => {
+    const expiresDate = new Date("2026-12-31T00:00:00Z");
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([
+      {
+        id: "pw-1",
+        entryType: ENTRY_TYPE.LOGIN,
+        encryptedOverview: "enc-overview",
+        overviewIv: "aabbccdd11223344",
+        overviewAuthTag: "aabbccdd11223344aabbccdd11223344",
+        aadVersion: 1,
+        teamKeyVersion: 1,
+        isArchived: false,
+        requireReprompt: true,
+        expiresAt: expiresDate,
+        favorites: [],
+        tags: [],
+        createdBy: { id: "u1", name: "User", image: null },
+        updatedBy: { id: "u1", name: "User" },
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      },
+    ]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json[0].requireReprompt).toBe(true);
+    expect(json[0].expiresAt).toBe(expiresDate.toISOString());
+  });
+
   it("does not filter by folder when folder param is absent", async () => {
     mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([]);
 
@@ -513,6 +547,16 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
         }),
       }),
     );
+  });
+
+  it("returns 400 when expiresAt has invalid format in POST", async () => {
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
+        body: { ...validE2EBody, expiresAt: "not-a-date" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(400);
   });
 
   it("creates entry without folder validation when teamFolderId is not provided", async () => {

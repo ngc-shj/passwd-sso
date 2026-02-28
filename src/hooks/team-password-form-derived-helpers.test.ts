@@ -337,6 +337,8 @@ describe("team-password-form-derived-helpers snapshot helpers", () => {
         licensee: "Jane Doe",
         purchaseDate: "2026-01-01",
         expirationDate: "2027-01-01",
+        requireReprompt: false,
+        expiresAt: null,
       },
     });
 

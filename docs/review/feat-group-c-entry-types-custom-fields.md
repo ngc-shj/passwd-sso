@@ -176,3 +176,37 @@
 ### T-1〜T-12 テスト追加
 - 対応: Export→Import 往復テスト、バリデーションテスト、Import payload テスト等を追加
 - 修正ファイル: export-format-common.test.ts, team-password-form-actions.test.ts, password-import-payload.test.ts, password-import-parsers.test.ts, team-password-form-submit-args.test.ts, use-team-password-form-derived.test.ts, team-password-form-derived-helpers.test.ts, team-entry-specific-fields-callbacks.test.ts, team-entry-specific-fields-text-props.test.ts
+
+---
+
+# レビュー3回目: requireReprompt/expiresAt 横展開コミット (9bfccd3)
+
+日時: 2026-02-28T17:00:00+09:00
+
+## 機能観点の指摘
+**指摘なし。** 全7エントリータイプに一貫して追加済み。データフロー完全。
+
+## セキュリティ観点の指摘
+**指摘なし。** 認可チェック・RLS・Zodバリデーション全て適切。
+
+## テスト観点の指摘
+
+### R3-1（低）: `makeEntryForGET` デフォルトに `requireReprompt`/`expiresAt` 未設定
+- `passwords/[id]/route.test.ts`
+
+### R3-2（中）: Team GETリストの `requireReprompt`/`expiresAt` レスポンステスト欠落
+- `passwords/route.test.ts`
+
+### R3-3（中）: Team PUT `expiresAt: null` クリアテスト欠落
+- `passwords/[id]/route.test.ts`
+
+### R3-4（中）: Team POST/PUT `expiresAt` 不正フォーマットバリデーションテスト欠落
+- `passwords/route.test.ts`, `passwords/[id]/route.test.ts`
+
+### R3-5（低）: 複数テストフィクスチャの型整合性
+- 複数ファイルの `values`/`setters` mockに新フィールド未追加
+
+### R3-6（低）: `team-password-form-submit-args.test.ts` pass-through未検証
+
+## 対応状況
+（修正後に追記）

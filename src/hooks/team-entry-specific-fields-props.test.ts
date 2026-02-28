@@ -261,6 +261,8 @@ function createState(): {
       licensee: "",
       purchaseDate: "",
       expirationDate: "",
+      requireReprompt: false,
+      expiresAt: null,
       teamFolderId: null,
     },
     setters: {
@@ -322,6 +324,8 @@ function createState(): {
       setLicensee: vi.fn(),
       setPurchaseDate: vi.fn(),
       setExpirationDate: vi.fn(),
+      setRequireReprompt: vi.fn(),
+      setExpiresAt: vi.fn(),
       setTeamFolderId: vi.fn(),
     },
   };

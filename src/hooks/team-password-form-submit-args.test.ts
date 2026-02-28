@@ -47,6 +47,7 @@ function buildDefaultParams(overrides: Record<string, unknown> = {}) {
       iban: "", branchName: "",
       softwareName: "", licenseKey: "", version: "",
       licensee: "", purchaseDate: "", expirationDate: "",
+      requireReprompt: false, expiresAt: null,
       generatorSettings: {},
     },
     cardNumberValid: true,
@@ -150,6 +151,8 @@ describe("buildTeamSubmitArgs", () => {
         licensee: "",
         purchaseDate: "",
         expirationDate: "",
+        requireReprompt: false,
+        expiresAt: null,
         generatorSettings: {},
       },
       cardNumberValid: true,
@@ -265,5 +268,17 @@ describe("buildTeamSubmitArgs", () => {
     expect(args.softwareLicenseErrorCopy).toEqual({
       expirationBeforePurchase: "sl.expirationBeforePurchase",
     });
+  });
+
+  it("passes requireReprompt and expiresAt through from entryValues", () => {
+    const args = buildTeamSubmitArgs(buildDefaultParams({
+      entryValues: {
+        ...buildDefaultParams().entryValues,
+        requireReprompt: true,
+        expiresAt: "2026-12-31T00:00:00Z",
+      },
+    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
+    expect(args.requireReprompt).toBe(true);
+    expect(args.expiresAt).toBe("2026-12-31T00:00:00Z");
   });
 });
