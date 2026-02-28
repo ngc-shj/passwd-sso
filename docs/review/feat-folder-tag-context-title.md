@@ -81,4 +81,23 @@
 - 判定: **修正**
 
 ## 対応状況
-（修正後に追記）
+
+### F-5/F-6: tags.find 重複と変数名
+- 対応: `matchedTag` を先に定義し、`tagLabel = matchedTag?.name` に変更。重複検索を排除、変数名を `tag` に統一
+- 修正ファイル: `src/components/passwords/password-dashboard.tsx`
+
+### T-1: 循環参照テストのアサーション
+- 対応: `toContain` → `toBe("B / A")` に厳密化
+- 修正ファイル: `src/lib/folder-path.test.ts`
+
+### T-2: MAX_FOLDER_DEPTH 境界値テスト
+- 対応: depth=5（ちょうど上限）と depth=6（打ち切り）の2ケースを追加
+- 修正ファイル: `src/lib/folder-path.test.ts`
+
+### T-5: defaults パラメータテスト（initial values）
+- 対応: 4ケース追加（defaultFolderId使用、defaultTags使用、initialData優先×2）
+- 修正ファイル: `src/hooks/personal-password-form-initial-values.test.ts`
+
+### T-6: defaults パラメータテスト（derived）
+- 対応: 3ケース追加（hasChanges=false with defaultFolderId、hasChanges=true差分、hasChanges=false with defaultTags）
+- 修正ファイル: `src/hooks/personal-password-form-derived.test.ts`
