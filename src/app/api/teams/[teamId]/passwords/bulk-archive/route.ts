@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 
 interface BulkArchiveBody {
@@ -12,11 +13,25 @@ interface BulkArchiveBody {
   operation?: "archive" | "unarchive";
 }
 
-// POST /api/passwords/bulk-archive - Archive multiple entries
-async function handlePOST(req: NextRequest) {
+// POST /api/teams/[teamId]/passwords/bulk-archive - Archive/unarchive multiple team entries
+async function handlePOST(
+  req: NextRequest,
+  { params }: { params: Promise<{ teamId: string }> },
+) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
+
+  const { teamId } = await params;
+
+  try {
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE);
+  } catch (e) {
+    if (e instanceof TeamAuthError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
   }
 
   let body: unknown;
@@ -47,9 +62,9 @@ async function handlePOST(req: NextRequest) {
   }
 
   const entriesToProcess = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.findMany({
+    prisma.teamPasswordEntry.findMany({
       where: {
-        userId: session.user.id,
+        teamId,
         id: { in: ids },
         deletedAt: null,
         isArchived: !toArchived,
@@ -60,9 +75,9 @@ async function handlePOST(req: NextRequest) {
   const entryIds = entriesToProcess.map((entry) => entry.id);
 
   const result = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.updateMany({
+    prisma.teamPasswordEntry.updateMany({
       where: {
-        userId: session.user.id,
+        teamId,
         id: { in: entryIds },
         deletedAt: null,
         isArchived: !toArchived,
@@ -75,9 +90,9 @@ async function handlePOST(req: NextRequest) {
 
   // Re-fetch to get accurate list of actually processed entries
   const processedEntries = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.findMany({
+    prisma.teamPasswordEntry.findMany({
       where: {
-        userId: session.user.id,
+        teamId,
         id: { in: entryIds },
         isArchived: toArchived,
       },
@@ -89,12 +104,13 @@ async function handlePOST(req: NextRequest) {
   const requestMeta = extractRequestMeta(req);
 
   logAudit({
-    scope: AUDIT_SCOPE.PERSONAL,
+    scope: AUDIT_SCOPE.TEAM,
     action: toArchived
       ? AUDIT_ACTION.ENTRY_BULK_ARCHIVE
       : AUDIT_ACTION.ENTRY_BULK_UNARCHIVE,
     userId: session.user.id,
-    targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+    teamId,
+    targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: "bulk",
     metadata: {
       bulk: true,
@@ -110,10 +126,11 @@ async function handlePOST(req: NextRequest) {
 
   for (const entryId of processedEntryIds) {
     logAudit({
-      scope: AUDIT_SCOPE.PERSONAL,
+      scope: AUDIT_SCOPE.TEAM,
       action: AUDIT_ACTION.ENTRY_UPDATE,
       userId: session.user.id,
-      targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+      teamId,
+      targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
       targetId: entryId,
       metadata: {
         source: "bulk-archive",

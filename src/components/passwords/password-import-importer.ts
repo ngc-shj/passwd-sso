@@ -6,11 +6,16 @@ import {
   resolveTagNameToIdForImport,
   type ParsedEntry,
 } from "@/components/passwords/password-import-utils";
+import {
+  resolveFolderPathsForImport,
+  resolveEntryFolderId,
+} from "@/components/passwords/password-import-folders";
 
 interface RunImportParams {
   entries: ParsedEntry[];
   isTeamImport: boolean;
   tagsPath: string;
+  foldersPath: string;
   passwordsPath: string;
   sourceFilename: string;
   userId?: string;
@@ -38,6 +43,7 @@ export async function runImportEntries({
   entries,
   isTeamImport,
   tagsPath,
+  foldersPath,
   passwordsPath,
   sourceFilename,
   userId,
@@ -55,7 +61,10 @@ export async function runImportEntries({
   }
 
   let successCount = 0;
-  const tagNameToId = await resolveTagNameToIdForImport(entries, tagsPath);
+  const [tagNameToId, folderPathToId] = await Promise.all([
+    resolveTagNameToIdForImport(entries, tagsPath),
+    resolveFolderPathsForImport(entries, foldersPath),
+  ]);
   const headers = importRequestHeaders(sourceFilename);
 
   for (let i = 0; i < entries.length; i++) {
@@ -85,6 +94,12 @@ export async function runImportEntries({
             aadVersion: AAD_VERSION,
             teamKeyVersion: teamKeyVersion ?? 1,
             tagIds,
+            ...(entry.requireReprompt ? { requireReprompt: true } : {}),
+            ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
+            ...(() => {
+              const fid = resolveEntryFolderId(entry, folderPathToId);
+              return fid ? { teamFolderId: fid } : {};
+            })(),
           }),
         });
       } else {
@@ -106,6 +121,12 @@ export async function runImportEntries({
             aadVersion: aad ? AAD_VERSION : 0,
             tagIds,
             ...(entry.requireReprompt ? { requireReprompt: true } : {}),
+            ...(entry.isFavorite ? { isFavorite: true } : {}),
+            ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
+            ...(() => {
+              const fid = resolveEntryFolderId(entry, folderPathToId);
+              return fid ? { folderId: fid } : {};
+            })(),
           }),
         });
       }

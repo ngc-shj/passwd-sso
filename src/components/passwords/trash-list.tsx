@@ -17,6 +17,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Trash2, Loader2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
@@ -59,6 +69,8 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
   const [entries, setEntries] = useState<TrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
 
   const fetchTrash = useCallback(async () => {
     if (!encryptionKey) return;
@@ -185,6 +197,7 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
 
   const handleBulkRestore = async () => {
     if (selectedIds.size === 0) return;
+    setBulkProcessing(true);
     try {
       const res = await fetch(apiPath.passwordsBulkRestore(), {
         method: "POST",
@@ -199,10 +212,13 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
       toast.success(
         t("bulkRestored", { count: json.restoredCount ?? selectedIds.size })
       );
+      setBulkDialogOpen(false);
       setEntries((prev) => prev.filter((entry) => !selectedIds.has(entry.id)));
       setSelectedIds(new Set());
     } catch {
       toast.error(t("bulkRestoreFailed"));
+    } finally {
+      setBulkProcessing(false);
     }
   };
 
@@ -338,12 +354,43 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
 
       {selectionMode && selectedIds.size > 0 && (
         <div className="sticky bottom-4 z-40 mt-2 flex items-center justify-end rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <Button size="sm" onClick={handleBulkRestore}>
+          <Button size="sm" onClick={() => setBulkDialogOpen(true)}>
             <RotateCcw className="h-3.5 w-3.5 mr-1" />
             {t("restoreSelected")}
           </Button>
         </div>
       )}
+
+      <AlertDialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("restoreSelected")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("bulkRestoreConfirm", { count: selectedIds.size })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkProcessing}>
+              {tl("cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleBulkRestore();
+              }}
+              disabled={bulkProcessing}
+            >
+              {bulkProcessing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                tl("confirm")
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

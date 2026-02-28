@@ -1,9 +1,11 @@
 {
   "format": "passwd-sso",
   "version": 1,
-  "exportedAt": "2026-02-14T12:00:00.000Z",
+  "exportedAt": "2026-03-01T00:00:00.000Z",
   "entries": [
     {
+      "folder": "Work / Cloud",
+      "favorite": true,
       "type": "login",
       "name": "AWS Console (IAM)",
       "login": {
@@ -17,29 +19,19 @@
         "totp": "JBSWY3DPEHPK3PXP"
       },
       "notes": "Sample login entry for import testing",
+      "reprompt": 1,
       "passwdSso": {
         "entryType": "LOGIN",
         "tags": [
-          {
-            "name": "aws",
-            "color": "#ff9900"
-          },
-          {
-            "name": "work",
-            "color": "#2563eb"
-          }
+          { "name": "aws", "color": "#ff9900" },
+          { "name": "work", "color": "#2563eb" }
         ],
+        "requireReprompt": true,
+        "isFavorite": true,
+        "expiresAt": "2027-03-01T00:00:00.000Z",
         "customFields": [
-          {
-            "label": "accountIdOrAlias",
-            "value": "123456789012",
-            "type": "text"
-          },
-          {
-            "label": "iamUsername",
-            "value": "alice",
-            "type": "text"
-          }
+          { "label": "accountIdOrAlias", "value": "123456789012", "type": "text" },
+          { "label": "iamUsername", "value": "alice", "type": "text" }
         ],
         "totp": {
           "secret": "JBSWY3DPEHPK3PXP",
@@ -57,14 +49,12 @@
           "includeSymbols": true
         },
         "passwordHistory": [
-          {
-            "password": "OldPassword-Example-001",
-            "changedAt": "2025-12-01T00:00:00.000Z"
-          }
+          { "password": "OldPassword-Example-001", "changedAt": "2025-12-01T00:00:00.000Z" }
         ]
       }
     },
     {
+      "folder": "Work / Cloud",
       "type": "login",
       "name": "Azure Portal",
       "login": {
@@ -78,20 +68,16 @@
         "totp": null
       },
       "notes": "Tenant A",
+      "reprompt": 0,
       "passwdSso": {
         "entryType": "LOGIN",
         "tags": [
-          {
-            "name": "azure",
-            "color": "#0078d4"
-          }
+          { "name": "azure", "color": "#0078d4" }
         ],
+        "requireReprompt": false,
+        "isFavorite": false,
         "customFields": [
-          {
-            "label": "tenant",
-            "value": "contoso.onmicrosoft.com",
-            "type": "text"
-          }
+          { "label": "tenant", "value": "contoso.onmicrosoft.com", "type": "text" }
         ],
         "totp": null,
         "generatorSettings": {
@@ -105,6 +91,8 @@
       }
     },
     {
+      "folder": "Personal / Finance",
+      "favorite": true,
       "type": "card",
       "name": "Corporate VISA",
       "card": {
@@ -116,17 +104,18 @@
         "code": "123"
       },
       "notes": "Sample test card",
+      "reprompt": 1,
       "passwdSso": {
         "entryType": "CREDIT_CARD",
         "tags": [
-          {
-            "name": "finance",
-            "color": "#8b5cf6"
-          }
-        ]
+          { "name": "finance", "color": "#8b5cf6" }
+        ],
+        "requireReprompt": true,
+        "isFavorite": true
       }
     },
     {
+      "folder": "Personal",
       "type": "identity",
       "name": "Alice Example Identity",
       "identity": {
@@ -141,17 +130,18 @@
         "expiryDate": "2030-01-01"
       },
       "notes": "Identity sample",
+      "reprompt": 0,
       "passwdSso": {
         "entryType": "IDENTITY",
         "tags": [
-          {
-            "name": "identity",
-            "color": "#16a34a"
-          }
-        ]
+          { "name": "identity", "color": "#16a34a" }
+        ],
+        "requireReprompt": false,
+        "isFavorite": false
       }
     },
     {
+      "folder": "Work",
       "type": "passkey",
       "name": "GitHub Passkey",
       "passkey": {
@@ -163,28 +153,82 @@
         "deviceInfo": "macOS / Touch ID"
       },
       "notes": "Passkey sample",
+      "reprompt": 0,
       "passwdSso": {
         "entryType": "PASSKEY",
         "tags": [
-          {
-            "name": "passkey",
-            "color": "#0ea5e9"
-          }
-        ]
+          { "name": "passkey", "color": "#0ea5e9" }
+        ],
+        "requireReprompt": false,
+        "isFavorite": false
       }
     },
     {
+      "folder": "Work / Infra",
       "type": "securenote",
       "name": "VPN Recovery Notes",
-      "notes": "This is a secure note sample.",
+      "notes": "This is a secure note sample.\nLine 2 of the note.",
+      "reprompt": 1,
       "passwdSso": {
         "entryType": "SECURE_NOTE",
         "tags": [
-          {
-            "name": "infra",
-            "color": "#16a34a"
-          }
-        ]
+          { "name": "infra", "color": "#16a34a" }
+        ],
+        "requireReprompt": true,
+        "isFavorite": false,
+        "expiresAt": "2027-06-01T00:00:00.000Z"
+      }
+    },
+    {
+      "folder": "Personal / Finance",
+      "favorite": true,
+      "type": "bankaccount",
+      "name": "Acme Savings Account",
+      "bankAccount": {
+        "bankName": "Acme Bank",
+        "accountType": "savings",
+        "accountHolderName": "Alice Example",
+        "accountNumber": "1234567890",
+        "routingNumber": "021000021",
+        "swiftBic": "BOFAUS3N",
+        "iban": "DE89370400440532013000",
+        "branchName": "Chiyoda Branch"
+      },
+      "notes": "Primary savings account",
+      "reprompt": 1,
+      "passwdSso": {
+        "entryType": "BANK_ACCOUNT",
+        "tags": [
+          { "name": "finance", "color": "#8b5cf6" },
+          { "name": "bank", "color": "#059669" }
+        ],
+        "requireReprompt": true,
+        "isFavorite": true
+      }
+    },
+    {
+      "folder": "Work / Tools",
+      "type": "softwarelicense",
+      "name": "Adobe Creative Cloud",
+      "softwareLicense": {
+        "softwareName": "Adobe Creative Cloud",
+        "licenseKey": "ABCD-EFGH-IJKL-MNOP",
+        "version": "2026",
+        "licensee": "Alice Example",
+        "email": "alice@example.com",
+        "purchaseDate": "2026-01-15",
+        "expirationDate": "2027-01-15"
+      },
+      "notes": "Annual license",
+      "reprompt": 0,
+      "passwdSso": {
+        "entryType": "SOFTWARE_LICENSE",
+        "tags": [
+          { "name": "license", "color": "#ea580c" }
+        ],
+        "requireReprompt": false,
+        "isFavorite": false,
+        "expiresAt": "2027-01-15T00:00:00.000Z"
       }
     }
   ]

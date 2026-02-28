@@ -56,6 +56,9 @@ export interface ExportEntry {
   generatorSettings: Record<string, unknown> | null;
   passwordHistory: EntryPasswordHistory[];
   requireReprompt?: boolean;
+  folderPath: string;
+  isFavorite: boolean;
+  expiresAt: string | null;
 }
 
 export type ExportProfile = "compatible" | "passwd-sso";
@@ -161,6 +164,8 @@ function basePasswdSsoMeta(
     ...(includeRequireRepromptInPasswdSso
       ? { requireReprompt: entry.requireReprompt }
       : {}),
+    isFavorite: entry.isFavorite,
+    ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
   };
 }
 
@@ -182,8 +187,13 @@ export function formatExportJson(
       ...(profile === "passwd-sso" ? { format: "passwd-sso", version: 1 } : {}),
       exportedAt: new Date().toISOString(),
       entries: entries.map((e) => {
+        const folderFavorite = {
+          folder: e.folderPath || undefined,
+          favorite: e.isFavorite || undefined,
+        };
         if (options.includePasskey && e.entryType === ENTRY_TYPE.PASSKEY) {
           return {
+            ...folderFavorite,
             type: "passkey",
             name: e.title,
             passkey: {
@@ -205,6 +215,7 @@ export function formatExportJson(
 
         if (e.entryType === ENTRY_TYPE.IDENTITY) {
           return {
+            ...folderFavorite,
             type: "identity",
             name: e.title,
             identity: {
@@ -229,6 +240,7 @@ export function formatExportJson(
 
         if (e.entryType === ENTRY_TYPE.CREDIT_CARD) {
           return {
+            ...folderFavorite,
             type: "card",
             name: e.title,
             card: {
@@ -250,6 +262,7 @@ export function formatExportJson(
 
         if (e.entryType === ENTRY_TYPE.BANK_ACCOUNT) {
           return {
+            ...folderFavorite,
             type: "bankaccount",
             name: e.title,
             bankAccount: {
@@ -273,6 +286,7 @@ export function formatExportJson(
 
         if (e.entryType === ENTRY_TYPE.SOFTWARE_LICENSE) {
           return {
+            ...folderFavorite,
             type: "softwarelicense",
             name: e.title,
             softwareLicense: {
@@ -295,6 +309,7 @@ export function formatExportJson(
 
         if (e.entryType === ENTRY_TYPE.SECURE_NOTE) {
           return {
+            ...folderFavorite,
             type: "securenote",
             name: e.title,
             notes: e.content,
@@ -307,6 +322,7 @@ export function formatExportJson(
         }
 
         return {
+          ...folderFavorite,
           type: "login",
           name: e.title,
           login: {
@@ -349,6 +365,8 @@ function passwdSsoCsvPayload(
     ...(options.includeRequireRepromptInPasswdSso
       ? { requireReprompt: entry.requireReprompt }
       : {}),
+    isFavorite: entry.isFavorite,
+    ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
     cardholderName: entry.cardholderName,
     cardNumber: entry.cardNumber,
     brand: entry.brand,
@@ -414,8 +432,8 @@ export function formatExportCsv(
     });
 
     return [
-      "",
-      "",
+      escapeCsvValue(entry.folderPath),
+      entry.isFavorite ? "1" : "",
       type,
       escapeCsvValue(entry.title),
       escapeCsvValue(isNote ? entry.content : entry.notes),

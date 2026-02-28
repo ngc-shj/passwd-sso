@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { ParsedEntry } from "@/components/passwords/password-import-types";
 
@@ -68,6 +68,9 @@ function makeEntry(overrides: Partial<ParsedEntry> = {}): ParsedEntry {
     generatorSettings: null,
     passwordHistory: [],
     requireReprompt: false,
+    folderPath: "",
+    isFavorite: false,
+    expiresAt: null,
     ...overrides,
   };
 }
@@ -77,7 +80,12 @@ describe("runImportEntries", () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("imports team entries and reports success/failed counts", async () => {
+    // No folderPath on entries → folder resolution skips GET
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(response(true)) // GET tags
@@ -96,6 +104,7 @@ describe("runImportEntries", () => {
       entries: [makeEntry({ title: "a" }), makeEntry({ title: "b" })],
       isTeamImport: true,
       tagsPath: "/api/teams/tags",
+      foldersPath: "/api/teams/folders",
       passwordsPath: "/api/teams/passwords",
       sourceFilename: "team.csv",
       teamEncryptionKey: {} as CryptoKey,
@@ -113,6 +122,7 @@ describe("runImportEntries", () => {
   });
 
   it("imports personal entry with encrypted payload", async () => {
+    // No folderPath on entries → folder resolution skips GET
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(response(true)) // GET tags
@@ -127,6 +137,7 @@ describe("runImportEntries", () => {
       entries: [makeEntry()],
       isTeamImport: false,
       tagsPath: "/api/tags",
+      foldersPath: "/api/folders",
       passwordsPath: "/api/passwords",
       sourceFilename: "personal.json",
       userId: "user-1",
@@ -149,5 +160,93 @@ describe("runImportEntries", () => {
     expect(body.entryType).toBe(ENTRY_TYPE.LOGIN);
     expect(body.encryptedBlob).toEqual({ ciphertext: "full", iv: "iv1", authTag: "tag1" });
     expect(body.encryptedOverview).toEqual({ ciphertext: "overview", iv: "iv2", authTag: "tag2" });
+  });
+
+  it("includes isFavorite and expiresAt in personal import POST body", async () => {
+    // No folderPath on entries → folder resolution skips GET
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(true)) // GET tags
+      .mockResolvedValueOnce(response(true)); // POST password
+    vi.stubGlobal("fetch", fetchMock);
+
+    mockEncryptData
+      .mockResolvedValueOnce({ ciphertext: "full", iv: "iv1", authTag: "tag1" })
+      .mockResolvedValueOnce({ ciphertext: "overview", iv: "iv2", authTag: "tag2" });
+
+    await runImportEntries({
+      entries: [makeEntry({ isFavorite: true, expiresAt: "2027-01-01T00:00:00.000Z" })],
+      isTeamImport: false,
+      tagsPath: "/api/tags",
+      foldersPath: "/api/folders",
+      passwordsPath: "/api/passwords",
+      sourceFilename: "personal.json",
+      userId: "user-1",
+      encryptionKey: {} as CryptoKey,
+    });
+
+    const postCall = fetchMock.mock.calls[1];
+    const body = JSON.parse(String((postCall[1] as RequestInit).body));
+    expect(body.isFavorite).toBe(true);
+    expect(body.expiresAt).toBe("2027-01-01T00:00:00.000Z");
+  });
+
+  it("includes folderId in personal import POST body when folderPath resolves", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(true)) // GET tags
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: "folder-1", name: "Work", parentId: null }],
+      } as unknown as Response) // GET folders
+      .mockResolvedValueOnce(response(true)); // POST password
+    vi.stubGlobal("fetch", fetchMock);
+
+    mockEncryptData
+      .mockResolvedValueOnce({ ciphertext: "full", iv: "iv1", authTag: "tag1" })
+      .mockResolvedValueOnce({ ciphertext: "overview", iv: "iv2", authTag: "tag2" });
+
+    await runImportEntries({
+      entries: [makeEntry({ folderPath: "Work" })],
+      isTeamImport: false,
+      tagsPath: "/api/tags",
+      foldersPath: "/api/folders",
+      passwordsPath: "/api/passwords",
+      sourceFilename: "personal.json",
+      userId: "user-1",
+      encryptionKey: {} as CryptoKey,
+    });
+
+    const postCall = fetchMock.mock.calls[2];
+    const body = JSON.parse(String((postCall[1] as RequestInit).body));
+    expect(body.folderId).toBe("folder-1");
+  });
+
+  it("omits folderId when folderPath is empty", async () => {
+    // No folderPath on entries → folder resolution skips GET
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(true)) // GET tags
+      .mockResolvedValueOnce(response(true)); // POST password
+    vi.stubGlobal("fetch", fetchMock);
+
+    mockEncryptData
+      .mockResolvedValueOnce({ ciphertext: "full", iv: "iv1", authTag: "tag1" })
+      .mockResolvedValueOnce({ ciphertext: "overview", iv: "iv2", authTag: "tag2" });
+
+    await runImportEntries({
+      entries: [makeEntry({ folderPath: "" })],
+      isTeamImport: false,
+      tagsPath: "/api/tags",
+      foldersPath: "/api/folders",
+      passwordsPath: "/api/passwords",
+      sourceFilename: "personal.json",
+      userId: "user-1",
+      encryptionKey: {} as CryptoKey,
+    });
+
+    const postCall = fetchMock.mock.calls[1];
+    const body = JSON.parse(String((postCall[1] as RequestInit).body));
+    expect(body.folderId).toBeUndefined();
   });
 });
