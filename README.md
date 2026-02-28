@@ -9,7 +9,8 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **SSO Authentication** - Google OIDC + SAML 2.0 (via [BoxyHQ SAML Jackson](https://github.com/boxyhq/jackson))
 - **End-to-End Encryption** - AES-256-GCM; the server never sees plaintext passwords
 - **Master Passphrase** - PBKDF2 (600k iterations) + HKDF key derivation with Secret Key
-- **Multiple Entry Types** - Passwords, secure notes, credit cards, identity/personal info, and passkey records
+- **Multiple Entry Types** - Passwords, secure notes, credit cards, identity/personal info, passkeys, bank accounts, and software licenses
+- **Custom Field Types** - TEXT, HIDDEN, URL, BOOLEAN, DATE, and MONTH_YEAR
 - **Password Generator** - Random passwords (8-128 chars) and diceware passphrases (3-10 words)
 - **TOTP Authenticator** - Store and generate 2FA codes (otpauth:// URI support)
 - **Security Audit (Watchtower)** - Breached (HIBP), weak, reused, old, and HTTP-URL detection with security score

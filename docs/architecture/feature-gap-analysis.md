@@ -38,11 +38,11 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 
 ### Vault Management
 
-- 5 entry types (LOGIN, SECURE_NOTE, CREDIT_CARD, IDENTITY, PASSKEY)
+- 7 entry types (LOGIN, SECURE_NOTE, CREDIT_CARD, IDENTITY, PASSKEY, BANK_ACCOUNT, SOFTWARE_LICENSE)
 - Favorites / archive / trash (30-day auto purge)
 - Bulk operations (archive / trash / restore / permanent delete)
 - Tags (with color, user-scope unique constraint)
-- Custom fields (TEXT, HIDDEN, URL)
+- Custom fields (TEXT, HIDDEN, URL, BOOLEAN, DATE, MONTH_YEAR)
 - File attachments (10 MB, max 20 per entry, E2E encrypted)
 - Folders / hierarchical grouping (personal + team, max depth 5, cycle detection)
 - Entry history (max 20 snapshots per entry, 90-day purge, restore support)
@@ -165,10 +165,10 @@ Added `PasswordEntry.expiresAt`, date-picker UI, Watchtower expired/expiring det
 | # | Feature | 1P | BW | LP | DL | KP | PP | NP | Impact | Implementation Effort |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | E-1 | SSH keys (+ SSH Agent) | Yes | Yes | - | - | Yes | - | - | High | High |
-| E-2 | Bank account | Yes | - | Yes | Yes | - | - | - | Medium | Low |
-| E-3 | Software license | Yes | - | Yes | - | - | - | - | Medium | Low |
-| E-4 | Custom field: BOOLEAN | - | Yes | - | - | - | - | - | Low | Low |
-| E-5 | Custom field: DATE, MONTH_YEAR | Yes | - | - | - | - | - | - | Low | Low |
+| ~~E-2~~ | ~~Bank account~~ | Yes | - | Yes | Yes | - | - | - | — | — |
+| ~~E-3~~ | ~~Software license~~ | Yes | - | Yes | - | - | - | - | — | — |
+| ~~E-4~~ | ~~Custom field: BOOLEAN~~ | - | Yes | - | - | - | - | - | — | — |
+| ~~E-5~~ | ~~Custom field: DATE, MONTH_YEAR~~ | Yes | - | - | - | - | - | - | — | — |
 | E-6 | Secure note Markdown support | Yes | - | - | - | - | - | - | Low | Low |
 
 #### E-1 SSH key management
@@ -177,10 +177,21 @@ Added `PasswordEntry.expiresAt`, date-picker UI, Watchtower expired/expiring det
 - Competitors: 1Password (SSH Agent + Git signing), Bitwarden (SSH Agent), KeePassXC (SSH Agent + Auto-Type)
 - Proposal: add `SSH_KEY` entry type with `privateKey` (encrypted), `publicKey`, `fingerprint`, `keyType` (Ed25519/RSA/ECDSA), `comment`; future SSH-agent proxy support
 
-#### E-2 / E-3 Bank account and software license
+#### ~~E-2 Bank account~~ — Implemented (2026-02-28)
 
-- Current: can be approximated with IDENTITY custom fields, but no dedicated UX
-- Proposal: add `BANK_ACCOUNT`, `SOFTWARE_LICENSE` to `entryType` enum and define dedicated encrypted-blob structures
+Added `BANK_ACCOUNT` entry type with encrypted-blob fields: bankName, accountHolderName, accountType (checking/savings/money_market/line_of_credit/other), accountNumber, accountNumberLast4, routingNumber, iban, swiftBic, branchName. Full form UI in personal + team vaults, detail/share views, export/import support (JSON + passwd-sso CSV), audit logged.
+
+#### ~~E-3 Software license~~ — Implemented (2026-02-28)
+
+Added `SOFTWARE_LICENSE` entry type with: softwareName, licenseKey, licensee, email, version, purchaseDate, expirationDate. Validation: expirationDate >= purchaseDate. Watchtower expiry detection. Full form UI, detail/share display with date formatting, export/import support, audit logged.
+
+#### ~~E-4 Custom field: BOOLEAN~~ — Implemented (2026-02-28)
+
+Extended custom field types enum to include BOOLEAN type. Supports true/false toggle in forms, localized "Yes"/"No" display in views.
+
+#### ~~E-5 Custom field: DATE, MONTH_YEAR~~ — Implemented (2026-02-28)
+
+Extended custom field types to support DATE (full date picker, YYYY-MM-DD) and MONTH_YEAR (month/year picker, YYYY-MM). Both with localized formatting across all views (detail, history, export).
 
 ---
 
@@ -365,8 +376,8 @@ Implemented SCIM 2.0 provisioning scoped to tenant level. Endpoints: `/api/scim/
 | --- | --- | --- |
 | ~~S-5~~ | ~~Session management~~ | ✅ 2026-02-23 |
 | S-6 | Login notifications | Built on top of N-1 email foundation |
-| E-2 | Bank account type | Enum + UI additions |
-| E-3 | Software license type | Enum + UI additions |
+| ~~E-2~~ | ~~Bank account type~~ | ✅ 2026-02-28 |
+| ~~E-3~~ | ~~Software license type~~ | ✅ 2026-02-28 |
 | ~~X-3~~ | ~~Context menu~~ | ✅ 2026-02-28 |
 | ~~X-4~~ | ~~Extension keyboard shortcuts~~ | ✅ 2026-02-28 |
 | C-2 | Granular sharing permissions | Extend existing RBAC |
@@ -376,8 +387,8 @@ Implemented SCIM 2.0 provisioning scoped to tenant level. Endpoints: `/api/scim/
 | V-6 | Nested tags | Hierarchy via `/` style path representation |
 | U-4 | Secure note templates | Mostly schema/template additions |
 | N-2 | In-app notification center | Generic notification UX beyond Watchtower |
-| E-4 | Custom field: BOOLEAN | Enum addition |
-| E-5 | Custom field: DATE, MONTH_YEAR | Enum addition |
+| ~~E-4~~ | ~~Custom field: BOOLEAN~~ | ✅ 2026-02-28 |
+| ~~E-5~~ | ~~Custom field: DATE, MONTH_YEAR~~ | ✅ 2026-02-28 |
 | E-6 | Secure note Markdown | Editor integration |
 
 ### P3: Mid/long-term (low impact or high effort)
@@ -475,7 +486,7 @@ Feature-category coverage:
 | KeePassXC | 7/11 | Fully local, SSH Agent, Auto-Type |
 | Proton Pass | 8/11 | Email aliases, Swiss jurisdiction, ecosystem |
 | NordPass | 7/11 | XChaCha20, email masking, offline mode |
-| **passwd-sso** | **9/11** | E2E encryption, PQC-ready, self-hosted, SAML SSO, Send, SCIM, tenant RLS |
+| **passwd-sso** | **10/11** | E2E encryption, PQC-ready, self-hosted, SAML SSO, Send, SCIM, tenant RLS, 7 entry types |
 
 **passwd-sso differentiators:**
 
@@ -505,6 +516,7 @@ Feature-category coverage:
 - CI guard scripts for RLS bypass allowlist and nested auth detection
 - Extension Group A completed: context menu, keyboard shortcuts, new-login detect & save
 - Group B completed: session management, email notification infrastructure, emergency-access notifications
+- Group C completed: Bank Account + Software License entry types, BOOLEAN/DATE/MONTH_YEAR custom fields, requireReprompt/expiresAt on all 7 entry types
 
 ---
 
@@ -528,16 +540,18 @@ Combine remaining Phase 2 scope with low-friction P2 items.
 | ~~N-1~~ | ~~Email notification foundation~~ | Medium | ✅ Resend + SMTP dual-provider, bilingual templates |
 | ~~N-4~~ | ~~Emergency-access notifications~~ | Low | ✅ 6 email types across all EA workflows |
 
-### Group C: Entry Type Expansion
+### Group C: Entry Type Expansion — ✅ Completed (2026-02-28)
 
 | ID | Feature | Effort | Notes |
 | --- | --- | --- | --- |
-| E-2 | Bank account | Low | Enum + encrypted-blob structure + UI |
-| E-3 | Software license | Low | Same as above |
-| E-4 | Custom field: BOOLEAN | Low | Enum addition |
-| E-5 | Custom field: DATE, MONTH_YEAR | Low | Enum addition |
+| ~~E-2~~ | ~~Bank account~~ | Low | ✅ Enum + encrypted-blob structure + UI |
+| ~~E-3~~ | ~~Software license~~ | Low | ✅ Same as above |
+| ~~E-4~~ | ~~Custom field: BOOLEAN~~ | Low | ✅ Enum addition |
+| ~~E-5~~ | ~~Custom field: DATE, MONTH_YEAR~~ | Low | ✅ Enum addition |
 
-**Recommended order:** ~~A~~ -> ~~B~~ -> C (Groups A and B completed; proceed with C next)
+Also extended `requireReprompt` and `expiresAt` from LOGIN-only to all 7 entry types (personal + team vaults).
+
+**All three groups completed:** ~~A~~ -> ~~B~~ -> ~~C~~
 
 ---
 
