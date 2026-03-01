@@ -126,5 +126,6 @@
   "scimLastUsed": "最終使用: {date}",
   "scimNeverUsed": "未使用",
   "scimExpiresAt": "有効期限: {date}",
-  "cancel": "キャンセル"
+  "cancel": "キャンセル",
+  "externalTenant": "外部テナント"
 }

@@ -6,7 +6,7 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 interface BulkArchiveBody {
   ids: string[];
@@ -61,7 +61,7 @@ async function handlePOST(
     return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
   }
 
-  const entriesToProcess = await withUserTenantRls(session.user.id, async () =>
+  const entriesToProcess = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findMany({
       where: {
         teamId,
@@ -74,7 +74,7 @@ async function handlePOST(
   );
   const entryIds = entriesToProcess.map((entry) => entry.id);
 
-  const result = await withUserTenantRls(session.user.id, async () =>
+  const result = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.updateMany({
       where: {
         teamId,
@@ -89,7 +89,7 @@ async function handlePOST(
   );
 
   // Re-fetch to get accurate list of actually processed entries
-  const processedEntries = await withUserTenantRls(session.user.id, async () =>
+  const processedEntries = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findMany({
       where: {
         teamId,

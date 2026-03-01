@@ -6,7 +6,7 @@ const {
   mockRequireTeamPermission,
   mockRequireTeamMember, mockHasTeamPermission, TeamAuthError,
   mockPrismaTransaction,
-  mockWithUserTenantRls,
+  mockWithTeamTenantRls,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
@@ -31,7 +31,7 @@ const {
     mockHasTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
     mockPrismaTransaction: vi.fn(),
-    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
   };
 });
 
@@ -52,7 +52,7 @@ vi.mock("@/lib/team-auth", () => ({
   TeamAuthError,
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+  withTeamTenantRls: mockWithTeamTenantRls,
 }));
 
 import { GET, PUT, DELETE } from "./route";
@@ -87,8 +87,8 @@ function makeEntryForGET(overrides = {}) {
     expiresAt: null,
     teamFolderId: null,
     tags: [],
-    createdBy: { id: "u1", name: "User", image: null },
-    updatedBy: { id: "u1", name: "User" },
+    createdBy: { id: "u1", name: "User", email: "user@example.com", image: null },
+    updatedBy: { id: "u1", name: "User", email: "user@example.com" },
     favorites: [],
     createdAt: now,
     updatedAt: now,

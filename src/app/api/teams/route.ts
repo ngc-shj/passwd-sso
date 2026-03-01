@@ -5,7 +5,9 @@ import { prisma } from "@/lib/prisma";
 import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
-import { resolveUserTenantId, withUserTenantRls } from "@/lib/tenant-context";
+import { resolveUserTenantId, resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { getLogger } from "@/lib/logger";
 
 // GET /api/teams — List teams the user belongs to
 export async function GET() {
@@ -14,49 +16,54 @@ export async function GET() {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  try {
-    const memberships = await withUserTenantRls(session.user.id, async () =>
-      prisma.teamMember.findMany({
-        where: { userId: session.user.id, deactivatedAt: null },
-        include: {
-          team: {
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-              description: true,
-              createdAt: true,
-              _count: {
-                select: { members: true },
-              },
+  const { userTenantId, memberships } = await withBypassRls(prisma, async () => {
+    const uid = await resolveUserTenantIdFromClient(prisma, session.user.id);
+    const data = await prisma.teamMember.findMany({
+      where: { userId: session.user.id, deactivatedAt: null },
+      include: {
+        team: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            description: true,
+            createdAt: true,
+            _count: {
+              select: { members: true },
+            },
+            tenant: {
+              select: { id: true, name: true },
             },
           },
         },
-        orderBy: { team: { name: "asc" } },
-      }),
+      },
+      orderBy: { team: { name: "asc" } },
+    });
+    return { userTenantId: uid, memberships: data };
+  });
+
+  const teams = memberships.map((m) => ({
+    id: m.team.id,
+    name: m.team.name,
+    slug: m.team.slug,
+    description: m.team.description,
+    createdAt: m.team.createdAt,
+    role: m.role,
+    memberCount: m.team._count.members,
+    tenantName: m.team.tenant.name,
+    isCrossTenant: userTenantId !== m.team.tenant.id,
+  }));
+
+  const logger = getLogger();
+  const crossTenantTeams = teams.filter((t) => t.isCrossTenant);
+  if (crossTenantTeams.length > 0) {
+    logger.info(
+      { userId: session.user.id, crossTenantTeamIds: crossTenantTeams.map((t) => t.id) },
+      "Cross-tenant team memberships detected",
     );
-
-    const teams = memberships.map((m) => ({
-      id: m.team.id,
-      name: m.team.name,
-      slug: m.team.slug,
-      description: m.team.description,
-      createdAt: m.team.createdAt,
-      role: m.role,
-      memberCount: m.team._count.members,
-    }));
-
-    return NextResponse.json(teams);
-  } catch (e) {
-    if (
-      e instanceof Error &&
-      (e.message === "TENANT_NOT_RESOLVED" ||
-        e.message === "MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED")
-    ) {
-      return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
-    }
-    throw e;
   }
+
+  return NextResponse.json(teams);
 }
 
 // POST /api/teams — Create a new E2E-enabled team

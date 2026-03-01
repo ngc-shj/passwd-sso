@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 
 // GET /api/teams/pending-key-distributions
 // Returns all pending key distributions across all teams where the user is OWNER/ADMIN.
@@ -15,7 +15,7 @@ export async function GET() {
   }
 
   // Find teams where the user is OWNER or ADMIN and team is E2E-enabled
-  const adminMemberships = await withUserTenantRls(session.user.id, async () =>
+  const adminMemberships = await withBypassRls(prisma, async () =>
     prisma.teamMember.findMany({
       where: {
         userId: session.user.id,
@@ -33,7 +33,7 @@ export async function GET() {
   const teamIds = adminMemberships.map((m) => m.teamId);
 
   // Find members who need key distribution
-  const pendingMembers = await withUserTenantRls(session.user.id, async () =>
+  const pendingMembers = await withBypassRls(prisma, async () =>
     prisma.teamMember.findMany({
       where: {
         teamId: { in: teamIds },

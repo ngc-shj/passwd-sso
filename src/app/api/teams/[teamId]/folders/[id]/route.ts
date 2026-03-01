@@ -12,12 +12,12 @@ import {
   type ParentNode,
 } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
-function getTeamParent(userId: string, id: string): Promise<ParentNode | null> {
-  return withUserTenantRls(userId, async () =>
+function getTeamParent(teamId: string, id: string): Promise<ParentNode | null> {
+  return withTeamTenantRls(teamId, async () =>
     prisma.teamFolder
       .findUnique({ where: { id }, select: { parentId: true, teamId: true } })
       .then((f) => (f ? { parentId: f.parentId, ownerId: f.teamId } : null)),
@@ -42,7 +42,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const existing = await withUserTenantRls(session.user.id, async () =>
+  const existing = await withTeamTenantRls(teamId, async () =>
     prisma.teamFolder.findUnique({ where: { id } }),
   );
   if (!existing || existing.teamId !== teamId) {
@@ -80,7 +80,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
           await validateParentFolder(
             newParentId,
             teamId,
-            (parentIdValue) => getTeamParent(session.user.id, parentIdValue),
+            (parentIdValue) => getTeamParent(teamId, parentIdValue),
           );
         } catch {
           return NextResponse.json(
@@ -99,7 +99,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
         const isCircular = await checkCircularReference(
           id,
           newParentId,
-          (parentIdValue) => getTeamParent(session.user.id, parentIdValue),
+          (parentIdValue) => getTeamParent(teamId, parentIdValue),
         );
         if (isCircular) {
           return NextResponse.json(
@@ -113,7 +113,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
         await validateFolderDepth(
           newParentId,
           teamId,
-          (parentIdValue) => getTeamParent(session.user.id, parentIdValue),
+          (parentIdValue) => getTeamParent(teamId, parentIdValue),
         );
       } catch {
         return NextResponse.json(
@@ -134,7 +134,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   if (finalName !== existing.name || finalParentId !== existing.parentId) {
     if (finalParentId) {
-      const dup = await withUserTenantRls(session.user.id, async () =>
+      const dup = await withTeamTenantRls(teamId, async () =>
         prisma.teamFolder.findUnique({
           where: { name_parentId_teamId: { name: finalName, parentId: finalParentId, teamId: teamId } },
         }),
@@ -146,7 +146,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
         );
       }
     } else {
-      const rootDup = await withUserTenantRls(session.user.id, async () =>
+      const rootDup = await withTeamTenantRls(teamId, async () =>
         prisma.teamFolder.findFirst({
           where: { name: finalName, parentId: null, teamId: teamId },
         }),
@@ -160,7 +160,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
   }
 
-  const folder = await withUserTenantRls(session.user.id, async () =>
+  const folder = await withTeamTenantRls(teamId, async () =>
     prisma.teamFolder.update({
       where: { id },
       data: updateData,
@@ -205,7 +205,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const existing = await withUserTenantRls(session.user.id, async () =>
+  const existing = await withTeamTenantRls(teamId, async () =>
     prisma.teamFolder.findUnique({ where: { id } }),
   );
   if (!existing || existing.teamId !== teamId) {
@@ -213,14 +213,14 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   // Collect children and detect name conflicts at the target parent level.
-  const children = await withUserTenantRls(session.user.id, async () =>
+  const children = await withTeamTenantRls(teamId, async () =>
     prisma.teamFolder.findMany({
       where: { parentId: id },
       select: { id: true, name: true },
     }),
   );
 
-  const siblingsAtTarget = await withUserTenantRls(session.user.id, async () =>
+  const siblingsAtTarget = await withTeamTenantRls(teamId, async () =>
     prisma.teamFolder.findMany({
       where: { parentId: existing.parentId, teamId: teamId },
       select: { id: true, name: true },
@@ -252,7 +252,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     }
   }
 
-  await withUserTenantRls(session.user.id, async () =>
+  await withTeamTenantRls(teamId, async () =>
     prisma.$transaction(async (tx) => {
       for (const child of children) {
         const rename = renames.find((r) => r.childId === child.id);

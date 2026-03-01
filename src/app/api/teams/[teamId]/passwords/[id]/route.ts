@@ -11,7 +11,7 @@ import {
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -33,13 +33,13 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await withUserTenantRls(session.user.id, async () =>
+  const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
       include: {
         tags: { select: { id: true, name: true, color: true } },
-        createdBy: { select: { id: true, name: true, image: true } },
-        updatedBy: { select: { id: true, name: true } },
+        createdBy: { select: { id: true, name: true, email: true, image: true } },
+        updatedBy: { select: { id: true, name: true, email: true } },
         favorites: {
           where: { userId: session.user.id },
           select: { id: true },
@@ -95,7 +95,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await withUserTenantRls(session.user.id, async () =>
+  const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
       select: {
@@ -149,7 +149,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // Validate teamKeyVersion matches current team key version (F-13)
   if (isFullUpdate) {
-    const team = await withUserTenantRls(session.user.id, async () =>
+    const team = await withTeamTenantRls(teamId, async () =>
       prisma.team.findUnique({
         where: { id: teamId },
         select: { teamKeyVersion: true },
@@ -165,7 +165,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // Validate teamFolderId belongs to this team
   if (teamFolderId) {
-    const folder = await withUserTenantRls(session.user.id, async () =>
+    const folder = await withTeamTenantRls(teamId, async () =>
       prisma.teamFolder.findUnique({
         where: { id: teamFolderId },
         select: { teamId: true },
@@ -200,7 +200,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   // Snapshot + update in a single transaction for atomicity (F-9)
-  const updated = await withUserTenantRls(session.user.id, async () =>
+  const updated = await withTeamTenantRls(teamId, async () =>
     prisma.$transaction(async (tx) => {
       if (isFullUpdate) {
         await tx.teamPasswordEntryHistory.create({
@@ -273,7 +273,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const existing = await withUserTenantRls(session.user.id, async () =>
+  const existing = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
     }),
@@ -287,11 +287,11 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const permanent = searchParams.get("permanent") === "true";
 
   if (permanent) {
-    await withUserTenantRls(session.user.id, async () =>
+    await withTeamTenantRls(teamId, async () =>
       prisma.teamPasswordEntry.delete({ where: { id } }),
     );
   } else {
-    await withUserTenantRls(session.user.id, async () =>
+    await withTeamTenantRls(teamId, async () =>
       prisma.teamPasswordEntry.update({
         where: { id },
         data: { deletedAt: new Date() },

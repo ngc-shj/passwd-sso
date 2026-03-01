@@ -10,6 +10,8 @@ export type TeamScopedVaultContext = {
   teamId: string;
   teamName?: string;
   teamRole?: string;
+  tenantName?: string;
+  isCrossTenant?: boolean;
 };
 
 export type VaultContext =
@@ -22,6 +24,8 @@ interface TeamContextItem {
   id: string;
   name: string;
   role: string;
+  tenantName?: string;
+  isCrossTenant?: boolean;
 }
 
 const CROSS_VAULT_PATHS = [
@@ -53,7 +57,9 @@ function createTeamScopedContext(team: TeamContextItem): TeamScopedVaultContext 
     teamId: team.id,
     teamName: team.name,
     teamRole: team.role,
-      };
+    tenantName: team.tenantName,
+    isCrossTenant: team.isCrossTenant,
+  };
 }
 
 export function useVaultContext(teams: TeamContextItem[]): VaultContext {

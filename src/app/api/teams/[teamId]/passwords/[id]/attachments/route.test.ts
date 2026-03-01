@@ -8,7 +8,7 @@ const {
   mockPrismaAttachment,
   mockPrismaTeam,
   MockTeamAuthError,
-  mockWithUserTenantRls,
+  mockWithTeamTenantRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
@@ -23,7 +23,7 @@ const {
   mockPrismaTeam: {
     findUnique: vi.fn(),
   },
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
   MockTeamAuthError: class MockTeamAuthError extends Error {
     status: number;
     constructor(message: string, status = 403) {
@@ -47,7 +47,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+  withTeamTenantRls: mockWithTeamTenantRls,
 }));
 
 import { GET, POST } from "./route";

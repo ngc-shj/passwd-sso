@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser, mockTransaction, mockRateLimiter, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser, mockTransaction, mockRateLimiter, mockWithUserTenantRls, mockWithTeamTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamInvitation: {
     findUnique: vi.fn(),
@@ -16,6 +16,8 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser
   mockTransaction: vi.fn(),
   mockRateLimiter: { check: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -32,6 +34,10 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+  withTeamTenantRls: mockWithTeamTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { POST } from "./route";
@@ -203,5 +209,22 @@ describe("POST /api/teams/invitations/accept", () => {
     expect(res.status).toBe(200);
     expect(json.needsKeyDistribution).toBe(true);
     expect(json.vaultSetupRequired).toBe(true);
+  });
+
+  it("uses correct RLS context for each operation", async () => {
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaTeamMember.findUnique.mockResolvedValue(null);
+    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
+
+    await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
+      body: { token: "valid-token" },
+    }));
+
+    // Invitation lookup: bypass RLS (invitee not yet in team's tenant)
+    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function));
+    // Team data operations: team tenant RLS
+    expect(mockWithTeamTenantRls).toHaveBeenCalledWith("team-1", expect.any(Function));
+    // User data: user tenant RLS
+    expect(mockWithUserTenantRls).toHaveBeenCalledWith("test-user-id", expect.any(Function));
   });
 });

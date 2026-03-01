@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/avatar";
 import { CopyButton } from "@/components/passwords/copy-button";
 import { Link } from "@/i18n/navigation";
-import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert } from "lucide-react";
+import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert, Globe } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
@@ -46,6 +46,7 @@ interface TeamInfo {
   slug: string;
   description: string | null;
   role: string;
+  tenantName?: string;
 }
 
 interface Member {
@@ -56,6 +57,7 @@ interface Member {
   email: string | null;
   image: string | null;
   joinedAt: string;
+  tenantName: string | null;
 }
 
 interface Invitation {
@@ -431,6 +433,12 @@ export default function TeamSettingsPage({
                         </p>
                         {m.name && m.email && (
                           <p className="text-xs text-muted-foreground truncate">{m.email}</p>
+                        )}
+                        {m.tenantName && team.tenantName && m.tenantName !== team.tenantName && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400 truncate flex items-center gap-1">
+                            <Globe className="h-3 w-3 shrink-0" />
+                            {m.tenantName}
+                          </p>
                         )}
                       </div>
                       {isAdmin && m.role !== TEAM_ROLE.OWNER && m.userId !== currentUserId ? (

@@ -5,7 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY, TEAM_PERMISSION } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; id: string; historyId: string }> };
 
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await withUserTenantRls(session.user.id, async () =>
+  const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
     }),
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const history = await withUserTenantRls(session.user.id, async () =>
+  const history = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntryHistory.findUnique({
       where: { id: historyId },
     }),
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.HISTORY_NOT_FOUND }, { status: 404 });
   }
 
-  await withUserTenantRls(session.user.id, async () =>
+  await withTeamTenantRls(teamId, async () =>
     prisma.$transaction(async (tx) => {
     // Snapshot current
     await tx.teamPasswordEntryHistory.create({

@@ -32,6 +32,10 @@ export interface SidebarContentProps {
   isSelectedVaultFavorites: boolean;
   isSelectedVaultArchive: boolean;
   isSelectedVaultTrash: boolean;
+  isTeamSettingsActive: boolean;
+  isSettingsActive: boolean;
+  isExportActive: boolean;
+  isImportActive: boolean;
   isWatchtower: boolean;
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
@@ -66,6 +70,10 @@ export function SidebarContent({
   isSelectedVaultFavorites,
   isSelectedVaultArchive,
   isSelectedVaultTrash,
+  isTeamSettingsActive,
+  isSettingsActive,
+  isExportActive,
+  isImportActive,
   isWatchtower,
   isShareLinks,
   isEmergencyAccess,
@@ -201,6 +209,10 @@ export function SidebarContent({
         t={t}
         tTeam={tTeam}
         selectedTeam={selectedTeam}
+        isTeamSettingsActive={isTeamSettingsActive}
+        isSettingsActive={isSettingsActive}
+        isExportActive={isExportActive}
+        isImportActive={isImportActive}
         onNavigate={onNavigate}
       />
     </nav>

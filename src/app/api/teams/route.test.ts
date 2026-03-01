@@ -2,13 +2,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, mockResolveUserTenantId } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockPrismaTeamMember: { findMany: vi.fn() },
-  mockPrismaTeam: { findUnique: vi.fn(), create: vi.fn() },
-  mockWithUserTenantRls: vi.fn(),
-  mockResolveUserTenantId: vi.fn(),
-}));
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, mockWithBypassRls, mockResolveUserTenantId, mockResolveUserTenantIdFromClient, mockGetLogger, mockLoggerInfo } = vi.hoisted(() => {
+  const loggerInfo = vi.fn();
+  return {
+    mockAuth: vi.fn(),
+    mockPrismaTeamMember: { findMany: vi.fn() },
+    mockPrismaTeam: { findUnique: vi.fn(), create: vi.fn() },
+    mockWithUserTenantRls: vi.fn(),
+    mockWithBypassRls: vi.fn(),
+    mockResolveUserTenantId: vi.fn(),
+    mockResolveUserTenantIdFromClient: vi.fn(),
+    mockGetLogger: vi.fn(() => ({ info: loggerInfo })),
+    mockLoggerInfo: loggerInfo,
+  };
+});
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -19,6 +26,13 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
   resolveUserTenantId: mockResolveUserTenantId,
+  resolveUserTenantIdFromClient: mockResolveUserTenantIdFromClient,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
+}));
+vi.mock("@/lib/logger", () => ({
+  getLogger: mockGetLogger,
 }));
 
 import { GET, POST } from "./route";
@@ -30,8 +44,8 @@ describe("GET /api/teams", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => unknown) => fn());
-    mockResolveUserTenantId.mockResolvedValue("tenant-1");
+    mockWithBypassRls.mockImplementation(async (_prisma: unknown, fn: () => unknown) => fn());
+    mockResolveUserTenantIdFromClient.mockResolvedValue("tenant-1");
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -40,7 +54,7 @@ describe("GET /api/teams", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns list of teams with role", async () => {
+  it("returns list of teams with role and tenant info", async () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([
       {
         role: TEAM_ROLE.OWNER,
@@ -51,6 +65,7 @@ describe("GET /api/teams", () => {
           description: null,
           createdAt: now,
           _count: { members: 3 },
+          tenant: { id: "tenant-1", name: "Acme Corp" },
         },
       },
       {
@@ -62,6 +77,7 @@ describe("GET /api/teams", () => {
           description: "desc",
           createdAt: now,
           _count: { members: 8 },
+          tenant: { id: "tenant-1", name: "Acme Corp" },
         },
       },
     ]);
@@ -72,8 +88,76 @@ describe("GET /api/teams", () => {
     expect(json).toHaveLength(2);
     expect(json[0].role).toBe(TEAM_ROLE.OWNER);
     expect(json[0].memberCount).toBe(3);
+    expect(json[0].tenantName).toBe("Acme Corp");
+    expect(json[0].isCrossTenant).toBe(false);
     expect(json[1].role).toBe(TEAM_ROLE.MEMBER);
     expect(json[1].memberCount).toBe(8);
+    expect(json[1].isCrossTenant).toBe(false);
+  });
+
+  it("returns isCrossTenant true when team belongs to different tenant", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      {
+        role: TEAM_ROLE.MEMBER,
+        team: {
+          id: "team-ext",
+          name: "External Team",
+          slug: "ext",
+          description: null,
+          createdAt: now,
+          _count: { members: 5 },
+          tenant: { id: "tenant-2", name: "External Org" },
+        },
+      },
+    ]);
+
+    const res = await GET();
+    const json = await res.json();
+    expect(json[0].isCrossTenant).toBe(true);
+    expect(json[0].tenantName).toBe("External Org");
+  });
+
+  it("logs cross-tenant team memberships", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      {
+        role: TEAM_ROLE.MEMBER,
+        team: {
+          id: "team-ext",
+          name: "External",
+          slug: "ext",
+          description: null,
+          createdAt: now,
+          _count: { members: 2 },
+          tenant: { id: "tenant-2", name: "External Org" },
+        },
+      },
+    ]);
+
+    await GET();
+    expect(mockLoggerInfo).toHaveBeenCalledWith(
+      { userId: "test-user-id", crossTenantTeamIds: ["team-ext"] },
+      "Cross-tenant team memberships detected",
+    );
+  });
+
+  it("does not log when all teams are same tenant", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      {
+        role: TEAM_ROLE.OWNER,
+        team: {
+          id: "team-1",
+          name: "My Team",
+          slug: "my-team",
+          description: null,
+          createdAt: now,
+          _count: { members: 3 },
+          tenant: { id: "tenant-1", name: "Acme Corp" },
+        },
+      },
+    ]);
+
+    await GET();
+    expect(mockLoggerInfo).not.toHaveBeenCalled();
   });
 
   it("returns empty array when user has no teams", async () => {
@@ -81,6 +165,13 @@ describe("GET /api/teams", () => {
     const res = await GET();
     const json = await res.json();
     expect(json).toEqual([]);
+  });
+
+  it("uses withBypassRls (not user tenant RLS) for cross-tenant membership query", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([]);
+    await GET();
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function));
   });
 });
 

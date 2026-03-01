@@ -60,5 +60,6 @@
   "settings": "Settings",
   "select": "Select",
   "close": "Close",
-  "selectAll": "Select All"
+  "selectAll": "Select All",
+  "externalTenant": "External tenant"
 }
