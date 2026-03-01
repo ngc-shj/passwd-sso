@@ -3,5 +3,10 @@
   "searchOrCreate": "タグを検索または作成...",
   "createTag": "「{name}」を作成",
   "noTags": "タグが見つかりません",
-  "createFailed": "タグの作成に失敗しました"
+  "createFailed": "タグの作成に失敗しました",
+  "parentTag": "親タグ",
+  "noParent": "なし（ルートレベル）",
+  "pathSeparator": " / ",
+  "maxDepthError": "ネストの最大深度を超えました",
+  "cycleError": "循環参照は作成できません"
 }

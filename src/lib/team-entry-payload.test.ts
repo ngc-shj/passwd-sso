@@ -47,6 +47,7 @@ describe("buildTeamEntryPayload", () => {
     expect(blob.entryType).toBe(ENTRY_TYPE.SECURE_NOTE);
     expect(blob.title).toBe("Note");
     expect(blob.content).toBe("body");
+    expect(blob.isMarkdown).toBe(true);
 
     const overview = JSON.parse(overviewBlob);
     expect(overview.title).toBe("Note");

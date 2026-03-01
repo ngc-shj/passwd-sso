@@ -94,6 +94,7 @@ export const createTagSchema = z.object({
     .optional()
     .or(z.literal(""))
     .or(z.null().transform(() => undefined)),
+  parentId: z.string().cuid().optional().nullable(),
 });
 
 export const updateTagSchema = z.object({
@@ -104,6 +105,7 @@ export const updateTagSchema = z.object({
     .nullable()
     .optional()
     .or(z.literal("")),
+  parentId: z.string().cuid().optional().nullable(),
 });
 
 export const generatePassphraseSchema = z.object({
@@ -215,6 +217,18 @@ export const createTeamTagSchema = z.object({
     .nullable()
     .optional()
     .or(z.literal("")),
+  parentId: z.string().cuid().optional().nullable(),
+});
+
+export const updateTeamTagSchema = z.object({
+  name: z.string().min(1).max(50).trim().optional(),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .nullable()
+    .optional()
+    .or(z.literal("")),
+  parentId: z.string().cuid().optional().nullable(),
 });
 
 // ─── Send Schemas ─────────────────────────────────────────

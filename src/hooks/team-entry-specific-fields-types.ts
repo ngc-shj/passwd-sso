@@ -25,6 +25,8 @@ export type TeamEntrySpecificComputedProps =
   | "urlLabel"
   | "contentLabel"
   | "contentPlaceholder"
+  | "editTabLabel"
+  | "previewTabLabel"
   | "cardholderNamePlaceholder"
   | "brandPlaceholder"
   | "cardNumberPlaceholder"

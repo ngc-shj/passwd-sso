@@ -9,23 +9,43 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { buildTagTree, flattenTagTree, type FlatTag } from "@/lib/tag-tree";
+
+export interface TagDialogTag {
+  id: string;
+  name: string;
+  color: string | null;
+  parentId?: string | null;
+}
 
 interface TagDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  editTag: { id: string; name: string; color: string | null } | null;
-  onSubmit: (data: { name: string; color: string | null }) => Promise<void>;
+  editTag: TagDialogTag | null;
+  allTags?: FlatTag[];
+  onSubmit: (data: { name: string; color: string | null; parentId?: string | null }) => Promise<void>;
 }
 
-export function TagDialog({ open, onOpenChange, editTag, onSubmit }: TagDialogProps) {
+const ROOT_VALUE = "__root__";
+
+export function TagDialog({ open, onOpenChange, editTag, allTags = [], onSubmit }: TagDialogProps) {
   const t = useTranslations("Dashboard");
+  const tTag = useTranslations("Tag");
   const tCommon = useTranslations("Common");
   const [name, setName] = useState("");
   const [color, setColor] = useState("#4f46e5");
   const [colorChanged, setColorChanged] = useState(false);
+  const [parentId, setParentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const isEdit = !!editTag;
 
@@ -34,7 +54,34 @@ export function TagDialog({ open, onOpenChange, editTag, onSubmit }: TagDialogPr
     setName(editTag?.name ?? "");
     setColor(editTag?.color ?? "#4f46e5");
     setColorChanged(false);
+    setParentId(editTag?.parentId ?? null);
   }, [open, editTag]);
+
+  // Build parent options: exclude self and descendants for edit, limit depth
+  const parentOptions = (() => {
+    const tree = buildTagTree(allTags);
+    const flat = flattenTagTree(tree);
+
+    // Collect IDs to exclude (self + descendants)
+    const excludeIds = new Set<string>();
+    if (editTag) {
+      excludeIds.add(editTag.id);
+      for (const t of flat) {
+        let cur: string | null = t.parentId ?? null;
+        while (cur) {
+          if (cur === editTag.id) {
+            excludeIds.add(t.id);
+            break;
+          }
+          const parent = allTags.find((p) => p.id === cur);
+          cur = parent?.parentId ?? null;
+        }
+      }
+    }
+
+    // Only show tags at depth < 2 as potential parents (max depth 3)
+    return flat.filter((t) => !excludeIds.has(t.id) && t.depth < 2);
+  })();
 
   const handleSubmit = async () => {
     if (!name.trim()) return;
@@ -47,11 +94,10 @@ export function TagDialog({ open, onOpenChange, editTag, onSubmit }: TagDialogPr
 
     setLoading(true);
     try {
-      await onSubmit({ name: name.trim(), color: normalizedColor });
+      await onSubmit({ name: name.trim(), color: normalizedColor, parentId });
       onOpenChange(false);
     } catch {
       // Error already handled by caller (e.g. toast in sidebar).
-      // Dialog stays open so the user can correct input.
     } finally {
       setLoading(false);
     }
@@ -94,6 +140,28 @@ export function TagDialog({ open, onOpenChange, editTag, onSubmit }: TagDialogPr
               className="h-10 w-24 p-1"
             />
           </div>
+
+          {allTags.length > 0 && (
+            <div className="space-y-2">
+              <Label>{tTag("parentTag")}</Label>
+              <Select
+                value={parentId ?? ROOT_VALUE}
+                onValueChange={(v) => setParentId(v === ROOT_VALUE ? null : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ROOT_VALUE}>{tTag("noParent")}</SelectItem>
+                  {parentOptions.map((opt) => (
+                    <SelectItem key={opt.id} value={opt.id}>
+                      {"  ".repeat(opt.depth)}{opt.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
 
         <DialogFooter>

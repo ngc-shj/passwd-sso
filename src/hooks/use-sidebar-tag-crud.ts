@@ -13,6 +13,7 @@ interface SidebarTagItem {
 interface TagSubmitPayload {
   name: string;
   color: string | null;
+  parentId?: string | null;
 }
 
 interface UseSidebarTagCrudParams {

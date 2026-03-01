@@ -16,6 +16,8 @@ export interface TagData {
   id: string;
   name: string;
   color: string | null;
+  parentId?: string | null;
+  depth?: number;
 }
 
 interface TagInputProps {
@@ -35,7 +37,7 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
 
   const fetchTags = useCallback(async () => {
     try {
-      const res = await fetch(API_PATH.TAGS);
+      const res = await fetch(`${API_PATH.TAGS}?tree=true`);
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data)) setAllTags(data);
@@ -185,11 +187,12 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
             <div className="mt-1 max-h-40 overflow-y-auto">
               {filteredTags.map((tag) => {
                 const colorClass = getTagColorClass(tag.color);
+                const depthClass = [undefined, "pl-5", "pl-8", "pl-11"][tag.depth ?? 0];
                 return (
                   <button
                     key={tag.id}
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-accent"
+                    className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-accent", depthClass)}
                     onClick={() => addTag(tag)}
                   >
                     {tag.color && (

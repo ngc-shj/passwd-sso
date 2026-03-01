@@ -68,6 +68,8 @@ function renderSubject(entryKind: "password" | "secureNote" | "creditCard" | "id
       onContentChange={vi.fn()}
       contentLabel="contentLabel"
       contentPlaceholder="contentPlaceholder"
+      editTabLabel="Edit"
+      previewTabLabel="Preview"
       cardholderName=""
       onCardholderNameChange={vi.fn()}
       cardholderNamePlaceholder="cardholderNamePlaceholder"

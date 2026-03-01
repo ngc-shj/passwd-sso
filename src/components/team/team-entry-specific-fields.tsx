@@ -47,6 +47,8 @@ interface TeamEntrySpecificFieldsProps {
   onContentChange: (value: string) => void;
   contentLabel: string;
   contentPlaceholder: string;
+  editTabLabel: string;
+  previewTabLabel: string;
   // credit card
   cardholderName: string;
   onCardholderNameChange: (value: string) => void;
@@ -257,6 +259,8 @@ export function TeamEntrySpecificFields({
   onContentChange,
   contentLabel,
   contentPlaceholder,
+  editTabLabel,
+  previewTabLabel,
   cardholderName,
   onCardholderNameChange,
   cardholderNamePlaceholder,
@@ -575,6 +579,8 @@ export function TeamEntrySpecificFields({
           onContentChange={onContentChange}
           contentLabel={contentLabel}
           contentPlaceholder={contentPlaceholder}
+          editTabLabel={editTabLabel}
+          previewTabLabel={previewTabLabel}
         />
       );
     case "password":

@@ -206,16 +206,19 @@ model Tag {
   id        String   @id @default(cuid())
   name      String
   color     String?
+  parentId  String?  @map("parent_id")
   userId    String   @map("user_id")
   tenantId  String   @map("tenant_id")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  parent    Tag?            @relation("TagHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Tag[]           @relation("TagHierarchy")
   user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   passwords PasswordEntry[]
 
-  @@unique([name, userId])
+  @@unique([name, parentId, userId])
   @@index([tenantId])
   @@map("tags")
 }
@@ -527,9 +530,10 @@ model TeamPasswordEntry {
 }
 
 model TeamTag {
-  id    String  @id @default(cuid())
-  name  String
-  color String?
+  id       String  @id @default(cuid())
+  name     String
+  color    String?
+  parentId String? @map("parent_id")
 
   teamId   String @map("team_id")
   tenantId String @map("tenant_id")
@@ -537,11 +541,13 @@ model TeamTag {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  parent    TeamTag?            @relation("TeamTagHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children  TeamTag[]           @relation("TeamTagHierarchy")
   team      Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
   tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   passwords TeamPasswordEntry[]
 
-  @@unique([name, teamId])
+  @@unique([name, parentId, teamId])
   @@index([tenantId])
   @@map("team_tags")
 }
