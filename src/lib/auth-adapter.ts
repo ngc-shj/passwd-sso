@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { sessionMetaStorage } from "@/lib/session-meta";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
+import { checkNewDeviceAndNotify } from "@/lib/new-device-detection";
 
 /**
  * Custom Auth.js adapter that extends PrismaAdapter with:
@@ -120,6 +121,12 @@ export function createCustomAdapter(): Adapter {
             userAgent: meta?.userAgent?.slice(0, 512) ?? null,
           },
         });
+      });
+
+      // Fire-and-forget: check for new device and notify user
+      void checkNewDeviceAndNotify(session.userId, {
+        ip: meta?.ip ?? null,
+        userAgent: meta?.userAgent ?? null,
       });
 
       return {
