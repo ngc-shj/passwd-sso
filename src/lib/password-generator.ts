@@ -9,6 +9,8 @@ export interface GeneratorOptions {
   numbers: boolean;
   symbols: string;
   excludeAmbiguous?: boolean;
+  includeChars?: string;
+  excludeChars?: string;
 }
 
 const CHARSETS = {
@@ -25,12 +27,23 @@ function filterAmbiguous(chars: string): string {
 }
 
 export function generatePassword(options: GeneratorOptions): string {
-  const { length, uppercase, lowercase, numbers, symbols, excludeAmbiguous } = options;
+  const {
+    length,
+    uppercase,
+    lowercase,
+    numbers,
+    symbols,
+    excludeAmbiguous,
+    includeChars = "",
+    excludeChars = "",
+  } = options;
   const filter = excludeAmbiguous ? filterAmbiguous : (s: string) => s;
+  const excludeSet = excludeChars.length > 0 ? new Set(excludeChars) : null;
 
-  let charset = "";
   const required: string[] = [];
 
+  // Build charset per type and guarantee one from each enabled type
+  let charset = "";
   if (uppercase) {
     const chars = filter(CHARSETS.uppercase);
     charset += chars;
@@ -50,6 +63,31 @@ export function generatePassword(options: GeneratorOptions): string {
     const chars = filter(symbols);
     charset += chars;
     if (chars.length > 0) required.push(randomChar(chars));
+  }
+
+  // Add includeChars to charset (unique chars not already present)
+  if (includeChars.length > 0) {
+    const uniqueInclude = [...new Set(includeChars)].join("");
+    for (const ch of uniqueInclude) {
+      if (!charset.includes(ch)) charset += ch;
+    }
+    // Guarantee one character from includeChars in required
+    if (uniqueInclude.length > 0) {
+      required.push(randomChar(uniqueInclude));
+    }
+  }
+
+  // Remove excludeChars from charset and required
+  if (excludeSet) {
+    charset = charset
+      .split("")
+      .filter((c) => !excludeSet.has(c))
+      .join("");
+    for (let i = required.length - 1; i >= 0; i--) {
+      if (excludeSet.has(required[i])) {
+        required.splice(i, 1);
+      }
+    }
   }
 
   if (charset.length === 0) {

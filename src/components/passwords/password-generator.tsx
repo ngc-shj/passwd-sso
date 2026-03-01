@@ -17,6 +17,7 @@ import {
   type PassphraseSettings,
   DEFAULT_GENERATOR_SETTINGS,
   buildSymbolString,
+  buildEffectiveCharset,
 } from "@/lib/generator-prefs";
 import { API_PATH } from "@/lib/constants";
 
@@ -37,13 +38,16 @@ function estimateBits(settings: GeneratorSettings, generated: string): number {
     return settings.passphrase.wordCount * 12;
   }
 
-  let charsetSize = 0;
-  if (settings.uppercase) charsetSize += 26;
-  if (settings.lowercase) charsetSize += 26;
-  if (settings.numbers) charsetSize += 10;
-  for (const key of SYMBOL_GROUP_KEYS) {
-    if (settings.symbolGroups[key]) charsetSize += SYMBOL_GROUPS[key].length;
-  }
+  const charset = buildEffectiveCharset({
+    uppercase: settings.uppercase,
+    lowercase: settings.lowercase,
+    numbers: settings.numbers,
+    symbols: buildSymbolString(settings.symbolGroups),
+    excludeAmbiguous: settings.excludeAmbiguous,
+    includeChars: settings.includeChars ?? "",
+    excludeChars: settings.excludeChars ?? "",
+  });
+  const charsetSize = new Set(charset).size;
   if (charsetSize <= 1) return 0;
   return generated.length * Math.log2(charsetSize);
 }
@@ -114,6 +118,8 @@ export function PasswordGenerator({
           numbers: settings.numbers,
           symbols,
           excludeAmbiguous: settings.excludeAmbiguous,
+          includeChars: settings.includeChars ?? "",
+          excludeChars: settings.excludeChars ?? "",
         }),
       });
       if (res.ok) {
@@ -192,7 +198,8 @@ export function PasswordGenerator({
     settings.uppercase ||
     settings.lowercase ||
     settings.numbers ||
-    anySymbolEnabled;
+    anySymbolEnabled ||
+    (settings.includeChars?.length ?? 0) > 0;
 
   const setMode = (mode: GeneratorMode) => update({ mode });
 
@@ -255,26 +262,6 @@ export function PasswordGenerator({
           {t("modePassphrase")}
         </button>
       </div>
-
-      {settings.mode === "password" && (
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">{t("quickLength")}</Label>
-          <div className="flex gap-1.5">
-            {LENGTH_PRESETS.map((len) => (
-              <Button
-                key={len}
-                type="button"
-                variant={settings.length === len ? "default" : "outline"}
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => update({ length: len })}
-              >
-                {len}
-              </Button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Generated password display */}
       {generated && (
@@ -347,6 +334,27 @@ export function PasswordGenerator({
                 }}
                 className="h-7 w-18 text-xs text-center shrink-0"
               />
+            </div>
+
+            {/* Quick length presets */}
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground shrink-0">
+                {t("quickLength")}
+              </Label>
+              <div className="flex gap-1.5">
+                {LENGTH_PRESETS.map((len) => (
+                  <Button
+                    key={len}
+                    type="button"
+                    variant={settings.length === len ? "default" : "outline"}
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => update({ length: len })}
+                  >
+                    {len}
+                  </Button>
+                ))}
+              </div>
             </div>
 
             {/* Character types */}
@@ -458,6 +466,38 @@ export function PasswordGenerator({
                 >
                   {t("excludeAmbiguous")}
                 </Label>
+              </div>
+            </div>
+
+            {/* Include / Exclude characters */}
+            <div className="pt-2 border-t space-y-2">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="gen-include-chars" className="text-xs text-muted-foreground shrink-0 w-14">
+                  {t("includeChars")}
+                </Label>
+                <Input
+                  id="gen-include-chars"
+                  type="text"
+                  value={settings.includeChars ?? ""}
+                  onChange={(e) => update({ includeChars: e.target.value })}
+                  placeholder={t("includeCharsPlaceholder")}
+                  className="h-7 text-xs font-mono flex-1"
+                  maxLength={128}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="gen-exclude-chars" className="text-xs text-muted-foreground shrink-0 w-14">
+                  {t("excludeChars")}
+                </Label>
+                <Input
+                  id="gen-exclude-chars"
+                  type="text"
+                  value={settings.excludeChars ?? ""}
+                  onChange={(e) => update({ excludeChars: e.target.value })}
+                  placeholder={t("excludeCharsPlaceholder")}
+                  className="h-7 text-xs font-mono flex-1"
+                  maxLength={128}
+                />
               </div>
             </div>
           </>

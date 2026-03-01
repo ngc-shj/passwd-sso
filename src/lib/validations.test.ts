@@ -5,6 +5,7 @@ import {
   updateE2EPasswordSchema,
   createShareLinkSchema,
   teamMemberKeySchema,
+  generatePasswordSchema,
 } from "./validations";
 import { ENTRY_TYPE } from "@/lib/constants";
 
@@ -285,5 +286,43 @@ describe("teamMemberKeySchema", () => {
   it("rejects wrapVersion=2 (unsupported)", () => {
     const result = teamMemberKeySchema.safeParse({ ...validKey, wrapVersion: 2 });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("generatePasswordSchema", () => {
+  it("accepts ASCII printable includeChars", () => {
+    const result = generatePasswordSchema.safeParse({ includeChars: "!@#$%^&*()" });
+    expect(result.success).toBe(true);
+    expect(result.data!.includeChars).toBe("!@#$%^&*()");
+  });
+
+  it("rejects control characters in includeChars", () => {
+    expect(generatePasswordSchema.safeParse({ includeChars: "abc\x00" }).success).toBe(false);
+    expect(generatePasswordSchema.safeParse({ includeChars: "abc\x1F" }).success).toBe(false);
+  });
+
+  it("rejects emoji/surrogate pairs in includeChars", () => {
+    expect(generatePasswordSchema.safeParse({ includeChars: "abc\u{1F600}" }).success).toBe(false);
+  });
+
+  it("applies same ASCII constraint to excludeChars", () => {
+    expect(generatePasswordSchema.safeParse({ excludeChars: "abc" }).success).toBe(true);
+    expect(generatePasswordSchema.safeParse({ excludeChars: "abc\x00" }).success).toBe(false);
+  });
+
+  it("rejects symbols longer than 128 characters", () => {
+    const longString = "!".repeat(129);
+    expect(generatePasswordSchema.safeParse({ symbols: longString }).success).toBe(false);
+  });
+
+  it("rejects non-ASCII symbols", () => {
+    expect(generatePasswordSchema.safeParse({ symbols: "abc\u{1F600}" }).success).toBe(false);
+  });
+
+  it("defaults includeChars and excludeChars to empty string when omitted", () => {
+    const result = generatePasswordSchema.safeParse({});
+    expect(result.success).toBe(true);
+    expect(result.data!.includeChars).toBe("");
+    expect(result.data!.excludeChars).toBe("");
   });
 });
