@@ -5,6 +5,7 @@ import {
   updateE2EPasswordSchema,
   createShareLinkSchema,
   teamMemberKeySchema,
+  generatePasswordSchema,
 } from "./validations";
 import { ENTRY_TYPE } from "@/lib/constants";
 
@@ -285,5 +286,67 @@ describe("teamMemberKeySchema", () => {
   it("rejects wrapVersion=2 (unsupported)", () => {
     const result = teamMemberKeySchema.safeParse({ ...validKey, wrapVersion: 2 });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("generatePasswordSchema", () => {
+  it("accepts ASCII printable includeChars", () => {
+    const result = generatePasswordSchema.safeParse({ includeChars: "!@#$%^&*()" });
+    expect(result.success).toBe(true);
+    expect(result.data!.includeChars).toBe("!@#$%^&*()");
+  });
+
+  it("rejects control characters in includeChars", () => {
+    expect(generatePasswordSchema.safeParse({ includeChars: "abc\x00" }).success).toBe(false);
+    expect(generatePasswordSchema.safeParse({ includeChars: "abc\x1F" }).success).toBe(false);
+  });
+
+  it("rejects emoji/surrogate pairs in includeChars", () => {
+    expect(generatePasswordSchema.safeParse({ includeChars: "abc\u{1F600}" }).success).toBe(false);
+  });
+
+  it("applies same ASCII constraint to excludeChars", () => {
+    expect(generatePasswordSchema.safeParse({ excludeChars: "abc" }).success).toBe(true);
+    expect(generatePasswordSchema.safeParse({ excludeChars: "abc\x00" }).success).toBe(false);
+  });
+
+  it("rejects symbols longer than 128 characters", () => {
+    const longString = "!".repeat(129);
+    expect(generatePasswordSchema.safeParse({ symbols: longString }).success).toBe(false);
+  });
+
+  it("rejects non-ASCII symbols", () => {
+    expect(generatePasswordSchema.safeParse({ symbols: "abc\u{1F600}" }).success).toBe(false);
+  });
+
+  it("rejects emoji in excludeChars", () => {
+    expect(generatePasswordSchema.safeParse({ excludeChars: "abc\u{1F600}" }).success).toBe(false);
+  });
+
+  it("rejects includeChars longer than 128 characters", () => {
+    expect(generatePasswordSchema.safeParse({ includeChars: "a".repeat(129) }).success).toBe(false);
+  });
+
+  it("accepts includeChars at exactly 128 characters", () => {
+    expect(generatePasswordSchema.safeParse({ includeChars: "a".repeat(128) }).success).toBe(true);
+  });
+
+  it("rejects excludeChars longer than 128 characters", () => {
+    expect(generatePasswordSchema.safeParse({ excludeChars: "a".repeat(129) }).success).toBe(false);
+  });
+
+  it("rejects DEL character (0x7F) in includeChars", () => {
+    expect(generatePasswordSchema.safeParse({ includeChars: "abc\x7F" }).success).toBe(false);
+  });
+
+  it("accepts space character (0x20) in includeChars", () => {
+    expect(generatePasswordSchema.safeParse({ includeChars: " abc" }).success).toBe(true);
+  });
+
+  it("defaults includeChars and excludeChars to empty string when omitted", () => {
+    const result = generatePasswordSchema.safeParse({});
+    expect(result.success).toBe(true);
+    expect(result.data!.includeChars).toBe("");
+    expect(result.data!.excludeChars).toBe("");
   });
 });
