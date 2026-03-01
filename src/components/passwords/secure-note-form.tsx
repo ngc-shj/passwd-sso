@@ -19,7 +19,15 @@ import {
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ENTRY_TYPE } from "@/lib/constants";
+import { SECURE_NOTE_TEMPLATES } from "@/lib/secure-note-templates";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
@@ -123,6 +131,34 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, d
   const formContent = (
     <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
       <EntryPrimaryCard className={primaryCardClass}>
+        {mode === "create" && (
+          <div className="space-y-2">
+            <Label>{t("templateLabel")}</Label>
+            <Select
+              defaultValue="blank"
+              onValueChange={(templateId) => {
+                const tmpl = SECURE_NOTE_TEMPLATES.find(
+                  (t) => t.id === templateId,
+                );
+                if (!tmpl || tmpl.id === "blank") return;
+                if (!title) setTitle(t(tmpl.titleKey));
+                if (!content) setContent(tmpl.contentTemplate);
+              }}
+            >
+              <SelectTrigger className="w-full max-w-[300px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SECURE_NOTE_TEMPLATES.map((tmpl) => (
+                  <SelectItem key={tmpl.id} value={tmpl.id}>
+                    {t(tmpl.titleKey)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div className="space-y-2">
           <Label htmlFor="title">{t("title")}</Label>
           <Input
