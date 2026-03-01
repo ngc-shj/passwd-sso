@@ -32,12 +32,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare, CheckSquare, Loader2 } from "lucide-react";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare, CheckSquare, Loader2, FolderOpen, Tag } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-sort";
+import { buildFolderPath } from "@/lib/folder-path";
+import type { FolderItem } from "@/components/folders/folder-tree";
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto-aad";
@@ -173,6 +175,18 @@ export default function TeamDashboardPage({
   const isTeamTrash = activeScope === "trash";
   const isTeamFavorites = activeScope === "favorites";
   const isTeamSpecialView = isTeamArchive || isTeamTrash;
+
+  const [teamFolders, setTeamFolders] = useState<FolderItem[]>([]);
+  const [teamTags, setTeamTags] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    Promise.all([
+      fetch(apiPath.teamFolders(teamId)).then((r) => r.ok ? r.json() : []),
+      fetch(apiPath.teamTags(teamId)).then((r) => r.ok ? r.json() : []),
+    ]).then(([f, tg]) => {
+      if (Array.isArray(f)) setTeamFolders(f);
+      if (Array.isArray(tg)) setTeamTags(tg);
+    }).catch(() => {});
+  }, [teamId]);
 
   // Reset selection mode when view changes (during render, not in effect)
   const viewKey = `${activeScope}|${activeTagId}|${activeFolderId}|${activeEntryType}`;
@@ -334,13 +348,18 @@ export default function TeamDashboardPage({
         [ENTRY_TYPE.SOFTWARE_LICENSE]: tDash("catSoftwareLicense"),
       } as Record<string, string>)[activeEntryType] ?? activeEntryType
     : null;
+  const folderLabel = activeFolderId ? buildFolderPath(activeFolderId, teamFolders) : null;
+  const matchedTag = activeTagId ? teamTags.find((tg) => tg.id === activeTagId) : undefined;
+  const tagLabel = matchedTag?.name;
   const subtitle = isTeamTrash
     ? t("trash")
     : isTeamArchive
       ? t("archive")
       : isTeamFavorites
         ? t("favorites")
-      : (activeCategoryLabel ?? t("passwords"));
+        : activeCategoryLabel
+          ?? folderLabel ?? tagLabel
+          ?? (activeFolderId || activeTagId ? "\u00A0" : t("passwords"));
   const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
     LOGIN: <KeyRound className="h-6 w-6" />,
     SECURE_NOTE: <FileText className="h-6 w-6" />,
@@ -359,7 +378,11 @@ export default function TeamDashboardPage({
         ? <Star className="h-6 w-6" />
         : activeEntryType && ENTRY_TYPE_ICONS[activeEntryType]
           ? ENTRY_TYPE_ICONS[activeEntryType]
-          : <KeyRound className="h-6 w-6" />;
+          : activeFolderId
+            ? <FolderOpen className="h-6 w-6" />
+            : activeTagId
+              ? <Tag className="h-6 w-6" />
+              : <KeyRound className="h-6 w-6" />;
 
   const isTeamAll =
     !isTeamTrash &&
@@ -722,6 +745,7 @@ export default function TeamDashboardPage({
           title={isPrimaryScopeLabel ? subtitle : (team?.name ?? "...")}
           subtitle={subtitle}
           showSubtitle={!isPrimaryScopeLabel}
+          truncateStart={!!folderLabel}
           titleExtra={!isPrimaryScopeLabel && team ? <TeamRoleBadge role={team.role} /> : null}
           actions={
             selectionMode ? (

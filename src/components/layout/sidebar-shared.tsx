@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
@@ -64,7 +64,13 @@ export function FolderTreeNode({
     ? isAncestorOf(folder.id, activeFolderId, folders)
     : false;
   const [open, setOpen] = useState(isAncestorOfActive);
-  const isExpanded = open || isAncestorOfActive;
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (isAncestorOfActive) setOpen(true);
+  }, [isAncestorOfActive]);
+
+  const isExpanded = open;
 
   return (
     <>
