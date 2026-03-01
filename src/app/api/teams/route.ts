@@ -15,49 +15,38 @@ export async function GET() {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  try {
-    const memberships = await withBypassRls(prisma, async () =>
-      prisma.teamMember.findMany({
-        where: { userId: session.user.id, deactivatedAt: null },
-        include: {
-          team: {
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-              description: true,
-              createdAt: true,
-              _count: {
-                select: { members: true },
-              },
+  const memberships = await withBypassRls(prisma, async () =>
+    prisma.teamMember.findMany({
+      where: { userId: session.user.id, deactivatedAt: null },
+      include: {
+        team: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            description: true,
+            createdAt: true,
+            _count: {
+              select: { members: true },
             },
           },
         },
-        orderBy: { team: { name: "asc" } },
-      }),
-    );
+      },
+      orderBy: { team: { name: "asc" } },
+    }),
+  );
 
-    const teams = memberships.map((m) => ({
-      id: m.team.id,
-      name: m.team.name,
-      slug: m.team.slug,
-      description: m.team.description,
-      createdAt: m.team.createdAt,
-      role: m.role,
-      memberCount: m.team._count.members,
-    }));
+  const teams = memberships.map((m) => ({
+    id: m.team.id,
+    name: m.team.name,
+    slug: m.team.slug,
+    description: m.team.description,
+    createdAt: m.team.createdAt,
+    role: m.role,
+    memberCount: m.team._count.members,
+  }));
 
-    return NextResponse.json(teams);
-  } catch (e) {
-    if (
-      e instanceof Error &&
-      (e.message === "TENANT_NOT_RESOLVED" ||
-        e.message === "MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED")
-    ) {
-      return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
-    }
-    throw e;
-  }
+  return NextResponse.json(teams);
 }
 
 // POST /api/teams — Create a new E2E-enabled team

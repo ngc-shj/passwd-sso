@@ -15,8 +15,8 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
-function getTeamParent(userId: string, id: string): Promise<ParentNode | null> {
-  return withTeamTenantRls(userId, async () =>
+function getTeamParent(teamId: string, id: string): Promise<ParentNode | null> {
+  return withTeamTenantRls(teamId, async () =>
     prisma.teamFolder
       .findUnique({ where: { id }, select: { parentId: true, teamId: true } })
       .then((f) => (f ? { parentId: f.parentId, ownerId: f.teamId } : null)),
@@ -111,7 +111,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       await validateParentFolder(
         parentId,
         teamId,
-        (parentIdValue) => getTeamParent(session.user.id, parentIdValue),
+        (parentIdValue) => getTeamParent(teamId, parentIdValue),
       );
     } catch {
       return NextResponse.json(

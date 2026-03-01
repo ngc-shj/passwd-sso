@@ -210,4 +210,21 @@ describe("POST /api/teams/invitations/accept", () => {
     expect(json.needsKeyDistribution).toBe(true);
     expect(json.vaultSetupRequired).toBe(true);
   });
+
+  it("uses correct RLS context for each operation", async () => {
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaTeamMember.findUnique.mockResolvedValue(null);
+    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
+
+    await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
+      body: { token: "valid-token" },
+    }));
+
+    // Invitation lookup: bypass RLS (invitee not yet in team's tenant)
+    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function));
+    // Team data operations: team tenant RLS
+    expect(mockWithTeamTenantRls).toHaveBeenCalledWith("team-1", expect.any(Function));
+    // User data: user tenant RLS
+    expect(mockWithUserTenantRls).toHaveBeenCalledWith("test-user-id", expect.any(Function));
+  });
 });

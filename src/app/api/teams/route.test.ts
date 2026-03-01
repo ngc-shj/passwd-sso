@@ -86,6 +86,13 @@ describe("GET /api/teams", () => {
     const json = await res.json();
     expect(json).toEqual([]);
   });
+
+  it("uses withBypassRls (not user tenant RLS) for cross-tenant membership query", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([]);
+    await GET();
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function));
+  });
 });
 
 describe("POST /api/teams (E2E-only)", () => {
