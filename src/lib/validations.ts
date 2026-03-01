@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
-import { TEAM_INVITE_ROLE_VALUES, TEAM_ROLE, TEAM_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, CUSTOM_FIELD_TYPE_VALUES } from "@/lib/constants";
+import { TEAM_INVITE_ROLE_VALUES, TEAM_ROLE, TEAM_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, CUSTOM_FIELD_TYPE_VALUES, SHARE_PERMISSION_VALUES } from "@/lib/constants";
 
 const asciiPrintable = /^[\x20-\x7E]*$/;
 
@@ -347,6 +347,7 @@ export const createShareLinkSchema = z.object({
   entryType: entryTypeSchema.optional(),
   expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
   maxViews: z.number().int().min(1).max(100).optional(),
+  permissions: z.array(z.enum(SHARE_PERMISSION_VALUES)).optional(),
 }).refine(
   (d) => (d.passwordEntryId ? !d.teamPasswordEntryId : !!d.teamPasswordEntryId),
   { message: "Exactly one of passwordEntryId or teamPasswordEntryId is required" }

@@ -325,6 +325,105 @@ describe("POST /api/share-links", () => {
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
   });
+
+  it("filters password field with HIDE_PASSWORD permission", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique.mockResolvedValue({
+      userId: DEFAULT_SESSION.user.id,
+      entryType: ENTRY_TYPE.LOGIN,
+      tenantId: "tenant-1",
+    });
+    mockCreate.mockResolvedValue({
+      id: "share-hp",
+      expiresAt: new Date(Date.now() + 86400000),
+    });
+
+    const req = createRequest("POST", "http://localhost/api/share-links", {
+      body: {
+        passwordEntryId: VALID_ENTRY_ID,
+        data: { title: "Test", password: "secret", username: "user1", cvv: "123" },
+        expiresIn: "1d",
+        permissions: ["HIDE_PASSWORD"],
+      },
+    });
+    const res = await POST(req as never);
+    const { status } = await parseResponse(res);
+    expect(status).toBe(200);
+
+    // Verify permissions are saved to DB
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          permissions: ["HIDE_PASSWORD"],
+        }),
+      }),
+    );
+  });
+
+  it("filters to overview only with OVERVIEW_ONLY permission", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique.mockResolvedValue({
+      userId: DEFAULT_SESSION.user.id,
+      entryType: ENTRY_TYPE.LOGIN,
+      tenantId: "tenant-1",
+    });
+    mockCreate.mockResolvedValue({
+      id: "share-ov",
+      expiresAt: new Date(Date.now() + 86400000),
+    });
+
+    const req = createRequest("POST", "http://localhost/api/share-links", {
+      body: {
+        passwordEntryId: VALID_ENTRY_ID,
+        data: { title: "Test", password: "secret", username: "user1", url: "https://example.com" },
+        expiresIn: "1d",
+        permissions: ["OVERVIEW_ONLY"],
+      },
+    });
+    const res = await POST(req as never);
+    const { status } = await parseResponse(res);
+    expect(status).toBe(200);
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          permissions: ["OVERVIEW_ONLY"],
+        }),
+      }),
+    );
+  });
+
+  it("saves empty permissions with VIEW_ALL (default)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique.mockResolvedValue({
+      userId: DEFAULT_SESSION.user.id,
+      entryType: ENTRY_TYPE.LOGIN,
+      tenantId: "tenant-1",
+    });
+    mockCreate.mockResolvedValue({
+      id: "share-va",
+      expiresAt: new Date(Date.now() + 86400000),
+    });
+
+    const req = createRequest("POST", "http://localhost/api/share-links", {
+      body: {
+        passwordEntryId: VALID_ENTRY_ID,
+        data: { title: "Test", password: "secret" },
+        expiresIn: "1d",
+      },
+    });
+    const res = await POST(req as never);
+    const { status } = await parseResponse(res);
+    expect(status).toBe(200);
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          permissions: [],
+        }),
+      }),
+    );
+  });
 });
 
 describe("GET /api/share-links", () => {

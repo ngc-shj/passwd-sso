@@ -628,6 +628,9 @@ model PasswordShare {
   // Master key version used to encrypt this share's data
   masterKeyVersion Int @default(1) @map("master_key_version")
 
+  // Share permissions (e.g., ["HIDE_PASSWORD"], empty = VIEW_ALL)
+  permissions String[] @default([])
+
   createdBy         User               @relation(fields: [createdById], references: [id], onDelete: Cascade)
   tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   passwordEntry     PasswordEntry?     @relation("personalShares", fields: [passwordEntryId], references: [id], onDelete: SetNull)
