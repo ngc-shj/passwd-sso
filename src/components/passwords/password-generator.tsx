@@ -17,6 +17,7 @@ import {
   type PassphraseSettings,
   DEFAULT_GENERATOR_SETTINGS,
   buildSymbolString,
+  buildEffectiveCharset,
 } from "@/lib/generator-prefs";
 import { API_PATH } from "@/lib/constants";
 
@@ -37,13 +38,16 @@ function estimateBits(settings: GeneratorSettings, generated: string): number {
     return settings.passphrase.wordCount * 12;
   }
 
-  let charsetSize = 0;
-  if (settings.uppercase) charsetSize += 26;
-  if (settings.lowercase) charsetSize += 26;
-  if (settings.numbers) charsetSize += 10;
-  for (const key of SYMBOL_GROUP_KEYS) {
-    if (settings.symbolGroups[key]) charsetSize += SYMBOL_GROUPS[key].length;
-  }
+  const charset = buildEffectiveCharset({
+    uppercase: settings.uppercase,
+    lowercase: settings.lowercase,
+    numbers: settings.numbers,
+    symbols: buildSymbolString(settings.symbolGroups),
+    excludeAmbiguous: settings.excludeAmbiguous,
+    includeChars: settings.includeChars ?? "",
+    excludeChars: settings.excludeChars ?? "",
+  });
+  const charsetSize = charset.length; // buildEffectiveCharset() is already deduplicated
   if (charsetSize <= 1) return 0;
   return generated.length * Math.log2(charsetSize);
 }
@@ -88,38 +92,30 @@ export function PasswordGenerator({
   }, [initialSettings]);
 
   const generate = useCallback(async () => {
-    if (settings.mode === "passphrase") {
-      const res = await fetch(API_PATH.PASSWORDS_GENERATE, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "passphrase",
-          ...settings.passphrase,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setGenerated(data.password);
-      }
+    const body =
+      settings.mode === "passphrase"
+        ? { mode: "passphrase" as const, ...settings.passphrase }
+        : {
+            mode: "password" as const,
+            length: settings.length,
+            uppercase: settings.uppercase,
+            lowercase: settings.lowercase,
+            numbers: settings.numbers,
+            symbols: buildSymbolString(settings.symbolGroups),
+            excludeAmbiguous: settings.excludeAmbiguous,
+            includeChars: settings.includeChars ?? "",
+            excludeChars: settings.excludeChars ?? "",
+          };
+    const res = await fetch(API_PATH.PASSWORDS_GENERATE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setGenerated(data.password);
     } else {
-      const symbols = buildSymbolString(settings.symbolGroups);
-      const res = await fetch(API_PATH.PASSWORDS_GENERATE, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "password",
-          length: settings.length,
-          uppercase: settings.uppercase,
-          lowercase: settings.lowercase,
-          numbers: settings.numbers,
-          symbols,
-          excludeAmbiguous: settings.excludeAmbiguous,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setGenerated(data.password);
-      }
+      setGenerated("");
     }
   }, [settings]);
 
@@ -184,15 +180,17 @@ export function PasswordGenerator({
     }));
   };
 
-  const anySymbolEnabled = SYMBOL_GROUP_KEYS.some(
-    (key) => settings.symbolGroups[key]
-  );
   const anyTypeEnabled =
     settings.mode === "passphrase" ||
-    settings.uppercase ||
-    settings.lowercase ||
-    settings.numbers ||
-    anySymbolEnabled;
+    buildEffectiveCharset({
+      uppercase: settings.uppercase,
+      lowercase: settings.lowercase,
+      numbers: settings.numbers,
+      symbols: buildSymbolString(settings.symbolGroups),
+      excludeAmbiguous: settings.excludeAmbiguous,
+      includeChars: settings.includeChars ?? "",
+      excludeChars: settings.excludeChars ?? "",
+    }).length > 0;
 
   const setMode = (mode: GeneratorMode) => update({ mode });
 
@@ -256,24 +254,11 @@ export function PasswordGenerator({
         </button>
       </div>
 
-      {settings.mode === "password" && (
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">{t("quickLength")}</Label>
-          <div className="flex gap-1.5">
-            {LENGTH_PRESETS.map((len) => (
-              <Button
-                key={len}
-                type="button"
-                variant={settings.length === len ? "default" : "outline"}
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => update({ length: len })}
-              >
-                {len}
-              </Button>
-            ))}
-          </div>
-        </div>
+      {/* Warning when no characters available */}
+      {!anyTypeEnabled && settings.mode === "password" && (
+        <p className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {t("noAvailableChars")}
+        </p>
       )}
 
       {/* Generated password display */}
@@ -347,6 +332,27 @@ export function PasswordGenerator({
                 }}
                 className="h-7 w-18 text-xs text-center shrink-0"
               />
+            </div>
+
+            {/* Quick length presets */}
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground shrink-0">
+                {t("quickLength")}
+              </Label>
+              <div className="flex gap-1.5">
+                {LENGTH_PRESETS.map((len) => (
+                  <Button
+                    key={len}
+                    type="button"
+                    variant={settings.length === len ? "default" : "outline"}
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => update({ length: len })}
+                  >
+                    {len}
+                  </Button>
+                ))}
+              </div>
             </div>
 
             {/* Character types */}
@@ -458,6 +464,38 @@ export function PasswordGenerator({
                 >
                   {t("excludeAmbiguous")}
                 </Label>
+              </div>
+            </div>
+
+            {/* Include / Exclude characters */}
+            <div className="pt-2 border-t space-y-2">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="gen-include-chars" className="text-xs text-muted-foreground shrink-0 w-14">
+                  {t("includeChars")}
+                </Label>
+                <Input
+                  id="gen-include-chars"
+                  type="text"
+                  value={settings.includeChars ?? ""}
+                  onChange={(e) => update({ includeChars: e.target.value })}
+                  placeholder={t("includeCharsPlaceholder")}
+                  className="h-7 text-xs font-mono flex-1"
+                  maxLength={128}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="gen-exclude-chars" className="text-xs text-muted-foreground shrink-0 w-14">
+                  {t("excludeChars")}
+                </Label>
+                <Input
+                  id="gen-exclude-chars"
+                  type="text"
+                  value={settings.excludeChars ?? ""}
+                  onChange={(e) => update({ excludeChars: e.target.value })}
+                  placeholder={t("excludeCharsPlaceholder")}
+                  className="h-7 text-xs font-mono flex-1"
+                  maxLength={128}
+                />
               </div>
             </div>
           </>

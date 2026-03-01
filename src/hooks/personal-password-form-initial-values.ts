@@ -33,7 +33,7 @@ export function buildPersonalPasswordFormInitialValues(
     url: initialData?.url ?? "",
     notes: initialData?.notes ?? "",
     selectedTags: initialData?.tags ?? defaults?.defaultTags ?? [],
-    generatorSettings: initialData?.generatorSettings ?? { ...DEFAULT_GENERATOR_SETTINGS },
+    generatorSettings: { ...DEFAULT_GENERATOR_SETTINGS, ...initialData?.generatorSettings },
     customFields: initialData?.customFields ?? [],
     totp: initialData?.totp ?? null,
     showTotpInput: Boolean(initialData?.totp),

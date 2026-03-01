@@ -112,6 +112,140 @@ describe("generatePassword", () => {
     expect(password).toMatch(/[0-9]/);
     expect(password).toMatch(/[!@#$]/);
   });
+
+  it("includes at least one includeChars character", () => {
+    const password = generatePassword({
+      length: 20,
+      uppercase: true,
+      lowercase: true,
+      numbers: false,
+      symbols: "",
+      includeChars: "@#",
+    });
+    expect(password).toHaveLength(20);
+    expect(password).toMatch(/[@#]/);
+  });
+
+  it("excludes all excludeChars from generated password", () => {
+    const password = generatePassword({
+      length: 128,
+      uppercase: true,
+      lowercase: true,
+      numbers: true,
+      symbols: "",
+      excludeChars: "abc123",
+    });
+    expect(password).not.toMatch(/[abc123]/);
+  });
+
+  it("excludeChars takes priority over includeChars", () => {
+    const password = generatePassword({
+      length: 128,
+      uppercase: true,
+      lowercase: true,
+      numbers: true,
+      symbols: "",
+      includeChars: "abc",
+      excludeChars: "a",
+    });
+    expect(password).not.toMatch(/a/);
+    // Remaining includeChars ("b" or "c") should still be guaranteed
+    expect(password).toMatch(/[bc]/);
+  });
+
+  it("excludeAmbiguous filters includeChars too", () => {
+    const password = generatePassword({
+      length: 30,
+      uppercase: true,
+      lowercase: false,
+      numbers: false,
+      symbols: "",
+      excludeAmbiguous: true,
+      includeChars: "0O",
+    });
+    // "0" and "O" are ambiguous, must not appear
+    expect(password).not.toMatch(/[0O]/);
+  });
+
+  it("throws when excludeChars removes all characters", () => {
+    expect(() =>
+      generatePassword({
+        length: 16,
+        uppercase: false,
+        lowercase: false,
+        numbers: false,
+        symbols: "",
+        includeChars: "abc",
+        excludeChars: "abc",
+      })
+    ).toThrow("At least one character type must be selected");
+  });
+
+  it("generates with only includeChars (all types off)", () => {
+    const password = generatePassword({
+      length: 10,
+      uppercase: false,
+      lowercase: false,
+      numbers: false,
+      symbols: "",
+      includeChars: "xyz",
+    });
+    expect(password).toHaveLength(10);
+    expect(password).toMatch(/^[xyz]+$/);
+  });
+
+  it("includes both uppercase and includeChars when combined", () => {
+    const password = generatePassword({
+      length: 50,
+      uppercase: true,
+      lowercase: false,
+      numbers: false,
+      symbols: "",
+      includeChars: "!@",
+    });
+    expect(password).toMatch(/[A-Z]/);
+    expect(password).toMatch(/[!@]/);
+  });
+
+  it("handles excludeAmbiguous and excludeChars together", () => {
+    const password = generatePassword({
+      length: 128,
+      uppercase: true,
+      lowercase: true,
+      numbers: true,
+      symbols: "",
+      excludeAmbiguous: true,
+      excludeChars: "abc",
+    });
+    // Ambiguous chars: 0OoIl1|
+    expect(password).not.toMatch(/[0OoIl1|abc]/);
+  });
+
+  it("handles duplicate characters in includeChars", () => {
+    const password = generatePassword({
+      length: 10,
+      uppercase: false,
+      lowercase: false,
+      numbers: false,
+      symbols: "",
+      includeChars: "aaabbb",
+    });
+    expect(password).toHaveLength(10);
+    expect(password).toMatch(/^[ab]+$/);
+  });
+
+  it("respects length even when required exceeds it", () => {
+    // 5 required (upper + lower + numbers + symbols + includeChars) but length=8
+    const password = generatePassword({
+      length: 8,
+      uppercase: true,
+      lowercase: true,
+      numbers: true,
+      symbols: "!@#$",
+      includeChars: "^",
+    });
+    expect(password).toHaveLength(8);
+  });
 });
 
 describe("generatePassphrase", () => {

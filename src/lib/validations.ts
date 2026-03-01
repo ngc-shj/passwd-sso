@@ -2,13 +2,17 @@ import { z } from "zod";
 import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
 import { TEAM_INVITE_ROLE_VALUES, TEAM_ROLE, TEAM_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, CUSTOM_FIELD_TYPE_VALUES } from "@/lib/constants";
 
+const asciiPrintable = /^[\x20-\x7E]*$/;
+
 export const generatePasswordSchema = z.object({
   length: z.number().int().min(8).max(128).default(16),
   uppercase: z.boolean().default(true),
   lowercase: z.boolean().default(true),
   numbers: z.boolean().default(true),
-  symbols: z.string().default(""),
+  symbols: z.string().max(128).regex(asciiPrintable).default(""),
   excludeAmbiguous: z.boolean().default(false),
+  includeChars: z.string().max(128).regex(asciiPrintable).default(""),
+  excludeChars: z.string().max(128).regex(asciiPrintable).default(""),
 });
 
 // ─── Attachment Constants ────────────────────────────────────

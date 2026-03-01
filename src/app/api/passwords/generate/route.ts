@@ -51,10 +51,18 @@ async function handlePOST(req: NextRequest) {
   const data = parsed.data;
   let password: string;
 
-  if (data.mode === "passphrase") {
-    password = generatePassphrase(data);
-  } else {
-    password = generatePassword(data);
+  try {
+    if (data.mode === "passphrase") {
+      password = generatePassphrase(data);
+    } else {
+      password = generatePassword(data);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Generation failed";
+    return NextResponse.json(
+      { error: API_ERROR.VALIDATION_ERROR, message },
+      { status: 400 }
+    );
   }
 
   return NextResponse.json({ password });

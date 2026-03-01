@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { AMBIGUOUS_CHARS } from "./generator-prefs";
+import { AMBIGUOUS_CHARS, CHARSETS } from "./generator-prefs";
 import { WORDLIST } from "./wordlist";
 
 export interface GeneratorOptions {
@@ -9,13 +9,9 @@ export interface GeneratorOptions {
   numbers: boolean;
   symbols: string;
   excludeAmbiguous?: boolean;
+  includeChars?: string;
+  excludeChars?: string;
 }
-
-const CHARSETS = {
-  uppercase: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-  lowercase: "abcdefghijklmnopqrstuvwxyz",
-  numbers: "0123456789",
-} as const;
 
 function filterAmbiguous(chars: string): string {
   return chars
@@ -25,12 +21,23 @@ function filterAmbiguous(chars: string): string {
 }
 
 export function generatePassword(options: GeneratorOptions): string {
-  const { length, uppercase, lowercase, numbers, symbols, excludeAmbiguous } = options;
+  const {
+    length,
+    uppercase,
+    lowercase,
+    numbers,
+    symbols,
+    excludeAmbiguous,
+    includeChars = "",
+    excludeChars = "",
+  } = options;
   const filter = excludeAmbiguous ? filterAmbiguous : (s: string) => s;
+  const excludeSet = excludeChars.length > 0 ? new Set(excludeChars) : null;
 
-  let charset = "";
   const required: string[] = [];
 
+  // Build charset per type and guarantee one from each enabled type
+  let charset = "";
   if (uppercase) {
     const chars = filter(CHARSETS.uppercase);
     charset += chars;
@@ -52,8 +59,41 @@ export function generatePassword(options: GeneratorOptions): string {
     if (chars.length > 0) required.push(randomChar(chars));
   }
 
+  // Add includeChars to charset (apply ambiguous filter + exclude)
+  if (includeChars.length > 0) {
+    const filtered = filter([...new Set(includeChars)].join(""));
+    const effectiveInclude = excludeSet
+      ? filtered.split("").filter((c) => !excludeSet.has(c)).join("")
+      : filtered;
+    for (const ch of effectiveInclude) {
+      if (!charset.includes(ch)) charset += ch;
+    }
+    // Guarantee one character from effective includeChars in required
+    if (effectiveInclude.length > 0) {
+      required.push(randomChar(effectiveInclude));
+    }
+  }
+
+  // Remove excludeChars from charset and required
+  if (excludeSet) {
+    charset = charset
+      .split("")
+      .filter((c) => !excludeSet.has(c))
+      .join("");
+    for (let i = required.length - 1; i >= 0; i--) {
+      if (excludeSet.has(required[i])) {
+        required.splice(i, 1);
+      }
+    }
+  }
+
   if (charset.length === 0) {
     throw new Error("At least one character type must be selected");
+  }
+
+  // Truncate required if it exceeds requested length
+  while (required.length > length) {
+    required.pop();
   }
 
   // Fill remaining length with random characters from full charset
