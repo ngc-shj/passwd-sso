@@ -155,6 +155,7 @@ export function ShareDialog({
   useEffect(() => {
     if (open) {
       setCreatedUrl(null);
+      setPermission(SHARE_PERMISSION.VIEW_ALL);
       fetchLinks();
     }
   }, [open, fetchLinks]);
