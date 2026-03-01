@@ -66,3 +66,11 @@
 ### F-1: getTeamParent に userId が渡されている
 - 対応: シグネチャを `(teamId, folderId)` に変更、呼び出し元で `teamId` を渡すよう修正
 - 修正ファイル: `src/app/api/teams/[teamId]/folders/route.ts:18-19,114,128`, `src/app/api/teams/[teamId]/folders/[id]/route.ts:19-20,83,102,116`
+
+### F-2: GET /api/teams の不要なエラーハンドリング
+- 対応: try-catch を除去し、withBypassRls の直接呼び出しに変更
+- 修正ファイル: `src/app/api/teams/route.ts:18-48`
+
+### T-2: RLSコンテキスト呼び出しの検証不足
+- 対応: GET /api/teams に withBypassRls 呼び出し検証テスト追加、invitations/accept に3種RLSコンテキスト引数検証テスト追加
+- 修正ファイル: `src/app/api/teams/route.test.ts`, `src/app/api/teams/invitations/accept/route.test.ts`
