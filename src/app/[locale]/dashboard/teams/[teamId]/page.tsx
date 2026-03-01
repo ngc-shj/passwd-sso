@@ -520,6 +520,7 @@ export default function TeamDashboardPage({
         entryType: eType,
         password: (blob.password as string) ?? "",
         content: blob.content as string | undefined,
+        isMarkdown: blob.isMarkdown as boolean | undefined,
         url: (blob.url as string) ?? null,
         urlHost: null,
         notes: (blob.notes as string) ?? null,

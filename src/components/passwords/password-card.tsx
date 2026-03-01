@@ -343,6 +343,7 @@ export function PasswordCard({
             requireReprompt: (raw.requireReprompt as boolean | undefined) ?? requireReprompt,
             password: entry.password ?? "",
             content: entry.content,
+            isMarkdown: entry.isMarkdown,
             url: entry.url ?? null,
             urlHost,
             notes: entry.notes ?? null,

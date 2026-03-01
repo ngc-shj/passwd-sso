@@ -139,6 +139,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         title: entry.title,
         content: entry.content || "",
         tags: entry.tags,
+        isMarkdown: true,
       }),
       overviewBlob: JSON.stringify({
         title: entry.title,

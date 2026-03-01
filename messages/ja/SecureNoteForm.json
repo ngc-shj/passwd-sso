@@ -18,5 +18,7 @@
   "template_apiKey": "APIキー",
   "template_server": "サーバー / SSH",
   "template_recoveryCodes": "リカバリコード",
-  "template_meeting": "ミーティング情報"
+  "template_meeting": "ミーティング情報",
+  "editTab": "編集",
+  "previewTab": "プレビュー"
 }

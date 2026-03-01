@@ -28,6 +28,8 @@ import {
 } from "@/components/ui/select";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { SECURE_NOTE_TEMPLATES } from "@/lib/secure-note-templates";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SecureNoteMarkdown } from "@/components/passwords/secure-note-markdown";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
@@ -106,7 +108,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, d
     if (!encryptionKey) return;
     const tags = toTagPayload(selectedTags);
     const snippet = content.slice(0, 100);
-    const fullBlob = JSON.stringify({ title, content, tags });
+    const fullBlob = JSON.stringify({ title, content, tags, isMarkdown: true });
     const overviewBlob = JSON.stringify({ title, snippet, tags });
 
     await executePersonalEntrySubmit({
@@ -172,16 +174,35 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, d
 
         <div className="space-y-2">
           <Label htmlFor="content">{t("content")}</Label>
-          <textarea
-            id="content"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder={t("contentPlaceholder")}
-            rows={10}
-            maxLength={50000}
-            required
-            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
+          <Tabs defaultValue="edit">
+            <TabsList className="grid w-full max-w-[200px] grid-cols-2">
+              <TabsTrigger value="edit">{t("editTab")}</TabsTrigger>
+              <TabsTrigger value="preview">{t("previewTab")}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="edit" className="mt-2">
+              <textarea
+                id="content"
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder={t("contentPlaceholder")}
+                rows={10}
+                maxLength={50000}
+                required
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </TabsContent>
+            <TabsContent value="preview" className="mt-2">
+              <div className="min-h-[240px] rounded-lg border bg-muted/30 p-3">
+                {content ? (
+                  <SecureNoteMarkdown content={content} />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {t("contentPlaceholder")}
+                  </p>
+                )}
+              </div>
+            </TabsContent>
+          </Tabs>
         </div>
       </EntryPrimaryCard>
 

@@ -18,5 +18,7 @@
   "template_apiKey": "API Key",
   "template_server": "Server / SSH",
   "template_recoveryCodes": "Recovery Codes",
-  "template_meeting": "Meeting Info"
+  "template_meeting": "Meeting Info",
+  "editTab": "Edit",
+  "previewTab": "Preview"
 }
