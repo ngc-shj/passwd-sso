@@ -32,9 +32,9 @@
   "ENTRY_EXPORT": "Exported entries",
   "ATTACHMENT_UPLOAD": "Uploaded attachment",
   "ATTACHMENT_DELETE": "Deleted attachment",
-  "ORG_MEMBER_INVITE": "Invited member",
-  "ORG_MEMBER_REMOVE": "Removed member",
-  "ORG_ROLE_UPDATE": "Changed role",
+  "TEAM_MEMBER_INVITE": "Invited member",
+  "TEAM_MEMBER_REMOVE": "Removed member",
+  "TEAM_ROLE_UPDATE": "Changed role",
   "SHARE_CREATE": "Created share link",
   "SHARE_REVOKE": "Revoked share link",
   "SEND_CREATE": "Created send",
@@ -61,9 +61,9 @@
   "MASTER_KEY_ROTATION": "Master key rotation",
   "SESSION_REVOKE": "Revoked session",
   "SESSION_REVOKE_ALL": "Revoked all other sessions",
-  "ORG_E2E_MIGRATION": "Organization E2E migration",
-  "ORG_KEY_ROTATION": "Organization key rotation",
-  "ORG_MEMBER_KEY_DISTRIBUTE": "Distributed member key",
+  "TEAM_E2E_MIGRATION": "Team E2E migration",
+  "TEAM_KEY_ROTATION": "Team key rotation",
+  "TEAM_MEMBER_KEY_DISTRIBUTE": "Distributed member key",
   "teamAuditLog": "Audit Log — {teamName}",
   "teamAuditLogDesc": "View activity for {teamName}",
   "deletedEntry": "Deleted entry",
@@ -114,5 +114,6 @@
   "notIncluded": "not included",
   "exportMeta": "File: {filename} / Count: {entryCount} / Format: {format} / Encrypted: {encrypted} / Teams: {teams}",
   "exportMetaTeam": "File: {filename} / Count: {entryCount} / Format: {format} / Encrypted: {encrypted}",
-  "importMeta": "File: {filename} / Format: {format} / Encrypted: {encrypted} / Success: {successCount} / Failed: {failedCount} / Total: {requestedCount}"
+  "importMeta": "File: {filename} / Format: {format} / Encrypted: {encrypted} / Success: {successCount} / Failed: {failedCount} / Total: {requestedCount}",
+  "operatedBy": "Operated by {name}"
 }

@@ -80,7 +80,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       prisma.auditLog.findMany({
         where,
         include: {
-          user: { select: { id: true, name: true, image: true } },
+          user: { select: { id: true, name: true, email: true, image: true } },
         },
         orderBy: { createdAt: "desc" },
         take: limit + 1,

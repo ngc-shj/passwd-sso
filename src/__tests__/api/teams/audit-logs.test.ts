@@ -97,7 +97,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
         ip: "10.0.0.1",
         userAgent: "Test",
         createdAt: now,
-        user: { id: "user-1", name: "Alice", image: null },
+        user: { id: "user-1", name: "Alice", email: "alice@example.com", image: null },
       },
     ];
 
@@ -117,6 +117,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     expect(json.items[0].user).toEqual({
       id: "user-1",
       name: "Alice",
+      email: "alice@example.com",
       image: null,
     });
     expect(json.nextCursor).toBeNull();
@@ -128,7 +129,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
           scope: AUDIT_SCOPE.TEAM,
         },
         include: {
-          user: { select: { id: true, name: true, image: true } },
+          user: { select: { id: true, name: true, email: true, image: true } },
         },
         orderBy: { createdAt: "desc" },
       })

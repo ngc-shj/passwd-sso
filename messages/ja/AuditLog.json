@@ -32,9 +32,9 @@
   "ENTRY_EXPORT": "エクスポート実行",
   "ATTACHMENT_UPLOAD": "添付ファイルのアップロード",
   "ATTACHMENT_DELETE": "添付ファイルの削除",
-  "ORG_MEMBER_INVITE": "メンバー招待",
-  "ORG_MEMBER_REMOVE": "メンバー削除",
-  "ORG_ROLE_UPDATE": "ロール変更",
+  "TEAM_MEMBER_INVITE": "メンバー招待",
+  "TEAM_MEMBER_REMOVE": "メンバー削除",
+  "TEAM_ROLE_UPDATE": "ロール変更",
   "SHARE_CREATE": "共有リンク作成",
   "SHARE_REVOKE": "共有リンク取り消し",
   "SEND_CREATE": "Send作成",
@@ -61,9 +61,9 @@
   "MASTER_KEY_ROTATION": "マスターキーローテーション",
   "SESSION_REVOKE": "セッションを取り消し",
   "SESSION_REVOKE_ALL": "他のすべてのセッションを取り消し",
-  "ORG_E2E_MIGRATION": "組織 E2E 移行",
-  "ORG_KEY_ROTATION": "組織キーローテーション",
-  "ORG_MEMBER_KEY_DISTRIBUTE": "メンバー鍵を配布",
+  "TEAM_E2E_MIGRATION": "チーム E2E 移行",
+  "TEAM_KEY_ROTATION": "チームキーローテーション",
+  "TEAM_MEMBER_KEY_DISTRIBUTE": "メンバー鍵を配布",
   "teamAuditLog": "監査ログ — {teamName}",
   "teamAuditLogDesc": "{teamName} のアクティビティを表示",
   "deletedEntry": "削除済みエントリー",
@@ -114,5 +114,6 @@
   "notIncluded": "含まない",
   "exportMeta": "ファイル: {filename} / 件数: {entryCount} / 形式: {format} / 暗号化: {encrypted} / チーム: {teams}",
   "exportMetaTeam": "ファイル: {filename} / 件数: {entryCount} / 形式: {format} / 暗号化: {encrypted}",
-  "importMeta": "ファイル: {filename} / 形式: {format} / 暗号化: {encrypted} / 成功: {successCount} / 失敗: {failedCount} / 合計: {requestedCount}"
+  "importMeta": "ファイル: {filename} / 形式: {format} / 暗号化: {encrypted} / 成功: {successCount} / 失敗: {failedCount} / 合計: {requestedCount}",
+  "operatedBy": "{name} が操作"
 }

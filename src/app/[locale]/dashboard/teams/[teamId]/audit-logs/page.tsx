@@ -53,7 +53,7 @@ interface TeamAuditLogItem {
   ip: string | null;
   userAgent: string | null;
   createdAt: string;
-  user: { id: string; name: string | null; image: string | null };
+  user: { id: string; name: string | null; email: string | null; image: string | null };
 }
 
 const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
@@ -508,9 +508,10 @@ export default function TeamAuditLogsPage({
                   </Avatar>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium">
-                      <span className="text-muted-foreground">{log.user.name}</span>
-                      {" · "}
                       {getActionLabel(log)}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {t("operatedBy", { name: log.user.email ? `${log.user.name} (${log.user.email})` : (log.user.name ?? "") })}
                     </p>
                     {targetLabel && (
                       <p className="text-xs text-muted-foreground truncate">
