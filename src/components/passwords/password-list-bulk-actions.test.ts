@@ -3,20 +3,24 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 describe("password list bulk actions", () => {
-  it("contains bulk archive/unarchive and trash action wiring", () => {
+  it("uses shared bulk hooks and components", () => {
     const src = readFileSync(
       join(process.cwd(), "src/components/passwords/password-list.tsx"),
       "utf8"
     );
 
-    expect(src).toContain("passwordsBulkArchive()");
-    expect(src).toContain("passwordsBulkTrash()");
-    expect(src).toContain('setBulkAction("archive")');
-    expect(src).toContain('setBulkAction("unarchive")');
-    expect(src).toContain('setBulkAction("trash")');
-    expect(src).toContain('t("moveSelectedToArchive")');
-    expect(src).toContain('t("moveSelectedToUnarchive")');
-    expect(src).toContain('t("bulkArchiveConfirm"');
-    expect(src).toContain('t("bulkUnarchiveConfirm"');
+    // Uses shared hooks
+    expect(src).toContain("useBulkSelection");
+    expect(src).toContain("useBulkAction");
+    expect(src).toContain('scope: { type: "personal" }');
+
+    // Uses shared components
+    expect(src).toContain("FloatingActionBar");
+    expect(src).toContain("BulkActionConfirmDialog");
+
+    // Wires up bulk actions
+    expect(src).toContain('requestAction("archive")');
+    expect(src).toContain('requestAction("unarchive")');
+    expect(src).toContain('requestAction("trash")');
   });
 });
