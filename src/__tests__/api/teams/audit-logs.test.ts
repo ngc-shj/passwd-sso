@@ -318,7 +318,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       ip: null,
       userAgent: null,
       createdAt: new Date(),
-      user: { id: "user-1", name: "Alice", image: null },
+      user: { id: "user-1", name: "Alice", email: "alice@example.com", image: null },
     }));
 
     mockFindMany.mockResolvedValue(logs);
@@ -381,7 +381,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
         ip: null,
         userAgent: null,
         createdAt: new Date(),
-        user: { id: "u1", name: "Alice", image: null },
+        user: { id: "u1", name: "Alice", email: "alice@example.com", image: null },
       },
     ];
     mockFindMany.mockResolvedValue(logs);
@@ -430,7 +430,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
         ip: null,
         userAgent: null,
         createdAt: new Date(),
-        user: { id: "u1", name: "Alice", image: null },
+        user: { id: "u1", name: "Alice", email: "alice@example.com", image: null },
       },
     ];
     mockFindMany.mockResolvedValue(logs);
