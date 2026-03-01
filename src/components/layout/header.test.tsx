@@ -23,6 +23,7 @@ const { mockUseSession, mockUseVault, mockLock } = vi.hoisted(() => ({
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+  useLocale: () => "en",
 }));
 
 vi.mock("next-auth/react", () => ({
@@ -50,6 +51,9 @@ vi.mock("@/components/vault/change-passphrase-dialog", () => ({
 }));
 vi.mock("@/components/vault/recovery-key-dialog", () => ({
   RecoveryKeyDialog: () => null,
+}));
+vi.mock("@/components/notifications/notification-bell", () => ({
+  NotificationBell: () => <div data-testid="notification-bell" />,
 }));
 
 // Mock dropdown to render content directly (bypass Radix interaction)

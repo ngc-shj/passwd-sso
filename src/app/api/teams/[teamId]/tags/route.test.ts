@@ -14,7 +14,7 @@ const { mockAuth, mockPrismaTeamTag, mockPrismaTeam, mockRequireTeamMember, mock
     mockAuth: vi.fn(),
     mockPrismaTeamTag: {
       findMany: vi.fn(),
-      findUnique: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
     },
     mockPrismaTeam: { findUnique: vi.fn() },
@@ -183,7 +183,7 @@ describe("POST /api/teams/[teamId]/tags", () => {
   });
 
   it("returns 409 when tag already exists", async () => {
-    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: "existing" });
+    mockPrismaTeamTag.findFirst.mockResolvedValue({ id: "existing" });
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/tags`, { body: { name: "Work" } }),
       createParams({ teamId: TEAM_ID }),
@@ -192,8 +192,8 @@ describe("POST /api/teams/[teamId]/tags", () => {
   });
 
   it("creates team tag (201)", async () => {
-    mockPrismaTeamTag.findUnique.mockResolvedValue(null);
-    mockPrismaTeamTag.create.mockResolvedValue({ id: "new-tag", name: "Finance", color: null });
+    mockPrismaTeamTag.findFirst.mockResolvedValue(null);
+    mockPrismaTeamTag.create.mockResolvedValue({ id: "new-tag", name: "Finance", color: null, parentId: null });
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/tags`, { body: { name: "Finance" } }),

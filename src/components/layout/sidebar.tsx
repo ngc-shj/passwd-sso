@@ -203,6 +203,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         open={tagDialogOpen}
         onOpenChange={setTagDialogOpen}
         editTag={editingTag}
+        allTags={tags.map((t) => ({ id: t.id, name: t.name, color: t.color, parentId: t.parentId }))}
         onSubmit={handleTagSubmit}
       />
 

@@ -33,6 +33,11 @@ import {
 import { toast } from "sonner";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH, apiPath } from "@/lib/constants";
+import {
+  SHARE_PERMISSION,
+  SHARE_PERMISSION_VALUES,
+  applySharePermissions,
+} from "@/lib/constants/share-permission";
 import { formatDateTime } from "@/lib/format-datetime";
 
 interface ShareLink {
@@ -114,6 +119,7 @@ export function ShareDialog({
   const locale = useLocale();
   const [expiresIn, setExpiresIn] = useState<string>("1d");
   const [maxViews, setMaxViews] = useState<string>("");
+  const [permission, setPermission] = useState<string>(SHARE_PERMISSION.VIEW_ALL);
   const [creating, setCreating] = useState(false);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -165,16 +171,23 @@ export function ShareDialog({
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { totp, ...safeData } = (decryptedData ?? {}) as Record<string, unknown>;
 
+      const permissions =
+        permission === SHARE_PERMISSION.VIEW_ALL ? [] : [permission];
+      if (permissions.length > 0) {
+        body.permissions = permissions;
+      }
+
       if (passwordEntryId) {
         body.passwordEntryId = passwordEntryId;
         body.data = safeData;
       } else {
-        // Team entry: E2E — encrypt with random share key
+        // Team entry: E2E — encrypt with random share key, reduced blob per permissions
         if (!decryptedData) {
           toast.error(t("createError"));
           return;
         }
-        const encrypted = await encryptForShare(safeData);
+        const filteredData = applySharePermissions(safeData, permissions);
+        const encrypted = await encryptForShare(filteredData);
         body.teamPasswordEntryId = teamPasswordEntryId;
         body.encryptedShareData = {
           ciphertext: encrypted.ciphertext,
@@ -348,6 +361,26 @@ export function ShareDialog({
                 value={maxViews}
                 onChange={(e) => setMaxViews(e.target.value)}
               />
+            </div>
+
+            {/* Permissions */}
+            <div className="space-y-2">
+              <Label className="text-xs">{t("permissionLabel")}</Label>
+              <Select value={permission} onValueChange={setPermission}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SHARE_PERMISSION_VALUES.map((perm) => (
+                    <SelectItem key={perm} value={perm}>
+                      <span>{t(`permission_${perm}`)}</span>
+                      <span className="ml-2 text-muted-foreground">
+                        — {t(`permission_${perm}_desc`)}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <DialogFooter className="border-t pt-4">

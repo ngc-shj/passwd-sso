@@ -8,6 +8,7 @@ interface SidebarTagItem {
   id: string;
   name: string;
   color: string | null;
+  parentId?: string | null;
 }
 
 interface TagSubmitPayload {
