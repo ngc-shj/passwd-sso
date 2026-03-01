@@ -15,7 +15,14 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
+  "overrides": {
+    "rollup": "$rollup",
+    "@crxjs/vite-plugin": {
+      "rollup": "^2.80.0"
+    }
+  },
   "devDependencies": {
+    "rollup": "^4.59.0",
     "@crxjs/vite-plugin": "^2.3.0",
     "@tailwindcss/vite": "^4.1.0",
     "@testing-library/jest-dom": "^6.6.0",
