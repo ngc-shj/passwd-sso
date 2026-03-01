@@ -1,29 +1,17 @@
 "use client";
 
-import { useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
+import { useEffect, useState, useCallback, forwardRef } from "react";
 import { useTranslations } from "next-intl";
 import { PasswordCard } from "@/components/passwords/password-card";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
-import {
-  reconcileSelectedIds,
-  toggleSelectAllIds,
-  toggleSelectOneId,
-} from "@/components/passwords/password-list-selection";
 import { TeamPasswordForm } from "@/components/team/team-password-form";
-import { Building2, Loader2, RotateCcw, Trash2 } from "lucide-react";
+import { Building2, RotateCcw, Trash2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { toast } from "sonner";
+import { useBulkSelection } from "@/hooks/use-bulk-selection";
+import { useBulkAction } from "@/hooks/use-bulk-action";
+import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
+import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
@@ -103,10 +91,6 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     customFields?: EntryCustomField[];
     totp?: EntryTotp | null;
   } | null>(null);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
-  const [bulkAction, setBulkAction] = useState<"unarchive" | "trash">("unarchive");
-  const [bulkProcessing, setBulkProcessing] = useState(false);
 
   const effectiveSelectionMode = scopedTeamId ? (selectionMode ?? false) : false;
 
@@ -220,86 +204,32 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     compareEntriesWithFavorite(a, b, sortBy)
   );
 
-  // Reconcile stale selectedIds when entries change
-  useEffect(() => {
-    setSelectedIds((prev) =>
-      reconcileSelectedIds(prev, entries.map((e) => e.id))
-    );
-  }, [entries]);
+  // Bulk selection — uses sortedFiltered (not entries) to fix reconciliation bug
+  const entryIds = sortedFiltered.map((e) => e.id);
+  const { selectedIds, toggleSelectOne, clearSelection } = useBulkSelection({
+    entryIds,
+    selectionMode: effectiveSelectionMode,
+    selectAllRef: ref,
+    onSelectedCountChange,
+  });
 
-  // Reset selection when leaving selection mode
-  useEffect(() => {
-    if (!effectiveSelectionMode) setSelectedIds(new Set());
-  }, [effectiveSelectionMode]);
-
-  // Sync selected count to parent
-  useEffect(() => {
-    const allSel = sortedFiltered.length > 0 && selectedIds.size === sortedFiltered.length;
-    onSelectedCountChange?.(selectedIds.size, allSel);
-  }, [selectedIds.size, sortedFiltered.length, onSelectedCountChange]);
-
-  // Expose toggleSelectAll to parent
-  useImperativeHandle(ref, () => ({
-    toggleSelectAll: (checked: boolean) => {
-      setSelectedIds(toggleSelectAllIds(sortedFiltered.map((e) => e.id), checked));
+  // Bulk action
+  const {
+    dialogOpen: bulkDialogOpen,
+    setDialogOpen: setBulkDialogOpen,
+    pendingAction,
+    processing: bulkProcessing,
+    requestAction,
+    executeAction,
+  } = useBulkAction({
+    selectedIds,
+    scope: { type: "team", teamId: scopedTeamId ?? "" },
+    t: tl,
+    onSuccess: () => {
+      clearSelection();
+      fetchArchived();
     },
-  }));
-
-  const toggleSelectOne = (id: string, checked: boolean) => {
-    setSelectedIds((prev) => toggleSelectOneId(prev, id, checked));
-  };
-
-  const handleBulkUnarchive = async () => {
-    if (selectedIds.size === 0 || !scopedTeamId) return;
-    setBulkProcessing(true);
-    try {
-      const res = await fetch(apiPath.teamPasswordsBulkArchive(scopedTeamId), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selectedIds), operation: "unarchive" }),
-      });
-      if (!res.ok) throw new Error("bulk unarchive failed");
-      const json = await res.json();
-      toast.success(
-        tl("bulkUnarchived", {
-          count: json.processedCount ?? json.unarchivedCount ?? selectedIds.size,
-        })
-      );
-      setBulkDialogOpen(false);
-      setSelectedIds(new Set());
-      fetchArchived();
-    } catch {
-      toast.error(tl("bulkUnarchiveFailed"));
-    } finally {
-      setBulkProcessing(false);
-    }
-  };
-
-  const handleBulkTrash = async () => {
-    if (selectedIds.size === 0 || !scopedTeamId) return;
-    setBulkProcessing(true);
-    try {
-      const res = await fetch(apiPath.teamPasswordsBulkTrash(scopedTeamId), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selectedIds) }),
-      });
-      if (!res.ok) throw new Error("bulk trash failed");
-      const json = await res.json();
-      toast.success(
-        tl("bulkMovedToTrash", {
-          count: json.movedCount ?? selectedIds.size,
-        })
-      );
-      setBulkDialogOpen(false);
-      setSelectedIds(new Set());
-      fetchArchived();
-    } catch {
-      toast.error(tl("bulkMoveFailed"));
-    } finally {
-      setBulkProcessing(false);
-    }
-  };
+  });
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleToggleFavorite = async (id: string, _current: boolean) => {
@@ -565,75 +495,35 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
         )}
       </div>
 
-      {effectiveSelectionMode && selectedIds.size > 0 && (
-        <div className="fixed bottom-4 inset-x-0 z-40 flex justify-center px-4 md:pl-60 pointer-events-none">
-          <div className="pointer-events-auto w-full max-w-4xl flex items-center justify-end rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
-            <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setBulkAction("unarchive");
-                  setBulkDialogOpen(true);
-                }}
-              >
-                <RotateCcw className="mr-1 h-4 w-4" />
-                {tl("moveSelectedToUnarchive")}
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => {
-                  setBulkAction("trash");
-                  setBulkDialogOpen(true);
-                }}
-              >
-                <Trash2 className="mr-1 h-4 w-4" />
-                {tl("moveSelectedToTrash")}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <FloatingActionBar visible={effectiveSelectionMode && selectedIds.size > 0} position="fixed">
+        <Button variant="secondary" size="sm" onClick={() => requestAction("unarchive")}>
+          <RotateCcw className="mr-1 h-4 w-4" />
+          {tl("moveSelectedToUnarchive")}
+        </Button>
+        <Button variant="destructive" size="sm" onClick={() => requestAction("trash")}>
+          <Trash2 className="mr-1 h-4 w-4" />
+          {tl("moveSelectedToTrash")}
+        </Button>
+      </FloatingActionBar>
 
-      <AlertDialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {bulkAction === "unarchive"
-                ? tl("moveSelectedToUnarchive")
-                : tl("moveSelectedToTrash")}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {bulkAction === "unarchive"
-                ? tl("bulkUnarchiveConfirm", { count: selectedIds.size })
-                : tl("bulkMoveConfirm", { count: selectedIds.size })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={bulkProcessing}>
-              {tl("cancel")}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                if (bulkAction === "unarchive") {
-                  void handleBulkUnarchive();
-                } else {
-                  void handleBulkTrash();
-                }
-              }}
-              disabled={bulkProcessing}
-            >
-              {bulkProcessing ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                tl("confirm")
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <BulkActionConfirmDialog
+        open={bulkDialogOpen}
+        onOpenChange={setBulkDialogOpen}
+        title={
+          pendingAction === "unarchive"
+            ? tl("moveSelectedToUnarchive")
+            : tl("moveSelectedToTrash")
+        }
+        description={
+          pendingAction === "unarchive"
+            ? tl("bulkUnarchiveConfirm", { count: selectedIds.size })
+            : tl("bulkMoveConfirm", { count: selectedIds.size })
+        }
+        cancelLabel={tl("cancel")}
+        confirmLabel={tl("confirm")}
+        processing={bulkProcessing}
+        onConfirm={() => void executeAction()}
+      />
 
       {editTeamId && (
         <TeamPasswordForm

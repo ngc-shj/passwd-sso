@@ -3,7 +3,7 @@ import {
   reconcileSelectedIds,
   toggleSelectAllIds,
   toggleSelectOneId,
-} from "@/components/passwords/password-list-selection";
+} from "@/lib/bulk-selection-helpers";
 
 describe("password-list selection helpers", () => {
   it("reconcileSelectedIds drops removed entries", () => {
