@@ -53,8 +53,8 @@ interface TeamArchivedEntry {
   isFavorite: boolean;
   isArchived: boolean;
   tags: { id: string; name: string; color: string | null }[];
-  createdBy: { id: string; name: string | null; image: string | null };
-  updatedBy: { id: string; name: string | null };
+  createdBy: { id: string; name: string | null; email: string | null; image: string | null };
+  updatedBy: { id: string; name: string | null; email: string | null };
   createdAt: string;
   updatedAt: string;
 }

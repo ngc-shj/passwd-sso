@@ -38,8 +38,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
       where: { id },
       include: {
         tags: { select: { id: true, name: true, color: true } },
-        createdBy: { select: { id: true, name: true, image: true } },
-        updatedBy: { select: { id: true, name: true } },
+        createdBy: { select: { id: true, name: true, email: true, image: true } },
+        updatedBy: { select: { id: true, name: true, email: true } },
         favorites: {
           where: { userId: session.user.id },
           select: { id: true },
