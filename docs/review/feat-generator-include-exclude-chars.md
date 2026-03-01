@@ -1,6 +1,6 @@
-# コードレビュー: main (dcc316b)
-日時: 2026-03-01T18:10:00+09:00
-レビュー回数: 1回目
+# コードレビュー: feat/generator-include-exclude-chars
+日時: 2026-03-01T18:22:00+09:00
+レビュー回数: 2回目
 
 ## 前回からの変更
 初回レビュー
@@ -59,4 +59,43 @@ F-1, F-2 と同一。追加のセキュリティ脆弱性なし。
 - **推奨:** DEL文字拒否、スペース許可のテスト追加。
 
 ## 対応状況
-（修正後に追記）
+
+### F-1 (高): excludeAmbiguous が includeChars に不適用
+- 対応: `generatePassword()` の includeChars 処理に `filter()` を適用。さらに `excludeSet` も事前考慮し、有効な文字のみを charset と required に追加するよう変更。
+- 修正ファイル: `src/lib/password-generator.ts:68-82`
+
+### F-2 (中): includeChars 保証が確率的に破れる
+- 対応: F-1 と同時修正。`effectiveInclude` (ambiguous + exclude 適用後) から required を選択するよう変更。
+- 修正ファイル: `src/lib/password-generator.ts:68-82`
+
+### F-3 (中): CHARSETS 重複定義
+- 対応: `generator-prefs.ts` の `CHARSETS` を `export` し、`password-generator.ts` のローカル定義を削除してインポートに変更。
+- 修正ファイル: `src/lib/generator-prefs.ts:93`, `src/lib/password-generator.ts:2`
+
+### F-4 (中): APIバリデーションエラーがサイレント
+- 対応: `generate()` の `!res.ok` 時に `setGenerated("")` でクリア。generate() を1関数に統合。
+- 修正ファイル: `src/components/passwords/password-generator.tsx:94-119`
+
+### F-5 (低): 冗長な new Set
+- 対応: `new Set(charset).size` → `charset.length` に変更。
+- 修正ファイル: `src/components/passwords/password-generator.tsx:50`
+
+### T-1 (低): excludeChars優先テストの不足
+- 対応: `expect(password).toMatch(/[bc]/)` を追加。
+- 修正ファイル: `src/lib/password-generator.test.ts:152`
+
+### T-2 (中): max(128)境界テスト追加
+- 対応: includeChars/excludeChars の 128文字OK・129文字NG テスト追加。
+- 修正ファイル: `src/lib/validations.test.ts`
+
+### T-3 (中): excludeChars emoji拒否テスト追加
+- 対応: `excludeChars: "abc\u{1F600}"` 拒否テスト追加。
+- 修正ファイル: `src/lib/validations.test.ts`
+
+### T-4 (中): API route統合テスト追加
+- 対応: includeChars/excludeChars付きリクエスト + 非ASCII拒否テスト追加。
+- 修正ファイル: `src/app/api/passwords/generate/route.test.ts`
+
+### T-5 (低): ASCII境界テスト追加
+- 対応: DEL (0x7F) 拒否 + スペース (0x20) 許可テスト追加。
+- 修正ファイル: `src/lib/validations.test.ts`

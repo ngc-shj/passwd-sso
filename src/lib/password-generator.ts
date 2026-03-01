@@ -91,6 +91,11 @@ export function generatePassword(options: GeneratorOptions): string {
     throw new Error("At least one character type must be selected");
   }
 
+  // Truncate required if it exceeds requested length
+  while (required.length > length) {
+    required.pop();
+  }
+
   // Fill remaining length with random characters from full charset
   const remaining = length - required.length;
   const chars = [...required];

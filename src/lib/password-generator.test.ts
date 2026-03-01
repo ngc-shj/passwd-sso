@@ -233,6 +233,19 @@ describe("generatePassword", () => {
     expect(password).toHaveLength(10);
     expect(password).toMatch(/^[ab]+$/);
   });
+
+  it("respects length even when required exceeds it", () => {
+    // 5 required (upper + lower + numbers + symbols + includeChars) but length=8
+    const password = generatePassword({
+      length: 8,
+      uppercase: true,
+      lowercase: true,
+      numbers: true,
+      symbols: "!@#$",
+      includeChars: "^",
+    });
+    expect(password).toHaveLength(8);
+  });
 });
 
 describe("generatePassphrase", () => {
