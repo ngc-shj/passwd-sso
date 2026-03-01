@@ -58,3 +58,9 @@ export {
   EXTENSION_TOKEN_MAX_ACTIVE,
 } from "./extension-token";
 export type { ExtensionTokenScope } from "./extension-token";
+
+export {
+  NOTIFICATION_TYPE,
+  NOTIFICATION_TYPE_VALUES,
+} from "./notification";
+export type { NotificationTypeValue } from "./notification";

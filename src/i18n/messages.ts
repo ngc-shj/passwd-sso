@@ -51,6 +51,7 @@ export const NAMESPACES = [
   "ApiErrors",
   "Attachments",
   "Sessions",
+  "Notifications",
 ] as const;
 
 export type Namespace = (typeof NAMESPACES)[number];

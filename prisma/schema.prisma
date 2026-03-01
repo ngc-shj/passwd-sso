@@ -135,6 +135,7 @@ model User {
   folders               Folder[]
   teamPasswordHistories TeamPasswordEntryHistory[]
   teamMemberKeys        TeamMemberKey[]
+  notifications         Notification[]
   tenant                Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
@@ -343,6 +344,7 @@ model Team {
   scimTokens           ScimToken[]
   scimExternalMappings ScimExternalMapping[]
   scimGroupMappings    ScimGroupMapping[]
+  policy               TeamPolicy?
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
@@ -387,6 +389,8 @@ model Tenant {
   scimTokens                 ScimToken[]
   scimExternalMappings       ScimExternalMapping[]
   scimGroupMappings          ScimGroupMapping[]
+  notifications              Notification[]
+  teamPolicies               TeamPolicy[]
 
   @@map("tenants")
 }
@@ -707,6 +711,7 @@ enum AuditAction {
   SCIM_USER_REACTIVATE
   SCIM_USER_DELETE
   SCIM_GROUP_UPDATE
+  POLICY_UPDATE
 }
 
 enum AuditScope {
@@ -933,4 +938,62 @@ model EmergencyAccessKeyPair {
 
   @@index([tenantId])
   @@map("emergency_access_key_pairs")
+}
+
+// ─── Notification Models ─────────────────────────────────────
+
+enum NotificationType {
+  SECURITY_ALERT
+  NEW_DEVICE_LOGIN
+  EMERGENCY_ACCESS
+  SHARE_ACCESS
+  TEAM_INVITE
+  ENTRY_EXPIRING
+  WATCHTOWER_ALERT
+  POLICY_UPDATE
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  tenantId  String           @map("tenant_id")
+  type      NotificationType
+  title     String           @db.VarChar(200)
+  body      String           @db.Text
+  metadata  Json?
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([userId, isRead, createdAt(sort: Desc)])
+  @@index([tenantId])
+  @@map("notifications")
+}
+
+// ─── Team Policy Models ─────────────────────────────────────
+
+model TeamPolicy {
+  id                        String  @id @default(cuid())
+  teamId                    String  @unique @map("team_id")
+  tenantId                  String  @map("tenant_id")
+  minPasswordLength         Int     @default(0) @map("min_password_length")
+  requireUppercase          Boolean @default(false) @map("require_uppercase")
+  requireLowercase          Boolean @default(false) @map("require_lowercase")
+  requireNumbers            Boolean @default(false) @map("require_numbers")
+  requireSymbols            Boolean @default(false) @map("require_symbols")
+  maxSessionDurationMinutes Int?    @map("max_session_duration_minutes")
+  requireRepromptForAll     Boolean @default(false) @map("require_reprompt_for_all")
+  allowExport               Boolean @default(true) @map("allow_export")
+  allowSharing              Boolean @default(true) @map("allow_sharing")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@map("team_policies")
 }
