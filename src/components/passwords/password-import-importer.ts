@@ -102,6 +102,14 @@ export async function runImportEntries({
             })(),
           }),
         });
+
+        // Set per-user favorite via toggle API (team favorites are a join table)
+        if (res.ok && entry.isFavorite) {
+          await fetch(`${passwordsPath}/${entryId}/favorite`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          }).catch(() => {});
+        }
       } else {
         const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
         const entryId = crypto.randomUUID();

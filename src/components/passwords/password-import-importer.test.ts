@@ -162,6 +162,64 @@ describe("runImportEntries", () => {
     expect(body.encryptedOverview).toEqual({ ciphertext: "overview", iv: "iv2", authTag: "tag2" });
   });
 
+  it("calls favorite toggle API for team import when isFavorite is true", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(true)) // GET tags
+      .mockResolvedValueOnce(response(true)) // POST entry
+      .mockResolvedValueOnce(response(true)); // POST favorite
+    vi.stubGlobal("fetch", fetchMock);
+
+    mockEncryptData
+      .mockResolvedValueOnce({ ciphertext: "blob", iv: "iv1", authTag: "tag1" })
+      .mockResolvedValueOnce({ ciphertext: "ov", iv: "iv2", authTag: "tag2" });
+
+    await runImportEntries({
+      entries: [makeEntry({ isFavorite: true })],
+      isTeamImport: true,
+      tagsPath: "/api/teams/t1/tags",
+      foldersPath: "/api/teams/t1/folders",
+      passwordsPath: "/api/teams/t1/passwords",
+      sourceFilename: "team.json",
+      teamEncryptionKey: {} as CryptoKey,
+      teamKeyVersion: 1,
+      teamId: "t1",
+    });
+
+    // 3 calls: GET tags, POST entry, POST favorite
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const favoriteCall = fetchMock.mock.calls[2];
+    expect(favoriteCall[0]).toMatch(/\/api\/teams\/t1\/passwords\/[^/]+\/favorite$/);
+    expect((favoriteCall[1] as RequestInit).method).toBe("POST");
+  });
+
+  it("does not call favorite toggle API for team import when isFavorite is false", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(true)) // GET tags
+      .mockResolvedValueOnce(response(true)); // POST entry
+    vi.stubGlobal("fetch", fetchMock);
+
+    mockEncryptData
+      .mockResolvedValueOnce({ ciphertext: "blob", iv: "iv1", authTag: "tag1" })
+      .mockResolvedValueOnce({ ciphertext: "ov", iv: "iv2", authTag: "tag2" });
+
+    await runImportEntries({
+      entries: [makeEntry({ isFavorite: false })],
+      isTeamImport: true,
+      tagsPath: "/api/teams/t1/tags",
+      foldersPath: "/api/teams/t1/folders",
+      passwordsPath: "/api/teams/t1/passwords",
+      sourceFilename: "team.json",
+      teamEncryptionKey: {} as CryptoKey,
+      teamKeyVersion: 1,
+      teamId: "t1",
+    });
+
+    // Only 2 calls: GET tags, POST entry (no favorite call)
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("includes isFavorite and expiresAt in personal import POST body", async () => {
     // No folderPath on entries → folder resolution skips GET
     const fetchMock = vi
