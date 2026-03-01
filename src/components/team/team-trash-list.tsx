@@ -190,7 +190,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
   } = useBulkAction({
     selectedIds,
     scope: { type: "team", teamId: scopedTeamId ?? "" },
-    t: tl,
+    t,
     onSuccess: () => {
       clearSelection();
       fetchTrash();
