@@ -125,7 +125,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     await validateFolderDepth(
       parentId ?? null,
       teamId,
-      (parentIdValue) => getTeamParent(session.user.id, parentIdValue),
+      (parentIdValue) => getTeamParent(teamId, parentIdValue),
     );
   } catch {
     return NextResponse.json(

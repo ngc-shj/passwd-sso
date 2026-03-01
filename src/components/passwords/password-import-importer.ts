@@ -10,6 +10,7 @@ import {
   resolveFolderPathsForImport,
   resolveEntryFolderId,
 } from "@/components/passwords/password-import-folders";
+import { apiPath } from "@/lib/constants";
 
 interface RunImportParams {
   entries: ParsedEntry[];
@@ -102,6 +103,18 @@ export async function runImportEntries({
             })(),
           }),
         });
+
+        // Set per-user favorite via toggle API (team favorites are a join table).
+        // Failure is best-effort: the entry itself is already created and
+        // the user can manually toggle the favorite later.
+        if (res.ok && entry.isFavorite) {
+          await fetch(apiPath.teamPasswordFavorite(teamId!, entryId), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          }).catch(() => {
+            // Silently ignore — entry is already created
+          });
+        }
       } else {
         const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
         const entryId = crypto.randomUUID();

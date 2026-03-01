@@ -212,6 +212,31 @@ describe("POST /api/teams/[teamId]/folders", () => {
     expect(json.error).toBe("FOLDER_ALREADY_EXISTS");
   });
 
+  it("calls validateFolderDepth with teamId, not session.user.id", async () => {
+    mockPrismaTeamFolder.findFirst.mockResolvedValue(null);
+    mockPrismaTeamFolder.create.mockResolvedValue({
+      id: "new-folder-id",
+      name: "Child",
+      parentId: "cm000000000000000parent1",
+      sortOrder: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await POST(
+      createRequest("POST", BASE, {
+        body: { name: "Child", parentId: "cm000000000000000parent1" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(vi.mocked(validateFolderDepth)).toHaveBeenCalledWith(
+      "cm000000000000000parent1",
+      TEAM_ID, // must be teamId ("team-1"), NOT session.user.id ("user-1")
+      expect.any(Function),
+    );
+  });
+
   it("creates team folder successfully (201)", async () => {
     mockPrismaTeamFolder.findFirst.mockResolvedValue(null);
     mockPrismaTeamFolder.create.mockResolvedValue({

@@ -101,7 +101,7 @@ describe("runImportEntries", () => {
 
     const progress = vi.fn();
     const result = await runImportEntries({
-      entries: [makeEntry({ title: "a" }), makeEntry({ title: "b" })],
+      entries: [makeEntry({ title: "a", isFavorite: false }), makeEntry({ title: "b", isFavorite: false })],
       isTeamImport: true,
       tagsPath: "/api/teams/tags",
       foldersPath: "/api/teams/folders",
@@ -160,6 +160,125 @@ describe("runImportEntries", () => {
     expect(body.entryType).toBe(ENTRY_TYPE.LOGIN);
     expect(body.encryptedBlob).toEqual({ ciphertext: "full", iv: "iv1", authTag: "tag1" });
     expect(body.encryptedOverview).toEqual({ ciphertext: "overview", iv: "iv2", authTag: "tag2" });
+  });
+
+  it("calls favorite toggle API for team import when isFavorite is true", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(true)) // GET tags
+      .mockResolvedValueOnce(response(true)) // POST entry
+      .mockResolvedValueOnce(response(true)); // POST favorite
+    vi.stubGlobal("fetch", fetchMock);
+
+    mockEncryptData
+      .mockResolvedValueOnce({ ciphertext: "blob", iv: "iv1", authTag: "tag1" })
+      .mockResolvedValueOnce({ ciphertext: "ov", iv: "iv2", authTag: "tag2" });
+
+    const result = await runImportEntries({
+      entries: [makeEntry({ isFavorite: true })],
+      isTeamImport: true,
+      tagsPath: "/api/teams/t1/tags",
+      foldersPath: "/api/teams/t1/folders",
+      passwordsPath: "/api/teams/t1/passwords",
+      sourceFilename: "team.json",
+      teamEncryptionKey: {} as CryptoKey,
+      teamKeyVersion: 1,
+      teamId: "t1",
+    });
+
+    expect(result).toEqual({ successCount: 1, failedCount: 0 });
+
+    // 3 calls: GET tags, POST entry, POST favorite
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    // Verify favorite URL uses the same entryId from the POST body
+    const entryCall = fetchMock.mock.calls[1];
+    const entryBody = JSON.parse(String((entryCall[1] as RequestInit).body));
+    const favoriteCall = fetchMock.mock.calls[2];
+    expect(favoriteCall[0]).toBe(`/api/teams/t1/passwords/${entryBody.id}/favorite`);
+    expect((favoriteCall[1] as RequestInit).method).toBe("POST");
+  });
+
+  it("does not call favorite toggle API for team import when isFavorite is false", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(true)) // GET tags
+      .mockResolvedValueOnce(response(true)); // POST entry
+    vi.stubGlobal("fetch", fetchMock);
+
+    mockEncryptData
+      .mockResolvedValueOnce({ ciphertext: "blob", iv: "iv1", authTag: "tag1" })
+      .mockResolvedValueOnce({ ciphertext: "ov", iv: "iv2", authTag: "tag2" });
+
+    await runImportEntries({
+      entries: [makeEntry({ isFavorite: false })],
+      isTeamImport: true,
+      tagsPath: "/api/teams/t1/tags",
+      foldersPath: "/api/teams/t1/folders",
+      passwordsPath: "/api/teams/t1/passwords",
+      sourceFilename: "team.json",
+      teamEncryptionKey: {} as CryptoKey,
+      teamKeyVersion: 1,
+      teamId: "t1",
+    });
+
+    // Only 2 calls: GET tags, POST entry (no favorite call)
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("counts entry as success even when favorite API throws", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(true)) // GET tags
+      .mockResolvedValueOnce(response(true)) // POST entry
+      .mockRejectedValueOnce(new Error("network error")); // POST favorite — reject
+    vi.stubGlobal("fetch", fetchMock);
+
+    mockEncryptData
+      .mockResolvedValueOnce({ ciphertext: "blob", iv: "iv1", authTag: "tag1" })
+      .mockResolvedValueOnce({ ciphertext: "ov", iv: "iv2", authTag: "tag2" });
+
+    const result = await runImportEntries({
+      entries: [makeEntry({ isFavorite: true })],
+      isTeamImport: true,
+      tagsPath: "/api/teams/t1/tags",
+      foldersPath: "/api/teams/t1/folders",
+      passwordsPath: "/api/teams/t1/passwords",
+      sourceFilename: "team.json",
+      teamEncryptionKey: {} as CryptoKey,
+      teamKeyVersion: 1,
+      teamId: "t1",
+    });
+
+    expect(result).toEqual({ successCount: 1, failedCount: 0 });
+  });
+
+  it("does not call favorite API when entry creation fails", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(true)) // GET tags
+      .mockResolvedValueOnce(response(false)); // POST entry — fail
+    vi.stubGlobal("fetch", fetchMock);
+
+    mockEncryptData
+      .mockResolvedValueOnce({ ciphertext: "blob", iv: "iv1", authTag: "tag1" })
+      .mockResolvedValueOnce({ ciphertext: "ov", iv: "iv2", authTag: "tag2" });
+
+    const result = await runImportEntries({
+      entries: [makeEntry({ isFavorite: true })],
+      isTeamImport: true,
+      tagsPath: "/api/teams/t1/tags",
+      foldersPath: "/api/teams/t1/folders",
+      passwordsPath: "/api/teams/t1/passwords",
+      sourceFilename: "team.json",
+      teamEncryptionKey: {} as CryptoKey,
+      teamKeyVersion: 1,
+      teamId: "t1",
+    });
+
+    // Only 2 calls: GET tags, POST entry (no favorite call)
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({ successCount: 0, failedCount: 1 });
   });
 
   it("includes isFavorite and expiresAt in personal import POST body", async () => {
