@@ -19,6 +19,13 @@ const ALLOWED_FILES = new Set([
   "src/lib/scim-token.ts", // SCIM token validation
   "src/lib/extension-token.ts", // extension token validation
   "src/app/api/admin/rotate-master-key/route.ts", // admin key rotation
+  "src/app/api/teams/route.ts", // cross-tenant team list
+  "src/app/api/teams/archived/route.ts", // cross-tenant archived teams
+  "src/app/api/teams/favorites/route.ts", // cross-tenant favorite teams
+  "src/app/api/teams/trash/route.ts", // cross-tenant trashed teams
+  "src/app/api/teams/pending-key-distributions/route.ts", // cross-tenant key distribution
+  "src/app/api/teams/[teamId]/members/route.ts", // member tenant lookup
+  "src/app/api/teams/invitations/accept/route.ts", // cross-tenant invitation accept
 ]);
 
 function getSourceFiles() {
