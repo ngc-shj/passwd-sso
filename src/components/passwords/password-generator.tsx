@@ -47,7 +47,7 @@ function estimateBits(settings: GeneratorSettings, generated: string): number {
     includeChars: settings.includeChars ?? "",
     excludeChars: settings.excludeChars ?? "",
   });
-  const charsetSize = new Set(charset).size;
+  const charsetSize = charset.length; // buildEffectiveCharset() is already deduplicated
   if (charsetSize <= 1) return 0;
   return generated.length * Math.log2(charsetSize);
 }
@@ -92,40 +92,30 @@ export function PasswordGenerator({
   }, [initialSettings]);
 
   const generate = useCallback(async () => {
-    if (settings.mode === "passphrase") {
-      const res = await fetch(API_PATH.PASSWORDS_GENERATE, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "passphrase",
-          ...settings.passphrase,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setGenerated(data.password);
-      }
+    const body =
+      settings.mode === "passphrase"
+        ? { mode: "passphrase" as const, ...settings.passphrase }
+        : {
+            mode: "password" as const,
+            length: settings.length,
+            uppercase: settings.uppercase,
+            lowercase: settings.lowercase,
+            numbers: settings.numbers,
+            symbols: buildSymbolString(settings.symbolGroups),
+            excludeAmbiguous: settings.excludeAmbiguous,
+            includeChars: settings.includeChars ?? "",
+            excludeChars: settings.excludeChars ?? "",
+          };
+    const res = await fetch(API_PATH.PASSWORDS_GENERATE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setGenerated(data.password);
     } else {
-      const symbols = buildSymbolString(settings.symbolGroups);
-      const res = await fetch(API_PATH.PASSWORDS_GENERATE, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "password",
-          length: settings.length,
-          uppercase: settings.uppercase,
-          lowercase: settings.lowercase,
-          numbers: settings.numbers,
-          symbols,
-          excludeAmbiguous: settings.excludeAmbiguous,
-          includeChars: settings.includeChars ?? "",
-          excludeChars: settings.excludeChars ?? "",
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setGenerated(data.password);
-      }
+      setGenerated("");
     }
   }, [settings]);
 

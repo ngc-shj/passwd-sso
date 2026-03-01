@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { AMBIGUOUS_CHARS } from "./generator-prefs";
+import { AMBIGUOUS_CHARS, CHARSETS } from "./generator-prefs";
 import { WORDLIST } from "./wordlist";
 
 export interface GeneratorOptions {
@@ -12,12 +12,6 @@ export interface GeneratorOptions {
   includeChars?: string;
   excludeChars?: string;
 }
-
-const CHARSETS = {
-  uppercase: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-  lowercase: "abcdefghijklmnopqrstuvwxyz",
-  numbers: "0123456789",
-} as const;
 
 function filterAmbiguous(chars: string): string {
   return chars
@@ -65,15 +59,18 @@ export function generatePassword(options: GeneratorOptions): string {
     if (chars.length > 0) required.push(randomChar(chars));
   }
 
-  // Add includeChars to charset (unique chars not already present)
+  // Add includeChars to charset (apply ambiguous filter + exclude)
   if (includeChars.length > 0) {
-    const uniqueInclude = [...new Set(includeChars)].join("");
-    for (const ch of uniqueInclude) {
+    const filtered = filter([...new Set(includeChars)].join(""));
+    const effectiveInclude = excludeSet
+      ? filtered.split("").filter((c) => !excludeSet.has(c)).join("")
+      : filtered;
+    for (const ch of effectiveInclude) {
       if (!charset.includes(ch)) charset += ch;
     }
-    // Guarantee one character from includeChars in required
-    if (uniqueInclude.length > 0) {
-      required.push(randomChar(uniqueInclude));
+    // Guarantee one character from effective includeChars in required
+    if (effectiveInclude.length > 0) {
+      required.push(randomChar(effectiveInclude));
     }
   }
 

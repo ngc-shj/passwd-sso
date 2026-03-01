@@ -128,9 +128,14 @@ describe("buildEffectiveCharset", () => {
     expect(charset).toBe("xyz");
   });
 
-  it("returns same charset with empty includeChars and excludeChars", () => {
-    const withFields = buildEffectiveCharset({ ...base, uppercase: true, includeChars: "", excludeChars: "" });
-    const withoutFields = buildEffectiveCharset({ ...base, uppercase: true });
-    expect(withFields).toBe(withoutFields);
+  it("excludeAmbiguous removes ambiguous chars from includeChars", () => {
+    const charset = buildEffectiveCharset({
+      ...base,
+      uppercase: true,
+      excludeAmbiguous: true,
+      includeChars: "0O",
+    });
+    expect(charset).not.toContain("0");
+    expect(charset).not.toContain("O");
   });
 });

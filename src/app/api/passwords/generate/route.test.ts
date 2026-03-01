@@ -103,4 +103,34 @@ describe("POST /api/passwords/generate", () => {
     expect(res.status).toBe(200);
     expect(json.password.length).toBe(16);
   });
+
+  it("generates password with includeChars and excludeChars", async () => {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords/generate", {
+      body: {
+        mode: "password",
+        length: 30,
+        uppercase: true,
+        lowercase: true,
+        numbers: false,
+        symbols: "",
+        includeChars: "!@",
+        excludeChars: "abc",
+      },
+    }));
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.password).toMatch(/[!@]/);
+    expect(json.password).not.toMatch(/[abc]/);
+  });
+
+  it("returns 400 when includeChars contains non-ASCII", async () => {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords/generate", {
+      body: {
+        mode: "password",
+        length: 16,
+        includeChars: "abc\u{1F600}",
+      },
+    }));
+    expect(res.status).toBe(400);
+  });
 });

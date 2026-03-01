@@ -149,6 +149,22 @@ describe("generatePassword", () => {
       excludeChars: "a",
     });
     expect(password).not.toMatch(/a/);
+    // Remaining includeChars ("b" or "c") should still be guaranteed
+    expect(password).toMatch(/[bc]/);
+  });
+
+  it("excludeAmbiguous filters includeChars too", () => {
+    const password = generatePassword({
+      length: 30,
+      uppercase: true,
+      lowercase: false,
+      numbers: false,
+      symbols: "",
+      excludeAmbiguous: true,
+      includeChars: "0O",
+    });
+    // "0" and "O" are ambiguous, must not appear
+    expect(password).not.toMatch(/[0O]/);
   });
 
   it("throws when excludeChars removes all characters", () => {

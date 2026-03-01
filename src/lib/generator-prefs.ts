@@ -90,7 +90,7 @@ export function buildSymbolString(groups: SymbolGroupFlags): string {
     .join("");
 }
 
-const CHARSETS = {
+export const CHARSETS = {
   uppercase: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
   lowercase: "abcdefghijklmnopqrstuvwxyz",
   numbers: "0123456789",
