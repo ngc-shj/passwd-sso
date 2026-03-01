@@ -123,6 +123,7 @@ export function useBulkAction({
 
   const executeAction = useCallback(async () => {
     if (selectedIds.size === 0 || !pendingAction) return;
+    if (scope.type === "team" && !scope.teamId) return;
 
     setProcessing(true);
     try {

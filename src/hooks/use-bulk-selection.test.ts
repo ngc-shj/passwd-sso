@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useBulkSelection } from "@/hooks/use-bulk-selection";
+import {
+  useBulkSelection,
+  type BulkSelectionHandle,
+} from "@/hooks/use-bulk-selection";
 
 describe("useBulkSelection", () => {
   it("starts with empty selectedIds", () => {
@@ -109,6 +112,27 @@ describe("useBulkSelection", () => {
     expect(result.current.selectedIds.size).toBe(2);
 
     act(() => result.current.clearSelection());
+    expect(result.current.selectedIds.size).toBe(0);
+  });
+
+  it("exposes toggleSelectAll via selectAllRef", () => {
+    const ref = { current: null as BulkSelectionHandle | null };
+    const { result } = renderHook(() =>
+      useBulkSelection({
+        entryIds: ["a", "b", "c"],
+        selectionMode: true,
+        selectAllRef: ref,
+      }),
+    );
+
+    expect(ref.current).not.toBeNull();
+    expect(typeof ref.current!.toggleSelectAll).toBe("function");
+
+    act(() => ref.current!.toggleSelectAll(true));
+    expect(result.current.selectedIds.size).toBe(3);
+    expect(result.current.allSelected).toBe(true);
+
+    act(() => ref.current!.toggleSelectAll(false));
     expect(result.current.selectedIds.size).toBe(0);
   });
 });

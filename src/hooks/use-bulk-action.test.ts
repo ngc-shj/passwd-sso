@@ -136,6 +136,10 @@ describe("extractCount", () => {
       extractCount({ processedCount: 1, archivedCount: 9 }, 10),
     ).toBe(1);
   });
+
+  it("returns 0 when processedCount is 0 (not falsy-skipped)", () => {
+    expect(extractCount({ processedCount: 0, archivedCount: 5 }, 10)).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -262,6 +266,79 @@ describe("useBulkAction", () => {
     await act(() => result.current.executeAction());
 
     expect(result.current.processing).toBe(false);
+  });
+
+  it("does nothing when pendingAction is null", async () => {
+    const { result } = setup();
+    // executeAction without requestAction
+    await act(() => result.current.executeAction());
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("uses the most recent pendingAction when overridden", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ processedCount: 2 }),
+    });
+
+    const { result } = setup();
+    act(() => result.current.requestAction("trash"));
+    act(() => result.current.requestAction("archive"));
+
+    await act(() => result.current.executeAction());
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/passwords/bulk-archive",
+      expect.objectContaining({
+        body: JSON.stringify({ ids: ["a", "b"], operation: "archive" }),
+      }),
+    );
+  });
+
+  it("shows error toast when fetch throws (network error)", async () => {
+    mockFetch.mockRejectedValue(new Error("Network error"));
+
+    const { result } = setup();
+    act(() => result.current.requestAction("trash"));
+    await act(() => result.current.executeAction());
+
+    expect(mockError).toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(result.current.processing).toBe(false);
+  });
+
+  it("keeps dialog open on error so user can retry", async () => {
+    mockFetch.mockResolvedValue({ ok: false });
+
+    const { result } = setup();
+    act(() => result.current.requestAction("archive"));
+    await act(() => result.current.executeAction());
+
+    expect(result.current.dialogOpen).toBe(true);
+  });
+
+  it("setDialogOpen(false) closes dialog without clearing pendingAction", () => {
+    const { result } = setup();
+    act(() => result.current.requestAction("trash"));
+    expect(result.current.dialogOpen).toBe(true);
+    expect(result.current.pendingAction).toBe("trash");
+
+    act(() => result.current.setDialogOpen(false));
+    expect(result.current.dialogOpen).toBe(false);
+    expect(result.current.pendingAction).toBe("trash");
+  });
+
+  it("guards against empty teamId in team scope", async () => {
+    const { result } = setup(new Set(["a"]), {
+      type: "team",
+      teamId: "",
+    });
+    act(() => result.current.requestAction("trash"));
+    await act(() => result.current.executeAction());
+
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("uses count fallback chain correctly", async () => {
