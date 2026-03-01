@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useImperativeHandle } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
@@ -17,25 +17,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Trash2, Loader2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
-import {
-  reconcileTrashSelectedIds,
-  toggleTrashSelectAllIds,
-  toggleTrashSelectOneId,
-} from "./trash-list-selection";
 import type { EntryTypeValue } from "@/lib/constants";
+import { useBulkSelection, type BulkSelectionHandle } from "@/hooks/use-bulk-selection";
+import { useBulkAction } from "@/hooks/use-bulk-action";
+import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
+import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
 
 interface TrashEntry {
   id: string;
@@ -50,10 +39,7 @@ interface TrashEntry {
   deletedAt: string;
 }
 
-export interface TrashListHandle {
-  toggleSelectAll: (checked: boolean) => void;
-  allSelected: boolean;
-}
+export type TrashListHandle = BulkSelectionHandle;
 
 interface TrashListProps {
   refreshKey: number;
@@ -68,9 +54,6 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
   const { encryptionKey, userId } = useVault();
   const [entries, setEntries] = useState<TrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
-  const [bulkProcessing, setBulkProcessing] = useState(false);
 
   const fetchTrash = useCallback(async () => {
     if (!encryptionKey) return;
@@ -122,29 +105,29 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
     fetchTrash();
   }, [fetchTrash, refreshKey]);
 
-  useEffect(() => {
-    setSelectedIds((prev) => {
-      return reconcileTrashSelectedIds(prev, entries.map((entry) => entry.id));
-    });
-  }, [entries]);
+  const entryIds = entries.map((e) => e.id);
+  const { selectedIds, toggleSelectOne, clearSelection } = useBulkSelection({
+    entryIds,
+    selectionMode,
+    selectAllRef,
+    onSelectedCountChange,
+  });
 
-  // Reset selection when leaving selection mode
-  useEffect(() => {
-    if (!selectionMode) setSelectedIds(new Set());
-  }, [selectionMode]);
-
-  // Sync selected count to parent
-  useEffect(() => {
-    onSelectedCountChange?.(selectedIds.size, entries.length > 0 && selectedIds.size === entries.length);
-  }, [selectedIds.size, entries.length, onSelectedCountChange]);
-
-  // Expose selectAll to parent via imperative handle
-  useImperativeHandle(selectAllRef, () => ({
-    toggleSelectAll: (checked: boolean) => {
-      setSelectedIds(toggleTrashSelectAllIds(entries.map((e) => e.id), checked));
+  const {
+    dialogOpen: bulkDialogOpen,
+    setDialogOpen: setBulkDialogOpen,
+    processing: bulkProcessing,
+    requestAction,
+    executeAction,
+  } = useBulkAction({
+    selectedIds,
+    scope: { type: "personal" },
+    t,
+    onSuccess: () => {
+      clearSelection();
+      fetchTrash();
     },
-    allSelected: entries.length > 0 && selectedIds.size === entries.length,
-  }), [entries, selectedIds]);
+  });
 
   const handleRestore = async (id: string) => {
     try {
@@ -185,42 +168,12 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
       }
       toast.success(t("emptyTrashSuccess"));
       setEntries([]);
-      setSelectedIds(new Set());
+      clearSelection();
     } catch {
       toast.error(t("networkError"));
     }
   };
 
-  const toggleSelectOne = (id: string, checked: boolean) => {
-    setSelectedIds((prev) => toggleTrashSelectOneId(prev, id, checked));
-  };
-
-  const handleBulkRestore = async () => {
-    if (selectedIds.size === 0) return;
-    setBulkProcessing(true);
-    try {
-      const res = await fetch(apiPath.passwordsBulkRestore(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selectedIds) }),
-      });
-      if (!res.ok) {
-        toast.error(t("bulkRestoreFailed"));
-        return;
-      }
-      const json = await res.json();
-      toast.success(
-        t("bulkRestored", { count: json.restoredCount ?? selectedIds.size })
-      );
-      setBulkDialogOpen(false);
-      setEntries((prev) => prev.filter((entry) => !selectedIds.has(entry.id)));
-      setSelectedIds(new Set());
-    } catch {
-      toast.error(t("bulkRestoreFailed"));
-    } finally {
-      setBulkProcessing(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -352,45 +305,23 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
         ))}
       </div>
 
-      {selectionMode && selectedIds.size > 0 && (
-        <div className="sticky bottom-4 z-40 mt-2 flex items-center justify-end rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <Button size="sm" onClick={() => setBulkDialogOpen(true)}>
-            <RotateCcw className="h-3.5 w-3.5 mr-1" />
-            {t("restoreSelected")}
-          </Button>
-        </div>
-      )}
+      <FloatingActionBar visible={selectionMode && selectedIds.size > 0} position="sticky">
+        <Button size="sm" onClick={() => requestAction("restore")}>
+          <RotateCcw className="h-3.5 w-3.5 mr-1" />
+          {t("restoreSelected")}
+        </Button>
+      </FloatingActionBar>
 
-      <AlertDialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("restoreSelected")}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("bulkRestoreConfirm", { count: selectedIds.size })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={bulkProcessing}>
-              {tl("cancel")}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                void handleBulkRestore();
-              }}
-              disabled={bulkProcessing}
-            >
-              {bulkProcessing ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                tl("confirm")
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <BulkActionConfirmDialog
+        open={bulkDialogOpen}
+        onOpenChange={setBulkDialogOpen}
+        title={t("restoreSelected")}
+        description={t("bulkRestoreConfirm", { count: selectedIds.size })}
+        cancelLabel={tl("cancel")}
+        confirmLabel={tl("confirm")}
+        processing={bulkProcessing}
+        onConfirm={() => void executeAction()}
+      />
     </div>
   );
 }

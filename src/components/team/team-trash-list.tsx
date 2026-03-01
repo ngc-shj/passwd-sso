@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
+import { useEffect, useState, useCallback, forwardRef } from "react";
 import { useTranslations } from "next-intl";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,25 +14,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Building2, Trash2, RotateCcw, Loader2, FileText, CreditCard, IdCard } from "lucide-react";
+import { Building2, Trash2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
 import { toast } from "sonner";
+import { useBulkSelection } from "@/hooks/use-bulk-selection";
+import { useBulkAction } from "@/hooks/use-bulk-action";
+import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
+import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
 import { TEAM_ROLE, ENTRY_TYPE, API_PATH, apiPath } from "@/lib/constants";
-import {
-  reconcileSelectedIds,
-  toggleSelectAllIds,
-  toggleSelectOneId,
-} from "@/components/passwords/password-list-selection";
 import type { EntryTypeValue } from "@/lib/constants";
+import type { BulkSelectionHandle } from "@/hooks/use-bulk-selection";
 import {
   compareEntriesByDeletedAt,
   type EntrySortOption,
@@ -57,10 +47,7 @@ interface TeamTrashEntry {
   deletedAt: string;
 }
 
-export interface TeamTrashListHandle {
-  toggleSelectAll: (checked: boolean) => void;
-  allSelected: boolean;
-}
+export type TeamTrashListHandle = BulkSelectionHandle;
 
 interface TeamTrashListProps {
   teamId?: string;
@@ -69,7 +56,6 @@ interface TeamTrashListProps {
   sortBy?: EntrySortOption;
   selectionMode?: boolean;
   onSelectedCountChange?: (count: number, allSelected: boolean) => void;
-  selectAllRef?: React.Ref<TeamTrashListHandle>;
 }
 
 export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>(
@@ -81,7 +67,6 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
       sortBy = "updatedAt",
       selectionMode: selectionModeProp,
       onSelectedCountChange,
-      selectAllRef,
     },
     ref,
   ) {
@@ -91,9 +76,6 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
   const { getTeamEncryptionKey } = useTeamVault();
   const [entries, setEntries] = useState<TeamTrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
-  const [bulkProcessing, setBulkProcessing] = useState(false);
 
   // Selection only works when scoped to a single team
   const effectiveSelectionMode = scopedTeamId ? (selectionModeProp ?? false) : false;
@@ -191,62 +173,29 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
 
   const sortedFilteredIds = sortedFiltered.map((e) => e.id);
 
-  // Reconcile stale selectedIds when entries change
-  useEffect(() => {
-    setSelectedIds((prev) => {
-      return reconcileSelectedIds(prev, sortedFilteredIds);
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries]);
+  const { selectedIds, toggleSelectOne, clearSelection } = useBulkSelection({
+    entryIds: sortedFilteredIds,
+    selectionMode: effectiveSelectionMode,
+    selectAllRef: ref,
+    onSelectedCountChange,
+  });
 
-  // Reset selection when leaving selection mode
-  useEffect(() => {
-    if (!effectiveSelectionMode) setSelectedIds(new Set());
-  }, [effectiveSelectionMode]);
-
-  // Sync selected count to parent
-  useEffect(() => {
-    onSelectedCountChange?.(selectedIds.size, sortedFilteredIds.length > 0 && selectedIds.size === sortedFilteredIds.length);
-  }, [selectedIds.size, sortedFilteredIds.length, onSelectedCountChange]);
-
-  // Expose selectAll to parent via imperative handle
-  useImperativeHandle(selectAllRef ?? ref, () => ({
-    toggleSelectAll: (checked: boolean) => {
-      setSelectedIds(toggleSelectAllIds(sortedFilteredIds, checked));
-    },
-    allSelected: sortedFilteredIds.length > 0 && selectedIds.size === sortedFilteredIds.length,
-  }), [sortedFilteredIds, selectedIds]);
-
-  const toggleSelectOne = (id: string, checked: boolean) => {
-    setSelectedIds((prev) => toggleSelectOneId(prev, id, checked));
-  };
-
-  const handleBulkRestore = async () => {
-    if (selectedIds.size === 0 || !scopedTeamId) return;
-    setBulkProcessing(true);
-    try {
-      const res = await fetch(apiPath.teamPasswordsBulkRestore(scopedTeamId), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selectedIds) }),
-      });
-      if (!res.ok) {
-        toast.error(t("bulkRestoreFailed"));
-        return;
-      }
-      const json = await res.json();
-      toast.success(
-        t("bulkRestored", { count: json.restoredCount ?? selectedIds.size })
-      );
-      setBulkDialogOpen(false);
-      setSelectedIds(new Set());
+  const {
+    dialogOpen: bulkDialogOpen,
+    setDialogOpen: setBulkDialogOpen,
+    pendingAction,
+    processing: bulkProcessing,
+    requestAction,
+    executeAction,
+  } = useBulkAction({
+    selectedIds,
+    scope: { type: "team", teamId: scopedTeamId ?? "" },
+    t,
+    onSuccess: () => {
+      clearSelection();
       fetchTrash();
-    } catch {
-      toast.error(t("bulkRestoreFailed"));
-    } finally {
-      setBulkProcessing(false);
-    }
-  };
+    },
+  });
 
   const handleRestore = async (entry: TeamTrashEntry) => {
     try {
@@ -386,50 +335,23 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
         ))}
       </div>
 
-      {effectiveSelectionMode && selectedIds.size > 0 && (
-        <div className="fixed bottom-4 inset-x-0 z-40 flex justify-center px-4 md:pl-60 pointer-events-none">
-          <div className="pointer-events-auto w-full max-w-4xl flex items-center justify-end rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
-            <Button
-              size="sm"
-              onClick={() => setBulkDialogOpen(true)}
-            >
-              <RotateCcw className="h-3.5 w-3.5 mr-1" />
-              {t("restoreSelected")}
-            </Button>
-          </div>
-        </div>
-      )}
+      <FloatingActionBar visible={effectiveSelectionMode && selectedIds.size > 0} position="fixed">
+        <Button size="sm" onClick={() => requestAction("restore")}>
+          <RotateCcw className="h-3.5 w-3.5 mr-1" />
+          {t("restoreSelected")}
+        </Button>
+      </FloatingActionBar>
 
-      <AlertDialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("restoreSelected")}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("bulkRestoreConfirm", { count: selectedIds.size })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={bulkProcessing}>
-              {tl("cancel")}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                void handleBulkRestore();
-              }}
-              disabled={bulkProcessing}
-            >
-              {bulkProcessing ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                tl("confirm")
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <BulkActionConfirmDialog
+        open={bulkDialogOpen}
+        onOpenChange={setBulkDialogOpen}
+        title={pendingAction === "restore" ? t("restoreSelected") : ""}
+        description={pendingAction === "restore" ? t("bulkRestoreConfirm", { count: selectedIds.size }) : ""}
+        cancelLabel={tl("cancel")}
+        confirmLabel={tl("confirm")}
+        processing={bulkProcessing}
+        onConfirm={executeAction}
+      />
     </div>
   );
 });

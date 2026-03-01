@@ -22,17 +22,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare, CheckSquare, Loader2, FolderOpen, Tag } from "lucide-react";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare, CheckSquare, FolderOpen, Tag } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -43,11 +33,10 @@ import type { FolderItem } from "@/components/folders/folder-tree";
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto-aad";
-import {
-  reconcileSelectedIds,
-  toggleSelectAllIds,
-  toggleSelectOneId,
-} from "@/components/passwords/password-list-selection";
+import { useBulkSelection } from "@/hooks/use-bulk-selection";
+import { useBulkAction } from "@/hooks/use-bulk-action";
+import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
+import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
 
 interface TeamInfo {
   id: string;
@@ -163,10 +152,6 @@ export default function TeamDashboardPage({
     expiresAt?: string | null;
   } | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
-  const [bulkAction, setBulkAction] = useState<"trash" | "archive" | "unarchive">("trash");
-  const [bulkProcessing, setBulkProcessing] = useState(false);
   const archivedListRef = useRef<TeamArchivedListHandle>(null);
   const trashListRef = useRef<TeamTrashListHandle>(null);
   const [childSelectedCount, setChildSelectedCount] = useState(0);
@@ -195,10 +180,6 @@ export default function TeamDashboardPage({
     setPrevViewKey(viewKey);
     setSelectionMode(false);
   }
-
-  const toggleSelectOne = (id: string, checked: boolean) => {
-    setSelectedIds((prev) => toggleSelectOneId(prev, id, checked));
-  };
 
   const fetchTeam = async (): Promise<boolean> => {
     try {
@@ -633,21 +614,31 @@ export default function TeamDashboardPage({
     compareEntriesWithFavorite(a, b, sortBy)
   );
 
-  const allSelected = sortedFiltered.length > 0 && selectedIds.size === sortedFiltered.length;
+  // Bulk selection for main password list
+  const entryIds = sortedFiltered.map((e) => e.id);
+  const { selectedIds, allSelected, toggleSelectOne, toggleSelectAll, clearSelection } =
+    useBulkSelection({
+      entryIds,
+      selectionMode,
+    });
 
-  const handleToggleSelectAll = (checked: boolean) => {
-    setSelectedIds(toggleSelectAllIds(sortedFiltered.map((e) => e.id), checked));
-  };
-
-  // Reconcile selectedIds when entries change (remove stale IDs)
-  useEffect(() => {
-    setSelectedIds((prev) => reconcileSelectedIds(prev, sortedFiltered.map((e) => e.id)));
-  }, [sortedFiltered.length]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reset selectedIds when leaving selection mode
-  useEffect(() => {
-    if (!selectionMode) setSelectedIds(new Set());
-  }, [selectionMode]);
+  // Bulk action for main password list
+  const {
+    dialogOpen: bulkDialogOpen,
+    setDialogOpen: setBulkDialogOpen,
+    pendingAction,
+    processing: bulkProcessing,
+    requestAction,
+    executeAction,
+  } = useBulkAction({
+    selectedIds,
+    scope: { type: "team", teamId },
+    t: tl,
+    onSuccess: () => {
+      clearSelection();
+      fetchPasswords();
+    },
+  });
 
   // ESC key to exit selection mode
   useEffect(() => {
@@ -659,61 +650,6 @@ export default function TeamDashboardPage({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [selectionMode]);
-
-  const handleBulkAction = async () => {
-    if (selectedIds.size === 0) return;
-    setBulkProcessing(true);
-    try {
-      const endpoint =
-        bulkAction === "archive" || bulkAction === "unarchive"
-          ? apiPath.teamPasswordsBulkArchive(teamId)
-          : apiPath.teamPasswordsBulkTrash(teamId);
-      const body =
-        bulkAction === "archive" || bulkAction === "unarchive"
-          ? { ids: Array.from(selectedIds), operation: bulkAction }
-          : { ids: Array.from(selectedIds) };
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) throw new Error("bulk action failed");
-      const json = await res.json();
-      if (bulkAction === "archive") {
-        toast.success(
-          tl("bulkArchived", {
-            count: json.processedCount ?? json.archivedCount ?? selectedIds.size,
-          })
-        );
-      } else if (bulkAction === "unarchive") {
-        toast.success(
-          tl("bulkUnarchived", {
-            count: json.processedCount ?? json.unarchivedCount ?? selectedIds.size,
-          })
-        );
-      } else {
-        toast.success(
-          tl("bulkMovedToTrash", {
-            count: json.movedCount ?? selectedIds.size,
-          })
-        );
-      }
-      setBulkDialogOpen(false);
-      setSelectedIds(new Set());
-      fetchPasswords();
-    } catch {
-      toast.error(
-        bulkAction === "archive"
-          ? tl("bulkArchiveFailed")
-          : bulkAction === "unarchive"
-            ? tl("bulkUnarchiveFailed")
-            : tl("bulkMoveFailed")
-      );
-    } finally {
-      setBulkProcessing(false);
-    }
-  };
 
   if (loadError) {
     return (
@@ -760,7 +696,7 @@ export default function TeamDashboardPage({
                       } else if (isTeamTrash) {
                         trashListRef.current?.toggleSelectAll(checked);
                       } else {
-                        handleToggleSelectAll(checked);
+                        toggleSelectAll(checked);
                       }
                     }}
                     aria-label={tDash("selectAll")}
@@ -1033,36 +969,16 @@ export default function TeamDashboardPage({
               )
             ))}
 
-            {selectionMode && selectedIds.size > 0 && (
-              <div className="fixed bottom-4 inset-x-0 z-40 flex justify-center px-4 md:pl-60 pointer-events-none">
-                <div className="pointer-events-auto w-full max-w-4xl flex items-center justify-end rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        setBulkAction("archive");
-                        setBulkDialogOpen(true);
-                      }}
-                    >
-                      <Archive className="h-4 w-4 mr-2" />
-                      {tl("moveSelectedToArchive")}
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => {
-                        setBulkAction("trash");
-                        setBulkDialogOpen(true);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      {tl("moveSelectedToTrash")}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
+            <FloatingActionBar visible={selectionMode && selectedIds.size > 0} position="fixed">
+              <Button variant="secondary" size="sm" onClick={() => requestAction("archive")}>
+                <Archive className="h-4 w-4 mr-2" />
+                {tl("moveSelectedToArchive")}
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => requestAction("trash")}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                {tl("moveSelectedToTrash")}
+              </Button>
+            </FloatingActionBar>
           </div>
         )}
       </div>
@@ -1080,44 +996,28 @@ export default function TeamDashboardPage({
         entryType={editData?.entryType ?? newEntryType}
       />
 
-      <AlertDialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {bulkAction === "archive"
-                ? tl("moveSelectedToArchive")
-                : bulkAction === "unarchive"
-                  ? tl("moveSelectedToUnarchive")
-                  : tl("moveSelectedToTrash")}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {bulkAction === "archive"
-                ? tl("bulkArchiveConfirm", { count: selectedIds.size })
-                : bulkAction === "unarchive"
-                  ? tl("bulkUnarchiveConfirm", { count: selectedIds.size })
-                  : tl("bulkMoveConfirm", { count: selectedIds.size })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={bulkProcessing}>
-              {tl("cancel")}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                void handleBulkAction();
-              }}
-              disabled={bulkProcessing}
-            >
-              {bulkProcessing ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                tl("confirm")
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <BulkActionConfirmDialog
+        open={bulkDialogOpen}
+        onOpenChange={setBulkDialogOpen}
+        title={
+          pendingAction === "archive"
+            ? tl("moveSelectedToArchive")
+            : pendingAction === "unarchive"
+              ? tl("moveSelectedToUnarchive")
+              : tl("moveSelectedToTrash")
+        }
+        description={
+          pendingAction === "archive"
+            ? tl("bulkArchiveConfirm", { count: selectedIds.size })
+            : pendingAction === "unarchive"
+              ? tl("bulkUnarchiveConfirm", { count: selectedIds.size })
+              : tl("bulkMoveConfirm", { count: selectedIds.size })
+        }
+        cancelLabel={tl("cancel")}
+        confirmLabel={tl("confirm")}
+        processing={bulkProcessing}
+        onConfirm={() => void executeAction()}
+      />
     </div>
   );
 }
