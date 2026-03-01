@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { TeamCreateDialog } from "@/components/team/team-create-dialog";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
-import { Plus, Building2, CalendarClock } from "lucide-react";
+import { Plus, Building2, CalendarClock, Globe } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 
@@ -19,6 +19,8 @@ interface TeamListItem {
   role: string;
   createdAt: string;
   memberCount: number;
+  tenantName?: string;
+  isCrossTenant?: boolean;
 }
 
 export default function TeamsPage() {
@@ -95,6 +97,12 @@ export default function TeamsPage() {
                 <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto_auto] md:items-center">
                   <div className="min-w-0">
                     <h3 className="truncate text-base font-semibold">{team.name}</h3>
+                    {team.isCrossTenant && (
+                      <p className="truncate text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                        <Globe className="h-3 w-3 shrink-0" />
+                        {team.tenantName}
+                      </p>
+                    )}
                     <p className="truncate text-sm text-muted-foreground">
                       {team.description || "—"}
                     </p>

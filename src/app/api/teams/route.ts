@@ -5,8 +5,9 @@ import { prisma } from "@/lib/prisma";
 import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
-import { resolveUserTenantId, withUserTenantRls } from "@/lib/tenant-context";
+import { resolveUserTenantId, resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { getLogger } from "@/lib/logger";
 
 // GET /api/teams — List teams the user belongs to
 export async function GET() {
@@ -15,8 +16,9 @@ export async function GET() {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const memberships = await withBypassRls(prisma, async () =>
-    prisma.teamMember.findMany({
+  const { userTenantId, memberships } = await withBypassRls(prisma, async () => {
+    const uid = await resolveUserTenantIdFromClient(prisma, session.user.id);
+    const data = await prisma.teamMember.findMany({
       where: { userId: session.user.id, deactivatedAt: null },
       include: {
         team: {
@@ -29,12 +31,16 @@ export async function GET() {
             _count: {
               select: { members: true },
             },
+            tenant: {
+              select: { id: true, name: true },
+            },
           },
         },
       },
       orderBy: { team: { name: "asc" } },
-    }),
-  );
+    });
+    return { userTenantId: uid, memberships: data };
+  });
 
   const teams = memberships.map((m) => ({
     id: m.team.id,
@@ -44,7 +50,18 @@ export async function GET() {
     createdAt: m.team.createdAt,
     role: m.role,
     memberCount: m.team._count.members,
+    tenantName: m.team.tenant.name,
+    isCrossTenant: userTenantId !== m.team.tenant.id,
   }));
+
+  const logger = getLogger();
+  const crossTenantTeams = teams.filter((t) => t.isCrossTenant);
+  if (crossTenantTeams.length > 0) {
+    logger.info(
+      { userId: session.user.id, crossTenantTeamIds: crossTenantTeams.map((t) => t.id) },
+      "Cross-tenant team memberships detected",
+    );
+  }
 
   return NextResponse.json(teams);
 }
