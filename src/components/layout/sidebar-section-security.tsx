@@ -74,6 +74,10 @@ interface UtilitiesSectionProps {
   t: (key: string) => string;
   tTeam: (key: string) => string;
   selectedTeam?: SecurityTeam | null;
+  isTeamSettingsActive?: boolean;
+  isSettingsActive?: boolean;
+  isExportActive?: boolean;
+  isImportActive?: boolean;
   onNavigate: () => void;
 }
 
@@ -83,6 +87,10 @@ export function UtilitiesSection({
   t,
   tTeam,
   selectedTeam,
+  isTeamSettingsActive,
+  isSettingsActive,
+  isExportActive,
+  isImportActive,
   onNavigate,
 }: UtilitiesSectionProps) {
   const scopedTeam = selectedTeam ?? null;
@@ -100,7 +108,7 @@ export function UtilitiesSection({
         <div className="space-y-1">
           {scopedTeam &&
             (scopedTeam.role === TEAM_ROLE.OWNER || scopedTeam.role === TEAM_ROLE.ADMIN) ? (
-            <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+            <Button variant={isTeamSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
               <Link href={`/dashboard/teams/${scopedTeam.id}/settings`} onClick={onNavigate}>
                 <Settings className="h-4 w-4" />
                 {tTeam("teamSettings")}
@@ -108,13 +116,13 @@ export function UtilitiesSection({
             </Button>
           ) : !scopedTeam && (
             <>
-              <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+              <Button variant={isSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
                 <Link href="/dashboard/settings" onClick={onNavigate}>
                   <Monitor className="h-4 w-4" />
                   {t("settings")}
                 </Link>
               </Button>
-              <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+              <Button variant={isTeamSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
                 <Link href="/dashboard/teams" onClick={onNavigate}>
                   <Settings className="h-4 w-4" />
                   {tTeam("teamSettings")}
@@ -122,13 +130,13 @@ export function UtilitiesSection({
               </Button>
             </>
           )}
-          <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+          <Button variant={isExportActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
             <Link href={exportHref} onClick={onNavigate}>
               <Download className="h-4 w-4" />
               {t("export")}
             </Link>
           </Button>
-          <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+          <Button variant={isImportActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
             <Link href={importHref} onClick={onNavigate}>
               <Upload className="h-4 w-4" />
               {t("import")}
