@@ -52,6 +52,7 @@ export const NAMESPACES = [
   "Attachments",
   "Sessions",
   "Notifications",
+  "TeamPolicy",
 ] as const;
 
 export type Namespace = (typeof NAMESPACES)[number];

@@ -186,6 +186,18 @@ export const updateTeamSchema = z.object({
   description: z.string().max(500).trim().optional().or(z.literal("")),
 });
 
+export const upsertTeamPolicySchema = z.object({
+  minPasswordLength: z.number().int().min(0).max(128).default(0),
+  requireUppercase: z.boolean().default(false),
+  requireLowercase: z.boolean().default(false),
+  requireNumbers: z.boolean().default(false),
+  requireSymbols: z.boolean().default(false),
+  maxSessionDurationMinutes: z.number().int().min(5).max(43200).nullable().default(null),
+  requireRepromptForAll: z.boolean().default(false),
+  allowExport: z.boolean().default(true),
+  allowSharing: z.boolean().default(true),
+});
+
 export const inviteSchema = z.object({
   email: z.string().email(),
   role: z.enum(TEAM_INVITE_ROLE_VALUES).default(TEAM_ROLE.MEMBER),

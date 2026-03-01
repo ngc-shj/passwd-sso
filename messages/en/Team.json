@@ -23,6 +23,7 @@
   "createdAtLabel": "Created: {date}",
   "settings": "Settings",
   "generalSettings": "General",
+  "securityPolicy": "Policy",
   "teamSettings": "Team Settings",
   "updateTeam": "Update Team",
   "updated": "Team updated",
