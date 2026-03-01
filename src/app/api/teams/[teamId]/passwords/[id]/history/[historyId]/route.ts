@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; id: string; historyId: string }> };
 
@@ -25,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await withUserTenantRls(session.user.id, async () =>
+  const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
       select: { teamId: true, entryType: true },
@@ -36,7 +36,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const history = await withUserTenantRls(session.user.id, async () =>
+  const history = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntryHistory.findUnique({
       where: { id: historyId },
     }),

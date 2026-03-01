@@ -7,7 +7,7 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const trashOnly = searchParams.get("trash") === "true";
   const archivedOnly = searchParams.get("archived") === "true";
 
-  const passwords = await withUserTenantRls(session.user.id, async () =>
+  const passwords = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findMany({
       where: {
         teamId: teamId,
@@ -59,8 +59,8 @@ export async function GET(req: NextRequest, { params }: Params) {
       },
       include: {
         tags: { select: { id: true, name: true, color: true } },
-        createdBy: { select: { id: true, name: true, image: true } },
-        updatedBy: { select: { id: true, name: true } },
+        createdBy: { select: { id: true, name: true, email: true, image: true } },
+        updatedBy: { select: { id: true, name: true, email: true } },
         favorites: {
           where: { userId: session.user.id },
           select: { id: true },
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   // Auto-purge items deleted more than 30 days ago (async nonblocking, F-20)
   if (!trashOnly) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    withUserTenantRls(session.user.id, async () =>
+    withTeamTenantRls(teamId, async () =>
       prisma.teamPasswordEntry.deleteMany({
         where: {
           teamId: teamId,
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, entryType, tagIds, teamFolderId, requireReprompt, expiresAt } = parsed.data;
 
   // Validate teamKeyVersion matches current team key version
-  const team = await withUserTenantRls(session.user.id, async () =>
+  const team = await withTeamTenantRls(teamId, async () =>
     prisma.team.findUnique({
       where: { id: teamId },
       select: { teamKeyVersion: true, tenantId: true },
@@ -163,7 +163,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // Validate teamFolderId belongs to this team
   if (teamFolderId) {
-    const folder = await withUserTenantRls(session.user.id, async () =>
+    const folder = await withTeamTenantRls(teamId, async () =>
       prisma.teamFolder.findUnique({
         where: { id: teamFolderId },
         select: { teamId: true },
@@ -177,7 +177,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Use client-provided ID (bound into AAD during encryption) or generate one
   const entryId = clientId ?? crypto.randomUUID();
 
-  const entry = await withUserTenantRls(session.user.id, async () =>
+  const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.create({
       data: {
         id: entryId,

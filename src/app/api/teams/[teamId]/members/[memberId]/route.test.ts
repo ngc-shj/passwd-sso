@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithUserTenantRls } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -27,7 +27,7 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
     mockRequireTeamPermission: vi.fn(),
     mockIsRoleAbove: vi.fn(),
     TeamAuthError: _TeamAuthError,
-    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
   };
 });
 
@@ -47,7 +47,7 @@ vi.mock("@/lib/team-auth", () => ({
   TeamAuthError,
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+  withTeamTenantRls: mockWithTeamTenantRls,
 }));
 
 import { PUT, DELETE } from "./route";

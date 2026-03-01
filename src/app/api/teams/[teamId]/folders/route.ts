@@ -11,12 +11,12 @@ import {
 import { API_ERROR } from "@/lib/api-error-codes";
 import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
 
-function getTeamParent(userId: string, id: string): Promise<ParentNode | null> {
-  return withUserTenantRls(userId, async () =>
+function getTeamParent(teamId: string, id: string): Promise<ParentNode | null> {
+  return withTeamTenantRls(teamId, async () =>
     prisma.teamFolder
       .findUnique({ where: { id }, select: { parentId: true, teamId: true } })
       .then((f) => (f ? { parentId: f.parentId, ownerId: f.teamId } : null)),
@@ -41,7 +41,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const folders = await withUserTenantRls(session.user.id, async () =>
+  const folders = await withTeamTenantRls(teamId, async () =>
     prisma.teamFolder.findMany({
       where: { teamId: teamId },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -111,7 +111,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       await validateParentFolder(
         parentId,
         teamId,
-        (parentIdValue) => getTeamParent(session.user.id, parentIdValue),
+        (parentIdValue) => getTeamParent(teamId, parentIdValue),
       );
     } catch {
       return NextResponse.json(
@@ -135,7 +135,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   if (parentId) {
-    const dup = await withUserTenantRls(session.user.id, async () =>
+    const dup = await withTeamTenantRls(teamId, async () =>
       prisma.teamFolder.findUnique({
         where: { name_parentId_teamId: { name, parentId, teamId: teamId } },
       }),
@@ -147,7 +147,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       );
     }
   } else {
-    const rootDup = await withUserTenantRls(session.user.id, async () =>
+    const rootDup = await withTeamTenantRls(teamId, async () =>
       prisma.teamFolder.findFirst({
         where: { name, parentId: null, teamId: teamId },
       }),
@@ -160,7 +160,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
   }
 
-  const team = await withUserTenantRls(session.user.id, async () =>
+  const team = await withTeamTenantRls(teamId, async () =>
     prisma.team.findUnique({
       where: { id: teamId },
       select: { tenantId: true },
@@ -170,7 +170,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const folder = await withUserTenantRls(session.user.id, async () =>
+  const folder = await withTeamTenantRls(teamId, async () =>
     prisma.teamFolder.create({
       data: {
         name,

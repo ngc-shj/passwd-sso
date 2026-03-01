@@ -6,7 +6,7 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type RouteContext = {
   params: Promise<{ teamId: string; id: string; attachmentId: string }>;
@@ -33,7 +33,7 @@ export async function GET(
     throw e;
   }
 
-  const entry = await withUserTenantRls(session.user.id, async () =>
+  const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
       select: { teamId: true },
@@ -44,7 +44,7 @@ export async function GET(
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const attachment = await withUserTenantRls(session.user.id, async () =>
+  const attachment = await withTeamTenantRls(teamId, async () =>
     prisma.attachment.findUnique({
       where: { id: attachmentId, teamPasswordEntryId: id },
     }),
@@ -96,7 +96,7 @@ export async function DELETE(
     throw e;
   }
 
-  const entry = await withUserTenantRls(session.user.id, async () =>
+  const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
       select: { teamId: true },
@@ -107,7 +107,7 @@ export async function DELETE(
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const attachment = await withUserTenantRls(session.user.id, async () =>
+  const attachment = await withTeamTenantRls(teamId, async () =>
     prisma.attachment.findUnique({
       where: { id: attachmentId, teamPasswordEntryId: id },
       select: { id: true, filename: true, encryptedData: true },
@@ -125,7 +125,7 @@ export async function DELETE(
     teamId,
   });
 
-  await withUserTenantRls(session.user.id, async () =>
+  await withTeamTenantRls(teamId, async () =>
     prisma.attachment.delete({
       where: { id: attachmentId },
     }),

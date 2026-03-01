@@ -89,7 +89,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
         ? t("archive")
         : entryType && ENTRY_TYPE_TITLES[entryType]
           ? ENTRY_TYPE_TITLES[entryType]
-          : folderLabel ?? tagLabel ?? t("passwords");
+          : folderLabel ?? tagLabel ?? (folderId || tagId ? "\u00A0" : t("passwords"));
 
   const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
     LOGIN: <KeyRound className="h-6 w-6" />,

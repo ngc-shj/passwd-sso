@@ -647,17 +647,17 @@ export function PasswordCard({
                   )}
                 </>
               )}
-              {createdBy && isTeamMode && (
+              {isTeamMode && (
                 <span className="truncate text-xs font-medium">
-                  {createdBy} / {entryTypeLabel}
-                </span>
-              )}
-              {createdBy && !isTeamMode && (
-                <span className="truncate text-xs">
-                  {createdBy}
+                  {entryTypeLabel}
                 </span>
               )}
             </div>
+            {createdBy && (
+              <span className="truncate text-xs text-muted-foreground block">
+                {createdBy}
+              </span>
+            )}
           </div>
           {tags.length > 0 && (
             <div className="flex gap-1 shrink-0">

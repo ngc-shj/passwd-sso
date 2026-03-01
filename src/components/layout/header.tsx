@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
-import { Building2, KeyRound, Lock, Menu, RefreshCw, ShieldCheck } from "lucide-react";
+import { Building2, Globe, KeyRound, Lock, Menu, RefreshCw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -63,9 +63,20 @@ export function Header({ onMenuToggle }: HeaderProps) {
               </>
             ) : (
               <>
-                <Building2 className="h-4 w-4 shrink-0" />
-                <span className="truncate max-w-[8rem]">
-                  {activeVault.teamName}
+                {activeVault.isCrossTenant ? (
+                  <Globe className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                ) : (
+                  <Building2 className="h-4 w-4 shrink-0" />
+                )}
+                <span className="flex flex-col items-start leading-tight">
+                  <span className="truncate max-w-[8rem]">
+                    {activeVault.teamName}
+                  </span>
+                  {activeVault.isCrossTenant && activeVault.tenantName && (
+                    <span className="truncate max-w-[8rem] text-[10px] text-amber-600 dark:text-amber-400">
+                      {activeVault.tenantName}
+                    </span>
+                  )}
                 </span>
               </>
             )}

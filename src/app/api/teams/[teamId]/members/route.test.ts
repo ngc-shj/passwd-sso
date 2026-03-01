@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockRequireTeamMember, TeamAuthError, mockWithUserTenantRls } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamMember, mockPrismaTenantMember, mockRequireTeamMember, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -13,22 +13,27 @@ const { mockAuth, mockPrismaTeamMember, mockRequireTeamMember, TeamAuthError, mo
   return {
     mockAuth: vi.fn(),
     mockPrismaTeamMember: { findMany: vi.fn() },
+    mockPrismaTenantMember: { findMany: vi.fn() },
     mockRequireTeamMember: vi.fn(),
     TeamAuthError: _TeamAuthError,
-    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+    mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   };
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { teamMember: mockPrismaTeamMember },
+  prisma: { teamMember: mockPrismaTeamMember, tenantMember: mockPrismaTenantMember },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
   TeamAuthError,
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+  withTeamTenantRls: mockWithTeamTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { GET } from "./route";
@@ -62,7 +67,7 @@ describe("GET /api/teams/[teamId]/members", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns list of members", async () => {
+  it("returns list of members with tenantName", async () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([
       {
         id: "m1",
@@ -79,6 +84,10 @@ describe("GET /api/teams/[teamId]/members", () => {
         user: { id: "u2", name: "Member", email: "member@test.com", image: null },
       },
     ]);
+    mockPrismaTenantMember.findMany.mockResolvedValue([
+      { userId: "u1", tenant: { name: "Acme Corp" } },
+      { userId: "u2", tenant: { name: "External Org" } },
+    ]);
 
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
@@ -88,6 +97,40 @@ describe("GET /api/teams/[teamId]/members", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(2);
     expect(json[0].role).toBe(TEAM_ROLE.OWNER);
+    expect(json[0].tenantName).toBe("Acme Corp");
     expect(json[1].role).toBe(TEAM_ROLE.MEMBER);
+    expect(json[1].tenantName).toBe("External Org");
+  });
+
+  it("returns tenantName null when member has no tenant", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      {
+        id: "m1",
+        userId: "u1",
+        role: TEAM_ROLE.OWNER,
+        createdAt: now,
+        user: { id: "u1", name: "Owner", email: "owner@test.com", image: null },
+      },
+    ]);
+    mockPrismaTenantMember.findMany.mockResolvedValue([]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+    expect(json[0].tenantName).toBeNull();
+  });
+
+  it("uses withBypassRls for tenant member lookup", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([]);
+    mockPrismaTenantMember.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function));
   });
 });

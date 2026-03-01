@@ -5,7 +5,7 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { teamMemberKeySchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   // Verify target member exists, belongs to this team, and is active
-  const targetMember = await withUserTenantRls(session.user.id, async () =>
+  const targetMember = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.findUnique({
       where: { id: memberId },
       select: { teamId: true, userId: true, keyDistributed: true, deactivatedAt: true },
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   // Verify the target user has an ECDH public key (vault set up)
-  const targetUser = await withUserTenantRls(session.user.id, async () =>
+  const targetUser = await withTeamTenantRls(teamId, async () =>
     prisma.user.findUnique({
       where: { id: targetMember.userId },
       select: { ecdhPublicKey: true },
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const data = parsed.data;
 
   // Atomic check-and-set: re-verify keyDistributed + deactivatedAt + teamKeyVersion inside transaction (S-12/F-16/S-24)
-  const distributed = await withUserTenantRls(session.user.id, async () =>
+  const distributed = await withTeamTenantRls(teamId, async () =>
     prisma.$transaction(async (tx) => {
       const member = await tx.teamMember.findUnique({
         where: { id: memberId },

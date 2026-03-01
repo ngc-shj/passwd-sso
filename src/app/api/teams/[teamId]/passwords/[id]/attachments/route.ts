@@ -6,7 +6,7 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -42,7 +42,7 @@ export async function GET(
     throw e;
   }
 
-  const entry = await withUserTenantRls(session.user.id, async () =>
+  const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
       select: { teamId: true, tenantId: true },
@@ -53,7 +53,7 @@ export async function GET(
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  const attachments = await withUserTenantRls(session.user.id, async () =>
+  const attachments = await withTeamTenantRls(teamId, async () =>
     prisma.attachment.findMany({
       where: { teamPasswordEntryId: id },
       select: {
@@ -91,7 +91,7 @@ export async function POST(
     throw e;
   }
 
-  const entry = await withUserTenantRls(session.user.id, async () =>
+  const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
       select: { teamId: true, tenantId: true },
@@ -103,7 +103,7 @@ export async function POST(
   }
 
   // Check attachment count limit
-  const count = await withUserTenantRls(session.user.id, async () =>
+  const count = await withTeamTenantRls(teamId, async () =>
     prisma.attachment.count({
       where: { teamPasswordEntryId: id },
     }),
@@ -208,7 +208,7 @@ export async function POST(
   const teamKeyVersion = teamKeyVersionStr ? parseInt(teamKeyVersionStr, 10) : 1;
 
   // Validate teamKeyVersion matches current team key version (S-20/F-23)
-  const team = await withUserTenantRls(session.user.id, async () =>
+  const team = await withTeamTenantRls(teamId, async () =>
     prisma.team.findUnique({
       where: { id: teamId },
       select: { teamKeyVersion: true },
@@ -228,7 +228,7 @@ export async function POST(
 
   let attachment;
   try {
-    attachment = await withUserTenantRls(session.user.id, async () =>
+    attachment = await withTeamTenantRls(teamId, async () =>
       prisma.attachment.create({
         data: {
           id: attachmentId,

@@ -46,6 +46,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
           createdAt: true,
           updatedAt: true,
           _count: { select: { members: true, passwords: true } },
+          tenant: { select: { name: true } },
         },
       }),
     );
@@ -56,6 +57,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
     return NextResponse.json({
       ...team,
+      tenantName: team.tenant.name,
       role: membership.role,
       memberCount: team._count.members,
       passwordCount: team._count.passwords,

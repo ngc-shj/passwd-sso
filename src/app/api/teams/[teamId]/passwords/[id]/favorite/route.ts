@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -27,7 +27,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
   }
 
   // Verify the password belongs to this team
-  const entry = await withUserTenantRls(session.user.id, async () =>
+  const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
       select: { teamId: true, tenantId: true },
@@ -39,7 +39,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
   }
 
   // Toggle: if exists, remove; if not, create
-  const existing = await withUserTenantRls(session.user.id, async () =>
+  const existing = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordFavorite.findUnique({
       where: {
         userId_teamPasswordEntryId: {
@@ -51,14 +51,14 @@ export async function POST(_req: NextRequest, { params }: Params) {
   );
 
   if (existing) {
-    await withUserTenantRls(session.user.id, async () =>
+    await withTeamTenantRls(teamId, async () =>
       prisma.teamPasswordFavorite.delete({
         where: { id: existing.id },
       }),
     );
     return NextResponse.json({ isFavorite: false });
   } else {
-    await withUserTenantRls(session.user.id, async () =>
+    await withTeamTenantRls(teamId, async () =>
       prisma.teamPasswordFavorite.create({
         data: {
           userId: session.user.id,

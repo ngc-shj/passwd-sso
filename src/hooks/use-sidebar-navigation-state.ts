@@ -60,6 +60,16 @@ export function useSidebarNavigationState({
     const activeTeamTypeFilter = activeTeamId ? searchParams.get("type") : null;
     const activeTeamScope = activeTeamId ? searchParams.get("scope") : null;
     const isTeamsManage = cleanPath === "/dashboard/teams";
+    const isTeamSettings = teamMatch
+      ? cleanPath === `/dashboard/teams/${teamMatch[1]}/settings`
+      : false;
+    const isSettings = cleanPath === "/dashboard/settings";
+    const isExport = teamMatch
+      ? cleanPath === `/dashboard/teams/${teamMatch[1]}/export`
+      : cleanPath === "/dashboard/export";
+    const isImport = teamMatch
+      ? cleanPath === `/dashboard/teams/${teamMatch[1]}/import`
+      : cleanPath === "/dashboard/import";
     const isShareLinks = cleanPath === "/dashboard/share-links";
     const isEmergencyAccess =
       cleanPath === "/dashboard/emergency-access" ||
@@ -100,7 +110,10 @@ export function useSidebarNavigationState({
           !selectedTeamTypeFilter &&
           !selectedTeamScope &&
           !selectedTeamTagId &&
-          !selectedTeamFolderId
+          !selectedTeamFolderId &&
+          !isTeamSettings &&
+          !isExport &&
+          !isImport
         : isVaultAll;
 
     const isSelectedVaultFavorites =
@@ -140,6 +153,10 @@ export function useSidebarNavigationState({
       activeTeamId,
       activeAuditTeamId,
       isTeamsManage,
+      isTeamSettings,
+      isSettings,
+      isExport,
+      isImport,
       isWatchtower,
       isShareLinks,
       isEmergencyAccess,

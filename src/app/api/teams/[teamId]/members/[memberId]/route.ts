@@ -10,7 +10,7 @@ import {
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -37,7 +37,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const target = await withUserTenantRls(session.user.id, async () =>
+  const target = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.findUnique({
       where: { id: memberId },
     }),
@@ -72,7 +72,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
 
     // Transfer: promote target to OWNER, demote self to ADMIN
-    const updated = await withUserTenantRls(session.user.id, async () => {
+    const updated = await withTeamTenantRls(teamId, async () => {
       await prisma.teamMember.update({
         where: { id: actorMembership.id },
         data: { role: TEAM_ROLE.ADMIN },
@@ -127,7 +127,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     );
   }
 
-  const updated = await withUserTenantRls(session.user.id, async () =>
+  const updated = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.update({
       where: { id: memberId },
       data: { role: parsed.data.role },
@@ -181,7 +181,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const target = await withUserTenantRls(session.user.id, async () =>
+  const target = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.findUnique({
       where: { id: memberId },
     }),
@@ -208,7 +208,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     );
   }
 
-  await withUserTenantRls(session.user.id, async () =>
+  await withTeamTenantRls(teamId, async () =>
     prisma.$transaction([
       prisma.teamMemberKey.deleteMany({ where: { teamId: teamId, userId: target.userId } }),
       prisma.scimExternalMapping.deleteMany({

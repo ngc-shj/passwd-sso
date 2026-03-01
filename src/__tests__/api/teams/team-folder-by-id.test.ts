@@ -10,7 +10,7 @@ const {
   mockTeamFolderFindMany,
   mockTeamFolderFindFirst,
   mockTransaction,
-  mockWithUserTenantRls,
+  mockWithTeamTenantRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
@@ -19,7 +19,7 @@ const {
   mockTeamFolderFindMany: vi.fn(),
   mockTeamFolderFindFirst: vi.fn(),
   mockTransaction: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -54,7 +54,7 @@ vi.mock("@/lib/folder-utils", () => ({
   checkCircularReference: vi.fn().mockResolvedValue(false),
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+  withTeamTenantRls: mockWithTeamTenantRls,
 }));
 
 import { PUT, DELETE } from "@/app/api/teams/[teamId]/folders/[id]/route";

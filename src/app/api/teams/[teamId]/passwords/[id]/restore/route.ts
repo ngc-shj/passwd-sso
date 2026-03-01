@@ -5,7 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const existing = await withUserTenantRls(session.user.id, async () =>
+  const existing = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
     }),
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  await withUserTenantRls(session.user.id, async () =>
+  await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.update({
       where: { id },
       data: { deletedAt: null },

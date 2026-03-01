@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { INVITATION_STATUS } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withUserTenantRls, withTeamTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 
 const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 
@@ -34,7 +35,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.TOKEN_REQUIRED }, { status: 400 });
   }
 
-  const invitation = await withUserTenantRls(session.user.id, async () =>
+  // Invitation lookup must bypass RLS: the invitee is not yet in the team's tenant
+  const invitation = await withBypassRls(prisma, async () =>
     prisma.teamInvitation.findUnique({
       where: { token },
       include: { team: { select: { id: true, name: true, slug: true, tenantId: true } } },
@@ -56,7 +58,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (invitation.expiresAt < new Date()) {
-    await withUserTenantRls(session.user.id, async () =>
+    await withTeamTenantRls(invitation.teamId, async () =>
       prisma.teamInvitation.update({
         where: { id: invitation.id },
         data: { status: INVITATION_STATUS.EXPIRED },
@@ -76,8 +78,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Check if already a member (active or deactivated)
-  const existingMember = await withUserTenantRls(session.user.id, async () =>
+  // Check if already a member (active or deactivated) — team tenant context
+  const existingMember = await withTeamTenantRls(invitation.teamId, async () =>
     prisma.teamMember.findUnique({
       where: {
         teamId_userId: {
@@ -91,7 +93,7 @@ export async function POST(req: NextRequest) {
   if (existingMember) {
     // Active member → already a member
     if (existingMember.deactivatedAt === null) {
-      await withUserTenantRls(session.user.id, async () =>
+      await withTeamTenantRls(invitation.teamId, async () =>
         prisma.teamInvitation.update({
           where: { id: invitation.id },
           data: { status: INVITATION_STATUS.ACCEPTED },
@@ -126,7 +128,8 @@ export async function POST(req: NextRequest) {
 
   // Create membership (or re-activate if previously deactivated) and mark invitation as accepted.
   // keyDistributed starts as false (admin must distribute team key).
-  await withUserTenantRls(session.user.id, async () =>
+  // Use team tenant context: team_members and team_invitations belong to the team's tenant.
+  await withTeamTenantRls(invitation.teamId, async () =>
     prisma.$transaction([
       prisma.teamMember.upsert({
         where: {

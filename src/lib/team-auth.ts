@@ -11,7 +11,7 @@
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 import type { TeamRole } from "@prisma/client";
 
 // ─── Permission Definitions ─────────────────────────────────────
@@ -92,7 +92,7 @@ async function getTeamMembershipInRlsContext(userId: string, teamId: string) {
 }
 
 export async function getTeamMembership(userId: string, teamId: string) {
-  return withUserTenantRls(userId, async () =>
+  return withTeamTenantRls(teamId, async () =>
     getTeamMembershipInRlsContext(userId, teamId),
   );
 }

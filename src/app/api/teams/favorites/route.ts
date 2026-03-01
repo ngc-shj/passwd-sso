@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { hasTeamPermission } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 
 // GET /api/teams/favorites — Get all team passwords favorited by current user
 export async function GET() {
@@ -14,7 +14,7 @@ export async function GET() {
   }
 
   // Build role map for permission check + UI display
-  const memberships = await withUserTenantRls(session.user.id, async () =>
+  const memberships = await withBypassRls(prisma, async () =>
     prisma.teamMember.findMany({
       where: { userId: session.user.id, deactivatedAt: null },
       select: { teamId: true, role: true },
@@ -22,7 +22,7 @@ export async function GET() {
   );
   const roleMap = new Map(memberships.map((m) => [m.teamId, m.role]));
 
-  const favorites = await withUserTenantRls(session.user.id, async () =>
+  const favorites = await withBypassRls(prisma, async () =>
     prisma.teamPasswordFavorite.findMany({
       where: { userId: session.user.id },
       include: {

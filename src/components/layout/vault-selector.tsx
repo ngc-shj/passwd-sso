@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, Lock } from "lucide-react";
+import { Building2, Globe, Lock } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   Select,
@@ -13,6 +13,8 @@ import {
 interface VaultSelectorTeam {
   id: string;
   name: string;
+  tenantName?: string;
+  isCrossTenant?: boolean;
 }
 
 interface VaultSelectorProps {
@@ -45,8 +47,19 @@ export function VaultSelector({ value, teams, onValueChange }: VaultSelectorProp
           </SelectItem>
           {teamOptions.map((team) => (
             <SelectItem key={team.id} value={team.id}>
-              <Building2 className="h-4 w-4" />
-              {team.name}
+              <div className="flex items-start gap-2">
+                {team.isCrossTenant ? (
+                  <Globe className="h-4 w-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                ) : (
+                  <Building2 className="h-4 w-4 mt-0.5 shrink-0" />
+                )}
+                <span className="flex flex-col items-start">
+                  <span>{team.name}</span>
+                  {team.isCrossTenant && (
+                    <span className="text-xs text-amber-600 dark:text-amber-400">{team.tenantName}</span>
+                  )}
+                </span>
+              </div>
             </SelectItem>
           ))}
         </SelectContent>

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string; invId: string }> };
 
@@ -26,7 +26,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const invitation = await withUserTenantRls(session.user.id, async () =>
+  const invitation = await withTeamTenantRls(teamId, async () =>
     prisma.teamInvitation.findUnique({
       where: { id: invId },
     }),
@@ -39,7 +39,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     );
   }
 
-  await withUserTenantRls(session.user.id, async () =>
+  await withTeamTenantRls(teamId, async () =>
     prisma.teamInvitation.delete({ where: { id: invId } }),
   );
 

@@ -23,6 +23,8 @@ export interface SidebarTeamItem {
   name: string;
   slug: string;
   role: string;
+  tenantName: string;
+  isCrossTenant: boolean;
 }
 
 export interface SidebarTeamTagGroup {

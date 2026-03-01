@@ -126,5 +126,6 @@
   "scimLastUsed": "Last used {date}",
   "scimNeverUsed": "Never used",
   "scimExpiresAt": "Expires {date}",
-  "cancel": "Cancel"
+  "cancel": "Cancel",
+  "externalTenant": "External tenant"
 }

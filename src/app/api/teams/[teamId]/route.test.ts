@@ -93,7 +93,7 @@ describe("GET /api/teams/[teamId]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns team details with counts", async () => {
+  it("returns team details with counts and tenantName", async () => {
     mockPrismaTeam.findUnique.mockResolvedValue({
       id: TEAM_ID,
       name: "My Team",
@@ -102,6 +102,7 @@ describe("GET /api/teams/[teamId]", () => {
       createdAt: now,
       updatedAt: now,
       _count: { members: 5, passwords: 10 },
+      tenant: { name: "Acme Corp" },
     });
 
     const res = await GET(
@@ -113,6 +114,7 @@ describe("GET /api/teams/[teamId]", () => {
     expect(json.role).toBe(TEAM_ROLE.OWNER);
     expect(json.memberCount).toBe(5);
     expect(json.passwordCount).toBe(10);
+    expect(json.tenantName).toBe("Acme Corp");
   });
 
   it("returns 404 when team not found", async () => {

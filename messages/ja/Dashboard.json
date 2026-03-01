@@ -60,5 +60,6 @@
   "settings": "設定",
   "select": "選択",
   "close": "閉じる",
-  "selectAll": "すべて選択"
+  "selectAll": "すべて選択",
+  "externalTenant": "外部テナント"
 }

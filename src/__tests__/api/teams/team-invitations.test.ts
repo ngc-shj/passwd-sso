@@ -11,7 +11,7 @@ const {
   mockPrismaTeam,
   mockUserFindUnique,
   mockTeamMemberFindUnique,
-  mockWithUserTenantRls,
+  mockWithTeamTenantRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
@@ -21,7 +21,7 @@ const {
   mockPrismaTeam: { findUnique: vi.fn() },
   mockUserFindUnique: vi.fn(),
   mockTeamMemberFindUnique: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -55,7 +55,7 @@ vi.mock("node:crypto", () => ({
   randomBytes: () => Buffer.from("a".repeat(32)),
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+  withTeamTenantRls: mockWithTeamTenantRls,
 }));
 
 import { GET, POST } from "@/app/api/teams/[teamId]/invitations/route";

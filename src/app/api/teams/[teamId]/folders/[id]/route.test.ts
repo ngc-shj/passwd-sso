@@ -9,7 +9,7 @@ const {
   mockRequireTeamPermission,
   TeamAuthError,
   mockLogAudit,
-  mockWithUserTenantRls,
+  mockWithTeamTenantRls,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
@@ -36,7 +36,7 @@ const {
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
     mockLogAudit: vi.fn(),
-    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
   };
 });
 
@@ -57,7 +57,7 @@ vi.mock("@/lib/audit", () => ({
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+  withTeamTenantRls: mockWithTeamTenantRls,
 }));
 vi.mock("@/lib/folder-utils", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/folder-utils")>();

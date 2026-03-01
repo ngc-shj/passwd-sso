@@ -8,7 +8,7 @@ const {
   mockRequireTeamPermission,
   mockTeamEntryFindMany,
   TeamAuthError,
-  mockWithUserTenantRls,
+  mockWithTeamTenantRls,
 } = vi.hoisted(() => {
     class TeamAuthError extends Error {
       status: number;
@@ -24,7 +24,7 @@ const {
       mockRequireTeamPermission: vi.fn(),
       mockTeamEntryFindMany: vi.fn(),
       TeamAuthError,
-      mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+      mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
     };
   });
 
@@ -40,7 +40,7 @@ vi.mock("@/lib/team-auth", () => ({
   TeamAuthError,
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+  withTeamTenantRls: mockWithTeamTenantRls,
 }));
 
 import { GET } from "@/app/api/teams/[teamId]/audit-logs/route";
@@ -97,7 +97,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
         ip: "10.0.0.1",
         userAgent: "Test",
         createdAt: now,
-        user: { id: "user-1", name: "Alice", image: null },
+        user: { id: "user-1", name: "Alice", email: "alice@example.com", image: null },
       },
     ];
 
@@ -117,6 +117,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     expect(json.items[0].user).toEqual({
       id: "user-1",
       name: "Alice",
+      email: "alice@example.com",
       image: null,
     });
     expect(json.nextCursor).toBeNull();
@@ -128,7 +129,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
           scope: AUDIT_SCOPE.TEAM,
         },
         include: {
-          user: { select: { id: true, name: true, image: true } },
+          user: { select: { id: true, name: true, email: true, image: true } },
         },
         orderBy: { createdAt: "desc" },
       })
@@ -317,7 +318,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       ip: null,
       userAgent: null,
       createdAt: new Date(),
-      user: { id: "user-1", name: "Alice", image: null },
+      user: { id: "user-1", name: "Alice", email: "alice@example.com", image: null },
     }));
 
     mockFindMany.mockResolvedValue(logs);
@@ -380,7 +381,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
         ip: null,
         userAgent: null,
         createdAt: new Date(),
-        user: { id: "u1", name: "Alice", image: null },
+        user: { id: "u1", name: "Alice", email: "alice@example.com", image: null },
       },
     ];
     mockFindMany.mockResolvedValue(logs);
@@ -429,7 +430,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
         ip: null,
         userAgent: null,
         createdAt: new Date(),
-        user: { id: "u1", name: "Alice", image: null },
+        user: { id: "u1", name: "Alice", email: "alice@example.com", image: null },
       },
     ];
     mockFindMany.mockResolvedValue(logs);
