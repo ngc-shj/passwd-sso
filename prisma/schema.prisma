@@ -348,6 +348,7 @@ model Team {
   scimExternalMappings ScimExternalMapping[]
   scimGroupMappings    ScimGroupMapping[]
   policy               TeamPolicy?
+  webhooks             TeamWebhook[]
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
@@ -394,6 +395,7 @@ model Tenant {
   scimGroupMappings          ScimGroupMapping[]
   notifications              Notification[]
   teamPolicies               TeamPolicy[]
+  teamWebhooks               TeamWebhook[]
 
   @@map("tenants")
 }
@@ -718,6 +720,10 @@ enum AuditAction {
   SCIM_USER_DELETE
   SCIM_GROUP_UPDATE
   POLICY_UPDATE
+  AUDIT_LOG_DOWNLOAD
+  WEBHOOK_CREATE
+  WEBHOOK_DELETE
+  WEBHOOK_DELIVERY_FAILED
 }
 
 enum AuditScope {
@@ -1002,4 +1008,30 @@ model TeamPolicy {
 
   @@index([tenantId])
   @@map("team_policies")
+}
+
+model TeamWebhook {
+  id              String   @id @default(cuid())
+  teamId          String   @map("team_id")
+  tenantId        String   @map("tenant_id")
+  url             String   @db.VarChar(2048)
+  secretEncrypted String   @map("secret_encrypted") @db.Text
+  secretIv        String   @map("secret_iv") @db.VarChar(24)
+  secretAuthTag   String   @map("secret_auth_tag") @db.VarChar(32)
+  masterKeyVersion Int     @default(1) @map("master_key_version")
+  events          String[]
+  isActive        Boolean  @default(true) @map("is_active")
+  lastError       String?  @map("last_error") @db.Text
+  failCount       Int      @default(0) @map("fail_count")
+  lastDeliveredAt DateTime? @map("last_delivered_at")
+  lastFailedAt    DateTime? @map("last_failed_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([teamId])
+  @@index([tenantId])
+  @@map("team_webhooks")
 }

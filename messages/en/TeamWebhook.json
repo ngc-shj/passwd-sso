@@ -1,0 +1,22 @@
+{
+  "title": "Webhooks",
+  "description": "Send real-time audit events to external services",
+  "addWebhook": "Add webhook",
+  "url": "Endpoint URL",
+  "urlPlaceholder": "https://example.com/webhook",
+  "events": "Events",
+  "eventsPlaceholder": "Select events to subscribe",
+  "secret": "Signing secret",
+  "secretCopied": "Secret copied. Store it securely — it won't be shown again.",
+  "created": "Webhook created",
+  "deleted": "Webhook deleted",
+  "deleteConfirm": "Delete this webhook?",
+  "noWebhooks": "No webhooks configured",
+  "active": "Active",
+  "inactive": "Inactive",
+  "lastDelivered": "Last delivered",
+  "failCount": "{count} failures",
+  "limitReached": "Maximum webhooks reached",
+  "createFailed": "Failed to create webhook",
+  "deleteFailed": "Failed to delete webhook"
+}

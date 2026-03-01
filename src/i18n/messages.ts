@@ -53,6 +53,8 @@ export const NAMESPACES = [
   "Sessions",
   "Notifications",
   "TeamPolicy",
+  "TeamWebhook",
+  "AuditDownload",
 ] as const;
 
 export type Namespace = (typeof NAMESPACES)[number];

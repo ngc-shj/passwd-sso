@@ -1,0 +1,22 @@
+{
+  "title": "Webhook",
+  "description": "監査イベントを外部サービスにリアルタイム送信",
+  "addWebhook": "Webhook を追加",
+  "url": "エンドポイント URL",
+  "urlPlaceholder": "https://example.com/webhook",
+  "events": "イベント",
+  "eventsPlaceholder": "サブスクライブするイベントを選択",
+  "secret": "署名シークレット",
+  "secretCopied": "シークレットをコピーしました。安全に保管してください。再表示はできません。",
+  "created": "Webhook を作成しました",
+  "deleted": "Webhook を削除しました",
+  "deleteConfirm": "この Webhook を削除しますか？",
+  "noWebhooks": "Webhook が設定されていません",
+  "active": "有効",
+  "inactive": "無効",
+  "lastDelivered": "最終配信",
+  "failCount": "{count}回の失敗",
+  "limitReached": "Webhook の上限に達しました",
+  "createFailed": "Webhook の作成に失敗しました",
+  "deleteFailed": "Webhook の削除に失敗しました"
+}

@@ -1,0 +1,15 @@
+{
+  "title": "Download audit logs",
+  "description": "Export audit logs as JSONL or CSV",
+  "format": "Format",
+  "formatJsonl": "JSONL",
+  "formatCsv": "CSV",
+  "dateRange": "Date range",
+  "from": "From",
+  "to": "To",
+  "download": "Download",
+  "downloading": "Downloading...",
+  "maxRange": "Maximum range is 90 days",
+  "rateLimited": "Too many requests. Please try again later.",
+  "exportDisabled": "Export is disabled by team policy"
+}
