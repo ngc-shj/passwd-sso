@@ -180,16 +180,17 @@ export function PasswordGenerator({
     }));
   };
 
-  const anySymbolEnabled = SYMBOL_GROUP_KEYS.some(
-    (key) => settings.symbolGroups[key]
-  );
   const anyTypeEnabled =
     settings.mode === "passphrase" ||
-    settings.uppercase ||
-    settings.lowercase ||
-    settings.numbers ||
-    anySymbolEnabled ||
-    (settings.includeChars?.length ?? 0) > 0;
+    buildEffectiveCharset({
+      uppercase: settings.uppercase,
+      lowercase: settings.lowercase,
+      numbers: settings.numbers,
+      symbols: buildSymbolString(settings.symbolGroups),
+      excludeAmbiguous: settings.excludeAmbiguous,
+      includeChars: settings.includeChars ?? "",
+      excludeChars: settings.excludeChars ?? "",
+    }).length > 0;
 
   const setMode = (mode: GeneratorMode) => update({ mode });
 
@@ -252,6 +253,13 @@ export function PasswordGenerator({
           {t("modePassphrase")}
         </button>
       </div>
+
+      {/* Warning when no characters available */}
+      {!anyTypeEnabled && settings.mode === "password" && (
+        <p className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {t("noAvailableChars")}
+        </p>
+      )}
 
       {/* Generated password display */}
       {generated && (

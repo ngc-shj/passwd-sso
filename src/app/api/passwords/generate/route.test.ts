@@ -133,4 +133,22 @@ describe("POST /api/passwords/generate", () => {
     }));
     expect(res.status).toBe(400);
   });
+
+  it("returns 400 when all characters are excluded", async () => {
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords/generate", {
+      body: {
+        mode: "password",
+        length: 16,
+        uppercase: false,
+        lowercase: false,
+        numbers: false,
+        symbols: "",
+        includeChars: "abc",
+        excludeChars: "abc",
+      },
+    }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
 });
