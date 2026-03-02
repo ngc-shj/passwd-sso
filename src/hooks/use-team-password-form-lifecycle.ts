@@ -38,12 +38,6 @@ export function useTeamPasswordFormLifecycle({
     resetTeamFormForClose(settersRef.current);
   }, []);
 
-  useEffect(() => {
-    if (open && editData) {
-      applyEditData(editData);
-    }
-  }, [open, editData, applyEditData]);
-
   const applyDefaults = useCallback(() => {
     if (defaults?.defaultFolderId != null) {
       settersRef.current.setTeamFolderId(defaults.defaultFolderId);
@@ -52,6 +46,14 @@ export function useTeamPasswordFormLifecycle({
       settersRef.current.setSelectedTags(defaults.defaultTags);
     }
   }, [defaults]);
+
+  useEffect(() => {
+    if (open && editData) {
+      applyEditData(editData);
+    } else if (open) {
+      applyDefaults();
+    }
+  }, [open, editData, applyEditData, applyDefaults]);
 
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
