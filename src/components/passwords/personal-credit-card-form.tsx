@@ -31,6 +31,7 @@ import { EntryExpirationSection } from "@/components/passwords/entry-expiration-
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { toTagPayload } from "@/components/passwords/entry-form-tags";
+import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
 import { usePersonalBaseFormModel } from "@/hooks/use-personal-base-form-model";
 
 interface CreditCardFormProps {
@@ -160,6 +161,46 @@ export function CreditCardForm({
   const dialogSectionClass = base.isDialogVariant
     ? ENTRY_DIALOG_FLAT_SECTION_CLASS
     : "";
+  const {
+    tagsAndFolderProps,
+    repromptSectionProps,
+    expirationSectionProps,
+    actionBarProps,
+  } = buildPersonalFormSectionsProps({
+    tagsTitle: t("tags"),
+    tagsHint: tPw("tagsHint"),
+    folders: base.folders,
+    sectionCardClass: dialogSectionClass,
+    repromptTitle: tPw("requireReprompt"),
+    repromptDescription: tPw("requireRepromptHelp"),
+    expirationTitle: tPw("expirationTitle"),
+    expirationDescription: tPw("expirationDescription"),
+    hasChanges,
+    submitting: base.submitting,
+    saveLabel: mode === "create" ? tc("save") : tc("update"),
+    cancelLabel: tc("cancel"),
+    statusUnsavedLabel: tPw("statusUnsaved"),
+    statusSavedLabel: tPw("statusSaved"),
+    onCancel: base.handleCancel,
+    values: {
+      selectedTags: base.selectedTags,
+      folderId: base.folderId,
+      customFields: [],
+      totp: null,
+      showTotpInput: false,
+      requireReprompt: base.requireReprompt,
+      expiresAt: base.expiresAt,
+    },
+    setters: {
+      setSelectedTags: base.setSelectedTags,
+      setFolderId: base.setFolderId,
+      setCustomFields: () => {},
+      setTotp: () => {},
+      setShowTotpInput: () => {},
+      setRequireReprompt: base.setRequireReprompt,
+      setExpiresAt: base.setExpiresAt,
+    },
+  });
 
   const validation = getCardNumberValidation(cardNumber, brand);
   const allowedLengths = getAllowedLengths(validation.effectiveBrand);
@@ -295,43 +336,10 @@ export function CreditCardForm({
         />
       </EntryPrimaryCard>
 
-      <EntryTagsAndFolderSection
-        tagsTitle={t("tags")}
-        tagsHint={tPw("tagsHint")}
-        selectedTags={base.selectedTags}
-        onTagsChange={base.setSelectedTags}
-        folders={base.folders}
-        folderId={base.folderId}
-        onFolderChange={base.setFolderId}
-        sectionCardClass={dialogSectionClass}
-      />
-
-      <EntryRepromptSection
-        checked={base.requireReprompt}
-        onCheckedChange={base.setRequireReprompt}
-        title={tPw("requireReprompt")}
-        description={tPw("requireRepromptHelp")}
-        sectionCardClass={dialogSectionClass}
-      />
-
-      <EntryExpirationSection
-        value={base.expiresAt}
-        onChange={base.setExpiresAt}
-        title={tPw("expirationTitle")}
-        description={tPw("expirationDescription")}
-        sectionCardClass={dialogSectionClass}
-      />
-
-      <EntryActionBar
-        hasChanges={hasChanges}
-        submitting={base.submitting}
-        submitDisabled={!cardNumberValid}
-        saveLabel={mode === "create" ? tc("save") : tc("update")}
-        cancelLabel={tc("cancel")}
-        statusUnsavedLabel={tPw("statusUnsaved")}
-        statusSavedLabel={tPw("statusSaved")}
-        onCancel={base.handleCancel}
-      />
+      <EntryTagsAndFolderSection {...tagsAndFolderProps} />
+      <EntryRepromptSection {...repromptSectionProps} />
+      <EntryExpirationSection {...expirationSectionProps} />
+      <EntryActionBar {...actionBarProps} submitDisabled={!cardNumberValid} />
     </form>
   );
 

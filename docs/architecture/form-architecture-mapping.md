@@ -87,6 +87,12 @@ The target state is to make these boundaries more directly corresponding. At min
 | `src/components/team/team-bank-account-form.tsx` | `src/components/passwords/personal-bank-account-form.tsx` |
 | `src/components/team/team-software-license-form.tsx` | `src/components/passwords/personal-software-license-form.tsx` |
 
+### Non-Login Entry Alignment
+
+- Team and Personal non-login forms now follow the same broad split: `base form model + shared section props builder + entry-specific state`.
+- Team uses `use-team-base-form-model.ts` with `team-form-sections-props.ts`.
+- Personal uses `use-personal-base-form-model.ts` with `personal-form-sections-props.ts`.
+
 ## Structural Rules
 
 ### Naming
@@ -132,8 +138,6 @@ The target state is to make these boundaries more directly corresponding. At min
 
 ## Refactor Targets
 
-- Decide whether Team non-login flows should also gain per-entry model hooks, or continue to share `use-team-base-form-model.ts` directly.
-- Decide whether the login submit helper names should converge on `*-login-submit` or `*-login-form-actions`.
 - Keep Team creation flow separate from Team Vault entry flow.
 
 ## Rules For Future Changes
