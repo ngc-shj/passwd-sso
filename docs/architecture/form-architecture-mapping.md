@@ -34,9 +34,9 @@ This document distinguishes between:
 ### Target Dialog Flow
 
 - Team new flow: `team-new-dialog -> team-entry-dialog-shell -> team-* form body`
-- Personal new flow: `personal-password-new-dialog -> personal-* form`
-- Team edit flow: `page -> team-edit-dialog -> team-entry-dialog-shell -> team-* form body`
-- Personal edit flow: `personal-password-edit-dialog-loader -> personal-password-edit-dialog -> personal-* form`
+- Personal new flow: `personal-password-new-dialog -> personal-entry-dialog-shell -> personal-* form body`
+- Team edit flow: `team-edit-dialog-loader -> team-edit-dialog -> team-entry-dialog-shell -> team-* form body`
+- Personal edit flow: `personal-password-edit-dialog-loader -> personal-password-edit-dialog -> personal-entry-dialog-shell -> personal-* form body`
 
 The target state is to make these boundaries more directly corresponding. At minimum:
 
@@ -64,6 +64,7 @@ The target state is to make these boundaries more directly corresponding. At min
 - Personal login code is split into `model / state / presenter / controller / derived / fields`.
 - Team login code now has matching `model / state / presenter / controller / derived / fields` helpers.
 - Team login still shares common entry state through `use-team-base-form-model.ts`, while Personal keeps more of that composition inside the login model hook.
+- Personal login field helpers are still split more finely with `fields-props / fields-callbacks / fields-text-props`, while Team currently keeps a single `team-login-fields-props.ts`.
 
 ### Shared Entry Sections
 
@@ -129,7 +130,9 @@ The target state is to make these boundaries more directly corresponding. At min
 
 ## Refactor Targets
 
+- Decide whether Team login field helpers should be split to the same granularity as Personal.
 - Decide whether Team non-login flows should also gain per-entry model hooks, or continue to share `use-team-base-form-model.ts` directly.
+- Decide whether the login submit helper names should converge on `*-login-submit` or `*-login-form-actions`.
 - Keep Team creation flow separate from Team Vault entry flow.
 
 ## Rules For Future Changes
