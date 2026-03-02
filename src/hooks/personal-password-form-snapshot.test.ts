@@ -23,7 +23,7 @@ describe("personal-password-form-derived snapshot helpers", () => {
         password: "secret",
         url: "https://example.com",
         notes: "notes",
-        tags: [{ id: "t1", name: "Tag", color: "#ffffff" }],
+        selectedTags: [{ id: "t1", name: "Tag", color: "#ffffff" }],
         generatorSettings: { ...DEFAULT_GENERATOR_SETTINGS, length: 16 },
         customFields: [],
         totp: null,

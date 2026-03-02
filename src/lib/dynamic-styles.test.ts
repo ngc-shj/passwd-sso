@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 
 // Use resetModules to get a fresh module state per test group
 // (tagColorRules Set and cachedNonce are module-level singletons)

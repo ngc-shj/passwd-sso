@@ -117,7 +117,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
       makeParams("grp-1"),
     );
 
-    expect(res.status).toBe(200);
+    expect(res!.status).toBe(200);
     expect(mockTeamMember.update).toHaveBeenCalled();
   });
 });
@@ -152,7 +152,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
       makeParams("grp-1"),
     );
 
-    expect(res.status).toBe(200);
+    expect(res!.status).toBe(200);
   });
 
   it("creates team member when user exists in tenant but not in team", async () => {
@@ -175,7 +175,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
       makeParams("grp-1"),
     );
 
-    expect(res.status).toBe(200);
+    expect(res!.status).toBe(200);
     expect(mockTeamMember.create).toHaveBeenCalledWith({
       data: {
         teamId: "team-1",

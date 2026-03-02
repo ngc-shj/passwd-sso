@@ -3,7 +3,7 @@ import { buildPersonalEntryLoginFieldTextProps } from "@/hooks/personal-entry-lo
 
 describe("buildPersonalEntryLoginFieldTextProps", () => {
   it("maps all personal login labels from PasswordForm translator", () => {
-    const props = buildPersonalEntryLoginFieldTextProps((key) => `label.${key}`);
+    const props = buildPersonalEntryLoginFieldTextProps(((key: string) => `label.${key}`) as any);
 
     expect(props.titleLabel).toBe("label.title");
     expect(props.titlePlaceholder).toBe("label.titlePlaceholder");

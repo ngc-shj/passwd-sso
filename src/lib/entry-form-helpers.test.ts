@@ -33,10 +33,10 @@ describe("toTagNameColor", () => {
   });
 
   it("strips extra properties from tag objects", () => {
-    const tags = [{ name: "Tag", color: "#000", extra: "ignored" }] as {
+    const tags = [{ name: "Tag", color: "#000", extra: "ignored" } as unknown as {
       name: string;
       color: string | null;
-    }[];
+    }];
     const result = toTagNameColor(tags);
     expect(Object.keys(result[0])).toEqual(["name", "color"]);
   });

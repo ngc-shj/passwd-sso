@@ -30,7 +30,8 @@ describe("GET /api/tags", () => {
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const res = await GET();
+    const req = createRequest("GET", "http://localhost:3000/api/tags");
+    const res = await GET(req);
     expect(res.status).toBe(401);
   });
 

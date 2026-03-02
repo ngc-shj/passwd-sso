@@ -44,9 +44,10 @@ describe("submitPersonalPasswordForm", () => {
       customFields: [],
       totp: null,
       requireReprompt: false,
+      expiresAt: null,
       folderId: null,
       setSubmitting,
-      t: (key) => key,
+      t: ((key: string) => key) as any,
       router: { push: vi.fn(), refresh: vi.fn() },
     });
 
@@ -80,9 +81,10 @@ describe("submitPersonalPasswordForm", () => {
       customFields: [],
       totp: null,
       requireReprompt: true,
+      expiresAt: null,
       folderId: "folder-1",
       setSubmitting,
-      t: (key) => key,
+      t: ((key: string) => key) as any,
       router: { push: vi.fn(), refresh: vi.fn() },
     });
 

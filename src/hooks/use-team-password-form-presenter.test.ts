@@ -92,7 +92,7 @@ function buildFormState(): TeamPasswordFormState {
       cardNumber: "4242 4242 4242 4242",
       brand: "visa",
       brandSource: "manual",
-      generatorSettings: {},
+      generatorSettings: {} as any,
       title: "title",
       notes: "notes",
       selectedTags: [],
@@ -218,13 +218,13 @@ function buildFormState(): TeamPasswordFormState {
 
 function buildTranslations(): TeamPasswordFormTranslations {
   return {
-    t: (key) => key,
-    tGen: (key) => key,
-    tn: (key) => key,
-    tcc: (key) => key,
-    ti: (key) => key,
-    tpk: (key) => key,
-    tba: (key) => key,
-    tsl: (key) => key,
+    t: ((key: string) => key) as any,
+    tGen: ((key: string) => key) as any,
+    tn: ((key: string) => key) as any,
+    tcc: ((key: string) => key) as any,
+    ti: ((key: string) => key) as any,
+    tpk: ((key: string) => key) as any,
+    tba: ((key: string) => key) as any,
+    tsl: ((key: string) => key) as any,
   };
 }

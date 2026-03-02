@@ -111,7 +111,7 @@ function createState(): Pick<TeamPasswordFormState, "values" | "setters"> {
       showTotpInput: false,
       requireReprompt: false,
       expiresAt: null,
-    } as TeamPasswordFormState["values"],
+    } as unknown as TeamPasswordFormState["values"],
     setters: {
       setSelectedTags: vi.fn(),
       setTeamFolderId: vi.fn(),
@@ -120,6 +120,6 @@ function createState(): Pick<TeamPasswordFormState, "values" | "setters"> {
       setShowTotpInput: vi.fn(),
       setRequireReprompt: vi.fn(),
       setExpiresAt: vi.fn(),
-    } as TeamPasswordFormState["setters"],
+    } as unknown as TeamPasswordFormState["setters"],
   };
 }

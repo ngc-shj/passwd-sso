@@ -187,6 +187,20 @@ describe("checkNewDeviceAndNotify", () => {
     );
   });
 
+  it("skips notification when user is not found", async () => {
+    mockSessionFindMany.mockResolvedValue([{ userAgent: CHROME_WIN }]);
+    mockUserFindUnique.mockResolvedValue(null);
+
+    await checkNewDeviceAndNotify("user-1", {
+      ip: "5.6.7.8",
+      userAgent: FIREFOX_MAC,
+      acceptLanguage: null,
+    });
+
+    expect(mockSendEmail).not.toHaveBeenCalled();
+    expect(mockCreateNotification).not.toHaveBeenCalled();
+  });
+
   it("never throws even on error", async () => {
     mockSessionFindMany.mockRejectedValue(new Error("DB down"));
 

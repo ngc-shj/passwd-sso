@@ -113,11 +113,11 @@ describe("team-password-form-actions", () => {
       softwareLicenseErrorCopy: {
         expirationBeforePurchase: "expiration before purchase",
       },
-      t: (key) => key,
+      t: ((key: string) => key) as any,
       setSaving: vi.fn(),
       handleOpenChange: vi.fn(),
       onSaved: vi.fn(),
-    });
+    } as unknown as Parameters<typeof submitTeamPasswordForm>[0]);
 
     expect(setDobError).toHaveBeenCalledWith("dob future");
     expect(setExpiryError).toHaveBeenCalledWith("expiry before issue");
@@ -189,11 +189,11 @@ describe("team-password-form-actions", () => {
       softwareLicenseErrorCopy: {
         expirationBeforePurchase: "expiration before purchase",
       },
-      t: (key) => key,
+      t: ((key: string) => key) as any,
       setSaving: vi.fn(),
       handleOpenChange: vi.fn(),
       onSaved: vi.fn(),
-    });
+    } as unknown as Parameters<typeof submitTeamPasswordForm>[0]);
 
     expect(setExpiryError).toHaveBeenCalledWith("expiration before purchase");
     expect(executeTeamEntrySubmitMock).not.toHaveBeenCalled();

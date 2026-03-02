@@ -303,7 +303,7 @@ describe("TeamPasswordForm — folder selection", () => {
     });
 
     await waitFor(() => {
-      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      const calls = mockFetch.mock.calls.map((c: any[]) => c[0]);
       expect(calls.some((u: string) => u.includes("/teams/team-1/folders"))).toBe(true);
     });
   });
@@ -344,7 +344,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     // Wait for folder fetch to settle
     await waitFor(() => {
-      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      const calls = mockFetch.mock.calls.map((c: any[]) => c[0]);
       expect(calls.some((u: string) => u.includes("/folders"))).toBe(true);
     });
 
@@ -425,7 +425,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     await waitFor(() => {
       const putCall = mockFetch.mock.calls.find(
-        (c: [string, RequestInit?]) => c[1]?.method === "PUT",
+        (c: any[]) => c[1]?.method === "PUT",
       );
       expect(putCall).toBeDefined();
       const body = JSON.parse(putCall![1]!.body as string);
@@ -469,7 +469,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     await waitFor(() => {
       const putCall = mockFetch.mock.calls.find(
-        (c: [string, RequestInit?]) => c[1]?.method === "PUT",
+        (c: any[]) => c[1]?.method === "PUT",
       );
       expect(putCall).toBeDefined();
       const body = JSON.parse(putCall![1]!.body as string);

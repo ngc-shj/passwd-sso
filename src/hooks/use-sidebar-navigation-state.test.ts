@@ -3,11 +3,11 @@ import { describe, it, expect } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useSidebarNavigationState } from "./use-sidebar-navigation-state";
 
-const teams = [{ id: "team-1", name: "Acme", slug: "acme", role: "ADMIN" }];
+const teams = [{ id: "team-1", name: "Acme", slug: "acme", role: "ADMIN", tenantName: "Acme Corp", isCrossTenant: false }];
 const folders = [{ id: "f1", name: "Personal", parentId: null, sortOrder: 0, entryCount: 1 }];
 const tags = [
-  { id: "t1", name: "keep", color: null, passwordCount: 2 },
-  { id: "t2", name: "skip", color: null, passwordCount: 0 },
+  { id: "t1", name: "keep", color: null, parentId: null, passwordCount: 2 },
+  { id: "t2", name: "skip", color: null, parentId: null, passwordCount: 0 },
 ];
 const teamFolderGroups = [
   {
@@ -22,8 +22,8 @@ const teamTagGroups = [
     teamId: "team-1",
     teamName: "Acme",
     tags: [
-      { id: "ot1", name: "TeamTag", color: "blue", count: 4 },
-      { id: "ot2", name: "TeamEmpty", color: null, count: 0 },
+      { id: "ot1", name: "TeamTag", color: "blue", parentId: null, count: 4 },
+      { id: "ot2", name: "TeamEmpty", color: null, parentId: null, count: 0 },
     ],
   },
 ];
@@ -47,8 +47,8 @@ describe("useSidebarNavigationState", () => {
     expect(result.current.selectedTagId).toBe("t1");
     expect(result.current.selectedFolders).toEqual(folders);
     expect(result.current.selectedTags).toEqual([
-      { id: "t1", name: "keep", color: null, count: 2 },
-      { id: "t2", name: "skip", color: null, count: 0 },
+      { id: "t1", name: "keep", color: null, parentId: null, count: 2 },
+      { id: "t2", name: "skip", color: null, parentId: null, count: 0 },
     ]);
   });
 
@@ -75,8 +75,8 @@ describe("useSidebarNavigationState", () => {
     expect(result.current.isSelectedVaultFavorites).toBe(true);
     expect(result.current.selectedFolders).toEqual(teamFolderGroups[0].folders);
     expect(result.current.selectedTags).toEqual([
-      { id: "ot1", name: "TeamTag", color: "blue", count: 4 },
-      { id: "ot2", name: "TeamEmpty", color: null, count: 0 },
+      { id: "ot1", name: "TeamTag", color: "blue", count: 4, parentId: null },
+      { id: "ot2", name: "TeamEmpty", color: null, count: 0, parentId: null },
     ]);
   });
 
@@ -105,7 +105,7 @@ describe("useSidebarNavigationState", () => {
         pathname: "/ja/dashboard/teams/team-1",
         searchParams: new URLSearchParams(),
         vaultContext: { type: "team", teamId: "team-1" },
-        teams: [{ id: "team-1", name: "Acme", slug: "acme", role: "MEMBER" }],
+        teams: [{ id: "team-1", name: "Acme", slug: "acme", role: "MEMBER", tenantName: "Acme Corp", isCrossTenant: false }],
         folders,
         tags,
         teamFolderGroups,
@@ -132,8 +132,8 @@ describe("useSidebarNavigationState", () => {
     );
 
     expect(result.current.selectedTags).toEqual([
-      { id: "ot1", name: "TeamTag", color: "blue", count: 4 },
-      { id: "ot2", name: "TeamEmpty", color: null, count: 0 },
+      { id: "ot1", name: "TeamTag", color: "blue", count: 4, parentId: null },
+      { id: "ot2", name: "TeamEmpty", color: null, count: 0, parentId: null },
     ]);
   });
 });

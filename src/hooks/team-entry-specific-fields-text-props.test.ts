@@ -5,13 +5,13 @@ describe("buildTeamEntrySpecificTextProps", () => {
   it("maps translation namespaces and entry copy values", () => {
     const props = buildTeamEntrySpecificTextProps(
       {
-        t: (k) => `t.${k}`,
-        tn: (k) => `tn.${k}`,
-        tcc: (k, values) => `tcc.${k}${values ? `:${JSON.stringify(values)}` : ""}`,
-        ti: (k) => `ti.${k}`,
-        tpk: (k) => `tpk.${k}`,
-        tba: (k) => `tba.${k}`,
-        tsl: (k) => `tsl.${k}`,
+        t: ((k: string) => `t.${k}`) as any,
+        tn: ((k: string) => `tn.${k}`) as any,
+        tcc: ((k: string, values: any) => `tcc.${k}${values ? `:${JSON.stringify(values)}` : ""}`) as any,
+        ti: ((k: string) => `ti.${k}`) as any,
+        tpk: ((k: string) => `tpk.${k}`) as any,
+        tba: ((k: string) => `tba.${k}`) as any,
+        tsl: ((k: string) => `tsl.${k}`) as any,
       },
       {
         notesLabel: "notes.label",

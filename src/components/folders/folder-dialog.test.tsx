@@ -77,8 +77,10 @@ const folders: FolderItem[] = [
 ];
 
 describe("FolderDialog", () => {
-  let mockOnOpenChange: ReturnType<typeof vi.fn>;
-  let mockOnSubmit: ReturnType<typeof vi.fn>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockOnOpenChange: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockOnSubmit: any;
 
   beforeEach(() => {
     mockOnOpenChange = vi.fn();

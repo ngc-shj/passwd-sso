@@ -177,7 +177,7 @@ describe("TeamDashboardPage — folder query propagation", () => {
     });
 
     await waitFor(() => {
-      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      const calls = mockFetch.mock.calls.map((c: any[]) => c[0]);
       const passwordCall = calls.find((u: string) => u.includes("/passwords"));
       expect(passwordCall).toBeDefined();
       expect(passwordCall).toContain("folder=folder-abc");
@@ -192,7 +192,7 @@ describe("TeamDashboardPage — folder query propagation", () => {
     });
 
     await waitFor(() => {
-      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      const calls = mockFetch.mock.calls.map((c: any[]) => c[0]);
       const passwordCall = calls.find((u: string) => u.includes("/passwords"));
       expect(passwordCall).toBeDefined();
       expect(passwordCall).not.toContain("folder=");
@@ -209,7 +209,7 @@ describe("TeamDashboardPage — folder query propagation", () => {
     });
 
     await waitFor(() => {
-      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      const calls = mockFetch.mock.calls.map((c: any[]) => c[0]);
       const passwordCall = calls.find((u: string) => u.includes("/passwords"));
       expect(passwordCall).toBeDefined();
       expect(passwordCall).toContain("folder=folder-abc");
@@ -237,7 +237,7 @@ describe("TeamDashboardPage — scopes", () => {
 
     await waitFor(() => {
       // Team fetch should happen
-      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      const calls = mockFetch.mock.calls.map((c: any[]) => c[0]);
       expect(calls.some((u: string) => u.includes("/api/teams/team-1") && !u.includes("/passwords"))).toBe(true);
     });
 
@@ -257,12 +257,12 @@ describe("TeamDashboardPage — scopes", () => {
     });
 
     await waitFor(() => {
-      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      const calls = mockFetch.mock.calls.map((c: any[]) => c[0]);
       expect(calls.some((u: string) => u.includes("/api/teams/team-1") && !u.includes("/passwords"))).toBe(true);
     });
 
     const passwordCalls = mockFetch.mock.calls
-      .map((c: [string]) => c[0])
+      .map((c: any[]) => c[0])
       .filter((u: string) => u.includes("/passwords"));
     expect(passwordCalls).toHaveLength(0);
   });
@@ -276,7 +276,7 @@ describe("TeamDashboardPage — scopes", () => {
     });
 
     await waitFor(() => {
-      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      const calls = mockFetch.mock.calls.map((c: any[]) => c[0]);
       const passwordCall = calls.find((u: string) => u.includes("/passwords"));
       expect(passwordCall).toBeDefined();
       expect(passwordCall).toContain("favorites=true");
@@ -317,7 +317,7 @@ describe("TeamDashboardPage — role-based rendering", () => {
 
     await waitFor(() => {
       // Wait for team data to load
-      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      const calls = mockFetch.mock.calls.map((c: any[]) => c[0]);
       expect(calls.some((u: string) => u.includes("/api/teams/team-1"))).toBe(true);
     });
 

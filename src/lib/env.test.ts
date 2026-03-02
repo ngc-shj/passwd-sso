@@ -5,7 +5,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const VALID_HEX_64 = "a".repeat(64);
 
-function buildMinimalEnv(overrides: Record<string, string> = {}): Record<string, string> {
+function buildMinimalEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
     DATABASE_URL: "postgresql://localhost:5432/test",
     SHARE_MASTER_KEY: VALID_HEX_64,
@@ -33,12 +33,12 @@ describe("env validation", () => {
   });
 
   it("throws for missing DATABASE_URL", async () => {
-    process.env = { SHARE_MASTER_KEY: VALID_HEX_64 };
+    process.env = { SHARE_MASTER_KEY: VALID_HEX_64 } as unknown as NodeJS.ProcessEnv;
     await expect(import("./env")).rejects.toThrow("Invalid environment variables");
   });
 
   it("throws for missing SHARE_MASTER_KEY", async () => {
-    process.env = { DATABASE_URL: "postgresql://localhost:5432/test" };
+    process.env = { DATABASE_URL: "postgresql://localhost:5432/test" } as unknown as NodeJS.ProcessEnv;
     await expect(import("./env")).rejects.toThrow("Invalid environment variables");
   });
 

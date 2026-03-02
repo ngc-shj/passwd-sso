@@ -20,14 +20,14 @@ function buildDefaultParams(overrides: Record<string, unknown> = {}) {
       isSoftwareLicense: false,
     },
     translations: {
-      t: (key: string) => `pf.${key}`,
-      tGen: (key: string) => key,
-      tn: (key: string) => key,
-      tcc: (key: string) => key,
-      ti: (key: string) => `identity.${key}`,
-      tpk: (key: string) => key,
-      tba: (key: string) => key,
-      tsl: (key: string) => `sl.${key}`,
+      t: ((key: string) => `pf.${key}`) as any,
+      tGen: ((key: string) => key) as any,
+      tn: ((key: string) => key) as any,
+      tcc: ((key: string) => key) as any,
+      ti: ((key: string) => `identity.${key}`) as any,
+      tpk: ((key: string) => key) as any,
+      tba: ((key: string) => key) as any,
+      tsl: ((key: string) => `sl.${key}`) as any,
     },
     handleOpenChange: vi.fn(),
     setters: { setDobError: vi.fn(), setExpiryError: vi.fn(), setSaving: vi.fn() },
@@ -57,7 +57,7 @@ function buildDefaultParams(overrides: Record<string, unknown> = {}) {
 
 describe("buildTeamSubmitArgs", () => {
   it("maps login entry type correctly", () => {
-    const args = buildTeamSubmitArgs(buildDefaultParams() as Parameters<typeof buildTeamSubmitArgs>[0]);
+    const args = buildTeamSubmitArgs(buildDefaultParams() as unknown as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.effectiveEntryType).toBe(ENTRY_TYPE.LOGIN);
     expect(args.isIdentity).toBe(false);
     expect(args.title).toBe("title");
@@ -73,6 +73,8 @@ describe("buildTeamSubmitArgs", () => {
 
     const args = buildTeamSubmitArgs({
       teamId: "team-1",
+      teamEncryptionKey: {} as CryptoKey,
+      teamKeyVersion: 1,
       onSaved,
       isEdit: true,
       editData: {
@@ -95,14 +97,14 @@ describe("buildTeamSubmitArgs", () => {
         isSoftwareLicense: false,
       },
       translations: {
-        t: (key) => `pf.${key}`,
-        tGen: (key) => key,
-        tn: (key) => key,
-        tcc: (key) => key,
-        ti: (key) => `identity.${key}`,
-        tpk: (key) => key,
-        tba: (key) => key,
-        tsl: (key) => `sl.${key}`,
+        t: ((key: string) => `pf.${key}`) as any,
+        tGen: ((key: string) => key) as any,
+        tn: ((key: string) => key) as any,
+        tcc: ((key: string) => key) as any,
+        ti: ((key: string) => `identity.${key}`) as any,
+        tpk: ((key: string) => key) as any,
+        tba: ((key: string) => key) as any,
+        tsl: ((key: string) => `sl.${key}`) as any,
       },
       handleOpenChange,
       setters: { setDobError, setExpiryError, setSaving },
@@ -153,7 +155,6 @@ describe("buildTeamSubmitArgs", () => {
         expirationDate: "",
         requireReprompt: false,
         expiresAt: null,
-        generatorSettings: {},
       },
       cardNumberValid: true,
     });
@@ -179,7 +180,7 @@ describe("buildTeamSubmitArgs", () => {
     const args = buildTeamSubmitArgs(buildDefaultParams({
       isEdit: true,
       editData,
-    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
+    }) as unknown as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.isEdit).toBe(true);
     expect(args.editData).toBe(editData);
   });
@@ -187,7 +188,7 @@ describe("buildTeamSubmitArgs", () => {
   it("passes cardNumberValid through", () => {
     const args = buildTeamSubmitArgs(buildDefaultParams({
       cardNumberValid: false,
-    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
+    }) as unknown as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.cardNumberValid).toBe(false);
   });
 
@@ -204,7 +205,7 @@ describe("buildTeamSubmitArgs", () => {
         isBankAccount: false,
         isSoftwareLicense: false,
       },
-    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
+    }) as unknown as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.effectiveEntryType).toBe(ENTRY_TYPE.CREDIT_CARD);
     expect(args.isIdentity).toBe(false);
   });
@@ -222,7 +223,7 @@ describe("buildTeamSubmitArgs", () => {
         isBankAccount: false,
         isSoftwareLicense: false,
       },
-    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
+    }) as unknown as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.effectiveEntryType).toBe(ENTRY_TYPE.SECURE_NOTE);
     expect(args.isIdentity).toBe(false);
   });
@@ -240,7 +241,7 @@ describe("buildTeamSubmitArgs", () => {
         isBankAccount: true,
         isSoftwareLicense: false,
       },
-    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
+    }) as unknown as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.effectiveEntryType).toBe(ENTRY_TYPE.BANK_ACCOUNT);
     expect(args.isBankAccount).toBe(true);
     expect(args.isIdentity).toBe(false);
@@ -260,7 +261,7 @@ describe("buildTeamSubmitArgs", () => {
         isBankAccount: false,
         isSoftwareLicense: true,
       },
-    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
+    }) as unknown as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.effectiveEntryType).toBe(ENTRY_TYPE.SOFTWARE_LICENSE);
     expect(args.isSoftwareLicense).toBe(true);
     expect(args.isBankAccount).toBe(false);
@@ -277,7 +278,7 @@ describe("buildTeamSubmitArgs", () => {
         requireReprompt: true,
         expiresAt: "2026-12-31T00:00:00Z",
       },
-    }) as Parameters<typeof buildTeamSubmitArgs>[0]);
+    }) as unknown as Parameters<typeof buildTeamSubmitArgs>[0]);
     expect(args.requireReprompt).toBe(true);
     expect(args.expiresAt).toBe("2026-12-31T00:00:00Z");
   });

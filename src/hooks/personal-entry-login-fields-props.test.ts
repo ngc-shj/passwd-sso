@@ -12,7 +12,7 @@ describe("buildPersonalEntryLoginFieldsProps", () => {
   it("builds complete login field props from state", () => {
     const state = createState();
     const callbacks = buildPersonalEntryLoginFieldCallbacks(state.values, state.setters);
-    const textProps = buildPersonalEntryLoginFieldTextProps((k) => `label.${k}`);
+    const textProps = buildPersonalEntryLoginFieldTextProps(((k: string) => `label.${k}`) as any);
 
     const props = buildPersonalEntryLoginFieldPropsFromState({
       values: state.values,
@@ -35,7 +35,7 @@ describe("buildPersonalEntryLoginFieldsProps", () => {
     const props = buildPersonalEntryLoginFieldsProps({
       formState: state,
       generatorSummary: "summary",
-      translations: { t: (k) => `label.${k}` },
+      translations: { t: ((k: string) => `label.${k}`) as any },
     });
 
     expect(props.title).toBe(state.values.title);
@@ -55,7 +55,7 @@ describe("buildPersonalEntryLoginFieldsProps", () => {
     const props = buildPersonalEntryLoginFieldsProps({
       formState: state,
       generatorSummary: "summary",
-      translations: { t: (k) => k },
+      translations: { t: ((k: string) => k) as any },
     });
 
     props.onToggleShowPassword();
@@ -88,6 +88,7 @@ function createState(): PersonalPasswordFormState {
       totp: null,
       showTotpInput: false,
       requireReprompt: false,
+      expiresAt: null,
       folderId: null,
     },
     setters: {
@@ -105,6 +106,7 @@ function createState(): PersonalPasswordFormState {
       setTotp: vi.fn(),
       setShowTotpInput: vi.fn(),
       setRequireReprompt: vi.fn(),
+      setExpiresAt: vi.fn(),
       setFolderId: vi.fn(),
     },
   };

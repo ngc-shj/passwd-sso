@@ -75,6 +75,9 @@ function makeEntry(): ParsedEntry {
     generatorSettings: null,
     passwordHistory: [],
     requireReprompt: false,
+    folderPath: "",
+    isFavorite: false,
+    expiresAt: null,
   };
 }
 
@@ -86,7 +89,7 @@ describe("useImportExecution", () => {
   it("runs personal import and triggers audit + completion", async () => {
     mockRunImportEntries.mockResolvedValue({ successCount: 2, failedCount: 1 });
     const onComplete = vi.fn();
-    const t = (key: string) => key;
+    const t = ((key: string) => key) as any;
 
     const { result } = renderHook(() =>
       useImportExecution({
@@ -99,7 +102,7 @@ describe("useImportExecution", () => {
         encryptedInput: true,
         userId: "u1",
         encryptionKey: {} as CryptoKey,
-      })
+      } as any)
     );
 
     await act(async () => {
@@ -120,7 +123,7 @@ describe("useImportExecution", () => {
 
     const { result } = renderHook(() =>
       useImportExecution({
-        t: (key: string) => key,
+        t: ((key: string) => key) as any,
         onComplete,
         isTeamImport: true,
         tagsPath: "/api/teams/o1/tags",
@@ -130,7 +133,7 @@ describe("useImportExecution", () => {
         teamEncryptionKey: {} as CryptoKey,
         teamKeyVersion: 1,
         teamId: "o1",
-      })
+      } as any)
     );
 
     await act(async () => {
@@ -144,14 +147,14 @@ describe("useImportExecution", () => {
   it("skips execution when personal import has no encryption key", async () => {
     const { result } = renderHook(() =>
       useImportExecution({
-        t: (key: string) => key,
+        t: ((key: string) => key) as any,
         onComplete: vi.fn(),
         isTeamImport: false,
         tagsPath: "/api/tags",
         passwordsPath: "/api/passwords",
         sourceFilename: "x.csv",
         encryptedInput: false,
-      })
+      } as any)
     );
 
     await act(async () => {
@@ -167,7 +170,7 @@ describe("useImportExecution", () => {
     mockRunImportEntries.mockRejectedValue(new Error("network"));
     const { result } = renderHook(() =>
       useImportExecution({
-        t: (key: string) => key,
+        t: ((key: string) => key) as any,
         onComplete: vi.fn(),
         isTeamImport: false,
         tagsPath: "/api/tags",
@@ -175,7 +178,7 @@ describe("useImportExecution", () => {
         sourceFilename: "x.csv",
         encryptedInput: false,
         encryptionKey: {} as CryptoKey,
-      })
+      } as any)
     );
 
     await expect(

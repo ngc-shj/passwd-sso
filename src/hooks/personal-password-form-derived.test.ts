@@ -125,8 +125,8 @@ function buildTranslations(
   tGen: (key: string) => string,
 ): PersonalPasswordFormTranslations {
   return {
-    t: (key) => key,
-    tGen,
-    tc: (key) => key,
+    t: ((key: string) => key) as any,
+    tGen: tGen as any,
+    tc: ((key: string) => key) as any,
   };
 }

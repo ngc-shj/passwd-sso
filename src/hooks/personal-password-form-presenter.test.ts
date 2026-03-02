@@ -33,9 +33,9 @@ describe("buildPersonalPasswordFormPresenter", () => {
         },
         formState,
         translations: {
-          t: (k) => k,
-          tGen: (k) => k,
-          tc: (k) => k,
+          t: ((k: string) => k) as any,
+          tGen: ((k: string) => k) as any,
+          tc: ((k: string) => k) as any,
         },
       });
     });

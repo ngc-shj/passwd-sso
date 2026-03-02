@@ -89,7 +89,7 @@ describe("ReusedSection", () => {
   it("renders title and badge count", () => {
     const groups: ReusedGroup[] = [
       {
-        hash: "abc",
+
         entries: [
           { id: "1", title: "Gmail", username: "u1" },
           { id: "2", title: "Twitter", username: "u2" },
@@ -104,7 +104,7 @@ describe("ReusedSection", () => {
   it("renders group entries with formatCount", () => {
     const groups: ReusedGroup[] = [
       {
-        hash: "abc",
+
         entries: [
           { id: "1", title: "Gmail", username: "user1" },
           { id: "2", title: "Twitter", username: null },
@@ -120,7 +120,7 @@ describe("ReusedSection", () => {
 
   it("collapses on click", () => {
     const groups: ReusedGroup[] = [
-      { hash: "x", entries: [{ id: "1", title: "Site", username: "u" }] },
+      { entries: [{ id: "1", title: "Site", username: "u" }] },
     ];
     render(<ReusedSection {...baseProps} groups={groups} />);
     fireEvent.click(screen.getByText("Reused Passwords"));

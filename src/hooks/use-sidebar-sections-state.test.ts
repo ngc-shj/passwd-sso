@@ -43,7 +43,7 @@ describe("useSidebarSectionsState", () => {
     const { result } = renderHook(() => useSidebarSectionsState(baseParams()));
 
     act(() => {
-      result.current.toggleSection("vault")(true);
+      result.current.toggleSection("categories")(true);
     });
 
     expect(mockSetCollapsed).toHaveBeenCalled();

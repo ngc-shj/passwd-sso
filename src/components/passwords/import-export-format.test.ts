@@ -80,7 +80,7 @@ describe("import/export format compatibility", () => {
 
   it("round-trips passwd-sso CSV custom fields", () => {
     const csv = formatExportCsv(
-      [sampleLoginEntry] as ExportEntry[],
+      [sampleLoginEntry] as unknown as ExportEntry[],
       "passwd-sso",
       PERSONAL_EXPORT_OPTIONS.csv
     );
@@ -159,7 +159,7 @@ describe("import/export format compatibility", () => {
 
   it("round-trips requireReprompt through CSV export/import", () => {
     const csv = formatExportCsv(
-      [{ ...sampleLoginEntry, requireReprompt: true }] as ExportEntry[],
+      [{ ...sampleLoginEntry, requireReprompt: true }] as unknown as ExportEntry[],
       "passwd-sso",
       PERSONAL_EXPORT_OPTIONS.csv
     );
@@ -169,7 +169,7 @@ describe("import/export format compatibility", () => {
 
   it("round-trips requireReprompt through JSON export/import", () => {
     const json = formatExportJson(
-      [{ ...sampleLoginEntry, requireReprompt: true }] as ExportEntry[],
+      [{ ...sampleLoginEntry, requireReprompt: true }] as unknown as ExportEntry[],
       "passwd-sso",
       PERSONAL_EXPORT_OPTIONS.json
     );

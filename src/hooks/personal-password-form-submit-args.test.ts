@@ -23,13 +23,14 @@ describe("buildPersonalSubmitArgs", () => {
         customFields: [],
         totp: null,
         requireReprompt: false,
+        expiresAt: null,
         folderId: null,
       },
       setSubmitting,
       translations: {
-        t: (key) => `pf.${key}`,
-        tGen: (key) => key,
-        tc: (key) => key,
+        t: ((key: string) => `pf.${key}`) as any,
+        tGen: ((key: string) => key) as any,
+        tc: ((key: string) => key) as any,
       },
       router: { push: vi.fn(), refresh: vi.fn(), back: vi.fn() },
     });

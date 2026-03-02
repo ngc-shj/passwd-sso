@@ -31,7 +31,7 @@ describe("buildPersonalPasswordFormController", () => {
       setSubmitting: vi.fn(),
       translations: buildTranslations(),
       router: { push: vi.fn(), refresh: vi.fn(), back },
-    });
+    } as unknown as Parameters<typeof buildPersonalPasswordFormController>[0]);
 
     await controller.handleSubmit({ preventDefault } as unknown as React.FormEvent);
 
@@ -60,7 +60,7 @@ describe("buildPersonalPasswordFormController", () => {
       setSubmitting: vi.fn(),
       translations: buildTranslations(),
       router: { push: vi.fn(), refresh: vi.fn(), back: vi.fn() },
-    });
+    } as unknown as Parameters<typeof buildPersonalPasswordFormController>[0]);
 
     await controller.handleSubmit({ preventDefault: vi.fn() } as unknown as React.FormEvent);
 
@@ -81,14 +81,15 @@ function buildValues(overrides: Partial<{ title: string }> = {}) {
     customFields: [],
     totp: null,
     requireReprompt: false,
+    expiresAt: null,
     folderId: null,
   };
 }
 
 function buildTranslations(): PersonalPasswordFormTranslations {
   return {
-    t: (key) => key,
-    tGen: (key) => key,
-    tc: (key) => key,
+    t: ((key: string) => key) as any,
+    tGen: ((key: string) => key) as any,
+    tc: ((key: string) => key) as any,
   };
 }

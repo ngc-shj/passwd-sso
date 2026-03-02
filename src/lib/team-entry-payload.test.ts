@@ -12,8 +12,8 @@ describe("buildTeamEntryPayload", () => {
       password: "pw",
       url: " https://example.com ",
       customFields: [
-        { label: "a", value: "b", type: "TEXT" },
-        { label: "", value: "c", type: "TEXT" },
+        { label: "a", value: "b", type: "text" },
+        { label: "", value: "c", type: "text" },
       ],
       totp: null,
       tagNames: [{ name: "t1", color: "#f00" }],

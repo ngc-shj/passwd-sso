@@ -35,7 +35,7 @@ describe("executePersonalEntrySubmit", () => {
       overviewBlob: "overview",
       tagIds: ["t1"],
       setSubmitting,
-      t: (key) => key,
+      t: ((key: string) => key) as any,
       router: { push: vi.fn(), refresh: vi.fn() },
     });
 
@@ -56,7 +56,7 @@ describe("executePersonalEntrySubmit", () => {
       overviewBlob: "overview",
       tagIds: [],
       setSubmitting,
-      t: (key) => key,
+      t: ((key: string) => key) as any,
       router: { push: vi.fn(), refresh: vi.fn() },
     });
 

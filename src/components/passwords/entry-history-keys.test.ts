@@ -44,7 +44,7 @@ describe("DISPLAY_KEYS coverage", () => {
 
   for (const [entryType, fields] of Object.entries(EXPECTED_FIELDS)) {
     it(`covers all ${entryType} fullBlob fields`, () => {
-      const missing = fields.filter((f) => !displayKeySet.has(f));
+      const missing = fields.filter((f) => !displayKeySet.has(f as typeof DISPLAY_KEYS[number]));
       expect(missing).toEqual([]);
     });
   }
@@ -62,13 +62,13 @@ describe("DISPLAY_KEYS coverage", () => {
 
 describe("SENSITIVE_KEYS coverage", () => {
   it("contains all expected sensitive fields", () => {
-    const missing = EXPECTED_SENSITIVE.filter((f) => !SENSITIVE_KEYS.has(f));
+    const missing = EXPECTED_SENSITIVE.filter((f) => !(SENSITIVE_KEYS as Set<string>).has(f));
     expect(missing).toEqual([]);
   });
 
   it("every sensitive key is also in DISPLAY_KEYS", () => {
     const displayKeySet = new Set(DISPLAY_KEYS);
-    const orphaned = [...SENSITIVE_KEYS].filter((f) => !displayKeySet.has(f));
+    const orphaned = [...SENSITIVE_KEYS].filter((f) => !(displayKeySet as Set<string>).has(f));
     expect(orphaned).toEqual([]);
   });
 });
@@ -81,7 +81,7 @@ const EXPECTED_DATE_KEYS = [
 
 describe("DATE_KEYS coverage", () => {
   it("contains all expected date fields", () => {
-    const missing = EXPECTED_DATE_KEYS.filter((f) => !DATE_KEYS.has(f));
+    const missing = EXPECTED_DATE_KEYS.filter((f) => !(DATE_KEYS as Set<string>).has(f));
     expect(missing).toEqual([]);
   });
 

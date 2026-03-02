@@ -350,7 +350,7 @@ describe("PasswordForm folder selector", () => {
 
     await waitFor(() => {
       const postCall = fetchMock.mock.calls.find(
-        (c: [string, RequestInit?]) => c[1]?.method === "POST",
+        (c: any[]) => c[1]?.method === "POST",
       );
       expect(postCall).toBeDefined();
       const body = JSON.parse(postCall![1]!.body as string);
@@ -401,7 +401,7 @@ describe("PasswordForm folder selector", () => {
 
     await waitFor(() => {
       const putCall = fetchMock.mock.calls.find(
-        (c: [string, RequestInit?]) => c[1]?.method === "PUT",
+        (c: any[]) => c[1]?.method === "PUT",
       );
       expect(putCall).toBeDefined();
       const body = JSON.parse(putCall![1]!.body as string);
@@ -478,7 +478,7 @@ describe("PasswordForm folder selector", () => {
 
     // No POST should have been made (only the initial GET for folders)
     const postCalls = fetchMock.mock.calls.filter(
-      (c: [string, RequestInit?]) => c[1]?.method === "POST",
+      (c: any[]) => c[1]?.method === "POST",
     );
     expect(postCalls).toHaveLength(0);
   });

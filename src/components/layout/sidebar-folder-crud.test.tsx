@@ -437,7 +437,7 @@ describe("Sidebar folder CRUD integration", () => {
     await waitFor(() => {
       const postSubmitCalls = fetchMock.mock.calls.slice(callCountBefore);
       const getFoldersCalls = postSubmitCalls.filter(
-        (c: [string, RequestInit?]) => c[0].includes("/api/folders") && !c[1]?.method,
+        (c: any[]) => c[0].includes("/api/folders") && !c[1]?.method,
       );
       expect(getFoldersCalls.length).toBeGreaterThan(0);
     });
@@ -653,7 +653,7 @@ describe("Sidebar team folder CRUD integration", () => {
 
     // Verify the POST was sent to the team folders endpoint
     const postCalls = fetchMock.mock.calls.filter(
-      (c: [string, RequestInit?]) => c[1]?.method === "POST",
+      (c: any[]) => c[1]?.method === "POST",
     );
     expect(postCalls.length).toBe(1);
     expect(postCalls[0][0]).toContain("/api/teams/team-1/folders");
