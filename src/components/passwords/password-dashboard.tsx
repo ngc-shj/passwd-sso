@@ -28,6 +28,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { usePersonalTags } from "@/hooks/use-personal-tags";
 import { buildFolderPath } from "@/lib/folder-path";
+import { buildTagPath } from "@/lib/tag-tree";
 import type { TagData } from "@/components/tags/tag-input";
 
 type VaultView = "all" | "favorites" | "archive" | "trash";
@@ -79,7 +80,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
 
   const folderLabel = folderId ? buildFolderPath(folderId, folders) : null;
   const matchedTag = tagId ? tags.find((tag) => tag.id === tagId) : undefined;
-  const tagLabel = matchedTag?.name;
+  const tagLabel = tagId ? buildTagPath(tagId, tags) : null;
 
   const subtitle = isTrash
     ? t("trash")
@@ -229,7 +230,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
           title={isPrimaryScopeLabel ? subtitle : t("personalVault")}
           subtitle={subtitle}
           showSubtitle={!isPrimaryScopeLabel}
-          truncateStart={!!folderLabel}
+          truncateStart={!!folderLabel || !!tagLabel}
           actions={
             selectionMode ? (
               <div className="flex items-center gap-3">

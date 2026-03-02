@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTranslator } from "@/lib/translation-types";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import { buildPersonalPasswordFormDerived } from "@/hooks/personal-password-form-derived";
@@ -125,8 +127,8 @@ function buildTranslations(
   tGen: (key: string) => string,
 ): PersonalPasswordFormTranslations {
   return {
-    t: (key) => key,
-    tGen,
-    tc: (key) => key,
+    t: mockTranslator<PasswordFormTranslator>(),
+    tGen: mockTranslator<PasswordGeneratorTranslator>(tGen),
+    tc: mockTranslator<CommonTranslator>(),
   };
 }

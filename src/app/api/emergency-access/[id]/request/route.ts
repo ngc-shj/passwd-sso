@@ -8,7 +8,7 @@ import { emergencyAccessRequestedEmail } from "@/lib/email/templates/emergency-a
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { routing } from "@/i18n/routing";
+import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
 
 const requestLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 3 });
@@ -73,7 +73,7 @@ export async function POST(
   const owner = await withUserTenantRls(session.user.id, async () =>
     prisma.user.findUnique({
       where: { id: grant.ownerId },
-      select: { email: true, name: true },
+      select: { email: true, name: true, locale: true },
     }),
   );
   if (owner?.email) {
@@ -84,7 +84,7 @@ export async function POST(
       }),
     );
     const granteeName = grantee?.name ?? grantee?.email ?? "";
-    const { subject, html, text } = emergencyAccessRequestedEmail(routing.defaultLocale, granteeName, grant.waitDays);
+    const { subject, html, text } = emergencyAccessRequestedEmail(resolveUserLocale(owner.locale), granteeName, grant.waitDays);
     void sendEmail({ to: owner.email, subject, html, text });
   }
 

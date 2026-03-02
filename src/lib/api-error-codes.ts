@@ -92,6 +92,10 @@ export const API_ERROR = {
   INVITATION_ALREADY_SENT: "INVITATION_ALREADY_SENT",
   INVITATION_NOT_FOUND: "INVITATION_NOT_FOUND",
 
+  // ── Policy ───────────────────────────────────────────────
+  POLICY_SHARING_DISABLED: "POLICY_SHARING_DISABLED",
+  POLICY_EXPORT_DISABLED: "POLICY_EXPORT_DISABLED",
+
   // ── Share Links ───────────────────────────────────────────
   ALREADY_REVOKED: "ALREADY_REVOKED",
 
@@ -207,6 +211,8 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   INVITATION_WRONG_EMAIL: "invitationWrongEmail",
   INVITATION_ALREADY_SENT: "invitationAlreadySent",
   INVITATION_NOT_FOUND: "invitationNotFound",
+  POLICY_SHARING_DISABLED: "policySharingDisabled",
+  POLICY_EXPORT_DISABLED: "policyExportDisabled",
   ALREADY_REVOKED: "alreadyRevoked",
   SEND_TEXT_TOO_LARGE: "sendTextTooLarge",
   SEND_FILE_TOO_LARGE: "sendFileTooLarge",

@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type { PasswordFormTranslator } from "@/lib/translation-types";
 import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
 
 const savePersonalEntryMock = vi.fn();
@@ -35,7 +37,7 @@ describe("executePersonalEntrySubmit", () => {
       overviewBlob: "overview",
       tagIds: ["t1"],
       setSubmitting,
-      t: (key) => key,
+      t: mockTranslator<PasswordFormTranslator>(),
       router: { push: vi.fn(), refresh: vi.fn() },
     });
 
@@ -56,7 +58,7 @@ describe("executePersonalEntrySubmit", () => {
       overviewBlob: "overview",
       tagIds: [],
       setSubmitting,
-      t: (key) => key,
+      t: mockTranslator<PasswordFormTranslator>(),
       router: { push: vi.fn(), refresh: vi.fn() },
     });
 

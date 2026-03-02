@@ -74,6 +74,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     setTagDialogOpen,
     editingTag,
     deletingTag,
+    tagTeamId,
     handleTagCreate,
     handleTagEdit,
     handleTagDeleteClick,
@@ -203,6 +204,13 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
         open={tagDialogOpen}
         onOpenChange={setTagDialogOpen}
         editTag={editingTag}
+        allTags={
+          tagTeamId
+            ? (teamTagGroups.find((g) => g.teamId === tagTeamId)?.tags ?? []).map((t) => ({
+                id: t.id, name: t.name, color: t.color, parentId: t.parentId,
+              }))
+            : tags.map((t) => ({ id: t.id, name: t.name, color: t.color, parentId: t.parentId }))
+        }
         onSubmit={handleTagSubmit}
       />
 

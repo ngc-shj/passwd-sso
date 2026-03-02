@@ -26,6 +26,9 @@ const ALLOWED_FILES = new Set([
   "src/app/api/teams/pending-key-distributions/route.ts", // cross-tenant key distribution
   "src/app/api/teams/[teamId]/members/route.ts", // member tenant lookup
   "src/app/api/teams/invitations/accept/route.ts", // cross-tenant invitation accept
+  "src/lib/new-device-detection.ts", // fire-and-forget session lookup for device detection
+  "src/lib/notification.ts", // fire-and-forget notification creation
+  "src/lib/webhook-dispatcher.ts", // fire-and-forget webhook delivery
 ]);
 
 function getSourceFiles() {

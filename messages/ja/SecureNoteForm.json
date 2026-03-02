@@ -11,5 +11,15 @@
   "saved": "セキュアノートを保存しました",
   "updated": "セキュアノートを更新しました",
   "failedToSave": "保存に失敗しました",
-  "networkError": "ネットワークエラー"
+  "networkError": "ネットワークエラー",
+  "templateLabel": "テンプレート",
+  "template_blank": "空白",
+  "template_wifi": "Wi-Fiネットワーク",
+  "template_apiKey": "APIキー",
+  "template_server": "サーバー / SSH",
+  "template_recoveryCodes": "リカバリコード",
+  "template_meeting": "ミーティング情報",
+  "editTab": "編集",
+  "previewTab": "プレビュー",
+  "markdownHint": "Markdown記法が使えます"
 }

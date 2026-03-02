@@ -41,6 +41,9 @@ export const API_PATH = {
   WATCHTOWER_HIBP: "/api/watchtower/hibp",
   CSP_REPORT: "/api/csp-report",
   SESSIONS: "/api/sessions",
+  USER_LOCALE: "/api/user/locale",
+  NOTIFICATIONS: "/api/notifications",
+  NOTIFICATIONS_COUNT: "/api/notifications/count",
   SCIM_V2: "/api/scim/v2",
   HEALTH_LIVE: "/api/health/live",
   HEALTH_READY: "/api/health/ready",
@@ -78,6 +81,7 @@ export const apiPath = {
     `${API_PATH.TEAMS}/${teamId}/members/${memberId}/confirm-key`,
   teamTags: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/tags`,
   teamAuditLogs: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/audit-logs`,
+  teamPolicy: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/policy`,
   passwordById: (entryId: string) => `${API_PATH.PASSWORDS}/${entryId}`,
   passwordsBulkTrash: () => API_PATH.PASSWORDS_BULK_TRASH,
   passwordsBulkArchive: () => API_PATH.PASSWORDS_BULK_ARCHIVE,
@@ -108,6 +112,7 @@ export const apiPath = {
   teamPasswordHistoryRestore: (teamId: string, entryId: string, historyId: string) =>
     `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/history/${historyId}/restore`,
   sessionById: (sessionId: string) => `${API_PATH.SESSIONS}/${sessionId}`,
+  notificationById: (id: string) => `${API_PATH.NOTIFICATIONS}/${id}`,
   teamScimTokens: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/scim-tokens`,
   teamScimTokenById: (teamId: string, tokenId: string) =>
     `${API_PATH.TEAMS}/${teamId}/scim-tokens/${tokenId}`,

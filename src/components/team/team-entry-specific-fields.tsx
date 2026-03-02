@@ -2,6 +2,7 @@
 
 import { CARD_BRANDS } from "@/lib/credit-card";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
+import type { TeamPolicyClient } from "@/hooks/use-team-policy";
 import { TeamBankAccountFields } from "@/components/team/team-bank-account-fields";
 import { TeamCreditCardFields } from "@/components/team/team-credit-card-fields";
 import { TeamIdentityFields } from "@/components/team/team-identity-fields";
@@ -47,6 +48,9 @@ interface TeamEntrySpecificFieldsProps {
   onContentChange: (value: string) => void;
   contentLabel: string;
   contentPlaceholder: string;
+  editTabLabel: string;
+  previewTabLabel: string;
+  markdownHint?: string;
   // credit card
   cardholderName: string;
   onCardholderNameChange: (value: string) => void;
@@ -221,6 +225,7 @@ interface TeamEntrySpecificFieldsProps {
     purchaseDate: string;
     expirationDate: string;
   };
+  teamPolicy?: TeamPolicyClient | null;
 }
 
 export function TeamEntrySpecificFields({
@@ -257,6 +262,9 @@ export function TeamEntrySpecificFields({
   onContentChange,
   contentLabel,
   contentPlaceholder,
+  editTabLabel,
+  previewTabLabel,
+  markdownHint,
   cardholderName,
   onCardholderNameChange,
   cardholderNamePlaceholder,
@@ -387,6 +395,7 @@ export function TeamEntrySpecificFields({
   onExpirationDateChange,
   softwareLicenseExpiryError,
   softwareLicenseLabels,
+  teamPolicy,
 }: TeamEntrySpecificFieldsProps) {
   switch (entryKind) {
     case "passkey":
@@ -575,6 +584,9 @@ export function TeamEntrySpecificFields({
           onContentChange={onContentChange}
           contentLabel={contentLabel}
           contentPlaceholder={contentPlaceholder}
+          editTabLabel={editTabLabel}
+          previewTabLabel={previewTabLabel}
+          markdownHint={markdownHint}
         />
       );
     case "password":
@@ -611,6 +623,7 @@ export function TeamEntrySpecificFields({
           onNotesChange={onNotesChange}
           notesLabel={notesLabel}
           notesPlaceholder={notesPlaceholder}
+          teamPolicy={teamPolicy}
         />
       );
   }

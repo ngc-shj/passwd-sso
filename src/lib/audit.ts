@@ -141,16 +141,18 @@ export function logAudit(params: AuditLogParams): void {
 }
 
 /**
- * Extract IP address and User-Agent from a NextRequest.
+ * Extract IP address, User-Agent, and Accept-Language from a NextRequest.
  */
 export function extractRequestMeta(req: NextRequest): {
   ip: string | null;
   userAgent: string | null;
+  acceptLanguage: string | null;
 } {
   const forwarded = req.headers.get("x-forwarded-for");
   const ip = forwarded
     ? forwarded.split(",")[0].trim()
     : req.headers.get("x-real-ip") ?? null;
   const userAgent = req.headers.get("user-agent");
-  return { ip, userAgent };
+  const acceptLanguage = req.headers.get("accept-language");
+  return { ip, userAgent, acceptLanguage };
 }

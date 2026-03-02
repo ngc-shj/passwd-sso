@@ -14,6 +14,7 @@ describe("useTeamPasswordFormValueState", () => {
       title: "GitHub",
       username: "user@example.com",
       password: "secret",
+      url: null,
       notes: "note",
       teamFolderId: "folder-1",
     });
@@ -51,6 +52,8 @@ describe("useTeamPasswordFormValueState", () => {
       title: "Test",
       username: "u",
       password: "p",
+      url: null,
+      notes: null,
       requireReprompt: true,
       expiresAt: "2026-12-31T00:00:00Z",
     });

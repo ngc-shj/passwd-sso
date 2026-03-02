@@ -8,6 +8,7 @@ import {
   encryptShareData,
 } from "@/lib/crypto-server";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { assertPolicyAllowsSharing, PolicyViolationError } from "@/lib/team-policy";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -16,6 +17,7 @@ import {
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
   AUDIT_SCOPE,
+  applySharePermissions,
 } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -58,7 +60,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { passwordEntryId, teamPasswordEntryId, data, encryptedShareData, expiresIn, maxViews } =
+  const { passwordEntryId, teamPasswordEntryId, data, encryptedShareData, expiresIn, maxViews, permissions } =
     parsed.data;
 
   let encryptedData: string;
@@ -85,7 +87,14 @@ export async function POST(req: NextRequest) {
     // TOTP is already stripped by Zod shareDataSchema (no totp field defined)
     entryType = entry.entryType;
     tenantId = entry.tenantId;
-    const plaintext = JSON.stringify(data);
+
+    // Apply share permissions: filter fields before encryption
+    const filteredData = applySharePermissions(
+      data as Record<string, unknown>,
+      permissions ?? [],
+      entryType,
+    );
+    const plaintext = JSON.stringify(filteredData);
 
     // Encrypt share data with master key
     const encrypted = encryptShareData(plaintext);
@@ -114,6 +123,16 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       if (e instanceof TeamAuthError) {
         return NextResponse.json({ error: e.message }, { status: e.status });
+      }
+      throw e;
+    }
+
+    // Enforce team policy: sharing
+    try {
+      await assertPolicyAllowsSharing(teamEntry.teamId);
+    } catch (e) {
+      if (e instanceof PolicyViolationError) {
+        return NextResponse.json({ error: API_ERROR.POLICY_SHARING_DISABLED }, { status: 403 });
       }
       throw e;
     }
@@ -149,6 +168,7 @@ export async function POST(req: NextRequest) {
         tenantId,
         passwordEntryId: passwordEntryId ?? null,
         teamPasswordEntryId: teamPasswordEntryId ?? null,
+        permissions: permissions ?? [],
       },
     }),
   );

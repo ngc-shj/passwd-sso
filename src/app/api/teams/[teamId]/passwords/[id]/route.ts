@@ -12,6 +12,7 @@ import {
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { dispatchWebhook } from "@/lib/webhook-dispatcher";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -247,6 +248,13 @@ export async function PUT(req: NextRequest, { params }: Params) {
     ...extractRequestMeta(req),
   });
 
+  void dispatchWebhook({
+    type: AUDIT_ACTION.ENTRY_UPDATE,
+    teamId,
+    timestamp: new Date().toISOString(),
+    data: { entryId: id, entryType: updated.entryType },
+  });
+
   return NextResponse.json({
     id: updated.id,
     entryType: updated.entryType,
@@ -308,6 +316,13 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     targetId: id,
     metadata: { permanent },
     ...extractRequestMeta(req),
+  });
+
+  void dispatchWebhook({
+    type: AUDIT_ACTION.ENTRY_DELETE,
+    teamId,
+    timestamp: new Date().toISOString(),
+    data: { entryId: id, permanent },
   });
 
   return NextResponse.json({ success: true });

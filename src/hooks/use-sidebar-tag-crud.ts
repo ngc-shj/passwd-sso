@@ -8,11 +8,13 @@ interface SidebarTagItem {
   id: string;
   name: string;
   color: string | null;
+  parentId?: string | null;
 }
 
 interface TagSubmitPayload {
   name: string;
   color: string | null;
+  parentId?: string | null;
 }
 
 interface UseSidebarTagCrudParams {
@@ -92,6 +94,7 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
     setTagDialogOpen,
     editingTag,
     deletingTag,
+    tagTeamId,
     handleTagCreate,
     handleTagEdit,
     handleTagDeleteClick,

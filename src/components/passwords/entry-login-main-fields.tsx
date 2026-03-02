@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordGenerator } from "@/components/passwords/password-generator";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
+import type { TeamPolicyClient } from "@/hooks/use-team-policy";
 
 interface EntryLoginMainFieldsProps {
   idPrefix?: string;
@@ -40,6 +41,7 @@ interface EntryLoginMainFieldsProps {
   onNotesChange: (value: string) => void;
   notesLabel: string;
   notesPlaceholder: string;
+  teamPolicy?: TeamPolicyClient | null;
 }
 
 export function EntryLoginMainFields({
@@ -75,6 +77,7 @@ export function EntryLoginMainFields({
   onNotesChange,
   notesLabel,
   notesPlaceholder,
+  teamPolicy,
 }: EntryLoginMainFieldsProps) {
   const titleId = `${idPrefix}title`;
   const usernameId = `${idPrefix}username`;
@@ -156,6 +159,7 @@ export function EntryLoginMainFields({
           onClose={onToggleGenerator}
           settings={generatorSettings}
           onUse={onGeneratorUse}
+          teamPolicy={teamPolicy}
         />
       </div>
 

@@ -1,0 +1,21 @@
+{
+  "label": "Notifications",
+  "title": "Notifications",
+  "noNotifications": "No notifications",
+  "markAllAsRead": "Mark all as read",
+  "markAsRead": "Mark as read",
+  "delete": "Delete",
+  "unreadCount": "{count} unread",
+  "timeAgo": "{value}",
+  "viewAll": "View all",
+  "loading": "Loading...",
+  "fetchError": "Failed to load notifications.",
+  "type_SECURITY_ALERT": "Security alert",
+  "type_NEW_DEVICE_LOGIN": "New device login",
+  "type_EMERGENCY_ACCESS": "Emergency access",
+  "type_SHARE_ACCESS": "Share access",
+  "type_TEAM_INVITE": "Team invite",
+  "type_ENTRY_EXPIRING": "Expiring entry",
+  "type_WATCHTOWER_ALERT": "Watchtower alert",
+  "type_POLICY_UPDATE": "Policy update"
+}

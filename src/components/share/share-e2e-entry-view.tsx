@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -84,38 +84,12 @@ export function ShareE2EEntryView({
 }: ShareE2EEntryViewProps) {
   const t = useTranslations("Share");
 
-  // Parse share key from URL fragment (pure computation, no setState).
-  const parsedKey = useMemo(() => {
-    if (typeof window === "undefined") return null;
-    const hash = window.location.hash;
-    const keyParam = hash
-      .slice(1)
-      .split("&")
-      .find((p) => p.startsWith("key="));
-    if (!keyParam) return null;
-    const keyB64 = keyParam.slice(4);
-    if (!keyB64) return null;
-    try {
-      const bytes = base64urlDecode(keyB64);
-      return bytes.length === 32 ? bytes : null;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  // Decrypt state — only set from async callbacks inside the effect.
+  // Decrypt state — starts as "pending" on both server and client to avoid hydration mismatch.
   const [decryptState, setDecryptState] = useState<
     | { status: "pending" }
     | { status: "error"; reason: string }
     | { status: "ok"; data: Record<string, unknown> }
   >({ status: "pending" });
-
-  // Derive display state: missing key → error, pending → loading, otherwise decrypt result.
-  const state = !parsedKey
-    ? ({ status: "error", reason: "missingKey" } as const)
-    : decryptState.status === "pending"
-      ? ({ status: "loading" } as const)
-      : decryptState;
 
   // Prevent URL leakage via Referer header (S-06)
   useEffect(() => {
@@ -127,18 +101,47 @@ export function ShareE2EEntryView({
   }, []);
 
   useEffect(() => {
-    // Remove fragment from browser history immediately (S-15)
-    history.replaceState(null, "", location.pathname + location.search);
+    async function decrypt() {
+      // Parse share key from URL fragment (client-only)
+      const hash = window.location.hash;
+      const keyParam = hash
+        .slice(1)
+        .split("&")
+        .find((p) => p.startsWith("key="));
 
-    if (!parsedKey) return;
+      // Remove fragment from browser history immediately (S-15)
+      history.replaceState(null, "", location.pathname + location.search);
 
-    decryptShareE2E(encryptedData, dataIv, dataAuthTag, parsedKey)
-      .then((data) => setDecryptState({ status: "ok", data }))
-      .catch(() => setDecryptState({ status: "error", reason: "decryptFailed" }))
-      .finally(() => parsedKey.fill(0));
-  }, [parsedKey, encryptedData, dataIv, dataAuthTag]);
+      if (!keyParam) {
+        setDecryptState({ status: "error", reason: "missingKey" });
+        return;
+      }
+      const keyB64 = keyParam.slice(4);
+      let keyBytes: Uint8Array;
+      try {
+        keyBytes = base64urlDecode(keyB64);
+        if (keyBytes.length !== 32) {
+          setDecryptState({ status: "error", reason: "missingKey" });
+          return;
+        }
+      } catch {
+        setDecryptState({ status: "error", reason: "missingKey" });
+        return;
+      }
 
-  if (state.status === "loading") {
+      try {
+        const data = await decryptShareE2E(encryptedData, dataIv, dataAuthTag, keyBytes);
+        setDecryptState({ status: "ok", data });
+      } catch {
+        setDecryptState({ status: "error", reason: "decryptFailed" });
+      } finally {
+        keyBytes.fill(0);
+      }
+    }
+    decrypt();
+  }, [encryptedData, dataIv, dataAuthTag]);
+
+  if (decryptState.status === "pending") {
     return (
       <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background p-4">
         <div className="mx-auto flex max-w-md items-center justify-center py-16">
@@ -151,13 +154,13 @@ export function ShareE2EEntryView({
     );
   }
 
-  if (state.status === "error") {
-    return <ShareError reason={state.reason} />;
+  if (decryptState.status === "error") {
+    return <ShareError reason={decryptState.reason} />;
   }
 
   return (
     <ShareEntryView
-      data={state.data}
+      data={decryptState.data}
       entryType={entryType}
       expiresAt={expiresAt}
       viewCount={viewCount}

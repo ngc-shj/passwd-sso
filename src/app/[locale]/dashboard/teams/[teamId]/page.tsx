@@ -29,6 +29,7 @@ import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-sort";
 import { buildFolderPath } from "@/lib/folder-path";
+import { buildTagPath } from "@/lib/tag-tree";
 import type { FolderItem } from "@/components/folders/folder-tree";
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
@@ -162,7 +163,7 @@ export default function TeamDashboardPage({
   const isTeamSpecialView = isTeamArchive || isTeamTrash;
 
   const [teamFolders, setTeamFolders] = useState<FolderItem[]>([]);
-  const [teamTags, setTeamTags] = useState<{ id: string; name: string }[]>([]);
+  const [teamTags, setTeamTags] = useState<{ id: string; name: string; color?: string | null; parentId?: string | null }[]>([]);
   useEffect(() => {
     Promise.all([
       fetch(apiPath.teamFolders(teamId)).then((r) => r.ok ? r.json() : []),
@@ -330,8 +331,8 @@ export default function TeamDashboardPage({
       } as Record<string, string>)[activeEntryType] ?? activeEntryType
     : null;
   const folderLabel = activeFolderId ? buildFolderPath(activeFolderId, teamFolders) : null;
-  const matchedTag = activeTagId ? teamTags.find((tg) => tg.id === activeTagId) : undefined;
-  const tagLabel = matchedTag?.name;
+  const matchedTag = activeTagId ? teamTags.find((tg) => tg.id === activeTagId) : null;
+  const tagLabel = activeTagId ? buildTagPath(activeTagId, teamTags) : null;
   const subtitle = isTeamTrash
     ? t("trash")
     : isTeamArchive
@@ -517,9 +518,11 @@ export default function TeamDashboardPage({
       const blob = await decryptFullBlob(id, raw);
       return {
         id: raw.id,
+        title: (blob.title as string) ?? undefined,
         entryType: eType,
         password: (blob.password as string) ?? "",
         content: blob.content as string | undefined,
+        isMarkdown: blob.isMarkdown as boolean | undefined,
         url: (blob.url as string) ?? null,
         urlHost: null,
         notes: (blob.notes as string) ?? null,
@@ -681,7 +684,7 @@ export default function TeamDashboardPage({
           title={isPrimaryScopeLabel ? subtitle : (team?.name ?? "...")}
           subtitle={subtitle}
           showSubtitle={!isPrimaryScopeLabel}
-          truncateStart={!!folderLabel}
+          truncateStart={!!folderLabel || !!tagLabel}
           titleExtra={!isPrimaryScopeLabel && team ? <TeamRoleBadge role={team.role} /> : null}
           actions={
             selectionMode ? (
@@ -983,18 +986,22 @@ export default function TeamDashboardPage({
         )}
       </div>
 
-      <TeamPasswordForm
-        teamId={teamId}
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        onSaved={() => {
-          fetchPasswords();
-          setExpandedId(null);
-          setRefreshKey((k) => k + 1);
-        }}
-        editData={editData}
-        entryType={editData?.entryType ?? newEntryType}
-      />
+      {formOpen && (
+        <TeamPasswordForm
+          teamId={teamId}
+          open={formOpen}
+          onOpenChange={setFormOpen}
+          onSaved={() => {
+            fetchPasswords();
+            setExpandedId(null);
+            setRefreshKey((k) => k + 1);
+          }}
+          editData={editData}
+          entryType={editData?.entryType ?? newEntryType}
+          defaultFolderId={activeFolderId ?? null}
+          defaultTags={matchedTag ? [{ id: matchedTag.id, name: matchedTag.name, color: matchedTag.color ?? null }] : undefined}
+        />
+      )}
 
       <BulkActionConfirmDialog
         open={bulkDialogOpen}

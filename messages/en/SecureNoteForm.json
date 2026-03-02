@@ -11,5 +11,15 @@
   "saved": "Secure note saved",
   "updated": "Secure note updated",
   "failedToSave": "Failed to save",
-  "networkError": "Network error"
+  "networkError": "Network error",
+  "templateLabel": "Template",
+  "template_blank": "Blank",
+  "template_wifi": "Wi-Fi Network",
+  "template_apiKey": "API Key",
+  "template_server": "Server / SSH",
+  "template_recoveryCodes": "Recovery Codes",
+  "template_meeting": "Meeting Info",
+  "editTab": "Edit",
+  "previewTab": "Preview",
+  "markdownHint": "Markdown formatting is supported"
 }

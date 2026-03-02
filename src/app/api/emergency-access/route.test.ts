@@ -8,7 +8,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser, mockCheck, mockSendEmail, moc
     findFirst: vi.fn(),
     findMany: vi.fn(),
   },
-  mockPrismaUser: { findUnique: vi.fn() },
+  mockPrismaUser: { findUnique: vi.fn(), findFirst: vi.fn() },
   mockCheck: vi.fn().mockResolvedValue(true),
   mockSendEmail: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),

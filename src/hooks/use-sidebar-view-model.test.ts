@@ -42,7 +42,7 @@ function makeParams() {
 describe("useSidebarViewModel", () => {
   it("navigates to personal vault and closes sidebar", () => {
     const params = makeParams();
-    const { result } = renderHook(() => useSidebarViewModel(params));
+    const { result } = renderHook(() => useSidebarViewModel(params as unknown as Parameters<typeof useSidebarViewModel>[0]));
 
     act(() => {
       result.current.onVaultChange("personal");
@@ -54,7 +54,7 @@ describe("useSidebarViewModel", () => {
 
   it("navigates to team vault and closes sidebar", () => {
     const params = makeParams();
-    const { result } = renderHook(() => useSidebarViewModel(params));
+    const { result } = renderHook(() => useSidebarViewModel(params as unknown as Parameters<typeof useSidebarViewModel>[0]));
 
     act(() => {
       result.current.onVaultChange("team-1");
@@ -66,7 +66,7 @@ describe("useSidebarViewModel", () => {
 
   it("exposes onNavigate behavior", () => {
     const params = makeParams();
-    const { result } = renderHook(() => useSidebarViewModel(params));
+    const { result } = renderHook(() => useSidebarViewModel(params as unknown as Parameters<typeof useSidebarViewModel>[0]));
 
     act(() => {
       result.current.onNavigate();
@@ -77,7 +77,7 @@ describe("useSidebarViewModel", () => {
 
   it("forwards sidebar state and handlers", () => {
     const params = makeParams();
-    const { result } = renderHook(() => useSidebarViewModel(params));
+    const { result } = renderHook(() => useSidebarViewModel(params as unknown as Parameters<typeof useSidebarViewModel>[0]));
 
     // Handlers (renamed props)
     expect(result.current.onCreateFolder).toBe(params.handleFolderCreate);

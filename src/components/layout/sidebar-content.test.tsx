@@ -37,7 +37,7 @@ function baseProps(overrides: Partial<SidebarContentProps> = {}): SidebarContent
     t: (k: string) => k,
     tTeam: (k: string) => k,
     vaultContext: { type: "personal" },
-    teams: [{ id: "team-1", name: "Acme", slug: "acme", role: "ADMIN" }],
+    teams: [{ id: "team-1", name: "Acme", slug: "acme", role: "ADMIN", tenantName: "Acme Corp", isCrossTenant: false }],
     selectedTeam: null,
     selectedTeamCanManageFolders: false,
     selectedTeamCanManageTags: false,

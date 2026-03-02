@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
-import { TEAM_INVITE_ROLE_VALUES, TEAM_ROLE, TEAM_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, CUSTOM_FIELD_TYPE_VALUES } from "@/lib/constants";
+import { TEAM_INVITE_ROLE_VALUES, TEAM_ROLE, TEAM_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, CUSTOM_FIELD_TYPE_VALUES, SHARE_PERMISSION_VALUES } from "@/lib/constants";
 
 const asciiPrintable = /^[\x20-\x7E]*$/;
 
@@ -94,6 +94,7 @@ export const createTagSchema = z.object({
     .optional()
     .or(z.literal(""))
     .or(z.null().transform(() => undefined)),
+  parentId: z.string().cuid().optional().nullable(),
 });
 
 export const updateTagSchema = z.object({
@@ -104,6 +105,7 @@ export const updateTagSchema = z.object({
     .nullable()
     .optional()
     .or(z.literal("")),
+  parentId: z.string().cuid().optional().nullable(),
 });
 
 export const generatePassphraseSchema = z.object({
@@ -186,6 +188,18 @@ export const updateTeamSchema = z.object({
   description: z.string().max(500).trim().optional().or(z.literal("")),
 });
 
+export const upsertTeamPolicySchema = z.object({
+  minPasswordLength: z.number().int().min(0).max(128).default(0),
+  requireUppercase: z.boolean().default(false),
+  requireLowercase: z.boolean().default(false),
+  requireNumbers: z.boolean().default(false),
+  requireSymbols: z.boolean().default(false),
+  maxSessionDurationMinutes: z.number().int().min(5).max(43200).nullable().default(null),
+  requireRepromptForAll: z.boolean().default(false),
+  allowExport: z.boolean().default(true),
+  allowSharing: z.boolean().default(true),
+});
+
 export const inviteSchema = z.object({
   email: z.string().email(),
   role: z.enum(TEAM_INVITE_ROLE_VALUES).default(TEAM_ROLE.MEMBER),
@@ -203,6 +217,18 @@ export const createTeamTagSchema = z.object({
     .nullable()
     .optional()
     .or(z.literal("")),
+  parentId: z.string().cuid().optional().nullable(),
+});
+
+export const updateTeamTagSchema = z.object({
+  name: z.string().min(1).max(50).trim().optional(),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .nullable()
+    .optional()
+    .or(z.literal("")),
+  parentId: z.string().cuid().optional().nullable(),
 });
 
 // ─── Send Schemas ─────────────────────────────────────────
@@ -321,6 +347,7 @@ export const createShareLinkSchema = z.object({
   entryType: entryTypeSchema.optional(),
   expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
   maxViews: z.number().int().min(1).max(100).optional(),
+  permissions: z.array(z.enum(SHARE_PERMISSION_VALUES)).optional(),
 }).refine(
   (d) => (d.passwordEntryId ? !d.teamPasswordEntryId : !!d.teamPasswordEntryId),
   { message: "Exactly one of passwordEntryId or teamPasswordEntryId is required" }

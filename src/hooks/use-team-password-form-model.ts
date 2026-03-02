@@ -5,20 +5,17 @@ import { getTeamEntryKindState } from "@/components/team/team-entry-kind";
 import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
 import { useTeamAttachments } from "@/hooks/use-team-attachments";
 import { useTeamFolders } from "@/hooks/use-team-folders";
+import { useTeamPolicy } from "@/hooks/use-team-policy";
 import { useTeamPasswordFormController } from "@/hooks/use-team-password-form-controller";
-import { useTeamPasswordFormLifecycle } from "@/hooks/use-team-password-form-lifecycle";
 import {
   toTeamPasswordFormTranslations,
   useEntryFormTranslations,
 } from "@/hooks/use-entry-form-translations";
-import {
-  type TeamPasswordFormLifecycleSetters,
-  useTeamPasswordFormState,
-} from "@/hooks/use-team-password-form-state";
+import { useTeamPasswordFormState } from "@/hooks/use-team-password-form-state";
 
 type TeamPasswordFormModelBaseInput = Pick<
   TeamPasswordFormProps,
-  "teamId" | "open" | "onOpenChange" | "onSaved" | "entryType" | "editData"
+  "teamId" | "open" | "onOpenChange" | "onSaved" | "entryType" | "editData" | "defaultFolderId" | "defaultTags"
 >;
 
 function useTeamPasswordFormModelInternal({
@@ -28,6 +25,8 @@ function useTeamPasswordFormModelInternal({
   onSaved,
   entryType: entryTypeProp = ENTRY_TYPE.LOGIN,
   editData,
+  defaultFolderId,
+  defaultTags,
 }: TeamPasswordFormModelBaseInput) {
   const translationBundle = useEntryFormTranslations();
   const { t, tc } = translationBundle;
@@ -38,18 +37,14 @@ function useTeamPasswordFormModelInternal({
   const { isLoginEntry } = entryKindState;
   const isEdit = !!editData;
 
-  const formState = useTeamPasswordFormState(editData);
+  const { policy: teamPolicy } = useTeamPolicy(open, teamId);
+  const defaults = defaultFolderId != null || defaultTags != null
+    ? { defaultFolderId, defaultTags }
+    : undefined;
+  const formState = useTeamPasswordFormState(editData, teamPolicy, defaults);
 
   const { attachments, setAttachments } = useTeamAttachments(open, teamId, editData?.id);
   const { folders: teamFolders } = useTeamFolders(open, teamId);
-
-  const formSetters: TeamPasswordFormLifecycleSetters = { ...formState.setters, setAttachments };
-  const { handleOpenChange } = useTeamPasswordFormLifecycle({
-    open,
-    editData,
-    onOpenChange,
-    setters: formSetters,
-  });
 
   const { entryCopy, entrySpecificFieldsProps, handleSubmit, hasChanges, submitDisabled } =
     useTeamPasswordFormController({
@@ -61,7 +56,7 @@ function useTeamPasswordFormModelInternal({
       entryKindState,
       translations,
       formState,
-      handleOpenChange,
+      handleOpenChange: onOpenChange,
     });
 
   return {
@@ -71,10 +66,11 @@ function useTeamPasswordFormModelInternal({
     isLoginEntry,
     editData,
     formState,
+    teamPolicy,
     attachments,
     setAttachments,
     teamFolders,
-    handleOpenChange,
+    handleOpenChange: onOpenChange,
     entryCopy,
     entrySpecificFieldsProps,
     handleSubmit,

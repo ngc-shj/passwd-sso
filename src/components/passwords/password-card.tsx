@@ -118,6 +118,7 @@ interface VaultEntryFull {
   url?: string | null;
   notes?: string | null;
   content?: string;
+  isMarkdown?: boolean;
   tags: EntryTagNameColor[];
   customFields?: EntryCustomField[];
   passwordHistory?: EntryPasswordHistory[];
@@ -343,6 +344,7 @@ export function PasswordCard({
             requireReprompt: (raw.requireReprompt as boolean | undefined) ?? requireReprompt,
             password: entry.password ?? "",
             content: entry.content,
+            isMarkdown: entry.isMarkdown,
             url: entry.url ?? null,
             urlHost,
             notes: entry.notes ?? null,
@@ -883,6 +885,7 @@ export function PasswordCard({
         teamPasswordEntryId={isTeamMode ? id : undefined}
         decryptedData={shareData}
         entryType={isTeamMode ? entryType : undefined}
+        teamId={isTeamMode ? scopedTeamId : undefined}
       />
 
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

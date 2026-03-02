@@ -130,6 +130,7 @@ export function buildTeamEntryPayload(
     case ENTRY_TYPE.SECURE_NOTE:
       entryFields = {
         content: input.content ?? "",
+        isMarkdown: true,
       };
       break;
     case ENTRY_TYPE.LOGIN:

@@ -32,6 +32,8 @@ interface UseTeamFormSectionsPropsArgs {
   statusSavedLabel: string;
   repromptTitle: string;
   repromptDescription: string;
+  repromptPolicyForced?: boolean;
+  repromptPolicyForcedLabel?: string;
   expirationTitle: string;
   expirationDescription: string;
   onCancel: () => void;
@@ -69,6 +71,8 @@ export function buildTeamFormSectionsProps({
   statusSavedLabel,
   repromptTitle,
   repromptDescription,
+  repromptPolicyForced,
+  repromptPolicyForcedLabel,
   expirationTitle,
   expirationDescription,
   onCancel,
@@ -105,6 +109,8 @@ export function buildTeamFormSectionsProps({
       title: repromptTitle,
       description: repromptDescription,
       sectionCardClass,
+      policyForced: repromptPolicyForced,
+      policyForcedLabel: repromptPolicyForcedLabel,
     },
     expirationSectionProps: {
       value: values.expiresAt,

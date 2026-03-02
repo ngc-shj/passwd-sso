@@ -58,6 +58,7 @@ describe("useTeamPasswordFormState", () => {
         title: "Identity",
         username: "identity-user",
         password: "identity-pass",
+        url: null,
         notes: "id note",
         teamFolderId: "folder-1",
       }),

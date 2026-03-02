@@ -9,7 +9,7 @@ import { emergencyInviteEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { routing } from "@/i18n/routing";
+import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
 
 const createLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 5 });
@@ -101,8 +101,16 @@ export async function POST(req: NextRequest) {
     ...extractRequestMeta(req),
   });
 
+  // Best-effort: look up grantee's locale if they already have an account
+  const granteeUser = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findFirst({
+      where: { email: { equals: granteeEmail, mode: "insensitive" } },
+      select: { locale: true },
+    }),
+  );
+  const locale = resolveUserLocale(granteeUser?.locale);
   const ownerName = session.user.name ?? session.user.email ?? "";
-  const { subject, html, text } = emergencyInviteEmail(routing.defaultLocale, ownerName);
+  const { subject, html, text } = emergencyInviteEmail(locale, ownerName);
   void sendEmail({ to: granteeEmail, subject, html, text });
 
   // Return plaintext token only at creation time; DB stores only the hash

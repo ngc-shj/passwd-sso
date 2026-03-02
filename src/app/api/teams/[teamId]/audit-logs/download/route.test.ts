@@ -1,0 +1,206 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
+
+const { mockAuth, mockPrismaAuditLog, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockLogAudit, mockExtractRequestMeta, mockAssertPolicyAllowsExport, PolicyViolationError, mockCheckRateLimit } = vi.hoisted(() => {
+  class _TeamAuthError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = "TeamAuthError";
+      this.status = status;
+    }
+  }
+  class _PolicyViolationError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "PolicyViolationError";
+    }
+  }
+  return {
+    mockAuth: vi.fn(),
+    mockPrismaAuditLog: { findMany: vi.fn() },
+    mockRequireTeamPermission: vi.fn(),
+    TeamAuthError: _TeamAuthError,
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+    mockLogAudit: vi.fn(),
+    mockExtractRequestMeta: vi.fn(() => ({ ip: null, userAgent: null })),
+    mockAssertPolicyAllowsExport: vi.fn(),
+    PolicyViolationError: _PolicyViolationError,
+    mockCheckRateLimit: vi.fn().mockResolvedValue(true),
+  };
+});
+
+vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/prisma", () => ({
+  prisma: { auditLog: mockPrismaAuditLog },
+}));
+vi.mock("@/lib/team-auth", () => ({
+  requireTeamPermission: mockRequireTeamPermission,
+  TeamAuthError,
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withTeamTenantRls: mockWithTeamTenantRls,
+}));
+vi.mock("@/lib/audit", () => ({
+  logAudit: mockLogAudit,
+  extractRequestMeta: mockExtractRequestMeta,
+}));
+vi.mock("@/lib/team-policy", () => ({
+  assertPolicyAllowsExport: mockAssertPolicyAllowsExport,
+  PolicyViolationError,
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: () => ({ check: mockCheckRateLimit }),
+}));
+
+import { GET } from "./route";
+
+const TEAM_ID = "team-123";
+
+async function streamToString(response: Response): Promise<string> {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let result = "";
+  let done = false;
+  while (!done) {
+    const chunk = await reader.read();
+    done = chunk.done;
+    if (chunk.value) result += decoder.decode(chunk.value, { stream: !done });
+  }
+  return result;
+}
+
+describe("GET /api/teams/[teamId]/audit-logs/download", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockRequireTeamPermission.mockResolvedValue({ role: "OWNER" });
+    mockAssertPolicyAllowsExport.mockResolvedValue(undefined);
+    mockCheckRateLimit.mockResolvedValue(true);
+  });
+
+  it("returns 401 when unauthenticated", async () => {
+    mockAuth.mockResolvedValue(null);
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 403 when permission denied", async () => {
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 403 when export is disabled by policy", async () => {
+    mockAssertPolicyAllowsExport.mockRejectedValue(new PolicyViolationError("Export is disabled by team policy"));
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 429 when rate limit exceeded", async () => {
+    mockCheckRateLimit.mockResolvedValue(false);
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(429);
+  });
+
+  it("returns 400 when date range exceeds 90 days", async () => {
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
+        searchParams: { from: "2025-01-01", to: "2025-06-01" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("streams JSONL format by default", async () => {
+    const logEntry = {
+      id: "log-1",
+      action: "ENTRY_CREATE",
+      targetType: "password",
+      targetId: "pw-1",
+      metadata: { foo: "bar" },
+      ip: "127.0.0.1",
+      userAgent: "TestAgent",
+      createdAt: new Date("2025-06-01T00:00:00Z"),
+      user: { id: "u1", name: "Test User", email: "test@example.com" },
+    };
+    mockPrismaAuditLog.findMany.mockResolvedValue([logEntry]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.headers.get("Content-Type")).toContain("application/x-ndjson");
+    expect(res.headers.get("Content-Disposition")).toContain("team-audit-logs.jsonl");
+
+    const text = await streamToString(res);
+    const lines = text.trim().split("\n");
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.id).toBe("log-1");
+    expect(parsed.action).toBe("ENTRY_CREATE");
+    expect(parsed.user.email).toBe("test@example.com");
+  });
+
+  it("streams CSV format when requested", async () => {
+    const logEntry = {
+      id: "log-1",
+      action: "ENTRY_CREATE",
+      targetType: "password",
+      targetId: "pw-1",
+      ip: "127.0.0.1",
+      userAgent: "TestAgent",
+      createdAt: new Date("2025-06-01T00:00:00Z"),
+      user: { id: "u1", name: "Test User", email: "test@example.com" },
+    };
+    mockPrismaAuditLog.findMany.mockResolvedValue([logEntry]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
+        searchParams: { format: "csv" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.headers.get("Content-Type")).toContain("text/csv");
+    expect(res.headers.get("Content-Disposition")).toContain("team-audit-logs.csv");
+
+    const text = await streamToString(res);
+    const lines = text.trim().split("\n");
+    expect(lines).toHaveLength(2); // header + 1 data row
+    expect(lines[0]).toContain("id,action");
+  });
+
+  it("logs audit event for download", async () => {
+    mockPrismaAuditLog.findMany.mockResolvedValue([]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    // Consume stream to ensure it completes
+    await streamToString(res);
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "AUDIT_LOG_DOWNLOAD",
+        teamId: TEAM_ID,
+      }),
+    );
+  });
+});

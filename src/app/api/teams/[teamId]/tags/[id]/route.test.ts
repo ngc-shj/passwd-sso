@@ -14,6 +14,8 @@ const { mockAuth, mockPrismaTeamTag, mockRequireTeamPermission, TeamAuthError, m
     mockAuth: vi.fn(),
     mockPrismaTeamTag: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
     },
@@ -102,9 +104,9 @@ describe("PUT /api/teams/[teamId]/tags/[id]", () => {
   });
 
   it("returns 400 on validation error", async () => {
-    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID });
+    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID, name: "Old", parentId: null });
     const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`, { body: {} }),
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`, { body: { name: "" } }),
       createParams({ teamId: TEAM_ID, id: TAG_ID }),
     );
     expect(res.status).toBe(400);
@@ -113,8 +115,9 @@ describe("PUT /api/teams/[teamId]/tags/[id]", () => {
   });
 
   it("updates tag successfully", async () => {
-    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID });
-    mockPrismaTeamTag.update.mockResolvedValue({ id: TAG_ID, name: "Updated", color: "#00ff00" });
+    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID, name: "Old", parentId: null });
+    mockPrismaTeamTag.findFirst.mockResolvedValue(null);
+    mockPrismaTeamTag.update.mockResolvedValue({ id: TAG_ID, name: "Updated", color: "#00ff00", parentId: null });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`, {
@@ -128,8 +131,9 @@ describe("PUT /api/teams/[teamId]/tags/[id]", () => {
   });
 
   it("accepts color: null to clear the tag color", async () => {
-    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID });
-    mockPrismaTeamTag.update.mockResolvedValue({ id: TAG_ID, name: "Ops", color: null });
+    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID, name: "Ops", parentId: null });
+    mockPrismaTeamTag.findFirst.mockResolvedValue(null);
+    mockPrismaTeamTag.update.mockResolvedValue({ id: TAG_ID, name: "Ops", color: null, parentId: null });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`, {

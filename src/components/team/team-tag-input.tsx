@@ -11,11 +11,14 @@ import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { apiPath } from "@/lib/constants";
+import { buildTagPath } from "@/lib/tag-tree";
 
 export interface TeamTagData {
   id: string;
   name: string;
   color: string | null;
+  parentId?: string | null;
+  depth?: number;
 }
 
 interface TeamTagInputProps {
@@ -36,7 +39,7 @@ export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputPro
 
   const fetchTags = useCallback(async () => {
     try {
-      const res = await fetch(apiPath.teamTags(teamId));
+      const res = await fetch(`${apiPath.teamTags(teamId)}?tree=true`);
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data)) setAllTags(data);
@@ -111,7 +114,7 @@ export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputPro
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (filteredTags.length > 0 && !canCreate) {
         addTag(filteredTags[0]);
@@ -140,7 +143,7 @@ export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputPro
                   colorClass
                 )}
               >
-                {tag.name}
+                {buildTagPath(tag.id, allTags) ?? tag.name}
                 <button
                   type="button"
                   onClick={() => removeTag(tag.id)}
@@ -183,11 +186,12 @@ export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputPro
             <div className="mt-1 max-h-40 overflow-y-auto">
               {filteredTags.map((tag) => {
                 const colorClass = getTagColorClass(tag.color);
+                const depthClass = [undefined, "pl-5", "pl-8", "pl-11"][tag.depth ?? 0];
                 return (
                   <button
                     key={tag.id}
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-accent"
+                    className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-accent", depthClass)}
                     onClick={() => addTag(tag)}
                   >
                     {tag.color && (

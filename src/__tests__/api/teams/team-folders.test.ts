@@ -205,7 +205,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
   it("creates folder successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    vi.mocked(validateFolderDepth).mockResolvedValue(undefined);
+    vi.mocked(validateFolderDepth).mockResolvedValue(undefined as unknown as number);
     mockTeamFolderFindFirst.mockResolvedValue(null);
     const created = {
       id: "f1",

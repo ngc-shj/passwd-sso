@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTranslator } from "@/lib/translation-types";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import { buildPersonalSubmitArgs } from "@/hooks/personal-password-form-submit-args";
 
@@ -23,13 +25,14 @@ describe("buildPersonalSubmitArgs", () => {
         customFields: [],
         totp: null,
         requireReprompt: false,
+        expiresAt: null,
         folderId: null,
       },
       setSubmitting,
       translations: {
-        t: (key) => `pf.${key}`,
-        tGen: (key) => key,
-        tc: (key) => key,
+        t: mockTranslator<PasswordFormTranslator>((key) => `pf.${key}`),
+        tGen: mockTranslator<PasswordGeneratorTranslator>(),
+        tc: mockTranslator<CommonTranslator>(),
       },
       router: { push: vi.fn(), refresh: vi.fn(), back: vi.fn() },
     });

@@ -126,7 +126,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       makeParams("user-1"),
     );
 
-    expect(res.status).toBe(200);
+    expect(res!.status).toBe(200);
     expect(mockTenantMember.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "tm1" } }),
     );
@@ -149,7 +149,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       makeParams("user-1"),
     );
 
-    expect(res.status).toBe(403);
+    expect(res!.status).toBe(403);
     expect(mockTenantMember.update).not.toHaveBeenCalled();
   });
 
@@ -189,8 +189,8 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       makeParams("user-1"),
     );
 
-    expect(res.status).toBe(409);
-    const body = await res.json();
+    expect(res!.status).toBe(409);
+    const body = await res!.json();
     expect(body.detail).toContain("externalId");
   });
 });
@@ -213,7 +213,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       }),
       makeParams("user-1"),
     );
-    expect(res.status).toBe(400);
+    expect(res!.status).toBe(400);
   });
 
   it("returns 403 when deactivating OWNER via PATCH", async () => {
@@ -232,7 +232,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       makeParams("user-1"),
     );
 
-    expect(res.status).toBe(403);
+    expect(res!.status).toBe(403);
     expect(mockTenantMember.update).not.toHaveBeenCalled();
   });
 });
@@ -251,7 +251,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     mockTransaction.mockResolvedValue([]);
 
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
-    expect(res.status).toBe(204);
+    expect(res!.status).toBe(204);
     expect(mockTransaction).toHaveBeenCalledWith(expect.any(Array));
   });
 
@@ -261,7 +261,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ id: "tm1", role: "OWNER", user: { email: "owner@example.com" } });
 
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
-    expect(res.status).toBe(403);
+    expect(res!.status).toBe(403);
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 });

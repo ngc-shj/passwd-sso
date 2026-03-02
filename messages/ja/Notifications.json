@@ -1,0 +1,21 @@
+{
+  "label": "通知",
+  "title": "通知",
+  "noNotifications": "通知はありません",
+  "markAllAsRead": "すべて既読にする",
+  "markAsRead": "既読にする",
+  "delete": "削除",
+  "unreadCount": "{count}件の未読",
+  "timeAgo": "{value}",
+  "viewAll": "すべて表示",
+  "loading": "読み込み中...",
+  "fetchError": "通知の読み込みに失敗しました。",
+  "type_SECURITY_ALERT": "セキュリティ警告",
+  "type_NEW_DEVICE_LOGIN": "新しいデバイスからのログイン",
+  "type_EMERGENCY_ACCESS": "緊急アクセス",
+  "type_SHARE_ACCESS": "共有アクセス",
+  "type_TEAM_INVITE": "チーム招待",
+  "type_ENTRY_EXPIRING": "期限切れエントリ",
+  "type_WATCHTOWER_ALERT": "ウォッチタワー警告",
+  "type_POLICY_UPDATE": "ポリシー更新"
+}

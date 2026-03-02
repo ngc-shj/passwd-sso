@@ -23,6 +23,7 @@
   "createdAtLabel": "作成日: {date}",
   "settings": "設定",
   "generalSettings": "一般",
+  "securityPolicy": "ポリシー",
   "teamSettings": "チーム設定",
   "updateTeam": "チームを更新",
   "updated": "チームを更新しました",

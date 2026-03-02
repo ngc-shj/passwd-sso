@@ -19,7 +19,17 @@ import {
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ENTRY_TYPE } from "@/lib/constants";
+import { SECURE_NOTE_TEMPLATES } from "@/lib/secure-note-templates";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SecureNoteMarkdown } from "@/components/passwords/secure-note-markdown";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
@@ -98,7 +108,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, d
     if (!encryptionKey) return;
     const tags = toTagPayload(selectedTags);
     const snippet = content.slice(0, 100);
-    const fullBlob = JSON.stringify({ title, content, tags });
+    const fullBlob = JSON.stringify({ title, content, tags, isMarkdown: true });
     const overviewBlob = JSON.stringify({ title, snippet, tags });
 
     await executePersonalEntrySubmit({
@@ -123,6 +133,39 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, d
   const formContent = (
     <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
       <EntryPrimaryCard className={primaryCardClass}>
+        {mode === "create" && (
+          <div className="space-y-2">
+            <Label>{t("templateLabel")}</Label>
+            <Select
+              defaultValue="blank"
+              onValueChange={(templateId) => {
+                const tmpl = SECURE_NOTE_TEMPLATES.find(
+                  (tp) => tp.id === templateId,
+                );
+                if (!tmpl) return;
+                if (tmpl.id === "blank") {
+                  setTitle("");
+                  setContent("");
+                  return;
+                }
+                setTitle(t(tmpl.titleKey));
+                setContent(tmpl.contentTemplate);
+              }}
+            >
+              <SelectTrigger className="w-full max-w-[300px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SECURE_NOTE_TEMPLATES.map((tmpl) => (
+                  <SelectItem key={tmpl.id} value={tmpl.id}>
+                    {t(tmpl.titleKey)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div className="space-y-2">
           <Label htmlFor="title">{t("title")}</Label>
           <Input
@@ -136,16 +179,36 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, d
 
         <div className="space-y-2">
           <Label htmlFor="content">{t("content")}</Label>
-          <textarea
-            id="content"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder={t("contentPlaceholder")}
-            rows={10}
-            maxLength={50000}
-            required
-            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
+          <p className="text-xs text-muted-foreground">{t("markdownHint")}</p>
+          <Tabs defaultValue="edit">
+            <TabsList className="grid w-full max-w-[200px] grid-cols-2">
+              <TabsTrigger value="edit">{t("editTab")}</TabsTrigger>
+              <TabsTrigger value="preview">{t("previewTab")}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="edit" className="mt-2">
+              <textarea
+                id="content"
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder={t("contentPlaceholder")}
+                rows={10}
+                maxLength={50000}
+                required
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </TabsContent>
+            <TabsContent value="preview" className="mt-2">
+              <div className="min-h-[240px] rounded-lg border bg-muted/30 p-3">
+                {content ? (
+                  <SecureNoteMarkdown content={content} />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {t("contentPlaceholder")}
+                  </p>
+                )}
+              </div>
+            </TabsContent>
+          </Tabs>
         </div>
       </EntryPrimaryCard>
 

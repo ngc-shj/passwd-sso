@@ -98,5 +98,13 @@
   "error_missingKey_title": "Missing Decryption Key",
   "error_missingKey_desc": "The decryption key was not found in the link. Make sure you are using the complete URL.",
   "error_decryptFailed_title": "Decryption Failed",
-  "error_decryptFailed_desc": "Could not decrypt the shared data. The link may be corrupted or tampered with."
+  "error_decryptFailed_desc": "Could not decrypt the shared data. The link may be corrupted or tampered with.",
+  "permissionLabel": "Visibility",
+  "permission_VIEW_ALL": "Full access",
+  "permission_VIEW_ALL_desc": "All fields visible",
+  "permission_HIDE_PASSWORD": "Hide password",
+  "permission_HIDE_PASSWORD_desc": "Password and CVV fields hidden",
+  "permission_OVERVIEW_ONLY": "Overview only",
+  "permission_OVERVIEW_ONLY_desc": "Title, username, and URL only",
+  "sharingDisabledByPolicy": "Sharing is disabled by team policy. Contact your team administrator to enable sharing."
 }

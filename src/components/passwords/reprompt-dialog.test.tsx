@@ -62,8 +62,10 @@ import { RepromptDialog } from "./reprompt-dialog";
 // ── Tests ──────────────────────────────────────────────────
 
 describe("RepromptDialog IME composition", () => {
-  let mockOnVerified: ReturnType<typeof vi.fn>;
-  let mockOnCancel: ReturnType<typeof vi.fn>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockOnVerified: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockOnCancel: any;
 
   beforeEach(() => {
     vi.clearAllMocks();

@@ -2,7 +2,6 @@
 
 import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
@@ -10,8 +9,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
-import { getTagColorClass } from "@/lib/dynamic-styles";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { SidebarTeamTagItem } from "@/hooks/use-sidebar-data";
 import { type VaultContext } from "@/hooks/use-vault-context";
@@ -31,11 +28,8 @@ import {
   Plus,
   Link as LinkIcon,
   ScrollText,
-  MoreVertical,
-  Pencil,
-  Trash2 as TrashIcon,
 } from "lucide-react";
-import { CollapsibleSectionHeader, FolderTreeNode, type SidebarFolderItem } from "@/components/layout/sidebar-shared";
+import { CollapsibleSectionHeader, FolderTreeNode, TagTreeNode, type SidebarFolderItem } from "@/components/layout/sidebar-shared";
 
 interface VaultSectionProps {
   t: (key: string) => string;
@@ -232,66 +226,22 @@ export function ManageSection({
             ))}
         </div>
         <div className="space-y-1">
-          {tags.map((tag) => {
-            const colorClass = getTagColorClass(tag.color);
-            return (
-              <div key={tag.id} className={cn("group/tag flex items-center rounded-md transition-colors", activeTagId === tag.id ? "bg-secondary" : "hover:bg-accent dark:hover:bg-accent/50")}>
-                <Button
-                  variant={activeTagId === tag.id ? "secondary" : "ghost"}
-                  className="flex-1 justify-start gap-2 min-w-0 rounded-none hover:bg-transparent dark:hover:bg-transparent"
-                  asChild
-                >
-                  <Link href={tagHref(tag.id)} onClick={onNavigate}>
-                    <Badge
-                      variant="outline"
-                      className={cn("h-3 w-3 rounded-full p-0", colorClass && "tag-color-bg", colorClass)}
-                    />
-                    <span className="truncate">{tag.name}</span>
-                  </Link>
-                </Button>
-                {showTagMenu ? (
-                  <div className="shrink-0 relative flex items-center justify-center w-7 h-7">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="peer absolute inset-0 h-7 w-7 opacity-0 transition-opacity group-hover/tag:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 rounded hover:bg-black/[0.1] dark:hover:bg-white/[0.15]"
-                          aria-label={`${tag.name} menu`}
-                        >
-                          <MoreVertical className="h-3.5 w-3.5" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => onEditTag(tag)}>
-                          <Pencil className="h-3.5 w-3.5 mr-2" />
-                          {t("editTag")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem className="text-destructive" onClick={() => onDeleteTag(tag)}>
-                          <TrashIcon className="h-3.5 w-3.5 mr-2" />
-                          {t("deleteTag")}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                    {tag.count > 0 && (
-                      <span className="text-xs text-muted-foreground transition-opacity group-hover/tag:opacity-0 peer-focus-visible:opacity-0 peer-data-[state=open]:opacity-0 pointer-events-none">
-                        {tag.count}
-                      </span>
-                    )}
-                  </div>
-                ) : tag.count > 0 ? (
-                  <div className="shrink-0 relative flex items-center justify-center w-7 h-7">
-                    <span className="text-xs text-muted-foreground transition-opacity group-hover/tag:opacity-0 pointer-events-none">
-                      {tag.count}
-                    </span>
-                    <span className="absolute inset-0 flex items-center justify-center rounded opacity-0 transition-opacity group-hover/tag:opacity-100 text-muted-foreground pointer-events-none">
-                      <MoreVertical className="h-3.5 w-3.5" />
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
+          {tags
+            .filter((tag) => !tag.parentId)
+            .map((tag) => (
+              <TagTreeNode
+                key={tag.id}
+                tag={tag}
+                tags={tags}
+                activeTagId={activeTagId}
+                depth={0}
+                linkHref={tagHref}
+                showMenu={showTagMenu}
+                onNavigate={onNavigate}
+                onEdit={onEditTag}
+                onDelete={onDeleteTag}
+              />
+            ))}
         </div>
       </CollapsibleContent>
     </Collapsible>
