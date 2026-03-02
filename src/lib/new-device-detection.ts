@@ -97,7 +97,7 @@ export async function checkNewDeviceAndNotify(
       text: emailTemplate.text,
     });
 
-    void createNotification({
+    createNotification({
       userId,
       type: NOTIFICATION_TYPE.NEW_DEVICE_LOGIN,
       title: locale.startsWith("ja")

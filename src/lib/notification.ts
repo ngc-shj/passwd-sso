@@ -33,7 +33,11 @@ function sanitizeNotificationMetadata(
   if (!metadata) return undefined;
   const cleaned: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(metadata)) {
-    if (!METADATA_BLOCKLIST.has(k)) {
+    if (METADATA_BLOCKLIST.has(k)) continue;
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+      const nested = sanitizeNotificationMetadata(v as Record<string, unknown>);
+      if (nested) cleaned[k] = nested;
+    } else {
       cleaned[k] = v;
     }
   }
@@ -67,7 +71,7 @@ export function createNotification(params: CreateNotificationParams): void {
           tenantId: resolvedTenantId,
           type,
           title: title.slice(0, 200),
-          body,
+          body: body.slice(0, 2000),
           metadata: safeMetadata as never ?? undefined,
         },
       });

@@ -17,14 +17,37 @@ import {
 } from "@/lib/crypto-server";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import { AUDIT_ACTION_VALUES } from "@/lib/constants";
 
 type Params = { params: Promise<{ teamId: string }> };
 
 const MAX_WEBHOOKS_PER_TEAM = 5;
 
 const createWebhookSchema = z.object({
-  url: z.string().url().max(2048),
-  events: z.array(z.string().min(1)).min(1).max(50),
+  url: z.string().url().max(2048).refine(
+    (u) => {
+      try {
+        const parsed = new URL(u);
+        if (parsed.protocol !== "https:") return false;
+        const host = parsed.hostname.toLowerCase();
+        if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return false;
+        if (host === "0.0.0.0" || host.endsWith(".local") || host.endsWith(".internal")) return false;
+        // Block private/link-local IPs (10.x, 172.16-31.x, 192.168.x, 169.254.x)
+        const parts = host.split(".").map(Number);
+        if (parts.length === 4 && parts.every((p) => !isNaN(p))) {
+          if (parts[0] === 10) return false;
+          if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return false;
+          if (parts[0] === 192 && parts[1] === 168) return false;
+          if (parts[0] === 169 && parts[1] === 254) return false;
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: "URL must use HTTPS and must not point to private/internal addresses" },
+  ),
+  events: z.array(z.enum(AUDIT_ACTION_VALUES as unknown as [string, ...string[]])).min(1).max(50),
 });
 
 // GET /api/teams/[teamId]/webhooks — List team webhooks
@@ -84,7 +107,12 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const body = await req.json();
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
+  }
   const parsed = createWebhookSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(

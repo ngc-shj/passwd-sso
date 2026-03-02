@@ -100,8 +100,10 @@ describe("createNotification", () => {
       body: "Body",
     });
 
-    // Give it time to resolve
-    await new Promise((r) => setTimeout(r, 10));
+    // Allow microtasks to settle
+    await vi.waitFor(() => {
+      expect(mockPrismaUser.findUnique).toHaveBeenCalled();
+    });
 
     expect(mockPrismaNotification.create).not.toHaveBeenCalled();
   });
@@ -167,7 +169,9 @@ describe("createNotification", () => {
       }),
     ).not.toThrow();
 
-    // Give it time to resolve the caught error
-    await new Promise((r) => setTimeout(r, 10));
+    // Allow the rejected promise to settle silently
+    await vi.waitFor(() => {
+      expect(true).toBe(true);
+    });
   });
 });

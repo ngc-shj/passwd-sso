@@ -27,10 +27,17 @@ const downloadLimiter = createRateLimiter({
   max: 2,
 });
 
+function escapeCsvValue(v: string): string {
+  // Prevent CSV injection: escape values starting with formula-triggering characters
+  const escaped = v.replace(/"/g, '""');
+  if (/^[=+\-@\t\r]/.test(escaped)) {
+    return `"'${escaped}"`;
+  }
+  return `"${escaped}"`;
+}
+
 function formatCsvRow(values: string[]): string {
-  return values
-    .map((v) => `"${v.replace(/"/g, '""')}"`)
-    .join(",");
+  return values.map(escapeCsvValue).join(",");
 }
 
 const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "userName", "userEmail"];
@@ -78,15 +85,23 @@ export async function GET(req: NextRequest, { params }: Params) {
   const to = searchParams.get("to");
 
   // Validate date range
-  if (from && to) {
-    const fromDate = new Date(from);
-    const toDate = new Date(to);
-    const diffMs = toDate.getTime() - fromDate.getTime();
-    if (diffMs > MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+  if (from || to) {
+    const fromDate = from ? new Date(from) : undefined;
+    const toDate = to ? new Date(to) : undefined;
+    if ((fromDate && isNaN(fromDate.getTime())) || (toDate && isNaN(toDate.getTime()))) {
       return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { range: `Maximum range is ${MAX_RANGE_DAYS} days` } },
+        { error: API_ERROR.VALIDATION_ERROR, details: { date: "Invalid date format" } },
         { status: 400 },
       );
+    }
+    if (fromDate && toDate) {
+      const diffMs = toDate.getTime() - fromDate.getTime();
+      if (diffMs > MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+        return NextResponse.json(
+          { error: API_ERROR.VALIDATION_ERROR, details: { range: `Maximum range is ${MAX_RANGE_DAYS} days` } },
+          { status: 400 },
+        );
+      }
     }
   }
 
