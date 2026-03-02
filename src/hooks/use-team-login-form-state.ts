@@ -12,26 +12,31 @@ import {
 
 type TeamPolicy = ReturnType<typeof useTeamPolicy>["policy"];
 
-export interface TeamLoginFormState {
+export interface TeamLoginFormValues {
   username: string;
-  setUsername: (value: string) => void;
   password: string;
-  setPassword: (value: string) => void;
   url: string;
-  setUrl: (value: string) => void;
   showPassword: boolean;
-  setShowPassword: (value: boolean) => void;
   showGenerator: boolean;
-  setShowGenerator: (value: boolean) => void;
   generatorSettings: GeneratorSettings;
-  setGeneratorSettings: (value: GeneratorSettings) => void;
   customFields: EntryCustomField[];
-  setCustomFields: Dispatch<SetStateAction<EntryCustomField[]>>;
   totp: EntryTotp | null;
-  setTotp: Dispatch<SetStateAction<EntryTotp | null>>;
   showTotpInput: boolean;
+}
+
+export interface TeamLoginFormSetters {
+  setUsername: (value: string) => void;
+  setPassword: (value: string) => void;
+  setUrl: (value: string) => void;
+  setShowPassword: (value: boolean) => void;
+  setShowGenerator: (value: boolean) => void;
+  setGeneratorSettings: (value: GeneratorSettings) => void;
+  setCustomFields: Dispatch<SetStateAction<EntryCustomField[]>>;
+  setTotp: Dispatch<SetStateAction<EntryTotp | null>>;
   setShowTotpInput: Dispatch<SetStateAction<boolean>>;
 }
+
+export type TeamLoginFormState = TeamLoginFormValues & TeamLoginFormSetters;
 
 interface UseTeamLoginFormStateArgs {
   editData?: TeamEntryFormEditData | null;

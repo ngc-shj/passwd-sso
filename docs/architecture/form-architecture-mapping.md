@@ -55,7 +55,10 @@ The target state is to make these boundaries more directly corresponding. At min
 | Login presenter | `src/hooks/team-login-form-presenter.ts` | `src/hooks/personal-login-form-presenter.ts` |
 | Login controller | `src/hooks/team-login-form-controller.ts` | `src/hooks/personal-login-form-controller.ts` |
 | Login derived state | `src/hooks/team-login-form-derived.ts` | `src/hooks/personal-login-form-derived.ts` |
+| Login field types | `src/hooks/team-login-fields-types.ts` | `src/hooks/personal-login-fields-types.ts` |
 | Login field props | `src/hooks/team-login-fields-props.ts` | `src/hooks/personal-login-fields-props.ts` |
+| Login field callbacks | `src/hooks/team-login-fields-callbacks.ts` | `src/hooks/personal-login-fields-callbacks.ts` |
+| Login field text props | `src/hooks/team-login-fields-text-props.ts` | `src/hooks/personal-login-fields-text-props.ts` |
 | Login initial values | `src/hooks/team-login-form-initial-values.ts` | `src/hooks/personal-login-form-initial-values.ts` |
 | Login submit helper | `src/components/team/team-login-form-actions.ts` | `src/components/passwords/personal-login-submit.ts` |
 
@@ -64,7 +67,6 @@ The target state is to make these boundaries more directly corresponding. At min
 - Personal login code is split into `model / state / presenter / controller / derived / fields`.
 - Team login code now has matching `model / state / presenter / controller / derived / fields` helpers.
 - Team login still shares common entry state through `use-team-base-form-model.ts`, while Personal keeps more of that composition inside the login model hook.
-- Personal login field helpers are still split more finely with `fields-props / fields-callbacks / fields-text-props`, while Team currently keeps a single `team-login-fields-props.ts`.
 
 ### Shared Entry Sections
 
@@ -130,7 +132,6 @@ The target state is to make these boundaries more directly corresponding. At min
 
 ## Refactor Targets
 
-- Decide whether Team login field helpers should be split to the same granularity as Personal.
 - Decide whether Team non-login flows should also gain per-entry model hooks, or continue to share `use-team-base-form-model.ts` directly.
 - Decide whether the login submit helper names should converge on `*-login-submit` or `*-login-form-actions`.
 - Keep Team creation flow separate from Team Vault entry flow.

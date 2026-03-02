@@ -2,9 +2,11 @@ import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-ty
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import type { PasswordFormTranslator } from "@/lib/translation-types";
 import type { useTeamPolicy } from "@/hooks/use-team-policy";
 import { buildTeamLoginFormDerived } from "@/hooks/team-login-form-derived";
 import { buildTeamLoginFieldsProps } from "@/hooks/team-login-fields-props";
+import { buildTeamLoginFieldTextProps } from "@/hooks/team-login-fields-text-props";
 
 type TeamPolicy = ReturnType<typeof useTeamPolicy>["policy"];
 
@@ -39,7 +41,7 @@ interface BuildTeamLoginFormPresenterArgs {
   notesLabel: string;
   notesPlaceholder: string;
   teamPolicy: TeamPolicy;
-  t: (key: string) => string;
+  t: PasswordFormTranslator;
   tGen: (key: "modePassphrase" | "modePassword") => string;
 }
 
@@ -96,39 +98,37 @@ export function buildTeamLoginFormPresenter({
     tGen,
   });
 
+  const textProps = buildTeamLoginFieldTextProps(t, teamPolicy);
+
   const loginMainFieldsProps = buildTeamLoginFieldsProps({
-    title,
-    onTitleChange: setTitle,
-    titleLabel,
-    titlePlaceholder,
-    username,
-    onUsernameChange: setUsername,
-    usernameLabel: t("usernameEmail"),
-    usernamePlaceholder: t("usernamePlaceholder"),
-    password,
-    onPasswordChange: setPassword,
-    passwordLabel: t("password"),
-    passwordPlaceholder: t("passwordPlaceholder"),
-    showPassword,
-    onToggleShowPassword: () => setShowPassword(!showPassword),
-    generatorSummary,
-    showGenerator,
-    onToggleGenerator: () => setShowGenerator(!showGenerator),
-    closeGeneratorLabel: t("closeGenerator"),
-    openGeneratorLabel: t("openGenerator"),
-    generatorSettings,
-    onGeneratorUse: (pw, settings) => {
-      setPassword(pw);
-      setGeneratorSettings(settings);
+    values: {
+      title,
+      username,
+      password,
+      showPassword,
+      showGenerator,
+      generatorSettings,
+      url,
+      notes,
     },
-    url,
-    onUrlChange: setUrl,
-    urlLabel: t("url"),
-    notes,
-    onNotesChange: setNotes,
-    notesLabel,
-    notesPlaceholder,
-    teamPolicy,
+    setters: {
+      setTitle,
+      setUsername,
+      setPassword,
+      setShowPassword,
+      setShowGenerator,
+      setGeneratorSettings,
+      setUrl,
+      setNotes,
+    },
+    generatorSummary,
+    textProps: {
+      ...textProps,
+      titleLabel,
+      titlePlaceholder,
+      notesLabel,
+      notesPlaceholder,
+    },
   });
 
   return {
