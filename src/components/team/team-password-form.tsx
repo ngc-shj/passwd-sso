@@ -77,6 +77,8 @@ export function TeamPasswordForm({
     statusSavedLabel: t("statusSaved"),
     repromptTitle: t("requireReprompt"),
     repromptDescription: t("requireRepromptHelp"),
+    repromptPolicyForced: teamPolicy?.requireRepromptForAll,
+    repromptPolicyForcedLabel: teamPolicy?.requireRepromptForAll ? t("requireRepromptPolicyForced") : undefined,
     expirationTitle: t("expirationTitle"),
     expirationDescription: t("expirationDescription"),
     onCancel: () => handleOpenChange(false),

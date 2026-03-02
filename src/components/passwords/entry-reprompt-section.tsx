@@ -11,6 +11,8 @@ interface EntryRepromptSectionProps {
   description: string;
   sectionCardClass?: string;
   checkboxId?: string;
+  policyForced?: boolean;
+  policyForcedLabel?: string;
 }
 
 export function EntryRepromptSection({
@@ -20,13 +22,17 @@ export function EntryRepromptSection({
   description,
   sectionCardClass = "",
   checkboxId = "require-reprompt",
+  policyForced,
+  policyForcedLabel,
 }: EntryRepromptSectionProps) {
+  const isChecked = policyForced || checked;
   return (
     <EntrySectionCard className={sectionCardClass}>
       <label className="flex cursor-pointer items-center gap-3" htmlFor={checkboxId}>
         <Checkbox
           id={checkboxId}
-          checked={checked}
+          checked={isChecked}
+          disabled={policyForced}
           onCheckedChange={(value) => onCheckedChange(!!value)}
         />
         <div className="space-y-0.5">
@@ -35,6 +41,9 @@ export function EntryRepromptSection({
             {title}
           </span>
           <p className="text-xs text-muted-foreground">{description}</p>
+          {policyForced && policyForcedLabel && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">{policyForcedLabel}</p>
+          )}
         </div>
       </label>
     </EntrySectionCard>

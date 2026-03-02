@@ -135,7 +135,7 @@ export function buildTeamPasswordFormInitialValues(
     purchaseDate: editData?.purchaseDate ?? "",
     expirationDate: editData?.expirationDate ?? "",
     teamFolderId: editData?.teamFolderId ?? null,
-    requireReprompt: editData?.requireReprompt ?? false,
+    requireReprompt: editData?.requireReprompt ?? teamPolicy?.requireRepromptForAll ?? false,
     expiresAt: editData?.expiresAt ?? null,
   };
 }
