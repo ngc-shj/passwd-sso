@@ -11,6 +11,7 @@ interface TeamSecureNoteFieldsProps {
   contentPlaceholder: string;
   editTabLabel: string;
   previewTabLabel: string;
+  markdownHint?: string;
 }
 
 export function TeamSecureNoteFields({
@@ -20,10 +21,12 @@ export function TeamSecureNoteFields({
   contentPlaceholder,
   editTabLabel,
   previewTabLabel,
+  markdownHint,
 }: TeamSecureNoteFieldsProps) {
   return (
     <div className="space-y-2">
       <Label>{contentLabel}</Label>
+      {markdownHint && <p className="text-xs text-muted-foreground">{markdownHint}</p>}
       <Tabs defaultValue="edit">
         <TabsList className="grid w-full max-w-[200px] grid-cols-2">
           <TabsTrigger value="edit">{editTabLabel}</TabsTrigger>

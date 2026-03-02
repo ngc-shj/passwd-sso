@@ -34,6 +34,7 @@ export function buildTeamEntrySpecificTextProps(
     contentPlaceholder: tn("contentPlaceholder"),
     editTabLabel: tn("editTab"),
     previewTabLabel: tn("previewTab"),
+    markdownHint: tn("markdownHint"),
     cardholderNamePlaceholder: tcc("cardholderNamePlaceholder"),
     brandPlaceholder: tcc("brandPlaceholder"),
     cardNumberPlaceholder: tcc("cardNumberPlaceholder"),

@@ -20,5 +20,6 @@
   "template_recoveryCodes": "Recovery Codes",
   "template_meeting": "Meeting Info",
   "editTab": "Edit",
-  "previewTab": "Preview"
+  "previewTab": "Preview",
+  "markdownHint": "Markdown formatting is supported"
 }

@@ -179,6 +179,7 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, d
 
         <div className="space-y-2">
           <Label htmlFor="content">{t("content")}</Label>
+          <p className="text-xs text-muted-foreground">{t("markdownHint")}</p>
           <Tabs defaultValue="edit">
             <TabsList className="grid w-full max-w-[200px] grid-cols-2">
               <TabsTrigger value="edit">{t("editTab")}</TabsTrigger>

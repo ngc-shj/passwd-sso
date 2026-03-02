@@ -20,5 +20,6 @@
   "template_recoveryCodes": "リカバリコード",
   "template_meeting": "ミーティング情報",
   "editTab": "編集",
-  "previewTab": "プレビュー"
+  "previewTab": "プレビュー",
+  "markdownHint": "Markdown記法が使えます"
 }
