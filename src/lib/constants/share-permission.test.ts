@@ -440,14 +440,20 @@ describe("applySharePermissions — customFields", () => {
     expect(result).toHaveProperty("customFields");
   });
 
-  it("OVERVIEW_ONLY excludes customFields (allowlist)", () => {
+  it("OVERVIEW_ONLY excludes customFields for all entry types (allowlist)", () => {
     const data = {
       title: "Test",
       username: "user",
       customFields: [{ name: "Notes", type: "TEXT", value: "hello" }],
     };
-    const result = applySharePermissions(data, [SHARE_PERMISSION.OVERVIEW_ONLY], "LOGIN");
-    expect(result).not.toHaveProperty("customFields");
+    for (const entryType of ENTRY_TYPE_VALUES) {
+      const result = applySharePermissions(
+        data,
+        [SHARE_PERMISSION.OVERVIEW_ONLY],
+        entryType,
+      );
+      expect(result).not.toHaveProperty("customFields");
+    }
   });
 });
 
