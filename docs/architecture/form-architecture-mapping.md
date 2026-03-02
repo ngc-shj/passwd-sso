@@ -47,7 +47,8 @@ The target state is to make these boundaries more directly corresponding. At min
 
 | Responsibility | Team Vault | Personal Vault |
 | --- | --- | --- |
-| Login form component | `src/components/team/team-password-form.tsx` | `src/components/passwords/personal-password-form.tsx` |
+| Login form component | `src/components/team/team-login-form.tsx` | `src/components/passwords/personal-login-form.tsx` |
+| Login form types | `src/components/team/team-login-form-types.ts` | `src/components/passwords/personal-login-form-types.ts` |
 | Login form model | `src/hooks/use-team-login-form-model.ts` | `src/hooks/use-personal-login-form-model.ts` |
 | Login state | `src/hooks/use-team-login-form-state.ts` | `src/hooks/use-personal-login-form-state.ts` |
 | Login presenter | `src/hooks/team-login-form-presenter.ts` | `src/hooks/personal-login-form-presenter.ts` |
@@ -55,6 +56,7 @@ The target state is to make these boundaries more directly corresponding. At min
 | Login derived state | `src/hooks/team-login-form-derived.ts` | `src/hooks/personal-login-form-derived.ts` |
 | Login field props | `src/hooks/team-login-fields-props.ts` | `src/hooks/personal-login-fields-props.ts` |
 | Login initial values | `src/hooks/team-login-form-initial-values.ts` | `src/hooks/personal-login-form-initial-values.ts` |
+| Login submit helper | `src/components/team/team-login-form-actions.ts` | `src/components/passwords/personal-login-submit.ts` |
 
 ### Login Entry Mismatch
 
@@ -87,7 +89,9 @@ The target state is to make these boundaries more directly corresponding. At min
 
 - Team Vault files use the `team-` prefix.
 - Personal Vault files use the `personal-` prefix.
+- Login-specific components and helpers should use the `*-login-*` infix where practical.
 - Personal login-specific hooks use the `personal-login-` or `use-personal-login-` prefix.
+- Team login-specific hooks use the `team-login-` or `use-team-login-` prefix.
 - Shared Personal non-login form state uses `use-personal-base-form-model.ts`.
 
 ### Responsibility Split
