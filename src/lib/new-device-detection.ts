@@ -9,6 +9,7 @@ import { NOTIFICATION_TYPE } from "@/lib/constants";
 interface DeviceMeta {
   ip: string | null;
   userAgent: string | null;
+  currentSessionToken?: string;
 }
 
 function parseDevice(ua: string): { browserName: string; osName: string } {
@@ -40,6 +41,11 @@ export async function checkNewDeviceAndNotify(
         where: {
           userId,
           createdAt: { gte: thirtyDaysAgo },
+          // Exclude the session that was just created so it doesn't
+          // match itself and incorrectly mark the device as "known".
+          ...(meta.currentSessionToken
+            ? { sessionToken: { not: meta.currentSessionToken } }
+            : {}),
         },
         select: { userAgent: true },
         orderBy: { createdAt: "desc" },

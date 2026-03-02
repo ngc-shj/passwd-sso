@@ -127,6 +127,7 @@ export function createCustomAdapter(): Adapter {
       void checkNewDeviceAndNotify(session.userId, {
         ip: meta?.ip ?? null,
         userAgent: meta?.userAgent ?? null,
+        currentSessionToken: session.sessionToken,
       });
 
       return {
