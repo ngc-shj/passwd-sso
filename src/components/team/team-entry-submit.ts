@@ -1,13 +1,13 @@
 import { toast } from "sonner";
 import { saveTeamEntry } from "@/lib/team-entry-save";
-import type { TeamLoginFormEditData } from "@/components/team/team-login-form-types";
+import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 interface ExecuteTeamEntrySubmitArgs {
   teamId: string;
   isEdit: boolean;
-  editData?: TeamLoginFormEditData | null;
+  editData?: TeamEntryFormEditData | null;
   teamEncryptionKey: CryptoKey;
   teamKeyVersion: number;
   fullBlob: string;

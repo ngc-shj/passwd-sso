@@ -5,7 +5,7 @@ import { getTeamEntryKindState } from "@/components/team/team-entry-kind";
 import { buildTeamEntryCopy } from "@/components/team/team-entry-copy";
 import { buildTeamEntryCopyData } from "@/components/team/team-entry-copy-data";
 import { TeamEntryDialogShell } from "@/components/team/team-entry-dialog-shell";
-import type { TeamLoginFormEditData } from "@/components/team/team-login-form-types";
+import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import { TeamLoginForm } from "@/components/team/team-login-form";
 import { TeamSecureNoteForm } from "@/components/team/team-secure-note-form";
@@ -24,7 +24,7 @@ interface TeamEditDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
-  editData: TeamLoginFormEditData;
+  editData: TeamEntryFormEditData;
   defaultFolderId?: string | null;
   defaultTags?: TeamTagData[];
 }

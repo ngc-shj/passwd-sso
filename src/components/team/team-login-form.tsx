@@ -8,7 +8,7 @@ import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-sect
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamAttachmentSection } from "./team-attachment-section";
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
-import type { TeamLoginFormProps } from "@/components/team/team-login-form-types";
+import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { EntryActionBar } from "@/components/passwords/entry-form-ui";
 import { useTeamLoginFormModel } from "@/hooks/use-team-login-form-model";
@@ -22,7 +22,7 @@ export function TeamLoginForm({
   editData,
   defaultFolderId,
   defaultTags,
-}: TeamLoginFormProps) {
+}: TeamEntryFormProps) {
   const {
     base,
     loginMainFieldsProps,

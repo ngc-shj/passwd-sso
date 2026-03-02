@@ -3,7 +3,7 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { TeamLoginFormEditData } from "@/components/team/team-login-form-types";
+import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
 import type { useTeamPolicy } from "@/hooks/use-team-policy";
 import {
   applyPolicyToGeneratorSettings,
@@ -34,7 +34,7 @@ export interface TeamLoginFormState {
 }
 
 interface UseTeamLoginFormStateArgs {
-  editData?: TeamLoginFormEditData | null;
+  editData?: TeamEntryFormEditData | null;
   teamPolicy: TeamPolicy;
 }
 

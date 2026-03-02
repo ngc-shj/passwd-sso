@@ -1,11 +1,11 @@
 import { buildGeneratorSummary } from "@/lib/generator-summary";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { TeamLoginFormEditData } from "@/components/team/team-login-form-types";
+import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 
 interface BuildTeamLoginFormDerivedArgs {
-  editData?: TeamLoginFormEditData | null;
+  editData?: TeamEntryFormEditData | null;
   defaultFolderId?: string | null;
   defaultTags?: TeamTagData[];
   title: string;

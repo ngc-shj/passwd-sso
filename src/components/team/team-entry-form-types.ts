@@ -17,7 +17,7 @@ export interface TeamFolderItem {
   parentId: string | null;
 }
 
-export interface TeamLoginFormEditData {
+export interface TeamEntryFormEditData {
   id: string;
   entryType?: EntryTypeValue;
   title: string;
@@ -68,13 +68,13 @@ export interface TeamLoginFormEditData {
   expiresAt?: string | null;
 }
 
-export interface TeamLoginFormProps {
+export interface TeamEntryFormProps {
   teamId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
   entryType?: EntryTypeValue;
-  editData?: TeamLoginFormEditData | null;
+  editData?: TeamEntryFormEditData | null;
   defaultFolderId?: string | null;
   defaultTags?: TeamTagData[];
 }

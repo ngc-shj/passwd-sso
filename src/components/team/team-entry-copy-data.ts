@@ -1,5 +1,5 @@
 import type { EntryLocaleCopy } from "@/components/team/team-entry-copy";
-import type { TeamEntryKind } from "@/components/team/team-login-form-types";
+import type { TeamEntryKind } from "@/components/team/team-entry-form-types";
 import type {
   BankAccountFormTranslator,
   CreditCardFormTranslator,

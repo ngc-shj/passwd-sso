@@ -49,7 +49,7 @@ The target state is to make these boundaries more directly corresponding. At min
 | Responsibility | Team Vault | Personal Vault |
 | --- | --- | --- |
 | Login form component | `src/components/team/team-login-form.tsx` | `src/components/passwords/personal-login-form.tsx` |
-| Login form types | `src/components/team/team-login-form-types.ts` | `src/components/passwords/personal-login-form-types.ts` |
+| Entry form types | `src/components/team/team-entry-form-types.ts` | `src/components/passwords/personal-login-form-types.ts` |
 | Login form model | `src/hooks/use-team-login-form-model.ts` | `src/hooks/use-personal-login-form-model.ts` |
 | Login state | `src/hooks/use-team-login-form-state.ts` | `src/hooks/use-personal-login-form-state.ts` |
 | Login presenter | `src/hooks/team-login-form-presenter.ts` | `src/hooks/personal-login-form-presenter.ts` |

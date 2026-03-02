@@ -6,7 +6,7 @@ import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custo
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
-import type { TeamFolderItem } from "@/components/team/team-login-form-types";
+import type { TeamFolderItem } from "@/components/team/team-entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";

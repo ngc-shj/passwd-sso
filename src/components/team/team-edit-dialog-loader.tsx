@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { TeamEntryDialogShell } from "@/components/team/team-entry-dialog-shell";
 import { TeamEditDialog } from "@/components/team/team-edit-dialog";
-import type { TeamLoginFormEditData } from "@/components/team/team-login-form-types";
+import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import { apiPath } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
@@ -35,7 +35,7 @@ export function TeamEditDialogLoader({
   const t = useTranslations("PasswordForm");
   const td = useTranslations("PasswordDetail");
   const { getTeamEncryptionKey } = useTeamVault();
-  const [data, setData] = useState<TeamLoginFormEditData | null>(null);
+  const [data, setData] = useState<TeamEntryFormEditData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {

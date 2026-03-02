@@ -13,7 +13,7 @@ import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import type { TeamLoginFormProps } from "@/components/team/team-login-form-types";
+import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { CARD_BRANDS } from "@/lib/credit-card";
 import { handleTeamCardNumberChange } from "@/components/team/team-login-form-actions";
@@ -31,7 +31,7 @@ export function TeamCreditCardForm({
   editData,
   defaultFolderId,
   defaultTags,
-}: TeamLoginFormProps) {
+}: TeamEntryFormProps) {
   const tcc = useTranslations("CreditCardForm");
   const base = useTeamBaseFormModel({
     teamId,
