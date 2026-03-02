@@ -2,13 +2,13 @@
 
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type {
-  PersonalPasswordFormSetters,
-  PersonalPasswordFormValues,
-} from "@/hooks/use-personal-password-form-state";
+  PersonalLoginFormSetters,
+  PersonalLoginFormValues,
+} from "@/hooks/use-personal-login-form-state";
 
-export function buildPersonalEntryLoginFieldCallbacks(
-  values: PersonalPasswordFormValues,
-  setters: PersonalPasswordFormSetters,
+export function buildPersonalLoginFieldCallbacks(
+  values: PersonalLoginFormValues,
+  setters: PersonalLoginFormSetters,
 ) {
   return {
     onTitleChange: setters.setTitle,

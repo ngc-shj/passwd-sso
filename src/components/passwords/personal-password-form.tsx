@@ -12,7 +12,7 @@ import {
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import type { PasswordFormProps } from "@/components/passwords/personal-password-form-types";
-import { usePersonalPasswordFormModel } from "@/hooks/use-personal-password-form-model";
+import { usePersonalLoginFormModel } from "@/hooks/use-personal-login-form-model";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,7 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved, def
     handleSubmit,
     handleCancel,
     handleBack,
-  } = usePersonalPasswordFormModel({
+  } = usePersonalLoginFormModel({
     mode,
     initialData,
     onSaved,

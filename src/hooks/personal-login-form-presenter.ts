@@ -1,34 +1,34 @@
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/personal-password-form-types";
 import {
-  buildPersonalPasswordFormDerived,
-} from "@/hooks/personal-password-form-derived";
+  buildPersonalLoginFormDerived,
+} from "@/hooks/personal-login-form-derived";
 import {
-  buildPersonalEntryLoginFieldsProps,
-} from "@/hooks/personal-entry-login-fields-props";
-import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
+  buildPersonalLoginFieldsProps,
+} from "@/hooks/personal-login-fields-props";
+import type { PersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
 import {
   selectPersonalEntryValues,
-} from "@/hooks/use-personal-password-form-state";
+} from "@/hooks/use-personal-login-form-state";
 import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import type { TagData } from "@/components/tags/tag-input";
 
-export interface PersonalPasswordFormPresenterArgs {
+export interface PersonalLoginFormPresenterArgs {
   initialData?: PersonalPasswordFormInitialData;
-  formState: PersonalPasswordFormState;
+  formState: PersonalLoginFormState;
   translations: PersonalPasswordFormTranslations;
   defaultFolderId?: string | null;
   defaultTags?: TagData[];
 }
 
-export function buildPersonalPasswordFormPresenter({
+export function buildPersonalLoginFormPresenter({
   initialData,
   formState,
   translations,
   defaultFolderId,
   defaultTags,
-}: PersonalPasswordFormPresenterArgs) {
+}: PersonalLoginFormPresenterArgs) {
   const values = selectPersonalEntryValues(formState.values);
-  const { hasChanges, generatorSummary } = buildPersonalPasswordFormDerived({
+  const { hasChanges, generatorSummary } = buildPersonalLoginFormDerived({
     initialData,
     values,
     translations,
@@ -36,7 +36,7 @@ export function buildPersonalPasswordFormPresenter({
     defaultTags,
   });
 
-  const loginMainFieldsProps = buildPersonalEntryLoginFieldsProps({
+  const loginMainFieldsProps = buildPersonalLoginFieldsProps({
     formState,
     generatorSummary,
     translations: { t: translations.t },

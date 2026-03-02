@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTranslator } from "@/lib/translation-types";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
-import { buildPersonalSubmitArgs } from "@/hooks/personal-password-form-submit-args";
+import { buildPersonalLoginSubmitArgs } from "@/hooks/personal-login-form-submit-args";
 
-describe("buildPersonalSubmitArgs", () => {
+describe("buildPersonalLoginSubmitArgs", () => {
   it("maps personal form values and normalizes null userId", () => {
     const setSubmitting = vi.fn();
     const onSaved = vi.fn();
-    const args = buildPersonalSubmitArgs({
+    const args = buildPersonalLoginSubmitArgs({
       mode: "create",
       initialData: undefined,
       onSaved,

@@ -5,16 +5,16 @@ import { describe, expect, it } from "vitest";
 import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTranslator } from "@/lib/translation-types";
 import {
-  usePersonalPasswordFormState,
-} from "@/hooks/use-personal-password-form-state";
+  usePersonalLoginFormState,
+} from "@/hooks/use-personal-login-form-state";
 import {
-  buildPersonalPasswordFormPresenter,
-} from "@/hooks/personal-password-form-presenter";
+  buildPersonalLoginFormPresenter,
+} from "@/hooks/personal-login-form-presenter";
 
-describe("buildPersonalPasswordFormPresenter", () => {
+describe("buildPersonalLoginFormPresenter", () => {
   it("exposes entry values, derived state and login field props", () => {
     const { result } = renderHook(() => {
-      const formState = usePersonalPasswordFormState({
+      const formState = usePersonalLoginFormState({
         id: "entry-1",
         title: "original",
         username: "user",
@@ -23,7 +23,7 @@ describe("buildPersonalPasswordFormPresenter", () => {
         notes: "",
         tags: [],
       });
-      return buildPersonalPasswordFormPresenter({
+      return buildPersonalLoginFormPresenter({
         initialData: {
           id: "entry-1",
           title: "original",

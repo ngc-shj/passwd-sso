@@ -2,11 +2,11 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { usePersonalPasswordFormUiState } from "@/hooks/use-personal-password-form-ui-state";
+import { usePersonalLoginFormUiState } from "@/hooks/use-personal-login-form-ui-state";
 
-describe("usePersonalPasswordFormUiState", () => {
+describe("usePersonalLoginFormUiState", () => {
   it("initializes ui flags", () => {
-    const { result } = renderHook(() => usePersonalPasswordFormUiState());
+    const { result } = renderHook(() => usePersonalLoginFormUiState());
 
     expect(result.current.values.showPassword).toBe(false);
     expect(result.current.values.showGenerator).toBe(false);
@@ -14,7 +14,7 @@ describe("usePersonalPasswordFormUiState", () => {
   });
 
   it("updates ui flags through setters", () => {
-    const { result } = renderHook(() => usePersonalPasswordFormUiState());
+    const { result } = renderHook(() => usePersonalLoginFormUiState());
 
     act(() => {
       result.current.setters.setShowPassword(true);

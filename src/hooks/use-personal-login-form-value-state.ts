@@ -2,9 +2,9 @@ import { useState } from "react";
 import type { TagData } from "@/components/tags/tag-input";
 import { type GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import type { PersonalPasswordFormInitialValues } from "@/hooks/personal-password-form-initial-values";
+import type { PersonalLoginFormInitialValues } from "@/hooks/personal-login-form-initial-values";
 
-export function usePersonalPasswordFormValueState(initial: PersonalPasswordFormInitialValues) {
+export function usePersonalLoginFormValueState(initial: PersonalLoginFormInitialValues) {
   const [title, setTitle] = useState(initial.title);
   const [username, setUsername] = useState(initial.username);
   const [password, setPassword] = useState(initial.password);

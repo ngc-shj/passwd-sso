@@ -3,22 +3,22 @@
 import type { SubmitPersonalPasswordFormArgs } from "@/components/passwords/personal-password-submit";
 import type { PasswordFormProps } from "@/components/passwords/personal-password-form-types";
 import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
-import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
+import type { PersonalLoginFormEntryValues } from "@/hooks/use-personal-login-form-state";
 import type { PasswordFormRouter } from "@/hooks/password-form-router";
 
-interface BuildPersonalSubmitArgsParams {
+interface BuildPersonalLoginSubmitArgsParams {
   mode: Pick<PasswordFormProps, "mode">["mode"];
   initialData: Pick<PasswordFormProps, "initialData">["initialData"];
   onSaved: Pick<PasswordFormProps, "onSaved">["onSaved"];
   encryptionKey: CryptoKey | null;
   userId?: string | null;
-  values: PersonalPasswordFormEntryValues;
+  values: PersonalLoginFormEntryValues;
   setSubmitting: (value: boolean) => void;
   translations: PersonalPasswordFormTranslations;
   router: PasswordFormRouter;
 }
 
-export function buildPersonalSubmitArgs({
+export function buildPersonalLoginSubmitArgs({
   mode,
   initialData,
   onSaved,
@@ -28,7 +28,7 @@ export function buildPersonalSubmitArgs({
   setSubmitting,
   translations,
   router,
-}: BuildPersonalSubmitArgsParams): SubmitPersonalPasswordFormArgs {
+}: BuildPersonalLoginSubmitArgsParams): SubmitPersonalPasswordFormArgs {
   return {
     mode,
     initialData,

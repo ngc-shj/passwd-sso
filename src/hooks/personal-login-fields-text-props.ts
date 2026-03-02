@@ -1,11 +1,11 @@
 "use client";
 
 import type { PasswordFormTranslator } from "@/lib/translation-types";
-import type { PersonalEntryLoginFieldTextProps } from "@/hooks/personal-entry-login-fields-types";
+import type { PersonalLoginFieldTextProps } from "@/hooks/personal-login-fields-types";
 
-export function buildPersonalEntryLoginFieldTextProps(
+export function buildPersonalLoginFieldTextProps(
   t: PasswordFormTranslator,
-): PersonalEntryLoginFieldTextProps {
+): PersonalLoginFieldTextProps {
   return {
     titleLabel: t("title"),
     titlePlaceholder: t("titlePlaceholder"),

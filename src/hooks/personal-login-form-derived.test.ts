@@ -3,11 +3,11 @@ import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTranslator } from "@/lib/translation-types";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
-import { buildPersonalPasswordFormDerived } from "@/hooks/personal-password-form-derived";
+import { buildPersonalLoginFormDerived } from "@/hooks/personal-login-form-derived";
 
-describe("buildPersonalPasswordFormDerived", () => {
+describe("buildPersonalLoginFormDerived", () => {
   it("computes hasChanges=false when values match initial data", () => {
-    const result = buildPersonalPasswordFormDerived({
+    const result = buildPersonalLoginFormDerived({
       initialData: {
         id: "entry-1",
         title: "same",
@@ -25,7 +25,7 @@ describe("buildPersonalPasswordFormDerived", () => {
   });
 
   it("computes hasChanges=true when title differs", () => {
-    const result = buildPersonalPasswordFormDerived({
+    const result = buildPersonalLoginFormDerived({
       initialData: {
         id: "entry-1",
         title: "same",
@@ -43,7 +43,7 @@ describe("buildPersonalPasswordFormDerived", () => {
   });
 
   it("builds generator summary labels via translation callback", () => {
-    const result = buildPersonalPasswordFormDerived({
+    const result = buildPersonalLoginFormDerived({
       values: buildValues(),
       translations: buildTranslations((key: string) =>
         key === "modePassword" ? "Password" : "Passphrase"),
@@ -53,7 +53,7 @@ describe("buildPersonalPasswordFormDerived", () => {
   });
 
   it("hasChanges=false when values match defaultFolderId (no initialData)", () => {
-    const result = buildPersonalPasswordFormDerived({
+    const result = buildPersonalLoginFormDerived({
       values: buildEmptyValues({ folderId: "f1" }),
       translations: buildTranslations((key: string) => key),
       defaultFolderId: "f1",
@@ -62,7 +62,7 @@ describe("buildPersonalPasswordFormDerived", () => {
   });
 
   it("hasChanges=true when folderId differs from defaultFolderId", () => {
-    const result = buildPersonalPasswordFormDerived({
+    const result = buildPersonalLoginFormDerived({
       values: buildEmptyValues({ folderId: "f2" }),
       translations: buildTranslations((key: string) => key),
       defaultFolderId: "f1",
@@ -72,7 +72,7 @@ describe("buildPersonalPasswordFormDerived", () => {
 
   it("hasChanges=false when values match defaultTags (no initialData)", () => {
     const tag = { id: "t1", name: "work", color: null };
-    const result = buildPersonalPasswordFormDerived({
+    const result = buildPersonalLoginFormDerived({
       values: buildEmptyValues({ selectedTags: [tag] }),
       translations: buildTranslations((key: string) => key),
       defaultTags: [tag],

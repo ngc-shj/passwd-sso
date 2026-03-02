@@ -3,24 +3,24 @@ import {
   submitPersonalPasswordForm,
 } from "@/components/passwords/personal-password-submit";
 import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
-import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
+import type { PersonalLoginFormEntryValues } from "@/hooks/use-personal-login-form-state";
 import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
-import { buildPersonalSubmitArgs } from "@/hooks/personal-password-form-submit-args";
+import { buildPersonalLoginSubmitArgs } from "@/hooks/personal-login-form-submit-args";
 import type { PasswordFormRouter } from "@/hooks/password-form-router";
 
-export interface PersonalPasswordFormControllerArgs {
+export interface PersonalLoginFormControllerArgs {
   mode: Pick<PasswordFormProps, "mode">["mode"];
   initialData: Pick<PasswordFormProps, "initialData">["initialData"];
   onSaved: Pick<PasswordFormProps, "onSaved">["onSaved"];
   encryptionKey: CryptoKey | null;
   userId?: string | null;
-  values: PersonalPasswordFormEntryValues;
+  values: PersonalLoginFormEntryValues;
   setSubmitting: (value: boolean) => void;
   translations: PersonalPasswordFormTranslations;
   router: PasswordFormRouter;
 }
 
-export function buildPersonalPasswordFormController({
+export function buildPersonalLoginFormController({
   mode,
   initialData,
   onSaved,
@@ -30,12 +30,12 @@ export function buildPersonalPasswordFormController({
   setSubmitting,
   translations,
   router,
-}: PersonalPasswordFormControllerArgs) {
+}: PersonalLoginFormControllerArgs) {
   const { handleCancel, handleBack } = createFormNavigationHandlers({ onSaved, router });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const submitArgs = buildPersonalSubmitArgs({
+    const submitArgs = buildPersonalLoginSubmitArgs({
       mode,
       initialData,
       onSaved,

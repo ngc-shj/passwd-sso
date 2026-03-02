@@ -3,11 +3,11 @@
 import type { ComponentProps } from "react";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
-import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
+import type { PersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
 
 export type EntryLoginMainFieldsProps = ComponentProps<typeof EntryLoginMainFields>;
 
-export type PersonalEntryLoginFieldTextProps = Pick<
+export type PersonalLoginFieldTextProps = Pick<
   EntryLoginMainFieldsProps,
   | "titleLabel"
   | "titlePlaceholder"
@@ -22,8 +22,8 @@ export type PersonalEntryLoginFieldTextProps = Pick<
   | "notesPlaceholder"
 >;
 
-export interface BuildPersonalEntryLoginFieldsPropsArgs {
-  formState: PersonalPasswordFormState;
+export interface BuildPersonalLoginFieldsPropsArgs {
+  formState: PersonalLoginFormState;
   generatorSummary: string;
   translations: Pick<PersonalPasswordFormTranslations, "t">;
 }

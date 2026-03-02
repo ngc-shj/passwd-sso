@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildPersonalCurrentSnapshot,
   buildPersonalInitialSnapshot,
-} from "@/hooks/personal-password-form-derived";
+} from "@/hooks/personal-login-form-derived";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 
-describe("personal-password-form-derived snapshot helpers", () => {
+describe("personal-login-form-derived snapshot helpers", () => {
   it("builds initial snapshot with defaults", () => {
     const snapshot = JSON.parse(buildPersonalInitialSnapshot());
     expect(snapshot.title).toBe("");

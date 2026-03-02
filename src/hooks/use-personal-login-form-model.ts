@@ -5,20 +5,20 @@ import { useVault } from "@/lib/vault-context";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import type { PasswordFormProps } from "@/components/passwords/personal-password-form-types";
 import {
-  buildPersonalPasswordFormController,
-} from "@/hooks/personal-password-form-controller";
+  buildPersonalLoginFormController,
+} from "@/hooks/personal-login-form-controller";
 import {
-  buildPersonalPasswordFormPresenter,
-} from "@/hooks/personal-password-form-presenter";
+  buildPersonalLoginFormPresenter,
+} from "@/hooks/personal-login-form-presenter";
 import {
   toPersonalPasswordFormTranslations,
   useEntryFormTranslations,
 } from "@/hooks/use-entry-form-translations";
-import { usePersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
+import { usePersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
 
 type PersonalPasswordFormModelInput = Pick<PasswordFormProps, "mode" | "initialData" | "onSaved" | "defaultFolderId" | "defaultTags">;
 
-export function usePersonalPasswordFormModel({
+export function usePersonalLoginFormModel({
   mode,
   initialData,
   onSaved,
@@ -29,17 +29,17 @@ export function usePersonalPasswordFormModel({
   const translations = toPersonalPasswordFormTranslations(translationBundle);
   const router = useRouter();
   const { encryptionKey, userId } = useVault();
-  const formState = usePersonalPasswordFormState(initialData, { defaultFolderId, defaultTags });
+  const formState = usePersonalLoginFormState(initialData, { defaultFolderId, defaultTags });
   const { folders } = usePersonalFolders();
 
-  const { values, hasChanges, loginMainFieldsProps } = buildPersonalPasswordFormPresenter({
+  const { values, hasChanges, loginMainFieldsProps } = buildPersonalLoginFormPresenter({
     initialData,
     formState,
     translations,
     defaultFolderId,
     defaultTags,
   });
-  const { handleSubmit, handleCancel, handleBack } = buildPersonalPasswordFormController({
+  const { handleSubmit, handleCancel, handleBack } = buildPersonalLoginFormController({
     mode,
     initialData,
     onSaved,

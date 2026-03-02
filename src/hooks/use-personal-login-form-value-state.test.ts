@@ -2,12 +2,12 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { buildPersonalPasswordFormInitialValues } from "@/hooks/personal-password-form-initial-values";
-import { usePersonalPasswordFormValueState } from "@/hooks/use-personal-password-form-value-state";
+import { buildPersonalLoginFormInitialValues } from "@/hooks/personal-login-form-initial-values";
+import { usePersonalLoginFormValueState } from "@/hooks/use-personal-login-form-value-state";
 
-describe("usePersonalPasswordFormValueState", () => {
+describe("usePersonalLoginFormValueState", () => {
   it("initializes with provided initial values", () => {
-    const initial = buildPersonalPasswordFormInitialValues({
+    const initial = buildPersonalLoginFormInitialValues({
       id: "entry-1",
       title: "Personal Title",
       username: "user@example.com",
@@ -18,7 +18,7 @@ describe("usePersonalPasswordFormValueState", () => {
       folderId: "folder-1",
     });
 
-    const { result } = renderHook(() => usePersonalPasswordFormValueState(initial));
+    const { result } = renderHook(() => usePersonalLoginFormValueState(initial));
 
     expect(result.current.values.title).toBe("Personal Title");
     expect(result.current.values.username).toBe("user@example.com");
@@ -28,8 +28,8 @@ describe("usePersonalPasswordFormValueState", () => {
   });
 
   it("updates values through setters", () => {
-    const initial = buildPersonalPasswordFormInitialValues();
-    const { result } = renderHook(() => usePersonalPasswordFormValueState(initial));
+    const initial = buildPersonalLoginFormInitialValues();
+    const { result } = renderHook(() => usePersonalLoginFormValueState(initial));
 
     act(() => {
       result.current.setters.setTitle("Updated");

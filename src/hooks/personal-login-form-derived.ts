@@ -2,11 +2,11 @@ import { buildGeneratorSummary } from "@/lib/generator-summary";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { PersonalPasswordFormInitialData } from "@/components/passwords/personal-password-form-types";
 import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
-import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
+import type { PersonalLoginFormEntryValues } from "@/hooks/use-personal-login-form-state";
 import type { TagData } from "@/components/tags/tag-input";
 
 type PersonalFormSnapshotInitialData = PersonalPasswordFormInitialData;
-type BuildPersonalCurrentSnapshotArgs = PersonalPasswordFormEntryValues;
+type BuildPersonalCurrentSnapshotArgs = PersonalLoginFormEntryValues;
 
 export function buildPersonalInitialSnapshot(
   initialData?: PersonalFormSnapshotInitialData,
@@ -58,21 +58,21 @@ export function buildPersonalCurrentSnapshot({
   });
 }
 
-export type PersonalPasswordFormDerivedArgs = {
+export type PersonalLoginFormDerivedArgs = {
   initialData?: PersonalPasswordFormInitialData;
-  values: PersonalPasswordFormEntryValues;
+  values: PersonalLoginFormEntryValues;
   translations: PersonalPasswordFormTranslations;
   defaultFolderId?: string | null;
   defaultTags?: TagData[];
 };
 
-export function buildPersonalPasswordFormDerived({
+export function buildPersonalLoginFormDerived({
   initialData,
   values,
   translations,
   defaultFolderId,
   defaultTags,
-}: PersonalPasswordFormDerivedArgs) {
+}: PersonalLoginFormDerivedArgs) {
   const { tGen } = translations;
   const initialSnapshot = buildPersonalInitialSnapshot(initialData, { defaultFolderId, defaultTags });
   const currentSnapshot = buildPersonalCurrentSnapshot({

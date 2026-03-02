@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildPersonalEntryLoginFieldCallbacks } from "@/hooks/personal-entry-login-fields-callbacks";
+import { buildPersonalLoginFieldCallbacks } from "@/hooks/personal-login-fields-callbacks";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
-import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
+import type { PersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
 
-function createState(): PersonalPasswordFormState {
+function createState(): PersonalLoginFormState {
   return {
     values: {
       showPassword: true,
@@ -44,10 +44,10 @@ function createState(): PersonalPasswordFormState {
   };
 }
 
-describe("buildPersonalEntryLoginFieldCallbacks", () => {
+describe("buildPersonalLoginFieldCallbacks", () => {
   it("toggles flags and applies generated password", () => {
     const state = createState();
-    const callbacks = buildPersonalEntryLoginFieldCallbacks(
+    const callbacks = buildPersonalLoginFieldCallbacks(
       state.values,
       state.setters,
     );

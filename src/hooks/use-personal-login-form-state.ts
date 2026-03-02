@@ -5,11 +5,11 @@ import type { PersonalPasswordFormInitialData } from "@/components/passwords/per
 import type { TagData } from "@/components/tags/tag-input";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import { usePersonalPasswordFormUiState } from "@/hooks/use-personal-password-form-ui-state";
-import { usePersonalPasswordFormValueState } from "@/hooks/use-personal-password-form-value-state";
-import { buildPersonalPasswordFormInitialValues } from "@/hooks/personal-password-form-initial-values";
+import { usePersonalLoginFormUiState } from "@/hooks/use-personal-login-form-ui-state";
+import { usePersonalLoginFormValueState } from "@/hooks/use-personal-login-form-value-state";
+import { buildPersonalLoginFormInitialValues } from "@/hooks/personal-login-form-initial-values";
 
-export interface PersonalPasswordFormValues {
+export interface PersonalLoginFormValues {
   showPassword: boolean;
   showGenerator: boolean;
   submitting: boolean;
@@ -28,7 +28,7 @@ export interface PersonalPasswordFormValues {
   folderId: string | null;
 }
 
-export interface PersonalPasswordFormEntryValues {
+export interface PersonalLoginFormEntryValues {
   title: string;
   username: string;
   password: string;
@@ -43,7 +43,7 @@ export interface PersonalPasswordFormEntryValues {
   folderId: string | null;
 }
 
-export interface PersonalPasswordFormSetters {
+export interface PersonalLoginFormSetters {
   setShowPassword: (value: boolean) => void;
   setShowGenerator: (value: boolean) => void;
   setSubmitting: (value: boolean) => void;
@@ -62,18 +62,18 @@ export interface PersonalPasswordFormSetters {
   setFolderId: (value: string | null) => void;
 }
 
-export interface PersonalPasswordFormState {
-  values: PersonalPasswordFormValues;
-  setters: PersonalPasswordFormSetters;
+export interface PersonalLoginFormState {
+  values: PersonalLoginFormValues;
+  setters: PersonalLoginFormSetters;
 }
 
-export function usePersonalPasswordFormState(
+export function usePersonalLoginFormState(
   initialData?: PersonalPasswordFormInitialData,
   defaults?: { defaultFolderId?: string | null; defaultTags?: TagData[] },
-): PersonalPasswordFormState {
-  const initial = buildPersonalPasswordFormInitialValues(initialData, defaults);
-  const uiState = usePersonalPasswordFormUiState();
-  const valueState = usePersonalPasswordFormValueState(initial);
+): PersonalLoginFormState {
+  const initial = buildPersonalLoginFormInitialValues(initialData, defaults);
+  const uiState = usePersonalLoginFormUiState();
+  const valueState = usePersonalLoginFormValueState(initial);
 
   return {
     values: {
@@ -88,8 +88,8 @@ export function usePersonalPasswordFormState(
 }
 
 export function selectPersonalEntryValues(
-  values: PersonalPasswordFormValues,
-): PersonalPasswordFormEntryValues {
+  values: PersonalLoginFormValues,
+): PersonalLoginFormEntryValues {
   return {
     title: values.title,
     username: values.username,

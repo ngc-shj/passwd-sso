@@ -4,12 +4,12 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   selectPersonalEntryValues,
-  usePersonalPasswordFormState,
-} from "@/hooks/use-personal-password-form-state";
+  usePersonalLoginFormState,
+} from "@/hooks/use-personal-login-form-state";
 
-describe("usePersonalPasswordFormState", () => {
+describe("usePersonalLoginFormState", () => {
   it("initializes defaults without initial data", () => {
-    const { result } = renderHook(() => usePersonalPasswordFormState());
+    const { result } = renderHook(() => usePersonalLoginFormState());
 
     expect(result.current.values.title).toBe("");
     expect(result.current.values.username).toBe("");
@@ -21,7 +21,7 @@ describe("usePersonalPasswordFormState", () => {
 
   it("applies initial data and updates via setters", () => {
     const { result } = renderHook(() =>
-      usePersonalPasswordFormState({
+      usePersonalLoginFormState({
         id: "entry-1",
         title: "initial title",
         username: "initial-user",
@@ -53,7 +53,7 @@ describe("usePersonalPasswordFormState", () => {
 
   it("selects entry values for controller submit", () => {
     const { result } = renderHook(() =>
-      usePersonalPasswordFormState({
+      usePersonalLoginFormState({
         id: "entry-1",
         title: "title",
         username: "user",

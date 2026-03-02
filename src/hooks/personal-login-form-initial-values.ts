@@ -6,7 +6,7 @@ import {
 } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 
-export interface PersonalPasswordFormInitialValues {
+export interface PersonalLoginFormInitialValues {
   title: string;
   username: string;
   password: string;
@@ -22,10 +22,10 @@ export interface PersonalPasswordFormInitialValues {
   folderId: string | null;
 }
 
-export function buildPersonalPasswordFormInitialValues(
+export function buildPersonalLoginFormInitialValues(
   initialData?: PersonalPasswordFormInitialData,
   defaults?: { defaultFolderId?: string | null; defaultTags?: TagData[] },
-): PersonalPasswordFormInitialValues {
+): PersonalLoginFormInitialValues {
   return {
     title: initialData?.title ?? "",
     username: initialData?.username ?? "",

@@ -4,8 +4,8 @@ import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTransla
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import {
-  buildPersonalPasswordFormController,
-} from "@/hooks/personal-password-form-controller";
+  buildPersonalLoginFormController,
+} from "@/hooks/personal-login-form-controller";
 
 const submitPersonalPasswordFormMock = vi.fn();
 
@@ -13,7 +13,7 @@ vi.mock("@/components/passwords/personal-password-submit", () => ({
   submitPersonalPasswordForm: (...args: unknown[]) => submitPersonalPasswordFormMock(...args),
 }));
 
-describe("buildPersonalPasswordFormController", () => {
+describe("buildPersonalLoginFormController", () => {
   beforeEach(() => {
     submitPersonalPasswordFormMock.mockReset();
     submitPersonalPasswordFormMock.mockResolvedValue(undefined);
@@ -24,7 +24,7 @@ describe("buildPersonalPasswordFormController", () => {
     const onSaved = vi.fn();
     const back = vi.fn();
 
-    const controller = buildPersonalPasswordFormController({
+    const controller = buildPersonalLoginFormController({
       mode: "create",
       onSaved,
       encryptionKey: {} as CryptoKey,
@@ -33,7 +33,7 @@ describe("buildPersonalPasswordFormController", () => {
       setSubmitting: vi.fn(),
       translations: buildTranslations(),
       router: { push: vi.fn(), refresh: vi.fn(), back },
-    } as unknown as Parameters<typeof buildPersonalPasswordFormController>[0]);
+    } as unknown as Parameters<typeof buildPersonalLoginFormController>[0]);
 
     await controller.handleSubmit({ preventDefault } as unknown as React.FormEvent);
 
@@ -53,7 +53,7 @@ describe("buildPersonalPasswordFormController", () => {
   });
 
   it("normalizes null userId to undefined in submit args", async () => {
-    const controller = buildPersonalPasswordFormController({
+    const controller = buildPersonalLoginFormController({
       mode: "create",
       onSaved: vi.fn(),
       encryptionKey: {} as CryptoKey,
@@ -62,7 +62,7 @@ describe("buildPersonalPasswordFormController", () => {
       setSubmitting: vi.fn(),
       translations: buildTranslations(),
       router: { push: vi.fn(), refresh: vi.fn(), back: vi.fn() },
-    } as unknown as Parameters<typeof buildPersonalPasswordFormController>[0]);
+    } as unknown as Parameters<typeof buildPersonalLoginFormController>[0]);
 
     await controller.handleSubmit({ preventDefault: vi.fn() } as unknown as React.FormEvent);
 

@@ -1,25 +1,25 @@
 "use client";
 
-import { buildPersonalEntryLoginFieldCallbacks } from "@/hooks/personal-entry-login-fields-callbacks";
-import { buildPersonalEntryLoginFieldTextProps } from "@/hooks/personal-entry-login-fields-text-props";
+import { buildPersonalLoginFieldCallbacks } from "@/hooks/personal-login-fields-callbacks";
+import { buildPersonalLoginFieldTextProps } from "@/hooks/personal-login-fields-text-props";
 import type {
   EntryLoginMainFieldsProps,
-  PersonalEntryLoginFieldTextProps,
-  BuildPersonalEntryLoginFieldsPropsArgs,
-} from "@/hooks/personal-entry-login-fields-types";
+  PersonalLoginFieldTextProps,
+  BuildPersonalLoginFieldsPropsArgs,
+} from "@/hooks/personal-login-fields-types";
 
-type PersonalEntryLoginFieldCallbacks = ReturnType<typeof buildPersonalEntryLoginFieldCallbacks>;
+type PersonalLoginFieldCallbacks = ReturnType<typeof buildPersonalLoginFieldCallbacks>;
 
-export function buildPersonalEntryLoginFieldPropsFromState({
+export function buildPersonalLoginFieldPropsFromState({
   values,
   callbacks,
   generatorSummary,
   textProps,
 }: {
-  values: BuildPersonalEntryLoginFieldsPropsArgs["formState"]["values"];
-  callbacks: PersonalEntryLoginFieldCallbacks;
+  values: BuildPersonalLoginFieldsPropsArgs["formState"]["values"];
+  callbacks: PersonalLoginFieldCallbacks;
   generatorSummary: string;
-  textProps: PersonalEntryLoginFieldTextProps;
+  textProps: PersonalLoginFieldTextProps;
 }): EntryLoginMainFieldsProps {
   return {
     ...textProps,
@@ -45,17 +45,17 @@ export function buildPersonalEntryLoginFieldPropsFromState({
   };
 }
 
-export function buildPersonalEntryLoginFieldsProps({
+export function buildPersonalLoginFieldsProps({
   formState,
   generatorSummary,
   translations,
-}: BuildPersonalEntryLoginFieldsPropsArgs): EntryLoginMainFieldsProps {
+}: BuildPersonalLoginFieldsPropsArgs): EntryLoginMainFieldsProps {
   const { values, setters } = formState;
   const { t } = translations;
-  const callbacks = buildPersonalEntryLoginFieldCallbacks(values, setters);
-  const textProps = buildPersonalEntryLoginFieldTextProps(t);
+  const callbacks = buildPersonalLoginFieldCallbacks(values, setters);
+  const textProps = buildPersonalLoginFieldTextProps(t);
 
-  return buildPersonalEntryLoginFieldPropsFromState({
+  return buildPersonalLoginFieldPropsFromState({
     values,
     callbacks,
     generatorSummary,

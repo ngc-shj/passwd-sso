@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildPersonalPasswordFormInitialValues } from "@/hooks/personal-password-form-initial-values";
+import { buildPersonalLoginFormInitialValues } from "@/hooks/personal-login-form-initial-values";
 
-describe("buildPersonalPasswordFormInitialValues", () => {
+describe("buildPersonalLoginFormInitialValues", () => {
   it("returns defaults when initial data is missing", () => {
-    const result = buildPersonalPasswordFormInitialValues();
+    const result = buildPersonalLoginFormInitialValues();
 
     expect(result.title).toBe("");
     expect(result.username).toBe("");
@@ -14,7 +14,7 @@ describe("buildPersonalPasswordFormInitialValues", () => {
   });
 
   it("maps initial data and derived flags", () => {
-    const result = buildPersonalPasswordFormInitialValues({
+    const result = buildPersonalLoginFormInitialValues({
       id: "entry-1",
       title: "title",
       username: "user",
@@ -36,7 +36,7 @@ describe("buildPersonalPasswordFormInitialValues", () => {
   });
 
   it("uses defaultFolderId when initialData is undefined", () => {
-    const result = buildPersonalPasswordFormInitialValues(undefined, {
+    const result = buildPersonalLoginFormInitialValues(undefined, {
       defaultFolderId: "folder-x",
     });
     expect(result.folderId).toBe("folder-x");
@@ -44,14 +44,14 @@ describe("buildPersonalPasswordFormInitialValues", () => {
 
   it("uses defaultTags when initialData is undefined", () => {
     const tag = { id: "t1", name: "work", color: null };
-    const result = buildPersonalPasswordFormInitialValues(undefined, {
+    const result = buildPersonalLoginFormInitialValues(undefined, {
       defaultTags: [tag],
     });
     expect(result.selectedTags).toEqual([tag]);
   });
 
   it("initialData.folderId takes priority over defaultFolderId", () => {
-    const result = buildPersonalPasswordFormInitialValues(
+    const result = buildPersonalLoginFormInitialValues(
       {
         id: "entry-1",
         title: "t",
@@ -70,7 +70,7 @@ describe("buildPersonalPasswordFormInitialValues", () => {
   it("initialData.tags takes priority over defaultTags", () => {
     const initialTag = { id: "t1", name: "init", color: null };
     const defaultTag = { id: "t2", name: "default", color: "#ff0000" };
-    const result = buildPersonalPasswordFormInitialValues(
+    const result = buildPersonalLoginFormInitialValues(
       {
         id: "entry-1",
         title: "t",

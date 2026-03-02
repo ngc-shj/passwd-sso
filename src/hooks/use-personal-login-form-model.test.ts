@@ -2,7 +2,7 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { usePersonalPasswordFormModel } from "@/hooks/use-personal-password-form-model";
+import { usePersonalLoginFormModel } from "@/hooks/use-personal-login-form-model";
 
 const useRouterMock = vi.fn();
 const useVaultMock = vi.fn();
@@ -29,7 +29,7 @@ vi.mock("@/components/passwords/personal-password-submit", () => ({
   submitPersonalPasswordForm: (...args: unknown[]) => submitPersonalPasswordFormMock(...args),
 }));
 
-describe("usePersonalPasswordFormModel", () => {
+describe("usePersonalLoginFormModel", () => {
   beforeEach(() => {
     useRouterMock.mockReset();
     useVaultMock.mockReset();
@@ -51,7 +51,7 @@ describe("usePersonalPasswordFormModel", () => {
 
   it("computes hasChanges from initial snapshot", () => {
     const { result } = renderHook(() =>
-      usePersonalPasswordFormModel({
+      usePersonalLoginFormModel({
         mode: "edit",
         initialData: {
           id: "entry-1",
@@ -78,7 +78,7 @@ describe("usePersonalPasswordFormModel", () => {
     const preventDefault = vi.fn();
     const onSaved = vi.fn();
     const { result } = renderHook(() =>
-      usePersonalPasswordFormModel({
+      usePersonalLoginFormModel({
         mode: "create",
         onSaved,
       }),

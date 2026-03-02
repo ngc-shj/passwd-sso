@@ -3,20 +3,20 @@ import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import {
-  buildPersonalEntryLoginFieldPropsFromState,
-  buildPersonalEntryLoginFieldsProps,
-} from "@/hooks/personal-entry-login-fields-props";
-import { buildPersonalEntryLoginFieldCallbacks } from "@/hooks/personal-entry-login-fields-callbacks";
-import { buildPersonalEntryLoginFieldTextProps } from "@/hooks/personal-entry-login-fields-text-props";
-import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
+  buildPersonalLoginFieldPropsFromState,
+  buildPersonalLoginFieldsProps,
+} from "@/hooks/personal-login-fields-props";
+import { buildPersonalLoginFieldCallbacks } from "@/hooks/personal-login-fields-callbacks";
+import { buildPersonalLoginFieldTextProps } from "@/hooks/personal-login-fields-text-props";
+import type { PersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
 
-describe("buildPersonalEntryLoginFieldsProps", () => {
+describe("buildPersonalLoginFieldsProps", () => {
   it("builds complete login field props from state", () => {
     const state = createState();
-    const callbacks = buildPersonalEntryLoginFieldCallbacks(state.values, state.setters);
-    const textProps = buildPersonalEntryLoginFieldTextProps(mockTranslator<PasswordFormTranslator>((k) => `label.${k}`));
+    const callbacks = buildPersonalLoginFieldCallbacks(state.values, state.setters);
+    const textProps = buildPersonalLoginFieldTextProps(mockTranslator<PasswordFormTranslator>((k) => `label.${k}`));
 
-    const props = buildPersonalEntryLoginFieldPropsFromState({
+    const props = buildPersonalLoginFieldPropsFromState({
       values: state.values,
       callbacks,
       generatorSummary: "summary",
@@ -34,7 +34,7 @@ describe("buildPersonalEntryLoginFieldsProps", () => {
 
   it("maps values and labels from personal form state", () => {
     const state = createState();
-    const props = buildPersonalEntryLoginFieldsProps({
+    const props = buildPersonalLoginFieldsProps({
       formState: state,
       generatorSummary: "summary",
       translations: { t: mockTranslator<PasswordFormTranslator>((k) => `label.${k}`) },
@@ -54,7 +54,7 @@ describe("buildPersonalEntryLoginFieldsProps", () => {
     state.values.showPassword = true;
     state.values.showGenerator = true;
 
-    const props = buildPersonalEntryLoginFieldsProps({
+    const props = buildPersonalLoginFieldsProps({
       formState: state,
       generatorSummary: "summary",
       translations: { t: mockTranslator<PasswordFormTranslator>() },
@@ -73,7 +73,7 @@ describe("buildPersonalEntryLoginFieldsProps", () => {
   });
 });
 
-function createState(): PersonalPasswordFormState {
+function createState(): PersonalLoginFormState {
   return {
     values: {
       showPassword: false,
