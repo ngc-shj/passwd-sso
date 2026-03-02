@@ -22,11 +22,12 @@ This document distinguishes between:
 | New dialog router | `src/components/team/team-new-dialog.tsx` | `src/components/passwords/personal-password-new-dialog.tsx` |
 | Edit data loader | `src/app/[locale]/dashboard/teams/[teamId]/page.tsx` | `src/components/passwords/personal-password-edit-dialog-loader.tsx` |
 | Edit dialog router | `src/components/team/team-edit-dialog.tsx` | `src/components/passwords/personal-password-edit-dialog.tsx` |
+| Shared dialog shell | `src/components/team/team-entry-dialog-shell.tsx` | `src/components/passwords/personal-entry-dialog-shell.tsx` |
 
 ### Dialog Flow Mismatch
 
 - Team entry forms are now rendered inside `team-new-dialog.tsx` and `team-edit-dialog.tsx` through a shared dialog shell.
-- Personal entry forms are rendered inside `personal-password-new-dialog.tsx` and `personal-password-edit-dialog.tsx`.
+- Personal entry forms are now rendered through a shared dialog shell as well.
 - Team edit data is loaded at page level, while Personal edit data is loaded in `personal-password-edit-dialog-loader.tsx`.
 - `src/components/team/team-create-dialog.tsx` is a team creation dialog, not an entry form dialog, and should not be treated as a Team Vault entry-flow counterpart.
 
@@ -105,19 +106,26 @@ The target state is to make these boundaries more directly corresponding. At min
 
 #### Create
 
-- Team create flow today: `team-new-dialog -> team-entry-dialog-shell -> team-* form`
-- Personal create flow today: `personal-password-new-dialog -> personal-* form`
+| Stage | Team Vault | Personal Vault |
+| --- | --- | --- |
+| Router | `team-new-dialog` | `personal-password-new-dialog` |
+| Dialog shell | `team-entry-dialog-shell` | `personal-entry-dialog-shell` |
+| Entry form | `team-* form` | `personal-* form` |
 
 #### Edit
 
-- Team edit flow today: `page -> team-edit-dialog -> team-entry-dialog-shell -> team-* form`
-- Personal edit flow today: `personal-password-edit-dialog-loader -> personal-password-edit-dialog -> personal-* form`
+| Stage | Team Vault | Personal Vault |
+| --- | --- | --- |
+| Loader / first entry point | `page.tsx` | `personal-password-edit-dialog-loader.tsx` |
+| Router | `team-edit-dialog` | `personal-password-edit-dialog` |
+| Dialog shell | `team-entry-dialog-shell` | `personal-entry-dialog-shell` |
+| Entry form | `team-* form` | `personal-* form` |
 
 #### Structural Difference
 
-- Team keeps entry data loading at page level and dialog shell ownership in `team-new-dialog.tsx` / `team-edit-dialog.tsx`.
-- Personal keeps edit loading in `personal-password-edit-dialog-loader.tsx`, while dialog shell ownership stays in `personal-password-new-dialog.tsx` / `personal-password-edit-dialog.tsx`.
-- The flow stages are now comparable, but the exact component names still differ because Team uses generic `team-new-dialog` / `team-edit-dialog`, while Personal uses login-origin naming under `personal-password-*`.
+- Team splits create/edit router and dialog shell into separate components.
+- Personal also splits router and dialog shell now, but still keeps a dedicated edit loader component.
+- Team edit starts from page-level loading, while Personal edit starts from a dedicated loader component.
 
 ## Refactor Targets
 

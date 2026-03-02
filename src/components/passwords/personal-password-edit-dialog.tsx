@@ -9,13 +9,8 @@ import { PasskeyForm } from "./personal-passkey-form";
 import { BankAccountForm } from "./personal-bank-account-form";
 import { SoftwareLicenseForm } from "./personal-software-license-form";
 import { AttachmentSection, type AttachmentMeta } from "./attachment-section";
+import { PersonalEntryDialogShell } from "./personal-entry-dialog-shell";
 import type { PersonalPasswordEditData } from "./personal-password-edit-dialog-types";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { ENTRY_TYPE } from "@/lib/constants";
 
 interface PasswordEditDialogProps {
@@ -70,11 +65,11 @@ export function PasswordEditDialog({
         : t("editPassword");
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{dialogTitle}</DialogTitle>
-        </DialogHeader>
+    <PersonalEntryDialogShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title={dialogTitle}
+    >
         {isBankAccount ? (
           <BankAccountForm
             mode="edit"
@@ -217,7 +212,6 @@ export function PasswordEditDialog({
             keyVersion={undefined}
           />
         </div>
-      </DialogContent>
-    </Dialog>
+    </PersonalEntryDialogShell>
   );
 }

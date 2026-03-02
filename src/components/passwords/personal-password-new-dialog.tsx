@@ -8,15 +8,10 @@ import { IdentityForm } from "./personal-identity-form";
 import { PasskeyForm } from "./personal-passkey-form";
 import { BankAccountForm } from "./personal-bank-account-form";
 import { SoftwareLicenseForm } from "./personal-software-license-form";
+import { PersonalEntryDialogShell } from "./personal-entry-dialog-shell";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { TagData } from "@/components/tags/tag-input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 
 interface PasswordNewDialogProps {
   open: boolean;
@@ -70,11 +65,11 @@ export function PasswordNewDialog({
         : tp("newPassword");
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{dialogTitle}</DialogTitle>
-        </DialogHeader>
+    <PersonalEntryDialogShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title={dialogTitle}
+    >
         {isBankAccount ? (
           <BankAccountForm
             mode="create"
@@ -132,7 +127,6 @@ export function PasswordNewDialog({
             defaultTags={defaultTags}
           />
         )}
-      </DialogContent>
-    </Dialog>
+    </PersonalEntryDialogShell>
   );
 }
