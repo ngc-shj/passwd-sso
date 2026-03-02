@@ -122,6 +122,7 @@ export default function TeamAuditLogsPage({
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [downloading, setDownloading] = useState(false);
+  const [exportAllowed, setExportAllowed] = useState(true);
   const td = useTranslations("AuditDownload");
 
   const fetchLogs = useCallback(
@@ -161,6 +162,15 @@ export default function TeamAuditLogsPage({
       setLoading(false);
     });
   }, [fetchLogs]);
+
+  useEffect(() => {
+    fetch(apiPath.teamPolicy(teamId))
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.allowExport === false) setExportAllowed(false);
+      })
+      .catch(() => {});
+  }, [teamId]);
 
   const handleLoadMore = async () => {
     if (!nextCursor) return;
@@ -512,26 +522,33 @@ export default function TeamAuditLogsPage({
           </div>
           <div className="space-y-1">
             <Label className="text-xs invisible">&#8203;</Label>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" disabled={downloading}>
-                  {downloading ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Download className="h-4 w-4 mr-2" />
-                  )}
-                  {downloading ? td("downloading") : td("download")}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuItem onClick={() => handleDownload("csv")}>
-                  {td("formatCsv")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
-                  {td("formatJsonl")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {exportAllowed ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" disabled={downloading}>
+                    {downloading ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4 mr-2" />
+                    )}
+                    {downloading ? td("downloading") : td("download")}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onClick={() => handleDownload("csv")}>
+                    {td("formatCsv")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
+                    {td("formatJsonl")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Button variant="outline" disabled title={td("exportDisabled")}>
+                <Download className="h-4 w-4 mr-2" />
+                {td("download")}
+              </Button>
+            )}
           </div>
         </div>
       </Card>
