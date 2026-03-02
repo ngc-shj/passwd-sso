@@ -5,11 +5,14 @@ import { render, waitFor, act } from "@testing-library/react";
 import React from "react";
 
 /* ---------- hoisted mocks ---------- */
-const { mockSearchParams, mockFetch, mockGetTeamEncryptionKey } = vi.hoisted(() => ({
+const { mockSearchParams, mockFetch, mockGetTeamEncryptionKey, mockDecryptData } = vi.hoisted(() => ({
   mockSearchParams: new URLSearchParams(),
   mockFetch: vi.fn(),
   mockGetTeamEncryptionKey: vi.fn().mockResolvedValue(null),
+  mockDecryptData: vi.fn(),
 }));
+
+const teamEditDialogLoaderMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => mockSearchParams,
@@ -34,10 +37,20 @@ vi.mock("sonner", () => ({
 
 // Stub child components to avoid deep dependency trees
 vi.mock("@/components/passwords/password-card", () => ({
-  PasswordCard: () => <div data-testid="password-card" />,
+  PasswordCard: ({ onEditClick }: { onEditClick?: () => void }) => (
+    <button data-testid="password-card" onClick={onEditClick}>
+      password-card
+    </button>
+  ),
 }));
 vi.mock("@/components/team/team-login-form", () => ({
   TeamLoginForm: () => null,
+}));
+vi.mock("@/components/team/team-edit-dialog-loader", () => ({
+  TeamEditDialogLoader: (props: unknown) => {
+    teamEditDialogLoaderMock(props);
+    return <div data-testid="team-edit-dialog-loader" />;
+  },
 }));
 vi.mock("@/components/team/team-archived-list", () => ({
   TeamArchivedList: () => null,
@@ -149,7 +162,7 @@ vi.mock("@/lib/team-vault-context", () => ({
 }));
 
 vi.mock("@/lib/crypto-client", () => ({
-  decryptData: vi.fn(),
+  decryptData: (...args: unknown[]) => mockDecryptData(...args),
 }));
 
 vi.mock("@/lib/crypto-aad", () => ({
@@ -166,6 +179,12 @@ describe("TeamDashboardPage — folder query propagation", () => {
       mockSearchParams.delete(key);
     }
     globalThis.fetch = mockFetch as unknown as typeof fetch;
+    mockDecryptData.mockResolvedValue(
+      JSON.stringify({
+        title: "Entry One",
+        username: "alice",
+      }),
+    );
   });
 
   it("includes folder param in password fetch when folder is active", async () => {
@@ -225,6 +244,12 @@ describe("TeamDashboardPage — scopes", () => {
       mockSearchParams.delete(key);
     }
     globalThis.fetch = mockFetch as unknown as typeof fetch;
+    mockDecryptData.mockResolvedValue(
+      JSON.stringify({
+        title: "Entry One",
+        username: "alice",
+      }),
+    );
   });
 
   it("does NOT fetch passwords when scope=archive", async () => {
@@ -291,6 +316,12 @@ describe("TeamDashboardPage — role-based rendering", () => {
       mockSearchParams.delete(key);
     }
     globalThis.fetch = mockFetch as unknown as typeof fetch;
+    mockDecryptData.mockResolvedValue(
+      JSON.stringify({
+        title: "Entry One",
+        username: "alice",
+      }),
+    );
   });
 
   it("shows newItem button for OWNER role", async () => {
@@ -334,6 +365,12 @@ describe("TeamDashboardPage — error handling", () => {
       mockSearchParams.delete(key);
     }
     globalThis.fetch = mockFetch as unknown as typeof fetch;
+    mockDecryptData.mockResolvedValue(
+      JSON.stringify({
+        title: "Entry One",
+        username: "alice",
+      }),
+    );
   });
 
   it("shows error state when team fetch fails", async () => {
@@ -352,5 +389,62 @@ describe("TeamDashboardPage — error handling", () => {
     await waitFor(() => {
       expect(view!.container.textContent).toContain("forbidden");
     });
+  });
+});
+
+describe("TeamDashboardPage - edit wiring", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    for (const key of [...mockSearchParams.keys()]) {
+      mockSearchParams.delete(key);
+    }
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+  });
+
+  it("opens TeamEditDialogLoader with the clicked entry id", async () => {
+    mockGetTeamEncryptionKey.mockResolvedValue({} as CryptoKey);
+    setupFetch(makeTeamResponse("OWNER"), [
+      {
+        id: "entry-1",
+        entryType: "LOGIN",
+        encryptedOverview: "cipher",
+        overviewIv: "iv",
+        overviewAuthTag: "tag",
+        tags: [],
+        isFavorite: false,
+        isArchived: false,
+        requireReprompt: false,
+        expiresAt: null,
+        createdBy: { name: "Alice", email: "alice@example.com" },
+        updatedBy: { name: "Alice", email: "alice@example.com" },
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      },
+    ]);
+
+    let view: ReturnType<typeof render>;
+    await act(async () => {
+      view = renderPage();
+    });
+
+    await waitFor(() => {
+      expect(view!.getAllByTestId("password-card")).toHaveLength(1);
+    });
+
+    await act(async () => {
+      view!.getByTestId("password-card").click();
+    });
+
+    await waitFor(() => {
+      expect(view!.getByTestId("team-edit-dialog-loader")).toBeInTheDocument();
+    });
+
+    expect(teamEditDialogLoaderMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        teamId: "team-1",
+        id: "entry-1",
+        open: true,
+      }),
+    );
   });
 });
