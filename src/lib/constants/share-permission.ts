@@ -22,8 +22,10 @@ export const SHARE_PERMISSION_VALUES = [
 
 // ─── Entry-type-aware field definitions ─────────────────────
 
+import type { EntryTypeValue } from "./entry-type";
+
 /** Sensitive fields to remove per entry type for HIDE_PASSWORD. */
-const SENSITIVE_FIELDS: Record<string, Set<string>> = {
+export const SENSITIVE_FIELDS: Record<EntryTypeValue, Set<string>> = {
   LOGIN:            new Set(["password"]),
   SECURE_NOTE:      new Set(["content"]),
   CREDIT_CARD:      new Set(["cardNumber", "cvv"]),
@@ -34,7 +36,7 @@ const SENSITIVE_FIELDS: Record<string, Set<string>> = {
 };
 
 /** Fields to keep per entry type for OVERVIEW_ONLY. */
-const OVERVIEW_FIELDS: Record<string, Set<string>> = {
+export const OVERVIEW_FIELDS: Record<EntryTypeValue, Set<string>> = {
   LOGIN:            new Set(["title", "username", "url"]),
   SECURE_NOTE:      new Set(["title"]),
   CREDIT_CARD:      new Set(["title", "cardholderName", "brand", "expiryMonth", "expiryYear"]),
@@ -62,11 +64,11 @@ export function applySharePermissions(
   entryType?: string,
 ): Record<string, unknown> {
   if (permissions.length === 0 || permissions.includes(SHARE_PERMISSION.VIEW_ALL)) {
-    return data;
+    return { ...data };
   }
 
   if (permissions.includes(SHARE_PERMISSION.OVERVIEW_ONLY)) {
-    const allowedFields = (entryType && OVERVIEW_FIELDS[entryType]) || DEFAULT_OVERVIEW;
+    const allowedFields = (entryType && OVERVIEW_FIELDS[entryType as EntryTypeValue]) || DEFAULT_OVERVIEW;
     const filtered: Record<string, unknown> = {};
     for (const key of allowedFields) {
       if (key in data) filtered[key] = data[key];
@@ -75,7 +77,7 @@ export function applySharePermissions(
   }
 
   if (permissions.includes(SHARE_PERMISSION.HIDE_PASSWORD)) {
-    const sensitiveFields = (entryType && SENSITIVE_FIELDS[entryType]) || DEFAULT_SENSITIVE;
+    const sensitiveFields = (entryType && SENSITIVE_FIELDS[entryType as EntryTypeValue]) || DEFAULT_SENSITIVE;
     const filtered: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(data)) {
       if (!sensitiveFields.has(key)) {
@@ -85,5 +87,11 @@ export function applySharePermissions(
     return filtered;
   }
 
-  return data;
+  // Fail-closed: unrecognized permission values → apply OVERVIEW_ONLY (most restrictive)
+  const allowedFields = (entryType && OVERVIEW_FIELDS[entryType as EntryTypeValue]) || DEFAULT_OVERVIEW;
+  const filtered: Record<string, unknown> = {};
+  for (const key of allowedFields) {
+    if (key in data) filtered[key] = data[key];
+  }
+  return filtered;
 }

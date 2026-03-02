@@ -3,7 +3,10 @@ import {
   applySharePermissions,
   SHARE_PERMISSION,
   SHARE_PERMISSION_VALUES,
+  SENSITIVE_FIELDS,
+  OVERVIEW_FIELDS,
 } from "./share-permission";
+import { ENTRY_TYPE_VALUES } from "./entry-type";
 
 // ─── Test data per entry type ────────────────────────────────
 
@@ -319,6 +322,74 @@ describe("applySharePermissions — SOFTWARE_LICENSE", () => {
       "SOFTWARE_LICENSE",
     );
     expect(Object.keys(result).sort()).toEqual(["licensee", "softwareName", "title", "version"]);
+  });
+});
+
+// ─── Unknown entryType fallback (T-1) ────────────────────────
+
+describe("applySharePermissions — unknown entryType fallback", () => {
+  it("HIDE_PASSWORD with unknown entryType falls back to LOGIN behavior", () => {
+    const result = applySharePermissions(
+      LOGIN_DATA,
+      [SHARE_PERMISSION.HIDE_PASSWORD],
+      "FUTURE_TYPE",
+    );
+    // Should remove password (LOGIN default sensitive field)
+    expect(result).not.toHaveProperty("password");
+    expect(result).toHaveProperty("title", "My Login");
+    expect(result).toHaveProperty("username", "user@example.com");
+  });
+
+  it("OVERVIEW_ONLY with unknown entryType falls back to LOGIN behavior", () => {
+    const result = applySharePermissions(
+      LOGIN_DATA,
+      [SHARE_PERMISSION.OVERVIEW_ONLY],
+      "FUTURE_TYPE",
+    );
+    // Should keep only title, username, url (LOGIN default overview fields)
+    expect(Object.keys(result).sort()).toEqual(["title", "url", "username"]);
+  });
+
+  it("unrecognized permission values apply fail-closed (OVERVIEW_ONLY)", () => {
+    const result = applySharePermissions(
+      LOGIN_DATA,
+      ["SOME_UNKNOWN_PERMISSION"],
+    );
+    // Fail-closed: falls back to OVERVIEW_ONLY (most restrictive)
+    expect(Object.keys(result).sort()).toEqual(["title", "url", "username"]);
+    expect(result).not.toHaveProperty("password");
+    expect(result).not.toHaveProperty("notes");
+  });
+});
+
+// ─── ENTRY_TYPE_VALUES sync verification (T-2) ──────────────
+
+describe("applySharePermissions — ENTRY_TYPE_VALUES sync", () => {
+  it("SENSITIVE_FIELDS covers all entry types", () => {
+    for (const entryType of ENTRY_TYPE_VALUES) {
+      expect(SENSITIVE_FIELDS).toHaveProperty(entryType);
+      expect(SENSITIVE_FIELDS[entryType]).toBeInstanceOf(Set);
+    }
+  });
+
+  it("OVERVIEW_FIELDS covers all entry types", () => {
+    for (const entryType of ENTRY_TYPE_VALUES) {
+      expect(OVERVIEW_FIELDS).toHaveProperty(entryType);
+      expect(OVERVIEW_FIELDS[entryType]).toBeInstanceOf(Set);
+    }
+  });
+
+  it("applySharePermissions works without error for all entry types", () => {
+    const sampleData = { title: "Test", password: "secret", username: "user" };
+    for (const entryType of ENTRY_TYPE_VALUES) {
+      // Should not throw for any valid entry type
+      expect(() =>
+        applySharePermissions(sampleData, [SHARE_PERMISSION.HIDE_PASSWORD], entryType),
+      ).not.toThrow();
+      expect(() =>
+        applySharePermissions(sampleData, [SHARE_PERMISSION.OVERVIEW_ONLY], entryType),
+      ).not.toThrow();
+    }
   });
 });
 
