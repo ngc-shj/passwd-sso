@@ -9,7 +9,9 @@ import { EntryListHeader } from "@/components/passwords/entry-list-header";
 import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
 import { SearchBar } from "@/components/layout/search-bar";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
-import { TeamPasswordForm } from "@/components/team/team-password-form";
+import { TeamNewDialog } from "@/components/team/team-new-dialog";
+import { TeamEditDialog } from "@/components/team/team-edit-dialog";
+import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
 import { TeamArchivedList, type TeamArchivedListHandle } from "@/components/team/team-archived-list";
 import { TeamTrashList, type TeamTrashListHandle } from "@/components/team/team-trash-list";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
@@ -102,56 +104,7 @@ export default function TeamDashboardPage({
   const [formOpen, setFormOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newEntryType, setNewEntryType] = useState<EntryTypeValue>(ENTRY_TYPE.LOGIN);
-  const [editData, setEditData] = useState<{
-    id: string;
-    entryType?: EntryTypeValue;
-    title: string;
-    username: string | null;
-    password: string;
-    content?: string;
-    url: string | null;
-    notes: string | null;
-    tags?: { id: string; name: string; color: string | null }[];
-    customFields?: EntryCustomField[];
-    totp?: EntryTotp | null;
-    cardholderName?: string | null;
-    cardNumber?: string | null;
-    brand?: string | null;
-    expiryMonth?: string | null;
-    expiryYear?: string | null;
-    cvv?: string | null;
-    fullName?: string | null;
-    address?: string | null;
-    phone?: string | null;
-    email?: string | null;
-    dateOfBirth?: string | null;
-    nationality?: string | null;
-    idNumber?: string | null;
-    issueDate?: string | null;
-    expiryDate?: string | null;
-    relyingPartyId?: string | null;
-    relyingPartyName?: string | null;
-    credentialId?: string | null;
-    creationDate?: string | null;
-    deviceInfo?: string | null;
-    bankName?: string | null;
-    accountType?: string | null;
-    accountHolderName?: string | null;
-    accountNumber?: string | null;
-    routingNumber?: string | null;
-    swiftBic?: string | null;
-    iban?: string | null;
-    branchName?: string | null;
-    softwareName?: string | null;
-    licenseKey?: string | null;
-    version?: string | null;
-    licensee?: string | null;
-    purchaseDate?: string | null;
-    expirationDate?: string | null;
-    teamFolderId?: string | null;
-    requireReprompt?: boolean;
-    expiresAt?: string | null;
-  } | null>(null);
+  const [editData, setEditData] = useState<TeamPasswordFormEditData | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const archivedListRef = useRef<TeamArchivedListHandle>(null);
   const trashListRef = useRef<TeamTrashListHandle>(null);
@@ -986,8 +939,23 @@ export default function TeamDashboardPage({
         )}
       </div>
 
-      {formOpen && (
-        <TeamPasswordForm
+      {formOpen && !editData && (
+        <TeamNewDialog
+          teamId={teamId}
+          open={formOpen}
+          onOpenChange={setFormOpen}
+          onSaved={() => {
+            fetchPasswords();
+            setExpandedId(null);
+            setRefreshKey((k) => k + 1);
+          }}
+          entryType={newEntryType}
+          defaultFolderId={activeFolderId ?? null}
+          defaultTags={matchedTag ? [{ id: matchedTag.id, name: matchedTag.name, color: matchedTag.color ?? null }] : undefined}
+        />
+      )}
+      {formOpen && editData && (
+        <TeamEditDialog
           teamId={teamId}
           open={formOpen}
           onOpenChange={setFormOpen}
@@ -997,7 +965,6 @@ export default function TeamDashboardPage({
             setRefreshKey((k) => k + 1);
           }}
           editData={editData}
-          entryType={editData?.entryType ?? newEntryType}
           defaultFolderId={activeFolderId ?? null}
           defaultTags={matchedTag ? [{ id: matchedTag.id, name: matchedTag.name, color: matchedTag.color ?? null }] : undefined}
         />

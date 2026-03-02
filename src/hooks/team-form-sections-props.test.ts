@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
-import type { TeamPasswordFormState } from "@/hooks/use-team-password-form-state";
 
 describe("buildTeamFormSectionsProps", () => {
   it("maps tags/folders and action bar props", () => {
@@ -101,7 +100,7 @@ describe("buildTeamFormSectionsProps", () => {
   });
 });
 
-function createState(): Pick<TeamPasswordFormState, "values" | "setters"> {
+function createState() {
   return {
     values: {
       selectedTags: [],
@@ -111,7 +110,7 @@ function createState(): Pick<TeamPasswordFormState, "values" | "setters"> {
       showTotpInput: false,
       requireReprompt: false,
       expiresAt: null,
-    } as unknown as TeamPasswordFormState["values"],
+    },
     setters: {
       setSelectedTags: vi.fn(),
       setTeamFolderId: vi.fn(),
@@ -120,6 +119,6 @@ function createState(): Pick<TeamPasswordFormState, "values" | "setters"> {
       setShowTotpInput: vi.fn(),
       setRequireReprompt: vi.fn(),
       setExpiresAt: vi.fn(),
-    } as unknown as TeamPasswordFormState["setters"],
+    },
   };
 }

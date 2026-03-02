@@ -1,13 +1,14 @@
 "use client";
 
-import type { ComponentProps } from "react";
+import type { ComponentProps, Dispatch, SetStateAction } from "react";
 import { EntryActionBar } from "@/components/passwords/entry-form-ui";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import type { TeamFolderItem } from "@/components/team/team-password-form-types";
-import type { TeamPasswordFormState } from "@/hooks/use-team-password-form-state";
+import type { TeamTagData } from "@/components/team/team-tag-input";
+import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";
 
 type TeamTagsAndFolderSectionProps = ComponentProps<typeof TeamTagsAndFolderSection>;
@@ -37,14 +38,24 @@ interface UseTeamFormSectionsPropsArgs {
   expirationTitle: string;
   expirationDescription: string;
   onCancel: () => void;
-  values: Pick<
-    TeamPasswordFormState["values"],
-    "selectedTags" | "teamFolderId" | "customFields" | "totp" | "showTotpInput" | "requireReprompt" | "expiresAt"
-  >;
-  setters: Pick<
-    TeamPasswordFormState["setters"],
-    "setSelectedTags" | "setTeamFolderId" | "setCustomFields" | "setTotp" | "setShowTotpInput" | "setRequireReprompt" | "setExpiresAt"
-  >;
+  values: {
+    selectedTags: TeamTagData[];
+    teamFolderId: string | null;
+    customFields: EntryCustomField[];
+    totp: EntryTotp | null;
+    showTotpInput: boolean;
+    requireReprompt: boolean;
+    expiresAt: string | null;
+  };
+  setters: {
+    setSelectedTags: Dispatch<SetStateAction<TeamTagData[]>>;
+    setTeamFolderId: Dispatch<SetStateAction<string | null>>;
+    setCustomFields: Dispatch<SetStateAction<EntryCustomField[]>>;
+    setTotp: Dispatch<SetStateAction<EntryTotp | null>>;
+    setShowTotpInput: Dispatch<SetStateAction<boolean>>;
+    setRequireReprompt: Dispatch<SetStateAction<boolean>>;
+    setExpiresAt: Dispatch<SetStateAction<string | null>>;
+  };
 }
 
 interface TeamFormSectionsPropsResult {
