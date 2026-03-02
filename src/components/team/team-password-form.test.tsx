@@ -547,4 +547,26 @@ describe("TeamPasswordForm — folder selection", () => {
       expect(folderSelect).toBeInTheDocument();
     });
   });
+
+  it("uses the translated login field keys for labels", async () => {
+    setupFetch();
+
+    await act(async () => {
+      render(
+        <TeamPasswordForm
+          teamId="team-1"
+          open={true}
+          onOpenChange={vi.fn()}
+          onSaved={vi.fn()}
+        />,
+      );
+    });
+
+    expect(screen.getByText("usernameEmail")).toBeInTheDocument();
+    expect(screen.getByText("password")).toBeInTheDocument();
+    expect(screen.getByText("url")).toBeInTheDocument();
+    expect(screen.queryByText("usernameLabel")).not.toBeInTheDocument();
+    expect(screen.queryByText("passwordLabel")).not.toBeInTheDocument();
+    expect(screen.queryByText("urlLabel")).not.toBeInTheDocument();
+  });
 });

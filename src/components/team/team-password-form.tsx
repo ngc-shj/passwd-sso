@@ -249,11 +249,11 @@ export function TeamPasswordForm({
             titlePlaceholder={base.entryCopy.titlePlaceholder}
             username={username}
             onUsernameChange={setUsername}
-            usernameLabel={base.t("usernameLabel")}
+            usernameLabel={base.t("usernameEmail")}
             usernamePlaceholder={base.t("usernamePlaceholder")}
             password={password}
             onPasswordChange={setPassword}
-            passwordLabel={base.t("passwordLabel")}
+            passwordLabel={base.t("password")}
             passwordPlaceholder={base.t("passwordPlaceholder")}
             showPassword={showPassword}
             onToggleShowPassword={() => setShowPassword(!showPassword)}
@@ -269,7 +269,7 @@ export function TeamPasswordForm({
             }}
             url={url}
             onUrlChange={setUrl}
-            urlLabel={base.t("urlLabel")}
+            urlLabel={base.t("url")}
             notes={base.notes}
             onNotesChange={base.setNotes}
             notesLabel={base.entryCopy.notesLabel}
