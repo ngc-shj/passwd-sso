@@ -1,7 +1,6 @@
 "use client";
 
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
-import { PasswordFormPageShell } from "@/components/passwords/password-form-page-shell";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
@@ -15,6 +14,9 @@ import { preventIMESubmit } from "@/lib/ime-guard";
 import type { PasswordFormProps } from "@/components/passwords/password-form-types";
 import { usePersonalPasswordFormModel } from "@/hooks/use-personal-password-form-model";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
+import { ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function PasswordForm({ mode, initialData, variant = "page", onSaved, defaultFolderId, defaultTags }: PasswordFormProps) {
   const {
@@ -94,12 +96,22 @@ export function PasswordForm({ mode, initialData, variant = "page", onSaved, def
   }
 
   return (
-    <PasswordFormPageShell
-      backLabel={tc("back")}
-      onBack={handleBack}
-      title={mode === "create" ? t("newPassword") : t("editPassword")}
-    >
-      {formContent}
-    </PasswordFormPageShell>
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-4">
+        <Button variant="ghost" className="mb-4 gap-2" onClick={handleBack}>
+          <ArrowLeft className="h-4 w-4" />
+          {tc("back")}
+        </Button>
+
+        <Card className="rounded-xl border">
+          <CardHeader>
+            <CardTitle>
+              {mode === "create" ? t("newPassword") : t("editPassword")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>{formContent}</CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
