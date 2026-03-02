@@ -8,29 +8,33 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
-import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { SecureNoteFields } from "@/components/entry-fields/secure-note-fields";
+import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamAttachmentSection } from "./team-attachment-section";
-import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
-import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
-import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import { buildGeneratorSummary } from "@/lib/generator-summary";
-import { buildPolicyAwareGeneratorSettings } from "@/hooks/team-password-form-initial-values";
+import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
+import { preventIMESubmit } from "@/lib/ime-guard";
+import { SECURE_NOTE_TEMPLATES } from "@/lib/secure-note-templates";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
 
-export function TeamPasswordForm({
+export function TeamSecureNoteForm({
   teamId,
   open,
   onOpenChange,
@@ -40,6 +44,7 @@ export function TeamPasswordForm({
   defaultFolderId,
   defaultTags,
 }: TeamPasswordFormProps) {
+  const tSn = useTranslations("SecureNoteForm");
   const base = useTeamBaseFormModel({
     teamId,
     open,
@@ -51,31 +56,8 @@ export function TeamPasswordForm({
     defaultTags,
   });
 
-  const tGen = base.translationBundle.tGen;
-
-  // Entry-specific state (LOGIN)
-  const [username, setUsername] = useState(editData?.username ?? "");
-  const [password, setPassword] = useState(editData?.password ?? "");
-  const [url, setUrl] = useState(editData?.url ?? "");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
-  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(
-    () => buildPolicyAwareGeneratorSettings(base.teamPolicy),
-  );
-  const [customFields, setCustomFields] = useState<EntryCustomField[]>(
-    editData?.customFields ?? [],
-  );
-  const [totp, setTotp] = useState<EntryTotp | null>(editData?.totp ?? null);
-  const [showTotpInput, setShowTotpInput] = useState(Boolean(editData?.totp));
-
-  const generatorSummary = useMemo(
-    () =>
-      buildGeneratorSummary(generatorSettings, {
-        modePassphrase: tGen("modePassphrase"),
-        modePassword: tGen("modePassword"),
-      }),
-    [generatorSettings, tGen],
-  );
+  // Entry-specific state
+  const [content, setContent] = useState(editData?.content ?? "");
 
   // hasChanges
   const baselineSnapshot = useMemo(
@@ -83,11 +65,7 @@ export function TeamPasswordForm({
       JSON.stringify({
         title: editData?.title ?? "",
         notes: editData?.notes ?? "",
-        username: editData?.username ?? "",
-        password: editData?.password ?? "",
-        url: editData?.url ?? "",
-        customFields: JSON.stringify(editData?.customFields ?? []),
-        totp: JSON.stringify(editData?.totp ?? null),
+        content: editData?.content ?? "",
         selectedTagIds: (editData?.tags ?? defaultTags ?? [])
           .map((tag) => tag.id)
           .sort(),
@@ -103,11 +81,7 @@ export function TeamPasswordForm({
       JSON.stringify({
         title: base.title,
         notes: base.notes,
-        username,
-        password,
-        url,
-        customFields: JSON.stringify(customFields),
-        totp: JSON.stringify(totp),
+        content,
         selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
         teamFolderId: base.teamFolderId,
         requireReprompt: base.requireReprompt,
@@ -116,11 +90,7 @@ export function TeamPasswordForm({
     [
       base.title,
       base.notes,
-      username,
-      password,
-      url,
-      customFields,
-      totp,
+      content,
       base.selectedTags,
       base.teamFolderId,
       base.requireReprompt,
@@ -129,13 +99,12 @@ export function TeamPasswordForm({
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
-  const submitDisabled = !base.title.trim() || !password;
+  const submitDisabled = !base.title.trim();
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
   const {
     tagsAndFolderProps,
-    customFieldsTotpProps,
     repromptSectionProps,
     expirationSectionProps,
     actionBarProps,
@@ -145,7 +114,7 @@ export function TeamPasswordForm({
     tagsHint: base.t("tagsHint"),
     folders: base.teamFolders,
     sectionCardClass: dialogSectionClass,
-    isLoginEntry: true,
+    isLoginEntry: false,
     hasChanges,
     saving: base.saving,
     submitDisabled,
@@ -165,18 +134,18 @@ export function TeamPasswordForm({
     values: {
       selectedTags: base.selectedTags,
       teamFolderId: base.teamFolderId,
-      customFields,
-      totp,
-      showTotpInput,
+      customFields: [],
+      totp: null,
+      showTotpInput: false,
       requireReprompt: base.requireReprompt,
       expiresAt: base.expiresAt,
     },
     setters: {
       setSelectedTags: base.setSelectedTags,
       setTeamFolderId: base.setTeamFolderId,
-      setCustomFields,
-      setTotp,
-      setShowTotpInput,
+      setCustomFields: () => {},
+      setTotp: () => {},
+      setShowTotpInput: () => {},
       setRequireReprompt: base.setRequireReprompt,
       setExpiresAt: base.setExpiresAt,
     },
@@ -192,15 +161,11 @@ export function TeamPasswordForm({
     }));
 
     await base.submitEntry({
-      entryType: ENTRY_TYPE.LOGIN,
+      entryType: ENTRY_TYPE.SECURE_NOTE,
       title: base.title,
       notes: base.notes,
       tagNames,
-      username,
-      password,
-      url,
-      customFields,
-      totp,
+      content,
     });
   };
 
@@ -222,6 +187,39 @@ export function TeamPasswordForm({
           onKeyDown={preventIMESubmit}
           className="space-y-5"
         >
+          {!base.isEdit && (
+            <div className="space-y-2">
+              <Label>{tSn("templateLabel")}</Label>
+              <Select
+                defaultValue="blank"
+                onValueChange={(templateId) => {
+                  const tmpl = SECURE_NOTE_TEMPLATES.find(
+                    (tp) => tp.id === templateId,
+                  );
+                  if (!tmpl) return;
+                  if (tmpl.id === "blank") {
+                    base.setTitle("");
+                    setContent("");
+                    return;
+                  }
+                  base.setTitle(tSn(tmpl.titleKey));
+                  setContent(tmpl.contentTemplate);
+                }}
+              >
+                <SelectTrigger className="w-full max-w-[300px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SECURE_NOTE_TEMPLATES.map((tmpl) => (
+                    <SelectItem key={tmpl.id} value={tmpl.id}>
+                      {tSn(tmpl.titleKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label>{base.entryCopy.titleLabel}</Label>
             <Input
@@ -231,49 +229,18 @@ export function TeamPasswordForm({
             />
           </div>
 
-          <EntryLoginMainFields
+          <SecureNoteFields
             idPrefix="team-"
-            hideTitle
-            title={base.title}
-            onTitleChange={base.setTitle}
-            titleLabel={base.entryCopy.titleLabel}
-            titlePlaceholder={base.entryCopy.titlePlaceholder}
-            username={username}
-            onUsernameChange={setUsername}
-            usernameLabel={base.t("usernameLabel")}
-            usernamePlaceholder={base.t("usernamePlaceholder")}
-            password={password}
-            onPasswordChange={setPassword}
-            passwordLabel={base.t("passwordLabel")}
-            passwordPlaceholder={base.t("passwordPlaceholder")}
-            showPassword={showPassword}
-            onToggleShowPassword={() => setShowPassword(!showPassword)}
-            generatorSummary={generatorSummary}
-            showGenerator={showGenerator}
-            onToggleGenerator={() => setShowGenerator(!showGenerator)}
-            closeGeneratorLabel={base.t("closeGenerator")}
-            openGeneratorLabel={base.t("openGenerator")}
-            generatorSettings={generatorSettings}
-            onGeneratorUse={(pw, settings) => {
-              setPassword(pw);
-              setGeneratorSettings(settings);
-            }}
-            url={url}
-            onUrlChange={setUrl}
-            urlLabel={base.t("urlLabel")}
-            notes={base.notes}
-            onNotesChange={base.setNotes}
-            notesLabel={base.entryCopy.notesLabel}
-            notesPlaceholder={base.entryCopy.notesPlaceholder}
-            teamPolicy={base.teamPolicy}
+            content={content}
+            onContentChange={setContent}
+            contentLabel={tSn("content")}
+            contentPlaceholder={tSn("contentPlaceholder")}
+            editTabLabel={tSn("editTab")}
+            previewTabLabel={tSn("previewTab")}
+            markdownHint={tSn("markdownHint")}
           />
 
           <TeamTagsAndFolderSection {...tagsAndFolderProps} />
-
-          {customFieldsTotpProps && (
-            <EntryCustomFieldsTotpSection {...customFieldsTotpProps} />
-          )}
-
           <EntryRepromptSection {...repromptSectionProps} />
           <EntryExpirationSection {...expirationSectionProps} />
           <EntryActionBar {...actionBarProps} />

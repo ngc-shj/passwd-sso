@@ -8,29 +8,25 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
-import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
+import { BankAccountFields } from "@/components/entry-fields/bank-account-fields";
+import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamAttachmentSection } from "./team-attachment-section";
-import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
-import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
-import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import { buildGeneratorSummary } from "@/lib/generator-summary";
-import { buildPolicyAwareGeneratorSettings } from "@/hooks/team-password-form-initial-values";
+import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
+import { preventIMESubmit } from "@/lib/ime-guard";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
 
-export function TeamPasswordForm({
+export function TeamBankAccountForm({
   teamId,
   open,
   onOpenChange,
@@ -40,6 +36,7 @@ export function TeamPasswordForm({
   defaultFolderId,
   defaultTags,
 }: TeamPasswordFormProps) {
+  const tba = useTranslations("BankAccountForm");
   const base = useTeamBaseFormModel({
     teamId,
     open,
@@ -51,31 +48,17 @@ export function TeamPasswordForm({
     defaultTags,
   });
 
-  const tGen = base.translationBundle.tGen;
-
-  // Entry-specific state (LOGIN)
-  const [username, setUsername] = useState(editData?.username ?? "");
-  const [password, setPassword] = useState(editData?.password ?? "");
-  const [url, setUrl] = useState(editData?.url ?? "");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
-  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(
-    () => buildPolicyAwareGeneratorSettings(base.teamPolicy),
-  );
-  const [customFields, setCustomFields] = useState<EntryCustomField[]>(
-    editData?.customFields ?? [],
-  );
-  const [totp, setTotp] = useState<EntryTotp | null>(editData?.totp ?? null);
-  const [showTotpInput, setShowTotpInput] = useState(Boolean(editData?.totp));
-
-  const generatorSummary = useMemo(
-    () =>
-      buildGeneratorSummary(generatorSettings, {
-        modePassphrase: tGen("modePassphrase"),
-        modePassword: tGen("modePassword"),
-      }),
-    [generatorSettings, tGen],
-  );
+  // Entry-specific state
+  const [bankName, setBankName] = useState(editData?.bankName ?? "");
+  const [accountType, setAccountType] = useState(editData?.accountType ?? "");
+  const [accountHolderName, setAccountHolderName] = useState(editData?.accountHolderName ?? "");
+  const [accountNumber, setAccountNumber] = useState(editData?.accountNumber ?? "");
+  const [showAccountNumber, setShowAccountNumber] = useState(false);
+  const [routingNumber, setRoutingNumber] = useState(editData?.routingNumber ?? "");
+  const [showRoutingNumber, setShowRoutingNumber] = useState(false);
+  const [swiftBic, setSwiftBic] = useState(editData?.swiftBic ?? "");
+  const [iban, setIban] = useState(editData?.iban ?? "");
+  const [branchName, setBranchName] = useState(editData?.branchName ?? "");
 
   // hasChanges
   const baselineSnapshot = useMemo(
@@ -83,11 +66,14 @@ export function TeamPasswordForm({
       JSON.stringify({
         title: editData?.title ?? "",
         notes: editData?.notes ?? "",
-        username: editData?.username ?? "",
-        password: editData?.password ?? "",
-        url: editData?.url ?? "",
-        customFields: JSON.stringify(editData?.customFields ?? []),
-        totp: JSON.stringify(editData?.totp ?? null),
+        bankName: editData?.bankName ?? "",
+        accountType: editData?.accountType ?? "",
+        accountHolderName: editData?.accountHolderName ?? "",
+        accountNumber: editData?.accountNumber ?? "",
+        routingNumber: editData?.routingNumber ?? "",
+        swiftBic: editData?.swiftBic ?? "",
+        iban: editData?.iban ?? "",
+        branchName: editData?.branchName ?? "",
         selectedTagIds: (editData?.tags ?? defaultTags ?? [])
           .map((tag) => tag.id)
           .sort(),
@@ -103,11 +89,14 @@ export function TeamPasswordForm({
       JSON.stringify({
         title: base.title,
         notes: base.notes,
-        username,
-        password,
-        url,
-        customFields: JSON.stringify(customFields),
-        totp: JSON.stringify(totp),
+        bankName,
+        accountType,
+        accountHolderName,
+        accountNumber,
+        routingNumber,
+        swiftBic,
+        iban,
+        branchName,
         selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
         teamFolderId: base.teamFolderId,
         requireReprompt: base.requireReprompt,
@@ -116,11 +105,14 @@ export function TeamPasswordForm({
     [
       base.title,
       base.notes,
-      username,
-      password,
-      url,
-      customFields,
-      totp,
+      bankName,
+      accountType,
+      accountHolderName,
+      accountNumber,
+      routingNumber,
+      swiftBic,
+      iban,
+      branchName,
       base.selectedTags,
       base.teamFolderId,
       base.requireReprompt,
@@ -129,13 +121,12 @@ export function TeamPasswordForm({
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
-  const submitDisabled = !base.title.trim() || !password;
+  const submitDisabled = !base.title.trim();
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
   const {
     tagsAndFolderProps,
-    customFieldsTotpProps,
     repromptSectionProps,
     expirationSectionProps,
     actionBarProps,
@@ -145,7 +136,7 @@ export function TeamPasswordForm({
     tagsHint: base.t("tagsHint"),
     folders: base.teamFolders,
     sectionCardClass: dialogSectionClass,
-    isLoginEntry: true,
+    isLoginEntry: false,
     hasChanges,
     saving: base.saving,
     submitDisabled,
@@ -165,18 +156,18 @@ export function TeamPasswordForm({
     values: {
       selectedTags: base.selectedTags,
       teamFolderId: base.teamFolderId,
-      customFields,
-      totp,
-      showTotpInput,
+      customFields: [],
+      totp: null,
+      showTotpInput: false,
       requireReprompt: base.requireReprompt,
       expiresAt: base.expiresAt,
     },
     setters: {
       setSelectedTags: base.setSelectedTags,
       setTeamFolderId: base.setTeamFolderId,
-      setCustomFields,
-      setTotp,
-      setShowTotpInput,
+      setCustomFields: () => {},
+      setTotp: () => {},
+      setShowTotpInput: () => {},
       setRequireReprompt: base.setRequireReprompt,
       setExpiresAt: base.setExpiresAt,
     },
@@ -192,15 +183,18 @@ export function TeamPasswordForm({
     }));
 
     await base.submitEntry({
-      entryType: ENTRY_TYPE.LOGIN,
+      entryType: ENTRY_TYPE.BANK_ACCOUNT,
       title: base.title,
       notes: base.notes,
       tagNames,
-      username,
-      password,
-      url,
-      customFields,
-      totp,
+      bankName,
+      accountType,
+      accountHolderName,
+      accountNumber,
+      routingNumber,
+      swiftBic,
+      iban,
+      branchName,
     });
   };
 
@@ -231,49 +225,56 @@ export function TeamPasswordForm({
             />
           </div>
 
-          <EntryLoginMainFields
+          <BankAccountFields
             idPrefix="team-"
-            hideTitle
-            title={base.title}
-            onTitleChange={base.setTitle}
-            titleLabel={base.entryCopy.titleLabel}
-            titlePlaceholder={base.entryCopy.titlePlaceholder}
-            username={username}
-            onUsernameChange={setUsername}
-            usernameLabel={base.t("usernameLabel")}
-            usernamePlaceholder={base.t("usernamePlaceholder")}
-            password={password}
-            onPasswordChange={setPassword}
-            passwordLabel={base.t("passwordLabel")}
-            passwordPlaceholder={base.t("passwordPlaceholder")}
-            showPassword={showPassword}
-            onToggleShowPassword={() => setShowPassword(!showPassword)}
-            generatorSummary={generatorSummary}
-            showGenerator={showGenerator}
-            onToggleGenerator={() => setShowGenerator(!showGenerator)}
-            closeGeneratorLabel={base.t("closeGenerator")}
-            openGeneratorLabel={base.t("openGenerator")}
-            generatorSettings={generatorSettings}
-            onGeneratorUse={(pw, settings) => {
-              setPassword(pw);
-              setGeneratorSettings(settings);
-            }}
-            url={url}
-            onUrlChange={setUrl}
-            urlLabel={base.t("urlLabel")}
+            bankName={bankName}
+            onBankNameChange={setBankName}
+            bankNamePlaceholder={tba("bankNamePlaceholder")}
+            accountType={accountType}
+            onAccountTypeChange={setAccountType}
+            accountTypePlaceholder={tba("accountTypePlaceholder")}
+            accountTypeCheckingLabel={tba("accountTypeChecking")}
+            accountTypeSavingsLabel={tba("accountTypeSavings")}
+            accountTypeOtherLabel={tba("accountTypeOther")}
+            accountHolderName={accountHolderName}
+            onAccountHolderNameChange={setAccountHolderName}
+            accountHolderNamePlaceholder={tba("accountHolderNamePlaceholder")}
+            accountNumber={accountNumber}
+            onAccountNumberChange={setAccountNumber}
+            accountNumberPlaceholder={tba("accountNumberPlaceholder")}
+            showAccountNumber={showAccountNumber}
+            onToggleAccountNumber={() => setShowAccountNumber(!showAccountNumber)}
+            routingNumber={routingNumber}
+            onRoutingNumberChange={setRoutingNumber}
+            routingNumberPlaceholder={tba("routingNumberPlaceholder")}
+            showRoutingNumber={showRoutingNumber}
+            onToggleRoutingNumber={() => setShowRoutingNumber(!showRoutingNumber)}
+            swiftBic={swiftBic}
+            onSwiftBicChange={setSwiftBic}
+            swiftBicPlaceholder={tba("swiftBicPlaceholder")}
+            iban={iban}
+            onIbanChange={setIban}
+            ibanPlaceholder={tba("ibanPlaceholder")}
+            branchName={branchName}
+            onBranchNameChange={setBranchName}
+            branchNamePlaceholder={tba("branchNamePlaceholder")}
+            notesLabel={base.entryCopy.notesLabel}
             notes={base.notes}
             onNotesChange={base.setNotes}
-            notesLabel={base.entryCopy.notesLabel}
             notesPlaceholder={base.entryCopy.notesPlaceholder}
-            teamPolicy={base.teamPolicy}
+            labels={{
+              bankName: tba("bankName"),
+              accountType: tba("accountType"),
+              accountHolderName: tba("accountHolderName"),
+              accountNumber: tba("accountNumber"),
+              routingNumber: tba("routingNumber"),
+              swiftBic: tba("swiftBic"),
+              iban: tba("iban"),
+              branchName: tba("branchName"),
+            }}
           />
 
           <TeamTagsAndFolderSection {...tagsAndFolderProps} />
-
-          {customFieldsTotpProps && (
-            <EntryCustomFieldsTotpSection {...customFieldsTotpProps} />
-          )}
-
           <EntryRepromptSection {...repromptSectionProps} />
           <EntryExpirationSection {...expirationSectionProps} />
           <EntryActionBar {...actionBarProps} />

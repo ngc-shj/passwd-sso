@@ -8,29 +8,28 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
-import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
+import { CreditCardFields } from "@/components/entry-fields/credit-card-fields";
+import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamAttachmentSection } from "./team-attachment-section";
-import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
-import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
-import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import { buildGeneratorSummary } from "@/lib/generator-summary";
-import { buildPolicyAwareGeneratorSettings } from "@/hooks/team-password-form-initial-values";
+import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
+import { preventIMESubmit } from "@/lib/ime-guard";
+import { CARD_BRANDS } from "@/lib/credit-card";
+import { handleTeamCardNumberChange } from "@/components/team/team-password-form-actions";
+import { getTeamCardValidationState } from "@/components/team/team-credit-card-validation";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
 
-export function TeamPasswordForm({
+export function TeamCreditCardForm({
   teamId,
   open,
   onOpenChange,
@@ -40,6 +39,7 @@ export function TeamPasswordForm({
   defaultFolderId,
   defaultTags,
 }: TeamPasswordFormProps) {
+  const tcc = useTranslations("CreditCardForm");
   const base = useTeamBaseFormModel({
     teamId,
     open,
@@ -51,31 +51,46 @@ export function TeamPasswordForm({
     defaultTags,
   });
 
-  const tGen = base.translationBundle.tGen;
+  // Entry-specific state
+  const [cardholderName, setCardholderName] = useState(editData?.cardholderName ?? "");
+  const [brand, setBrand] = useState(editData?.brand ?? "");
+  const [brandSource, setBrandSource] = useState<"auto" | "manual">(
+    editData?.brand ? "manual" : "auto",
+  );
+  const [cardNumber, setCardNumber] = useState(editData?.cardNumber ?? "");
+  const [showCardNumber, setShowCardNumber] = useState(false);
+  const [expiryMonth, setExpiryMonth] = useState(editData?.expiryMonth ?? "");
+  const [expiryYear, setExpiryYear] = useState(editData?.expiryYear ?? "");
+  const [cvv, setCvv] = useState(editData?.cvv ?? "");
+  const [showCvv, setShowCvv] = useState(false);
 
-  // Entry-specific state (LOGIN)
-  const [username, setUsername] = useState(editData?.username ?? "");
-  const [password, setPassword] = useState(editData?.password ?? "");
-  const [url, setUrl] = useState(editData?.url ?? "");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
-  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(
-    () => buildPolicyAwareGeneratorSettings(base.teamPolicy),
-  );
-  const [customFields, setCustomFields] = useState<EntryCustomField[]>(
-    editData?.customFields ?? [],
-  );
-  const [totp, setTotp] = useState<EntryTotp | null>(editData?.totp ?? null);
-  const [showTotpInput, setShowTotpInput] = useState(Boolean(editData?.totp));
+  // Card validation
+  const {
+    cardValidation,
+    lengthHint,
+    maxInputLength,
+    showLengthError,
+    showLuhnError,
+    cardNumberValid,
+    hasBrandHint,
+  } = getTeamCardValidationState(cardNumber, brand);
 
-  const generatorSummary = useMemo(
-    () =>
-      buildGeneratorSummary(generatorSettings, {
-        modePassphrase: tGen("modePassphrase"),
-        modePassword: tGen("modePassword"),
-      }),
-    [generatorSettings, tGen],
-  );
+  const detectedBrand = cardValidation.detectedBrand
+    ? tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })
+    : undefined;
+
+  const effectiveHasBrandHint =
+    hasBrandHint && cardValidation.digits.length > 0;
+
+  const onCardNumberChange = (value: string) => {
+    handleTeamCardNumberChange({
+      value,
+      brand,
+      brandSource,
+      setCardNumber,
+      setBrand,
+    });
+  };
 
   // hasChanges
   const baselineSnapshot = useMemo(
@@ -83,11 +98,12 @@ export function TeamPasswordForm({
       JSON.stringify({
         title: editData?.title ?? "",
         notes: editData?.notes ?? "",
-        username: editData?.username ?? "",
-        password: editData?.password ?? "",
-        url: editData?.url ?? "",
-        customFields: JSON.stringify(editData?.customFields ?? []),
-        totp: JSON.stringify(editData?.totp ?? null),
+        cardholderName: editData?.cardholderName ?? "",
+        brand: editData?.brand ?? "",
+        cardNumber: editData?.cardNumber ?? "",
+        expiryMonth: editData?.expiryMonth ?? "",
+        expiryYear: editData?.expiryYear ?? "",
+        cvv: editData?.cvv ?? "",
         selectedTagIds: (editData?.tags ?? defaultTags ?? [])
           .map((tag) => tag.id)
           .sort(),
@@ -103,11 +119,12 @@ export function TeamPasswordForm({
       JSON.stringify({
         title: base.title,
         notes: base.notes,
-        username,
-        password,
-        url,
-        customFields: JSON.stringify(customFields),
-        totp: JSON.stringify(totp),
+        cardholderName,
+        brand,
+        cardNumber,
+        expiryMonth,
+        expiryYear,
+        cvv,
         selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
         teamFolderId: base.teamFolderId,
         requireReprompt: base.requireReprompt,
@@ -116,11 +133,12 @@ export function TeamPasswordForm({
     [
       base.title,
       base.notes,
-      username,
-      password,
-      url,
-      customFields,
-      totp,
+      cardholderName,
+      brand,
+      cardNumber,
+      expiryMonth,
+      expiryYear,
+      cvv,
       base.selectedTags,
       base.teamFolderId,
       base.requireReprompt,
@@ -129,13 +147,12 @@ export function TeamPasswordForm({
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
-  const submitDisabled = !base.title.trim() || !password;
+  const submitDisabled = !base.title.trim() || !cardNumberValid;
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
   const {
     tagsAndFolderProps,
-    customFieldsTotpProps,
     repromptSectionProps,
     expirationSectionProps,
     actionBarProps,
@@ -145,7 +162,7 @@ export function TeamPasswordForm({
     tagsHint: base.t("tagsHint"),
     folders: base.teamFolders,
     sectionCardClass: dialogSectionClass,
-    isLoginEntry: true,
+    isLoginEntry: false,
     hasChanges,
     saving: base.saving,
     submitDisabled,
@@ -165,18 +182,18 @@ export function TeamPasswordForm({
     values: {
       selectedTags: base.selectedTags,
       teamFolderId: base.teamFolderId,
-      customFields,
-      totp,
-      showTotpInput,
+      customFields: [],
+      totp: null,
+      showTotpInput: false,
       requireReprompt: base.requireReprompt,
       expiresAt: base.expiresAt,
     },
     setters: {
       setSelectedTags: base.setSelectedTags,
       setTeamFolderId: base.setTeamFolderId,
-      setCustomFields,
-      setTotp,
-      setShowTotpInput,
+      setCustomFields: () => {},
+      setTotp: () => {},
+      setShowTotpInput: () => {},
       setRequireReprompt: base.setRequireReprompt,
       setExpiresAt: base.setExpiresAt,
     },
@@ -192,15 +209,16 @@ export function TeamPasswordForm({
     }));
 
     await base.submitEntry({
-      entryType: ENTRY_TYPE.LOGIN,
+      entryType: ENTRY_TYPE.CREDIT_CARD,
       title: base.title,
       notes: base.notes,
       tagNames,
-      username,
-      password,
-      url,
-      customFields,
-      totp,
+      cardholderName,
+      cardNumber,
+      brand,
+      expiryMonth,
+      expiryYear,
+      cvv,
     });
   };
 
@@ -231,49 +249,57 @@ export function TeamPasswordForm({
             />
           </div>
 
-          <EntryLoginMainFields
+          <CreditCardFields
             idPrefix="team-"
-            hideTitle
-            title={base.title}
-            onTitleChange={base.setTitle}
-            titleLabel={base.entryCopy.titleLabel}
-            titlePlaceholder={base.entryCopy.titlePlaceholder}
-            username={username}
-            onUsernameChange={setUsername}
-            usernameLabel={base.t("usernameLabel")}
-            usernamePlaceholder={base.t("usernamePlaceholder")}
-            password={password}
-            onPasswordChange={setPassword}
-            passwordLabel={base.t("passwordLabel")}
-            passwordPlaceholder={base.t("passwordPlaceholder")}
-            showPassword={showPassword}
-            onToggleShowPassword={() => setShowPassword(!showPassword)}
-            generatorSummary={generatorSummary}
-            showGenerator={showGenerator}
-            onToggleGenerator={() => setShowGenerator(!showGenerator)}
-            closeGeneratorLabel={base.t("closeGenerator")}
-            openGeneratorLabel={base.t("openGenerator")}
-            generatorSettings={generatorSettings}
-            onGeneratorUse={(pw, settings) => {
-              setPassword(pw);
-              setGeneratorSettings(settings);
+            cardholderName={cardholderName}
+            onCardholderNameChange={setCardholderName}
+            cardholderNamePlaceholder={tcc("cardholderNamePlaceholder")}
+            brand={brand}
+            onBrandChange={(v) => {
+              setBrand(v);
+              setBrandSource("manual");
             }}
-            url={url}
-            onUrlChange={setUrl}
-            urlLabel={base.t("urlLabel")}
+            brandPlaceholder={tcc("brandPlaceholder")}
+            brands={CARD_BRANDS}
+            cardNumber={cardNumber}
+            onCardNumberChange={onCardNumberChange}
+            cardNumberPlaceholder={tcc("cardNumberPlaceholder")}
+            showCardNumber={showCardNumber}
+            onToggleCardNumber={() => setShowCardNumber(!showCardNumber)}
+            maxInputLength={maxInputLength}
+            showLengthError={showLengthError}
+            showLuhnError={showLuhnError}
+            detectedBrand={detectedBrand}
+            hasBrandHint={effectiveHasBrandHint}
+            lengthHintGenericLabel={tcc("cardNumberLengthHintGeneric")}
+            lengthHintLabel={tcc("cardNumberLengthHint", { lengths: lengthHint })}
+            invalidLengthLabel={tcc("cardNumberInvalidLength", { lengths: lengthHint })}
+            invalidLuhnLabel={tcc("cardNumberInvalidLuhn")}
+            expiryMonth={expiryMonth}
+            onExpiryMonthChange={setExpiryMonth}
+            expiryYear={expiryYear}
+            onExpiryYearChange={setExpiryYear}
+            expiryMonthPlaceholder={tcc("expiryMonth")}
+            expiryYearPlaceholder={tcc("expiryYear")}
+            cvv={cvv}
+            onCvvChange={setCvv}
+            cvvPlaceholder={tcc("cvvPlaceholder")}
+            showCvv={showCvv}
+            onToggleCvv={() => setShowCvv(!showCvv)}
+            notesLabel={base.entryCopy.notesLabel}
             notes={base.notes}
             onNotesChange={base.setNotes}
-            notesLabel={base.entryCopy.notesLabel}
             notesPlaceholder={base.entryCopy.notesPlaceholder}
-            teamPolicy={base.teamPolicy}
+            labels={{
+              cardholderName: tcc("cardholderName"),
+              brand: tcc("brand"),
+              cardNumber: tcc("cardNumber"),
+              expiry: tcc("expiry"),
+              cvv: tcc("cvv"),
+            }}
           />
 
           <TeamTagsAndFolderSection {...tagsAndFolderProps} />
-
-          {customFieldsTotpProps && (
-            <EntryCustomFieldsTotpSection {...customFieldsTotpProps} />
-          )}
-
           <EntryRepromptSection {...repromptSectionProps} />
           <EntryExpirationSection {...expirationSectionProps} />
           <EntryActionBar {...actionBarProps} />

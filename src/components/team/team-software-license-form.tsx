@@ -8,29 +8,25 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
-import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
+import { SoftwareLicenseFields } from "@/components/entry-fields/software-license-fields";
+import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamAttachmentSection } from "./team-attachment-section";
-import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
-import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
-import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import { buildGeneratorSummary } from "@/lib/generator-summary";
-import { buildPolicyAwareGeneratorSettings } from "@/hooks/team-password-form-initial-values";
+import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
+import { preventIMESubmit } from "@/lib/ime-guard";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
 
-export function TeamPasswordForm({
+export function TeamSoftwareLicenseForm({
   teamId,
   open,
   onOpenChange,
@@ -40,6 +36,7 @@ export function TeamPasswordForm({
   defaultFolderId,
   defaultTags,
 }: TeamPasswordFormProps) {
+  const tsl = useTranslations("SoftwareLicenseForm");
   const base = useTeamBaseFormModel({
     teamId,
     open,
@@ -51,31 +48,16 @@ export function TeamPasswordForm({
     defaultTags,
   });
 
-  const tGen = base.translationBundle.tGen;
-
-  // Entry-specific state (LOGIN)
-  const [username, setUsername] = useState(editData?.username ?? "");
-  const [password, setPassword] = useState(editData?.password ?? "");
-  const [url, setUrl] = useState(editData?.url ?? "");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
-  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(
-    () => buildPolicyAwareGeneratorSettings(base.teamPolicy),
-  );
-  const [customFields, setCustomFields] = useState<EntryCustomField[]>(
-    editData?.customFields ?? [],
-  );
-  const [totp, setTotp] = useState<EntryTotp | null>(editData?.totp ?? null);
-  const [showTotpInput, setShowTotpInput] = useState(Boolean(editData?.totp));
-
-  const generatorSummary = useMemo(
-    () =>
-      buildGeneratorSummary(generatorSettings, {
-        modePassphrase: tGen("modePassphrase"),
-        modePassword: tGen("modePassword"),
-      }),
-    [generatorSettings, tGen],
-  );
+  // Entry-specific state
+  const [softwareName, setSoftwareName] = useState(editData?.softwareName ?? "");
+  const [licenseKey, setLicenseKey] = useState(editData?.licenseKey ?? "");
+  const [showLicenseKey, setShowLicenseKey] = useState(false);
+  const [version, setVersion] = useState(editData?.version ?? "");
+  const [licensee, setLicensee] = useState(editData?.licensee ?? "");
+  const [email, setEmail] = useState(editData?.email ?? "");
+  const [purchaseDate, setPurchaseDate] = useState(editData?.purchaseDate ?? "");
+  const [expirationDate, setExpirationDate] = useState(editData?.expirationDate ?? "");
+  const [expiryError, setExpiryError] = useState<string | null>(null);
 
   // hasChanges
   const baselineSnapshot = useMemo(
@@ -83,11 +65,13 @@ export function TeamPasswordForm({
       JSON.stringify({
         title: editData?.title ?? "",
         notes: editData?.notes ?? "",
-        username: editData?.username ?? "",
-        password: editData?.password ?? "",
-        url: editData?.url ?? "",
-        customFields: JSON.stringify(editData?.customFields ?? []),
-        totp: JSON.stringify(editData?.totp ?? null),
+        softwareName: editData?.softwareName ?? "",
+        licenseKey: editData?.licenseKey ?? "",
+        version: editData?.version ?? "",
+        licensee: editData?.licensee ?? "",
+        email: editData?.email ?? "",
+        purchaseDate: editData?.purchaseDate ?? "",
+        expirationDate: editData?.expirationDate ?? "",
         selectedTagIds: (editData?.tags ?? defaultTags ?? [])
           .map((tag) => tag.id)
           .sort(),
@@ -103,11 +87,13 @@ export function TeamPasswordForm({
       JSON.stringify({
         title: base.title,
         notes: base.notes,
-        username,
-        password,
-        url,
-        customFields: JSON.stringify(customFields),
-        totp: JSON.stringify(totp),
+        softwareName,
+        licenseKey,
+        version,
+        licensee,
+        email,
+        purchaseDate,
+        expirationDate,
         selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
         teamFolderId: base.teamFolderId,
         requireReprompt: base.requireReprompt,
@@ -116,11 +102,13 @@ export function TeamPasswordForm({
     [
       base.title,
       base.notes,
-      username,
-      password,
-      url,
-      customFields,
-      totp,
+      softwareName,
+      licenseKey,
+      version,
+      licensee,
+      email,
+      purchaseDate,
+      expirationDate,
       base.selectedTags,
       base.teamFolderId,
       base.requireReprompt,
@@ -129,13 +117,12 @@ export function TeamPasswordForm({
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
-  const submitDisabled = !base.title.trim() || !password;
+  const submitDisabled = !base.title.trim();
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
   const {
     tagsAndFolderProps,
-    customFieldsTotpProps,
     repromptSectionProps,
     expirationSectionProps,
     actionBarProps,
@@ -145,7 +132,7 @@ export function TeamPasswordForm({
     tagsHint: base.t("tagsHint"),
     folders: base.teamFolders,
     sectionCardClass: dialogSectionClass,
-    isLoginEntry: true,
+    isLoginEntry: false,
     hasChanges,
     saving: base.saving,
     submitDisabled,
@@ -165,18 +152,18 @@ export function TeamPasswordForm({
     values: {
       selectedTags: base.selectedTags,
       teamFolderId: base.teamFolderId,
-      customFields,
-      totp,
-      showTotpInput,
+      customFields: [],
+      totp: null,
+      showTotpInput: false,
       requireReprompt: base.requireReprompt,
       expiresAt: base.expiresAt,
     },
     setters: {
       setSelectedTags: base.setSelectedTags,
       setTeamFolderId: base.setTeamFolderId,
-      setCustomFields,
-      setTotp,
-      setShowTotpInput,
+      setCustomFields: () => {},
+      setTotp: () => {},
+      setShowTotpInput: () => {},
       setRequireReprompt: base.setRequireReprompt,
       setExpiresAt: base.setExpiresAt,
     },
@@ -186,21 +173,29 @@ export function TeamPasswordForm({
     e.preventDefault();
     if (submitDisabled) return;
 
+    if (purchaseDate && expirationDate && purchaseDate >= expirationDate) {
+      setExpiryError(tsl("expirationBeforePurchase"));
+      return;
+    }
+    setExpiryError(null);
+
     const tagNames = base.selectedTags.map((tag) => ({
       name: tag.name,
       color: tag.color,
     }));
 
     await base.submitEntry({
-      entryType: ENTRY_TYPE.LOGIN,
+      entryType: ENTRY_TYPE.SOFTWARE_LICENSE,
       title: base.title,
       notes: base.notes,
       tagNames,
-      username,
-      password,
-      url,
-      customFields,
-      totp,
+      softwareName,
+      licenseKey,
+      version,
+      licensee,
+      email,
+      purchaseDate,
+      expirationDate,
     });
   };
 
@@ -231,49 +226,60 @@ export function TeamPasswordForm({
             />
           </div>
 
-          <EntryLoginMainFields
+          <SoftwareLicenseFields
             idPrefix="team-"
-            hideTitle
-            title={base.title}
-            onTitleChange={base.setTitle}
-            titleLabel={base.entryCopy.titleLabel}
-            titlePlaceholder={base.entryCopy.titlePlaceholder}
-            username={username}
-            onUsernameChange={setUsername}
-            usernameLabel={base.t("usernameLabel")}
-            usernamePlaceholder={base.t("usernamePlaceholder")}
-            password={password}
-            onPasswordChange={setPassword}
-            passwordLabel={base.t("passwordLabel")}
-            passwordPlaceholder={base.t("passwordPlaceholder")}
-            showPassword={showPassword}
-            onToggleShowPassword={() => setShowPassword(!showPassword)}
-            generatorSummary={generatorSummary}
-            showGenerator={showGenerator}
-            onToggleGenerator={() => setShowGenerator(!showGenerator)}
-            closeGeneratorLabel={base.t("closeGenerator")}
-            openGeneratorLabel={base.t("openGenerator")}
-            generatorSettings={generatorSettings}
-            onGeneratorUse={(pw, settings) => {
-              setPassword(pw);
-              setGeneratorSettings(settings);
+            softwareName={softwareName}
+            onSoftwareNameChange={setSoftwareName}
+            softwareNamePlaceholder={tsl("softwareNamePlaceholder")}
+            licenseKey={licenseKey}
+            onLicenseKeyChange={setLicenseKey}
+            licenseKeyPlaceholder={tsl("licenseKeyPlaceholder")}
+            showLicenseKey={showLicenseKey}
+            onToggleLicenseKey={() => setShowLicenseKey(!showLicenseKey)}
+            version={version}
+            onVersionChange={setVersion}
+            versionPlaceholder={tsl("versionPlaceholder")}
+            licensee={licensee}
+            onLicenseeChange={setLicensee}
+            licenseePlaceholder={tsl("licenseePlaceholder")}
+            purchaseDate={purchaseDate}
+            onPurchaseDateChange={(v) => {
+              setPurchaseDate(v);
+              setExpiryError(null);
             }}
-            url={url}
-            onUrlChange={setUrl}
-            urlLabel={base.t("urlLabel")}
+            expirationDate={expirationDate}
+            onExpirationDateChange={(v) => {
+              setExpirationDate(v);
+              setExpiryError(null);
+            }}
+            expiryError={expiryError}
+            notesLabel={base.entryCopy.notesLabel}
             notes={base.notes}
             onNotesChange={base.setNotes}
-            notesLabel={base.entryCopy.notesLabel}
             notesPlaceholder={base.entryCopy.notesPlaceholder}
-            teamPolicy={base.teamPolicy}
+            labels={{
+              softwareName: tsl("softwareName"),
+              licenseKey: tsl("licenseKey"),
+              version: tsl("version"),
+              licensee: tsl("licensee"),
+              purchaseDate: tsl("purchaseDate"),
+              expirationDate: tsl("expirationDate"),
+            }}
           />
 
+          <div className="space-y-2">
+            <Label htmlFor="team-email">{tsl("email")}</Label>
+            <Input
+              id="team-email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder={tsl("emailPlaceholder")}
+              autoComplete="off"
+            />
+          </div>
+
           <TeamTagsAndFolderSection {...tagsAndFolderProps} />
-
-          {customFieldsTotpProps && (
-            <EntryCustomFieldsTotpSection {...customFieldsTotpProps} />
-          )}
-
           <EntryRepromptSection {...repromptSectionProps} />
           <EntryExpirationSection {...expirationSectionProps} />
           <EntryActionBar {...actionBarProps} />

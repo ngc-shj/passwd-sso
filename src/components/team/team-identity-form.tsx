@@ -8,29 +8,25 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
-import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
+import { IdentityFields } from "@/components/entry-fields/identity-fields";
+import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamAttachmentSection } from "./team-attachment-section";
-import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
-import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
-import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import { buildGeneratorSummary } from "@/lib/generator-summary";
-import { buildPolicyAwareGeneratorSettings } from "@/hooks/team-password-form-initial-values";
+import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
+import { preventIMESubmit } from "@/lib/ime-guard";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
 
-export function TeamPasswordForm({
+export function TeamIdentityForm({
   teamId,
   open,
   onOpenChange,
@@ -40,6 +36,7 @@ export function TeamPasswordForm({
   defaultFolderId,
   defaultTags,
 }: TeamPasswordFormProps) {
+  const ti = useTranslations("IdentityForm");
   const base = useTeamBaseFormModel({
     teamId,
     open,
@@ -51,31 +48,19 @@ export function TeamPasswordForm({
     defaultTags,
   });
 
-  const tGen = base.translationBundle.tGen;
-
-  // Entry-specific state (LOGIN)
-  const [username, setUsername] = useState(editData?.username ?? "");
-  const [password, setPassword] = useState(editData?.password ?? "");
-  const [url, setUrl] = useState(editData?.url ?? "");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
-  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(
-    () => buildPolicyAwareGeneratorSettings(base.teamPolicy),
-  );
-  const [customFields, setCustomFields] = useState<EntryCustomField[]>(
-    editData?.customFields ?? [],
-  );
-  const [totp, setTotp] = useState<EntryTotp | null>(editData?.totp ?? null);
-  const [showTotpInput, setShowTotpInput] = useState(Boolean(editData?.totp));
-
-  const generatorSummary = useMemo(
-    () =>
-      buildGeneratorSummary(generatorSettings, {
-        modePassphrase: tGen("modePassphrase"),
-        modePassword: tGen("modePassword"),
-      }),
-    [generatorSettings, tGen],
-  );
+  // Entry-specific state
+  const [fullName, setFullName] = useState(editData?.fullName ?? "");
+  const [address, setAddress] = useState(editData?.address ?? "");
+  const [phone, setPhone] = useState(editData?.phone ?? "");
+  const [email, setEmail] = useState(editData?.email ?? "");
+  const [dateOfBirth, setDateOfBirth] = useState(editData?.dateOfBirth ?? "");
+  const [nationality, setNationality] = useState(editData?.nationality ?? "");
+  const [idNumber, setIdNumber] = useState(editData?.idNumber ?? "");
+  const [showIdNumber, setShowIdNumber] = useState(false);
+  const [issueDate, setIssueDate] = useState(editData?.issueDate ?? "");
+  const [expiryDate, setExpiryDate] = useState(editData?.expiryDate ?? "");
+  const [dobError, setDobError] = useState<string | null>(null);
+  const [expiryError, setExpiryError] = useState<string | null>(null);
 
   // hasChanges
   const baselineSnapshot = useMemo(
@@ -83,11 +68,15 @@ export function TeamPasswordForm({
       JSON.stringify({
         title: editData?.title ?? "",
         notes: editData?.notes ?? "",
-        username: editData?.username ?? "",
-        password: editData?.password ?? "",
-        url: editData?.url ?? "",
-        customFields: JSON.stringify(editData?.customFields ?? []),
-        totp: JSON.stringify(editData?.totp ?? null),
+        fullName: editData?.fullName ?? "",
+        address: editData?.address ?? "",
+        phone: editData?.phone ?? "",
+        email: editData?.email ?? "",
+        dateOfBirth: editData?.dateOfBirth ?? "",
+        nationality: editData?.nationality ?? "",
+        idNumber: editData?.idNumber ?? "",
+        issueDate: editData?.issueDate ?? "",
+        expiryDate: editData?.expiryDate ?? "",
         selectedTagIds: (editData?.tags ?? defaultTags ?? [])
           .map((tag) => tag.id)
           .sort(),
@@ -103,11 +92,15 @@ export function TeamPasswordForm({
       JSON.stringify({
         title: base.title,
         notes: base.notes,
-        username,
-        password,
-        url,
-        customFields: JSON.stringify(customFields),
-        totp: JSON.stringify(totp),
+        fullName,
+        address,
+        phone,
+        email,
+        dateOfBirth,
+        nationality,
+        idNumber,
+        issueDate,
+        expiryDate,
         selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
         teamFolderId: base.teamFolderId,
         requireReprompt: base.requireReprompt,
@@ -116,11 +109,15 @@ export function TeamPasswordForm({
     [
       base.title,
       base.notes,
-      username,
-      password,
-      url,
-      customFields,
-      totp,
+      fullName,
+      address,
+      phone,
+      email,
+      dateOfBirth,
+      nationality,
+      idNumber,
+      issueDate,
+      expiryDate,
       base.selectedTags,
       base.teamFolderId,
       base.requireReprompt,
@@ -129,13 +126,12 @@ export function TeamPasswordForm({
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
-  const submitDisabled = !base.title.trim() || !password;
+  const submitDisabled = !base.title.trim();
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
   const {
     tagsAndFolderProps,
-    customFieldsTotpProps,
     repromptSectionProps,
     expirationSectionProps,
     actionBarProps,
@@ -145,7 +141,7 @@ export function TeamPasswordForm({
     tagsHint: base.t("tagsHint"),
     folders: base.teamFolders,
     sectionCardClass: dialogSectionClass,
-    isLoginEntry: true,
+    isLoginEntry: false,
     hasChanges,
     saving: base.saving,
     submitDisabled,
@@ -165,18 +161,18 @@ export function TeamPasswordForm({
     values: {
       selectedTags: base.selectedTags,
       teamFolderId: base.teamFolderId,
-      customFields,
-      totp,
-      showTotpInput,
+      customFields: [],
+      totp: null,
+      showTotpInput: false,
       requireReprompt: base.requireReprompt,
       expiresAt: base.expiresAt,
     },
     setters: {
       setSelectedTags: base.setSelectedTags,
       setTeamFolderId: base.setTeamFolderId,
-      setCustomFields,
-      setTotp,
-      setShowTotpInput,
+      setCustomFields: () => {},
+      setTotp: () => {},
+      setShowTotpInput: () => {},
       setRequireReprompt: base.setRequireReprompt,
       setExpiresAt: base.setExpiresAt,
     },
@@ -186,21 +182,38 @@ export function TeamPasswordForm({
     e.preventDefault();
     if (submitDisabled) return;
 
+    const today = new Date().toISOString().slice(0, 10);
+    if (dateOfBirth && dateOfBirth > today) {
+      setDobError(ti("dobFuture"));
+      return;
+    }
+    setDobError(null);
+
+    if (issueDate && expiryDate && issueDate >= expiryDate) {
+      setExpiryError(ti("expiryBeforeIssue"));
+      return;
+    }
+    setExpiryError(null);
+
     const tagNames = base.selectedTags.map((tag) => ({
       name: tag.name,
       color: tag.color,
     }));
 
     await base.submitEntry({
-      entryType: ENTRY_TYPE.LOGIN,
+      entryType: ENTRY_TYPE.IDENTITY,
       title: base.title,
       notes: base.notes,
       tagNames,
-      username,
-      password,
-      url,
-      customFields,
-      totp,
+      fullName,
+      address,
+      phone,
+      email,
+      dateOfBirth,
+      nationality,
+      idNumber,
+      issueDate,
+      expiryDate,
     });
   };
 
@@ -231,49 +244,63 @@ export function TeamPasswordForm({
             />
           </div>
 
-          <EntryLoginMainFields
+          <IdentityFields
             idPrefix="team-"
-            hideTitle
-            title={base.title}
-            onTitleChange={base.setTitle}
-            titleLabel={base.entryCopy.titleLabel}
-            titlePlaceholder={base.entryCopy.titlePlaceholder}
-            username={username}
-            onUsernameChange={setUsername}
-            usernameLabel={base.t("usernameLabel")}
-            usernamePlaceholder={base.t("usernamePlaceholder")}
-            password={password}
-            onPasswordChange={setPassword}
-            passwordLabel={base.t("passwordLabel")}
-            passwordPlaceholder={base.t("passwordPlaceholder")}
-            showPassword={showPassword}
-            onToggleShowPassword={() => setShowPassword(!showPassword)}
-            generatorSummary={generatorSummary}
-            showGenerator={showGenerator}
-            onToggleGenerator={() => setShowGenerator(!showGenerator)}
-            closeGeneratorLabel={base.t("closeGenerator")}
-            openGeneratorLabel={base.t("openGenerator")}
-            generatorSettings={generatorSettings}
-            onGeneratorUse={(pw, settings) => {
-              setPassword(pw);
-              setGeneratorSettings(settings);
+            fullName={fullName}
+            onFullNameChange={setFullName}
+            fullNamePlaceholder={ti("fullNamePlaceholder")}
+            address={address}
+            onAddressChange={setAddress}
+            addressPlaceholder={ti("addressPlaceholder")}
+            phone={phone}
+            onPhoneChange={setPhone}
+            phonePlaceholder={ti("phonePlaceholder")}
+            email={email}
+            onEmailChange={setEmail}
+            emailPlaceholder={ti("emailPlaceholder")}
+            dateOfBirth={dateOfBirth}
+            onDateOfBirthChange={(v) => {
+              setDateOfBirth(v);
+              setDobError(null);
             }}
-            url={url}
-            onUrlChange={setUrl}
-            urlLabel={base.t("urlLabel")}
+            nationality={nationality}
+            onNationalityChange={setNationality}
+            nationalityPlaceholder={ti("nationalityPlaceholder")}
+            idNumber={idNumber}
+            onIdNumberChange={setIdNumber}
+            idNumberPlaceholder={ti("idNumberPlaceholder")}
+            showIdNumber={showIdNumber}
+            onToggleIdNumber={() => setShowIdNumber(!showIdNumber)}
+            issueDate={issueDate}
+            onIssueDateChange={(v) => {
+              setIssueDate(v);
+              setExpiryError(null);
+            }}
+            expiryDate={expiryDate}
+            onExpiryDateChange={(v) => {
+              setExpiryDate(v);
+              setExpiryError(null);
+            }}
+            dobError={dobError}
+            expiryError={expiryError}
+            notesLabel={base.entryCopy.notesLabel}
             notes={base.notes}
             onNotesChange={base.setNotes}
-            notesLabel={base.entryCopy.notesLabel}
             notesPlaceholder={base.entryCopy.notesPlaceholder}
-            teamPolicy={base.teamPolicy}
+            labels={{
+              fullName: ti("fullName"),
+              address: ti("address"),
+              phone: ti("phone"),
+              email: ti("email"),
+              dateOfBirth: ti("dateOfBirth"),
+              nationality: ti("nationality"),
+              idNumber: ti("idNumber"),
+              issueDate: ti("issueDate"),
+              expiryDate: ti("expiryDate"),
+            }}
           />
 
           <TeamTagsAndFolderSection {...tagsAndFolderProps} />
-
-          {customFieldsTotpProps && (
-            <EntryCustomFieldsTotpSection {...customFieldsTotpProps} />
-          )}
-
           <EntryRepromptSection {...repromptSectionProps} />
           <EntryExpirationSection {...expirationSectionProps} />
           <EntryActionBar {...actionBarProps} />

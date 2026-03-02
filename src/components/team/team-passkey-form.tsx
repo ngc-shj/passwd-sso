@@ -8,29 +8,25 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
-import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
+import { PasskeyFields } from "@/components/entry-fields/passkey-fields";
+import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamAttachmentSection } from "./team-attachment-section";
-import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
-import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
-import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import { buildGeneratorSummary } from "@/lib/generator-summary";
-import { buildPolicyAwareGeneratorSettings } from "@/hooks/team-password-form-initial-values";
+import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
+import { preventIMESubmit } from "@/lib/ime-guard";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
 
-export function TeamPasswordForm({
+export function TeamPasskeyForm({
   teamId,
   open,
   onOpenChange,
@@ -40,6 +36,7 @@ export function TeamPasswordForm({
   defaultFolderId,
   defaultTags,
 }: TeamPasswordFormProps) {
+  const tpk = useTranslations("PasskeyForm");
   const base = useTeamBaseFormModel({
     teamId,
     open,
@@ -51,31 +48,14 @@ export function TeamPasswordForm({
     defaultTags,
   });
 
-  const tGen = base.translationBundle.tGen;
-
-  // Entry-specific state (LOGIN)
+  // Entry-specific state
+  const [relyingPartyId, setRelyingPartyId] = useState(editData?.relyingPartyId ?? "");
+  const [relyingPartyName, setRelyingPartyName] = useState(editData?.relyingPartyName ?? "");
   const [username, setUsername] = useState(editData?.username ?? "");
-  const [password, setPassword] = useState(editData?.password ?? "");
-  const [url, setUrl] = useState(editData?.url ?? "");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
-  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(
-    () => buildPolicyAwareGeneratorSettings(base.teamPolicy),
-  );
-  const [customFields, setCustomFields] = useState<EntryCustomField[]>(
-    editData?.customFields ?? [],
-  );
-  const [totp, setTotp] = useState<EntryTotp | null>(editData?.totp ?? null);
-  const [showTotpInput, setShowTotpInput] = useState(Boolean(editData?.totp));
-
-  const generatorSummary = useMemo(
-    () =>
-      buildGeneratorSummary(generatorSettings, {
-        modePassphrase: tGen("modePassphrase"),
-        modePassword: tGen("modePassword"),
-      }),
-    [generatorSettings, tGen],
-  );
+  const [credentialId, setCredentialId] = useState(editData?.credentialId ?? "");
+  const [showCredentialId, setShowCredentialId] = useState(false);
+  const [creationDate, setCreationDate] = useState(editData?.creationDate ?? "");
+  const [deviceInfo, setDeviceInfo] = useState(editData?.deviceInfo ?? "");
 
   // hasChanges
   const baselineSnapshot = useMemo(
@@ -83,11 +63,12 @@ export function TeamPasswordForm({
       JSON.stringify({
         title: editData?.title ?? "",
         notes: editData?.notes ?? "",
+        relyingPartyId: editData?.relyingPartyId ?? "",
+        relyingPartyName: editData?.relyingPartyName ?? "",
         username: editData?.username ?? "",
-        password: editData?.password ?? "",
-        url: editData?.url ?? "",
-        customFields: JSON.stringify(editData?.customFields ?? []),
-        totp: JSON.stringify(editData?.totp ?? null),
+        credentialId: editData?.credentialId ?? "",
+        creationDate: editData?.creationDate ?? "",
+        deviceInfo: editData?.deviceInfo ?? "",
         selectedTagIds: (editData?.tags ?? defaultTags ?? [])
           .map((tag) => tag.id)
           .sort(),
@@ -103,11 +84,12 @@ export function TeamPasswordForm({
       JSON.stringify({
         title: base.title,
         notes: base.notes,
+        relyingPartyId,
+        relyingPartyName,
         username,
-        password,
-        url,
-        customFields: JSON.stringify(customFields),
-        totp: JSON.stringify(totp),
+        credentialId,
+        creationDate,
+        deviceInfo,
         selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
         teamFolderId: base.teamFolderId,
         requireReprompt: base.requireReprompt,
@@ -116,11 +98,12 @@ export function TeamPasswordForm({
     [
       base.title,
       base.notes,
+      relyingPartyId,
+      relyingPartyName,
       username,
-      password,
-      url,
-      customFields,
-      totp,
+      credentialId,
+      creationDate,
+      deviceInfo,
       base.selectedTags,
       base.teamFolderId,
       base.requireReprompt,
@@ -129,13 +112,12 @@ export function TeamPasswordForm({
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
-  const submitDisabled = !base.title.trim() || !password;
+  const submitDisabled = !base.title.trim() || !relyingPartyId.trim();
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
   const {
     tagsAndFolderProps,
-    customFieldsTotpProps,
     repromptSectionProps,
     expirationSectionProps,
     actionBarProps,
@@ -145,7 +127,7 @@ export function TeamPasswordForm({
     tagsHint: base.t("tagsHint"),
     folders: base.teamFolders,
     sectionCardClass: dialogSectionClass,
-    isLoginEntry: true,
+    isLoginEntry: false,
     hasChanges,
     saving: base.saving,
     submitDisabled,
@@ -165,18 +147,18 @@ export function TeamPasswordForm({
     values: {
       selectedTags: base.selectedTags,
       teamFolderId: base.teamFolderId,
-      customFields,
-      totp,
-      showTotpInput,
+      customFields: [],
+      totp: null,
+      showTotpInput: false,
       requireReprompt: base.requireReprompt,
       expiresAt: base.expiresAt,
     },
     setters: {
       setSelectedTags: base.setSelectedTags,
       setTeamFolderId: base.setTeamFolderId,
-      setCustomFields,
-      setTotp,
-      setShowTotpInput,
+      setCustomFields: () => {},
+      setTotp: () => {},
+      setShowTotpInput: () => {},
       setRequireReprompt: base.setRequireReprompt,
       setExpiresAt: base.setExpiresAt,
     },
@@ -192,15 +174,16 @@ export function TeamPasswordForm({
     }));
 
     await base.submitEntry({
-      entryType: ENTRY_TYPE.LOGIN,
+      entryType: ENTRY_TYPE.PASSKEY,
       title: base.title,
       notes: base.notes,
       tagNames,
+      relyingPartyId,
+      relyingPartyName,
       username,
-      password,
-      url,
-      customFields,
-      totp,
+      credentialId,
+      creationDate,
+      deviceInfo,
     });
   };
 
@@ -231,49 +214,42 @@ export function TeamPasswordForm({
             />
           </div>
 
-          <EntryLoginMainFields
+          <PasskeyFields
             idPrefix="team-"
-            hideTitle
-            title={base.title}
-            onTitleChange={base.setTitle}
-            titleLabel={base.entryCopy.titleLabel}
-            titlePlaceholder={base.entryCopy.titlePlaceholder}
+            relyingPartyId={relyingPartyId}
+            onRelyingPartyIdChange={setRelyingPartyId}
+            relyingPartyIdPlaceholder={tpk("relyingPartyIdPlaceholder")}
+            relyingPartyName={relyingPartyName}
+            onRelyingPartyNameChange={setRelyingPartyName}
+            relyingPartyNamePlaceholder={tpk("relyingPartyNamePlaceholder")}
             username={username}
             onUsernameChange={setUsername}
-            usernameLabel={base.t("usernameLabel")}
-            usernamePlaceholder={base.t("usernamePlaceholder")}
-            password={password}
-            onPasswordChange={setPassword}
-            passwordLabel={base.t("passwordLabel")}
-            passwordPlaceholder={base.t("passwordPlaceholder")}
-            showPassword={showPassword}
-            onToggleShowPassword={() => setShowPassword(!showPassword)}
-            generatorSummary={generatorSummary}
-            showGenerator={showGenerator}
-            onToggleGenerator={() => setShowGenerator(!showGenerator)}
-            closeGeneratorLabel={base.t("closeGenerator")}
-            openGeneratorLabel={base.t("openGenerator")}
-            generatorSettings={generatorSettings}
-            onGeneratorUse={(pw, settings) => {
-              setPassword(pw);
-              setGeneratorSettings(settings);
-            }}
-            url={url}
-            onUrlChange={setUrl}
-            urlLabel={base.t("urlLabel")}
+            usernamePlaceholder={tpk("usernamePlaceholder")}
+            credentialId={credentialId}
+            onCredentialIdChange={setCredentialId}
+            credentialIdPlaceholder={tpk("credentialIdPlaceholder")}
+            showCredentialId={showCredentialId}
+            onToggleCredentialId={() => setShowCredentialId(!showCredentialId)}
+            creationDate={creationDate}
+            onCreationDateChange={setCreationDate}
+            deviceInfo={deviceInfo}
+            onDeviceInfoChange={setDeviceInfo}
+            deviceInfoPlaceholder={tpk("deviceInfoPlaceholder")}
+            notesLabel={base.entryCopy.notesLabel}
             notes={base.notes}
             onNotesChange={base.setNotes}
-            notesLabel={base.entryCopy.notesLabel}
             notesPlaceholder={base.entryCopy.notesPlaceholder}
-            teamPolicy={base.teamPolicy}
+            labels={{
+              relyingPartyId: tpk("relyingPartyId"),
+              relyingPartyName: tpk("relyingPartyName"),
+              username: tpk("username"),
+              credentialId: tpk("credentialId"),
+              creationDate: tpk("creationDate"),
+              deviceInfo: tpk("deviceInfo"),
+            }}
           />
 
           <TeamTagsAndFolderSection {...tagsAndFolderProps} />
-
-          {customFieldsTotpProps && (
-            <EntryCustomFieldsTotpSection {...customFieldsTotpProps} />
-          )}
-
           <EntryRepromptSection {...repromptSectionProps} />
           <EntryExpirationSection {...expirationSectionProps} />
           <EntryActionBar {...actionBarProps} />
