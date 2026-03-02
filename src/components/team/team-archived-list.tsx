@@ -333,6 +333,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
         const blob = await decryptFullBlob(entry.teamId, entry.id, raw);
         return {
           id: raw.id,
+          title: (blob.title as string) ?? undefined,
           entryType: entry.entryType,
           password: (blob.password as string) ?? "",
           content: blob.content as string | undefined,

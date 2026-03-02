@@ -33,6 +33,7 @@ import {
 
 export interface InlineDetailData {
   id: string;
+  title?: string;
   entryType?: EntryTypeValue;
   requireReprompt?: boolean;
   password: string;

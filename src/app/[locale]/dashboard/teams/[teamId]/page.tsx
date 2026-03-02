@@ -518,6 +518,7 @@ export default function TeamDashboardPage({
       const blob = await decryptFullBlob(id, raw);
       return {
         id: raw.id,
+        title: (blob.title as string) ?? undefined,
         entryType: eType,
         password: (blob.password as string) ?? "",
         content: blob.content as string | undefined,

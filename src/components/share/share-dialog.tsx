@@ -187,7 +187,7 @@ export function ShareDialog({
           toast.error(t("createError"));
           return;
         }
-        const filteredData = applySharePermissions(safeData, permissions);
+        const filteredData = applySharePermissions(safeData, permissions, entryType);
         const encrypted = await encryptForShare(filteredData);
         body.teamPasswordEntryId = teamPasswordEntryId;
         body.encryptedShareData = {

@@ -92,6 +92,7 @@ export async function POST(req: NextRequest) {
     const filteredData = applySharePermissions(
       data as Record<string, unknown>,
       permissions ?? [],
+      entryType,
     );
     const plaintext = JSON.stringify(filteredData);
 
