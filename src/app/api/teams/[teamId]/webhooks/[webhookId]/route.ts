@@ -43,7 +43,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   await withTeamTenantRls(teamId, async () =>
-    prisma.teamWebhook.delete({ where: { id: webhookId } }),
+    prisma.teamWebhook.delete({ where: { id: webhookId, teamId } }),
   );
 
   logAudit({

@@ -171,7 +171,53 @@ describe("createNotification", () => {
 
     // Allow the rejected promise to settle silently
     await vi.waitFor(() => {
-      expect(true).toBe(true);
+      expect(mockPrismaNotification.create).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("truncates body to 2000 characters", async () => {
+    mockPrismaNotification.create.mockResolvedValue({});
+    const longBody = "B".repeat(3000);
+
+    createNotification({
+      userId: "user-1",
+      tenantId: "tenant-1",
+      type: "SECURITY_ALERT" as never,
+      title: "Test",
+      body: longBody,
+    });
+
+    await vi.waitFor(() => {
+      expect(mockPrismaNotification.create).toHaveBeenCalled();
+    });
+
+    const callData = mockPrismaNotification.create.mock.calls[0][0].data;
+    expect(callData.body).toHaveLength(2000);
+  });
+
+  it("sanitizes metadata by removing blocklisted keys from nested objects", async () => {
+    mockPrismaNotification.create.mockResolvedValue({});
+
+    createNotification({
+      userId: "user-1",
+      tenantId: "tenant-1",
+      type: "SECURITY_ALERT" as never,
+      title: "Test",
+      body: "Body",
+      metadata: {
+        device: {
+          ip: "1.2.3.4",
+          token: "should-be-stripped",
+        },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockPrismaNotification.create).toHaveBeenCalled();
+    });
+
+    const callData = mockPrismaNotification.create.mock.calls[0][0].data;
+    expect(callData.metadata.device).toHaveProperty("ip");
+    expect(callData.metadata.device).not.toHaveProperty("token");
   });
 });

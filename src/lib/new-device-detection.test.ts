@@ -156,9 +156,33 @@ describe("checkNewDeviceAndNotify", () => {
     });
 
     expect(mockResolveUserLocale).toHaveBeenCalledWith("en", "ja,en-US;q=0.9");
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: expect.stringContaining("New device login"),
+      }),
+    );
     expect(mockCreateNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "New device login",
+      }),
+    );
+  });
+
+  it("excludes current session token from past session query", async () => {
+    mockSessionFindMany.mockResolvedValue([{ userAgent: CHROME_WIN }]);
+
+    await checkNewDeviceAndNotify("user-1", {
+      ip: "1.2.3.4",
+      userAgent: CHROME_WIN,
+      acceptLanguage: null,
+      currentSessionToken: "current-token-abc",
+    });
+
+    expect(mockSessionFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          sessionToken: { not: "current-token-abc" },
+        }),
       }),
     );
   });

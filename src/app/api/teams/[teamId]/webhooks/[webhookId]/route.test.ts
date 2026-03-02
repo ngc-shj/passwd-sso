@@ -92,7 +92,7 @@ describe("DELETE /api/teams/[teamId]/webhooks/[webhookId]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(mockPrismaTeamWebhook.delete).toHaveBeenCalledWith({ where: { id: WEBHOOK_ID } });
+    expect(mockPrismaTeamWebhook.delete).toHaveBeenCalledWith({ where: { id: WEBHOOK_ID, teamId: TEAM_ID } });
   });
 
   it("logs audit event on successful delete", async () => {

@@ -21,18 +21,12 @@ async function handlePATCH(
   const { id } = await params;
 
   const existing = await withUserTenantRls(session.user.id, async () =>
-    prisma.notification.findUnique({ where: { id } }),
+    prisma.notification.findFirst({ where: { id, userId: session.user.id } }),
   );
   if (!existing) {
     return NextResponse.json(
       { error: API_ERROR.NOT_FOUND },
       { status: 404 },
-    );
-  }
-  if (existing.userId !== session.user.id) {
-    return NextResponse.json(
-      { error: API_ERROR.FORBIDDEN },
-      { status: 403 },
     );
   }
 
@@ -65,18 +59,12 @@ async function handleDELETE(
   const { id } = await params;
 
   const existing = await withUserTenantRls(session.user.id, async () =>
-    prisma.notification.findUnique({ where: { id } }),
+    prisma.notification.findFirst({ where: { id, userId: session.user.id } }),
   );
   if (!existing) {
     return NextResponse.json(
       { error: API_ERROR.NOT_FOUND },
       { status: 404 },
-    );
-  }
-  if (existing.userId !== session.user.id) {
-    return NextResponse.json(
-      { error: API_ERROR.FORBIDDEN },
-      { status: 403 },
     );
   }
 

@@ -94,14 +94,21 @@ export async function GET(req: NextRequest, { params }: Params) {
         { status: 400 },
       );
     }
-    if (fromDate && toDate) {
-      const diffMs = toDate.getTime() - fromDate.getTime();
-      if (diffMs > MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
-        return NextResponse.json(
-          { error: API_ERROR.VALIDATION_ERROR, details: { range: `Maximum range is ${MAX_RANGE_DAYS} days` } },
-          { status: 400 },
-        );
-      }
+    const now = new Date();
+    const resolvedFrom = fromDate ?? new Date(now.getTime() - MAX_RANGE_DAYS * 24 * 60 * 60 * 1000);
+    const resolvedTo = toDate ?? now;
+    const diffMs = resolvedTo.getTime() - resolvedFrom.getTime();
+    if (diffMs < 0) {
+      return NextResponse.json(
+        { error: API_ERROR.VALIDATION_ERROR, details: { date: "'from' must be before 'to'" } },
+        { status: 400 },
+      );
+    }
+    if (diffMs > MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+      return NextResponse.json(
+        { error: API_ERROR.VALIDATION_ERROR, details: { range: `Maximum range is ${MAX_RANGE_DAYS} days` } },
+        { status: 400 },
+      );
     }
   }
 

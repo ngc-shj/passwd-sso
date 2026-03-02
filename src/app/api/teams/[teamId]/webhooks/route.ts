@@ -32,6 +32,8 @@ const createWebhookSchema = z.object({
         const host = parsed.hostname.toLowerCase();
         if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return false;
         if (host === "0.0.0.0" || host.endsWith(".local") || host.endsWith(".internal")) return false;
+        // Block all IP address literals (IPv4 and IPv6) — only allow FQDNs
+        if (/^[\d.]+$/.test(host) || host.startsWith("[")) return false;
         // Block private/link-local IPs (10.x, 172.16-31.x, 192.168.x, 169.254.x)
         const parts = host.split(".").map(Number);
         if (parts.length === 4 && parts.every((p) => !isNaN(p))) {
@@ -47,7 +49,7 @@ const createWebhookSchema = z.object({
     },
     { message: "URL must use HTTPS and must not point to private/internal addresses" },
   ),
-  events: z.array(z.enum(AUDIT_ACTION_VALUES as unknown as [string, ...string[]])).min(1).max(50),
+  events: z.array(z.enum(AUDIT_ACTION_VALUES as unknown as [string, ...string[]])).min(1).max(AUDIT_ACTION_VALUES.length),
 });
 
 // GET /api/teams/[teamId]/webhooks — List team webhooks

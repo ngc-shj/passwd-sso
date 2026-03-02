@@ -5,7 +5,7 @@ const { mockAuth, mockPrismaNotification, mockWithUserTenantRls } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockPrismaNotification: {
-      findUnique: vi.fn(),
+      findFirst: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
     },
@@ -64,7 +64,7 @@ describe("PATCH /api/notifications/[id]", () => {
   });
 
   it("returns 404 when notification not found", async () => {
-    mockPrismaNotification.findUnique.mockResolvedValue(null);
+    mockPrismaNotification.findFirst.mockResolvedValue(null);
     const res = await PATCH(
       createRequest("PATCH", "http://localhost:3000/api/notifications/n1"),
       createParams({ id: "n1" }),
@@ -72,19 +72,18 @@ describe("PATCH /api/notifications/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when notification belongs to another user", async () => {
-    mockPrismaNotification.findUnique.mockResolvedValue(
-      makeNotification({ userId: "other-user" }),
-    );
+  it("returns 404 when notification belongs to another user (filtered by userId)", async () => {
+    // findFirst with userId filter returns null for another user's notification
+    mockPrismaNotification.findFirst.mockResolvedValue(null);
     const res = await PATCH(
       createRequest("PATCH", "http://localhost:3000/api/notifications/n1"),
       createParams({ id: "n1" }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("marks notification as read", async () => {
-    mockPrismaNotification.findUnique.mockResolvedValue(makeNotification());
+    mockPrismaNotification.findFirst.mockResolvedValue(makeNotification());
     mockPrismaNotification.update.mockResolvedValue(
       makeNotification({ isRead: true }),
     );
@@ -122,7 +121,7 @@ describe("DELETE /api/notifications/[id]", () => {
   });
 
   it("returns 404 when notification not found", async () => {
-    mockPrismaNotification.findUnique.mockResolvedValue(null);
+    mockPrismaNotification.findFirst.mockResolvedValue(null);
     const res = await DELETE(
       createRequest("DELETE", "http://localhost:3000/api/notifications/n1"),
       createParams({ id: "n1" }),
@@ -130,19 +129,17 @@ describe("DELETE /api/notifications/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when notification belongs to another user", async () => {
-    mockPrismaNotification.findUnique.mockResolvedValue(
-      makeNotification({ userId: "other-user" }),
-    );
+  it("returns 404 when notification belongs to another user (filtered by userId)", async () => {
+    mockPrismaNotification.findFirst.mockResolvedValue(null);
     const res = await DELETE(
       createRequest("DELETE", "http://localhost:3000/api/notifications/n1"),
       createParams({ id: "n1" }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("deletes the notification", async () => {
-    mockPrismaNotification.findUnique.mockResolvedValue(makeNotification());
+    mockPrismaNotification.findFirst.mockResolvedValue(makeNotification());
     mockPrismaNotification.delete.mockResolvedValue(makeNotification());
 
     const res = await DELETE(
