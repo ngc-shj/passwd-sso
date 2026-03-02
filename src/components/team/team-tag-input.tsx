@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { apiPath } from "@/lib/constants";
+import { buildTagPath } from "@/lib/tag-tree";
 
 export interface TeamTagData {
   id: string;
@@ -142,7 +143,7 @@ export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputPro
                   colorClass
                 )}
               >
-                {tag.name}
+                {buildTagPath(tag.id, allTags) ?? tag.name}
                 <button
                   type="button"
                   onClick={() => removeTag(tag.id)}

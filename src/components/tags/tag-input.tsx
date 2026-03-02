@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
+import { buildTagPath } from "@/lib/tag-tree";
 
 export interface TagData {
   id: string;
@@ -143,7 +144,7 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
                   colorClass
                 )}
               >
-                {tag.name}
+                {buildTagPath(tag.id, allTags) ?? tag.name}
                 <button
                   type="button"
                   onClick={() => removeTag(tag.id)}

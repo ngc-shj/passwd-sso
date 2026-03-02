@@ -3,6 +3,7 @@ import {
   buildTagTree,
   flattenTagTree,
   collectDescendantIds,
+  buildTagPath,
   validateParentChain,
   TagTreeError,
   type FlatTag,
@@ -140,5 +141,29 @@ describe("validateParentChain", () => {
       { id: "l3", name: "L3", parentId: "l2" },
     ];
     expect(() => validateParentChain(null, "l3", deep)).toThrow(/depth/i);
+  });
+});
+
+describe("buildTagPath", () => {
+  it("returns full path for nested tag", () => {
+    expect(buildTagPath("d", tags)).toBe("A / B / D");
+  });
+
+  it("returns name only for root tag", () => {
+    expect(buildTagPath("a", tags)).toBe("A");
+    expect(buildTagPath("e", tags)).toBe("E");
+  });
+
+  it("returns null for unknown id", () => {
+    expect(buildTagPath("missing", tags)).toBeNull();
+  });
+
+  it("handles circular reference gracefully", () => {
+    const circular: FlatTag[] = [
+      { id: "x", name: "X", parentId: "y" },
+      { id: "y", name: "Y", parentId: "x" },
+    ];
+    const result = buildTagPath("x", circular);
+    expect(result).toContain("X");
   });
 });

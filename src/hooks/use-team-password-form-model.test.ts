@@ -35,6 +35,22 @@ vi.mock("@/hooks/use-team-password-form-controller", () => ({
   useTeamPasswordFormController: (...args: unknown[]) => useTeamPasswordFormControllerMock(...args),
 }));
 
+vi.mock("@/hooks/use-team-policy", () => ({
+  useTeamPolicy: () => ({
+    policy: {
+      minPasswordLength: 0,
+      requireUppercase: false,
+      requireLowercase: false,
+      requireNumbers: false,
+      requireSymbols: false,
+      maxSessionDurationMinutes: null,
+      requireRepromptForAll: false,
+      allowExport: true,
+      allowSharing: true,
+    },
+  }),
+}));
+
 describe("useTeamPasswordFormModel", () => {
   beforeEach(() => {
     useTeamPasswordFormStateMock.mockReset();
@@ -86,7 +102,7 @@ describe("useTeamPasswordFormModel", () => {
       }),
     );
 
-    expect(useTeamPasswordFormStateMock).toHaveBeenCalledWith(null);
+    expect(useTeamPasswordFormStateMock).toHaveBeenCalledWith(null, expect.any(Object), undefined);
     expect(useTeamAttachmentsMock).toHaveBeenCalledWith(true, "team-1", undefined);
     expect(useTeamFoldersMock).toHaveBeenCalledWith(true, "team-1");
     expect(useTeamPasswordFormControllerMock).toHaveBeenCalledTimes(1);

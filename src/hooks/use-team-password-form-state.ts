@@ -10,8 +10,9 @@ import { buildTeamPasswordFormInitialValues } from "@/hooks/team-password-form-i
 export function useTeamPasswordFormState(
   editData?: TeamPasswordFormEditData | null,
   teamPolicy?: TeamPolicyClient | null,
+  defaults?: { defaultFolderId?: string | null; defaultTags?: TeamTagData[] },
 ) {
-  const initial = buildTeamPasswordFormInitialValues(editData, teamPolicy);
+  const initial = buildTeamPasswordFormInitialValues(editData, teamPolicy, defaults);
   const uiState = useTeamPasswordFormUiState();
   const valueState = useTeamPasswordFormValueState(initial);
 

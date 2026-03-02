@@ -31,7 +31,7 @@ export interface SidebarTeamItem {
 export interface SidebarTeamTagGroup {
   teamId: string;
   teamName: string;
-  tags: { id: string; name: string; color: string | null; count: number }[];
+  tags: { id: string; name: string; color: string | null; parentId: string | null; count: number }[];
 }
 
 export interface SidebarTeamFolderGroup {
@@ -45,6 +45,7 @@ export interface SidebarTeamTagItem {
   id: string;
   name: string;
   color: string | null;
+  parentId: string | null;
   count: number;
 }
 
@@ -112,7 +113,7 @@ export function useSidebarData(pathname: string) {
     const teamDetails = await Promise.all(
       nextTeams.map(async (team) => {
         const [teamTags, teamFolders] = await Promise.all([
-          fetchArray<{ id: string; name: string; color: string | null; count: number }>(
+          fetchArray<{ id: string; name: string; color: string | null; parentId: string | null; count: number }>(
             apiPath.teamTags(team.id),
             reportError,
           ),

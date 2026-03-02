@@ -19,7 +19,7 @@ import {
 
 type TeamPasswordFormModelBaseInput = Pick<
   TeamPasswordFormProps,
-  "teamId" | "open" | "onOpenChange" | "onSaved" | "entryType" | "editData"
+  "teamId" | "open" | "onOpenChange" | "onSaved" | "entryType" | "editData" | "defaultFolderId" | "defaultTags"
 >;
 
 function useTeamPasswordFormModelInternal({
@@ -29,6 +29,8 @@ function useTeamPasswordFormModelInternal({
   onSaved,
   entryType: entryTypeProp = ENTRY_TYPE.LOGIN,
   editData,
+  defaultFolderId,
+  defaultTags,
 }: TeamPasswordFormModelBaseInput) {
   const translationBundle = useEntryFormTranslations();
   const { t, tc } = translationBundle;
@@ -40,7 +42,10 @@ function useTeamPasswordFormModelInternal({
   const isEdit = !!editData;
 
   const { policy: teamPolicy } = useTeamPolicy(open, teamId);
-  const formState = useTeamPasswordFormState(editData, teamPolicy);
+  const defaults = defaultFolderId != null || defaultTags != null
+    ? { defaultFolderId, defaultTags }
+    : undefined;
+  const formState = useTeamPasswordFormState(editData, teamPolicy, defaults);
 
   const { attachments, setAttachments } = useTeamAttachments(open, teamId, editData?.id);
   const { folders: teamFolders } = useTeamFolders(open, teamId);

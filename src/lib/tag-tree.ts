@@ -95,6 +95,37 @@ export function collectDescendantIds(
   return ids;
 }
 
+/**
+ * Build a display path string for a tag by walking up parent chain.
+ *
+ * @returns A path like "Parent / Child / Grandchild", or `null` if the tag
+ *          is not found in the list.
+ */
+export function buildTagPath(
+  tagId: string,
+  tags: FlatTag[],
+): string | null {
+  const tag = tags.find((t) => t.id === tagId);
+  if (!tag) return null;
+
+  const parts: string[] = [tag.name];
+  const visited = new Set<string>([tagId]);
+  let currentId = tag.parentId ?? null;
+
+  while (currentId) {
+    if (visited.has(currentId)) break;
+    visited.add(currentId);
+
+    const parent = tags.find((t) => t.id === currentId);
+    if (!parent) break;
+
+    parts.unshift(parent.name);
+    currentId = parent.parentId ?? null;
+  }
+
+  return parts.join(" / ");
+}
+
 export class TagTreeError extends Error {
   constructor(message: string) {
     super(message);

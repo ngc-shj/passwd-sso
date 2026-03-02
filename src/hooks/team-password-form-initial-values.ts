@@ -86,6 +86,7 @@ export function buildPolicyAwareGeneratorSettings(
 export function buildTeamPasswordFormInitialValues(
   editData?: TeamPasswordFormEditData | null,
   teamPolicy?: TeamPolicyClient | null,
+  defaults?: { defaultFolderId?: string | null; defaultTags?: TeamTagData[] },
 ): TeamPasswordFormInitialValues {
   return {
     title: editData?.title ?? "",
@@ -94,7 +95,7 @@ export function buildTeamPasswordFormInitialValues(
     content: editData?.content ?? "",
     url: editData?.url ?? "",
     notes: editData?.notes ?? "",
-    selectedTags: editData?.tags ?? [],
+    selectedTags: editData?.tags ?? defaults?.defaultTags ?? [],
     generatorSettings: buildPolicyAwareGeneratorSettings(teamPolicy),
     customFields: editData?.customFields ?? [],
     totp: editData?.totp ?? null,
@@ -134,7 +135,7 @@ export function buildTeamPasswordFormInitialValues(
     licensee: editData?.licensee ?? "",
     purchaseDate: editData?.purchaseDate ?? "",
     expirationDate: editData?.expirationDate ?? "",
-    teamFolderId: editData?.teamFolderId ?? null,
+    teamFolderId: editData?.teamFolderId ?? defaults?.defaultFolderId ?? null,
     requireReprompt: editData?.requireReprompt ?? teamPolicy?.requireRepromptForAll ?? false,
     expiresAt: editData?.expiresAt ?? null,
   };

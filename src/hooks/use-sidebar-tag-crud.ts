@@ -94,6 +94,7 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
     setTagDialogOpen,
     editingTag,
     deletingTag,
+    tagTeamId,
     handleTagCreate,
     handleTagEdit,
     handleTagDeleteClick,

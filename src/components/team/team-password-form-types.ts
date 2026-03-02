@@ -75,4 +75,6 @@ export interface TeamPasswordFormProps {
   onSaved: () => void;
   entryType?: EntryTypeValue;
   editData?: TeamPasswordFormEditData | null;
+  defaultFolderId?: string | null;
+  defaultTags?: TeamTagData[];
 }

@@ -155,7 +155,7 @@ export function TagDialog({ open, onOpenChange, editTag, allTags = [], onSubmit 
                   <SelectItem value={ROOT_VALUE}>{tTag("noParent")}</SelectItem>
                   {parentOptions.map((opt) => (
                     <SelectItem key={opt.id} value={opt.id}>
-                      {"  ".repeat(opt.depth)}{opt.name}
+                      <span style={{ paddingLeft: `${opt.depth * 12}px` }}>{opt.name}</span>
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -66,6 +66,14 @@ vi.mock("@/lib/generator-prefs", () => ({
     length: 16,
     passphrase: { wordCount: 4 },
   },
+  DEFAULT_SYMBOL_GROUPS: {
+    hashEtc: false,
+    punctuation: false,
+    quotes: false,
+    slashDash: false,
+    mathCompare: false,
+    brackets: false,
+  },
 }));
 
 vi.mock("@/lib/credit-card", () => ({
@@ -83,6 +91,22 @@ vi.mock("@/lib/credit-card", () => ({
   getMaxLength: vi.fn().mockReturnValue(19),
   normalizeCardBrand: vi.fn((b: string) => b),
   normalizeCardNumber: vi.fn((v: string) => v.replace(/\D/g, "")),
+}));
+
+vi.mock("@/hooks/use-team-policy", () => ({
+  useTeamPolicy: () => ({
+    policy: {
+      minPasswordLength: 0,
+      requireUppercase: false,
+      requireLowercase: false,
+      requireNumbers: false,
+      requireSymbols: false,
+      maxSessionDurationMinutes: null,
+      requireRepromptForAll: false,
+      allowExport: true,
+      allowSharing: true,
+    },
+  }),
 }));
 
 // Minimal UI component mocks

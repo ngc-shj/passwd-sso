@@ -30,6 +30,8 @@ export function TeamPasswordForm({
   onSaved,
   entryType,
   editData,
+  defaultFolderId,
+  defaultTags,
 }: TeamPasswordFormProps) {
   const scopedId = teamId;
   const {
@@ -55,6 +57,8 @@ export function TeamPasswordForm({
     onSaved,
     entryType,
     editData,
+    defaultFolderId,
+    defaultTags,
   });
   const {
     values: { saving, title },

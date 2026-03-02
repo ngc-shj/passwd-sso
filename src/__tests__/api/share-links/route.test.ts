@@ -47,6 +47,11 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+  withTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+}));
+vi.mock("@/lib/team-policy", () => ({
+  assertPolicyAllowsSharing: vi.fn(),
+  PolicyViolationError: class extends Error {},
 }));
 
 const { mockCheck } = vi.hoisted(() => ({
