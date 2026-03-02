@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { TeamPasswordFormEditData, TeamPasswordFormProps } from "@/components/team/team-password-form-types";
 import type { TeamPasswordFormLifecycleSetters } from "@/hooks/use-team-password-form-state";
+import type { TeamTagData } from "@/components/team/team-tag-input";
 import {
   applyTeamEditDataToForm,
   resetTeamFormForClose,
@@ -13,6 +14,7 @@ export interface TeamPasswordFormLifecycleArgs {
   editData?: TeamPasswordFormProps["editData"];
   onOpenChange: TeamPasswordFormProps["onOpenChange"];
   setters: TeamPasswordFormLifecycleSetters;
+  defaults?: { defaultFolderId?: string | null; defaultTags?: TeamTagData[] };
 }
 
 export function useTeamPasswordFormLifecycle({
@@ -20,6 +22,7 @@ export function useTeamPasswordFormLifecycle({
   editData,
   onOpenChange,
   setters,
+  defaults,
 }: TeamPasswordFormLifecycleArgs) {
   const settersRef = useRef(setters);
 
@@ -41,16 +44,27 @@ export function useTeamPasswordFormLifecycle({
     }
   }, [open, editData, applyEditData]);
 
+  const applyDefaults = useCallback(() => {
+    if (defaults?.defaultFolderId != null) {
+      settersRef.current.setTeamFolderId(defaults.defaultFolderId);
+    }
+    if (defaults?.defaultTags && defaults.defaultTags.length > 0) {
+      settersRef.current.setSelectedTags(defaults.defaultTags);
+    }
+  }, [defaults]);
+
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
       if (!nextOpen) {
         resetForm();
       } else if (editData) {
         applyEditData(editData);
+      } else {
+        applyDefaults();
       }
       onOpenChange(nextOpen);
     },
-    [applyEditData, editData, onOpenChange, resetForm],
+    [applyDefaults, applyEditData, editData, onOpenChange, resetForm],
   );
 
   return { handleOpenChange };

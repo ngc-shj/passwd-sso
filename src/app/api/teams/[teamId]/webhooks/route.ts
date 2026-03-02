@@ -35,14 +35,6 @@ const createWebhookSchema = z.object({
         // Block all IP address literals (IPv4 and IPv6) — only allow FQDNs
         // URL.hostname strips brackets from IPv6 (e.g. "[::1]" → "::1"), so check for colons
         if (/^[\d.]+$/.test(host) || host.includes(":")) return false;
-        // Block private/link-local IPs (10.x, 172.16-31.x, 192.168.x, 169.254.x)
-        const parts = host.split(".").map(Number);
-        if (parts.length === 4 && parts.every((p) => !isNaN(p))) {
-          if (parts[0] === 10) return false;
-          if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return false;
-          if (parts[0] === 192 && parts[1] === 168) return false;
-          if (parts[0] === 169 && parts[1] === 254) return false;
-        }
         return true;
       } catch {
         return false;

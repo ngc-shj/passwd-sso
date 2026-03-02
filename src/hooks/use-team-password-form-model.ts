@@ -56,6 +56,7 @@ function useTeamPasswordFormModelInternal({
     editData,
     onOpenChange,
     setters: formSetters,
+    defaults,
   });
 
   const { entryCopy, entrySpecificFieldsProps, handleSubmit, hasChanges, submitDisabled } =
