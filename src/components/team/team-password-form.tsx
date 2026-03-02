@@ -17,8 +17,7 @@ import {
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
 import { useTeamLoginFormState } from "@/hooks/use-team-login-form-state";
-import { buildTeamLoginFormDerived } from "@/hooks/team-login-form-derived";
-import { buildTeamLoginFieldsProps } from "@/hooks/team-login-fields-props";
+import { buildTeamLoginFormPresenter } from "@/hooks/team-login-form-presenter";
 import { createTeamLoginSubmitHandler } from "@/hooks/team-login-form-controller";
 
 export function TeamPasswordForm({
@@ -45,15 +44,20 @@ export function TeamPasswordForm({
     editData,
     teamPolicy: base.teamPolicy,
   });
-  const { hasChanges, generatorSummary } = buildTeamLoginFormDerived({
+  const { hasChanges, loginMainFieldsProps } = buildTeamLoginFormPresenter({
     editData,
     defaultFolderId,
     defaultTags,
     title: base.title,
+    setTitle: base.setTitle,
     notes: base.notes,
+    setNotes: base.setNotes,
     username: loginState.username,
+    setUsername: loginState.setUsername,
     password: loginState.password,
+    setPassword: loginState.setPassword,
     url: loginState.url,
+    setUrl: loginState.setUrl,
     customFields: loginState.customFields,
     totp: loginState.totp,
     selectedTags: base.selectedTags,
@@ -61,6 +65,17 @@ export function TeamPasswordForm({
     requireReprompt: base.requireReprompt,
     expiresAt: base.expiresAt,
     generatorSettings: loginState.generatorSettings,
+    setGeneratorSettings: loginState.setGeneratorSettings,
+    showPassword: loginState.showPassword,
+    setShowPassword: loginState.setShowPassword,
+    showGenerator: loginState.showGenerator,
+    setShowGenerator: loginState.setShowGenerator,
+    titleLabel: base.entryCopy.titleLabel,
+    titlePlaceholder: base.entryCopy.titlePlaceholder,
+    notesLabel: base.entryCopy.notesLabel,
+    notesPlaceholder: base.entryCopy.notesPlaceholder,
+    teamPolicy: base.teamPolicy,
+    t: base.t,
     tGen: base.translationBundle.tGen,
   });
   const submitDisabled = !base.title.trim() || !loginState.password;
@@ -116,40 +131,6 @@ export function TeamPasswordForm({
     },
   });
 
-  const loginMainFieldsProps = buildTeamLoginFieldsProps({
-    title: base.title,
-    onTitleChange: base.setTitle,
-    titleLabel: base.entryCopy.titleLabel,
-    titlePlaceholder: base.entryCopy.titlePlaceholder,
-    username: loginState.username,
-    onUsernameChange: loginState.setUsername,
-    usernameLabel: base.t("usernameEmail"),
-    usernamePlaceholder: base.t("usernamePlaceholder"),
-    password: loginState.password,
-    onPasswordChange: loginState.setPassword,
-    passwordLabel: base.t("password"),
-    passwordPlaceholder: base.t("passwordPlaceholder"),
-    showPassword: loginState.showPassword,
-    onToggleShowPassword: () => loginState.setShowPassword(!loginState.showPassword),
-    generatorSummary,
-    showGenerator: loginState.showGenerator,
-    onToggleGenerator: () => loginState.setShowGenerator(!loginState.showGenerator),
-    closeGeneratorLabel: base.t("closeGenerator"),
-    openGeneratorLabel: base.t("openGenerator"),
-    generatorSettings: loginState.generatorSettings,
-    onGeneratorUse: (pw, settings) => {
-      loginState.setPassword(pw);
-      loginState.setGeneratorSettings(settings);
-    },
-    url: loginState.url,
-    onUrlChange: loginState.setUrl,
-    urlLabel: base.t("url"),
-    notes: base.notes,
-    onNotesChange: base.setNotes,
-    notesLabel: base.entryCopy.notesLabel,
-    notesPlaceholder: base.entryCopy.notesPlaceholder,
-    teamPolicy: base.teamPolicy,
-  });
   const handleFormSubmit = createTeamLoginSubmitHandler({
     submitDisabled,
     submitEntry: base.submitEntry,
