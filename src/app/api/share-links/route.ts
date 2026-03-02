@@ -8,6 +8,7 @@ import {
   encryptShareData,
 } from "@/lib/crypto-server";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { assertPolicyAllowsSharing, PolicyViolationError } from "@/lib/team-policy";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -121,6 +122,16 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       if (e instanceof TeamAuthError) {
         return NextResponse.json({ error: e.message }, { status: e.status });
+      }
+      throw e;
+    }
+
+    // Enforce team policy: sharing
+    try {
+      await assertPolicyAllowsSharing(teamEntry.teamId);
+    } catch (e) {
+      if (e instanceof PolicyViolationError) {
+        return NextResponse.json({ error: API_ERROR.POLICY_SHARING_DISABLED }, { status: 403 });
       }
       throw e;
     }

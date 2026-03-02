@@ -58,7 +58,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     await assertPolicyAllowsExport(teamId);
   } catch (e) {
     if (e instanceof PolicyViolationError) {
-      return NextResponse.json({ error: e.message }, { status: 403 });
+      return NextResponse.json({ error: API_ERROR.POLICY_EXPORT_DISABLED }, { status: 403 });
     }
     throw e;
   }
