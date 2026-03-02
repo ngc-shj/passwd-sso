@@ -41,6 +41,7 @@ export const API_PATH = {
   WATCHTOWER_HIBP: "/api/watchtower/hibp",
   CSP_REPORT: "/api/csp-report",
   SESSIONS: "/api/sessions",
+  USER_LOCALE: "/api/user/locale",
   NOTIFICATIONS: "/api/notifications",
   NOTIFICATIONS_COUNT: "/api/notifications/count",
   SCIM_V2: "/api/scim/v2",

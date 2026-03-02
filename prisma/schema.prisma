@@ -93,6 +93,9 @@ model User {
   recoveryVerifierHmac       String?   @map("recovery_verifier_hmac") @db.VarChar(64)
   recoveryKeySetAt           DateTime? @map("recovery_key_set_at")
 
+  // User preference
+  locale String? @db.VarChar(5)
+
   // Account lockout
   failedUnlockAttempts Int       @default(0) @map("failed_unlock_attempts")
   lastFailedUnlockAt   DateTime? @map("last_failed_unlock_at")
