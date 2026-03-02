@@ -985,20 +985,22 @@ export default function TeamDashboardPage({
         )}
       </div>
 
-      <TeamPasswordForm
-        teamId={teamId}
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        onSaved={() => {
-          fetchPasswords();
-          setExpandedId(null);
-          setRefreshKey((k) => k + 1);
-        }}
-        editData={editData}
-        entryType={editData?.entryType ?? newEntryType}
-        defaultFolderId={activeFolderId ?? null}
-        defaultTags={matchedTag ? [{ id: matchedTag.id, name: matchedTag.name, color: matchedTag.color ?? null }] : undefined}
-      />
+      {formOpen && (
+        <TeamPasswordForm
+          teamId={teamId}
+          open={formOpen}
+          onOpenChange={setFormOpen}
+          onSaved={() => {
+            fetchPasswords();
+            setExpandedId(null);
+            setRefreshKey((k) => k + 1);
+          }}
+          editData={editData}
+          entryType={editData?.entryType ?? newEntryType}
+          defaultFolderId={activeFolderId ?? null}
+          defaultTags={matchedTag ? [{ id: matchedTag.id, name: matchedTag.name, color: matchedTag.color ?? null }] : undefined}
+        />
+      )}
 
       <BulkActionConfirmDialog
         open={bulkDialogOpen}

@@ -8,7 +8,6 @@ import { useTeamPasswordFormModel } from "@/hooks/use-team-password-form-model";
 const useTeamPasswordFormStateMock = vi.fn();
 const useTeamAttachmentsMock = vi.fn();
 const useTeamFoldersMock = vi.fn();
-const useTeamPasswordFormLifecycleMock = vi.fn();
 const useTeamPasswordFormControllerMock = vi.fn();
 
 vi.mock("next-intl", () => ({
@@ -25,10 +24,6 @@ vi.mock("@/hooks/use-team-attachments", () => ({
 
 vi.mock("@/hooks/use-team-folders", () => ({
   useTeamFolders: (...args: unknown[]) => useTeamFoldersMock(...args),
-}));
-
-vi.mock("@/hooks/use-team-password-form-lifecycle", () => ({
-  useTeamPasswordFormLifecycle: (...args: unknown[]) => useTeamPasswordFormLifecycleMock(...args),
 }));
 
 vi.mock("@/hooks/use-team-password-form-controller", () => ({
@@ -56,7 +51,6 @@ describe("useTeamPasswordFormModel", () => {
     useTeamPasswordFormStateMock.mockReset();
     useTeamAttachmentsMock.mockReset();
     useTeamFoldersMock.mockReset();
-    useTeamPasswordFormLifecycleMock.mockReset();
     useTeamPasswordFormControllerMock.mockReset();
 
     useTeamPasswordFormStateMock.mockReturnValue({
@@ -80,7 +74,6 @@ describe("useTeamPasswordFormModel", () => {
     });
     useTeamAttachmentsMock.mockReturnValue({ attachments: [], setAttachments: vi.fn() });
     useTeamFoldersMock.mockReturnValue({ folders: [], fetchError: null });
-    useTeamPasswordFormLifecycleMock.mockReturnValue({ handleOpenChange: vi.fn() });
     useTeamPasswordFormControllerMock.mockReturnValue({
       entryCopy: { dialogLabel: "x", titleLabel: "y", tagsTitle: "z" },
       entrySpecificFieldsProps: { a: 1 },
@@ -109,27 +102,6 @@ describe("useTeamPasswordFormModel", () => {
     expect(result.current.formState.values.title).toBe("t");
     expect(result.current.entryCopy.dialogLabel).toBe("x");
     expect(result.current.hasChanges).toBe(false);
-  });
-
-  it("passes attachment setter into lifecycle setters", () => {
-    const setAttachments = vi.fn();
-    useTeamAttachmentsMock.mockReturnValue({ attachments: [], setAttachments });
-
-    renderHook(() =>
-      useTeamPasswordFormModel({
-        teamId: "team-1",
-        open: true,
-        onOpenChange: vi.fn(),
-        onSaved: vi.fn(),
-        entryType: ENTRY_TYPE.LOGIN,
-        editData: null,
-      }),
-    );
-
-    const lifecycleArgs = useTeamPasswordFormLifecycleMock.mock.calls[0]?.[0] as
-      | { setters?: { setAttachments?: unknown } }
-      | undefined;
-    expect(lifecycleArgs?.setters?.setAttachments).toBe(setAttachments);
   });
 
   it("prefers editData entryType and forwards derived kind flags to controller", () => {

@@ -477,16 +477,27 @@ describe("TeamPasswordForm — folder selection", () => {
     });
   });
 
-  it("re-applies latest editData after close and reopen", async () => {
+  it("re-applies latest editData after close and reopen (conditional rendering)", async () => {
     setupFetch();
     const onOpenChange = vi.fn();
+    const onSaved = vi.fn();
+
+    // Simulate production pattern: parent conditionally renders TeamPasswordForm
+    function Wrapper({ formOpen, editData }: { formOpen: boolean; editData: React.ComponentProps<typeof TeamPasswordForm>["editData"] }) {
+      return formOpen ? (
+        <TeamPasswordForm
+          teamId="team-1"
+          open={true}
+          onOpenChange={onOpenChange}
+          onSaved={onSaved}
+          editData={editData}
+        />
+      ) : null;
+    }
 
     const view = render(
-      <TeamPasswordForm
-        teamId="team-1"
-        open={true}
-        onOpenChange={onOpenChange}
-        onSaved={vi.fn()}
+      <Wrapper
+        formOpen={true}
         editData={{
           id: "entry-1",
           title: "First Title",
@@ -503,30 +514,18 @@ describe("TeamPasswordForm — folder selection", () => {
       expect(screen.getByDisplayValue("First Title")).toBeInTheDocument();
     });
 
+    // Close: unmount
     view.rerender(
-      <TeamPasswordForm
-        teamId="team-1"
-        open={false}
-        onOpenChange={onOpenChange}
-        onSaved={vi.fn()}
-        editData={{
-          id: "entry-1",
-          title: "First Title",
-          username: "first-user",
-          password: "first-pass",
-          url: null,
-          notes: null,
-          teamFolderId: "folder-1",
-        }}
+      <Wrapper
+        formOpen={false}
+        editData={null}
       />,
     );
 
+    // Re-open with different editData: remount → useState picks up new initial values
     view.rerender(
-      <TeamPasswordForm
-        teamId="team-1"
-        open={true}
-        onOpenChange={onOpenChange}
-        onSaved={vi.fn()}
+      <Wrapper
+        formOpen={true}
         editData={{
           id: "entry-2",
           title: "Second Title",
