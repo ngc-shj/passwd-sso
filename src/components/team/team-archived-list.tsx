@@ -4,8 +4,7 @@ import { useEffect, useState, useCallback, forwardRef } from "react";
 import { useTranslations } from "next-intl";
 import { PasswordCard } from "@/components/passwords/password-card";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
-import { TeamEditDialog } from "@/components/team/team-edit-dialog";
-import type { TeamLoginFormEditData } from "@/components/team/team-login-form-types";
+import { TeamEditDialogLoader } from "@/components/team/team-edit-dialog-loader";
 import { Building2, RotateCcw, Trash2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
@@ -81,7 +80,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editTeamId, setEditTeamId] = useState<string | null>(null);
-  const [editData, setEditData] = useState<TeamLoginFormEditData | null>(null);
+  const [editEntryId, setEditEntryId] = useState<string | null>(null);
 
   const effectiveSelectionMode = scopedTeamId ? (selectionMode ?? false) : false;
 
@@ -292,66 +291,9 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   const handleEdit = async (id: string) => {
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;
-    try {
-      const res = await fetch(apiPath.teamPasswordById(entry.teamId, id));
-      if (!res.ok) return;
-      const raw = await res.json();
-      const blob = await decryptFullBlob(entry.teamId, id, raw);
-      setEditTeamId(entry.teamId);
-      setEditData({
-        id: raw.id,
-        entryType: raw.entryType,
-        title: (blob.title as string) ?? "",
-        username: (blob.username as string) ?? null,
-        password: (blob.password as string) ?? "",
-        content: blob.content as string | undefined,
-        url: (blob.url as string) ?? null,
-        notes: (blob.notes as string) ?? null,
-        tags: raw.tags,
-        customFields: blob.customFields as EntryCustomField[] | undefined,
-        totp: blob.totp as EntryTotp | null | undefined,
-        cardholderName: blob.cardholderName as string | null | undefined,
-        cardNumber: blob.cardNumber as string | null | undefined,
-        brand: blob.brand as string | null | undefined,
-        expiryMonth: blob.expiryMonth as string | null | undefined,
-        expiryYear: blob.expiryYear as string | null | undefined,
-        cvv: blob.cvv as string | null | undefined,
-        fullName: blob.fullName as string | null | undefined,
-        address: blob.address as string | null | undefined,
-        phone: blob.phone as string | null | undefined,
-        email: blob.email as string | null | undefined,
-        dateOfBirth: blob.dateOfBirth as string | null | undefined,
-        nationality: blob.nationality as string | null | undefined,
-        idNumber: blob.idNumber as string | null | undefined,
-        issueDate: blob.issueDate as string | null | undefined,
-        expiryDate: blob.expiryDate as string | null | undefined,
-        relyingPartyId: blob.relyingPartyId as string | null | undefined,
-        relyingPartyName: blob.relyingPartyName as string | null | undefined,
-        credentialId: blob.credentialId as string | null | undefined,
-        creationDate: blob.creationDate as string | null | undefined,
-        deviceInfo: blob.deviceInfo as string | null | undefined,
-        bankName: blob.bankName as string | null | undefined,
-        accountType: blob.accountType as string | null | undefined,
-        accountHolderName: blob.accountHolderName as string | null | undefined,
-        accountNumber: blob.accountNumber as string | null | undefined,
-        routingNumber: blob.routingNumber as string | null | undefined,
-        swiftBic: blob.swiftBic as string | null | undefined,
-        iban: blob.iban as string | null | undefined,
-        branchName: blob.branchName as string | null | undefined,
-        softwareName: blob.softwareName as string | null | undefined,
-        licenseKey: blob.licenseKey as string | null | undefined,
-        version: blob.version as string | null | undefined,
-        licensee: blob.licensee as string | null | undefined,
-        purchaseDate: blob.purchaseDate as string | null | undefined,
-        expirationDate: blob.expirationDate as string | null | undefined,
-        teamFolderId: (raw.teamFolderId as string) ?? null,
-        requireReprompt: raw.requireReprompt ?? false,
-        expiresAt: raw.expiresAt ?? null,
-      });
-      setFormOpen(true);
-    } catch {
-      // ignore
-    }
+    setEditTeamId(entry.teamId);
+    setEditEntryId(id);
+    setFormOpen(true);
   };
 
   const createDetailFetcher = useCallback(
@@ -571,16 +513,16 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
         onConfirm={() => void executeAction()}
       />
 
-      {editTeamId && editData && (
-        <TeamEditDialog
+      {editTeamId && editEntryId && (
+        <TeamEditDialogLoader
           teamId={editTeamId}
+          id={editEntryId}
           open={formOpen}
           onOpenChange={setFormOpen}
           onSaved={() => {
             fetchArchived();
             setExpandedId(null);
           }}
-          editData={editData}
         />
       )}
     </div>

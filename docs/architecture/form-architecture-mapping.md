@@ -20,15 +20,15 @@ This document distinguishes between:
 | Responsibility | Team Vault | Personal Vault |
 | --- | --- | --- |
 | New dialog router | `src/components/team/team-new-dialog.tsx` | `src/components/passwords/personal-password-new-dialog.tsx` |
-| Edit data loader | `src/app/[locale]/dashboard/teams/[teamId]/page.tsx` | `src/components/passwords/personal-password-edit-dialog-loader.tsx` |
+| Edit data loader | `src/components/team/team-edit-dialog-loader.tsx` | `src/components/passwords/personal-password-edit-dialog-loader.tsx` |
 | Edit dialog router | `src/components/team/team-edit-dialog.tsx` | `src/components/passwords/personal-password-edit-dialog.tsx` |
 | Shared dialog shell | `src/components/team/team-entry-dialog-shell.tsx` | `src/components/passwords/personal-entry-dialog-shell.tsx` |
 
 ### Dialog Flow Mismatch
 
-- Team entry forms are now rendered inside `team-new-dialog.tsx` and `team-edit-dialog.tsx` through a shared dialog shell.
-- Personal entry forms are now rendered through a shared dialog shell as well.
-- Team edit data is loaded at page level, while Personal edit data is loaded in `personal-password-edit-dialog-loader.tsx`.
+- Team and Personal now both use `new-dialog -> shared dialog shell -> entry form`.
+- Team and Personal now both use `edit-dialog-loader -> edit-dialog -> shared dialog shell -> entry form`.
+- Team edit is usually launched from page-level state, while Personal edit is usually launched from card-level state.
 - `src/components/team/team-create-dialog.tsx` is a team creation dialog, not an entry form dialog, and should not be treated as a Team Vault entry-flow counterpart.
 
 ### Target Dialog Flow
@@ -116,16 +116,16 @@ The target state is to make these boundaries more directly corresponding. At min
 
 | Stage | Team Vault | Personal Vault |
 | --- | --- | --- |
-| Loader / first entry point | `page.tsx` | `personal-password-edit-dialog-loader.tsx` |
+| Loader / first entry point | `team-edit-dialog-loader.tsx` | `personal-password-edit-dialog-loader.tsx` |
 | Router | `team-edit-dialog` | `personal-password-edit-dialog` |
 | Dialog shell | `team-entry-dialog-shell` | `personal-entry-dialog-shell` |
 | Entry form | `team-* form` | `personal-* form` |
 
 #### Structural Difference
 
-- Team splits create/edit router and dialog shell into separate components.
-- Personal also splits router and dialog shell now, but still keeps a dedicated edit loader component.
-- Team edit starts from page-level loading, while Personal edit starts from a dedicated loader component.
+- Team and Personal now match on dialog stages for both create and edit.
+- Team edit is often triggered from page-owned state, while Personal edit is often triggered from card-owned state.
+- The remaining difference is where the caller keeps the selected entry id before handing off to the loader.
 
 ## Refactor Targets
 
