@@ -4,6 +4,7 @@ import { use, useState, useEffect, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -544,10 +545,21 @@ export default function TeamAuditLogsPage({
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <Button variant="outline" disabled title={td("exportDisabled")}>
-                <Download className="h-4 w-4 mr-2" />
-                {td("download")}
-              </Button>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0}>
+                      <Button variant="outline" disabled>
+                        <Download className="h-4 w-4 mr-2" />
+                        {td("download")}
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{td("exportDisabled")}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
           </div>
         </div>

@@ -105,5 +105,6 @@
   "permission_HIDE_PASSWORD": "パスワード非表示",
   "permission_HIDE_PASSWORD_desc": "パスワードとCVVフィールドを非表示",
   "permission_OVERVIEW_ONLY": "概要のみ",
-  "permission_OVERVIEW_ONLY_desc": "タイトル、ユーザー名、URLのみ"
+  "permission_OVERVIEW_ONLY_desc": "タイトル、ユーザー名、URLのみ",
+  "sharingDisabledByPolicy": "チームポリシーにより共有が無効になっています。チーム管理者に連絡して共有を有効にしてください。"
 }

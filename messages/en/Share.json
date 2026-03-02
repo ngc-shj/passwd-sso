@@ -105,5 +105,6 @@
   "permission_HIDE_PASSWORD": "Hide password",
   "permission_HIDE_PASSWORD_desc": "Password and CVV fields hidden",
   "permission_OVERVIEW_ONLY": "Overview only",
-  "permission_OVERVIEW_ONLY_desc": "Title, username, and URL only"
+  "permission_OVERVIEW_ONLY_desc": "Title, username, and URL only",
+  "sharingDisabledByPolicy": "Sharing is disabled by team policy. Contact your team administrator to enable sharing."
 }

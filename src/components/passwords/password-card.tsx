@@ -885,6 +885,7 @@ export function PasswordCard({
         teamPasswordEntryId={isTeamMode ? id : undefined}
         decryptedData={shareData}
         entryType={isTeamMode ? entryType : undefined}
+        teamId={isTeamMode ? scopedTeamId : undefined}
       />
 
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

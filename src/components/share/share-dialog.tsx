@@ -59,6 +59,8 @@ interface ShareDialogProps {
   decryptedData?: Record<string, unknown>;
   /** Entry type (required for team entries) */
   entryType?: string;
+  /** Team ID — when provided, sharing policy is checked */
+  teamId?: string;
 }
 
 function hexEncode(bytes: Uint8Array): string {
@@ -113,6 +115,7 @@ export function ShareDialog({
   teamPasswordEntryId,
   decryptedData,
   entryType,
+  teamId,
 }: ShareDialogProps) {
   const t = useTranslations("Share");
   const tApi = useTranslations("ApiErrors");
@@ -132,6 +135,7 @@ export function ShareDialog({
   >([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [logNextCursor, setLogNextCursor] = useState<string | null>(null);
+  const [sharingAllowed, setSharingAllowed] = useState(true);
 
   const entryParam = passwordEntryId
     ? `passwordEntryId=${passwordEntryId}`
@@ -159,6 +163,17 @@ export function ShareDialog({
       fetchLinks();
     }
   }, [open, fetchLinks]);
+
+  useEffect(() => {
+    if (!open || !teamId) return;
+    fetch(apiPath.teamPolicy(teamId))
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.allowSharing === false) setSharingAllowed(false);
+        else setSharingAllowed(true);
+      })
+      .catch(() => {});
+  }, [open, teamId]);
 
   const handleCreate = async () => {
     setCreating(true);
@@ -331,6 +346,15 @@ export function ShareDialog({
             <Button variant="outline" className="w-full" onClick={() => setCreatedUrl(null)}>
               {t("createAnother")}
             </Button>
+          </div>
+        ) : !sharingAllowed ? (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <p className="text-sm text-destructive">
+                {t("sharingDisabledByPolicy")}
+              </p>
+            </div>
           </div>
         ) : (
           <div className="space-y-4 rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
