@@ -140,11 +140,16 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, d
               defaultValue="blank"
               onValueChange={(templateId) => {
                 const tmpl = SECURE_NOTE_TEMPLATES.find(
-                  (t) => t.id === templateId,
+                  (tp) => tp.id === templateId,
                 );
-                if (!tmpl || tmpl.id === "blank") return;
-                if (!title) setTitle(t(tmpl.titleKey));
-                if (!content) setContent(tmpl.contentTemplate);
+                if (!tmpl) return;
+                if (tmpl.id === "blank") {
+                  setTitle("");
+                  setContent("");
+                  return;
+                }
+                setTitle(t(tmpl.titleKey));
+                setContent(tmpl.contentTemplate);
               }}
             >
               <SelectTrigger className="w-full max-w-[300px]">
