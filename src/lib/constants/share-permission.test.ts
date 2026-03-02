@@ -91,9 +91,14 @@ describe("applySharePermissions — backward compatibility", () => {
     expect(result).toEqual(LOGIN_DATA);
   });
 
-  it("removes password with HIDE_PASSWORD (LOGIN default)", () => {
-    const result = applySharePermissions(LOGIN_DATA, [SHARE_PERMISSION.HIDE_PASSWORD]);
+  it("removes password and customFields with HIDE_PASSWORD (LOGIN default)", () => {
+    const dataWithCustom = {
+      ...LOGIN_DATA,
+      customFields: [{ name: "Secret", type: "PASSWORD", value: "hidden" }],
+    };
+    const result = applySharePermissions(dataWithCustom, [SHARE_PERMISSION.HIDE_PASSWORD]);
     expect(result).not.toHaveProperty("password");
+    expect(result).not.toHaveProperty("customFields");
     expect(result).toHaveProperty("title", "My Login");
     expect(result).toHaveProperty("username", "user@example.com");
     expect(result).toHaveProperty("url", "https://example.com");
@@ -338,6 +343,8 @@ describe("applySharePermissions — unknown entryType fallback", () => {
     expect(result).not.toHaveProperty("password");
     expect(result).toHaveProperty("title", "My Login");
     expect(result).toHaveProperty("username", "user@example.com");
+    expect(result).toHaveProperty("url", "https://example.com");
+    expect(result).toHaveProperty("notes", "Important notes");
   });
 
   it("OVERVIEW_ONLY with unknown entryType falls back to LOGIN behavior", () => {
@@ -379,6 +386,18 @@ describe("applySharePermissions — ENTRY_TYPE_VALUES sync", () => {
     }
   });
 
+  it("SENSITIVE_FIELDS entries are non-empty for all entry types", () => {
+    for (const entryType of ENTRY_TYPE_VALUES) {
+      expect(SENSITIVE_FIELDS[entryType].size).toBeGreaterThan(0);
+    }
+  });
+
+  it("OVERVIEW_FIELDS entries are non-empty for all entry types", () => {
+    for (const entryType of ENTRY_TYPE_VALUES) {
+      expect(OVERVIEW_FIELDS[entryType].size).toBeGreaterThan(0);
+    }
+  });
+
   it("applySharePermissions works without error for all entry types", () => {
     const sampleData = { title: "Test", password: "secret", username: "user" };
     for (const entryType of ENTRY_TYPE_VALUES) {
@@ -390,6 +409,45 @@ describe("applySharePermissions — ENTRY_TYPE_VALUES sync", () => {
         applySharePermissions(sampleData, [SHARE_PERMISSION.OVERVIEW_ONLY], entryType),
       ).not.toThrow();
     }
+  });
+});
+
+// ─── customFields filtering ─────────────────────────────────
+
+describe("applySharePermissions — customFields", () => {
+  it("HIDE_PASSWORD removes customFields for all entry types", () => {
+    const data = {
+      title: "Test",
+      password: "secret",
+      customFields: [{ name: "API Key", type: "PASSWORD", value: "sk-xxx" }],
+    };
+    for (const entryType of ENTRY_TYPE_VALUES) {
+      const result = applySharePermissions(
+        data,
+        [SHARE_PERMISSION.HIDE_PASSWORD],
+        entryType,
+      );
+      expect(result).not.toHaveProperty("customFields");
+    }
+  });
+
+  it("VIEW_ALL preserves customFields", () => {
+    const data = {
+      title: "Test",
+      customFields: [{ name: "Notes", type: "TEXT", value: "hello" }],
+    };
+    const result = applySharePermissions(data, [SHARE_PERMISSION.VIEW_ALL], "LOGIN");
+    expect(result).toHaveProperty("customFields");
+  });
+
+  it("OVERVIEW_ONLY excludes customFields (allowlist)", () => {
+    const data = {
+      title: "Test",
+      username: "user",
+      customFields: [{ name: "Notes", type: "TEXT", value: "hello" }],
+    };
+    const result = applySharePermissions(data, [SHARE_PERMISSION.OVERVIEW_ONLY], "LOGIN");
+    expect(result).not.toHaveProperty("customFields");
   });
 });
 
