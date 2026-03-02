@@ -1,6 +1,6 @@
 # Feature Gap Analysis Report
 
-Last updated: 2026-02-28
+Last updated: 2026-03-02
 
 ## Purpose
 
@@ -26,7 +26,7 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 
 - E2E encryption (PBKDF2 600k -> HKDF -> AES-256-GCM)
 - Team vault E2E encryption (ECDH-P256 key distribution)
-- Multi-tenant isolation (FORCE ROW LEVEL SECURITY on 28 tables)
+- Multi-tenant isolation (FORCE ROW LEVEL SECURITY on 33 tables)
 - Auto-lock (15 min idle / 5 min hidden tab)
 - Concurrent session management (list/revoke, device detection, rate limited)
 - Account lockout (progressive: 5 -> 15 min, 10 -> 1h, 15 -> 24h)
@@ -86,8 +86,8 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 ### Other
 
 - Browser extension (Chrome MV3, form detection, manual/auto fill, TOTP autofill)
-- i18n (ja/en, 884 keys)
-- Audit logs (34 actions, personal + team)
+- i18n (ja/en, 1,300+ keys)
+- Audit logs (62 actions, personal + team)
 - Import/export (CSV, JSON, password-protected encrypted export)
 - Dark mode / keyboard shortcuts
 - Health checks / structured logs / Terraform IaC
@@ -105,7 +105,7 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 | ~~S-3~~ | ~~FIDO2 / WebAuthn (login 2FA)~~ | Yes | Yes | Yes | Yes | - | Yes | Yes | — | — |
 | S-4 | Passkey-based vault unlock | - | Yes | - | - | - | - | - | Medium | High |
 | ~~S-5~~ | ~~Concurrent session management (list/revoke)~~ | Yes | Yes | Yes | Yes | - | Yes | Yes | — | — |
-| S-6 | New-device login notification | Yes | Yes | Yes | Yes | - | Yes | Yes | Medium | Medium |
+| ~~S-6~~ | ~~New-device login notification~~ | Yes | Yes | Yes | Yes | - | Yes | Yes | — | — |
 | S-7 | Phishing detection alert | - | - | - | Yes | - | - | - | Low | High |
 
 > **Out of scope by design: S-3 FIDO2 / WebAuthn (login 2FA)**  
@@ -129,6 +129,10 @@ By OSS-first design, authentication is not embedded in the app. MFA/2FA is expec
 
 Active session list (`GET /api/sessions`) and individual/bulk revocation (`DELETE /api/sessions/[id]`, `DELETE /api/sessions`). Device/browser/OS detection via Bowser. Rate limited (10/min single, 5/min bulk). Audit logged (`SESSION_REVOKE`, `SESSION_REVOKE_ALL`). Tenant RLS applied. UI in `sessions-card.tsx`.
 
+#### ~~S-6 New-device login notification~~ — Implemented (2026-03-02)
+
+New-device detection compares browser + OS against recent sessions and skips first-ever login. On detection, passwd-sso sends a localized email notification and creates an in-app notification without blocking sign-in flow.
+
 ---
 
 ### 2.2 Vault Management / Team
@@ -140,7 +144,7 @@ Active session list (`GET /api/sessions`) and individual/bulk revocation (`DELET
 | ~~V-3~~ | ~~Duplicate detection~~ | Yes | - | - | - | - | - | - | — | — |
 | ~~V-4~~ | ~~Entry expiration / rotation reminders~~ | Yes | - | Yes | - | Yes | - | - | — | — |
 | V-5 | Multiple personal vaults | Yes | - | - | - | Yes | Yes | - | Low | High |
-| V-6 | Nested tags | Yes | - | - | - | - | - | - | Low | Low |
+| ~~V-6~~ | ~~Nested tags~~ | Yes | - | - | - | - | - | - | — | — |
 
 #### ~~V-1 Folders / hierarchy~~ — Implemented (2026-02-18)
 
@@ -158,6 +162,10 @@ Added duplicate section in Watchtower. Compares host + username after client-sid
 
 Added `PasswordEntry.expiresAt`, date-picker UI, Watchtower expired/expiring detection, and card badges.
 
+#### ~~V-6 Nested tags~~ — Implemented (2026-03-02)
+
+Added parent-child tag hierarchy for personal and team vaults with max depth 3, cycle prevention, root-level uniqueness, tree API responses, and indented selectors / sidebar rendering.
+
 ---
 
 ### 2.3 Entry Types
@@ -169,7 +177,7 @@ Added `PasswordEntry.expiresAt`, date-picker UI, Watchtower expired/expiring det
 | ~~E-3~~ | ~~Software license~~ | Yes | - | Yes | - | - | - | - | — | — |
 | ~~E-4~~ | ~~Custom field: BOOLEAN~~ | - | Yes | - | - | - | - | - | — | — |
 | ~~E-5~~ | ~~Custom field: DATE, MONTH_YEAR~~ | Yes | - | - | - | - | - | - | — | — |
-| E-6 | Secure note Markdown support | Yes | - | - | - | - | - | - | Low | Low |
+| ~~E-6~~ | ~~Secure note Markdown support~~ | Yes | - | - | - | - | - | - | — | — |
 
 #### E-1 SSH key management
 
@@ -192,6 +200,10 @@ Extended custom field types enum to include BOOLEAN type. Supports true/false to
 #### ~~E-5 Custom field: DATE, MONTH_YEAR~~ — Implemented (2026-02-28)
 
 Extended custom field types to support DATE (full date picker, YYYY-MM-DD) and MONTH_YEAR (month/year picker, YYYY-MM). Both with localized formatting across all views (detail, history, export).
+
+#### ~~E-6 Secure note Markdown support~~ — Implemented (2026-03-02)
+
+Secure notes now support Markdown authoring with Edit/Preview tabs, rendered/source switching in detail views, GFM rendering, and external-image blocking for privacy. Template-based note creation is also available for common note types.
 
 ---
 
@@ -254,7 +266,7 @@ Form submit capture (capture phase) + click-based detection for SPAs. Registrati
 | # | Feature | 1P | BW | LP | DL | KP | PP | NP | Impact | Implementation Effort |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ~~C-1~~ | ~~Send (text/file sharing to non-users)~~ | - | Yes | - | - | - | - | - | — | — |
-| C-2 | Granular sharing permissions (view/edit/admin) | Yes | Yes | Yes | Yes | - | Yes | - | Medium | Medium |
+| ~~C-2~~ | ~~Granular sharing permissions (view/edit/admin)~~ | Yes | Yes | Yes | Yes | - | Yes | - | — | — |
 | C-3 | Vault-level sharing | Yes | Collection | - | - | KeeShare | Yes | - | Low | High |
 
 #### ~~C-1 Send~~ — Implemented (2026-02-19)
@@ -263,6 +275,10 @@ Implemented Bitwarden-like temporary text/file sharing.
 Added `sendContentType` to `PasswordShare` model; supports expiry, view limits, password protection, revocation.
 Audit events: `SEND_CREATE`, `SEND_REVOKE`. Sidebar integrated under "Share".
 
+#### ~~C-2 Granular sharing permissions~~ — Implemented (2026-03-02)
+
+Share links now support visibility presets for sensitive-field reduction: full view, password-hidden view, and overview-only view. Team-policy checks can block sharing entirely when configured.
+
 ---
 
 ### 2.7 Notifications / Alerts
@@ -270,7 +286,7 @@ Audit events: `SEND_CREATE`, `SEND_REVOKE`. Sidebar integrated under "Share".
 | # | Feature | 1P | BW | LP | DL | KP | PP | NP | Impact | Implementation Effort |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ~~N-1~~ | ~~Email notifications (breach etc.)~~ | Yes | Yes | Yes | Yes | - | Yes | Yes | — | — |
-| N-2 | In-app notification center | Yes | Yes | Yes | Yes | - | Yes | Yes | Medium | Medium |
+| ~~N-2~~ | ~~In-app notification center~~ | Yes | Yes | Yes | Yes | - | Yes | Yes | — | — |
 | ~~N-3~~ | ~~Password-change reminders~~ | Yes | - | Yes | - | Yes | - | - | — | — |
 | ~~N-4~~ | ~~Emergency-access request email~~ | - | Yes | Yes | - | - | - | Yes | — | — |
 
@@ -282,6 +298,10 @@ Dual-provider email foundation: Resend and SMTP (nodemailer). Provider selection
 
 6 email notification types across all emergency access workflows: invite, grant accepted, grant declined, access requested (with wait period), access approved, access revoked. Integrated into all EA API routes. Uses N-1 email infrastructure.
 
+#### ~~N-2 In-app notification center~~ — Implemented (2026-03-02)
+
+Added a notification bell with unread count, paginated notification list, mark-as-read actions, and polling that pauses when the tab is hidden. New-device login events are delivered through the same channel.
+
 ---
 
 ### 2.8 Enterprise
@@ -290,18 +310,21 @@ Dual-provider email foundation: Resend and SMTP (nodemailer). Provider selection
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ~~B-1~~ | ~~SCIM provisioning~~ | Yes | Yes | Yes | Yes | - | Yes | Yes | — | — |
 | B-2 | Directory sync (AD/Azure AD/LDAP) | Yes | Yes | Yes | Yes | - | - | - | Medium | High |
-| B-3 | SIEM integration (events API) | Yes | Yes | Yes | Yes | - | - | - | Medium | Medium |
-| B-4 | Security policies (enforce 2FA/password requirements) | Yes | Yes | Yes | Yes | - | Yes | Yes | Medium | Medium |
+| ~~B-3~~ | ~~SIEM integration (events API)~~ | Yes | Yes | Yes | Yes | - | - | - | — | — |
+| ~~B-4~~ | ~~Security policies (enforce 2FA/password requirements)~~ | Yes | Yes | Yes | Yes | - | Yes | Yes | — | — |
 | B-5 | Admin password reset | Yes | Yes | Yes | - | - | - | Yes | Low | Medium |
 
 #### ~~B-1 SCIM provisioning~~ — Implemented (2026-02-27)
 
 Implemented SCIM 2.0 provisioning scoped to tenant level. Endpoints: `/api/scim/v2/Users` (CRUD), `/api/scim/v2/Groups` (CRUD), `/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas`. Bearer token auth with tenant-scoped token management. Groups map to team membership roles. Rate limiting and RFC 7644 compliant error responses included.
 
-#### B-3 SIEM integration
+#### ~~B-3 SIEM integration~~ — Implemented (2026-03-02)
 
-- Current: audit logs stored in DB + pino stdout; no external SIEM API
-- Proposal: audit-log REST export (JSON Lines / CSV) and optional webhook notifications
+Audit logs can now be downloaded via REST in JSONL / CSV for both personal and team scopes. Team audit logs also support webhook delivery with HMAC signing, retries, and failure handling for external SIEM ingestion.
+
+#### ~~B-4 Security policies~~ — Implemented (2026-03-02)
+
+Added team security policy management covering export / sharing controls, reprompt requirements, and password-policy guidance. Export and sharing restrictions are server-enforced; password composition checks remain advisory because vault contents are client-side encrypted.
 
 ---
 
@@ -322,7 +345,7 @@ Implemented SCIM 2.0 provisioning scoped to tenant level. Endpoints: `/api/scim/
 | U-1 | Email alias generation | Proton Pass (unlimited), NordPass (200) | Medium | High |
 | U-2 | Continuous dark-web monitoring | Dashlane, LastPass | Medium | Medium |
 | U-3 | Travel Mode | 1Password | Low | Medium |
-| U-4 | Secure note templates | LastPass (15+) | Low | Low |
+| ~~U-4~~ | ~~Secure note templates~~ | LastPass (15+) | — | — |
 
 ---
 
@@ -375,21 +398,21 @@ Implemented SCIM 2.0 provisioning scoped to tenant level. Endpoints: `/api/scim/
 | ID | Feature | Rationale |
 | --- | --- | --- |
 | ~~S-5~~ | ~~Session management~~ | ✅ 2026-02-23 |
-| S-6 | Login notifications | Built on top of N-1 email foundation |
+| ~~S-6~~ | ~~Login notifications~~ | ✅ 2026-03-02 |
 | ~~E-2~~ | ~~Bank account type~~ | ✅ 2026-02-28 |
 | ~~E-3~~ | ~~Software license type~~ | ✅ 2026-02-28 |
 | ~~X-3~~ | ~~Context menu~~ | ✅ 2026-02-28 |
 | ~~X-4~~ | ~~Extension keyboard shortcuts~~ | ✅ 2026-02-28 |
-| C-2 | Granular sharing permissions | Extend existing RBAC |
-| B-3 | SIEM integration | Expose audit logs via REST |
-| B-4 | Security policies | Add team policy tables/settings |
+| ~~C-2~~ | ~~Granular sharing permissions~~ | ✅ 2026-03-02 |
+| ~~B-3~~ | ~~SIEM integration~~ | ✅ 2026-03-02 |
+| ~~B-4~~ | ~~Security policies~~ | ✅ 2026-03-02 |
 | P-2 | CLI tool | Developer-focused differentiation |
-| V-6 | Nested tags | Hierarchy via `/` style path representation |
-| U-4 | Secure note templates | Mostly schema/template additions |
-| N-2 | In-app notification center | Generic notification UX beyond Watchtower |
+| ~~V-6~~ | ~~Nested tags~~ | ✅ 2026-03-02 |
+| ~~U-4~~ | ~~Secure note templates~~ | ✅ 2026-03-02 |
+| ~~N-2~~ | ~~In-app notification center~~ | ✅ 2026-03-02 |
 | ~~E-4~~ | ~~Custom field: BOOLEAN~~ | ✅ 2026-02-28 |
 | ~~E-5~~ | ~~Custom field: DATE, MONTH_YEAR~~ | ✅ 2026-02-28 |
-| E-6 | Secure note Markdown | Editor integration |
+| ~~E-6~~ | ~~Secure note Markdown~~ | ✅ 2026-03-02 |
 
 ### P3: Mid/long-term (low impact or high effort)
 
@@ -448,16 +471,16 @@ Completed: 2026-02-23
 12. ~~**N-4** Emergency-access request notifications~~ ✅
 13. ~~**C-1** Send (temporary sharing)~~ ✅
 
-### Phase 4: Enterprise readiness (P1 + P2) — Partially complete
+### Phase 4: Enterprise readiness (P1 + P2) — ✅ Completed
 
 ```
 Goal: Add controls needed for enterprise use
-Completed: B-1 SCIM, S-5 Session management
+Completed: 2026-03-02
 ```
 
 1. ~~**B-1** SCIM provisioning~~ ✅
-2. **B-4** Security policies
-3. **B-3** SIEM integration
+2. ~~**B-4** Security policies~~ ✅
+3. ~~**B-3** SIEM integration~~ ✅
 4. ~~**S-5** Session management~~ ✅
 
 ### Phase 5: Platform expansion (P2 + P3)
@@ -495,7 +518,7 @@ Feature-category coverage:
 - Multi-tenant isolation with FORCE ROW LEVEL SECURITY (28 tables)
 - SCIM 2.0 provisioning (tenant-scoped, team-level group mapping)
 - Coexistence of team vault + personal E2E vault
-- Strong audit-log surface (36 action types)
+- Strong audit-log surface (62 action types)
 - Send (temporary text/file sharing) parity with Bitwarden
 - Strong vault management: folder hierarchy + entry history + duplicate detection
 - Full extension feature set: autofill, TOTP, context menu, keyboard shortcuts, login detection & save
@@ -505,7 +528,7 @@ Feature-category coverage:
 **Largest gaps:**
 
 - No mobile / desktop apps
-- Enterprise controls (SIEM, policy engine) — SCIM and session management implemented
+- Follow-on enterprise work remains in directory sync (B-2) and admin password reset (B-5)
 - Extension gaps: card/address autofill (X-2), TOTP QR capture (X-6)
 
 **Improvements since previous report (2026-02-20):**
@@ -517,10 +540,11 @@ Feature-category coverage:
 - Extension Group A completed: context menu, keyboard shortcuts, new-login detect & save
 - Group B completed: session management, email notification infrastructure, emergency-access notifications
 - Group C completed: Bank Account + Software License entry types, BOOLEAN/DATE/MONTH_YEAR custom fields, requireReprompt/expiresAt on all 7 entry types
+- Batch D completed: notification center, login alerts, nested tags, secure note templates/Markdown, share permissions, team policies, audit download + webhooks
 
 ---
 
-## 6. Recommended Next Batch (Batch D)
+## 6. Recommended Next Batch (Batch D) — ✅ Completed (2026-03-02)
 
 Combine remaining Phase 2 scope with low-friction P2 items.
 
@@ -551,7 +575,20 @@ Combine remaining Phase 2 scope with low-friction P2 items.
 
 Also extended `requireReprompt` and `expiresAt` from LOGIN-only to all 7 entry types (personal + team vaults).
 
-**All three groups completed:** ~~A~~ -> ~~B~~ -> ~~C~~
+### Group D: Collaboration + Enterprise Controls — ✅ Completed (2026-03-02)
+
+| ID | Feature | Effort | Notes |
+| --- | --- | --- | --- |
+| ~~N-2~~ | ~~In-app notification center~~ | Medium | ✅ Bell UI, unread count, paginated inbox |
+| ~~S-6~~ | ~~New-device login notification~~ | Medium | ✅ Localized email + in-app notification |
+| ~~V-6~~ | ~~Nested tags~~ | Low | ✅ Parent-child tree, depth/cycle validation |
+| ~~U-4~~ | ~~Secure note templates~~ | Low | ✅ 6 starter templates for note creation |
+| ~~E-6~~ | ~~Secure note Markdown~~ | Low | ✅ Preview/render support with safe sanitization |
+| ~~C-2~~ | ~~Granular sharing permissions~~ | Medium | ✅ `VIEW_ALL` / `HIDE_PASSWORD` / `OVERVIEW_ONLY` |
+| ~~B-3~~ | ~~SIEM integration~~ | Medium | ✅ Audit download + team webhooks |
+| ~~B-4~~ | ~~Security policies~~ | Medium | ✅ Team policy UI + enforcement helpers |
+
+**All four groups completed:** ~~A~~ -> ~~B~~ -> ~~C~~ -> ~~D~~
 
 ---
 
