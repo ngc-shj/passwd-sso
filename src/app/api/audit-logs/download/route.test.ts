@@ -157,6 +157,32 @@ describe("GET /api/audit-logs/download", () => {
     expect(json.details.range).toContain("90");
   });
 
+  it("escapes CSV injection characters in output", async () => {
+    mockPrismaAuditLog.findMany.mockResolvedValue([
+      {
+        ...MOCK_LOGS[0],
+        userAgent: "=cmd|'/C calc'!A0",
+      },
+    ]);
+    const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download", {
+      searchParams: { format: "csv" },
+    });
+    const res = await GET(req);
+    const body = await parseStreamResponse(res);
+    // Single quote prefix should be added before the '=' character
+    expect(body).toContain("\"'=cmd");
+  });
+
+  it("includes metadata column in CSV output", async () => {
+    const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download", {
+      searchParams: { format: "csv" },
+    });
+    const res = await GET(req);
+    const body = await parseStreamResponse(res);
+    const lines = body.trim().split("\n");
+    expect(lines[0]).toContain("metadata");
+  });
+
   it("records audit log download event", async () => {
     const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download");
     await GET(req);

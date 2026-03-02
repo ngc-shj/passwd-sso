@@ -40,7 +40,7 @@ function formatCsvRow(values: string[]): string {
   return values.map(escapeCsvValue).join(",");
 }
 
-const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "userName", "userEmail"];
+const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "userName", "userEmail", "metadata"];
 
 // GET /api/teams/[teamId]/audit-logs/download — Download team audit logs (ADMIN/OWNER)
 export async function GET(req: NextRequest, { params }: Params) {
@@ -185,6 +185,7 @@ export async function GET(req: NextRequest, { params }: Params) {
                     log.user?.id ?? "",
                     log.user?.name ?? "",
                     log.user?.email ?? "",
+                    JSON.stringify(log.metadata ?? {}),
                   ]) + "\n",
                 ),
               );
@@ -215,11 +216,11 @@ export async function GET(req: NextRequest, { params }: Params) {
             cursor = batch[batch.length - 1].id;
           }
         }
-      } catch {
-        // Stream errors are non-recoverable
-      } finally {
-        controller.close();
+      } catch (err) {
+        controller.error(err);
+        return;
       }
+      controller.close();
     },
   });
 
