@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
-import { submitPersonalPasswordForm } from "@/components/passwords/personal-password-submit";
+import { submitPersonalLoginForm } from "@/components/passwords/personal-login-submit";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 
 const buildPasswordHistoryMock = vi.fn();
@@ -22,7 +22,7 @@ vi.mock("@/components/passwords/personal-entry-submit", () => ({
   executePersonalEntrySubmit: (...args: unknown[]) => executePersonalEntrySubmitMock(...args),
 }));
 
-describe("submitPersonalPasswordForm", () => {
+describe("submitPersonalLoginForm", () => {
   beforeEach(() => {
     buildPasswordHistoryMock.mockReset();
     buildPersonalEntryPayloadMock.mockReset();
@@ -33,7 +33,7 @@ describe("submitPersonalPasswordForm", () => {
   it("returns early when encryption key is missing", async () => {
     const setSubmitting = vi.fn();
 
-    await submitPersonalPasswordForm({
+    await submitPersonalLoginForm({
       mode: "create",
       encryptionKey: null,
       title: "title",
@@ -69,7 +69,7 @@ describe("submitPersonalPasswordForm", () => {
     });
     extractTagIdsMock.mockReturnValue(["t1"]);
 
-    await submitPersonalPasswordForm({
+    await submitPersonalLoginForm({
       mode: "create",
       encryptionKey,
       userId: "user-1",

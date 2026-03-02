@@ -11,7 +11,7 @@ import type { TagData } from "@/components/tags/tag-input";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 import type { PasswordSubmitRouter } from "@/hooks/password-form-router";
 
-export interface SubmitPersonalPasswordFormArgs {
+export interface SubmitPersonalLoginFormArgs {
   mode: "create" | "edit";
   initialData?: PersonalLoginFormInitialData;
   encryptionKey: CryptoKey | null;
@@ -34,7 +34,7 @@ export interface SubmitPersonalPasswordFormArgs {
   onSaved?: () => void;
 }
 
-export async function submitPersonalPasswordForm({
+export async function submitPersonalLoginForm({
   mode,
   initialData,
   encryptionKey,
@@ -55,7 +55,7 @@ export async function submitPersonalPasswordForm({
   t,
   router,
   onSaved,
-}: SubmitPersonalPasswordFormArgs): Promise<void> {
+}: SubmitPersonalLoginFormArgs): Promise<void> {
   if (!encryptionKey) return;
 
   const existingHistory = buildPasswordHistory(

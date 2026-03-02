@@ -16,7 +16,7 @@ import {
 import type { TeamLoginFormProps } from "@/components/team/team-login-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { CARD_BRANDS } from "@/lib/credit-card";
-import { handleTeamCardNumberChange } from "@/components/team/team-password-form-actions";
+import { handleTeamCardNumberChange } from "@/components/team/team-login-form-actions";
 import { getTeamCardValidationState } from "@/components/team/team-credit-card-validation";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";

@@ -7,16 +7,16 @@ import {
   buildPersonalLoginFormController,
 } from "@/hooks/personal-login-form-controller";
 
-const submitPersonalPasswordFormMock = vi.fn();
+const submitPersonalLoginFormMock = vi.fn();
 
-vi.mock("@/components/passwords/personal-password-submit", () => ({
-  submitPersonalPasswordForm: (...args: unknown[]) => submitPersonalPasswordFormMock(...args),
+vi.mock("@/components/passwords/personal-login-submit", () => ({
+  submitPersonalLoginForm: (...args: unknown[]) => submitPersonalLoginFormMock(...args),
 }));
 
 describe("buildPersonalLoginFormController", () => {
   beforeEach(() => {
-    submitPersonalPasswordFormMock.mockReset();
-    submitPersonalPasswordFormMock.mockResolvedValue(undefined);
+    submitPersonalLoginFormMock.mockReset();
+    submitPersonalLoginFormMock.mockResolvedValue(undefined);
   });
 
   it("delegates submit and cancel/back actions", async () => {
@@ -38,8 +38,8 @@ describe("buildPersonalLoginFormController", () => {
     await controller.handleSubmit({ preventDefault } as unknown as React.FormEvent);
 
     expect(preventDefault).toHaveBeenCalledTimes(1);
-    expect(submitPersonalPasswordFormMock).toHaveBeenCalledTimes(1);
-    expect(submitPersonalPasswordFormMock.mock.calls[0]?.[0]).toMatchObject({
+    expect(submitPersonalLoginFormMock).toHaveBeenCalledTimes(1);
+    expect(submitPersonalLoginFormMock.mock.calls[0]?.[0]).toMatchObject({
       mode: "create",
       userId: "user-1",
       title: "title",
@@ -66,8 +66,8 @@ describe("buildPersonalLoginFormController", () => {
 
     await controller.handleSubmit({ preventDefault: vi.fn() } as unknown as React.FormEvent);
 
-    expect(submitPersonalPasswordFormMock).toHaveBeenCalledTimes(1);
-    expect(submitPersonalPasswordFormMock.mock.calls[0]?.[0]?.userId).toBeUndefined();
+    expect(submitPersonalLoginFormMock).toHaveBeenCalledTimes(1);
+    expect(submitPersonalLoginFormMock.mock.calls[0]?.[0]?.userId).toBeUndefined();
   });
 });
 

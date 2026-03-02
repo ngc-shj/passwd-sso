@@ -7,7 +7,7 @@ import { usePersonalLoginFormModel } from "@/hooks/use-personal-login-form-model
 const useRouterMock = vi.fn();
 const useVaultMock = vi.fn();
 const usePersonalFoldersMock = vi.fn();
-const submitPersonalPasswordFormMock = vi.fn();
+const submitPersonalLoginFormMock = vi.fn();
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -25,8 +25,8 @@ vi.mock("@/hooks/use-personal-folders", () => ({
   usePersonalFolders: () => usePersonalFoldersMock(),
 }));
 
-vi.mock("@/components/passwords/personal-password-submit", () => ({
-  submitPersonalPasswordForm: (...args: unknown[]) => submitPersonalPasswordFormMock(...args),
+vi.mock("@/components/passwords/personal-login-submit", () => ({
+  submitPersonalLoginForm: (...args: unknown[]) => submitPersonalLoginFormMock(...args),
 }));
 
 describe("usePersonalLoginFormModel", () => {
@@ -34,7 +34,7 @@ describe("usePersonalLoginFormModel", () => {
     useRouterMock.mockReset();
     useVaultMock.mockReset();
     usePersonalFoldersMock.mockReset();
-    submitPersonalPasswordFormMock.mockReset();
+    submitPersonalLoginFormMock.mockReset();
 
     useRouterMock.mockReturnValue({
       back: vi.fn(),
@@ -46,7 +46,7 @@ describe("usePersonalLoginFormModel", () => {
       userId: "user-1",
     });
     usePersonalFoldersMock.mockReturnValue([]);
-    submitPersonalPasswordFormMock.mockResolvedValue(undefined);
+    submitPersonalLoginFormMock.mockResolvedValue(undefined);
   });
 
   it("computes hasChanges from initial snapshot", () => {
@@ -74,7 +74,7 @@ describe("usePersonalLoginFormModel", () => {
     expect(result.current.hasChanges).toBe(true);
   });
 
-  it("delegates submit to submitPersonalPasswordForm", async () => {
+  it("delegates submit to submitPersonalLoginForm", async () => {
     const preventDefault = vi.fn();
     const onSaved = vi.fn();
     const { result } = renderHook(() =>
@@ -89,8 +89,8 @@ describe("usePersonalLoginFormModel", () => {
     });
 
     expect(preventDefault).toHaveBeenCalledTimes(1);
-    expect(submitPersonalPasswordFormMock).toHaveBeenCalledTimes(1);
-    expect(submitPersonalPasswordFormMock.mock.calls[0]?.[0]).toMatchObject({
+    expect(submitPersonalLoginFormMock).toHaveBeenCalledTimes(1);
+    expect(submitPersonalLoginFormMock.mock.calls[0]?.[0]).toMatchObject({
       mode: "create",
       userId: "user-1",
       onSaved,

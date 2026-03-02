@@ -1,6 +1,6 @@
 "use client";
 
-import type { SubmitPersonalPasswordFormArgs } from "@/components/passwords/personal-password-submit";
+import type { SubmitPersonalLoginFormArgs } from "@/components/passwords/personal-login-submit";
 import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
 import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
 import type { PersonalLoginFormEntryValues } from "@/hooks/use-personal-login-form-state";
@@ -28,7 +28,7 @@ export function buildPersonalLoginSubmitArgs({
   setSubmitting,
   translations,
   router,
-}: BuildPersonalLoginSubmitArgsParams): SubmitPersonalPasswordFormArgs {
+}: BuildPersonalLoginSubmitArgsParams): SubmitPersonalLoginFormArgs {
   return {
     mode,
     initialData,

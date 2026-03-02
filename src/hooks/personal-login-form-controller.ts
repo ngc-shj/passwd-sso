@@ -1,7 +1,7 @@
 import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
 import {
-  submitPersonalPasswordForm,
-} from "@/components/passwords/personal-password-submit";
+  submitPersonalLoginForm,
+} from "@/components/passwords/personal-login-submit";
 import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
 import type { PersonalLoginFormEntryValues } from "@/hooks/use-personal-login-form-state";
 import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
@@ -46,7 +46,7 @@ export function buildPersonalLoginFormController({
       translations,
       router,
     });
-    await submitPersonalPasswordForm(submitArgs);
+    await submitPersonalLoginForm(submitArgs);
   };
 
   return {

@@ -5,7 +5,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import {
   handleTeamCardNumberChange,
   submitTeamLoginForm,
-} from "@/components/team/team-password-form-actions";
+} from "@/components/team/team-login-form-actions";
 
 const executeTeamEntrySubmitMock = vi.fn();
 
