@@ -1,4 +1,4 @@
-import type { PersonalPasswordFormInitialData } from "@/components/passwords/personal-password-form-types";
+import type { PersonalLoginFormInitialData } from "@/components/passwords/personal-login-form-types";
 import {
   buildPersonalLoginFormDerived,
 } from "@/hooks/personal-login-form-derived";
@@ -13,7 +13,7 @@ import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-transl
 import type { TagData } from "@/components/tags/tag-input";
 
 export interface PersonalLoginFormPresenterArgs {
-  initialData?: PersonalPasswordFormInitialData;
+  initialData?: PersonalLoginFormInitialData;
   formState: PersonalLoginFormState;
   translations: PersonalPasswordFormTranslations;
   defaultFolderId?: string | null;

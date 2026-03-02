@@ -1,7 +1,7 @@
 "use client";
 
 import { type Dispatch, type SetStateAction } from "react";
-import type { PersonalPasswordFormInitialData } from "@/components/passwords/personal-password-form-types";
+import type { PersonalLoginFormInitialData } from "@/components/passwords/personal-login-form-types";
 import type { TagData } from "@/components/tags/tag-input";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
@@ -68,7 +68,7 @@ export interface PersonalLoginFormState {
 }
 
 export function usePersonalLoginFormState(
-  initialData?: PersonalPasswordFormInitialData,
+  initialData?: PersonalLoginFormInitialData,
   defaults?: { defaultFolderId?: string | null; defaultTags?: TagData[] },
 ): PersonalLoginFormState {
   const initial = buildPersonalLoginFormInitialValues(initialData, defaults);

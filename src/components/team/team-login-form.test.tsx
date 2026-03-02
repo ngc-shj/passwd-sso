@@ -244,7 +244,7 @@ vi.mock("@/components/passwords/entry-form-ui", () => ({
   ),
 }));
 
-import { TeamPasswordForm } from "./team-password-form";
+import { TeamLoginForm } from "./team-login-form";
 
 /* ---------- helpers ---------- */
 
@@ -282,7 +282,7 @@ function setupFetch(folders = FOLDERS, submitOk = true) {
 
 /* ---------- tests ---------- */
 
-describe("TeamPasswordForm — folder selection", () => {
+describe("TeamLoginForm — folder selection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     globalThis.fetch = mockFetch as unknown as typeof fetch;
@@ -293,7 +293,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     await act(async () => {
       render(
-        <TeamPasswordForm
+        <TeamLoginForm
           teamId="team-1"
           open={true}
           onOpenChange={vi.fn()}
@@ -313,7 +313,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     await act(async () => {
       render(
-        <TeamPasswordForm
+        <TeamLoginForm
           teamId="team-1"
           open={true}
           onOpenChange={vi.fn()}
@@ -333,7 +333,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     await act(async () => {
       render(
-        <TeamPasswordForm
+        <TeamLoginForm
           teamId="team-1"
           open={true}
           onOpenChange={vi.fn()}
@@ -361,7 +361,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     await act(async () => {
       render(
-        <TeamPasswordForm
+        <TeamLoginForm
           teamId="team-1"
           open={true}
           onOpenChange={vi.fn()}
@@ -395,7 +395,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     await act(async () => {
       render(
-        <TeamPasswordForm
+        <TeamLoginForm
           teamId="team-1"
           open={true}
           onOpenChange={vi.fn()}
@@ -439,7 +439,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     await act(async () => {
       render(
-        <TeamPasswordForm
+        <TeamLoginForm
           teamId="team-1"
           open={true}
           onOpenChange={vi.fn()}
@@ -482,10 +482,10 @@ describe("TeamPasswordForm — folder selection", () => {
     const onOpenChange = vi.fn();
     const onSaved = vi.fn();
 
-    // Simulate production pattern: parent conditionally renders TeamPasswordForm
-    function Wrapper({ formOpen, editData }: { formOpen: boolean; editData: React.ComponentProps<typeof TeamPasswordForm>["editData"] }) {
+    // Simulate production pattern: parent conditionally renders TeamLoginForm
+    function Wrapper({ formOpen, editData }: { formOpen: boolean; editData: React.ComponentProps<typeof TeamLoginForm>["editData"] }) {
       return formOpen ? (
-        <TeamPasswordForm
+        <TeamLoginForm
           teamId="team-1"
           open={true}
           onOpenChange={onOpenChange}
@@ -553,7 +553,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     await act(async () => {
       render(
-        <TeamPasswordForm
+        <TeamLoginForm
           teamId="team-1"
           open={true}
           onOpenChange={vi.fn()}

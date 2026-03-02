@@ -1,4 +1,4 @@
-import type { PasswordFormProps } from "@/components/passwords/personal-password-form-types";
+import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
 import {
   submitPersonalPasswordForm,
 } from "@/components/passwords/personal-password-submit";
@@ -9,9 +9,9 @@ import { buildPersonalLoginSubmitArgs } from "@/hooks/personal-login-form-submit
 import type { PasswordFormRouter } from "@/hooks/password-form-router";
 
 export interface PersonalLoginFormControllerArgs {
-  mode: Pick<PasswordFormProps, "mode">["mode"];
-  initialData: Pick<PasswordFormProps, "initialData">["initialData"];
-  onSaved: Pick<PasswordFormProps, "onSaved">["onSaved"];
+  mode: Pick<PersonalLoginFormProps, "mode">["mode"];
+  initialData: Pick<PersonalLoginFormProps, "initialData">["initialData"];
+  onSaved: Pick<PersonalLoginFormProps, "onSaved">["onSaved"];
   encryptionKey: CryptoKey | null;
   userId?: string | null;
   values: PersonalLoginFormEntryValues;

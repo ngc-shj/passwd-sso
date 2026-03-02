@@ -11,14 +11,14 @@ import {
 } from "@/components/passwords/entry-form-ui";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import { preventIMESubmit } from "@/lib/ime-guard";
-import type { PasswordFormProps } from "@/components/passwords/personal-password-form-types";
+import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
 import { usePersonalLoginFormModel } from "@/hooks/use-personal-login-form-model";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-export function PasswordForm({ mode, initialData, variant = "page", onSaved, defaultFolderId, defaultTags }: PasswordFormProps) {
+export function PersonalLoginForm({ mode, initialData, variant = "page", onSaved, defaultFolderId, defaultTags }: PersonalLoginFormProps) {
   const {
     t,
     tc,

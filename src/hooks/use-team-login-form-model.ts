@@ -1,6 +1,6 @@
 "use client";
 
-import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
+import type { TeamLoginFormProps } from "@/components/team/team-login-form-types";
 import { ENTRY_DIALOG_FLAT_SECTION_CLASS } from "@/components/passwords/entry-form-ui";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
 import { createTeamLoginSubmitHandler } from "@/hooks/team-login-form-controller";
@@ -9,7 +9,7 @@ import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { useTeamLoginFormState } from "@/hooks/use-team-login-form-state";
 
 type TeamLoginFormModelInput = Pick<
-  TeamPasswordFormProps,
+  TeamLoginFormProps,
   "teamId" | "open" | "onOpenChange" | "onSaved" | "entryType" | "editData" | "defaultFolderId" | "defaultTags"
 >;
 

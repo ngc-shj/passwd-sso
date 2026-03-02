@@ -4,7 +4,7 @@ import {
   buildPersonalEntryPayload,
 } from "@/lib/personal-entry-payload";
 import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
-import type { PersonalPasswordFormInitialData } from "@/components/passwords/personal-password-form-types";
+import type { PersonalLoginFormInitialData } from "@/components/passwords/personal-login-form-types";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { TagData } from "@/components/tags/tag-input";
@@ -13,7 +13,7 @@ import type { PasswordSubmitRouter } from "@/hooks/password-form-router";
 
 export interface SubmitPersonalPasswordFormArgs {
   mode: "create" | "edit";
-  initialData?: PersonalPasswordFormInitialData;
+  initialData?: PersonalLoginFormInitialData;
   encryptionKey: CryptoKey | null;
   userId?: string;
   title: string;

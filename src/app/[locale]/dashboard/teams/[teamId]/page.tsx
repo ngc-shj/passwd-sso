@@ -11,7 +11,7 @@ import { SearchBar } from "@/components/layout/search-bar";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { TeamNewDialog } from "@/components/team/team-new-dialog";
 import { TeamEditDialog } from "@/components/team/team-edit-dialog";
-import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
+import type { TeamLoginFormEditData } from "@/components/team/team-login-form-types";
 import { TeamArchivedList, type TeamArchivedListHandle } from "@/components/team/team-archived-list";
 import { TeamTrashList, type TeamTrashListHandle } from "@/components/team/team-trash-list";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
@@ -104,7 +104,7 @@ export default function TeamDashboardPage({
   const [formOpen, setFormOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newEntryType, setNewEntryType] = useState<EntryTypeValue>(ENTRY_TYPE.LOGIN);
-  const [editData, setEditData] = useState<TeamPasswordFormEditData | null>(null);
+  const [editData, setEditData] = useState<TeamLoginFormEditData | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const archivedListRef = useRef<TeamArchivedListHandle>(null);
   const trashListRef = useRef<TeamTrashListHandle>(null);

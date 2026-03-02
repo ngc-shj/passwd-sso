@@ -2,7 +2,7 @@ import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryPasswordHistory, EntryTotp } from "@/lib/entry-form-types";
 import type { TagData } from "@/components/tags/tag-input";
 
-export interface PersonalPasswordFormInitialData {
+export interface PersonalLoginFormInitialData {
   id: string;
   title: string;
   username: string;
@@ -19,9 +19,9 @@ export interface PersonalPasswordFormInitialData {
   folderId?: string | null;
 }
 
-export interface PasswordFormProps {
+export interface PersonalLoginFormProps {
   mode: "create" | "edit";
-  initialData?: PersonalPasswordFormInitialData;
+  initialData?: PersonalLoginFormInitialData;
   variant?: "page" | "dialog";
   onSaved?: () => void;
   defaultFolderId?: string | null;

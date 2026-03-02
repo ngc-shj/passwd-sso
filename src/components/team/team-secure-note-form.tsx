@@ -20,7 +20,7 @@ import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
+import type { TeamLoginFormProps } from "@/components/team/team-login-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { SECURE_NOTE_TEMPLATES } from "@/lib/secure-note-templates";
 import { ENTRY_TYPE } from "@/lib/constants";
@@ -36,7 +36,7 @@ export function TeamSecureNoteForm({
   editData,
   defaultFolderId,
   defaultTags,
-}: TeamPasswordFormProps) {
+}: TeamLoginFormProps) {
   const tSn = useTranslations("SecureNoteForm");
   const base = useTeamBaseFormModel({
     teamId,

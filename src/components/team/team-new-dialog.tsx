@@ -7,7 +7,7 @@ import { buildTeamEntryCopy } from "@/components/team/team-entry-copy";
 import { buildTeamEntryCopyData } from "@/components/team/team-entry-copy-data";
 import { TeamEntryDialogShell } from "@/components/team/team-entry-dialog-shell";
 import type { TeamTagData } from "@/components/team/team-tag-input";
-import { TeamPasswordForm } from "@/components/team/team-password-form";
+import { TeamLoginForm } from "@/components/team/team-login-form";
 import { TeamSecureNoteForm } from "@/components/team/team-secure-note-form";
 import { TeamCreditCardForm } from "@/components/team/team-credit-card-form";
 import { TeamIdentityForm } from "@/components/team/team-identity-form";
@@ -54,7 +54,7 @@ export function TeamNewDialog({
     defaultTags,
   };
 
-  let form = <TeamPasswordForm {...shared} />;
+  let form = <TeamLoginForm {...shared} />;
 
   switch (entryType) {
     case ENTRY_TYPE.SECURE_NOTE:

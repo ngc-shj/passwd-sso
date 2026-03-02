@@ -1,4 +1,4 @@
-import type { TeamEntryKind } from "@/components/team/team-password-form-types";
+import type { TeamEntryKind } from "@/components/team/team-login-form-types";
 
 export interface EntryLocaleCopy {
   edit: string;

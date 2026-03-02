@@ -8,12 +8,12 @@ import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-sect
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamAttachmentSection } from "./team-attachment-section";
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
-import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
+import type { TeamLoginFormProps } from "@/components/team/team-login-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { EntryActionBar } from "@/components/passwords/entry-form-ui";
 import { useTeamLoginFormModel } from "@/hooks/use-team-login-form-model";
 
-export function TeamPasswordForm({
+export function TeamLoginForm({
   teamId,
   open,
   onOpenChange,
@@ -22,7 +22,7 @@ export function TeamPasswordForm({
   editData,
   defaultFolderId,
   defaultTags,
-}: TeamPasswordFormProps) {
+}: TeamLoginFormProps) {
   const {
     base,
     loginMainFieldsProps,

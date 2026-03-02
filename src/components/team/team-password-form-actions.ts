@@ -4,7 +4,7 @@ import { extractTagIds } from "@/lib/entry-form-helpers";
 import { detectCardBrand, formatCardNumber, normalizeCardBrand, normalizeCardNumber } from "@/lib/credit-card";
 import { executeTeamEntrySubmit } from "@/components/team/team-entry-submit";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
+import type { TeamLoginFormEditData } from "@/components/team/team-login-form-types";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
@@ -40,7 +40,7 @@ export interface SubmitTeamPasswordFormArgs {
   teamEncryptionKey: CryptoKey;
   teamKeyVersion: number;
   isEdit: boolean;
-  editData?: TeamPasswordFormEditData | null;
+  editData?: TeamLoginFormEditData | null;
   effectiveEntryType: EntryTypeValue;
   title: string;
   notes: string;

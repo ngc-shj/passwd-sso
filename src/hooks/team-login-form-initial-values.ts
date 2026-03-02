@@ -1,4 +1,4 @@
-import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
+import type { TeamLoginFormEditData } from "@/components/team/team-login-form-types";
 import { formatCardNumber } from "@/lib/credit-card";
 import {
   DEFAULT_GENERATOR_SETTINGS,
@@ -114,7 +114,7 @@ export function applyPolicyToGeneratorSettings(
 }
 
 export function buildTeamLoginFormInitialValues(
-  editData?: TeamPasswordFormEditData | null,
+  editData?: TeamLoginFormEditData | null,
   teamPolicy?: TeamPolicyClient | null,
   defaults?: { defaultFolderId?: string | null; defaultTags?: TeamTagData[] },
 ): TeamLoginFormInitialValues {

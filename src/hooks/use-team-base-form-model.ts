@@ -8,8 +8,8 @@ import { getTeamEntryKindState } from "@/components/team/team-entry-kind";
 import { buildTeamEntryCopy } from "@/components/team/team-entry-copy";
 import { buildTeamEntryCopyData } from "@/components/team/team-entry-copy-data";
 import type {
-  TeamPasswordFormEditData,
-} from "@/components/team/team-password-form-types";
+  TeamLoginFormEditData,
+} from "@/components/team/team-login-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import { useTeamAttachments } from "@/hooks/use-team-attachments";
 import { useTeamFolders } from "@/hooks/use-team-folders";
@@ -32,7 +32,7 @@ export interface UseTeamBaseFormModelInput {
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
   entryType?: EntryTypeValue;
-  editData?: TeamPasswordFormEditData | null;
+  editData?: TeamLoginFormEditData | null;
   defaultFolderId?: string | null;
   defaultTags?: TeamTagData[];
 }

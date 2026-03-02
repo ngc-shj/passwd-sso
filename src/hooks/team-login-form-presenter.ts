@@ -1,4 +1,4 @@
-import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
+import type { TeamLoginFormEditData } from "@/components/team/team-login-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
@@ -9,7 +9,7 @@ import { buildTeamLoginFieldsProps } from "@/hooks/team-login-fields-props";
 type TeamPolicy = ReturnType<typeof useTeamPolicy>["policy"];
 
 interface BuildTeamLoginFormPresenterArgs {
-  editData?: TeamPasswordFormEditData | null;
+  editData?: TeamLoginFormEditData | null;
   defaultFolderId?: string | null;
   defaultTags?: TeamTagData[];
   title: string;

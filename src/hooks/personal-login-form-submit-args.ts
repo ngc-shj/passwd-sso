@@ -1,15 +1,15 @@
 "use client";
 
 import type { SubmitPersonalPasswordFormArgs } from "@/components/passwords/personal-password-submit";
-import type { PasswordFormProps } from "@/components/passwords/personal-password-form-types";
+import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
 import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import type { PersonalLoginFormEntryValues } from "@/hooks/use-personal-login-form-state";
 import type { PasswordFormRouter } from "@/hooks/password-form-router";
 
 interface BuildPersonalLoginSubmitArgsParams {
-  mode: Pick<PasswordFormProps, "mode">["mode"];
-  initialData: Pick<PasswordFormProps, "initialData">["initialData"];
-  onSaved: Pick<PasswordFormProps, "onSaved">["onSaved"];
+  mode: Pick<PersonalLoginFormProps, "mode">["mode"];
+  initialData: Pick<PersonalLoginFormProps, "initialData">["initialData"];
+  onSaved: Pick<PersonalLoginFormProps, "onSaved">["onSaved"];
   encryptionKey: CryptoKey | null;
   userId?: string | null;
   values: PersonalLoginFormEntryValues;

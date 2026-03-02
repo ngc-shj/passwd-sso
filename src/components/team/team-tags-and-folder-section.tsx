@@ -2,7 +2,7 @@
 
 import { EntryTagsAndFolderLayout } from "@/components/passwords/entry-tags-and-folder-layout";
 import { TeamTagInput } from "@/components/team/team-tag-input";
-import type { TeamFolderItem } from "@/components/team/team-password-form-types";
+import type { TeamFolderItem } from "@/components/team/team-login-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 
 interface TeamTagsAndFolderSectionProps {

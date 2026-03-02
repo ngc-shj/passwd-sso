@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * PasswordForm — Folder selector integration tests
+ * PersonalLoginForm — Folder selector integration tests
  *
  * Covers:
  *   - Folder select renders when folders exist (fetched from API)
@@ -188,7 +188,7 @@ vi.mock("@/components/ui/select", () => ({
   SelectValue: () => null,
 }));
 
-import { PasswordForm } from "./personal-password-form";
+import { PersonalLoginForm } from "./personal-login-form";
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -228,7 +228,7 @@ const baseInitialData = {
   tags: [],
 };
 
-describe("PasswordForm folder selector", () => {
+describe("PersonalLoginForm folder selector", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -238,7 +238,7 @@ describe("PasswordForm folder selector", () => {
 
     await act(async () => {
       render(
-        <PasswordForm mode="create" variant="dialog" />,
+        <PersonalLoginForm mode="create" variant="dialog" />,
       );
     });
 
@@ -259,7 +259,7 @@ describe("PasswordForm folder selector", () => {
 
     await act(async () => {
       render(
-        <PasswordForm mode="create" variant="dialog" />,
+        <PersonalLoginForm mode="create" variant="dialog" />,
       );
     });
 
@@ -282,7 +282,7 @@ describe("PasswordForm folder selector", () => {
 
     await act(async () => {
       render(
-        <PasswordForm
+        <PersonalLoginForm
           mode="edit"
           variant="dialog"
           initialData={{ ...baseInitialData, folderId: "f1" }}
@@ -307,7 +307,7 @@ describe("PasswordForm folder selector", () => {
 
     await act(async () => {
       render(
-        <PasswordForm
+        <PersonalLoginForm
           mode="create"
           variant="dialog"
           onSaved={vi.fn()}
@@ -364,7 +364,7 @@ describe("PasswordForm folder selector", () => {
 
     await act(async () => {
       render(
-        <PasswordForm
+        <PersonalLoginForm
           mode="edit"
           variant="dialog"
           initialData={{ ...baseInitialData, folderId: "f1" }}
@@ -414,7 +414,7 @@ describe("PasswordForm folder selector", () => {
 
     await act(async () => {
       render(
-        <PasswordForm mode="create" variant="dialog" />,
+        <PersonalLoginForm mode="create" variant="dialog" />,
       );
     });
 
@@ -452,7 +452,7 @@ describe("PasswordForm folder selector", () => {
 
     await act(async () => {
       render(
-        <PasswordForm mode="create" variant="dialog" onSaved={vi.fn()} />,
+        <PersonalLoginForm mode="create" variant="dialog" onSaved={vi.fn()} />,
       );
     });
 

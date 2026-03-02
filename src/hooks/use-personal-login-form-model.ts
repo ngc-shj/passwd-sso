@@ -3,7 +3,7 @@
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
-import type { PasswordFormProps } from "@/components/passwords/personal-password-form-types";
+import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
 import {
   buildPersonalLoginFormController,
 } from "@/hooks/personal-login-form-controller";
@@ -16,7 +16,7 @@ import {
 } from "@/hooks/use-entry-form-translations";
 import { usePersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
 
-type PersonalPasswordFormModelInput = Pick<PasswordFormProps, "mode" | "initialData" | "onSaved" | "defaultFolderId" | "defaultTags">;
+type PersonalLoginFormModelInput = Pick<PersonalLoginFormProps, "mode" | "initialData" | "onSaved" | "defaultFolderId" | "defaultTags">;
 
 export function usePersonalLoginFormModel({
   mode,
@@ -24,7 +24,7 @@ export function usePersonalLoginFormModel({
   onSaved,
   defaultFolderId,
   defaultTags,
-}: PersonalPasswordFormModelInput) {
+}: PersonalLoginFormModelInput) {
   const translationBundle = useEntryFormTranslations();
   const translations = toPersonalPasswordFormTranslations(translationBundle);
   const router = useRouter();

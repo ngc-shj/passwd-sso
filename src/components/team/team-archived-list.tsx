@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { PasswordCard } from "@/components/passwords/password-card";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { TeamEditDialog } from "@/components/team/team-edit-dialog";
-import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
+import type { TeamLoginFormEditData } from "@/components/team/team-login-form-types";
 import { Building2, RotateCcw, Trash2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
@@ -81,7 +81,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editTeamId, setEditTeamId] = useState<string | null>(null);
-  const [editData, setEditData] = useState<TeamPasswordFormEditData | null>(null);
+  const [editData, setEditData] = useState<TeamLoginFormEditData | null>(null);
 
   const effectiveSelectionMode = scopedTeamId ? (selectionMode ?? false) : false;
 

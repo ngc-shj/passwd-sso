@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { PasswordForm } from "./personal-password-form";
+import { PersonalLoginForm } from "./personal-login-form";
 import { SecureNoteForm } from "./personal-secure-note-form";
 import { CreditCardForm } from "./personal-credit-card-form";
 import { IdentityForm } from "./personal-identity-form";
@@ -124,7 +124,7 @@ export function PasswordNewDialog({
             defaultTags={defaultTags}
           />
         ) : (
-          <PasswordForm
+          <PersonalLoginForm
             mode="create"
             variant="dialog"
             onSaved={handleSaved}

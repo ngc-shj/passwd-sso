@@ -13,7 +13,7 @@ import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
+import type { TeamLoginFormProps } from "@/components/team/team-login-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
@@ -28,7 +28,7 @@ export function TeamPasskeyForm({
   editData,
   defaultFolderId,
   defaultTags,
-}: TeamPasswordFormProps) {
+}: TeamLoginFormProps) {
   const tpk = useTranslations("PasskeyForm");
   const base = useTeamBaseFormModel({
     teamId,

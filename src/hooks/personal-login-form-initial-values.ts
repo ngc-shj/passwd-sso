@@ -1,4 +1,4 @@
-import type { PersonalPasswordFormInitialData } from "@/components/passwords/personal-password-form-types";
+import type { PersonalLoginFormInitialData } from "@/components/passwords/personal-login-form-types";
 import type { TagData } from "@/components/tags/tag-input";
 import {
   DEFAULT_GENERATOR_SETTINGS,
@@ -23,7 +23,7 @@ export interface PersonalLoginFormInitialValues {
 }
 
 export function buildPersonalLoginFormInitialValues(
-  initialData?: PersonalPasswordFormInitialData,
+  initialData?: PersonalLoginFormInitialData,
   defaults?: { defaultFolderId?: string | null; defaultTags?: TagData[] },
 ): PersonalLoginFormInitialValues {
   return {
