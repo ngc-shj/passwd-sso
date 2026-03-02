@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTranslator } from "@/lib/translation-types";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import {
@@ -88,8 +90,8 @@ function buildValues(overrides: Partial<{ title: string }> = {}) {
 
 function buildTranslations(): PersonalPasswordFormTranslations {
   return {
-    t: ((key: string) => key) as any,
-    tGen: ((key: string) => key) as any,
-    tc: ((key: string) => key) as any,
+    t: mockTranslator<PasswordFormTranslator>(),
+    tGen: mockTranslator<PasswordGeneratorTranslator>(),
+    tc: mockTranslator<CommonTranslator>(),
   };
 }

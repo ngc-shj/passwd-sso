@@ -2,6 +2,17 @@
 
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type {
+  PasswordFormTranslator,
+  PasswordGeneratorTranslator,
+  SecureNoteFormTranslator,
+  CreditCardFormTranslator,
+  IdentityFormTranslator,
+  PasskeyFormTranslator,
+  BankAccountFormTranslator,
+  SoftwareLicenseFormTranslator,
+} from "@/lib/translation-types";
 import type { TeamPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import { useTeamPasswordFormPresenter } from "@/hooks/use-team-password-form-presenter";
 import type { TeamPasswordFormState } from "@/hooks/use-team-password-form-state";
@@ -92,7 +103,7 @@ function buildFormState(): TeamPasswordFormState {
       cardNumber: "4242 4242 4242 4242",
       brand: "visa",
       brandSource: "manual",
-      generatorSettings: {} as any,
+      generatorSettings: {} as TeamPasswordFormState["values"]["generatorSettings"],
       title: "title",
       notes: "notes",
       selectedTags: [],
@@ -218,13 +229,13 @@ function buildFormState(): TeamPasswordFormState {
 
 function buildTranslations(): TeamPasswordFormTranslations {
   return {
-    t: ((key: string) => key) as any,
-    tGen: ((key: string) => key) as any,
-    tn: ((key: string) => key) as any,
-    tcc: ((key: string) => key) as any,
-    ti: ((key: string) => key) as any,
-    tpk: ((key: string) => key) as any,
-    tba: ((key: string) => key) as any,
-    tsl: ((key: string) => key) as any,
+    t: mockTranslator<PasswordFormTranslator>(),
+    tGen: mockTranslator<PasswordGeneratorTranslator>(),
+    tn: mockTranslator<SecureNoteFormTranslator>(),
+    tcc: mockTranslator<CreditCardFormTranslator>(),
+    ti: mockTranslator<IdentityFormTranslator>(),
+    tpk: mockTranslator<PasskeyFormTranslator>(),
+    tba: mockTranslator<BankAccountFormTranslator>(),
+    tsl: mockTranslator<SoftwareLicenseFormTranslator>(),
   };
 }

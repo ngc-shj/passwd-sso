@@ -197,7 +197,6 @@ export default function AuditLogsPage() {
   );
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     fetchLogs().then(async (data) => {
       if (data) {

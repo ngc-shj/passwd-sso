@@ -66,6 +66,7 @@ async function handleGET(req: NextRequest) {
 }
 
 // PATCH /api/notifications — Mark all notifications as read
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function handlePATCH(_req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {

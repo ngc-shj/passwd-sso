@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type { ImportTranslator } from "@/components/passwords/password-import-types";
 import type { ParsedEntry } from "@/components/passwords/password-import-types";
 import { ENTRY_TYPE } from "@/lib/constants";
 
@@ -89,7 +91,7 @@ describe("useImportExecution", () => {
   it("runs personal import and triggers audit + completion", async () => {
     mockRunImportEntries.mockResolvedValue({ successCount: 2, failedCount: 1 });
     const onComplete = vi.fn();
-    const t = ((key: string) => key) as any;
+    const t = mockTranslator<ImportTranslator>();
 
     const { result } = renderHook(() =>
       useImportExecution({
@@ -97,12 +99,13 @@ describe("useImportExecution", () => {
         onComplete,
         isTeamImport: false,
         tagsPath: "/api/tags",
+        foldersPath: "/api/folders",
         passwordsPath: "/api/passwords",
         sourceFilename: "input.json",
         encryptedInput: true,
         userId: "u1",
         encryptionKey: {} as CryptoKey,
-      } as any)
+      })
     );
 
     await act(async () => {
@@ -123,17 +126,18 @@ describe("useImportExecution", () => {
 
     const { result } = renderHook(() =>
       useImportExecution({
-        t: ((key: string) => key) as any,
+        t: mockTranslator<ImportTranslator>(),
         onComplete,
         isTeamImport: true,
         tagsPath: "/api/teams/o1/tags",
+        foldersPath: "/api/teams/o1/folders",
         passwordsPath: "/api/teams/o1/passwords",
         sourceFilename: "team.csv",
         encryptedInput: false,
         teamEncryptionKey: {} as CryptoKey,
         teamKeyVersion: 1,
         teamId: "o1",
-      } as any)
+      })
     );
 
     await act(async () => {
@@ -147,14 +151,15 @@ describe("useImportExecution", () => {
   it("skips execution when personal import has no encryption key", async () => {
     const { result } = renderHook(() =>
       useImportExecution({
-        t: ((key: string) => key) as any,
+        t: mockTranslator<ImportTranslator>(),
         onComplete: vi.fn(),
         isTeamImport: false,
         tagsPath: "/api/tags",
+        foldersPath: "/api/folders",
         passwordsPath: "/api/passwords",
         sourceFilename: "x.csv",
         encryptedInput: false,
-      } as any)
+      })
     );
 
     await act(async () => {
@@ -170,15 +175,16 @@ describe("useImportExecution", () => {
     mockRunImportEntries.mockRejectedValue(new Error("network"));
     const { result } = renderHook(() =>
       useImportExecution({
-        t: ((key: string) => key) as any,
+        t: mockTranslator<ImportTranslator>(),
         onComplete: vi.fn(),
         isTeamImport: false,
         tagsPath: "/api/tags",
+        foldersPath: "/api/folders",
         passwordsPath: "/api/passwords",
         sourceFilename: "x.csv",
         encryptedInput: false,
         encryptionKey: {} as CryptoKey,
-      } as any)
+      })
     );
 
     await expect(

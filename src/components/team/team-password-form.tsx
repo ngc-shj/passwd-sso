@@ -24,7 +24,6 @@ import { TeamEntrySpecificFields } from "@/components/team/team-entry-specific-f
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
-import { ENTRY_TYPE } from "@/lib/constants";
 import { SECURE_NOTE_TEMPLATES } from "@/lib/secure-note-templates";
 import {
   EntryActionBar,

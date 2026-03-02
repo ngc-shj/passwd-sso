@@ -2,6 +2,8 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTranslator } from "@/lib/translation-types";
 import {
   usePersonalPasswordFormState,
 } from "@/hooks/use-personal-password-form-state";
@@ -33,9 +35,9 @@ describe("buildPersonalPasswordFormPresenter", () => {
         },
         formState,
         translations: {
-          t: ((k: string) => k) as any,
-          tGen: ((k: string) => k) as any,
-          tc: ((k: string) => k) as any,
+          t: mockTranslator<PasswordFormTranslator>(),
+          tGen: mockTranslator<PasswordGeneratorTranslator>(),
+          tc: mockTranslator<CommonTranslator>(),
         },
       });
     });

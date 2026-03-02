@@ -101,37 +101,44 @@ export function ShareE2EEntryView({
   }, []);
 
   useEffect(() => {
-    // Parse share key from URL fragment (client-only)
-    const hash = window.location.hash;
-    const keyParam = hash
-      .slice(1)
-      .split("&")
-      .find((p) => p.startsWith("key="));
+    async function decrypt() {
+      // Parse share key from URL fragment (client-only)
+      const hash = window.location.hash;
+      const keyParam = hash
+        .slice(1)
+        .split("&")
+        .find((p) => p.startsWith("key="));
 
-    // Remove fragment from browser history immediately (S-15)
-    history.replaceState(null, "", location.pathname + location.search);
+      // Remove fragment from browser history immediately (S-15)
+      history.replaceState(null, "", location.pathname + location.search);
 
-    if (!keyParam) {
-      setDecryptState({ status: "error", reason: "missingKey" });
-      return;
-    }
-    const keyB64 = keyParam.slice(4);
-    let keyBytes: Uint8Array;
-    try {
-      keyBytes = base64urlDecode(keyB64);
-      if (keyBytes.length !== 32) {
+      if (!keyParam) {
         setDecryptState({ status: "error", reason: "missingKey" });
         return;
       }
-    } catch {
-      setDecryptState({ status: "error", reason: "missingKey" });
-      return;
-    }
+      const keyB64 = keyParam.slice(4);
+      let keyBytes: Uint8Array;
+      try {
+        keyBytes = base64urlDecode(keyB64);
+        if (keyBytes.length !== 32) {
+          setDecryptState({ status: "error", reason: "missingKey" });
+          return;
+        }
+      } catch {
+        setDecryptState({ status: "error", reason: "missingKey" });
+        return;
+      }
 
-    decryptShareE2E(encryptedData, dataIv, dataAuthTag, keyBytes)
-      .then((data) => setDecryptState({ status: "ok", data }))
-      .catch(() => setDecryptState({ status: "error", reason: "decryptFailed" }))
-      .finally(() => keyBytes.fill(0));
+      try {
+        const data = await decryptShareE2E(encryptedData, dataIv, dataAuthTag, keyBytes);
+        setDecryptState({ status: "ok", data });
+      } catch {
+        setDecryptState({ status: "error", reason: "decryptFailed" });
+      } finally {
+        keyBytes.fill(0);
+      }
+    }
+    decrypt();
   }, [encryptedData, dataIv, dataAuthTag]);
 
   if (decryptState.status === "pending") {

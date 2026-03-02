@@ -1,17 +1,27 @@
 import { describe, expect, it } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type {
+  PasswordFormTranslator,
+  SecureNoteFormTranslator,
+  CreditCardFormTranslator,
+  IdentityFormTranslator,
+  PasskeyFormTranslator,
+  BankAccountFormTranslator,
+  SoftwareLicenseFormTranslator,
+} from "@/lib/translation-types";
 import { buildTeamEntrySpecificTextProps } from "@/hooks/team-entry-specific-fields-text-props";
 
 describe("buildTeamEntrySpecificTextProps", () => {
   it("maps translation namespaces and entry copy values", () => {
     const props = buildTeamEntrySpecificTextProps(
       {
-        t: ((k: string) => `t.${k}`) as any,
-        tn: ((k: string) => `tn.${k}`) as any,
-        tcc: ((k: string, values: any) => `tcc.${k}${values ? `:${JSON.stringify(values)}` : ""}`) as any,
-        ti: ((k: string) => `ti.${k}`) as any,
-        tpk: ((k: string) => `tpk.${k}`) as any,
-        tba: ((k: string) => `tba.${k}`) as any,
-        tsl: ((k: string) => `tsl.${k}`) as any,
+        t: mockTranslator<PasswordFormTranslator>((k) => `t.${k}`),
+        tn: mockTranslator<SecureNoteFormTranslator>((k) => `tn.${k}`),
+        tcc: mockTranslator<CreditCardFormTranslator>((k: string, values?: Record<string, unknown>) => `tcc.${k}${values ? `:${JSON.stringify(values)}` : ""}`),
+        ti: mockTranslator<IdentityFormTranslator>((k) => `ti.${k}`),
+        tpk: mockTranslator<PasskeyFormTranslator>((k) => `tpk.${k}`),
+        tba: mockTranslator<BankAccountFormTranslator>((k) => `tba.${k}`),
+        tsl: mockTranslator<SoftwareLicenseFormTranslator>((k) => `tsl.${k}`),
       },
       {
         notesLabel: "notes.label",

@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type { PasswordFormTranslator } from "@/lib/translation-types";
 import { ENTRY_TYPE } from "@/lib/constants";
 import {
   handleTeamCardNumberChange,
@@ -113,7 +115,7 @@ describe("team-password-form-actions", () => {
       softwareLicenseErrorCopy: {
         expirationBeforePurchase: "expiration before purchase",
       },
-      t: ((key: string) => key) as any,
+      t: mockTranslator<PasswordFormTranslator>(),
       setSaving: vi.fn(),
       handleOpenChange: vi.fn(),
       onSaved: vi.fn(),
@@ -189,7 +191,7 @@ describe("team-password-form-actions", () => {
       softwareLicenseErrorCopy: {
         expirationBeforePurchase: "expiration before purchase",
       },
-      t: ((key: string) => key) as any,
+      t: mockTranslator<PasswordFormTranslator>(),
       setSaving: vi.fn(),
       handleOpenChange: vi.fn(),
       onSaved: vi.fn(),

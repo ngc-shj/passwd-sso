@@ -2,7 +2,7 @@
  * Creates a mock translator function that satisfies the next-intl Translator type.
  * The function returns the key as-is (identity), and stubs `rich`, `markup`, `raw`, `has`.
  */
-export function mockTranslator<T = unknown>(fn?: (key: string) => string): T {
+export function mockTranslator<T = unknown>(fn?: (key: string, values?: Record<string, unknown>) => string): T {
   const t = fn ?? ((key: string) => key);
   const mock = Object.assign(t, {
     rich: (key: string) => key,

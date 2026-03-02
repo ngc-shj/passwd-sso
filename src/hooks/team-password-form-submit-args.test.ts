@@ -1,4 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type {
+  PasswordFormTranslator,
+  PasswordGeneratorTranslator,
+  SecureNoteFormTranslator,
+  CreditCardFormTranslator,
+  IdentityFormTranslator,
+  PasskeyFormTranslator,
+  BankAccountFormTranslator,
+  SoftwareLicenseFormTranslator,
+} from "@/lib/translation-types";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { buildTeamSubmitArgs } from "@/hooks/team-password-form-submit-args";
 
@@ -20,14 +31,14 @@ function buildDefaultParams(overrides: Record<string, unknown> = {}) {
       isSoftwareLicense: false,
     },
     translations: {
-      t: ((key: string) => `pf.${key}`) as any,
-      tGen: ((key: string) => key) as any,
-      tn: ((key: string) => key) as any,
-      tcc: ((key: string) => key) as any,
-      ti: ((key: string) => `identity.${key}`) as any,
-      tpk: ((key: string) => key) as any,
-      tba: ((key: string) => key) as any,
-      tsl: ((key: string) => `sl.${key}`) as any,
+      t: mockTranslator<PasswordFormTranslator>((key) => `pf.${key}`),
+      tGen: mockTranslator<PasswordGeneratorTranslator>(),
+      tn: mockTranslator<SecureNoteFormTranslator>(),
+      tcc: mockTranslator<CreditCardFormTranslator>(),
+      ti: mockTranslator<IdentityFormTranslator>((key) => `identity.${key}`),
+      tpk: mockTranslator<PasskeyFormTranslator>(),
+      tba: mockTranslator<BankAccountFormTranslator>(),
+      tsl: mockTranslator<SoftwareLicenseFormTranslator>((key) => `sl.${key}`),
     },
     handleOpenChange: vi.fn(),
     setters: { setDobError: vi.fn(), setExpiryError: vi.fn(), setSaving: vi.fn() },
@@ -97,14 +108,14 @@ describe("buildTeamSubmitArgs", () => {
         isSoftwareLicense: false,
       },
       translations: {
-        t: ((key: string) => `pf.${key}`) as any,
-        tGen: ((key: string) => key) as any,
-        tn: ((key: string) => key) as any,
-        tcc: ((key: string) => key) as any,
-        ti: ((key: string) => `identity.${key}`) as any,
-        tpk: ((key: string) => key) as any,
-        tba: ((key: string) => key) as any,
-        tsl: ((key: string) => `sl.${key}`) as any,
+        t: mockTranslator<PasswordFormTranslator>((key) => `pf.${key}`),
+        tGen: mockTranslator<PasswordGeneratorTranslator>(),
+        tn: mockTranslator<SecureNoteFormTranslator>(),
+        tcc: mockTranslator<CreditCardFormTranslator>(),
+        ti: mockTranslator<IdentityFormTranslator>((key) => `identity.${key}`),
+        tpk: mockTranslator<PasskeyFormTranslator>(),
+        tba: mockTranslator<BankAccountFormTranslator>(),
+        tsl: mockTranslator<SoftwareLicenseFormTranslator>((key) => `sl.${key}`),
       },
       handleOpenChange,
       setters: { setDobError, setExpiryError, setSaving },

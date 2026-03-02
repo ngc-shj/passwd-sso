@@ -36,8 +36,8 @@ describe("buildTeamCardNumberChangeCallback", () => {
 });
 
 describe("buildTeamCardPresentationProps", () => {
-  const tcc = ((key: string, opts: any) =>
-    opts && "brand" in opts ? `${key}:${opts.brand}` : key) as any as CreditCardFormTranslator;
+  const tcc = ((key: string, opts?: Record<string, unknown>) =>
+    opts && "brand" in opts ? `${key}:${opts.brand}` : key) as unknown as CreditCardFormTranslator;
 
   it("returns translated detectedBrand when brand is present", () => {
     const result = buildTeamCardPresentationProps({

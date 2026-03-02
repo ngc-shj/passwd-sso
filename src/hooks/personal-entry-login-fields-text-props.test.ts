@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type { PasswordFormTranslator } from "@/lib/translation-types";
 import { buildPersonalEntryLoginFieldTextProps } from "@/hooks/personal-entry-login-fields-text-props";
 
 describe("buildPersonalEntryLoginFieldTextProps", () => {
   it("maps all personal login labels from PasswordForm translator", () => {
-    const props = buildPersonalEntryLoginFieldTextProps(((key: string) => `label.${key}`) as any);
+    const props = buildPersonalEntryLoginFieldTextProps(mockTranslator<PasswordFormTranslator>((key) => `label.${key}`));
 
     expect(props.titleLabel).toBe("label.title");
     expect(props.titlePlaceholder).toBe("label.titlePlaceholder");

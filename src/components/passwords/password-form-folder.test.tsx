@@ -350,10 +350,10 @@ describe("PasswordForm folder selector", () => {
 
     await waitFor(() => {
       const postCall = fetchMock.mock.calls.find(
-        (c: any[]) => c[1]?.method === "POST",
+        (c: unknown[]) => (c[1] as Record<string, unknown>)?.method === "POST",
       );
       expect(postCall).toBeDefined();
-      const body = JSON.parse(postCall![1]!.body as string);
+      const body = JSON.parse((postCall![1] as Record<string, unknown>).body as string);
       expect(body.folderId).toBe("f1");
     });
   });
@@ -401,10 +401,10 @@ describe("PasswordForm folder selector", () => {
 
     await waitFor(() => {
       const putCall = fetchMock.mock.calls.find(
-        (c: any[]) => c[1]?.method === "PUT",
+        (c: unknown[]) => (c[1] as Record<string, unknown>)?.method === "PUT",
       );
       expect(putCall).toBeDefined();
-      const body = JSON.parse(putCall![1]!.body as string);
+      const body = JSON.parse((putCall![1] as Record<string, unknown>).body as string);
       expect(body.folderId).toBeNull();
     });
   });
@@ -478,7 +478,7 @@ describe("PasswordForm folder selector", () => {
 
     // No POST should have been made (only the initial GET for folders)
     const postCalls = fetchMock.mock.calls.filter(
-      (c: any[]) => c[1]?.method === "POST",
+      (c: unknown[]) => (c[1] as Record<string, unknown>)?.method === "POST",
     );
     expect(postCalls).toHaveLength(0);
   });
