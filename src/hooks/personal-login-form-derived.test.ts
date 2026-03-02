@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTranslator } from "@/lib/translation-types";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
-import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
+import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
 import { buildPersonalLoginFormDerived } from "@/hooks/personal-login-form-derived";
 
 describe("buildPersonalLoginFormDerived", () => {
@@ -125,7 +125,7 @@ function buildEmptyValues(overrides: Partial<{
 
 function buildTranslations(
   tGen: (key: string) => string,
-): PersonalPasswordFormTranslations {
+): PersonalLoginFormTranslations {
   return {
     t: mockTranslator<PasswordFormTranslator>(),
     tGen: mockTranslator<PasswordGeneratorTranslator>(tGen),

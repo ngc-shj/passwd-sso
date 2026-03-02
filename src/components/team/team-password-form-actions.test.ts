@@ -4,7 +4,7 @@ import type { PasswordFormTranslator } from "@/lib/translation-types";
 import { ENTRY_TYPE } from "@/lib/constants";
 import {
   handleTeamCardNumberChange,
-  submitTeamPasswordForm,
+  submitTeamLoginForm,
 } from "@/components/team/team-password-form-actions";
 
 const executeTeamEntrySubmitMock = vi.fn();
@@ -13,7 +13,7 @@ vi.mock("@/components/team/team-entry-submit", () => ({
   executeTeamEntrySubmit: (...args: unknown[]) => executeTeamEntrySubmitMock(...args),
 }));
 
-describe("team-password-form-actions", () => {
+describe("team-login-form-actions", () => {
   beforeEach(() => {
     executeTeamEntrySubmitMock.mockReset();
   });
@@ -54,7 +54,7 @@ describe("team-password-form-actions", () => {
     const setDobError = vi.fn();
     const setExpiryError = vi.fn();
 
-    await submitTeamPasswordForm({
+    await submitTeamLoginForm({
       teamId: "team-1",
       isEdit: false,
       effectiveEntryType: ENTRY_TYPE.IDENTITY,
@@ -119,7 +119,7 @@ describe("team-password-form-actions", () => {
       setSaving: vi.fn(),
       handleOpenChange: vi.fn(),
       onSaved: vi.fn(),
-    } as unknown as Parameters<typeof submitTeamPasswordForm>[0]);
+    } as unknown as Parameters<typeof submitTeamLoginForm>[0]);
 
     expect(setDobError).toHaveBeenCalledWith("dob future");
     expect(setExpiryError).toHaveBeenCalledWith("expiry before issue");
@@ -130,7 +130,7 @@ describe("team-password-form-actions", () => {
     const setDobError = vi.fn();
     const setExpiryError = vi.fn();
 
-    await submitTeamPasswordForm({
+    await submitTeamLoginForm({
       teamId: "team-1",
       isEdit: false,
       effectiveEntryType: ENTRY_TYPE.SOFTWARE_LICENSE,
@@ -195,7 +195,7 @@ describe("team-password-form-actions", () => {
       setSaving: vi.fn(),
       handleOpenChange: vi.fn(),
       onSaved: vi.fn(),
-    } as unknown as Parameters<typeof submitTeamPasswordForm>[0]);
+    } as unknown as Parameters<typeof submitTeamLoginForm>[0]);
 
     expect(setExpiryError).toHaveBeenCalledWith("expiration before purchase");
     expect(executeTeamEntrySubmitMock).not.toHaveBeenCalled();

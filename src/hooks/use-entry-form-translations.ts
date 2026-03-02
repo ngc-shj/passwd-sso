@@ -8,8 +8,8 @@ import type {
 import type { EntryFormTranslationsBundle } from "@/hooks/entry-form-translations";
 
 export {
-  toPersonalPasswordFormTranslations,
-  toTeamPasswordFormTranslations,
+  toPersonalLoginFormTranslations,
+  toTeamLoginFormTranslations,
 } from "@/hooks/entry-form-translations";
 
 export function useEntryFormTranslations() {

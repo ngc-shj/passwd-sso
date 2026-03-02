@@ -2,7 +2,7 @@
 
 import type { SubmitPersonalPasswordFormArgs } from "@/components/passwords/personal-password-submit";
 import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
-import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
+import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
 import type { PersonalLoginFormEntryValues } from "@/hooks/use-personal-login-form-state";
 import type { PasswordFormRouter } from "@/hooks/password-form-router";
 
@@ -14,7 +14,7 @@ interface BuildPersonalLoginSubmitArgsParams {
   userId?: string | null;
   values: PersonalLoginFormEntryValues;
   setSubmitting: (value: boolean) => void;
-  translations: PersonalPasswordFormTranslations;
+  translations: PersonalLoginFormTranslations;
   router: PasswordFormRouter;
 }
 

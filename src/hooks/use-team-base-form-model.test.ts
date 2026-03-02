@@ -22,7 +22,7 @@ vi.mock("@/hooks/use-entry-form-translations", () => ({
     t: (key: string) => key,
     tc: (key: string) => key,
   }),
-  toTeamPasswordFormTranslations: () => ({
+  toTeamLoginFormTranslations: () => ({
     t: (key: string) => key,
     tn: (key: string) => key,
     tcc: (key: string) => key,

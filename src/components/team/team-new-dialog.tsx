@@ -15,7 +15,7 @@ import { TeamPasskeyForm } from "@/components/team/team-passkey-form";
 import { TeamBankAccountForm } from "@/components/team/team-bank-account-form";
 import { TeamSoftwareLicenseForm } from "@/components/team/team-software-license-form";
 import {
-  toTeamPasswordFormTranslations,
+  toTeamLoginFormTranslations,
   useEntryFormTranslations,
 } from "@/hooks/use-entry-form-translations";
 
@@ -38,7 +38,7 @@ export function TeamNewDialog({
   defaultFolderId,
   defaultTags,
 }: TeamNewDialogProps) {
-  const translations = toTeamPasswordFormTranslations(useEntryFormTranslations());
+  const translations = toTeamLoginFormTranslations(useEntryFormTranslations());
   const dialogTitle = buildTeamEntryCopy({
     isEdit: false,
     entryKind: getTeamEntryKindState(entryType).entryKind,

@@ -2,7 +2,7 @@
 
 import type { ComponentProps } from "react";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
-import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
+import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
 import type { PersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
 
 export type EntryLoginMainFieldsProps = ComponentProps<typeof EntryLoginMainFields>;
@@ -25,5 +25,5 @@ export type PersonalLoginFieldTextProps = Pick<
 export interface BuildPersonalLoginFieldsPropsArgs {
   formState: PersonalLoginFormState;
   generatorSummary: string;
-  translations: Pick<PersonalPasswordFormTranslations, "t">;
+  translations: Pick<PersonalLoginFormTranslations, "t">;
 }

@@ -11,7 +11,7 @@ import {
   buildPersonalLoginFormPresenter,
 } from "@/hooks/personal-login-form-presenter";
 import {
-  toPersonalPasswordFormTranslations,
+  toPersonalLoginFormTranslations,
   useEntryFormTranslations,
 } from "@/hooks/use-entry-form-translations";
 import { usePersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
@@ -26,7 +26,7 @@ export function usePersonalLoginFormModel({
   defaultTags,
 }: PersonalLoginFormModelInput) {
   const translationBundle = useEntryFormTranslations();
-  const translations = toPersonalPasswordFormTranslations(translationBundle);
+  const translations = toPersonalLoginFormTranslations(translationBundle);
   const router = useRouter();
   const { encryptionKey, userId } = useVault();
   const formState = usePersonalLoginFormState(initialData, { defaultFolderId, defaultTags });

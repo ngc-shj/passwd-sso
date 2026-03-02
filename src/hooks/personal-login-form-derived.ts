@@ -1,7 +1,7 @@
 import { buildGeneratorSummary } from "@/lib/generator-summary";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { PersonalLoginFormInitialData } from "@/components/passwords/personal-login-form-types";
-import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
+import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
 import type { PersonalLoginFormEntryValues } from "@/hooks/use-personal-login-form-state";
 import type { TagData } from "@/components/tags/tag-input";
 
@@ -61,7 +61,7 @@ export function buildPersonalCurrentSnapshot({
 export type PersonalLoginFormDerivedArgs = {
   initialData?: PersonalLoginFormInitialData;
   values: PersonalLoginFormEntryValues;
-  translations: PersonalPasswordFormTranslations;
+  translations: PersonalLoginFormTranslations;
   defaultFolderId?: string | null;
   defaultTags?: TagData[];
 };

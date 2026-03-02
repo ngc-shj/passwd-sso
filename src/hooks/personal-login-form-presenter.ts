@@ -9,13 +9,13 @@ import type { PersonalLoginFormState } from "@/hooks/use-personal-login-form-sta
 import {
   selectPersonalEntryValues,
 } from "@/hooks/use-personal-login-form-state";
-import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
+import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
 import type { TagData } from "@/components/tags/tag-input";
 
 export interface PersonalLoginFormPresenterArgs {
   initialData?: PersonalLoginFormInitialData;
   formState: PersonalLoginFormState;
-  translations: PersonalPasswordFormTranslations;
+  translations: PersonalLoginFormTranslations;
   defaultFolderId?: string | null;
   defaultTags?: TagData[];
 }

@@ -17,7 +17,7 @@ import { useTeamPolicy } from "@/hooks/use-team-policy";
 import { useTeamVault } from "@/lib/team-vault-context";
 import {
   useEntryFormTranslations,
-  toTeamPasswordFormTranslations,
+  toTeamLoginFormTranslations,
 } from "@/hooks/use-entry-form-translations";
 import {
   buildTeamEntryPayload,
@@ -49,7 +49,7 @@ export function useTeamBaseFormModel({
 }: UseTeamBaseFormModelInput) {
   const translationBundle = useEntryFormTranslations();
   const { t, tc } = translationBundle;
-  const translations = toTeamPasswordFormTranslations(translationBundle);
+  const translations = toTeamLoginFormTranslations(translationBundle);
 
   const effectiveEntryType = editData?.entryType ?? entryTypeProp;
   const entryKindState = getTeamEntryKindState(effectiveEntryType);
