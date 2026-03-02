@@ -6,8 +6,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
@@ -16,6 +24,8 @@ import { TeamEntrySpecificFields } from "@/components/team/team-entry-specific-f
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
+import { ENTRY_TYPE } from "@/lib/constants";
+import { SECURE_NOTE_TEMPLATES } from "@/lib/secure-note-templates";
 import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
@@ -62,8 +72,10 @@ export function TeamPasswordForm({
   });
   const {
     values: { saving, title },
-    setters: { setTitle },
+    setters: { setTitle, setContent },
   } = formState;
+  const tSn = useTranslations("SecureNoteForm");
+  const isSecureNote = entrySpecificFieldsProps.entryKind === "secureNote";
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
   const { tagsAndFolderProps, customFieldsTotpProps, repromptSectionProps, expirationSectionProps, actionBarProps } = buildTeamFormSectionsProps({
     teamId: scopedId,
@@ -106,6 +118,39 @@ export function TeamPasswordForm({
         </DialogHeader>
 
         <form onSubmit={handleFormSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
+          {!isEdit && isSecureNote && (
+            <div className="space-y-2">
+              <Label>{tSn("templateLabel")}</Label>
+              <Select
+                defaultValue="blank"
+                onValueChange={(templateId) => {
+                  const tmpl = SECURE_NOTE_TEMPLATES.find(
+                    (tp) => tp.id === templateId,
+                  );
+                  if (!tmpl) return;
+                  if (tmpl.id === "blank") {
+                    setTitle("");
+                    setContent("");
+                    return;
+                  }
+                  setTitle(tSn(tmpl.titleKey));
+                  setContent(tmpl.contentTemplate);
+                }}
+              >
+                <SelectTrigger className="w-full max-w-[300px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SECURE_NOTE_TEMPLATES.map((tmpl) => (
+                    <SelectItem key={tmpl.id} value={tmpl.id}>
+                      {tSn(tmpl.titleKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label>{entryCopy.titleLabel}</Label>
             <Input
