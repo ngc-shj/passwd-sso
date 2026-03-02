@@ -80,6 +80,7 @@ export const apiPath = {
     `${API_PATH.TEAMS}/${teamId}/members/${memberId}/confirm-key`,
   teamTags: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/tags`,
   teamAuditLogs: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/audit-logs`,
+  teamPolicy: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/policy`,
   passwordById: (entryId: string) => `${API_PATH.PASSWORDS}/${entryId}`,
   passwordsBulkTrash: () => API_PATH.PASSWORDS_BULK_TRASH,
   passwordsBulkArchive: () => API_PATH.PASSWORDS_BULK_ARCHIVE,

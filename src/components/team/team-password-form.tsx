@@ -44,6 +44,7 @@ export function TeamPasswordForm({
     handleOpenChange,
     entryCopy,
     entrySpecificFieldsProps,
+    teamPolicy,
     handleSubmit,
     hasChanges,
     submitDisabled,
@@ -83,7 +84,7 @@ export function TeamPasswordForm({
     setters: formState.setters,
   });
 
-  const entrySpecificFields = <TeamEntrySpecificFields {...entrySpecificFieldsProps} />;
+  const entrySpecificFields = <TeamEntrySpecificFields {...entrySpecificFieldsProps} teamPolicy={teamPolicy} />;
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();

@@ -2,12 +2,16 @@ import type { TeamPasswordFormEditData } from "@/components/team/team-password-f
 import type { TeamAttachmentMeta } from "@/components/team/team-attachment-section";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
+import type { TeamPolicyClient } from "@/hooks/use-team-policy";
 import { useTeamPasswordFormUiState } from "@/hooks/use-team-password-form-ui-state";
 import { useTeamPasswordFormValueState } from "@/hooks/use-team-password-form-value-state";
 import { buildTeamPasswordFormInitialValues } from "@/hooks/team-password-form-initial-values";
 
-export function useTeamPasswordFormState(editData?: TeamPasswordFormEditData | null) {
-  const initial = buildTeamPasswordFormInitialValues(editData);
+export function useTeamPasswordFormState(
+  editData?: TeamPasswordFormEditData | null,
+  teamPolicy?: TeamPolicyClient | null,
+) {
+  const initial = buildTeamPasswordFormInitialValues(editData, teamPolicy);
   const uiState = useTeamPasswordFormUiState();
   const valueState = useTeamPasswordFormValueState(initial);
 

@@ -2,6 +2,7 @@
 
 import { CARD_BRANDS } from "@/lib/credit-card";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
+import type { TeamPolicyClient } from "@/hooks/use-team-policy";
 import { TeamBankAccountFields } from "@/components/team/team-bank-account-fields";
 import { TeamCreditCardFields } from "@/components/team/team-credit-card-fields";
 import { TeamIdentityFields } from "@/components/team/team-identity-fields";
@@ -223,6 +224,7 @@ interface TeamEntrySpecificFieldsProps {
     purchaseDate: string;
     expirationDate: string;
   };
+  teamPolicy?: TeamPolicyClient | null;
 }
 
 export function TeamEntrySpecificFields({
@@ -391,6 +393,7 @@ export function TeamEntrySpecificFields({
   onExpirationDateChange,
   softwareLicenseExpiryError,
   softwareLicenseLabels,
+  teamPolicy,
 }: TeamEntrySpecificFieldsProps) {
   switch (entryKind) {
     case "passkey":
@@ -617,6 +620,7 @@ export function TeamEntrySpecificFields({
           onNotesChange={onNotesChange}
           notesLabel={notesLabel}
           notesPlaceholder={notesPlaceholder}
+          teamPolicy={teamPolicy}
         />
       );
   }

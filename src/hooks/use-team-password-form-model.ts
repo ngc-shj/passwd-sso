@@ -5,6 +5,7 @@ import { getTeamEntryKindState } from "@/components/team/team-entry-kind";
 import type { TeamPasswordFormProps } from "@/components/team/team-password-form-types";
 import { useTeamAttachments } from "@/hooks/use-team-attachments";
 import { useTeamFolders } from "@/hooks/use-team-folders";
+import { useTeamPolicy } from "@/hooks/use-team-policy";
 import { useTeamPasswordFormController } from "@/hooks/use-team-password-form-controller";
 import { useTeamPasswordFormLifecycle } from "@/hooks/use-team-password-form-lifecycle";
 import {
@@ -38,7 +39,8 @@ function useTeamPasswordFormModelInternal({
   const { isLoginEntry } = entryKindState;
   const isEdit = !!editData;
 
-  const formState = useTeamPasswordFormState(editData);
+  const { policy: teamPolicy } = useTeamPolicy(open, teamId);
+  const formState = useTeamPasswordFormState(editData, teamPolicy);
 
   const { attachments, setAttachments } = useTeamAttachments(open, teamId, editData?.id);
   const { folders: teamFolders } = useTeamFolders(open, teamId);
@@ -71,6 +73,7 @@ function useTeamPasswordFormModelInternal({
     isLoginEntry,
     editData,
     formState,
+    teamPolicy,
     attachments,
     setAttachments,
     teamFolders,
