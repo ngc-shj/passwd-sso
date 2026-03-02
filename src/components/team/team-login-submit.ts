@@ -35,7 +35,7 @@ export function handleTeamCardNumberChange({
   }
 }
 
-export interface SubmitTeamLoginFormArgs {
+export interface SubmitTeamLoginArgs {
   teamId: string;
   teamEncryptionKey: CryptoKey;
   teamKeyVersion: number;
@@ -107,7 +107,7 @@ export interface SubmitTeamLoginFormArgs {
   onSaved: () => void;
 }
 
-export async function submitTeamLoginForm({
+export async function submitTeamLogin({
   teamId,
   teamEncryptionKey,
   teamKeyVersion,
@@ -171,7 +171,7 @@ export async function submitTeamLoginForm({
   setSaving,
   handleOpenChange,
   onSaved,
-}: SubmitTeamLoginFormArgs): Promise<void> {
+}: SubmitTeamLoginArgs): Promise<void> {
   const validation = validateTeamEntryBeforeSubmit({
     entryType: effectiveEntryType,
     title,

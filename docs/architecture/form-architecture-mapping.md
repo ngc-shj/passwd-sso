@@ -60,7 +60,7 @@ The target state is to make these boundaries more directly corresponding. At min
 | Login field callbacks | `src/hooks/team-login-fields-callbacks.ts` | `src/hooks/personal-login-fields-callbacks.ts` |
 | Login field text props | `src/hooks/team-login-fields-text-props.ts` | `src/hooks/personal-login-fields-text-props.ts` |
 | Login initial values | `src/hooks/team-login-form-initial-values.ts` | `src/hooks/personal-login-form-initial-values.ts` |
-| Login submit helper | `src/components/team/team-login-form-actions.ts` | `src/components/passwords/personal-login-submit.ts` |
+| Login submit helper | `src/components/team/team-login-submit.ts` | `src/components/passwords/personal-login-submit.ts` |
 
 ### Login Entry Mismatch
 
