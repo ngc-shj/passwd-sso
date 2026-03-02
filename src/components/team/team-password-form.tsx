@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -25,7 +25,10 @@ import {
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { buildGeneratorSummary } from "@/lib/generator-summary";
-import { buildPolicyAwareGeneratorSettings } from "@/hooks/team-password-form-initial-values";
+import {
+  applyPolicyToGeneratorSettings,
+  buildPolicyAwareGeneratorSettings,
+} from "@/hooks/team-password-form-initial-values";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
@@ -67,6 +70,12 @@ export function TeamPasswordForm({
   );
   const [totp, setTotp] = useState<EntryTotp | null>(editData?.totp ?? null);
   const [showTotpInput, setShowTotpInput] = useState(Boolean(editData?.totp));
+
+  useEffect(() => {
+    setGeneratorSettings((current) =>
+      applyPolicyToGeneratorSettings(current, base.teamPolicy),
+    );
+  }, [base.teamPolicy]);
 
   const generatorSummary = useMemo(
     () =>

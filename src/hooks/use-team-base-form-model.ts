@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -91,6 +91,11 @@ export function useTeamBaseFormModel({
   const [expiresAt, setExpiresAt] = useState<string | null>(
     editData?.expiresAt ?? null,
   );
+
+  useEffect(() => {
+    if (!teamPolicy.requireRepromptForAll) return;
+    setRequireReprompt(true);
+  }, [teamPolicy.requireRepromptForAll]);
 
   /**
    * Submit an entry. Each form builds the BuildTeamEntryPayloadInput

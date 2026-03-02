@@ -8,6 +8,7 @@ import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import type { TeamPolicyClient } from "@/hooks/use-team-policy";
+import type { SymbolGroupFlags } from "@/lib/generator-prefs";
 
 export interface TeamPasswordFormInitialValues {
   title: string;
@@ -80,6 +81,35 @@ export function buildPolicyAwareGeneratorSettings(
     symbolGroups: policy.requireSymbols
       ? { ...DEFAULT_SYMBOL_GROUPS, hashEtc: true, punctuation: true }
       : { ...DEFAULT_SYMBOL_GROUPS },
+  };
+}
+
+function mergeRequiredSymbolGroups(
+  current: SymbolGroupFlags,
+  policy?: TeamPolicyClient | null,
+): SymbolGroupFlags {
+  if (!policy?.requireSymbols) return { ...current };
+
+  return {
+    ...current,
+    hashEtc: true,
+    punctuation: true,
+  };
+}
+
+export function applyPolicyToGeneratorSettings(
+  settings: GeneratorSettings,
+  policy?: TeamPolicyClient | null,
+): GeneratorSettings {
+  if (!policy) return settings;
+
+  return {
+    ...settings,
+    length: Math.max(settings.length, policy.minPasswordLength),
+    uppercase: policy.requireUppercase || settings.uppercase,
+    lowercase: policy.requireLowercase || settings.lowercase,
+    numbers: policy.requireNumbers || settings.numbers,
+    symbolGroups: mergeRequiredSymbolGroups(settings.symbolGroups, policy),
   };
 }
 

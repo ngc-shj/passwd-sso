@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { buildTeamPasswordFormInitialValues } from "@/hooks/team-password-form-initial-values";
+import {
+  applyPolicyToGeneratorSettings,
+  buildTeamPasswordFormInitialValues,
+} from "@/hooks/team-password-form-initial-values";
 
 describe("buildTeamPasswordFormInitialValues", () => {
   it("returns safe defaults when edit data is absent", () => {
@@ -77,5 +80,50 @@ describe("buildTeamPasswordFormInitialValues", () => {
     );
     expect(result.teamFolderId).toBe("edit-folder");
     expect(result.selectedTags).toEqual([{ id: "t2", name: "EditTag", color: null }]);
+  });
+
+  it("applies required team policy constraints to existing generator settings", () => {
+    const result = applyPolicyToGeneratorSettings(
+      {
+        mode: "password",
+        length: 12,
+        uppercase: false,
+        lowercase: true,
+        numbers: false,
+        symbolGroups: {
+          hashEtc: false,
+          punctuation: false,
+          quotes: false,
+          slashDash: false,
+          mathCompare: false,
+          brackets: false,
+        },
+        excludeAmbiguous: false,
+        includeChars: "",
+        excludeChars: "",
+        passphrase: {
+          wordCount: 4,
+          separator: "-",
+          capitalize: true,
+          includeNumber: false,
+        },
+      },
+      {
+        minPasswordLength: 20,
+        requireUppercase: true,
+        requireLowercase: false,
+        requireNumbers: true,
+        requireSymbols: true,
+        requireRepromptForAll: false,
+        allowExport: true,
+        allowSharing: true,
+      },
+    );
+
+    expect(result.length).toBe(20);
+    expect(result.uppercase).toBe(true);
+    expect(result.numbers).toBe(true);
+    expect(result.symbolGroups.hashEtc).toBe(true);
+    expect(result.symbolGroups.punctuation).toBe(true);
   });
 });
