@@ -103,8 +103,21 @@ The target state is to make these boundaries more directly corresponding. At min
 
 ### Expected Flow
 
+#### Create
+
+- Team create flow today: `team-new-dialog -> team-entry-dialog-shell -> team-* form`
+- Personal create flow today: `personal-password-new-dialog -> personal-* form`
+
+#### Edit
+
 - Team edit flow today: `page -> team-edit-dialog -> team-entry-dialog-shell -> team-* form`
 - Personal edit flow today: `personal-password-edit-dialog-loader -> personal-password-edit-dialog -> personal-* form`
+
+#### Structural Difference
+
+- Team keeps entry data loading at page level and dialog shell ownership in `team-new-dialog.tsx` / `team-edit-dialog.tsx`.
+- Personal keeps edit loading in `personal-password-edit-dialog-loader.tsx`, while dialog shell ownership stays in `personal-password-new-dialog.tsx` / `personal-password-edit-dialog.tsx`.
+- The flow stages are now comparable, but the exact component names still differ because Team uses generic `team-new-dialog` / `team-edit-dialog`, while Personal uses login-origin naming under `personal-password-*`.
 
 ## Refactor Targets
 
