@@ -6,7 +6,7 @@ import { sendEmail } from "@/lib/email";
 import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { routing } from "@/i18n/routing";
+import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
 
 // POST /api/emergency-access/[id]/decline — Decline a grant by ID (authenticated grantee)
@@ -59,12 +59,12 @@ export async function POST(
   const owner = await withUserTenantRls(session.user.id, async () =>
     prisma.user.findUnique({
       where: { id: grant.ownerId },
-      select: { email: true, name: true },
+      select: { email: true, name: true, locale: true },
     }),
   );
   if (owner?.email) {
     const granteeName = session.user.name ?? session.user.email ?? "";
-    const { subject, html, text } = emergencyGrantDeclinedEmail(routing.defaultLocale, granteeName);
+    const { subject, html, text } = emergencyGrantDeclinedEmail(resolveUserLocale(owner.locale), granteeName);
     void sendEmail({ to: owner.email, subject, html, text });
   }
 

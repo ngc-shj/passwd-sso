@@ -5,25 +5,13 @@ import { sendEmail } from "@/lib/email";
 import { newDeviceLoginEmail } from "@/lib/email/templates/new-device-login";
 import { createNotification } from "@/lib/notification";
 import { NOTIFICATION_TYPE } from "@/lib/constants";
+import { resolveUserLocale } from "@/lib/locale";
 
 interface DeviceMeta {
   ip: string | null;
   userAgent: string | null;
   acceptLanguage: string | null;
   currentSessionToken?: string;
-}
-
-/**
- * Derive locale from Accept-Language header.
- * Returns "ja" or "en" (defaults to "ja" matching routing.defaultLocale).
- */
-function resolveLocale(acceptLanguage: string | null): string {
-  if (!acceptLanguage) return "ja";
-  const lower = acceptLanguage.toLowerCase();
-  const enIdx = lower.search(/\ben/);
-  const jaIdx = lower.search(/\bja/);
-  if (enIdx >= 0 && (jaIdx < 0 || enIdx < jaIdx)) return "en";
-  return "ja";
 }
 
 function parseDevice(ua: string): { browserName: string; osName: string } {
@@ -87,12 +75,12 @@ export async function checkNewDeviceAndNotify(
     const user = await withBypassRls(prisma, async () =>
       prisma.user.findUnique({
         where: { id: userId },
-        select: { email: true },
+        select: { email: true, locale: true },
       }),
     );
     if (!user?.email) return;
 
-    const locale = resolveLocale(meta.acceptLanguage);
+    const locale = resolveUserLocale(user.locale, meta.acceptLanguage);
     const timestamp = new Date().toISOString();
 
     const emailTemplate = newDeviceLoginEmail(locale, {

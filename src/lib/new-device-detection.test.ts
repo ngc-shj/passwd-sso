@@ -6,6 +6,7 @@ const {
   mockWithBypassRls,
   mockSendEmail,
   mockCreateNotification,
+  mockResolveUserLocale,
 } = vi.hoisted(() => ({
   mockSessionFindMany: vi.fn(),
   mockUserFindUnique: vi.fn(),
@@ -14,6 +15,19 @@ const {
   ),
   mockSendEmail: vi.fn(),
   mockCreateNotification: vi.fn(),
+  mockResolveUserLocale: vi.fn(
+    (stored?: string | null, accept?: string | null) => {
+      if (stored) return stored;
+      if (accept) {
+        const lower = accept.toLowerCase();
+        const enIdx = lower.search(/\ben/);
+        const jaIdx = lower.search(/\bja/);
+        if (enIdx >= 0 && (jaIdx < 0 || enIdx < jaIdx)) return "en";
+        return "ja";
+      }
+      return "ja";
+    },
+  ),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -30,6 +44,9 @@ vi.mock("@/lib/email", () => ({
 }));
 vi.mock("@/lib/notification", () => ({
   createNotification: mockCreateNotification,
+}));
+vi.mock("@/lib/locale", () => ({
+  resolveUserLocale: mockResolveUserLocale,
 }));
 
 import { checkNewDeviceAndNotify } from "./new-device-detection";
@@ -79,7 +96,7 @@ describe("checkNewDeviceAndNotify", () => {
     mockSessionFindMany.mockResolvedValue([
       { userAgent: CHROME_WIN },
     ]);
-    mockUserFindUnique.mockResolvedValue({ email: "user@example.com" });
+    mockUserFindUnique.mockResolvedValue({ email: "user@example.com", locale: null });
     mockCreateNotification.mockResolvedValue(undefined);
 
     await checkNewDeviceAndNotify("user-1", {
@@ -109,7 +126,7 @@ describe("checkNewDeviceAndNotify", () => {
     mockSessionFindMany.mockResolvedValue([
       { userAgent: CHROME_WIN },
     ]);
-    mockUserFindUnique.mockResolvedValue({ email: "user@example.com" });
+    mockUserFindUnique.mockResolvedValue({ email: "user@example.com", locale: null });
     mockCreateNotification.mockResolvedValue(undefined);
 
     await checkNewDeviceAndNotify("user-1", {
@@ -121,6 +138,27 @@ describe("checkNewDeviceAndNotify", () => {
     expect(mockCreateNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "新しいデバイスからのログイン",
+      }),
+    );
+  });
+
+  it("uses stored user locale over Accept-Language", async () => {
+    mockSessionFindMany.mockResolvedValue([
+      { userAgent: CHROME_WIN },
+    ]);
+    mockUserFindUnique.mockResolvedValue({ email: "user@example.com", locale: "en" });
+    mockCreateNotification.mockResolvedValue(undefined);
+
+    await checkNewDeviceAndNotify("user-1", {
+      ip: "5.6.7.8",
+      userAgent: FIREFOX_MAC,
+      acceptLanguage: "ja,en-US;q=0.9",
+    });
+
+    expect(mockResolveUserLocale).toHaveBeenCalledWith("en", "ja,en-US;q=0.9");
+    expect(mockCreateNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "New device login",
       }),
     );
   });
