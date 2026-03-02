@@ -43,7 +43,7 @@ describe("checkNewDeviceAndNotify", () => {
   });
 
   it("skips when userAgent is null", async () => {
-    await checkNewDeviceAndNotify("user-1", { ip: "1.2.3.4", userAgent: null });
+    await checkNewDeviceAndNotify("user-1", { ip: "1.2.3.4", userAgent: null, acceptLanguage: null });
     expect(mockSessionFindMany).not.toHaveBeenCalled();
   });
 
@@ -53,6 +53,7 @@ describe("checkNewDeviceAndNotify", () => {
     await checkNewDeviceAndNotify("user-1", {
       ip: "1.2.3.4",
       userAgent: CHROME_WIN,
+      acceptLanguage: null,
     });
 
     expect(mockSendEmail).not.toHaveBeenCalled();
@@ -67,6 +68,7 @@ describe("checkNewDeviceAndNotify", () => {
     await checkNewDeviceAndNotify("user-1", {
       ip: "1.2.3.4",
       userAgent: CHROME_WIN,
+      acceptLanguage: null,
     });
 
     expect(mockSendEmail).not.toHaveBeenCalled();
@@ -83,13 +85,14 @@ describe("checkNewDeviceAndNotify", () => {
     await checkNewDeviceAndNotify("user-1", {
       ip: "5.6.7.8",
       userAgent: FIREFOX_MAC,
+      acceptLanguage: null,
     });
 
     expect(mockSendEmail).toHaveBeenCalledTimes(1);
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "user@example.com",
-        subject: expect.stringContaining("device"),
+        subject: expect.stringContaining("ログイン"),
       }),
     );
 
@@ -102,6 +105,26 @@ describe("checkNewDeviceAndNotify", () => {
     );
   });
 
+  it("uses Japanese locale when Accept-Language starts with ja", async () => {
+    mockSessionFindMany.mockResolvedValue([
+      { userAgent: CHROME_WIN },
+    ]);
+    mockUserFindUnique.mockResolvedValue({ email: "user@example.com" });
+    mockCreateNotification.mockResolvedValue(undefined);
+
+    await checkNewDeviceAndNotify("user-1", {
+      ip: "5.6.7.8",
+      userAgent: FIREFOX_MAC,
+      acceptLanguage: "ja,en-US;q=0.9",
+    });
+
+    expect(mockCreateNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "新しいデバイスからのログイン",
+      }),
+    );
+  });
+
   it("never throws even on error", async () => {
     mockSessionFindMany.mockRejectedValue(new Error("DB down"));
 
@@ -110,6 +133,7 @@ describe("checkNewDeviceAndNotify", () => {
       checkNewDeviceAndNotify("user-1", {
         ip: "1.2.3.4",
         userAgent: CHROME_WIN,
+        acceptLanguage: null,
       }),
     ).resolves.toBeUndefined();
   });

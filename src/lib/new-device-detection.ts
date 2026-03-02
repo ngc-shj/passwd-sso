@@ -9,7 +9,21 @@ import { NOTIFICATION_TYPE } from "@/lib/constants";
 interface DeviceMeta {
   ip: string | null;
   userAgent: string | null;
+  acceptLanguage: string | null;
   currentSessionToken?: string;
+}
+
+/**
+ * Derive locale from Accept-Language header.
+ * Returns "ja" or "en" (defaults to "ja" matching routing.defaultLocale).
+ */
+function resolveLocale(acceptLanguage: string | null): string {
+  if (!acceptLanguage) return "ja";
+  const lower = acceptLanguage.toLowerCase();
+  const enIdx = lower.search(/\ben/);
+  const jaIdx = lower.search(/\bja/);
+  if (enIdx >= 0 && (jaIdx < 0 || enIdx < jaIdx)) return "en";
+  return "ja";
 }
 
 function parseDevice(ua: string): { browserName: string; osName: string } {
@@ -78,7 +92,7 @@ export async function checkNewDeviceAndNotify(
     );
     if (!user?.email) return;
 
-    const locale = "en";
+    const locale = resolveLocale(meta.acceptLanguage);
     const timestamp = new Date().toISOString();
 
     const emailTemplate = newDeviceLoginEmail(locale, {
