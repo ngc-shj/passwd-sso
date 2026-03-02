@@ -17,14 +17,17 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Import / Export** - Bitwarden, 1Password, Chrome CSV import; CSV/JSON export profiles: compatible and passwd-sso (full-fidelity)
 - **Password-Protected Export** - AES-256-GCM encrypted exports with PBKDF2 (600k)
 - **Attachments** - Encrypted file attachments (personal and team E2E)
-- **Share Links** - Time-limited read-only sharing with access logs
-- **Audit Logs** - Personal and team audit logs with filters and export events
+- **Share Links & Permissions** - Time-limited sharing with access logs and visibility controls (`view all`, `hide password`, `overview only`)
+- **Audit Logs & Webhooks** - Personal and team audit logs with filters, CSV/JSONL download, and team webhook delivery
 - **Emergency Access** - Request/approve temporary vault access with key exchange
 - **Session Management** - List active sessions and revoke single/all sessions
-- **Security Notifications** - Email notifications for emergency-access events
+- **Notifications** - In-app and email notifications for emergency-access events and new-device logins
 - **Key Rotation** - Rotate vault encryption key with passphrase verification
-- **Tags & Team** - Color-coded tags, favorites, archive, soft-delete trash (30-day auto-purge)
+- **Secure Notes** - Prebuilt templates and safe Markdown preview/rendering
+- **Tags & Team** - Nested color-coded tags, favorites, archive, soft-delete trash (30-day auto-purge)
+- **Team Security Policies** - Team-level sharing/export controls, reprompt requirements, and password-policy guidance
 - **Keyboard Shortcuts** - `/ or Cmd+K` search, `n` new, `?` help, `Esc` clear
+- **Locale Persistence** - User locale preference saved to database and used for emails/notifications
 - **i18n** - English and Japanese (next-intl)
 - **Dark Mode** - Light / dark / system (next-themes)
 - **Team Vault** - Team password sharing with E2E encryption (ECDH-P256) and RBAC (Owner/Admin/Member/Viewer)
@@ -34,7 +37,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Rate Limiting** - Redis-backed vault unlock rate limiting
 - **CSP & Security Headers** - Content Security Policy with nonce, CSP violation reporting
 - **SCIM 2.0 Provisioning** - Tenant-scoped user/group sync (RFC 7644) with Bearer token auth
-- **Multi-Tenant Isolation** - PostgreSQL FORCE ROW LEVEL SECURITY on 28 tables with IdP claim-based tenant resolution
+- **Multi-Tenant Isolation** - PostgreSQL FORCE ROW LEVEL SECURITY on 33 tables with IdP claim-based tenant resolution
 - **Self-Hosted** - Docker Compose with PostgreSQL, SAML Jackson, and Redis
 - **Browser Extension (Chrome/Edge, MV3)** - Manual autofill, inline suggestions, AWS 3-field fill, context menu, keyboard shortcuts, new-login detect & save
 
@@ -248,7 +251,9 @@ src/
 │   ├── vault/                # Setup, unlock, status, key rotation, recovery key, reset
 │   ├── teams/                # Team management API
 │   ├── share-links/          # Share link CRUD + access
-│   ├── audit-logs/           # Audit log queries
+│   ├── audit-logs/           # Audit log queries + download
+│   ├── notifications/        # In-app notification center
+│   ├── user/                 # User preferences (locale)
 │   ├── emergency-access/     # Emergency access workflows
 │   ├── watchtower/           # Security audit (HIBP, analysis)
 │   ├── health/               # Health check (liveness + readiness)
@@ -257,7 +262,8 @@ src/
 ├── components/
 │   ├── layout/               # Header, Sidebar, SearchBar
 │   ├── passwords/            # PasswordList, PasswordForm, Generator, entry type forms
-│   ├── team/                 # Team vault UI (list, form, settings, invitations)
+│   ├── team/                 # Team vault UI (list, form, settings, invitations, policies)
+│   ├── notifications/        # Notification bell and dropdown
 │   ├── emergency-access/     # Emergency access UI
 │   ├── share/                # Share link UI
 │   ├── watchtower/           # Security audit dashboard
