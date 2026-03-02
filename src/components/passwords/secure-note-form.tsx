@@ -28,8 +28,7 @@ import {
 } from "@/components/ui/select";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { SECURE_NOTE_TEMPLATES } from "@/lib/secure-note-templates";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SecureNoteMarkdown } from "@/components/passwords/secure-note-markdown";
+import { SecureNoteFields } from "@/components/entry-fields/secure-note-fields";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
@@ -177,39 +176,15 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, d
           />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="content">{t("content")}</Label>
-          <p className="text-xs text-muted-foreground">{t("markdownHint")}</p>
-          <Tabs defaultValue="edit">
-            <TabsList className="grid w-full max-w-[200px] grid-cols-2">
-              <TabsTrigger value="edit">{t("editTab")}</TabsTrigger>
-              <TabsTrigger value="preview">{t("previewTab")}</TabsTrigger>
-            </TabsList>
-            <TabsContent value="edit" className="mt-2">
-              <textarea
-                id="content"
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                placeholder={t("contentPlaceholder")}
-                rows={10}
-                maxLength={50000}
-                required
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </TabsContent>
-            <TabsContent value="preview" className="mt-2">
-              <div className="min-h-[240px] rounded-lg border bg-muted/30 p-3">
-                {content ? (
-                  <SecureNoteMarkdown content={content} />
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    {t("contentPlaceholder")}
-                  </p>
-                )}
-              </div>
-            </TabsContent>
-          </Tabs>
-        </div>
+        <SecureNoteFields
+          content={content}
+          onContentChange={setContent}
+          contentLabel={t("content")}
+          contentPlaceholder={t("contentPlaceholder")}
+          editTabLabel={t("editTab")}
+          previewTabLabel={t("previewTab")}
+          markdownHint={t("markdownHint")}
+        />
       </EntryPrimaryCard>
 
       <EntryTagsAndFolderSection

@@ -7,10 +7,10 @@ import { useVault } from "@/lib/vault-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { TagData } from "@/components/tags/tag-input";
-import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { SoftwareLicenseFields } from "@/components/entry-fields/software-license-fields";
 import {
   EntryActionBar,
   EntryPrimaryCard,
@@ -199,67 +199,39 @@ export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSav
         />
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="softwareName">{t("softwareName")}</Label>
-        <Input
-          id="softwareName"
-          value={softwareName}
-          onChange={(e) => setSoftwareName(e.target.value)}
-          placeholder={t("softwareNamePlaceholder")}
-          autoComplete="off"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="licenseKey">{t("licenseKey")}</Label>
-        <div className="relative">
-          <Input
-            id="licenseKey"
-            type={showLicenseKey ? "text" : "password"}
-            value={licenseKey}
-            onChange={(e) => setLicenseKey(e.target.value)}
-            placeholder={t("licenseKeyPlaceholder")}
-            autoComplete="off"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-            onClick={() => setShowLicenseKey(!showLicenseKey)}
-          >
-            {showLicenseKey ? (
-              <EyeOff className="h-4 w-4" />
-            ) : (
-              <Eye className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="version">{t("version")}</Label>
-          <Input
-            id="version"
-            value={version}
-            onChange={(e) => setVersion(e.target.value)}
-            placeholder={t("versionPlaceholder")}
-            autoComplete="off"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="licensee">{t("licensee")}</Label>
-          <Input
-            id="licensee"
-            value={licensee}
-            onChange={(e) => setLicensee(e.target.value)}
-            placeholder={t("licenseePlaceholder")}
-            autoComplete="off"
-          />
-        </div>
-      </div>
+      <SoftwareLicenseFields
+        softwareName={softwareName}
+        onSoftwareNameChange={setSoftwareName}
+        softwareNamePlaceholder={t("softwareNamePlaceholder")}
+        licenseKey={licenseKey}
+        onLicenseKeyChange={setLicenseKey}
+        licenseKeyPlaceholder={t("licenseKeyPlaceholder")}
+        showLicenseKey={showLicenseKey}
+        onToggleLicenseKey={() => setShowLicenseKey(!showLicenseKey)}
+        version={version}
+        onVersionChange={setVersion}
+        versionPlaceholder={t("versionPlaceholder")}
+        licensee={licensee}
+        onLicenseeChange={setLicensee}
+        licenseePlaceholder={t("licenseePlaceholder")}
+        purchaseDate={purchaseDate}
+        onPurchaseDateChange={(v) => { setPurchaseDate(v); setExpirationError(null); }}
+        expirationDate={expirationDate}
+        onExpirationDateChange={(v) => { setExpirationDate(v); setExpirationError(null); }}
+        expiryError={expirationError}
+        notesLabel={t("notes")}
+        notes={notes}
+        onNotesChange={setNotes}
+        notesPlaceholder={t("notesPlaceholder")}
+        labels={{
+          softwareName: t("softwareName"),
+          licenseKey: t("licenseKey"),
+          version: t("version"),
+          licensee: t("licensee"),
+          purchaseDate: t("purchaseDate"),
+          expirationDate: t("expirationDate"),
+        }}
+      />
 
       <div className="space-y-2">
         <Label htmlFor="email">{t("email")}</Label>
@@ -272,48 +244,6 @@ export function SoftwareLicenseForm({ mode, initialData, variant = "page", onSav
           autoComplete="off"
         />
         {emailError && <p className="text-destructive text-sm">{emailError}</p>}
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="purchaseDate">{t("purchaseDate")}</Label>
-          <Input
-            id="purchaseDate"
-            type="date"
-            value={purchaseDate}
-            onChange={(e) => {
-              setPurchaseDate(e.target.value);
-              setExpirationError(null);
-            }}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="expirationDate">{t("expirationDate")}</Label>
-          <Input
-            id="expirationDate"
-            type="date"
-            value={expirationDate}
-            onChange={(e) => {
-              setExpirationDate(e.target.value);
-              setExpirationError(null);
-            }}
-          />
-        </div>
-      </div>
-      {expirationError && (
-        <p className="text-sm text-destructive">{expirationError}</p>
-      )}
-
-      <div className="space-y-2">
-        <Label htmlFor="notes">{t("notes")}</Label>
-        <Textarea
-          id="notes"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder={t("notesPlaceholder")}
-          rows={3}
-        />
       </div>
 
       </EntryPrimaryCard>

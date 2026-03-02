@@ -7,17 +7,10 @@ import { useVault } from "@/lib/vault-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { TagData } from "@/components/tags/tag-input";
-import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { BankAccountFields } from "@/components/entry-fields/bank-account-fields";
 import {
   EntryActionBar,
   EntryPrimaryCard,
@@ -204,145 +197,53 @@ export function BankAccountForm({ mode, initialData, variant = "page", onSaved, 
         />
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="bankName">{t("bankName")}</Label>
-        <Input
-          id="bankName"
-          value={bankName}
-          onChange={(e) => setBankName(e.target.value)}
-          placeholder={t("bankNamePlaceholder")}
-          autoComplete="off"
-        />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>{t("accountType")}</Label>
-          <Select value={accountType} onValueChange={setAccountType}>
-            <SelectTrigger>
-              <SelectValue placeholder={t("accountTypePlaceholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="checking">{t("accountTypeChecking")}</SelectItem>
-              <SelectItem value="savings">{t("accountTypeSavings")}</SelectItem>
-              <SelectItem value="other">{t("accountTypeOther")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="accountHolderName">{t("accountHolderName")}</Label>
-          <Input
-            id="accountHolderName"
-            value={accountHolderName}
-            onChange={(e) => setAccountHolderName(e.target.value)}
-            placeholder={t("accountHolderNamePlaceholder")}
-            autoComplete="off"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="accountNumber">{t("accountNumber")}</Label>
-        <div className="relative">
-          <Input
-            id="accountNumber"
-            type={showAccountNumber ? "text" : "password"}
-            value={accountNumber}
-            onChange={(e) => setAccountNumber(e.target.value)}
-            placeholder={t("accountNumberPlaceholder")}
-            autoComplete="off"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-            onClick={() => setShowAccountNumber(!showAccountNumber)}
-          >
-            {showAccountNumber ? (
-              <EyeOff className="h-4 w-4" />
-            ) : (
-              <Eye className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="routingNumber">{t("routingNumber")}</Label>
-          <div className="relative">
-            <Input
-              id="routingNumber"
-              type={showRoutingNumber ? "text" : "password"}
-              value={routingNumber}
-              onChange={(e) => setRoutingNumber(e.target.value)}
-              placeholder={t("routingNumberPlaceholder")}
-              autoComplete="off"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-              onClick={() => setShowRoutingNumber(!showRoutingNumber)}
-            >
-              {showRoutingNumber ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="branchName">{t("branchName")}</Label>
-          <Input
-            id="branchName"
-            value={branchName}
-            onChange={(e) => setBranchName(e.target.value)}
-            placeholder={t("branchNamePlaceholder")}
-            autoComplete="off"
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="swiftBic">{t("swiftBic")}</Label>
-          <Input
-            id="swiftBic"
-            value={swiftBic}
-            onChange={(e) => setSwiftBic(e.target.value)}
-            placeholder={t("swiftBicPlaceholder")}
-            autoComplete="off"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="iban">{t("iban")}</Label>
-          <Input
-            id="iban"
-            value={iban}
-            onChange={(e) => setIban(e.target.value)}
-            placeholder={t("ibanPlaceholder")}
-            autoComplete="off"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="notes">{t("notes")}</Label>
-        <Textarea
-          id="notes"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder={t("notesPlaceholder")}
-          rows={3}
-        />
-      </div>
+      <BankAccountFields
+        bankName={bankName}
+        onBankNameChange={setBankName}
+        bankNamePlaceholder={t("bankNamePlaceholder")}
+        accountType={accountType}
+        onAccountTypeChange={setAccountType}
+        accountTypePlaceholder={t("accountTypePlaceholder")}
+        accountTypeCheckingLabel={t("accountTypeChecking")}
+        accountTypeSavingsLabel={t("accountTypeSavings")}
+        accountTypeOtherLabel={t("accountTypeOther")}
+        accountHolderName={accountHolderName}
+        onAccountHolderNameChange={setAccountHolderName}
+        accountHolderNamePlaceholder={t("accountHolderNamePlaceholder")}
+        accountNumber={accountNumber}
+        onAccountNumberChange={setAccountNumber}
+        accountNumberPlaceholder={t("accountNumberPlaceholder")}
+        showAccountNumber={showAccountNumber}
+        onToggleAccountNumber={() => setShowAccountNumber(!showAccountNumber)}
+        routingNumber={routingNumber}
+        onRoutingNumberChange={setRoutingNumber}
+        routingNumberPlaceholder={t("routingNumberPlaceholder")}
+        showRoutingNumber={showRoutingNumber}
+        onToggleRoutingNumber={() => setShowRoutingNumber(!showRoutingNumber)}
+        swiftBic={swiftBic}
+        onSwiftBicChange={setSwiftBic}
+        swiftBicPlaceholder={t("swiftBicPlaceholder")}
+        iban={iban}
+        onIbanChange={setIban}
+        ibanPlaceholder={t("ibanPlaceholder")}
+        branchName={branchName}
+        onBranchNameChange={setBranchName}
+        branchNamePlaceholder={t("branchNamePlaceholder")}
+        notesLabel={t("notes")}
+        notes={notes}
+        onNotesChange={setNotes}
+        notesPlaceholder={t("notesPlaceholder")}
+        labels={{
+          bankName: t("bankName"),
+          accountType: t("accountType"),
+          accountHolderName: t("accountHolderName"),
+          accountNumber: t("accountNumber"),
+          routingNumber: t("routingNumber"),
+          swiftBic: t("swiftBic"),
+          iban: t("iban"),
+          branchName: t("branchName"),
+        }}
+      />
 
       </EntryPrimaryCard>
 

@@ -17,17 +17,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { TagData } from "@/components/tags/tag-input";
-import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { CreditCardFields } from "@/components/entry-fields/credit-card-fields";
 import {
   EntryActionBar,
   EntryPrimaryCard,
@@ -247,168 +240,51 @@ export function CreditCardForm({ mode, initialData, variant = "page", onSaved, d
         />
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="cardholderName">{t("cardholderName")}</Label>
-        <Input
-          id="cardholderName"
-          value={cardholderName}
-          onChange={(e) => setCardholderName(e.target.value)}
-          placeholder={t("cardholderNamePlaceholder")}
-          autoComplete="off"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label>{t("brand")}</Label>
-        <Select
-          value={brand}
-          onValueChange={(value) => {
-            setBrand(value);
-            setBrandSource("manual");
-          }}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder={t("brandPlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            {CARD_BRANDS.map((b) => (
-              <SelectItem key={b} value={b}>
-                {b}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="cardNumber">{t("cardNumber")}</Label>
-        <div className="relative">
-          <Input
-            id="cardNumber"
-            type={showCardNumber ? "text" : "password"}
-            value={cardNumber}
-            onChange={(e) => handleCardNumberChange(e.target.value)}
-            placeholder={t("cardNumberPlaceholder")}
-            autoComplete="off"
-            inputMode="numeric"
-            maxLength={maxInputLength}
-            aria-invalid={showLengthError || showLuhnError}
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-            onClick={() => setShowCardNumber(!showCardNumber)}
-          >
-            {showCardNumber ? (
-              <EyeOff className="h-4 w-4" />
-            ) : (
-              <Eye className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-        {validation.detectedBrand && (
-          <p className="text-xs text-muted-foreground">
-            {t("cardNumberDetectedBrand", { brand: validation.detectedBrand })}
-          </p>
-        )}
-        {!hasBrandHint && validation.digits.length > 0 && (
-          <p className="text-xs text-muted-foreground">
-            {t("cardNumberLengthHintGeneric")}
-          </p>
-        )}
-        {hasBrandHint && (
-          <p className="text-xs text-muted-foreground">
-            {t("cardNumberLengthHint", { lengths: lengthHint })}
-          </p>
-        )}
-        {showLengthError && (
-          <p className="text-xs text-destructive">
-            {t("cardNumberInvalidLength", { lengths: lengthHint })}
-          </p>
-        )}
-        {!showLengthError && showLuhnError && (
-          <p className="text-xs text-destructive">
-            {t("cardNumberInvalidLuhn")}
-          </p>
-        )}
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>{t("expiry")}</Label>
-          <div className="flex gap-2">
-            <Select value={expiryMonth} onValueChange={setExpiryMonth}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder={t("expiryMonth")} />
-              </SelectTrigger>
-              <SelectContent>
-                {Array.from({ length: 12 }, (_, i) =>
-                  String(i + 1).padStart(2, "0")
-                ).map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={expiryYear} onValueChange={setExpiryYear}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder={t("expiryYear")} />
-              </SelectTrigger>
-              <SelectContent>
-                {Array.from({ length: 15 }, (_, i) =>
-                  String(new Date().getFullYear() + i)
-                ).map((y) => (
-                  <SelectItem key={y} value={y}>
-                    {y}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="cvv">{t("cvv")}</Label>
-          <div className="relative">
-            <Input
-              id="cvv"
-              type={showCvv ? "text" : "password"}
-              value={cvv}
-              onChange={(e) => setCvv(e.target.value)}
-              placeholder={t("cvvPlaceholder")}
-              autoComplete="off"
-              maxLength={4}
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-              onClick={() => setShowCvv(!showCvv)}
-            >
-              {showCvv ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="notes">{t("notes")}</Label>
-        <Textarea
-          id="notes"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder={t("notesPlaceholder")}
-          rows={3}
-        />
-      </div>
+      <CreditCardFields
+        cardholderName={cardholderName}
+        onCardholderNameChange={setCardholderName}
+        cardholderNamePlaceholder={t("cardholderNamePlaceholder")}
+        brand={brand}
+        onBrandChange={(v) => { setBrand(v); setBrandSource("manual"); }}
+        brandPlaceholder={t("brandPlaceholder")}
+        brands={CARD_BRANDS}
+        cardNumber={cardNumber}
+        onCardNumberChange={handleCardNumberChange}
+        cardNumberPlaceholder={t("cardNumberPlaceholder")}
+        showCardNumber={showCardNumber}
+        onToggleCardNumber={() => setShowCardNumber(!showCardNumber)}
+        maxInputLength={maxInputLength}
+        showLengthError={showLengthError}
+        showLuhnError={showLuhnError}
+        detectedBrand={validation.detectedBrand ? t("cardNumberDetectedBrand", { brand: validation.detectedBrand }) : undefined}
+        hasBrandHint={hasBrandHint}
+        lengthHintGenericLabel={t("cardNumberLengthHintGeneric")}
+        lengthHintLabel={t("cardNumberLengthHint", { lengths: lengthHint })}
+        invalidLengthLabel={t("cardNumberInvalidLength", { lengths: lengthHint })}
+        invalidLuhnLabel={t("cardNumberInvalidLuhn")}
+        expiryMonth={expiryMonth}
+        onExpiryMonthChange={setExpiryMonth}
+        expiryYear={expiryYear}
+        onExpiryYearChange={setExpiryYear}
+        expiryMonthPlaceholder={t("expiryMonth")}
+        expiryYearPlaceholder={t("expiryYear")}
+        cvv={cvv}
+        onCvvChange={setCvv}
+        cvvPlaceholder={t("cvvPlaceholder")}
+        showCvv={showCvv}
+        onToggleCvv={() => setShowCvv(!showCvv)}
+        notesLabel={t("notes")}
+        notes={notes}
+        onNotesChange={setNotes}
+        notesPlaceholder={t("notesPlaceholder")}
+        labels={{
+          cardholderName: t("cardholderName"),
+          brand: t("brand"),
+          cardNumber: t("cardNumber"),
+          expiry: t("expiry"),
+          cvv: t("cvv"),
+        }}
+      />
 
       </EntryPrimaryCard>
 

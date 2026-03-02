@@ -7,10 +7,10 @@ import { useVault } from "@/lib/vault-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { TagData } from "@/components/tags/tag-input";
-import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { PasskeyFields } from "@/components/entry-fields/passkey-fields";
 import {
   EntryActionBar,
   EntryPrimaryCard,
@@ -187,100 +187,39 @@ export function PasskeyForm({ mode, initialData, variant = "page", onSaved, defa
         />
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="relyingPartyId">{t("relyingPartyId")}</Label>
-        <Input
-          id="relyingPartyId"
-          value={relyingPartyId}
-          onChange={(e) => setRelyingPartyId(e.target.value)}
-          placeholder={t("relyingPartyIdPlaceholder")}
-          required
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="relyingPartyName">{t("relyingPartyName")}</Label>
-        <Input
-          id="relyingPartyName"
-          value={relyingPartyName}
-          onChange={(e) => setRelyingPartyName(e.target.value)}
-          placeholder={t("relyingPartyNamePlaceholder")}
-          autoComplete="off"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="username">{t("username")}</Label>
-        <Input
-          id="username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder={t("usernamePlaceholder")}
-          autoComplete="off"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="credentialId">{t("credentialId")}</Label>
-        <div className="relative">
-          <Input
-            id="credentialId"
-            type={showCredentialId ? "text" : "password"}
-            value={credentialId}
-            onChange={(e) => setCredentialId(e.target.value)}
-            placeholder={t("credentialIdPlaceholder")}
-            className="font-mono"
-            autoComplete="off"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-            onClick={() => setShowCredentialId(!showCredentialId)}
-          >
-            {showCredentialId ? (
-              <EyeOff className="h-4 w-4" />
-            ) : (
-              <Eye className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="creationDate">{t("creationDate")}</Label>
-          <Input
-            id="creationDate"
-            type="date"
-            value={creationDate}
-            onChange={(e) => setCreationDate(e.target.value)}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="deviceInfo">{t("deviceInfo")}</Label>
-          <Input
-            id="deviceInfo"
-            value={deviceInfo}
-            onChange={(e) => setDeviceInfo(e.target.value)}
-            placeholder={t("deviceInfoPlaceholder")}
-            autoComplete="off"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="notes">{t("notes")}</Label>
-        <Textarea
-          id="notes"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder={t("notesPlaceholder")}
-          rows={3}
-        />
-      </div>
+      <PasskeyFields
+        relyingPartyId={relyingPartyId}
+        onRelyingPartyIdChange={setRelyingPartyId}
+        relyingPartyIdPlaceholder={t("relyingPartyIdPlaceholder")}
+        relyingPartyName={relyingPartyName}
+        onRelyingPartyNameChange={setRelyingPartyName}
+        relyingPartyNamePlaceholder={t("relyingPartyNamePlaceholder")}
+        username={username}
+        onUsernameChange={setUsername}
+        usernamePlaceholder={t("usernamePlaceholder")}
+        credentialId={credentialId}
+        onCredentialIdChange={setCredentialId}
+        credentialIdPlaceholder={t("credentialIdPlaceholder")}
+        showCredentialId={showCredentialId}
+        onToggleCredentialId={() => setShowCredentialId(!showCredentialId)}
+        creationDate={creationDate}
+        onCreationDateChange={setCreationDate}
+        deviceInfo={deviceInfo}
+        onDeviceInfoChange={setDeviceInfo}
+        deviceInfoPlaceholder={t("deviceInfoPlaceholder")}
+        notesLabel={t("notes")}
+        notes={notes}
+        onNotesChange={setNotes}
+        notesPlaceholder={t("notesPlaceholder")}
+        labels={{
+          relyingPartyId: t("relyingPartyId"),
+          relyingPartyName: t("relyingPartyName"),
+          username: t("username"),
+          credentialId: t("credentialId"),
+          creationDate: t("creationDate"),
+          deviceInfo: t("deviceInfo"),
+        }}
+      />
       </EntryPrimaryCard>
 
       <EntryTagsAndFolderSection

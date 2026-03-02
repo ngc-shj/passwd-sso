@@ -9,9 +9,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/team/team-form-fields";
+import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/entry-fields/form-fields";
 
-interface TeamBankAccountFieldsProps {
+interface BankAccountFieldsProps {
   bankName: string;
   onBankNameChange: (value: string) => void;
   bankNamePlaceholder: string;
@@ -57,9 +57,10 @@ interface TeamBankAccountFieldsProps {
     iban: string;
     branchName: string;
   };
+  idPrefix?: string;
 }
 
-export function TeamBankAccountFields({
+export function BankAccountFields({
   bankName,
   onBankNameChange,
   bankNamePlaceholder,
@@ -96,12 +97,23 @@ export function TeamBankAccountFields({
   onNotesChange,
   notesPlaceholder,
   labels,
-}: TeamBankAccountFieldsProps) {
+  idPrefix = "",
+}: BankAccountFieldsProps) {
+  const bankNameId = `${idPrefix}bankName`;
+  const accountTypeId = `${idPrefix}accountType`;
+  const accountHolderNameId = `${idPrefix}accountHolderName`;
+  const accountNumberId = `${idPrefix}accountNumber`;
+  const routingNumberId = `${idPrefix}routingNumber`;
+  const swiftBicId = `${idPrefix}swiftBic`;
+  const ibanId = `${idPrefix}iban`;
+  const branchNameId = `${idPrefix}branchName`;
+
   return (
     <>
       <div className="space-y-2">
-        <Label>{labels.bankName}</Label>
+        <Label htmlFor={bankNameId}>{labels.bankName}</Label>
         <Input
+          id={bankNameId}
           value={bankName}
           onChange={(e) => onBankNameChange(e.target.value)}
           placeholder={bankNamePlaceholder}
@@ -112,9 +124,9 @@ export function TeamBankAccountFields({
       <TwoColumnFields
         left={(
           <>
-            <Label>{labels.accountType}</Label>
+            <Label htmlFor={accountTypeId}>{labels.accountType}</Label>
             <Select value={accountType} onValueChange={onAccountTypeChange}>
-              <SelectTrigger>
+              <SelectTrigger id={accountTypeId}>
                 <SelectValue placeholder={accountTypePlaceholder} />
               </SelectTrigger>
               <SelectContent>
@@ -127,8 +139,9 @@ export function TeamBankAccountFields({
         )}
         right={(
           <>
-            <Label>{labels.accountHolderName}</Label>
+            <Label htmlFor={accountHolderNameId}>{labels.accountHolderName}</Label>
             <Input
+              id={accountHolderNameId}
               value={accountHolderName}
               onChange={(e) => onAccountHolderNameChange(e.target.value)}
               placeholder={accountHolderNamePlaceholder}
@@ -139,11 +152,12 @@ export function TeamBankAccountFields({
       />
 
       <div className="space-y-2">
-        <Label>{labels.accountNumber}</Label>
+        <Label htmlFor={accountNumberId}>{labels.accountNumber}</Label>
         <VisibilityToggleInput
           show={showAccountNumber}
           onToggle={onToggleAccountNumber}
           inputProps={{
+            id: accountNumberId,
             value: accountNumber,
             onChange: (e) => onAccountNumberChange(e.target.value),
             placeholder: accountNumberPlaceholder,
@@ -155,11 +169,12 @@ export function TeamBankAccountFields({
       <TwoColumnFields
         left={(
           <>
-            <Label>{labels.routingNumber}</Label>
+            <Label htmlFor={routingNumberId}>{labels.routingNumber}</Label>
             <VisibilityToggleInput
               show={showRoutingNumber}
               onToggle={onToggleRoutingNumber}
               inputProps={{
+                id: routingNumberId,
                 value: routingNumber,
                 onChange: (e) => onRoutingNumberChange(e.target.value),
                 placeholder: routingNumberPlaceholder,
@@ -170,8 +185,9 @@ export function TeamBankAccountFields({
         )}
         right={(
           <>
-            <Label>{labels.branchName}</Label>
+            <Label htmlFor={branchNameId}>{labels.branchName}</Label>
             <Input
+              id={branchNameId}
               value={branchName}
               onChange={(e) => onBranchNameChange(e.target.value)}
               placeholder={branchNamePlaceholder}
@@ -184,8 +200,9 @@ export function TeamBankAccountFields({
       <TwoColumnFields
         left={(
           <>
-            <Label>{labels.swiftBic}</Label>
+            <Label htmlFor={swiftBicId}>{labels.swiftBic}</Label>
             <Input
+              id={swiftBicId}
               value={swiftBic}
               onChange={(e) => onSwiftBicChange(e.target.value)}
               placeholder={swiftBicPlaceholder}
@@ -195,8 +212,9 @@ export function TeamBankAccountFields({
         )}
         right={(
           <>
-            <Label>{labels.iban}</Label>
+            <Label htmlFor={ibanId}>{labels.iban}</Label>
             <Input
+              id={ibanId}
               value={iban}
               onChange={(e) => onIbanChange(e.target.value)}
               placeholder={ibanPlaceholder}

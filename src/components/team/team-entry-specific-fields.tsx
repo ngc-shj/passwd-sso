@@ -3,12 +3,12 @@
 import { CARD_BRANDS } from "@/lib/credit-card";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { TeamPolicyClient } from "@/hooks/use-team-policy";
-import { TeamBankAccountFields } from "@/components/team/team-bank-account-fields";
-import { TeamCreditCardFields } from "@/components/team/team-credit-card-fields";
-import { TeamIdentityFields } from "@/components/team/team-identity-fields";
-import { TeamPasskeyFields } from "@/components/team/team-passkey-fields";
-import { TeamSecureNoteFields } from "@/components/team/team-secure-note-fields";
-import { TeamSoftwareLicenseFields } from "@/components/team/team-software-license-fields";
+import { BankAccountFields } from "@/components/entry-fields/bank-account-fields";
+import { CreditCardFields } from "@/components/entry-fields/credit-card-fields";
+import { IdentityFields } from "@/components/entry-fields/identity-fields";
+import { PasskeyFields } from "@/components/entry-fields/passkey-fields";
+import { SecureNoteFields } from "@/components/entry-fields/secure-note-fields";
+import { SoftwareLicenseFields } from "@/components/entry-fields/software-license-fields";
 import type { TeamEntryKind } from "@/components/team/team-password-form-types";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 
@@ -400,7 +400,7 @@ export function TeamEntrySpecificFields({
   switch (entryKind) {
     case "passkey":
       return (
-        <TeamPasskeyFields
+        <PasskeyFields
           relyingPartyId={relyingPartyId}
           onRelyingPartyIdChange={onRelyingPartyIdChange}
           relyingPartyIdPlaceholder={relyingPartyIdPlaceholder}
@@ -429,7 +429,7 @@ export function TeamEntrySpecificFields({
       );
     case "identity":
       return (
-        <TeamIdentityFields
+        <IdentityFields
           fullName={fullName}
           onFullNameChange={onFullNameChange}
           fullNamePlaceholder={fullNamePlaceholder}
@@ -467,7 +467,7 @@ export function TeamEntrySpecificFields({
       );
     case "creditCard":
       return (
-        <TeamCreditCardFields
+        <CreditCardFields
           cardholderName={cardholderName}
           onCardholderNameChange={onCardholderNameChange}
           cardholderNamePlaceholder={cardholderNamePlaceholder}
@@ -509,7 +509,7 @@ export function TeamEntrySpecificFields({
       );
     case "bankAccount":
       return (
-        <TeamBankAccountFields
+        <BankAccountFields
           bankName={bankName}
           onBankNameChange={onBankNameChange}
           bankNamePlaceholder={bankNamePlaceholder}
@@ -550,7 +550,7 @@ export function TeamEntrySpecificFields({
       );
     case "softwareLicense":
       return (
-        <TeamSoftwareLicenseFields
+        <SoftwareLicenseFields
           softwareName={softwareName}
           onSoftwareNameChange={onSoftwareNameChange}
           softwareNamePlaceholder={softwareNamePlaceholder}
@@ -579,7 +579,7 @@ export function TeamEntrySpecificFields({
       );
     case "secureNote":
       return (
-        <TeamSecureNoteFields
+        <SecureNoteFields
           content={content}
           onContentChange={onContentChange}
           contentLabel={contentLabel}

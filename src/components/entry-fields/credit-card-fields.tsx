@@ -9,9 +9,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/team/team-form-fields";
+import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/entry-fields/form-fields";
 
-interface TeamCreditCardFieldsProps {
+interface CreditCardFieldsProps {
   cardholderName: string;
   onCardholderNameChange: (value: string) => void;
   cardholderNamePlaceholder: string;
@@ -55,9 +55,10 @@ interface TeamCreditCardFieldsProps {
     expiry: string;
     cvv: string;
   };
+  idPrefix?: string;
 }
 
-export function TeamCreditCardFields({
+export function CreditCardFields({
   cardholderName,
   onCardholderNameChange,
   cardholderNamePlaceholder,
@@ -95,12 +96,19 @@ export function TeamCreditCardFields({
   onNotesChange,
   notesPlaceholder,
   labels,
-}: TeamCreditCardFieldsProps) {
+  idPrefix = "",
+}: CreditCardFieldsProps) {
+  const cardholderNameId = `${idPrefix}cardholderName`;
+  const brandId = `${idPrefix}brand`;
+  const cardNumberId = `${idPrefix}cardNumber`;
+  const cvvId = `${idPrefix}cvv`;
+
   return (
     <>
       <div className="space-y-2">
-        <Label>{labels.cardholderName}</Label>
+        <Label htmlFor={cardholderNameId}>{labels.cardholderName}</Label>
         <Input
+          id={cardholderNameId}
           value={cardholderName}
           onChange={(e) => onCardholderNameChange(e.target.value)}
           placeholder={cardholderNamePlaceholder}
@@ -109,9 +117,9 @@ export function TeamCreditCardFields({
       </div>
 
       <div className="space-y-2">
-        <Label>{labels.brand}</Label>
+        <Label htmlFor={brandId}>{labels.brand}</Label>
         <Select value={brand} onValueChange={onBrandChange}>
-          <SelectTrigger>
+          <SelectTrigger id={brandId}>
             <SelectValue placeholder={brandPlaceholder} />
           </SelectTrigger>
           <SelectContent>
@@ -125,11 +133,12 @@ export function TeamCreditCardFields({
       </div>
 
       <div className="space-y-2">
-        <Label>{labels.cardNumber}</Label>
+        <Label htmlFor={cardNumberId}>{labels.cardNumber}</Label>
         <VisibilityToggleInput
           show={showCardNumber}
           onToggle={onToggleCardNumber}
           inputProps={{
+            id: cardNumberId,
             value: cardNumber,
             onChange: (e) => onCardNumberChange(e.target.value),
             placeholder: cardNumberPlaceholder,
@@ -194,11 +203,12 @@ export function TeamCreditCardFields({
         )}
         right={(
           <>
-            <Label>{labels.cvv}</Label>
+            <Label htmlFor={cvvId}>{labels.cvv}</Label>
             <VisibilityToggleInput
               show={showCvv}
               onToggle={onToggleCvv}
               inputProps={{
+                id: cvvId,
                 value: cvv,
                 onChange: (e) => onCvvChange(e.target.value),
                 placeholder: cvvPlaceholder,

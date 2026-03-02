@@ -2,9 +2,9 @@
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/team/team-form-fields";
+import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/entry-fields/form-fields";
 
-interface TeamSoftwareLicenseFieldsProps {
+interface SoftwareLicenseFieldsProps {
   softwareName: string;
   onSoftwareNameChange: (value: string) => void;
   softwareNamePlaceholder: string;
@@ -36,9 +36,10 @@ interface TeamSoftwareLicenseFieldsProps {
     purchaseDate: string;
     expirationDate: string;
   };
+  idPrefix?: string;
 }
 
-export function TeamSoftwareLicenseFields({
+export function SoftwareLicenseFields({
   softwareName,
   onSoftwareNameChange,
   softwareNamePlaceholder,
@@ -63,12 +64,21 @@ export function TeamSoftwareLicenseFields({
   onNotesChange,
   notesPlaceholder,
   labels,
-}: TeamSoftwareLicenseFieldsProps) {
+  idPrefix = "",
+}: SoftwareLicenseFieldsProps) {
+  const softwareNameId = `${idPrefix}softwareName`;
+  const licenseKeyId = `${idPrefix}licenseKey`;
+  const versionId = `${idPrefix}version`;
+  const licenseeId = `${idPrefix}licensee`;
+  const purchaseDateId = `${idPrefix}purchaseDate`;
+  const expirationDateId = `${idPrefix}expirationDate`;
+
   return (
     <>
       <div className="space-y-2">
-        <Label>{labels.softwareName}</Label>
+        <Label htmlFor={softwareNameId}>{labels.softwareName}</Label>
         <Input
+          id={softwareNameId}
           value={softwareName}
           onChange={(e) => onSoftwareNameChange(e.target.value)}
           placeholder={softwareNamePlaceholder}
@@ -77,11 +87,12 @@ export function TeamSoftwareLicenseFields({
       </div>
 
       <div className="space-y-2">
-        <Label>{labels.licenseKey}</Label>
+        <Label htmlFor={licenseKeyId}>{labels.licenseKey}</Label>
         <VisibilityToggleInput
           show={showLicenseKey}
           onToggle={onToggleLicenseKey}
           inputProps={{
+            id: licenseKeyId,
             value: licenseKey,
             onChange: (e) => onLicenseKeyChange(e.target.value),
             placeholder: licenseKeyPlaceholder,
@@ -93,8 +104,9 @@ export function TeamSoftwareLicenseFields({
       <TwoColumnFields
         left={(
           <>
-            <Label>{labels.version}</Label>
+            <Label htmlFor={versionId}>{labels.version}</Label>
             <Input
+              id={versionId}
               value={version}
               onChange={(e) => onVersionChange(e.target.value)}
               placeholder={versionPlaceholder}
@@ -104,8 +116,9 @@ export function TeamSoftwareLicenseFields({
         )}
         right={(
           <>
-            <Label>{labels.licensee}</Label>
+            <Label htmlFor={licenseeId}>{labels.licensee}</Label>
             <Input
+              id={licenseeId}
               value={licensee}
               onChange={(e) => onLicenseeChange(e.target.value)}
               placeholder={licenseePlaceholder}
@@ -118,8 +131,9 @@ export function TeamSoftwareLicenseFields({
       <TwoColumnFields
         left={(
           <>
-            <Label>{labels.purchaseDate}</Label>
+            <Label htmlFor={purchaseDateId}>{labels.purchaseDate}</Label>
             <Input
+              id={purchaseDateId}
               type="date"
               value={purchaseDate}
               onChange={(e) => onPurchaseDateChange(e.target.value)}
@@ -128,8 +142,9 @@ export function TeamSoftwareLicenseFields({
         )}
         right={(
           <>
-            <Label>{labels.expirationDate}</Label>
+            <Label htmlFor={expirationDateId}>{labels.expirationDate}</Label>
             <Input
+              id={expirationDateId}
               type="date"
               value={expirationDate}
               onChange={(e) => onExpirationDateChange(e.target.value)}

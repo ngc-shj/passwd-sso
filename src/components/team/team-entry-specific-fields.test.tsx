@@ -9,23 +9,23 @@ import { TeamEntrySpecificFields } from "@/components/team/team-entry-specific-f
 vi.mock("@/components/passwords/entry-login-main-fields", () => ({
   EntryLoginMainFields: () => <div data-testid="team-login-fields" />,
 }));
-vi.mock("@/components/team/team-secure-note-fields", () => ({
-  TeamSecureNoteFields: () => <div data-testid="team-secure-note-fields" />,
+vi.mock("@/components/entry-fields/secure-note-fields", () => ({
+  SecureNoteFields: () => <div data-testid="team-secure-note-fields" />,
 }));
-vi.mock("@/components/team/team-credit-card-fields", () => ({
-  TeamCreditCardFields: () => <div data-testid="team-credit-card-fields" />,
+vi.mock("@/components/entry-fields/credit-card-fields", () => ({
+  CreditCardFields: () => <div data-testid="team-credit-card-fields" />,
 }));
-vi.mock("@/components/team/team-identity-fields", () => ({
-  TeamIdentityFields: () => <div data-testid="team-identity-fields" />,
+vi.mock("@/components/entry-fields/identity-fields", () => ({
+  IdentityFields: () => <div data-testid="team-identity-fields" />,
 }));
-vi.mock("@/components/team/team-passkey-fields", () => ({
-  TeamPasskeyFields: () => <div data-testid="team-passkey-fields" />,
+vi.mock("@/components/entry-fields/passkey-fields", () => ({
+  PasskeyFields: () => <div data-testid="team-passkey-fields" />,
 }));
-vi.mock("@/components/team/team-bank-account-fields", () => ({
-  TeamBankAccountFields: () => <div data-testid="team-bank-account-fields" />,
+vi.mock("@/components/entry-fields/bank-account-fields", () => ({
+  BankAccountFields: () => <div data-testid="team-bank-account-fields" />,
 }));
-vi.mock("@/components/team/team-software-license-fields", () => ({
-  TeamSoftwareLicenseFields: () => <div data-testid="team-software-license-fields" />,
+vi.mock("@/components/entry-fields/software-license-fields", () => ({
+  SoftwareLicenseFields: () => <div data-testid="team-software-license-fields" />,
 }));
 
 const baseGeneratorSettings: GeneratorSettings = {

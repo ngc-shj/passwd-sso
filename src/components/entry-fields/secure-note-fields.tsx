@@ -4,7 +4,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SecureNoteMarkdown } from "@/components/passwords/secure-note-markdown";
 
-interface TeamSecureNoteFieldsProps {
+interface SecureNoteFieldsProps {
   content: string;
   onContentChange: (value: string) => void;
   contentLabel: string;
@@ -12,9 +12,10 @@ interface TeamSecureNoteFieldsProps {
   editTabLabel: string;
   previewTabLabel: string;
   markdownHint?: string;
+  idPrefix?: string;
 }
 
-export function TeamSecureNoteFields({
+export function SecureNoteFields({
   content,
   onContentChange,
   contentLabel,
@@ -22,10 +23,13 @@ export function TeamSecureNoteFields({
   editTabLabel,
   previewTabLabel,
   markdownHint,
-}: TeamSecureNoteFieldsProps) {
+  idPrefix = "",
+}: SecureNoteFieldsProps) {
+  const contentId = `${idPrefix}content`;
+
   return (
     <div className="space-y-2">
-      <Label>{contentLabel}</Label>
+      <Label htmlFor={contentId}>{contentLabel}</Label>
       {markdownHint && <p className="text-xs text-muted-foreground">{markdownHint}</p>}
       <Tabs defaultValue="edit">
         <TabsList className="grid w-full max-w-[200px] grid-cols-2">
@@ -34,6 +38,7 @@ export function TeamSecureNoteFields({
         </TabsList>
         <TabsContent value="edit" className="mt-2">
           <textarea
+            id={contentId}
             value={content}
             onChange={(e) => onContentChange(e.target.value)}
             placeholder={contentPlaceholder}

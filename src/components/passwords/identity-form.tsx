@@ -7,10 +7,10 @@ import { useVault } from "@/lib/vault-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { TagData } from "@/components/tags/tag-input";
-import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { IdentityFields } from "@/components/entry-fields/identity-fields";
 import {
   EntryActionBar,
   EntryPrimaryCard,
@@ -223,152 +223,51 @@ export function IdentityForm({ mode, initialData, variant = "page", onSaved, def
         />
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="fullName">{t("fullName")}</Label>
-        <Input
-          id="fullName"
-          value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
-          placeholder={t("fullNamePlaceholder")}
-          autoComplete="off"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="address">{t("address")}</Label>
-        <Textarea
-          id="address"
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          placeholder={t("addressPlaceholder")}
-          rows={2}
-          autoComplete="off"
-        />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="phone">{t("phone")}</Label>
-          <Input
-            id="phone"
-            type="tel"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder={t("phonePlaceholder")}
-            autoComplete="off"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="email">{t("email")}</Label>
-          <Input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder={t("emailPlaceholder")}
-            autoComplete="off"
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="dateOfBirth">{t("dateOfBirth")}</Label>
-          <Input
-            id="dateOfBirth"
-            type="date"
-            value={dateOfBirth}
-            onChange={(e) => {
-              setDateOfBirth(e.target.value);
-              setDobError(null);
-            }}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="nationality">{t("nationality")}</Label>
-          <Input
-            id="nationality"
-            value={nationality}
-            onChange={(e) => setNationality(e.target.value)}
-            placeholder={t("nationalityPlaceholder")}
-            autoComplete="off"
-          />
-        </div>
-      </div>
-      {dobError && (
-        <p className="text-sm text-destructive">{dobError}</p>
-      )}
-
-      <div className="space-y-2">
-        <Label htmlFor="idNumber">{t("idNumber")}</Label>
-        <div className="relative">
-          <Input
-            id="idNumber"
-            type={showIdNumber ? "text" : "password"}
-            value={idNumber}
-            onChange={(e) => setIdNumber(e.target.value)}
-            placeholder={t("idNumberPlaceholder")}
-            autoComplete="off"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-            onClick={() => setShowIdNumber(!showIdNumber)}
-          >
-            {showIdNumber ? (
-              <EyeOff className="h-4 w-4" />
-            ) : (
-              <Eye className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="issueDate">{t("issueDate")}</Label>
-          <Input
-            id="issueDate"
-            type="date"
-            value={issueDate}
-            onChange={(e) => {
-              setIssueDate(e.target.value);
-              setExpiryError(null);
-            }}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="expiryDate">{t("expiryDate")}</Label>
-          <Input
-            id="expiryDate"
-            type="date"
-            value={expiryDate}
-            onChange={(e) => {
-              setExpiryDate(e.target.value);
-              setExpiryError(null);
-            }}
-          />
-        </div>
-      </div>
-      {expiryError && (
-        <p className="text-sm text-destructive">{expiryError}</p>
-      )}
-
-      <div className="space-y-2">
-        <Label htmlFor="notes">{t("notes")}</Label>
-        <Textarea
-          id="notes"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder={t("notesPlaceholder")}
-          rows={3}
-        />
-      </div>
+      <IdentityFields
+        fullName={fullName}
+        onFullNameChange={setFullName}
+        fullNamePlaceholder={t("fullNamePlaceholder")}
+        address={address}
+        onAddressChange={setAddress}
+        addressPlaceholder={t("addressPlaceholder")}
+        phone={phone}
+        onPhoneChange={setPhone}
+        phonePlaceholder={t("phonePlaceholder")}
+        email={email}
+        onEmailChange={setEmail}
+        emailPlaceholder={t("emailPlaceholder")}
+        dateOfBirth={dateOfBirth}
+        onDateOfBirthChange={(v) => { setDateOfBirth(v); setDobError(null); }}
+        nationality={nationality}
+        onNationalityChange={setNationality}
+        nationalityPlaceholder={t("nationalityPlaceholder")}
+        idNumber={idNumber}
+        onIdNumberChange={setIdNumber}
+        idNumberPlaceholder={t("idNumberPlaceholder")}
+        showIdNumber={showIdNumber}
+        onToggleIdNumber={() => setShowIdNumber(!showIdNumber)}
+        issueDate={issueDate}
+        onIssueDateChange={(v) => { setIssueDate(v); setExpiryError(null); }}
+        expiryDate={expiryDate}
+        onExpiryDateChange={(v) => { setExpiryDate(v); setExpiryError(null); }}
+        dobError={dobError}
+        expiryError={expiryError}
+        notesLabel={t("notes")}
+        notes={notes}
+        onNotesChange={setNotes}
+        notesPlaceholder={t("notesPlaceholder")}
+        labels={{
+          fullName: t("fullName"),
+          address: t("address"),
+          phone: t("phone"),
+          email: t("email"),
+          dateOfBirth: t("dateOfBirth"),
+          nationality: t("nationality"),
+          idNumber: t("idNumber"),
+          issueDate: t("issueDate"),
+          expiryDate: t("expiryDate"),
+        }}
+      />
       </EntryPrimaryCard>
 
       <EntryTagsAndFolderSection

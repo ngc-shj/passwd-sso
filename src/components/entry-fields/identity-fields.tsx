@@ -3,9 +3,9 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/team/team-form-fields";
+import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/entry-fields/form-fields";
 
-interface TeamIdentityFieldsProps {
+interface IdentityFieldsProps {
   fullName: string;
   onFullNameChange: (value: string) => void;
   fullNamePlaceholder: string;
@@ -49,9 +49,10 @@ interface TeamIdentityFieldsProps {
     issueDate: string;
     expiryDate: string;
   };
+  idPrefix?: string;
 }
 
-export function TeamIdentityFields({
+export function IdentityFields({
   fullName,
   onFullNameChange,
   fullNamePlaceholder,
@@ -85,12 +86,24 @@ export function TeamIdentityFields({
   onNotesChange,
   notesPlaceholder,
   labels,
-}: TeamIdentityFieldsProps) {
+  idPrefix = "",
+}: IdentityFieldsProps) {
+  const fullNameId = `${idPrefix}fullName`;
+  const addressId = `${idPrefix}address`;
+  const phoneId = `${idPrefix}phone`;
+  const emailId = `${idPrefix}email`;
+  const dateOfBirthId = `${idPrefix}dateOfBirth`;
+  const nationalityId = `${idPrefix}nationality`;
+  const idNumberId = `${idPrefix}idNumber`;
+  const issueDateId = `${idPrefix}issueDate`;
+  const expiryDateId = `${idPrefix}expiryDate`;
+
   return (
     <>
       <div className="space-y-2">
-        <Label>{labels.fullName}</Label>
+        <Label htmlFor={fullNameId}>{labels.fullName}</Label>
         <Input
+          id={fullNameId}
           value={fullName}
           onChange={(e) => onFullNameChange(e.target.value)}
           placeholder={fullNamePlaceholder}
@@ -99,8 +112,9 @@ export function TeamIdentityFields({
       </div>
 
       <div className="space-y-2">
-        <Label>{labels.address}</Label>
+        <Label htmlFor={addressId}>{labels.address}</Label>
         <Textarea
+          id={addressId}
           value={address}
           onChange={(e) => onAddressChange(e.target.value)}
           placeholder={addressPlaceholder}
@@ -112,8 +126,9 @@ export function TeamIdentityFields({
       <TwoColumnFields
         left={(
           <>
-            <Label>{labels.phone}</Label>
+            <Label htmlFor={phoneId}>{labels.phone}</Label>
             <Input
+              id={phoneId}
               type="tel"
               value={phone}
               onChange={(e) => onPhoneChange(e.target.value)}
@@ -124,8 +139,9 @@ export function TeamIdentityFields({
         )}
         right={(
           <>
-            <Label>{labels.email}</Label>
+            <Label htmlFor={emailId}>{labels.email}</Label>
             <Input
+              id={emailId}
               type="email"
               value={email}
               onChange={(e) => onEmailChange(e.target.value)}
@@ -139,8 +155,9 @@ export function TeamIdentityFields({
       <TwoColumnFields
         left={(
           <>
-            <Label>{labels.dateOfBirth}</Label>
+            <Label htmlFor={dateOfBirthId}>{labels.dateOfBirth}</Label>
             <Input
+              id={dateOfBirthId}
               type="date"
               value={dateOfBirth}
               onChange={(e) => onDateOfBirthChange(e.target.value)}
@@ -149,8 +166,9 @@ export function TeamIdentityFields({
         )}
         right={(
           <>
-            <Label>{labels.nationality}</Label>
+            <Label htmlFor={nationalityId}>{labels.nationality}</Label>
             <Input
+              id={nationalityId}
               value={nationality}
               onChange={(e) => onNationalityChange(e.target.value)}
               placeholder={nationalityPlaceholder}
@@ -162,11 +180,12 @@ export function TeamIdentityFields({
       {dobError && <p className="text-sm text-destructive">{dobError}</p>}
 
       <div className="space-y-2">
-        <Label>{labels.idNumber}</Label>
+        <Label htmlFor={idNumberId}>{labels.idNumber}</Label>
         <VisibilityToggleInput
           show={showIdNumber}
           onToggle={onToggleIdNumber}
           inputProps={{
+            id: idNumberId,
             value: idNumber,
             onChange: (e) => onIdNumberChange(e.target.value),
             placeholder: idNumberPlaceholder,
@@ -178,8 +197,9 @@ export function TeamIdentityFields({
       <TwoColumnFields
         left={(
           <>
-            <Label>{labels.issueDate}</Label>
+            <Label htmlFor={issueDateId}>{labels.issueDate}</Label>
             <Input
+              id={issueDateId}
               type="date"
               value={issueDate}
               onChange={(e) => onIssueDateChange(e.target.value)}
@@ -188,8 +208,9 @@ export function TeamIdentityFields({
         )}
         right={(
           <>
-            <Label>{labels.expiryDate}</Label>
+            <Label htmlFor={expiryDateId}>{labels.expiryDate}</Label>
             <Input
+              id={expiryDateId}
               type="date"
               value={expiryDate}
               onChange={(e) => onExpiryDateChange(e.target.value)}

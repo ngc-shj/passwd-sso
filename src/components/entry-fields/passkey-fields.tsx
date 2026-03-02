@@ -2,9 +2,9 @@
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/team/team-form-fields";
+import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/entry-fields/form-fields";
 
-interface TeamPasskeyFieldsProps {
+interface PasskeyFieldsProps {
   relyingPartyId: string;
   onRelyingPartyIdChange: (value: string) => void;
   relyingPartyIdPlaceholder: string;
@@ -36,9 +36,10 @@ interface TeamPasskeyFieldsProps {
     creationDate: string;
     deviceInfo: string;
   };
+  idPrefix?: string;
 }
 
-export function TeamPasskeyFields({
+export function PasskeyFields({
   relyingPartyId,
   onRelyingPartyIdChange,
   relyingPartyIdPlaceholder,
@@ -63,12 +64,21 @@ export function TeamPasskeyFields({
   onNotesChange,
   notesPlaceholder,
   labels,
-}: TeamPasskeyFieldsProps) {
+  idPrefix = "",
+}: PasskeyFieldsProps) {
+  const relyingPartyIdId = `${idPrefix}relyingPartyId`;
+  const relyingPartyNameId = `${idPrefix}relyingPartyName`;
+  const usernameId = `${idPrefix}username`;
+  const credentialIdId = `${idPrefix}credentialId`;
+  const creationDateId = `${idPrefix}creationDate`;
+  const deviceInfoId = `${idPrefix}deviceInfo`;
+
   return (
     <>
       <div className="space-y-2">
-        <Label>{labels.relyingPartyId}</Label>
+        <Label htmlFor={relyingPartyIdId}>{labels.relyingPartyId}</Label>
         <Input
+          id={relyingPartyIdId}
           value={relyingPartyId}
           onChange={(e) => onRelyingPartyIdChange(e.target.value)}
           placeholder={relyingPartyIdPlaceholder}
@@ -77,8 +87,9 @@ export function TeamPasskeyFields({
       </div>
 
       <div className="space-y-2">
-        <Label>{labels.relyingPartyName}</Label>
+        <Label htmlFor={relyingPartyNameId}>{labels.relyingPartyName}</Label>
         <Input
+          id={relyingPartyNameId}
           value={relyingPartyName}
           onChange={(e) => onRelyingPartyNameChange(e.target.value)}
           placeholder={relyingPartyNamePlaceholder}
@@ -87,8 +98,9 @@ export function TeamPasskeyFields({
       </div>
 
       <div className="space-y-2">
-        <Label>{labels.username}</Label>
+        <Label htmlFor={usernameId}>{labels.username}</Label>
         <Input
+          id={usernameId}
           value={username}
           onChange={(e) => onUsernameChange(e.target.value)}
           placeholder={usernamePlaceholder}
@@ -97,11 +109,12 @@ export function TeamPasskeyFields({
       </div>
 
       <div className="space-y-2">
-        <Label>{labels.credentialId}</Label>
+        <Label htmlFor={credentialIdId}>{labels.credentialId}</Label>
         <VisibilityToggleInput
           show={showCredentialId}
           onToggle={onToggleCredentialId}
           inputProps={{
+            id: credentialIdId,
             value: credentialId,
             onChange: (e) => onCredentialIdChange(e.target.value),
             placeholder: credentialIdPlaceholder,
@@ -113,8 +126,9 @@ export function TeamPasskeyFields({
       <TwoColumnFields
         left={(
           <>
-            <Label>{labels.creationDate}</Label>
+            <Label htmlFor={creationDateId}>{labels.creationDate}</Label>
             <Input
+              id={creationDateId}
               type="date"
               value={creationDate}
               onChange={(e) => onCreationDateChange(e.target.value)}
@@ -123,8 +137,9 @@ export function TeamPasskeyFields({
         )}
         right={(
           <>
-            <Label>{labels.deviceInfo}</Label>
+            <Label htmlFor={deviceInfoId}>{labels.deviceInfo}</Label>
             <Input
+              id={deviceInfoId}
               value={deviceInfo}
               onChange={(e) => onDeviceInfoChange(e.target.value)}
               placeholder={deviceInfoPlaceholder}
