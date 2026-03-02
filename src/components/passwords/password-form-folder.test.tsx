@@ -188,7 +188,7 @@ vi.mock("@/components/ui/select", () => ({
   SelectValue: () => null,
 }));
 
-import { PasswordForm } from "./password-form";
+import { PasswordForm } from "./personal-password-form";
 
 // ── Helpers ──────────────────────────────────────────────────
 

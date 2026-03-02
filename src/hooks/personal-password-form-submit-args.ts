@@ -1,7 +1,7 @@
 "use client";
 
 import type { SubmitPersonalPasswordFormArgs } from "@/components/passwords/personal-password-submit";
-import type { PasswordFormProps } from "@/components/passwords/password-form-types";
+import type { PasswordFormProps } from "@/components/passwords/personal-password-form-types";
 import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
 import type { PasswordFormRouter } from "@/hooks/password-form-router";

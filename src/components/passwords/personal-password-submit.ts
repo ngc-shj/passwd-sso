@@ -4,7 +4,7 @@ import {
   buildPersonalEntryPayload,
 } from "@/lib/personal-entry-payload";
 import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
-import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
+import type { PersonalPasswordFormInitialData } from "@/components/passwords/personal-password-form-types";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { TagData } from "@/components/tags/tag-input";

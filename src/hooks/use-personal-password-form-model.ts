@@ -3,7 +3,7 @@
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
-import type { PasswordFormProps } from "@/components/passwords/password-form-types";
+import type { PasswordFormProps } from "@/components/passwords/personal-password-form-types";
 import {
   buildPersonalPasswordFormController,
 } from "@/hooks/personal-password-form-controller";

@@ -2,8 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useRouter } from "@/i18n/navigation";
-import { useVault } from "@/lib/vault-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,10 +28,8 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import { SECURE_NOTE_TEMPLATES } from "@/lib/secure-note-templates";
 import { SecureNoteFields } from "@/components/entry-fields/secure-note-fields";
 import { preventIMESubmit } from "@/lib/ime-guard";
-import { usePersonalFolders } from "@/hooks/use-personal-folders";
-import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
-import { toTagIds, toTagPayload } from "@/components/passwords/entry-form-tags";
-import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
+import { toTagPayload } from "@/components/passwords/entry-form-tags";
+import { usePersonalBaseFormModel } from "@/hooks/use-personal-base-form-model";
 
 interface SecureNoteFormProps {
   mode: "create" | "edit";
@@ -52,80 +48,94 @@ interface SecureNoteFormProps {
   defaultTags?: TagData[];
 }
 
-export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, defaultFolderId, defaultTags }: SecureNoteFormProps) {
+export function SecureNoteForm({
+  mode,
+  initialData,
+  variant = "page",
+  onSaved,
+  defaultFolderId,
+  defaultTags,
+}: SecureNoteFormProps) {
   const t = useTranslations("SecureNoteForm");
   const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
-  const router = useRouter();
-  const { encryptionKey, userId } = useVault();
-  const [submitting, setSubmitting] = useState(false);
-  const [requireReprompt, setRequireReprompt] = useState(initialData?.requireReprompt ?? false);
-  const [expiresAt, setExpiresAt] = useState<string | null>(initialData?.expiresAt ?? null);
-
-  const [title, setTitle] = useState(initialData?.title ?? "");
+  const base = usePersonalBaseFormModel({
+    mode,
+    initialId: initialData?.id,
+    initialTitle: initialData?.title,
+    initialTags: initialData?.tags,
+    initialFolderId: initialData?.folderId,
+    initialRequireReprompt: initialData?.requireReprompt,
+    initialExpiresAt: initialData?.expiresAt,
+    defaultFolderId,
+    defaultTags,
+    variant,
+    onSaved,
+  });
   const [content, setContent] = useState(initialData?.content ?? "");
-  const [selectedTags, setSelectedTags] = useState<TagData[]>(
-    initialData?.tags ?? defaultTags ?? []
-  );
-  const [folderId, setFolderId] = useState<string | null>(initialData?.folderId ?? defaultFolderId ?? null);
-  const { folders } = usePersonalFolders();
 
   const baselineSnapshot = useMemo(
     () =>
       JSON.stringify({
         title: initialData?.title ?? "",
         content: initialData?.content ?? "",
-        selectedTagIds: (initialData?.tags ?? defaultTags ?? []).map((tag) => tag.id).sort(),
+        selectedTagIds: (initialData?.tags ?? defaultTags ?? [])
+          .map((tag) => tag.id)
+          .sort(),
         folderId: initialData?.folderId ?? defaultFolderId ?? null,
         requireReprompt: initialData?.requireReprompt ?? false,
         expiresAt: initialData?.expiresAt ?? null,
       }),
-    [initialData, defaultFolderId, defaultTags]
+    [initialData, defaultFolderId, defaultTags],
   );
 
   const currentSnapshot = useMemo(
     () =>
       JSON.stringify({
-        title,
+        title: base.title,
         content,
-        selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
-        folderId,
-        requireReprompt,
-        expiresAt,
+        selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
+        folderId: base.folderId,
+        requireReprompt: base.requireReprompt,
+        expiresAt: base.expiresAt,
       }),
-    [title, content, selectedTags, folderId, requireReprompt, expiresAt]
+    [
+      base.title,
+      content,
+      base.selectedTags,
+      base.folderId,
+      base.requireReprompt,
+      base.expiresAt,
+    ],
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
-  const isDialogVariant = variant === "dialog";
-  const primaryCardClass = isDialogVariant ? ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS : "";
-  const dialogSectionClass = isDialogVariant ? ENTRY_DIALOG_FLAT_SECTION_CLASS : "";
-  const { handleCancel, handleBack } = createFormNavigationHandlers({ onSaved, router });
+  const primaryCardClass = base.isDialogVariant
+    ? ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS
+    : "";
+  const dialogSectionClass = base.isDialogVariant
+    ? ENTRY_DIALOG_FLAT_SECTION_CLASS
+    : "";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!encryptionKey) return;
-    const tags = toTagPayload(selectedTags);
+    const tags = toTagPayload(base.selectedTags);
     const snippet = content.slice(0, 100);
-    const fullBlob = JSON.stringify({ title, content, tags, isMarkdown: true });
-    const overviewBlob = JSON.stringify({ title, snippet, tags });
 
-    await executePersonalEntrySubmit({
-      mode,
-      initialId: initialData?.id,
-      encryptionKey,
-      userId: userId ?? undefined,
-      fullBlob,
-      overviewBlob,
-      tagIds: toTagIds(selectedTags),
-      folderId: folderId ?? null,
+    await base.submitEntry({
+      t: tPw,
+      fullBlob: JSON.stringify({
+        title: base.title,
+        content,
+        tags,
+        isMarkdown: true,
+      }),
+      overviewBlob: JSON.stringify({
+        title: base.title,
+        snippet,
+        tags,
+      }),
       entryType: ENTRY_TYPE.SECURE_NOTE,
-      requireReprompt,
-      expiresAt,
-      setSubmitting,
-      t,
-      router,
-      onSaved,
     });
   };
 
@@ -138,16 +148,14 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, d
             <Select
               defaultValue="blank"
               onValueChange={(templateId) => {
-                const tmpl = SECURE_NOTE_TEMPLATES.find(
-                  (tp) => tp.id === templateId,
-                );
+                const tmpl = SECURE_NOTE_TEMPLATES.find((tp) => tp.id === templateId);
                 if (!tmpl) return;
                 if (tmpl.id === "blank") {
-                  setTitle("");
+                  base.setTitle("");
                   setContent("");
                   return;
                 }
-                setTitle(t(tmpl.titleKey));
+                base.setTitle(t(tmpl.titleKey));
                 setContent(tmpl.contentTemplate);
               }}
             >
@@ -169,8 +177,8 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, d
           <Label htmlFor="title">{t("title")}</Label>
           <Input
             id="title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            value={base.title}
+            onChange={(e) => base.setTitle(e.target.value)}
             placeholder={t("titlePlaceholder")}
             required
           />
@@ -190,25 +198,25 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, d
       <EntryTagsAndFolderSection
         tagsTitle={t("tags")}
         tagsHint={tPw("tagsHint")}
-        selectedTags={selectedTags}
-        onTagsChange={setSelectedTags}
-        folders={folders}
-        folderId={folderId}
-        onFolderChange={setFolderId}
+        selectedTags={base.selectedTags}
+        onTagsChange={base.setSelectedTags}
+        folders={base.folders}
+        folderId={base.folderId}
+        onFolderChange={base.setFolderId}
         sectionCardClass={dialogSectionClass}
       />
 
       <EntryRepromptSection
-        checked={requireReprompt}
-        onCheckedChange={setRequireReprompt}
+        checked={base.requireReprompt}
+        onCheckedChange={base.setRequireReprompt}
         title={tPw("requireReprompt")}
         description={tPw("requireRepromptHelp")}
         sectionCardClass={dialogSectionClass}
       />
 
       <EntryExpirationSection
-        value={expiresAt}
-        onChange={setExpiresAt}
+        value={base.expiresAt}
+        onChange={base.setExpiresAt}
         title={tPw("expirationTitle")}
         description={tPw("expirationDescription")}
         sectionCardClass={dialogSectionClass}
@@ -216,42 +224,34 @@ export function SecureNoteForm({ mode, initialData, variant = "page", onSaved, d
 
       <EntryActionBar
         hasChanges={hasChanges}
-        submitting={submitting}
+        submitting={base.submitting}
         saveLabel={mode === "create" ? tc("save") : tc("update")}
         cancelLabel={tc("cancel")}
         statusUnsavedLabel={tPw("statusUnsaved")}
         statusSavedLabel={tPw("statusSaved")}
-        onCancel={handleCancel}
+        onCancel={base.handleCancel}
       />
     </form>
   );
 
-  if (variant === "dialog") {
+  if (base.isDialogVariant) {
     return formContent;
   }
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-4">
-      <Button
-        variant="ghost"
-        className="mb-4 gap-2"
-        onClick={handleBack}
-      >
-        <ArrowLeft className="h-4 w-4" />
-        {tc("back")}
-      </Button>
+        <Button variant="ghost" className="mb-4 gap-2" onClick={base.handleBack}>
+          <ArrowLeft className="h-4 w-4" />
+          {tc("back")}
+        </Button>
 
-      <Card className="rounded-xl border">
-        <CardHeader>
-          <CardTitle>
-            {mode === "create" ? t("newNote") : t("editNote")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {formContent}
-        </CardContent>
-      </Card>
+        <Card className="rounded-xl border">
+          <CardHeader>
+            <CardTitle>{mode === "create" ? t("newNote") : t("editNote")}</CardTitle>
+          </CardHeader>
+          <CardContent>{formContent}</CardContent>
+        </Card>
       </div>
     </div>
   );

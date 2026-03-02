@@ -27,7 +27,7 @@ import {
   PasswordDetailInline,
   type InlineDetailData,
 } from "./password-detail-inline";
-import { PasswordEditDialog } from "./password-edit-dialog";
+import { PasswordEditDialogLoader } from "./personal-password-edit-dialog-loader";
 import {
   User,
   Star,
@@ -867,7 +867,7 @@ export function PasswordCard({
       </Card>
 
       {!isTeamMode && (
-        <PasswordEditDialog
+        <PasswordEditDialogLoader
           id={id}
           open={editDialogOpen}
           onOpenChange={setEditDialogOpen}

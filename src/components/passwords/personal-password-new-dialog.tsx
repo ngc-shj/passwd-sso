@@ -1,13 +1,13 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { PasswordForm } from "./password-form";
-import { SecureNoteForm } from "./secure-note-form";
-import { CreditCardForm } from "./credit-card-form";
-import { IdentityForm } from "./identity-form";
-import { PasskeyForm } from "./passkey-form";
-import { BankAccountForm } from "./bank-account-form";
-import { SoftwareLicenseForm } from "./software-license-form";
+import { PasswordForm } from "./personal-password-form";
+import { SecureNoteForm } from "./personal-secure-note-form";
+import { CreditCardForm } from "./personal-credit-card-form";
+import { IdentityForm } from "./personal-identity-form";
+import { PasskeyForm } from "./personal-passkey-form";
+import { BankAccountForm } from "./personal-bank-account-form";
+import { SoftwareLicenseForm } from "./personal-software-license-form";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { TagData } from "@/components/tags/tag-input";

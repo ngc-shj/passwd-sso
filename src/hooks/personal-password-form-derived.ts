@@ -1,6 +1,6 @@
 import { buildGeneratorSummary } from "@/lib/generator-summary";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
-import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
+import type { PersonalPasswordFormInitialData } from "@/components/passwords/personal-password-form-types";
 import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import type { PersonalPasswordFormEntryValues } from "@/hooks/use-personal-password-form-state";
 import type { TagData } from "@/components/tags/tag-input";

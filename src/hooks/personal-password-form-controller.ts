@@ -1,4 +1,4 @@
-import type { PasswordFormProps } from "@/components/passwords/password-form-types";
+import type { PasswordFormProps } from "@/components/passwords/personal-password-form-types";
 import {
   submitPersonalPasswordForm,
 } from "@/components/passwords/personal-password-submit";

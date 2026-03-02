@@ -1,4 +1,4 @@
-import type { PersonalPasswordFormInitialData } from "@/components/passwords/password-form-types";
+import type { PersonalPasswordFormInitialData } from "@/components/passwords/personal-password-form-types";
 import {
   buildPersonalPasswordFormDerived,
 } from "@/hooks/personal-password-form-derived";
