@@ -30,6 +30,37 @@ function withIndent(folder: FolderLike, folders: FolderLike[]): string {
   return depth > 0 ? "\u00A0\u00A0".repeat(depth) + "└ " : "";
 }
 
+/** Flatten folders into tree order: parent always before children. */
+function flattenFolderTree(folders: FolderLike[]): FolderLike[] {
+  const childrenMap = new Map<string | null, FolderLike[]>();
+  for (const f of folders) {
+    const key = f.parentId ?? null;
+    let list = childrenMap.get(key);
+    if (!list) {
+      list = [];
+      childrenMap.set(key, list);
+    }
+    list.push(f);
+  }
+  const result: FolderLike[] = [];
+  function walk(parentId: string | null) {
+    const children = childrenMap.get(parentId);
+    if (!children) return;
+    for (const child of children) {
+      result.push(child);
+      walk(child.id);
+    }
+  }
+  walk(null);
+  if (result.length < folders.length) {
+    const seen = new Set(result.map((f) => f.id));
+    for (const f of folders) {
+      if (!seen.has(f.id)) result.push(f);
+    }
+  }
+  return result;
+}
+
 export function EntryFolderSelectSection({
   folders,
   value,
@@ -39,6 +70,8 @@ export function EntryFolderSelectSection({
   const t = useTranslations("PasswordForm");
 
   if (folders.length === 0) return null;
+
+  const sortedFolders = flattenFolderTree(folders);
 
   return (
     <EntrySectionCard className={sectionCardClass}>
@@ -58,9 +91,9 @@ export function EntryFolderSelectSection({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="__none__">{t("noFolder")}</SelectItem>
-          {folders.map((folder) => (
+          {sortedFolders.map((folder) => (
             <SelectItem key={folder.id} value={folder.id}>
-              {withIndent(folder, folders)}
+              {withIndent(folder, sortedFolders)}
               {folder.name}
             </SelectItem>
           ))}
