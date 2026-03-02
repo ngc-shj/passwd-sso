@@ -1,13 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -188,15 +181,7 @@ export function TeamPasskeyForm({
   };
 
   return (
-    <Dialog open={open} onOpenChange={base.handleOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{base.entryCopy.dialogLabel}</DialogTitle>
-          <DialogDescription className="sr-only">
-            {base.entryCopy.dialogLabel}
-          </DialogDescription>
-        </DialogHeader>
-
+    <>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -265,7 +250,6 @@ export function TeamPasskeyForm({
             />
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+    </>
   );
 }

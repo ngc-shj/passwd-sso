@@ -1,13 +1,5 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
@@ -22,16 +14,12 @@ import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry-form-ui";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import { buildGeneratorSummary } from "@/lib/generator-summary";
-import {
-  applyPolicyToGeneratorSettings,
-  buildPolicyAwareGeneratorSettings,
-} from "@/hooks/team-password-form-initial-values";
-import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
+import { useTeamLoginFormState } from "@/hooks/use-team-login-form-state";
+import { buildTeamLoginFormDerived } from "@/hooks/team-login-form-derived";
+import { buildTeamLoginFieldsProps } from "@/hooks/team-login-fields-props";
+import { createTeamLoginSubmitHandler } from "@/hooks/team-login-form-controller";
 
 export function TeamPasswordForm({
   teamId,
@@ -53,92 +41,29 @@ export function TeamPasswordForm({
     defaultFolderId,
     defaultTags,
   });
-
-  const tGen = base.translationBundle.tGen;
-
-  // Entry-specific state (LOGIN)
-  const [username, setUsername] = useState(editData?.username ?? "");
-  const [password, setPassword] = useState(editData?.password ?? "");
-  const [url, setUrl] = useState(editData?.url ?? "");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
-  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(
-    () => buildPolicyAwareGeneratorSettings(base.teamPolicy),
-  );
-  const [customFields, setCustomFields] = useState<EntryCustomField[]>(
-    editData?.customFields ?? [],
-  );
-  const [totp, setTotp] = useState<EntryTotp | null>(editData?.totp ?? null);
-  const [showTotpInput, setShowTotpInput] = useState(Boolean(editData?.totp));
-
-  useEffect(() => {
-    setGeneratorSettings((current) =>
-      applyPolicyToGeneratorSettings(current, base.teamPolicy),
-    );
-  }, [base.teamPolicy]);
-
-  const generatorSummary = useMemo(
-    () =>
-      buildGeneratorSummary(generatorSettings, {
-        modePassphrase: tGen("modePassphrase"),
-        modePassword: tGen("modePassword"),
-      }),
-    [generatorSettings, tGen],
-  );
-
-  // hasChanges
-  const baselineSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: editData?.title ?? "",
-        notes: editData?.notes ?? "",
-        username: editData?.username ?? "",
-        password: editData?.password ?? "",
-        url: editData?.url ?? "",
-        customFields: JSON.stringify(editData?.customFields ?? []),
-        totp: JSON.stringify(editData?.totp ?? null),
-        selectedTagIds: (editData?.tags ?? defaultTags ?? [])
-          .map((tag) => tag.id)
-          .sort(),
-        teamFolderId: editData?.teamFolderId ?? defaultFolderId ?? null,
-        requireReprompt: editData?.requireReprompt ?? false,
-        expiresAt: editData?.expiresAt ?? null,
-      }),
-    [editData, defaultFolderId, defaultTags],
-  );
-
-  const currentSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: base.title,
-        notes: base.notes,
-        username,
-        password,
-        url,
-        customFields: JSON.stringify(customFields),
-        totp: JSON.stringify(totp),
-        selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
-        teamFolderId: base.teamFolderId,
-        requireReprompt: base.requireReprompt,
-        expiresAt: base.expiresAt,
-      }),
-    [
-      base.title,
-      base.notes,
-      username,
-      password,
-      url,
-      customFields,
-      totp,
-      base.selectedTags,
-      base.teamFolderId,
-      base.requireReprompt,
-      base.expiresAt,
-    ],
-  );
-
-  const hasChanges = currentSnapshot !== baselineSnapshot;
-  const submitDisabled = !base.title.trim() || !password;
+  const loginState = useTeamLoginFormState({
+    editData,
+    teamPolicy: base.teamPolicy,
+  });
+  const { hasChanges, generatorSummary } = buildTeamLoginFormDerived({
+    editData,
+    defaultFolderId,
+    defaultTags,
+    title: base.title,
+    notes: base.notes,
+    username: loginState.username,
+    password: loginState.password,
+    url: loginState.url,
+    customFields: loginState.customFields,
+    totp: loginState.totp,
+    selectedTags: base.selectedTags,
+    teamFolderId: base.teamFolderId,
+    requireReprompt: base.requireReprompt,
+    expiresAt: base.expiresAt,
+    generatorSettings: loginState.generatorSettings,
+    tGen: base.translationBundle.tGen,
+  });
+  const submitDisabled = !base.title.trim() || !loginState.password;
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
@@ -174,55 +99,72 @@ export function TeamPasswordForm({
     values: {
       selectedTags: base.selectedTags,
       teamFolderId: base.teamFolderId,
-      customFields,
-      totp,
-      showTotpInput,
+      customFields: loginState.customFields,
+      totp: loginState.totp,
+      showTotpInput: loginState.showTotpInput,
       requireReprompt: base.requireReprompt,
       expiresAt: base.expiresAt,
     },
     setters: {
       setSelectedTags: base.setSelectedTags,
       setTeamFolderId: base.setTeamFolderId,
-      setCustomFields,
-      setTotp,
-      setShowTotpInput,
+      setCustomFields: loginState.setCustomFields,
+      setTotp: loginState.setTotp,
+      setShowTotpInput: loginState.setShowTotpInput,
       setRequireReprompt: base.setRequireReprompt,
       setExpiresAt: base.setExpiresAt,
     },
   });
 
-  const handleFormSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (submitDisabled) return;
-
-    const tagNames = base.selectedTags.map((tag) => ({
-      name: tag.name,
-      color: tag.color,
-    }));
-
-    await base.submitEntry({
-      entryType: ENTRY_TYPE.LOGIN,
-      title: base.title,
-      notes: base.notes,
-      tagNames,
-      username,
-      password,
-      url,
-      customFields,
-      totp,
-    });
-  };
+  const loginMainFieldsProps = buildTeamLoginFieldsProps({
+    title: base.title,
+    onTitleChange: base.setTitle,
+    titleLabel: base.entryCopy.titleLabel,
+    titlePlaceholder: base.entryCopy.titlePlaceholder,
+    username: loginState.username,
+    onUsernameChange: loginState.setUsername,
+    usernameLabel: base.t("usernameEmail"),
+    usernamePlaceholder: base.t("usernamePlaceholder"),
+    password: loginState.password,
+    onPasswordChange: loginState.setPassword,
+    passwordLabel: base.t("password"),
+    passwordPlaceholder: base.t("passwordPlaceholder"),
+    showPassword: loginState.showPassword,
+    onToggleShowPassword: () => loginState.setShowPassword(!loginState.showPassword),
+    generatorSummary,
+    showGenerator: loginState.showGenerator,
+    onToggleGenerator: () => loginState.setShowGenerator(!loginState.showGenerator),
+    closeGeneratorLabel: base.t("closeGenerator"),
+    openGeneratorLabel: base.t("openGenerator"),
+    generatorSettings: loginState.generatorSettings,
+    onGeneratorUse: (pw, settings) => {
+      loginState.setPassword(pw);
+      loginState.setGeneratorSettings(settings);
+    },
+    url: loginState.url,
+    onUrlChange: loginState.setUrl,
+    urlLabel: base.t("url"),
+    notes: base.notes,
+    onNotesChange: base.setNotes,
+    notesLabel: base.entryCopy.notesLabel,
+    notesPlaceholder: base.entryCopy.notesPlaceholder,
+    teamPolicy: base.teamPolicy,
+  });
+  const handleFormSubmit = createTeamLoginSubmitHandler({
+    submitDisabled,
+    submitEntry: base.submitEntry,
+    title: base.title,
+    notes: base.notes,
+    selectedTags: base.selectedTags,
+    username: loginState.username,
+    password: loginState.password,
+    url: loginState.url,
+    customFields: loginState.customFields,
+    totp: loginState.totp,
+  });
 
   return (
-    <Dialog open={open} onOpenChange={base.handleOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{base.entryCopy.dialogLabel}</DialogTitle>
-          <DialogDescription className="sr-only">
-            {base.entryCopy.dialogLabel}
-          </DialogDescription>
-        </DialogHeader>
-
+    <>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -240,42 +182,7 @@ export function TeamPasswordForm({
             />
           </div>
 
-          <EntryLoginMainFields
-            idPrefix="team-"
-            hideTitle
-            title={base.title}
-            onTitleChange={base.setTitle}
-            titleLabel={base.entryCopy.titleLabel}
-            titlePlaceholder={base.entryCopy.titlePlaceholder}
-            username={username}
-            onUsernameChange={setUsername}
-            usernameLabel={base.t("usernameEmail")}
-            usernamePlaceholder={base.t("usernamePlaceholder")}
-            password={password}
-            onPasswordChange={setPassword}
-            passwordLabel={base.t("password")}
-            passwordPlaceholder={base.t("passwordPlaceholder")}
-            showPassword={showPassword}
-            onToggleShowPassword={() => setShowPassword(!showPassword)}
-            generatorSummary={generatorSummary}
-            showGenerator={showGenerator}
-            onToggleGenerator={() => setShowGenerator(!showGenerator)}
-            closeGeneratorLabel={base.t("closeGenerator")}
-            openGeneratorLabel={base.t("openGenerator")}
-            generatorSettings={generatorSettings}
-            onGeneratorUse={(pw, settings) => {
-              setPassword(pw);
-              setGeneratorSettings(settings);
-            }}
-            url={url}
-            onUrlChange={setUrl}
-            urlLabel={base.t("url")}
-            notes={base.notes}
-            onNotesChange={base.setNotes}
-            notesLabel={base.entryCopy.notesLabel}
-            notesPlaceholder={base.entryCopy.notesPlaceholder}
-            teamPolicy={base.teamPolicy}
-          />
+          <EntryLoginMainFields {...loginMainFieldsProps} />
 
           <TeamTagsAndFolderSection {...tagsAndFolderProps} />
 
@@ -298,7 +205,6 @@ export function TeamPasswordForm({
             />
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+    </>
   );
 }
