@@ -10,6 +10,11 @@ This document fixes the current correspondence between Team Vault and Personal V
 
 ## Current Correspondence
 
+This document distinguishes between:
+
+- current aligned areas
+- current mismatches that still need refactoring
+
 ### Dialog Flow
 
 | Responsibility | Team Vault | Personal Vault |
@@ -18,17 +23,43 @@ This document fixes the current correspondence between Team Vault and Personal V
 | Edit data loader | `src/app/[locale]/dashboard/teams/[teamId]/page.tsx` | `src/components/passwords/personal-password-edit-dialog-loader.tsx` |
 | Edit dialog router | `src/components/team/team-edit-dialog.tsx` | `src/components/passwords/personal-password-edit-dialog.tsx` |
 
+### Dialog Flow Mismatch
+
+- Team entry forms currently own the `Dialog` shell themselves.
+- Personal entry forms are rendered inside `personal-password-new-dialog.tsx` and `personal-password-edit-dialog.tsx`.
+- Team edit data is loaded at page level, while Personal edit data is loaded in `personal-password-edit-dialog-loader.tsx`.
+- `src/components/team/team-create-dialog.tsx` is a team creation dialog, not an entry form dialog, and should not be treated as a Team Vault entry-flow counterpart.
+
+### Target Dialog Flow
+
+- Team new flow: `team-new-dialog -> team-* dialog shell -> team-* form body`
+- Personal new flow: `personal-password-new-dialog -> personal-* form`
+- Team edit flow: `page -> team-edit-dialog -> team-* dialog shell -> team-* form body`
+- Personal edit flow: `personal-password-edit-dialog-loader -> personal-password-edit-dialog -> personal-* form`
+
+The target state is to make these boundaries more directly corresponding. At minimum:
+
+- thin dialog router
+- optional loader before edit
+- per-entry form component focused on form state/rendering rather than shell orchestration
+
 ### Login Entry
 
 | Responsibility | Team Vault | Personal Vault |
 | --- | --- | --- |
 | Login form component | `src/components/team/team-password-form.tsx` | `src/components/passwords/personal-password-form.tsx` |
 | Login form model | `src/hooks/use-team-base-form-model.ts` + team password actions | `src/hooks/use-personal-login-form-model.ts` |
-| Login state | `src/hooks/use-team-base-form-model.ts` + `src/hooks/use-team-password-form-ui-state.ts` | `src/hooks/use-personal-login-form-state.ts` |
-| Login presenter | inline in Team-side model composition | `src/hooks/personal-login-form-presenter.ts` |
-| Login controller | team password actions + submit flow | `src/hooks/personal-login-form-controller.ts` |
-| Login derived state | team password form helpers | `src/hooks/personal-login-form-derived.ts` |
+| Login state | inline in `team-password-form.tsx` + `src/hooks/use-team-base-form-model.ts` | `src/hooks/use-personal-login-form-state.ts` |
+| Login presenter | inline in `team-password-form.tsx` | `src/hooks/personal-login-form-presenter.ts` |
+| Login controller | inline submit logic in `team-password-form.tsx` | `src/hooks/personal-login-form-controller.ts` |
+| Login derived state | inline in `team-password-form.tsx` + `team-password-form-initial-values.ts` | `src/hooks/personal-login-form-derived.ts` |
 | Login initial values | `src/hooks/team-password-form-initial-values.ts` | `src/hooks/personal-login-form-initial-values.ts` |
+
+### Login Entry Mismatch
+
+- Personal login code is split into `state / presenter / controller / derived / fields`.
+- Team login code is still concentrated in `team-password-form.tsx` with shared state coming from `use-team-base-form-model.ts`.
+- Team and Personal login naming is not yet symmetrical.
 
 ### Shared Entry Sections
 
@@ -67,8 +98,14 @@ This document fixes the current correspondence between Team Vault and Personal V
 
 ### Expected Flow
 
-- Team edit flow: `page -> team-edit-dialog -> team-* form`
-- Personal edit flow: `personal-password-edit-dialog-loader -> personal-password-edit-dialog -> personal-* form`
+- Team edit flow today: `page -> team-edit-dialog -> team-* form-with-dialog-shell`
+- Personal edit flow today: `personal-password-edit-dialog-loader -> personal-password-edit-dialog -> personal-* form`
+
+## Refactor Targets
+
+- Extract Team login flow into `team-login-*` helpers with the same responsibility split as Personal.
+- Reduce Team dialog shell ownership inside per-entry forms so dialog routing and form rendering line up with Personal.
+- Keep Team creation flow separate from Team Vault entry flow.
 
 ## Rules For Future Changes
 
