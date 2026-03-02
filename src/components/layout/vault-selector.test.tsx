@@ -47,8 +47,8 @@ vi.mock("@/components/ui/select", () => ({
       .map((node) => {
         if (typeof node === "string") return node;
         if (typeof node === "number") return String(node);
-        if (isValidElement(node) && typeof node.props.children === "string") {
-          return node.props.children;
+        if (isValidElement(node) && typeof (node.props as Record<string, unknown>).children === "string") {
+          return (node.props as Record<string, unknown>).children;
         }
         return "";
       })

@@ -10,6 +10,7 @@ import { TOTPField, type TOTPEntry } from "./totp-field";
 import { AttachmentSection, type AttachmentMeta } from "./attachment-section";
 import { TeamAttachmentSection, type TeamAttachmentMeta } from "@/components/team/team-attachment-section";
 import { EntryHistorySection } from "./entry-history-section";
+import { SecureNoteMarkdown } from "./secure-note-markdown";
 import { formatCardNumber } from "@/lib/credit-card";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
 import type {
@@ -32,10 +33,12 @@ import {
 
 export interface InlineDetailData {
   id: string;
+  title?: string;
   entryType?: EntryTypeValue;
   requireReprompt?: boolean;
   password: string;
   content?: string;
+  isMarkdown?: boolean;
   url: string | null;
   urlHost: string | null;
   notes: string | null;
@@ -104,6 +107,9 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
     new Set()
   );
 
+  const [showMarkdownView, setShowMarkdownView] = useState(
+    data.isMarkdown === true,
+  );
   const [showCardNumber, setShowCardNumber] = useState(false);
   const [showCvv, setShowCvv] = useState(false);
   const [showIdNumber, setShowIdNumber] = useState(false);
@@ -756,11 +762,27 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
       ) : isNote ? (
         /* Secure Note Content */
         <div className="space-y-1">
-          <label className="text-sm text-muted-foreground">{t("content")}</label>
+          <div className="flex items-center justify-between">
+            <label className="text-sm text-muted-foreground">{t("content")}</label>
+            {data.isMarkdown && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => setShowMarkdownView((v) => !v)}
+              >
+                {showMarkdownView ? t("showSource") : t("showMarkdown")}
+              </Button>
+            )}
+          </div>
           <div className="flex items-start gap-2">
-            <p className="flex-1 max-h-96 overflow-y-auto rounded-lg border bg-muted/30 p-3 text-sm font-mono whitespace-pre-wrap">
-              {data.content}
-            </p>
+            <div className="flex-1 max-h-96 overflow-y-auto rounded-lg border bg-muted/30 p-3 text-sm">
+              {showMarkdownView ? (
+                <SecureNoteMarkdown content={data.content ?? ""} />
+              ) : (
+                <p className="font-mono whitespace-pre-wrap">{data.content}</p>
+              )}
+            </div>
             <CopyButton getValue={() => data.content ?? ""} />
           </div>
         </div>

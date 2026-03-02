@@ -28,6 +28,19 @@ vi.mock("@/components/ui/label", () => ({
   Label: ({ children, ...rest }: React.ComponentProps<"label">) => <label {...rest}>{children}</label>,
 }));
 
+vi.mock("@/components/ui/select", () => ({
+  Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SelectTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SelectValue: () => <span />,
+  SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SelectItem: ({ children }: { children: React.ReactNode; value: string }) => <div>{children}</div>,
+}));
+
+vi.mock("@/lib/tag-tree", () => ({
+  buildTagTree: (tags: unknown[]) => (tags as Array<{ id: string; name: string; parentId: string | null }>).map((t) => ({ ...t, children: [] })),
+  flattenTagTree: (tree: unknown[]) => (tree as Array<{ id: string; name: string; parentId: string | null }>).map((t) => ({ ...t, depth: 0 })),
+}));
+
 import { TagDialog } from "./tag-dialog";
 
 describe("TagDialog", () => {
@@ -61,7 +74,7 @@ describe("TagDialog", () => {
       fireEvent.click(screen.getByRole("button", { name: "save" }));
     });
 
-    expect(onSubmit).toHaveBeenCalledWith({ name: "Ops", color: null });
+    expect(onSubmit).toHaveBeenCalledWith({ name: "Ops", color: null, parentId: null });
   });
 
   it("submits updated color when user changes color input", async () => {
@@ -81,7 +94,7 @@ describe("TagDialog", () => {
       fireEvent.click(screen.getByRole("button", { name: "save" }));
     });
 
-    expect(onSubmit).toHaveBeenCalledWith({ name: "Ops", color: "#abcdef" });
+    expect(onSubmit).toHaveBeenCalledWith({ name: "Ops", color: "#abcdef", parentId: null });
   });
 
   it("closes dialog on successful submit", async () => {
@@ -158,6 +171,6 @@ describe("TagDialog", () => {
       fireEvent.click(screen.getByRole("button", { name: "create" }));
     });
 
-    expect(onSubmit).toHaveBeenCalledWith({ name: "New Tag", color: "#aabbcc" });
+    expect(onSubmit).toHaveBeenCalledWith({ name: "New Tag", color: "#aabbcc", parentId: null });
   });
 });

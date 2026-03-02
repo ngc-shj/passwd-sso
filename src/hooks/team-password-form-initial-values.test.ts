@@ -20,6 +20,7 @@ describe("buildTeamPasswordFormInitialValues", () => {
       title: "GitHub",
       username: "user@example.com",
       password: "secret",
+      url: null,
       notes: "note",
       brand: "visa",
       cardNumber: "4242424242424242",
@@ -39,5 +40,42 @@ describe("buildTeamPasswordFormInitialValues", () => {
     expect(result.showTotpInput).toBe(true);
     expect(result.teamFolderId).toBe("f1");
     expect(result.cardNumber).toContain("4242");
+  });
+
+  it("uses defaultFolderId when editData is absent", () => {
+    const result = buildTeamPasswordFormInitialValues(null, null, {
+      defaultFolderId: "folder-x",
+    });
+    expect(result.teamFolderId).toBe("folder-x");
+  });
+
+  it("uses defaultTags when editData is absent", () => {
+    const tag = { id: "t1", name: "Tag1", color: null };
+    const result = buildTeamPasswordFormInitialValues(null, null, {
+      defaultTags: [tag],
+    });
+    expect(result.selectedTags).toEqual([tag]);
+  });
+
+  it("editData takes priority over defaults", () => {
+    const result = buildTeamPasswordFormInitialValues(
+      {
+        id: "e1",
+        title: "Test",
+        username: "",
+        password: "",
+        url: null,
+        notes: null,
+        teamFolderId: "edit-folder",
+        tags: [{ id: "t2", name: "EditTag", color: null }],
+      },
+      null,
+      {
+        defaultFolderId: "default-folder",
+        defaultTags: [{ id: "t1", name: "DefaultTag", color: null }],
+      },
+    );
+    expect(result.teamFolderId).toBe("edit-folder");
+    expect(result.selectedTags).toEqual([{ id: "t2", name: "EditTag", color: null }]);
   });
 });

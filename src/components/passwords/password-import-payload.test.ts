@@ -52,6 +52,9 @@ function baseParsedEntry(overrides: Partial<ParsedEntry>): ParsedEntry {
     generatorSettings: null,
     passwordHistory: [],
     requireReprompt: false,
+    folderPath: "",
+    isFavorite: false,
+    expiresAt: null,
     ...overrides,
   };
 }

@@ -11,6 +11,7 @@ export const AUDIT_TARGET_TYPE = {
   SCIM_TOKEN: "ScimToken",
   SCIM_EXTERNAL_MAPPING: "ScimExternalMapping",
   SESSION: "Session",
+  TEAM: "Team",
 } as const;
 
 export type AuditTargetType =

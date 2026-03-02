@@ -12,8 +12,8 @@ describe("buildTeamEntryPayload", () => {
       password: "pw",
       url: " https://example.com ",
       customFields: [
-        { label: "a", value: "b", type: "TEXT" },
-        { label: "", value: "c", type: "TEXT" },
+        { label: "a", value: "b", type: "text" },
+        { label: "", value: "c", type: "text" },
       ],
       totp: null,
       tagNames: [{ name: "t1", color: "#f00" }],
@@ -47,6 +47,7 @@ describe("buildTeamEntryPayload", () => {
     expect(blob.entryType).toBe(ENTRY_TYPE.SECURE_NOTE);
     expect(blob.title).toBe("Note");
     expect(blob.content).toBe("body");
+    expect(blob.isMarkdown).toBe(true);
 
     const overview = JSON.parse(overviewBlob);
     expect(overview.title).toBe("Note");

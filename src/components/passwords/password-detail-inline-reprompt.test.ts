@@ -21,7 +21,7 @@ describe("PasswordDetailInline reprompt guards", () => {
   });
 
   it("calls useReprompt()", () => {
-    expect(source).toMatch(/const\s+\{.*requireVerification.*createGuardedGetter.*repromptDialog.*\}\s*=\s*useReprompt\(\)/s);
+    expect(source).toMatch(/const\s+\{[\s\S]*requireVerification[\s\S]*createGuardedGetter[\s\S]*repromptDialog[\s\S]*\}\s*=\s*useReprompt\(\)/);
   });
 
   it("renders repromptDialog", () => {

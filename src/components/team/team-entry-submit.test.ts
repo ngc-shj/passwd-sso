@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 const toastErrorMock = vi.fn();
 const toastSuccessMock = vi.fn();
@@ -45,7 +47,7 @@ describe("executeTeamEntrySubmit", () => {
       fullBlob: '{"title":"A"}',
       overviewBlob: '{"title":"A"}',
       tagIds: [],
-      t: (key) => key,
+      t: mockTranslator<PasswordFormTranslator>(),
       setSaving,
       handleOpenChange,
       onSaved,
@@ -79,7 +81,7 @@ describe("executeTeamEntrySubmit", () => {
       fullBlob: '{"title":"A"}',
       overviewBlob: '{"title":"A"}',
       tagIds: [],
-      t: (key) => key,
+      t: mockTranslator<PasswordFormTranslator>(),
       setSaving,
       handleOpenChange: vi.fn(),
       onSaved: vi.fn(),

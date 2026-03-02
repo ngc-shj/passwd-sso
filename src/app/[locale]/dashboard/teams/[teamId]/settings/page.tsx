@@ -34,6 +34,7 @@ import {
   AvatarImage,
 } from "@/components/ui/avatar";
 import { CopyButton } from "@/components/passwords/copy-button";
+import { TeamPolicySettings } from "@/components/team/team-policy-settings";
 import { Link } from "@/i18n/navigation";
 import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert, Globe } from "lucide-react";
 import { toast } from "sonner";
@@ -305,9 +306,10 @@ export default function TeamSettingsPage({
         </Card>
 
         <Tabs defaultValue={isAdmin ? "general" : "members"} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className={`grid w-full ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}>
             <TabsTrigger value="general">{t("generalSettings")}</TabsTrigger>
             <TabsTrigger value="members">{t("members")}</TabsTrigger>
+            {isAdmin && <TabsTrigger value="policy">{t("securityPolicy")}</TabsTrigger>}
           </TabsList>
 
           <TabsContent value="general" className="space-y-4 mt-0">
@@ -626,6 +628,12 @@ export default function TeamSettingsPage({
               </>
             )}
           </TabsContent>
+
+          {isAdmin && (
+            <TabsContent value="policy" className="space-y-4 mt-0">
+              <TeamPolicySettings teamId={teamId} />
+            </TabsContent>
+          )}
         </Tabs>
       </div>
     </div>

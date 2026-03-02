@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTranslator } from "@/lib/translation-types";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { PersonalPasswordFormTranslations } from "@/hooks/entry-form-translations";
 import {
@@ -31,7 +33,7 @@ describe("buildPersonalPasswordFormController", () => {
       setSubmitting: vi.fn(),
       translations: buildTranslations(),
       router: { push: vi.fn(), refresh: vi.fn(), back },
-    });
+    } as unknown as Parameters<typeof buildPersonalPasswordFormController>[0]);
 
     await controller.handleSubmit({ preventDefault } as unknown as React.FormEvent);
 
@@ -60,7 +62,7 @@ describe("buildPersonalPasswordFormController", () => {
       setSubmitting: vi.fn(),
       translations: buildTranslations(),
       router: { push: vi.fn(), refresh: vi.fn(), back: vi.fn() },
-    });
+    } as unknown as Parameters<typeof buildPersonalPasswordFormController>[0]);
 
     await controller.handleSubmit({ preventDefault: vi.fn() } as unknown as React.FormEvent);
 
@@ -81,14 +83,15 @@ function buildValues(overrides: Partial<{ title: string }> = {}) {
     customFields: [],
     totp: null,
     requireReprompt: false,
+    expiresAt: null,
     folderId: null,
   };
 }
 
 function buildTranslations(): PersonalPasswordFormTranslations {
   return {
-    t: (key) => key,
-    tGen: (key) => key,
-    tc: (key) => key,
+    t: mockTranslator<PasswordFormTranslator>(),
+    tGen: mockTranslator<PasswordGeneratorTranslator>(),
+    tc: mockTranslator<CommonTranslator>(),
   };
 }

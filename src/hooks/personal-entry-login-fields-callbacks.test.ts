@@ -20,6 +20,7 @@ function createState(): PersonalPasswordFormState {
       totp: null,
       showTotpInput: false,
       requireReprompt: false,
+      expiresAt: null,
       folderId: null,
     },
     setters: {
@@ -37,6 +38,7 @@ function createState(): PersonalPasswordFormState {
       setTotp: vi.fn(),
       setShowTotpInput: vi.fn(),
       setRequireReprompt: vi.fn(),
+      setExpiresAt: vi.fn(),
       setFolderId: vi.fn(),
     },
   };

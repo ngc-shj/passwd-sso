@@ -140,12 +140,14 @@ export function useSidebarNavigationState({
             id: tag.id,
             name: tag.name,
             color: tag.color,
+            parentId: tag.parentId,
             count: tag.count,
           })) ?? []
         : tags.map((tag) => ({
               id: tag.id,
               name: tag.name,
               color: tag.color,
+              parentId: tag.parentId,
               count: tag.passwordCount,
             }));
 

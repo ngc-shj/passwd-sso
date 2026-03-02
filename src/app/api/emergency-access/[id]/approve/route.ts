@@ -7,7 +7,7 @@ import { sendEmail } from "@/lib/email";
 import { emergencyAccessApprovedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { routing } from "@/i18n/routing";
+import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
 
 // POST /api/emergency-access/[id]/approve — Owner early-approves emergency access request
@@ -64,12 +64,12 @@ export async function POST(
     const grantee = await withUserTenantRls(session.user.id, async () =>
       prisma.user.findUnique({
         where: { id: granteeId },
-        select: { email: true, name: true },
+        select: { email: true, name: true, locale: true },
       }),
     );
     if (grantee?.email) {
       const ownerName = session.user.name ?? session.user.email ?? "";
-      const { subject, html, text } = emergencyAccessApprovedEmail(routing.defaultLocale, ownerName);
+      const { subject, html, text } = emergencyAccessApprovedEmail(resolveUserLocale(grantee.locale), ownerName);
       void sendEmail({ to: grantee.email, subject, html, text });
     }
   }

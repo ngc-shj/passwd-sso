@@ -3,6 +3,7 @@
 import { useLocale, useTranslations } from "next-intl";
 import { usePathname, useRouter } from "@/i18n/navigation";
 import { routing } from "@/i18n/routing";
+import { API_PATH } from "@/lib/constants";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,6 +21,12 @@ export function LanguageSwitcher() {
 
   const switchLocale = (newLocale: string) => {
     router.replace(pathname, { locale: newLocale });
+    // Persist preference to DB (fire-and-forget; 401 on sign-in page is ignored)
+    void fetch(API_PATH.USER_LOCALE, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ locale: newLocale }),
+    }).catch(() => {});
   };
 
   return (

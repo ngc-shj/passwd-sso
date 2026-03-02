@@ -10,11 +10,17 @@ import {
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import {
+  validateParentChain,
+  buildTagTree,
+  flattenTagTree,
+  TagTreeError,
+} from "@/lib/tag-tree";
 
 type Params = { params: Promise<{ teamId: string }> };
 
 // GET /api/teams/[teamId]/tags — List team tags
-export async function GET(_req: NextRequest, { params }: Params) {
+export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -47,14 +53,32 @@ export async function GET(_req: NextRequest, { params }: Params) {
     }),
   );
 
-  return NextResponse.json(
-    tags.map((t) => ({
-      id: t.id,
-      name: t.name,
-      color: t.color,
-      count: t._count.passwords,
-    }))
-  );
+  const wantTree = req.nextUrl.searchParams.get("tree") === "true";
+
+  const flat = tags.map((t) => ({
+    id: t.id,
+    name: t.name,
+    color: t.color,
+    parentId: t.parentId,
+    count: t._count.passwords,
+  }));
+
+  if (wantTree) {
+    const tree = buildTagTree(flat);
+    const ordered = flattenTagTree(tree);
+    return NextResponse.json(
+      ordered.map((n) => ({
+        id: n.id,
+        name: n.name,
+        color: n.color,
+        parentId: n.parentId,
+        depth: n.depth,
+        count: flat.find((f) => f.id === n.id)?.count ?? 0,
+      })),
+    );
+  }
+
+  return NextResponse.json(flat);
 }
 
 // POST /api/teams/[teamId]/tags — Create team tag
@@ -90,7 +114,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  const { name, color } = parsed.data;
+  const { name, color, parentId } = parsed.data;
   const team = await withTeamTenantRls(teamId, async () =>
     prisma.team.findUnique({
       where: { id: teamId },
@@ -101,9 +125,35 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
+  // Validate parent chain if parentId is provided
+  if (parentId) {
+    const allTags = await withTeamTenantRls(teamId, async () =>
+      prisma.teamTag.findMany({
+        where: { teamId },
+        select: { id: true, name: true, parentId: true },
+      }),
+    );
+    try {
+      validateParentChain(null, parentId, allTags);
+    } catch (e) {
+      if (e instanceof TagTreeError) {
+        return NextResponse.json(
+          { error: API_ERROR.VALIDATION_ERROR, message: e.message },
+          { status: 400 },
+        );
+      }
+      throw e;
+    }
+  }
+
+  // Check for duplicate name at the same level
   const existing = await withTeamTenantRls(teamId, async () =>
-    prisma.teamTag.findUnique({
-      where: { name_teamId: { name, teamId: teamId } },
+    prisma.teamTag.findFirst({
+      where: {
+        name,
+        parentId: parentId ?? null,
+        teamId,
+      },
     }),
   );
   if (existing) {
@@ -118,6 +168,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       data: {
         name,
         color: color || null,
+        parentId: parentId ?? null,
         teamId: teamId,
         tenantId: team.tenantId,
       },
@@ -125,7 +176,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   );
 
   return NextResponse.json(
-    { id: tag.id, name: tag.name, color: tag.color, count: 0 },
+    { id: tag.id, name: tag.name, color: tag.color, parentId: tag.parentId, count: 0 },
     { status: 201 }
   );
 }

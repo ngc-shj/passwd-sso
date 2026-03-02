@@ -15,6 +15,7 @@ import {
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { SignOutButton } from "@/components/auth/signout-button";
 import { LanguageSwitcher } from "./language-switcher";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import { useVault } from "@/lib/vault-context";
 import { APP_NAME, VAULT_STATUS } from "@/lib/constants";
 import { ChangePassphraseDialog } from "@/components/vault/change-passphrase-dialog";
@@ -91,6 +92,7 @@ export function Header({ onMenuToggle }: HeaderProps) {
         <div className="flex-1" />
 
         {mounted && <LanguageSwitcher />}
+        {mounted && <NotificationBell />}
 
         {mounted ? (
           <DropdownMenu>

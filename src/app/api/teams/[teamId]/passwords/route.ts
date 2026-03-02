@@ -8,6 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { dispatchWebhook } from "@/lib/webhook-dispatcher";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -215,6 +216,13 @@ export async function POST(req: NextRequest, { params }: Params) {
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: entry.id,
     ...extractRequestMeta(req),
+  });
+
+  void dispatchWebhook({
+    type: AUDIT_ACTION.ENTRY_CREATE,
+    teamId,
+    timestamp: new Date().toISOString(),
+    data: { entryId: entry.id, entryType: entry.entryType },
   });
 
   return NextResponse.json(

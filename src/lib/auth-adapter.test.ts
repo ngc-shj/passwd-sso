@@ -75,6 +75,7 @@ describe("createCustomAdapter", () => {
 
       const adapter = createCustomAdapter();
       const user = await adapter.createUser!({
+        id: "",
         name: "Test User",
         email: "test@example.com",
         image: "https://example.com/avatar.png",

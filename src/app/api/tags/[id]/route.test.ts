@@ -5,6 +5,8 @@ const { mockAuth, mockPrismaTag, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTag: {
     findUnique: vi.fn(),
+    findFirst: vi.fn(),
+    findMany: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
   },
@@ -65,9 +67,8 @@ describe("PUT /api/tags/[id]", () => {
   });
 
   it("returns 409 when new name is duplicate", async () => {
-    mockPrismaTag.findUnique
-      .mockResolvedValueOnce({ id: TAG_ID, userId: "test-user-id", name: "Old" })
-      .mockResolvedValueOnce({ id: "other-tag" }); // duplicate check
+    mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "test-user-id", name: "Old", parentId: null });
+    mockPrismaTag.findFirst.mockResolvedValue({ id: "other-tag" }); // duplicate check
     const res = await PUT(
       createRequest("PUT", "http://localhost:3000/api/tags/tag-123", { body: { name: "Duplicate" } }),
       createParams({ id: TAG_ID }),
@@ -76,10 +77,9 @@ describe("PUT /api/tags/[id]", () => {
   });
 
   it("updates tag successfully", async () => {
-    mockPrismaTag.findUnique
-      .mockResolvedValueOnce({ id: TAG_ID, userId: "test-user-id", name: "Old" })
-      .mockResolvedValueOnce(null); // no duplicate
-    mockPrismaTag.update.mockResolvedValue({ id: TAG_ID, name: "New", color: "#ff0000" });
+    mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "test-user-id", name: "Old", parentId: null });
+    mockPrismaTag.findFirst.mockResolvedValue(null); // no duplicate
+    mockPrismaTag.update.mockResolvedValue({ id: TAG_ID, name: "New", color: "#ff0000", parentId: null });
 
     const res = await PUT(
       createRequest("PUT", "http://localhost:3000/api/tags/tag-123", { body: { name: "New", color: "#ff0000" } }),
@@ -87,14 +87,13 @@ describe("PUT /api/tags/[id]", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json).toEqual({ id: TAG_ID, name: "New", color: "#ff0000" });
+    expect(json).toEqual({ id: TAG_ID, name: "New", color: "#ff0000", parentId: null });
   });
 
   it("accepts color: null to clear the tag color", async () => {
-    mockPrismaTag.findUnique
-      .mockResolvedValueOnce({ id: TAG_ID, userId: "test-user-id", name: "Ops" })
-      .mockResolvedValueOnce(null); // no duplicate
-    mockPrismaTag.update.mockResolvedValue({ id: TAG_ID, name: "Ops", color: null });
+    mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "test-user-id", name: "Ops", parentId: null });
+    mockPrismaTag.findFirst.mockResolvedValue(null); // no duplicate
+    mockPrismaTag.update.mockResolvedValue({ id: TAG_ID, name: "Ops", color: null, parentId: null });
 
     const res = await PUT(
       createRequest("PUT", "http://localhost:3000/api/tags/tag-123", { body: { name: "Ops", color: null } }),
@@ -131,7 +130,7 @@ describe("DELETE /api/tags/[id]", () => {
   });
 
   it("returns 403 when tag belongs to another user", async () => {
-    mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "other-user" });
+    mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "other-user", name: "X", parentId: null });
     const res = await DELETE(
       createRequest("DELETE", "http://localhost:3000/api/tags/tag-123"),
       createParams({ id: TAG_ID }),
@@ -140,7 +139,7 @@ describe("DELETE /api/tags/[id]", () => {
   });
 
   it("deletes tag successfully", async () => {
-    mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "test-user-id" });
+    mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "test-user-id", name: "X", parentId: null });
     mockPrismaTag.delete.mockResolvedValue({});
 
     const res = await DELETE(

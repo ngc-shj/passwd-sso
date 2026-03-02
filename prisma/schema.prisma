@@ -93,6 +93,9 @@ model User {
   recoveryVerifierHmac       String?   @map("recovery_verifier_hmac") @db.VarChar(64)
   recoveryKeySetAt           DateTime? @map("recovery_key_set_at")
 
+  // User preference
+  locale String? @db.VarChar(5)
+
   // Account lockout
   failedUnlockAttempts Int       @default(0) @map("failed_unlock_attempts")
   lastFailedUnlockAt   DateTime? @map("last_failed_unlock_at")
@@ -135,6 +138,7 @@ model User {
   folders               Folder[]
   teamPasswordHistories TeamPasswordEntryHistory[]
   teamMemberKeys        TeamMemberKey[]
+  notifications         Notification[]
   tenant                Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
@@ -205,16 +209,19 @@ model Tag {
   id        String   @id @default(cuid())
   name      String
   color     String?
+  parentId  String?  @map("parent_id")
   userId    String   @map("user_id")
   tenantId  String   @map("tenant_id")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  parent    Tag?            @relation("TagHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Tag[]           @relation("TagHierarchy")
   user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   passwords PasswordEntry[]
 
-  @@unique([name, userId])
+  @@unique([name, parentId, userId])
   @@index([tenantId])
   @@map("tags")
 }
@@ -343,6 +350,8 @@ model Team {
   scimTokens           ScimToken[]
   scimExternalMappings ScimExternalMapping[]
   scimGroupMappings    ScimGroupMapping[]
+  policy               TeamPolicy?
+  webhooks             TeamWebhook[]
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
@@ -387,6 +396,9 @@ model Tenant {
   scimTokens                 ScimToken[]
   scimExternalMappings       ScimExternalMapping[]
   scimGroupMappings          ScimGroupMapping[]
+  notifications              Notification[]
+  teamPolicies               TeamPolicy[]
+  teamWebhooks               TeamWebhook[]
 
   @@map("tenants")
 }
@@ -523,9 +535,10 @@ model TeamPasswordEntry {
 }
 
 model TeamTag {
-  id    String  @id @default(cuid())
-  name  String
-  color String?
+  id       String  @id @default(cuid())
+  name     String
+  color    String?
+  parentId String? @map("parent_id")
 
   teamId   String @map("team_id")
   tenantId String @map("tenant_id")
@@ -533,11 +546,13 @@ model TeamTag {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  parent    TeamTag?            @relation("TeamTagHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children  TeamTag[]           @relation("TeamTagHierarchy")
   team      Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
   tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   passwords TeamPasswordEntry[]
 
-  @@unique([name, teamId])
+  @@unique([name, parentId, teamId])
   @@index([tenantId])
   @@map("team_tags")
 }
@@ -615,6 +630,9 @@ model PasswordShare {
 
   // Master key version used to encrypt this share's data
   masterKeyVersion Int @default(1) @map("master_key_version")
+
+  // Share permissions (e.g., ["HIDE_PASSWORD"], empty = VIEW_ALL)
+  permissions String[] @default([])
 
   createdBy         User               @relation(fields: [createdById], references: [id], onDelete: Cascade)
   tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -707,6 +725,11 @@ enum AuditAction {
   SCIM_USER_REACTIVATE
   SCIM_USER_DELETE
   SCIM_GROUP_UPDATE
+  POLICY_UPDATE
+  AUDIT_LOG_DOWNLOAD
+  WEBHOOK_CREATE
+  WEBHOOK_DELETE
+  WEBHOOK_DELIVERY_FAILED
 }
 
 enum AuditScope {
@@ -933,4 +956,88 @@ model EmergencyAccessKeyPair {
 
   @@index([tenantId])
   @@map("emergency_access_key_pairs")
+}
+
+// ─── Notification Models ─────────────────────────────────────
+
+enum NotificationType {
+  SECURITY_ALERT
+  NEW_DEVICE_LOGIN
+  EMERGENCY_ACCESS
+  SHARE_ACCESS
+  TEAM_INVITE
+  ENTRY_EXPIRING
+  WATCHTOWER_ALERT
+  POLICY_UPDATE
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  tenantId  String           @map("tenant_id")
+  type      NotificationType
+  title     String           @db.VarChar(200)
+  body      String           @db.Text
+  metadata  Json?
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([userId, isRead, createdAt(sort: Desc)])
+  @@index([tenantId])
+  @@map("notifications")
+}
+
+// ─── Team Policy Models ─────────────────────────────────────
+
+model TeamPolicy {
+  id                        String  @id @default(cuid())
+  teamId                    String  @unique @map("team_id")
+  tenantId                  String  @map("tenant_id")
+  minPasswordLength         Int     @default(0) @map("min_password_length")
+  requireUppercase          Boolean @default(false) @map("require_uppercase")
+  requireLowercase          Boolean @default(false) @map("require_lowercase")
+  requireNumbers            Boolean @default(false) @map("require_numbers")
+  requireSymbols            Boolean @default(false) @map("require_symbols")
+  maxSessionDurationMinutes Int?    @map("max_session_duration_minutes")
+  requireRepromptForAll     Boolean @default(false) @map("require_reprompt_for_all")
+  allowExport               Boolean @default(true) @map("allow_export")
+  allowSharing              Boolean @default(true) @map("allow_sharing")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@map("team_policies")
+}
+
+model TeamWebhook {
+  id              String   @id @default(cuid())
+  teamId          String   @map("team_id")
+  tenantId        String   @map("tenant_id")
+  url             String   @db.VarChar(2048)
+  secretEncrypted String   @map("secret_encrypted") @db.Text
+  secretIv        String   @map("secret_iv") @db.VarChar(24)
+  secretAuthTag   String   @map("secret_auth_tag") @db.VarChar(32)
+  masterKeyVersion Int     @default(1) @map("master_key_version")
+  events          String[]
+  isActive        Boolean  @default(true) @map("is_active")
+  lastError       String?  @map("last_error") @db.Text
+  failCount       Int      @default(0) @map("fail_count")
+  lastDeliveredAt DateTime? @map("last_delivered_at")
+  lastFailedAt    DateTime? @map("last_failed_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([teamId])
+  @@index([tenantId])
+  @@map("team_webhooks")
 }

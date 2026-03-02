@@ -8,7 +8,7 @@ import { sendEmail } from "@/lib/email";
 import { emergencyAccessRevokedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { routing } from "@/i18n/routing";
+import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
 
 // POST /api/emergency-access/[id]/revoke — Owner revokes or rejects request
@@ -87,12 +87,12 @@ export async function POST(
       const grantee = await withUserTenantRls(session.user.id, async () =>
         prisma.user.findUnique({
           where: { id: granteeId },
-          select: { email: true, name: true },
+          select: { email: true, name: true, locale: true },
         }),
       );
       if (grantee?.email) {
         const ownerName = session.user.name ?? session.user.email ?? "";
-        const { subject, html, text } = emergencyAccessRevokedEmail(routing.defaultLocale, ownerName);
+        const { subject, html, text } = emergencyAccessRevokedEmail(resolveUserLocale(grantee.locale), ownerName);
         void sendEmail({ to: grantee.email, subject, html, text });
       }
     }

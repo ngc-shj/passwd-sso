@@ -11,7 +11,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { getTagColorClass } from "@/lib/dynamic-styles";
+import type { SidebarTeamTagItem } from "@/hooks/use-sidebar-data";
 import { ChevronDown, ChevronRight, FolderOpen, MoreVertical, Pencil, Trash2 } from "lucide-react";
 
 export interface SidebarFolderItem {
@@ -90,7 +93,7 @@ export function FolderTreeNode({
                   setOpen((prev) => !prev);
                 }}
                 role="button"
-                aria-expanded={isExpanded ? "true" : "false"}
+                aria-expanded={isExpanded}
                 aria-label={isExpanded ? `Collapse ${folder.name}` : `Expand ${folder.name}`}
               >
                 <FolderOpen className="h-4 w-4 transition-opacity group-hover/folder:opacity-0" />
@@ -153,6 +156,168 @@ export function FolderTreeNode({
             folder={child}
             folders={folders}
             activeFolderId={activeFolderId}
+            depth={depth + 1}
+            linkHref={linkHref}
+            showMenu={showMenu}
+            onNavigate={onNavigate}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
+        ))}
+    </>
+  );
+}
+
+// ─── Tag tree node ───────────────────────────────────────────────
+
+function isAncestorOfTag(tagId: string, targetId: string, tags: SidebarTeamTagItem[]): boolean {
+  const map = new Map(tags.map((t) => [t.id, t]));
+  let current = map.get(targetId);
+  while (current) {
+    if (current.parentId === tagId) return true;
+    current = current.parentId ? map.get(current.parentId) : undefined;
+  }
+  return false;
+}
+
+interface TagTreeNodeProps {
+  tag: SidebarTeamTagItem;
+  tags: SidebarTeamTagItem[];
+  activeTagId: string | null;
+  depth: number;
+  linkHref: (tagId: string) => string;
+  showMenu: boolean;
+  onNavigate: () => void;
+  onEdit: (tag: SidebarTeamTagItem) => void;
+  onDelete: (tag: SidebarTeamTagItem) => void;
+}
+
+export function TagTreeNode({
+  tag,
+  tags,
+  activeTagId,
+  depth,
+  linkHref,
+  showMenu,
+  onNavigate,
+  onEdit,
+  onDelete,
+}: TagTreeNodeProps) {
+  const tCommon = useTranslations("Common");
+  const tDashboard = useTranslations("Dashboard");
+  const children = tags.filter((t) => t.parentId === tag.id);
+  const hasChildren = children.length > 0;
+  const colorClass = getTagColorClass(tag.color);
+
+  const isAncestorOfActive = activeTagId
+    ? isAncestorOfTag(tag.id, activeTagId, tags)
+    : false;
+  const [open, setOpen] = useState(isAncestorOfActive);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (isAncestorOfActive) setOpen(true);
+  }, [isAncestorOfActive]);
+
+  const isExpanded = open;
+
+  return (
+    <>
+      <div
+        className={cn(
+          "group/tag flex items-center rounded-md transition-colors",
+          activeTagId === tag.id ? "bg-secondary" : "hover:bg-accent dark:hover:bg-accent/50",
+        )}
+        style={{ paddingLeft: `${depth * 12}px` }}
+      >
+        <Button
+          variant={activeTagId === tag.id ? "secondary" : "ghost"}
+          className="flex-1 justify-start gap-2 min-w-0 rounded-none hover:bg-transparent dark:hover:bg-transparent"
+          asChild
+        >
+          <Link href={linkHref(tag.id)} onClick={onNavigate}>
+            {hasChildren ? (
+              <span
+                className="relative shrink-0 h-4 w-4 flex items-center justify-center"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setOpen((prev) => !prev);
+                }}
+                role="button"
+                aria-expanded={isExpanded}
+                aria-label={isExpanded ? `Collapse ${tag.name}` : `Expand ${tag.name}`}
+              >
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "h-3 w-3 rounded-full p-0 transition-opacity group-hover/tag:opacity-0",
+                    colorClass && "tag-color-bg",
+                    colorClass,
+                  )}
+                />
+                <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover/tag:opacity-100">
+                  {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                </span>
+              </span>
+            ) : (
+              <Badge
+                variant="outline"
+                className={cn("h-3 w-3 rounded-full p-0 shrink-0", colorClass && "tag-color-bg", colorClass)}
+              />
+            )}
+            <span className="truncate">{tag.name}</span>
+          </Link>
+        </Button>
+        {showMenu ? (
+          <div className="shrink-0 relative flex items-center justify-center w-7 h-7">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="peer absolute inset-0 h-7 w-7 opacity-0 transition-opacity group-hover/tag:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 rounded hover:bg-black/[0.1] dark:hover:bg-white/[0.15]"
+                  aria-label={`${tag.name} menu`}
+                >
+                  <MoreVertical className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => onEdit(tag)}>
+                  <Pencil className="h-3.5 w-3.5 mr-2" />
+                  {tCommon("edit")}
+                </DropdownMenuItem>
+                <DropdownMenuItem className="text-destructive" onClick={() => onDelete(tag)}>
+                  <Trash2 className="h-3.5 w-3.5 mr-2" />
+                  {tDashboard("deleteTag")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {tag.count > 0 && (
+              <span className="text-xs text-muted-foreground transition-opacity group-hover/tag:opacity-0 peer-focus-visible:opacity-0 peer-data-[state=open]:opacity-0 pointer-events-none">
+                {tag.count}
+              </span>
+            )}
+          </div>
+        ) : tag.count > 0 ? (
+          <div className="shrink-0 relative flex items-center justify-center w-7 h-7">
+            <span className="text-xs text-muted-foreground transition-opacity group-hover/tag:opacity-0 pointer-events-none">
+              {tag.count}
+            </span>
+            <span className="absolute inset-0 flex items-center justify-center rounded opacity-0 transition-opacity group-hover/tag:opacity-100 text-muted-foreground pointer-events-none">
+              <MoreVertical className="h-3.5 w-3.5" />
+            </span>
+          </div>
+        ) : null}
+      </div>
+      {hasChildren &&
+        isExpanded &&
+        children.map((child) => (
+          <TagTreeNode
+            key={child.id}
+            tag={child}
+            tags={tags}
+            activeTagId={activeTagId}
             depth={depth + 1}
             linkHref={linkHref}
             showMenu={showMenu}

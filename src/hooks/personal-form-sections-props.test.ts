@@ -47,7 +47,7 @@ function createState(): Pick<PersonalPasswordFormState, "values" | "setters"> {
       showTotpInput: false,
       requireReprompt: false,
       expiresAt: null,
-    } as PersonalPasswordFormState["values"],
+    } as unknown as PersonalPasswordFormState["values"],
     setters: {
       setSelectedTags: vi.fn(),
       setFolderId: vi.fn(),
@@ -56,6 +56,6 @@ function createState(): Pick<PersonalPasswordFormState, "values" | "setters"> {
       setShowTotpInput: vi.fn(),
       setRequireReprompt: vi.fn(),
       setExpiresAt: vi.fn(),
-    } as PersonalPasswordFormState["setters"],
+    } as unknown as PersonalPasswordFormState["setters"],
   };
 }

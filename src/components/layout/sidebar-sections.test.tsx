@@ -32,6 +32,13 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
 vi.mock("@/components/layout/sidebar-shared", () => ({
   CollapsibleSectionHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FolderTreeNode: ({ folder }: { folder: { name: string } }) => <div>{folder.name}</div>,
+  TagTreeNode: ({ tag, onEdit, onDelete }: { tag: { id: string; name: string }; onEdit: (t: unknown) => void; onDelete: (t: unknown) => void }) => (
+    <div>
+      <span>{tag.name}</span>
+      <button type="button" onClick={() => onEdit(tag)}>editTag</button>
+      <button type="button" onClick={() => onDelete(tag)}>deleteTag</button>
+    </div>
+  ),
 }));
 
 vi.mock("@/components/ui/badge", () => ({
@@ -245,7 +252,7 @@ describe("ManageSection", () => {
         activeFolderId={null}
         linkHref={() => "/dashboard"}
         showFolderMenu={false}
-        tags={[{ id: "tag-1", name: "work", color: "#111111", count: 2 }]}
+        tags={[{ id: "tag-1", name: "work", color: "#111111", parentId: null, count: 2 }]}
         activeTagId={null}
         tagHref={(id) => `/dashboard/tags/${id}`}
         onCreateFolder={() => {}}
@@ -262,7 +269,7 @@ describe("ManageSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "editTag" }));
     fireEvent.click(screen.getByRole("button", { name: "deleteTag" }));
 
-    expect(onEditTag).toHaveBeenCalledWith({ id: "tag-1", name: "work", color: "#111111", count: 2 });
-    expect(onDeleteTag).toHaveBeenCalledWith({ id: "tag-1", name: "work", color: "#111111", count: 2 });
+    expect(onEditTag).toHaveBeenCalledWith({ id: "tag-1", name: "work", color: "#111111", parentId: null, count: 2 });
+    expect(onDeleteTag).toHaveBeenCalledWith({ id: "tag-1", name: "work", color: "#111111", parentId: null, count: 2 });
   });
 });

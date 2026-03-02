@@ -7,7 +7,7 @@
  *   - Unauthenticated → renders sign-in page (no redirect)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────
 const { mockAuth, mockRedirect, mockGetTranslations, mockSetRequestLocale } =

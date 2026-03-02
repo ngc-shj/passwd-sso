@@ -1,9 +1,13 @@
 import type { TeamPasswordFormEditData } from "@/components/team/team-password-form-types";
 import { formatCardNumber } from "@/lib/credit-card";
-import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
+import {
+  DEFAULT_GENERATOR_SETTINGS,
+  DEFAULT_SYMBOL_GROUPS,
+} from "@/lib/generator-prefs";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
+import type { TeamPolicyClient } from "@/hooks/use-team-policy";
 
 export interface TeamPasswordFormInitialValues {
   title: string;
@@ -57,8 +61,32 @@ export interface TeamPasswordFormInitialValues {
   expiresAt: string | null;
 }
 
+/**
+ * Build generator settings that satisfy team policy constraints.
+ * Policy is advisory only — does not block saving.
+ */
+export function buildPolicyAwareGeneratorSettings(
+  policy?: TeamPolicyClient | null,
+): GeneratorSettings {
+  const base = { ...DEFAULT_GENERATOR_SETTINGS };
+  if (!policy) return base;
+
+  return {
+    ...base,
+    length: Math.max(base.length, policy.minPasswordLength),
+    uppercase: policy.requireUppercase || base.uppercase,
+    lowercase: policy.requireLowercase || base.lowercase,
+    numbers: policy.requireNumbers || base.numbers,
+    symbolGroups: policy.requireSymbols
+      ? { ...DEFAULT_SYMBOL_GROUPS, hashEtc: true, punctuation: true }
+      : { ...DEFAULT_SYMBOL_GROUPS },
+  };
+}
+
 export function buildTeamPasswordFormInitialValues(
   editData?: TeamPasswordFormEditData | null,
+  teamPolicy?: TeamPolicyClient | null,
+  defaults?: { defaultFolderId?: string | null; defaultTags?: TeamTagData[] },
 ): TeamPasswordFormInitialValues {
   return {
     title: editData?.title ?? "",
@@ -67,8 +95,8 @@ export function buildTeamPasswordFormInitialValues(
     content: editData?.content ?? "",
     url: editData?.url ?? "",
     notes: editData?.notes ?? "",
-    selectedTags: editData?.tags ?? [],
-    generatorSettings: { ...DEFAULT_GENERATOR_SETTINGS },
+    selectedTags: editData?.tags ?? defaults?.defaultTags ?? [],
+    generatorSettings: buildPolicyAwareGeneratorSettings(teamPolicy),
     customFields: editData?.customFields ?? [],
     totp: editData?.totp ?? null,
     showTotpInput: Boolean(editData?.totp),
@@ -107,8 +135,8 @@ export function buildTeamPasswordFormInitialValues(
     licensee: editData?.licensee ?? "",
     purchaseDate: editData?.purchaseDate ?? "",
     expirationDate: editData?.expirationDate ?? "",
-    teamFolderId: editData?.teamFolderId ?? null,
-    requireReprompt: editData?.requireReprompt ?? false,
+    teamFolderId: editData?.teamFolderId ?? defaults?.defaultFolderId ?? null,
+    requireReprompt: editData?.requireReprompt ?? teamPolicy?.requireRepromptForAll ?? false,
     expiresAt: editData?.expiresAt ?? null,
   };
 }

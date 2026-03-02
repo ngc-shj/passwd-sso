@@ -3,5 +3,10 @@
   "searchOrCreate": "Search or create tag...",
   "createTag": "Create \"{name}\"",
   "noTags": "No tags found",
-  "createFailed": "Failed to create tag"
+  "createFailed": "Failed to create tag",
+  "parentTag": "Parent tag",
+  "noParent": "None (root level)",
+  "pathSeparator": " / ",
+  "maxDepthError": "Maximum nesting depth exceeded",
+  "cycleError": "Cannot create circular reference"
 }

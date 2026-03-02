@@ -50,6 +50,10 @@ export const NS_DASHBOARD_CORE: readonly Namespace[] = [
   "EmergencyAccess",
   "ShareLinks",
   "Sessions",
+  "Notifications",
+  "TeamPolicy",
+  "TeamWebhook",
+  "AuditDownload",
 ];
 
 /** Union of all dashboard namespaces (must be a superset of NS_GLOBAL). */

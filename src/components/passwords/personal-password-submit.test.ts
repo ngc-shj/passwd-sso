@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type { PasswordFormTranslator } from "@/lib/translation-types";
 import { submitPersonalPasswordForm } from "@/components/passwords/personal-password-submit";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 
@@ -44,9 +46,10 @@ describe("submitPersonalPasswordForm", () => {
       customFields: [],
       totp: null,
       requireReprompt: false,
+      expiresAt: null,
       folderId: null,
       setSubmitting,
-      t: (key) => key,
+      t: mockTranslator<PasswordFormTranslator>(),
       router: { push: vi.fn(), refresh: vi.fn() },
     });
 
@@ -80,9 +83,10 @@ describe("submitPersonalPasswordForm", () => {
       customFields: [],
       totp: null,
       requireReprompt: true,
+      expiresAt: null,
       folderId: "folder-1",
       setSubmitting,
-      t: (key) => key,
+      t: mockTranslator<PasswordFormTranslator>(),
       router: { push: vi.fn(), refresh: vi.fn() },
     });
 

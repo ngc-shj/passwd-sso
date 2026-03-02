@@ -66,6 +66,14 @@ vi.mock("@/lib/generator-prefs", () => ({
     length: 16,
     passphrase: { wordCount: 4 },
   },
+  DEFAULT_SYMBOL_GROUPS: {
+    hashEtc: false,
+    punctuation: false,
+    quotes: false,
+    slashDash: false,
+    mathCompare: false,
+    brackets: false,
+  },
 }));
 
 vi.mock("@/lib/credit-card", () => ({
@@ -83,6 +91,22 @@ vi.mock("@/lib/credit-card", () => ({
   getMaxLength: vi.fn().mockReturnValue(19),
   normalizeCardBrand: vi.fn((b: string) => b),
   normalizeCardNumber: vi.fn((v: string) => v.replace(/\D/g, "")),
+}));
+
+vi.mock("@/hooks/use-team-policy", () => ({
+  useTeamPolicy: () => ({
+    policy: {
+      minPasswordLength: 0,
+      requireUppercase: false,
+      requireLowercase: false,
+      requireNumbers: false,
+      requireSymbols: false,
+      maxSessionDurationMinutes: null,
+      requireRepromptForAll: false,
+      allowExport: true,
+      allowSharing: true,
+    },
+  }),
 }));
 
 // Minimal UI component mocks
@@ -279,7 +303,7 @@ describe("TeamPasswordForm — folder selection", () => {
     });
 
     await waitFor(() => {
-      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      const calls = mockFetch.mock.calls.map((c: unknown[]) => c[0] as string);
       expect(calls.some((u: string) => u.includes("/teams/team-1/folders"))).toBe(true);
     });
   });
@@ -320,7 +344,7 @@ describe("TeamPasswordForm — folder selection", () => {
 
     // Wait for folder fetch to settle
     await waitFor(() => {
-      const calls = mockFetch.mock.calls.map((c: [string]) => c[0]);
+      const calls = mockFetch.mock.calls.map((c: unknown[]) => c[0] as string);
       expect(calls.some((u: string) => u.includes("/folders"))).toBe(true);
     });
 
@@ -401,10 +425,10 @@ describe("TeamPasswordForm — folder selection", () => {
 
     await waitFor(() => {
       const putCall = mockFetch.mock.calls.find(
-        (c: [string, RequestInit?]) => c[1]?.method === "PUT",
+        (c: unknown[]) => (c[1] as Record<string, unknown>)?.method === "PUT",
       );
       expect(putCall).toBeDefined();
-      const body = JSON.parse(putCall![1]!.body as string);
+      const body = JSON.parse((putCall![1] as Record<string, unknown>).body as string);
       expect(body.teamFolderId).toBe("folder-2");
     });
   });
@@ -445,24 +469,35 @@ describe("TeamPasswordForm — folder selection", () => {
 
     await waitFor(() => {
       const putCall = mockFetch.mock.calls.find(
-        (c: [string, RequestInit?]) => c[1]?.method === "PUT",
+        (c: unknown[]) => (c[1] as Record<string, unknown>)?.method === "PUT",
       );
       expect(putCall).toBeDefined();
-      const body = JSON.parse(putCall![1]!.body as string);
+      const body = JSON.parse((putCall![1] as Record<string, unknown>).body as string);
       expect(body.teamFolderId).toBeNull();
     });
   });
 
-  it("re-applies latest editData after close and reopen", async () => {
+  it("re-applies latest editData after close and reopen (conditional rendering)", async () => {
     setupFetch();
     const onOpenChange = vi.fn();
+    const onSaved = vi.fn();
+
+    // Simulate production pattern: parent conditionally renders TeamPasswordForm
+    function Wrapper({ formOpen, editData }: { formOpen: boolean; editData: React.ComponentProps<typeof TeamPasswordForm>["editData"] }) {
+      return formOpen ? (
+        <TeamPasswordForm
+          teamId="team-1"
+          open={true}
+          onOpenChange={onOpenChange}
+          onSaved={onSaved}
+          editData={editData}
+        />
+      ) : null;
+    }
 
     const view = render(
-      <TeamPasswordForm
-        teamId="team-1"
-        open={true}
-        onOpenChange={onOpenChange}
-        onSaved={vi.fn()}
+      <Wrapper
+        formOpen={true}
         editData={{
           id: "entry-1",
           title: "First Title",
@@ -479,30 +514,18 @@ describe("TeamPasswordForm — folder selection", () => {
       expect(screen.getByDisplayValue("First Title")).toBeInTheDocument();
     });
 
+    // Close: unmount
     view.rerender(
-      <TeamPasswordForm
-        teamId="team-1"
-        open={false}
-        onOpenChange={onOpenChange}
-        onSaved={vi.fn()}
-        editData={{
-          id: "entry-1",
-          title: "First Title",
-          username: "first-user",
-          password: "first-pass",
-          url: null,
-          notes: null,
-          teamFolderId: "folder-1",
-        }}
+      <Wrapper
+        formOpen={false}
+        editData={null}
       />,
     );
 
+    // Re-open with different editData: remount → useState picks up new initial values
     view.rerender(
-      <TeamPasswordForm
-        teamId="team-1"
-        open={true}
-        onOpenChange={onOpenChange}
-        onSaved={vi.fn()}
+      <Wrapper
+        formOpen={true}
         editData={{
           id: "entry-2",
           title: "Second Title",

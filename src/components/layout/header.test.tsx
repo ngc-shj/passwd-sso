@@ -10,7 +10,7 @@
  */
 
 import React from "react";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
@@ -23,6 +23,7 @@ const { mockUseSession, mockUseVault, mockLock } = vi.hoisted(() => ({
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+  useLocale: () => "en",
 }));
 
 vi.mock("next-auth/react", () => ({
@@ -50,6 +51,9 @@ vi.mock("@/components/vault/change-passphrase-dialog", () => ({
 }));
 vi.mock("@/components/vault/recovery-key-dialog", () => ({
   RecoveryKeyDialog: () => null,
+}));
+vi.mock("@/components/notifications/notification-bell", () => ({
+  NotificationBell: () => <div data-testid="notification-bell" />,
 }));
 
 // Mock dropdown to render content directly (bypass Radix interaction)

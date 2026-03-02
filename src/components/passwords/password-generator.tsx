@@ -20,12 +20,41 @@ import {
   buildEffectiveCharset,
 } from "@/lib/generator-prefs";
 import { API_PATH } from "@/lib/constants";
+import type { TeamPolicyClient } from "@/hooks/use-team-policy";
+import { AlertTriangle } from "lucide-react";
 
 interface PasswordGeneratorProps {
   open: boolean;
   onClose: () => void;
   onUse: (password: string, settings: GeneratorSettings) => void;
   settings?: GeneratorSettings;
+  teamPolicy?: TeamPolicyClient | null;
+}
+
+type PolicyViolation =
+  | { key: "policyMinLength"; min: number }
+  | { key: "policyUppercase" }
+  | { key: "policyLowercase" }
+  | { key: "policyNumbers" }
+  | { key: "policySymbols" };
+
+function getPolicyViolations(
+  settings: GeneratorSettings,
+  policy: TeamPolicyClient,
+): PolicyViolation[] {
+  if (settings.mode === "passphrase") return [];
+  const violations: PolicyViolation[] = [];
+  if (policy.minPasswordLength > 0 && settings.length < policy.minPasswordLength) {
+    violations.push({ key: "policyMinLength", min: policy.minPasswordLength });
+  }
+  if (policy.requireUppercase && !settings.uppercase) violations.push({ key: "policyUppercase" });
+  if (policy.requireLowercase && !settings.lowercase) violations.push({ key: "policyLowercase" });
+  if (policy.requireNumbers && !settings.numbers) violations.push({ key: "policyNumbers" });
+  if (policy.requireSymbols) {
+    const hasAnySymbol = Object.values(settings.symbolGroups).some(Boolean);
+    if (!hasAnySymbol) violations.push({ key: "policySymbols" });
+  }
+  return violations;
 }
 
 const SEPARATORS = ["-", ".", "_", " "];
@@ -71,6 +100,7 @@ export function PasswordGenerator({
   onClose,
   onUse,
   settings: initialSettings,
+  teamPolicy,
 }: PasswordGeneratorProps) {
   const t = useTranslations("PasswordGenerator");
   const tc = useTranslations("Common");
@@ -260,6 +290,25 @@ export function PasswordGenerator({
           {t("noAvailableChars")}
         </p>
       )}
+
+      {/* Team policy advisory warning */}
+      {teamPolicy && (() => {
+        const violations = getPolicyViolations(settings, teamPolicy);
+        if (violations.length === 0) return null;
+        const labels = violations.map((v) =>
+          v.key === "policyMinLength"
+            ? t("policyMinLength", { min: v.min })
+            : t(v.key),
+        );
+        return (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              {t("policyWarning")}: {labels.join(", ")}
+            </p>
+          </div>
+        );
+      })()}
 
       {/* Generated password display */}
       {generated && (

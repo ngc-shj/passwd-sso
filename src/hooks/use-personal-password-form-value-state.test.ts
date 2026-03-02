@@ -12,7 +12,9 @@ describe("usePersonalPasswordFormValueState", () => {
       title: "Personal Title",
       username: "user@example.com",
       password: "secret",
+      url: "https://example.com",
       notes: "memo",
+      tags: [],
       folderId: "folder-1",
     });
 

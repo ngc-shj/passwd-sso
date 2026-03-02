@@ -46,6 +46,8 @@
   "entryCountMismatch": "The number of submitted entries does not match the total. Please refresh and try again.",
   "onlyOwnEntries": "You can only modify your own entries.",
   "invalidDateRange": "The expiry date must be after the issue date.",
+  "policySharingDisabled": "Sharing is disabled by team policy.",
+  "policyExportDisabled": "Export is disabled by team policy.",
   "alreadyRevoked": "Already revoked.",
   "upstreamError": "An external service error occurred.",
   "verifierNotSet": "Please lock and unlock your vault first.",
