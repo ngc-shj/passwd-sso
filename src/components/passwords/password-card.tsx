@@ -118,6 +118,7 @@ interface VaultEntryFull {
   url?: string | null;
   notes?: string | null;
   content?: string;
+  isMarkdown?: boolean;
   tags: EntryTagNameColor[];
   customFields?: EntryCustomField[];
   passwordHistory?: EntryPasswordHistory[];

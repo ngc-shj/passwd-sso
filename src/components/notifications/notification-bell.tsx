@@ -66,11 +66,25 @@ export function NotificationBell() {
     }
   }, []);
 
-  // Poll unread count
+  // Poll unread count (pause when tab is hidden)
   useEffect(() => {
     fetchUnreadCount();
-    const id = setInterval(fetchUnreadCount, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
+    let id: ReturnType<typeof setInterval> | null = setInterval(fetchUnreadCount, POLL_INTERVAL_MS);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        fetchUnreadCount();
+        if (!id) id = setInterval(fetchUnreadCount, POLL_INTERVAL_MS);
+      } else {
+        if (id) { clearInterval(id); id = null; }
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      if (id) clearInterval(id);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [fetchUnreadCount]);
 
   // Fetch list when dropdown opens

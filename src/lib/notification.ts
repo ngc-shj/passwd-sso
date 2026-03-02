@@ -72,7 +72,7 @@ export function createNotification(params: CreateNotificationParams): void {
           type,
           title: title.slice(0, 200),
           body: body.slice(0, 2000),
-          metadata: safeMetadata as never ?? undefined,
+          metadata: (safeMetadata ?? undefined) as Parameters<typeof prisma.notification.create>[0]["data"]["metadata"],
         },
       });
     });

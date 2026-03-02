@@ -34,6 +34,10 @@ const components: Components = {
       </a>
     );
   },
+  img: ({ alt }) => {
+    // Block external image loading to prevent IP tracking via image URLs
+    return <span className="text-muted-foreground">[Image: {alt ?? ""}]</span>;
+  },
 };
 
 export function SecureNoteMarkdown({

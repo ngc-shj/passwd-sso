@@ -81,4 +81,22 @@ describe("SecureNoteMarkdown", () => {
     expect(code).not.toBeNull();
     expect(code!.textContent).toContain("const x = 1;");
   });
+
+  it("sanitizes data: protocol links", () => {
+    const { container } = render(
+      <SecureNoteMarkdown content='[click](data:text/html,<script>alert("xss")</script>)' />,
+    );
+    const link = container.querySelector("a");
+    expect(link).not.toBeNull();
+    expect(link!.getAttribute("href")).toBeNull();
+  });
+
+  it("blocks external images to prevent IP tracking", () => {
+    const { container } = render(
+      <SecureNoteMarkdown content='![tracker](https://attacker.com/pixel.gif)' />,
+    );
+    const img = container.querySelector("img");
+    expect(img).toBeNull();
+    expect(container.textContent).toContain("[Image: tracker]");
+  });
 });
