@@ -4,10 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { routing } from "@/i18n/routing";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 const updateLocaleSchema = z.object({
-  locale: z.enum(routing.locales as [string, ...string[]]),
+  locale: z.enum(routing.locales as unknown as [string, ...string[]]),
 });
 
 // PUT /api/user/locale — Update user's preferred locale

@@ -28,6 +28,9 @@ vi.mock("@/lib/logger", () => ({
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
+vi.mock("@/lib/with-request-log", () => ({
+  withRequestLog: (fn: (...args: unknown[]) => unknown) => fn,
+}));
 
 import { PATCH, DELETE } from "./route";
 

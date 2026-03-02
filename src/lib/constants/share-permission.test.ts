@@ -52,6 +52,14 @@ describe("applySharePermissions", () => {
     const result = applySharePermissions(data, [SHARE_PERMISSION.OVERVIEW_ONLY]);
     expect(result).toEqual({ title: "Note" });
   });
+
+  it("OVERVIEW_ONLY takes precedence over HIDE_PASSWORD when both present", () => {
+    const result = applySharePermissions(FULL_DATA, [
+      SHARE_PERMISSION.HIDE_PASSWORD,
+      SHARE_PERMISSION.OVERVIEW_ONLY,
+    ]);
+    expect(Object.keys(result).sort()).toEqual(["title", "url", "username"]);
+  });
 });
 
 describe("SHARE_PERMISSION_VALUES", () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
-import { createRequest, parseResponse } from "../../helpers/request-builder";
+import { parseResponse } from "../../helpers/request-builder";
 
 const { mockAuth, mockCount, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -33,8 +33,7 @@ describe("GET /api/notifications/count", () => {
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
 
-    const req = createRequest("GET", "http://localhost/api/notifications/count");
-    const res = await GET(req);
+    const res = await (GET as () => Promise<Response>)();
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(401);
@@ -45,8 +44,7 @@ describe("GET /api/notifications/count", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockCount.mockResolvedValue(7);
 
-    const req = createRequest("GET", "http://localhost/api/notifications/count");
-    const res = await GET(req);
+    const res = await (GET as () => Promise<Response>)();
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -60,8 +58,7 @@ describe("GET /api/notifications/count", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockCount.mockResolvedValue(0);
 
-    const req = createRequest("GET", "http://localhost/api/notifications/count");
-    const res = await GET(req);
+    const res = await (GET as () => Promise<Response>)();
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
