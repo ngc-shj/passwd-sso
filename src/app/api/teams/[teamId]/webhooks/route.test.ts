@@ -168,6 +168,39 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
     expect(status).toBe(400);
   });
 
+  it("rejects http:// URLs (requires HTTPS)", async () => {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+      body: {
+        url: "http://example.com/hook",
+        events: ["ENTRY_CREATE"],
+      },
+    });
+    const { status } = await parseResponse(await POST(req, teamParams()));
+    expect(status).toBe(400);
+  });
+
+  it("rejects localhost URLs", async () => {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+      body: {
+        url: "https://localhost/hook",
+        events: ["ENTRY_CREATE"],
+      },
+    });
+    const { status } = await parseResponse(await POST(req, teamParams()));
+    expect(status).toBe(400);
+  });
+
+  it("rejects IP address URLs", async () => {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+      body: {
+        url: "https://127.0.0.1/hook",
+        events: ["ENTRY_CREATE"],
+      },
+    });
+    const { status } = await parseResponse(await POST(req, teamParams()));
+    expect(status).toBe(400);
+  });
+
   it("returns 400 when webhook limit is reached", async () => {
     mockPrismaTeamWebhook.count.mockResolvedValue(5);
     const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {

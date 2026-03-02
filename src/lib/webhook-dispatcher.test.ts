@@ -171,6 +171,49 @@ describe("dispatchWebhook", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it("deactivates webhook when failCount reaches 10", async () => {
+    const highFailWebhook = { ...WEBHOOK, failCount: 9 };
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([highFailWebhook]);
+    mockFetch.mockResolvedValue({ ok: false, status: 500 });
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(32_000);
+
+    expect(mockPrismaTeamWebhook.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          failCount: 10,
+          isActive: false,
+        }),
+      }),
+    );
+  });
+
+  it("delivers to multiple webhooks independently", async () => {
+    const webhook2 = { ...WEBHOOK, id: "wh-2", url: "https://other.com/hook" };
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK, webhook2]);
+    mockFetch
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: false, status: 500 })
+      .mockResolvedValue({ ok: false, status: 500 });
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(32_000);
+
+    expect(mockPrismaTeamWebhook.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "wh-1" },
+        data: expect.objectContaining({ failCount: 0 }),
+      }),
+    );
+    expect(mockPrismaTeamWebhook.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "wh-2" },
+        data: expect.objectContaining({ failCount: 1 }),
+      }),
+    );
+  });
+
   it("never throws even on errors", async () => {
     mockPrismaTeamWebhook.findMany.mockRejectedValue(new Error("DB error"));
 

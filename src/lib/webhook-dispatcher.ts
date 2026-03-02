@@ -45,6 +45,7 @@ async function deliverWithRetry(
         },
         body: payload,
         signal: AbortSignal.timeout(10_000),
+        redirect: "error",
       });
       if (res.ok) return true;
     } catch {
@@ -129,8 +130,11 @@ export function dispatchWebhook(event: WebhookEvent): void {
             });
           }
         });
-      } catch {
-        // Never let webhook dispatch break anything
+      } catch (err) {
+        console.error("[webhook-dispatcher] dispatch error", {
+          webhookId: webhook.id,
+          error: err instanceof Error ? err.message : "unknown",
+        });
       }
     }
   })().catch(() => {
