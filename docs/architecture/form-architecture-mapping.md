@@ -48,19 +48,19 @@ The target state is to make these boundaries more directly corresponding. At min
 | Responsibility | Team Vault | Personal Vault |
 | --- | --- | --- |
 | Login form component | `src/components/team/team-password-form.tsx` | `src/components/passwords/personal-password-form.tsx` |
-| Login form model | `src/hooks/use-team-base-form-model.ts` + `src/hooks/use-team-login-form-state.ts` | `src/hooks/use-personal-login-form-model.ts` |
+| Login form model | `src/hooks/use-team-login-form-model.ts` | `src/hooks/use-personal-login-form-model.ts` |
 | Login state | `src/hooks/use-team-login-form-state.ts` | `src/hooks/use-personal-login-form-state.ts` |
 | Login presenter | `src/hooks/team-login-form-presenter.ts` | `src/hooks/personal-login-form-presenter.ts` |
 | Login controller | `src/hooks/team-login-form-controller.ts` | `src/hooks/personal-login-form-controller.ts` |
 | Login derived state | `src/hooks/team-login-form-derived.ts` | `src/hooks/personal-login-form-derived.ts` |
 | Login field props | `src/hooks/team-login-fields-props.ts` | `src/hooks/personal-login-fields-props.ts` |
-| Login initial values | `src/hooks/team-password-form-initial-values.ts` | `src/hooks/personal-login-form-initial-values.ts` |
+| Login initial values | `src/hooks/team-login-form-initial-values.ts` | `src/hooks/personal-login-form-initial-values.ts` |
 
 ### Login Entry Mismatch
 
 - Personal login code is split into `model / state / presenter / controller / derived / fields`.
-- Team login code now has matching `state / presenter / controller / derived / fields` helpers, but still keeps shared form state in `use-team-base-form-model.ts` rather than a dedicated `use-team-login-form-model.ts`.
-- Team login initial-value policy handling still uses the older `team-password-form-initial-values.ts` name.
+- Team login code now has matching `model / state / presenter / controller / derived / fields` helpers.
+- Team login still shares common entry state through `use-team-base-form-model.ts`, while Personal keeps more of that composition inside the login model hook.
 
 ### Shared Entry Sections
 
@@ -104,8 +104,7 @@ The target state is to make these boundaries more directly corresponding. At min
 
 ## Refactor Targets
 
-- Add a dedicated `use-team-login-form-model.ts` if Team login composition grows further.
-- Rename `team-password-form-initial-values.ts` if the team decides to make Team login naming fully parallel with Personal.
+- Decide whether Team non-login flows should also gain per-entry model hooks, or continue to share `use-team-base-form-model.ts` directly.
 - Keep Team creation flow separate from Team Vault entry flow.
 
 ## Rules For Future Changes

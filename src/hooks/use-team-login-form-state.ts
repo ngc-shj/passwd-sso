@@ -8,7 +8,7 @@ import type { useTeamPolicy } from "@/hooks/use-team-policy";
 import {
   applyPolicyToGeneratorSettings,
   buildPolicyAwareGeneratorSettings,
-} from "@/hooks/team-password-form-initial-values";
+} from "@/hooks/team-login-form-initial-values";
 
 type TeamPolicy = ReturnType<typeof useTeamPolicy>["policy"];
 
