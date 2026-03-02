@@ -9,6 +9,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -120,6 +121,8 @@ export default function TeamAuditLogsPage({
   const [actionSearch, setActionSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [downloading, setDownloading] = useState(false);
+  const td = useTranslations("AuditDownload");
 
   const fetchLogs = useCallback(
     async (cursor?: string) => {
@@ -380,6 +383,36 @@ export default function TeamAuditLogsPage({
 
   const clearActions = () => setSelectedActions(new Set());
 
+  const handleDownload = async (format: "jsonl" | "csv") => {
+    setDownloading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("format", format);
+      if (selectedActions.size > 0) {
+        params.set("actions", Array.from(selectedActions).join(","));
+      }
+      if (dateFrom) params.set("from", new Date(dateFrom).toISOString());
+      if (dateTo) {
+        const endOfDay = new Date(dateTo);
+        endOfDay.setHours(23, 59, 59, 999);
+        params.set("to", endOfDay.toISOString());
+      }
+      const res = await fetch(
+        `${apiPath.teamAuditLogs(teamId)}/download?${params.toString()}`
+      );
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `team-audit-logs.${format === "csv" ? "csv" : "jsonl"}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const selectedCount = selectedActions.size;
   const actionSummary =
     selectedCount === 0
@@ -476,6 +509,29 @@ export default function TeamAuditLogsPage({
               onChange={(e) => setDateTo(e.target.value)}
               className="w-[160px]"
             />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs invisible">&#8203;</Label>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={downloading}>
+                  {downloading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  {downloading ? td("downloading") : td("download")}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem onClick={() => handleDownload("csv")}>
+                  {td("formatCsv")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
+                  {td("formatJsonl")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </Card>
