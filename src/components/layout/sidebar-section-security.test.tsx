@@ -50,7 +50,7 @@ describe("SecuritySection", () => {
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        vaultContext={{ type: "team", teamId: "team-1" }}
+        vaultContext={{ type: "team", teamId: "team-1", teamRole: "MEMBER" }}
         isWatchtower={true}
         isEmergencyAccess={false}
         onNavigate={() => {}}
@@ -61,6 +61,22 @@ describe("SecuritySection", () => {
       "href",
       "/dashboard/teams/team-1/watchtower"
     );
+  });
+
+  it("hides watchtower for team viewers", () => {
+    render(
+      <SecuritySection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        vaultContext={{ type: "team", teamId: "team-1", teamRole: "VIEWER" }}
+        isWatchtower={false}
+        isEmergencyAccess={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.queryByRole("link", { name: "watchtower" })).toBeNull();
   });
 });
 

@@ -44,22 +44,26 @@ export function SecuritySection({
     vaultContext.type === "team"
       ? `/dashboard/teams/${vaultContext.teamId}/watchtower`
       : "/dashboard/watchtower";
+  const canAccessWatchtower =
+    vaultContext.type !== "team" || vaultContext.teamRole !== TEAM_ROLE.VIEWER;
 
   return (
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
       <CollapsibleSectionHeader isOpen={isOpen}>{t("security")}</CollapsibleSectionHeader>
       <CollapsibleContent>
         <div className="space-y-1">
-          <Button
-            variant={isWatchtower ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href={watchtowerHref} onClick={onNavigate}>
-              <Shield className="h-4 w-4" />
-              {t("watchtower")}
-            </Link>
-          </Button>
+          {canAccessWatchtower && (
+            <Button
+              variant={isWatchtower ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href={watchtowerHref} onClick={onNavigate}>
+                <Shield className="h-4 w-4" />
+                {t("watchtower")}
+              </Link>
+            </Button>
+          )}
           <Button
             variant={isEmergencyAccess ? "secondary" : "ghost"}
             className="w-full justify-start gap-2"
