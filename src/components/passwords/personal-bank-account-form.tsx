@@ -45,6 +45,7 @@ interface BankAccountFormProps {
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  onCancel?: () => void;
   defaultFolderId?: string | null;
   defaultTags?: TagData[];
 }
@@ -59,6 +60,7 @@ export function BankAccountForm({
   initialData,
   variant = "page",
   onSaved,
+  onCancel,
   defaultFolderId,
   defaultTags,
 }: BankAccountFormProps) {
@@ -77,6 +79,7 @@ export function BankAccountForm({
     defaultTags,
     variant,
     onSaved,
+    onCancel,
   });
   const [showAccountNumber, setShowAccountNumber] = useState(false);
   const [showRoutingNumber, setShowRoutingNumber] = useState(false);

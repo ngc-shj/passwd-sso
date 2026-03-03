@@ -43,6 +43,10 @@ export function PasswordEditDialog({
     onSaved();
   };
 
+  const handleCancel = () => {
+    onOpenChange(false);
+  };
+
   const isNote = editData.entryType === ENTRY_TYPE.SECURE_NOTE;
   const isCreditCard = editData.entryType === ENTRY_TYPE.CREDIT_CARD;
   const isIdentity = editData.entryType === ENTRY_TYPE.IDENTITY;
@@ -92,6 +96,7 @@ export function PasswordEditDialog({
               expiresAt: editData.expiresAt ?? null,
             }}
             onSaved={handleSaved}
+            onCancel={handleCancel}
           />
         ) : isSoftwareLicense ? (
           <SoftwareLicenseForm
@@ -114,6 +119,7 @@ export function PasswordEditDialog({
               expiresAt: editData.expiresAt ?? null,
             }}
             onSaved={handleSaved}
+            onCancel={handleCancel}
           />
         ) : isPasskey ? (
           <PasskeyForm
@@ -135,6 +141,7 @@ export function PasswordEditDialog({
               expiresAt: editData.expiresAt ?? null,
             }}
             onSaved={handleSaved}
+            onCancel={handleCancel}
           />
         ) : isIdentity ? (
           <IdentityForm
@@ -159,6 +166,7 @@ export function PasswordEditDialog({
               expiresAt: editData.expiresAt ?? null,
             }}
             onSaved={handleSaved}
+            onCancel={handleCancel}
           />
         ) : isCreditCard ? (
           <CreditCardForm
@@ -180,6 +188,7 @@ export function PasswordEditDialog({
               expiresAt: editData.expiresAt ?? null,
             }}
             onSaved={handleSaved}
+            onCancel={handleCancel}
           />
         ) : isNote ? (
           <SecureNoteForm
@@ -195,6 +204,7 @@ export function PasswordEditDialog({
               expiresAt: editData.expiresAt ?? null,
             }}
             onSaved={handleSaved}
+            onCancel={handleCancel}
           />
         ) : (
           <PersonalLoginForm
@@ -202,6 +212,7 @@ export function PasswordEditDialog({
             variant="dialog"
             initialData={editData}
             onSaved={handleSaved}
+            onCancel={handleCancel}
           />
         )}
         <div className="border-t pt-4 mt-2">

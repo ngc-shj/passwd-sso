@@ -44,6 +44,7 @@ interface SoftwareLicenseFormProps {
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  onCancel?: () => void;
   defaultFolderId?: string | null;
   defaultTags?: TagData[];
 }
@@ -53,6 +54,7 @@ export function SoftwareLicenseForm({
   initialData,
   variant = "page",
   onSaved,
+  onCancel,
   defaultFolderId,
   defaultTags,
 }: SoftwareLicenseFormProps) {
@@ -71,6 +73,7 @@ export function SoftwareLicenseForm({
     defaultTags,
     variant,
     onSaved,
+    onCancel,
   });
   const [showLicenseKey, setShowLicenseKey] = useState(false);
   const [expirationError, setExpirationError] = useState<string | null>(null);

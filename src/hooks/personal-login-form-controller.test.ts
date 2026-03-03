@@ -22,12 +22,14 @@ describe("buildPersonalLoginFormController", () => {
   it("delegates submit and cancel/back actions", async () => {
     const preventDefault = vi.fn();
     const onSaved = vi.fn();
+    const onCancel = vi.fn();
     const back = vi.fn();
 
     const controller = buildPersonalLoginFormController({
       mode: "create",
       variant: "dialog",
       onSaved,
+      onCancel,
       encryptionKey: {} as CryptoKey,
       userId: "user-1",
       values: buildValues(),
@@ -47,7 +49,8 @@ describe("buildPersonalLoginFormController", () => {
     });
 
     controller.handleCancel();
-    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onSaved).not.toHaveBeenCalled();
 
     controller.handleBack();
     expect(back).toHaveBeenCalledTimes(1);

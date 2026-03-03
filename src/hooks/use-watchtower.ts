@@ -77,6 +77,10 @@ export interface WatchtowerProgress {
   step: string;
 }
 
+export type WatchtowerAnalysisUnavailableReason =
+  | "personalKeyUnavailable"
+  | "teamKeyUnavailable";
+
 export type WatchtowerScope =
   | { type: "personal" }
   | { type: "team"; teamId: string };
@@ -92,6 +96,20 @@ interface DecryptedEntry {
   scope: "personal" | "team";
   teamId?: string;
 }
+
+interface FetchWatchtowerEntriesSuccess {
+  status: "ok";
+  entries: DecryptedEntry[];
+}
+
+interface FetchWatchtowerEntriesUnavailable {
+  status: "unavailable";
+  reason: WatchtowerAnalysisUnavailableReason;
+}
+
+type FetchWatchtowerEntriesResult =
+  | FetchWatchtowerEntriesSuccess
+  | FetchWatchtowerEntriesUnavailable;
 
 function toWatchtowerEntryRef(entry: DecryptedEntry): WatchtowerEntryRef {
   if (entry.scope === "team") {
@@ -122,6 +140,8 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
   const teamVault = useTeamVaultOptional();
   const [report, setReport] = useState<WatchtowerReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const [unavailableReason, setUnavailableReason] =
+    useState<WatchtowerAnalysisUnavailableReason | null>(null);
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [progress, setProgress] = useState<WatchtowerProgress>({
@@ -151,51 +171,95 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
     WATCHTOWER_COOLDOWN_MS
   );
 
-  const analyze = useCallback(async () => {
-    if (loading || cooldownRemainingMs > 0) return;
-    if (scope.type === "personal" && !encryptionKey) return;
+  const analyze = useCallback(async (
+    options?: {
+      bypassCooldown?: boolean;
+      skipRateLimit?: boolean;
+    },
+  ) => {
+    const bypassCooldown = options?.bypassCooldown === true;
+    const skipRateLimit = options?.skipRateLimit === true;
 
-    const startRes = await fetch(API_PATH.WATCHTOWER_START, { method: "POST" });
-    if (!startRes.ok) {
-      if (startRes.status === 429) {
-        const body = await startRes.json().catch(() => null) as { retryAt?: number } | null;
-        if (typeof body?.retryAt === "number") {
-          const startedAt = body.retryAt - WATCHTOWER_COOLDOWN_MS;
-          setLastAnalyzedAt(startedAt);
-          window.localStorage.setItem(
-            LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
-            String(startedAt)
-          );
-        } else {
-          const fallbackStartedAt = Date.now();
-          setLastAnalyzedAt(fallbackStartedAt);
-          window.localStorage.setItem(
-            LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
-            String(fallbackStartedAt)
-          );
-        }
-      }
+    if (loading || (!bypassCooldown && cooldownRemainingMs > 0)) return;
+    if (scope.type === "personal" && !encryptionKey) {
+      setReport(null);
+      setUnavailableReason("personalKeyUnavailable");
+      return;
+    }
+    if (
+      scope.type === "team" &&
+      (!teamVault || typeof teamVault.getTeamEncryptionKey !== "function")
+    ) {
+      setReport(null);
+      setUnavailableReason("teamKeyUnavailable");
       return;
     }
 
-    const startedAt = Date.now();
-    setLastAnalyzedAt(startedAt);
-    window.localStorage.setItem(
-      LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
-      String(startedAt)
-    );
+    let teamEncryptionKey: CryptoKey | undefined;
+    if (scope.type === "team") {
+      teamEncryptionKey = await teamVault.getTeamEncryptionKey(scope.teamId) ?? undefined;
+      if (!teamEncryptionKey) {
+        setReport(null);
+        setUnavailableReason("teamKeyUnavailable");
+        return;
+      }
+    }
+
+    if (!skipRateLimit) {
+      const startRes = await fetch(API_PATH.WATCHTOWER_START, { method: "POST" });
+      if (!startRes.ok) {
+        if (startRes.status === 429) {
+          const body = await startRes.json().catch(() => null) as { retryAt?: number } | null;
+          if (typeof body?.retryAt === "number") {
+            const startedAt = body.retryAt - WATCHTOWER_COOLDOWN_MS;
+            setLastAnalyzedAt(startedAt);
+            window.localStorage.setItem(
+              LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
+              String(startedAt)
+            );
+          } else {
+            const fallbackStartedAt = Date.now();
+            setLastAnalyzedAt(fallbackStartedAt);
+            window.localStorage.setItem(
+              LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
+              String(fallbackStartedAt)
+            );
+          }
+        }
+        return;
+      }
+    }
+
+    if (!bypassCooldown) {
+      const startedAt = Date.now();
+      setLastAnalyzedAt(startedAt);
+      window.localStorage.setItem(
+        LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
+        String(startedAt)
+      );
+    }
 
     setLoading(true);
+    setUnavailableReason(null);
 
     try {
       // Step 1: Fetch and decrypt the selected vault's login entries
       setProgress({ current: 0, total: 4, step: "fetching" });
-      const entries = await fetchWatchtowerEntries({
+      const entryResult = await fetchWatchtowerEntries({
         scope,
         encryptionKey,
+        teamEncryptionKey,
         userId: userId ?? undefined,
         getTeamEncryptionKey: teamVault?.getTeamEncryptionKey,
       });
+
+      if (entryResult.status === "unavailable") {
+        setReport(null);
+        setUnavailableReason(entryResult.reason);
+        return;
+      }
+
+      const entries = entryResult.entries;
 
       if (entries.length === 0) {
         setReport({
@@ -402,6 +466,7 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
     canAnalyze,
     cooldownRemainingMs,
     nextAllowedAt,
+    unavailableReason,
   };
 }
 
@@ -419,26 +484,34 @@ function normalizeHostname(url: string): string | null {
 async function fetchWatchtowerEntries({
   scope,
   encryptionKey,
+  teamEncryptionKey,
   userId,
   getTeamEncryptionKey,
 }: {
   scope: WatchtowerScope;
   encryptionKey?: CryptoKey;
+  teamEncryptionKey?: CryptoKey;
   userId?: string;
   getTeamEncryptionKey?: (teamId: string) => Promise<CryptoKey | null>;
-}): Promise<DecryptedEntry[]> {
+}): Promise<FetchWatchtowerEntriesResult> {
   if (scope.type === "team") {
-    if (!getTeamEncryptionKey) return [];
+    if (!getTeamEncryptionKey) {
+      return { status: "unavailable", reason: "teamKeyUnavailable" };
+    }
     return fetchTeamWatchtowerEntries({
       teamId: scope.teamId,
+      teamEncryptionKey,
       getTeamEncryptionKey,
     });
   }
 
-  return fetchPersonalWatchtowerEntries({
-    encryptionKey,
-    userId,
-  });
+  return {
+    status: "ok",
+    entries: await fetchPersonalWatchtowerEntries({
+      encryptionKey,
+      userId,
+    }),
+  };
 }
 
 async function fetchPersonalWatchtowerEntries({
@@ -487,20 +560,26 @@ async function fetchPersonalWatchtowerEntries({
 
 async function fetchTeamWatchtowerEntries({
   teamId,
+  teamEncryptionKey,
   getTeamEncryptionKey,
 }: {
   teamId: string;
+  teamEncryptionKey?: CryptoKey;
   getTeamEncryptionKey: (teamId: string) => Promise<CryptoKey | null>;
-}): Promise<DecryptedEntry[]> {
+}): Promise<FetchWatchtowerEntriesResult> {
   const entries: DecryptedEntry[] = [];
 
-  const teamKey = await getTeamEncryptionKey(teamId);
-  if (!teamKey) return entries;
+  const teamKey = teamEncryptionKey ?? await getTeamEncryptionKey(teamId);
+  if (!teamKey) {
+    return { status: "unavailable", reason: "teamKeyUnavailable" };
+  }
 
   const listRes = await fetch(`${apiPath.teamPasswords(teamId)}?type=${ENTRY_TYPE.LOGIN}`);
-  if (!listRes.ok) return entries;
+  if (!listRes.ok) throw new Error("Failed to fetch team passwords");
   const listedEntries = await listRes.json();
-  if (!Array.isArray(listedEntries) || listedEntries.length === 0) return entries;
+  if (!Array.isArray(listedEntries) || listedEntries.length === 0) {
+    return { status: "ok", entries };
+  }
 
   for (const listed of listedEntries) {
     if (!listed || typeof listed !== "object" || typeof listed.id !== "string") continue;
@@ -535,7 +614,7 @@ async function fetchTeamWatchtowerEntries({
     }
   }
 
-  return entries;
+  return { status: "ok", entries };
 }
 
 // ─── Score Calculation ───────────────────────────────────────

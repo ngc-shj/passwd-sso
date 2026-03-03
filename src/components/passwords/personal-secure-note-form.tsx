@@ -45,6 +45,7 @@ interface SecureNoteFormProps {
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  onCancel?: () => void;
   defaultFolderId?: string | null;
   defaultTags?: TagData[];
 }
@@ -54,6 +55,7 @@ export function SecureNoteForm({
   initialData,
   variant = "page",
   onSaved,
+  onCancel,
   defaultFolderId,
   defaultTags,
 }: SecureNoteFormProps) {
@@ -72,6 +74,7 @@ export function SecureNoteForm({
     defaultTags,
     variant,
     onSaved,
+    onCancel,
   });
   const [content, setContent] = useState(initialData?.content ?? "");
 

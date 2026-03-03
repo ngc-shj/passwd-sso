@@ -59,6 +59,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
     analyze,
     canAnalyze,
     cooldownRemainingMs,
+    unavailableReason,
   } = useWatchtower(scope);
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
@@ -116,7 +117,12 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
   };
 
   const totalIssues = report ? calculateTotalIssues(report) : 0;
-  const visibility = getWatchtowerVisibility(report, loading, totalIssues);
+  const visibility = getWatchtowerVisibility(
+    report,
+    unavailableReason,
+    loading,
+    totalIssues,
+  );
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
@@ -145,7 +151,9 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={analyze}
+                onClick={() => {
+                  void analyze();
+                }}
                 disabled={!canAnalyze}
               >
                 {loading ? (
@@ -176,6 +184,21 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
                   : t("runHintCooldown", {
                       seconds: Math.ceil(cooldownRemainingMs / 1000),
                     })}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {visibility.showUnavailableCard && (
+          <Card className="rounded-xl border bg-card/80">
+            <CardContent className="flex flex-col items-center py-12 gap-3">
+              <Shield className="h-12 w-12 text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground text-center">
+                {unavailableReason === "personalKeyUnavailable"
+                  ? t("personalKeyUnavailable")
+                  : unavailableReason === "teamKeyUnavailable"
+                  ? t("teamKeyUnavailable")
+                  : t("analysisUnavailable")}
               </p>
             </CardContent>
           </Card>
@@ -328,6 +351,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
           }}
           onSaved={() => {
             setSelectedEntry(null);
+            void analyze({ bypassCooldown: true, skipRateLimit: true });
           }}
         />
       )}
@@ -341,6 +365,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
           }}
           onSaved={() => {
             setSelectedEntry(null);
+            void analyze({ bypassCooldown: true, skipRateLimit: true });
           }}
         />
       )}

@@ -43,6 +43,10 @@ export function PasswordNewDialog({
     onSaved();
   };
 
+  const handleCancel = () => {
+    onOpenChange(false);
+  };
+
   const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
   const isCreditCard = entryType === ENTRY_TYPE.CREDIT_CARD;
   const isIdentity = entryType === ENTRY_TYPE.IDENTITY;
@@ -75,6 +79,7 @@ export function PasswordNewDialog({
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            onCancel={handleCancel}
             defaultFolderId={defaultFolderId}
             defaultTags={defaultTags}
           />
@@ -83,6 +88,7 @@ export function PasswordNewDialog({
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            onCancel={handleCancel}
             defaultFolderId={defaultFolderId}
             defaultTags={defaultTags}
           />
@@ -91,6 +97,7 @@ export function PasswordNewDialog({
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            onCancel={handleCancel}
             defaultFolderId={defaultFolderId}
             defaultTags={defaultTags}
           />
@@ -99,6 +106,7 @@ export function PasswordNewDialog({
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            onCancel={handleCancel}
             defaultFolderId={defaultFolderId}
             defaultTags={defaultTags}
           />
@@ -107,6 +115,7 @@ export function PasswordNewDialog({
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            onCancel={handleCancel}
             defaultFolderId={defaultFolderId}
             defaultTags={defaultTags}
           />
@@ -115,6 +124,7 @@ export function PasswordNewDialog({
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            onCancel={handleCancel}
             defaultFolderId={defaultFolderId}
             defaultTags={defaultTags}
           />
@@ -123,6 +133,7 @@ export function PasswordNewDialog({
             mode="create"
             variant="dialog"
             onSaved={handleSaved}
+            onCancel={handleCancel}
             defaultFolderId={defaultFolderId}
             defaultTags={defaultTags}
           />

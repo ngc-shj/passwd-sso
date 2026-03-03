@@ -29,7 +29,7 @@ describe("getCooldownState", () => {
 
 describe("watchtower visibility", () => {
   it("shows run hint before first run", () => {
-    const visibility = getWatchtowerVisibility(null, false, 0);
+    const visibility = getWatchtowerVisibility(null, null, false, 0);
     expect(visibility.showRunHint).toBe(true);
     expect(visibility.showIssueSections).toBe(false);
   });
@@ -46,10 +46,22 @@ describe("watchtower visibility", () => {
       expiring: [],
     };
     const totalIssues = calculateTotalIssues(report);
-    const visibility = getWatchtowerVisibility(report, false, totalIssues);
+    const visibility = getWatchtowerVisibility(report, null, false, totalIssues);
     expect(totalIssues).toBe(0);
     expect(visibility.showIssueSections).toBe(true);
     expect(visibility.showNoIssuesCard).toBe(true);
+  });
+
+  it("shows unavailable card instead of empty-state hint when analysis cannot run", () => {
+    const visibility = getWatchtowerVisibility(null, "teamKeyUnavailable", false, 0);
+    expect(visibility.showRunHint).toBe(false);
+    expect(visibility.showUnavailableCard).toBe(true);
+  });
+
+  it("shows unavailable card for a missing personal vault key", () => {
+    const visibility = getWatchtowerVisibility(null, "personalKeyUnavailable", false, 0);
+    expect(visibility.showRunHint).toBe(false);
+    expect(visibility.showUnavailableCard).toBe(true);
   });
 });
 
@@ -80,4 +92,3 @@ describe("calculateTotalIssues", () => {
     expect(calculateTotalIssues(report)).toBe(3); // 2 reused + 1 old
   });
 });
-

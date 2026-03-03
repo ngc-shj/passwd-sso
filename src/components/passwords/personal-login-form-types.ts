@@ -24,6 +24,7 @@ export interface PersonalLoginFormProps {
   initialData?: PersonalLoginFormInitialData;
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  onCancel?: () => void;
   defaultFolderId?: string | null;
   defaultTags?: TagData[];
 }

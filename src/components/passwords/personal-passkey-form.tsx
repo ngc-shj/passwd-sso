@@ -43,6 +43,7 @@ interface PasskeyFormProps {
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  onCancel?: () => void;
   defaultFolderId?: string | null;
   defaultTags?: TagData[];
 }
@@ -52,6 +53,7 @@ export function PasskeyForm({
   initialData,
   variant = "page",
   onSaved,
+  onCancel,
   defaultFolderId,
   defaultTags,
 }: PasskeyFormProps) {
@@ -70,6 +72,7 @@ export function PasskeyForm({
     defaultTags,
     variant,
     onSaved,
+    onCancel,
   });
   const [showCredentialId, setShowCredentialId] = useState(false);
   const [relyingPartyId, setRelyingPartyId] = useState(

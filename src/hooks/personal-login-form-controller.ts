@@ -13,6 +13,7 @@ export interface PersonalLoginFormControllerArgs {
   initialData: Pick<PersonalLoginFormProps, "initialData">["initialData"];
   variant?: Pick<PersonalLoginFormProps, "variant">["variant"];
   onSaved: Pick<PersonalLoginFormProps, "onSaved">["onSaved"];
+  onCancel: Pick<PersonalLoginFormProps, "onCancel">["onCancel"];
   encryptionKey: CryptoKey | null;
   userId?: string | null;
   values: PersonalLoginFormEntryValues;
@@ -26,6 +27,7 @@ export function buildPersonalLoginFormController({
   initialData,
   variant,
   onSaved,
+  onCancel,
   encryptionKey,
   userId,
   values,
@@ -34,7 +36,7 @@ export function buildPersonalLoginFormController({
   router,
 }: PersonalLoginFormControllerArgs) {
   const { handleCancel, handleBack } = createFormNavigationHandlers({
-    onCancel: variant === "dialog" ? onSaved : undefined,
+    onCancel: variant === "dialog" ? onCancel : undefined,
     router,
   });
 

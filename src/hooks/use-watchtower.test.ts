@@ -730,7 +730,7 @@ describe("useWatchtower", () => {
 
   // ─── Guard: no encryptionKey ─────────────────────────────
 
-  it("does nothing if encryptionKey is null", async () => {
+  it("marks analysis unavailable if the personal vault key is missing", async () => {
     mockUseVault.mockReturnValue({ encryptionKey: null, userId: "user-1" });
 
     const { result } = renderHook(() => useWatchtower());
@@ -741,6 +741,10 @@ describe("useWatchtower", () => {
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(result.current.report).toBeNull();
+    expect(result.current.unavailableReason).toBe("personalKeyUnavailable");
+    expect(
+      window.localStorage.getItem("watchtower:lastAnalyzedAt")
+    ).toBeNull();
   });
 
   // ─── Guard: cooldown active ──────────────────────────────
@@ -1404,5 +1408,25 @@ describe("useWatchtower", () => {
     );
     expect(mockBuildTeamEntryAAD).toHaveBeenCalledWith("team-1", "team-entry-1", "blob");
     expect(fetchSpy).not.toHaveBeenCalledWith("/api/passwords?include=blob");
+  });
+
+  it("reports team key unavailability without starting cooldown", async () => {
+    const getTeamEncryptionKey = vi.fn().mockResolvedValue(null);
+    mockUseTeamVaultOptional.mockReturnValue({
+      getTeamEncryptionKey,
+    });
+
+    const { result } = renderHook(() =>
+      useWatchtower({ type: "team", teamId: "team-1" })
+    );
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report).toBeNull();
+    expect(result.current.unavailableReason).toBe("teamKeyUnavailable");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem("watchtower:lastAnalyzedAt")).toBeNull();
   });
 });

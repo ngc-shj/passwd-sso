@@ -53,6 +53,7 @@ interface CreditCardFormProps {
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  onCancel?: () => void;
   defaultFolderId?: string | null;
   defaultTags?: TagData[];
 }
@@ -62,6 +63,7 @@ export function CreditCardForm({
   initialData,
   variant = "page",
   onSaved,
+  onCancel,
   defaultFolderId,
   defaultTags,
 }: CreditCardFormProps) {
@@ -80,6 +82,7 @@ export function CreditCardForm({
     defaultTags,
     variant,
     onSaved,
+    onCancel,
   });
   const [showCardNumber, setShowCardNumber] = useState(false);
   const [showCvv, setShowCvv] = useState(false);

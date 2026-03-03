@@ -16,13 +16,14 @@ import {
 } from "@/hooks/use-entry-form-translations";
 import { usePersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
 
-type PersonalLoginFormModelInput = Pick<PersonalLoginFormProps, "mode" | "initialData" | "variant" | "onSaved" | "defaultFolderId" | "defaultTags">;
+type PersonalLoginFormModelInput = Pick<PersonalLoginFormProps, "mode" | "initialData" | "variant" | "onSaved" | "onCancel" | "defaultFolderId" | "defaultTags">;
 
 export function usePersonalLoginFormModel({
   mode,
   initialData,
   variant,
   onSaved,
+  onCancel,
   defaultFolderId,
   defaultTags,
 }: PersonalLoginFormModelInput) {
@@ -45,6 +46,7 @@ export function usePersonalLoginFormModel({
     initialData,
     variant,
     onSaved,
+    onCancel,
     encryptionKey,
     userId,
     values,

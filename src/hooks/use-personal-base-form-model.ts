@@ -23,6 +23,7 @@ interface UsePersonalBaseFormModelArgs {
   defaultTags?: TagData[];
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  onCancel?: () => void;
 }
 
 interface SubmitEntryArgs {
@@ -44,6 +45,7 @@ export function usePersonalBaseFormModel({
   defaultTags,
   variant = "page",
   onSaved,
+  onCancel,
 }: UsePersonalBaseFormModelArgs) {
   const router = useRouter();
   const { encryptionKey, userId } = useVault();
@@ -64,7 +66,7 @@ export function usePersonalBaseFormModel({
   );
 
   const { handleCancel, handleBack } = createFormNavigationHandlers({
-    onCancel: variant === "dialog" ? onSaved : undefined,
+    onCancel: variant === "dialog" ? onCancel : undefined,
     router,
   });
 

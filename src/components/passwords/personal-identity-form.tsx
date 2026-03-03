@@ -46,6 +46,7 @@ interface IdentityFormProps {
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
+  onCancel?: () => void;
   defaultFolderId?: string | null;
   defaultTags?: TagData[];
 }
@@ -55,6 +56,7 @@ export function IdentityForm({
   initialData,
   variant = "page",
   onSaved,
+  onCancel,
   defaultFolderId,
   defaultTags,
 }: IdentityFormProps) {
@@ -73,6 +75,7 @@ export function IdentityForm({
     defaultTags,
     variant,
     onSaved,
+    onCancel,
   });
   const [showIdNumber, setShowIdNumber] = useState(false);
   const [fullName, setFullName] = useState(initialData?.fullName ?? "");

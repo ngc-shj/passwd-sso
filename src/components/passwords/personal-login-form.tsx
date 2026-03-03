@@ -18,7 +18,7 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-export function PersonalLoginForm({ mode, initialData, variant = "page", onSaved, defaultFolderId, defaultTags }: PersonalLoginFormProps) {
+export function PersonalLoginForm({ mode, initialData, variant = "page", onSaved, onCancel, defaultFolderId, defaultTags }: PersonalLoginFormProps) {
   const {
     t,
     tc,
@@ -34,6 +34,7 @@ export function PersonalLoginForm({ mode, initialData, variant = "page", onSaved
     initialData,
     variant,
     onSaved,
+    onCancel,
     defaultFolderId,
     defaultTags,
   });

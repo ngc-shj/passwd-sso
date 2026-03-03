@@ -43,11 +43,12 @@ export function calculateTotalIssues(report: {
 
 export function getWatchtowerVisibility(
   report: { totalPasswords: number } | null,
+  unavailableReason: string | null,
   loading: boolean,
   totalIssues: number
 ) {
   return {
-    showRunHint: !report && !loading,
+    showRunHint: !report && !unavailableReason && !loading,
     showIssueSections: !!report && !loading && report.totalPasswords > 0,
     showNoIssuesCard:
       !!report &&
@@ -55,5 +56,6 @@ export function getWatchtowerVisibility(
       totalIssues === 0 &&
       report.totalPasswords > 0,
     showEmptyVault: !!report && !loading && report.totalPasswords === 0,
+    showUnavailableCard: !report && !!unavailableReason && !loading,
   };
 }
