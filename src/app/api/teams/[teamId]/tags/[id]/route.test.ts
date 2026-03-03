@@ -130,6 +130,32 @@ describe("PUT /api/teams/[teamId]/tags/[id]", () => {
     expect(json.name).toBe("Updated");
   });
 
+  it("returns 409 when duplicate tag exists at the same level", async () => {
+    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID, name: "Old", parentId: null });
+    mockPrismaTeamTag.findFirst.mockResolvedValue({ id: "other-tag" });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`, {
+        body: { name: "Updated" },
+      }),
+      createParams({ teamId: TEAM_ID, id: TAG_ID }),
+    );
+    expect(res.status).toBe(409);
+  });
+
+  it("returns 400 when parent chain is invalid", async () => {
+    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID, name: "Old", parentId: null });
+    mockPrismaTeamTag.findMany.mockResolvedValue([{ id: "parent", name: "Parent", parentId: TAG_ID }]);
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`, {
+        body: { parentId: "parent" },
+      }),
+      createParams({ teamId: TEAM_ID, id: TAG_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("accepts color: null to clear the tag color", async () => {
     mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID, name: "Ops", parentId: null });
     mockPrismaTeamTag.findFirst.mockResolvedValue(null);
@@ -204,5 +230,14 @@ describe("DELETE /api/teams/[teamId]/tags/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
+  });
+
+  it("returns 404 when tag belongs to another team", async () => {
+    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: "other-team" });
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`),
+      createParams({ teamId: TEAM_ID, id: TAG_ID }),
+    );
+    expect(res.status).toBe(404);
   });
 });

@@ -76,6 +76,7 @@ function makeReq(options: { body?: unknown } = {}) {
 describe("GET /api/teams/[teamId]/scim-tokens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWithTeamTenantRls.mockImplementation(async (_teamId: string, fn: () => unknown) => fn());
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockTeamanization.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
@@ -93,6 +94,11 @@ describe("GET /api/teams/[teamId]/scim-tokens", () => {
     );
     const res = await GET(makeReq(), makeParams("team-1"));
     expect(res.status).toBe(403);
+  });
+
+  it("rethrows unexpected permission errors during GET", async () => {
+    mockRequireTeamPermission.mockRejectedValue(new Error("boom"));
+    await expect(GET(makeReq(), makeParams("team-1"))).rejects.toThrow("boom");
   });
 
   it("returns token list", async () => {
@@ -130,11 +136,28 @@ describe("GET /api/teams/[teamId]/scim-tokens", () => {
     const body = await res.json();
     expect(body.error).toBe("NOT_FOUND");
   });
+
+  it("returns 403 when listing tokens hits a TeamAuthError", async () => {
+    mockWithTeamTenantRls
+      .mockImplementationOnce(async (_teamId: string, fn: () => unknown) => fn())
+      .mockRejectedValueOnce(new TeamAuthError("FORBIDDEN", 403));
+
+    const res = await GET(makeReq(), makeParams("team-1"));
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 409 when team tenant lookup returns no tenant", async () => {
+    mockTeamanization.findUnique.mockResolvedValue(null);
+
+    const res = await GET(makeReq(), makeParams("team-1"));
+    expect(res.status).toBe(409);
+  });
 });
 
 describe("POST /api/teams/[teamId]/scim-tokens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWithTeamTenantRls.mockImplementation(async (_teamId: string, fn: () => unknown) => fn());
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockTeamanization.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
@@ -149,6 +172,16 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body.error).toContain("SCIM_TOKEN_LIMIT_EXCEEDED");
+  });
+
+  it("returns 403 when token counting hits a TeamAuthError", async () => {
+    mockScimToken.count.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
+
+    const res = await POST(
+      makeReq({ body: { description: "Overflow" } }),
+      makeParams("team-1"),
+    );
+    expect(res.status).toBe(403);
   });
 
   it("excludes expired tokens from active count", async () => {
@@ -201,6 +234,34 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
     expect(mockLogAudit).toHaveBeenCalled();
   });
 
+  it("returns 403 when token creation hits a TeamAuthError", async () => {
+    mockScimToken.count.mockResolvedValue(0);
+    mockScimToken.create.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
+
+    const res = await POST(
+      makeReq({ body: { description: "My token", expiresInDays: 365 } }),
+      makeParams("team-1"),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("rethrows unexpected count errors", async () => {
+    mockScimToken.count.mockRejectedValue(new Error("boom"));
+
+    await expect(
+      POST(makeReq({ body: { description: "Overflow" } }), makeParams("team-1")),
+    ).rejects.toThrow("boom");
+  });
+
+  it("rethrows unexpected create errors", async () => {
+    mockScimToken.count.mockResolvedValue(0);
+    mockScimToken.create.mockRejectedValue(new Error("boom"));
+
+    await expect(
+      POST(makeReq({ body: { description: "My token", expiresInDays: 365 } }), makeParams("team-1")),
+    ).rejects.toThrow("boom");
+  });
+
   it("returns 400 for expiresInDays exceeding max", async () => {
     const res = await POST(
       makeReq({ body: { expiresInDays: 3651 } }),
@@ -222,6 +283,17 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
       makeReq({ body: { expiresInDays: -1 } }),
       makeParams("team-1"),
     );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for invalid JSON payload", async () => {
+    const req = new NextRequest("http://localhost/api/teams/team-1/scim-tokens", {
+      method: "POST",
+      body: "{",
+      headers: { "content-type": "application/json" },
+    });
+
+    const res = await POST(req, makeParams("team-1"));
     expect(res.status).toBe(400);
   });
 
@@ -247,6 +319,16 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
     );
   });
 
+  it("returns 409 when team tenant lookup returns no tenant during creation", async () => {
+    mockTeamanization.findUnique.mockResolvedValue(null);
+
+    const res = await POST(
+      makeReq({ body: { description: "My token", expiresInDays: 365 } }),
+      makeParams("team-1"),
+    );
+    expect(res.status).toBe(409);
+  });
+
   it("returns 404 when tenant cannot be resolved during token creation flow", async () => {
     mockWithTeamTenantRls
       .mockImplementationOnce(async (_teamId: string, fn: () => unknown) => fn())
@@ -259,5 +341,12 @@ describe("POST /api/teams/[teamId]/scim-tokens", () => {
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.error).toBe("NOT_FOUND");
+  });
+
+  it("rethrows unexpected permission errors during POST", async () => {
+    mockRequireTeamPermission.mockRejectedValue(new Error("boom"));
+    await expect(
+      POST(makeReq({ body: { description: "My token", expiresInDays: 365 } }), makeParams("team-1")),
+    ).rejects.toThrow("boom");
   });
 });
