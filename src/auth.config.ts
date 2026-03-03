@@ -4,6 +4,11 @@ import { API_PATH } from "@/lib/constants";
 
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 
+// Auth.js resolves cookie name by URL scheme, not NODE_ENV.
+// npm start sets NODE_ENV=production even on localhost (HTTP),
+// so we mirror Auth.js's own logic: secure when AUTH_URL is HTTPS.
+const useSecureCookies = (process.env.AUTH_URL ?? "http://localhost:3000").startsWith("https://");
+
 export default {
   providers: [
     // Only register providers whose credentials are fully configured.
@@ -65,14 +70,14 @@ export default {
 
   cookies: {
     sessionToken: {
-      name: process.env.NODE_ENV === "production"
+      name: useSecureCookies
         ? "__Secure-authjs.session-token"
         : "authjs.session-token",
       options: {
         path: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/`,
         httpOnly: true,
         sameSite: "lax" as const,
-        secure: process.env.NODE_ENV === "production",
+        secure: useSecureCookies,
       },
     },
   },
