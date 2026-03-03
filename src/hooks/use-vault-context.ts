@@ -29,7 +29,6 @@ interface TeamContextItem {
 }
 
 const CROSS_VAULT_PATHS = [
-  "/dashboard/watchtower",
   "/dashboard/share-links",
   "/dashboard/emergency-access",
   "/dashboard/teams",
@@ -44,6 +43,7 @@ function isPersonalVaultPath(path: string): boolean {
     "/dashboard/tags",
     "/dashboard/folders",
     "/dashboard/audit-logs",
+    "/dashboard/watchtower",
   ].some((prefix) => path === prefix || path.startsWith(prefix + "/"));
 }
 

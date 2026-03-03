@@ -33,6 +33,7 @@ describe("SecuritySection", () => {
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
+        vaultContext={{ type: "personal" }}
         isWatchtower={false}
         isEmergencyAccess={false}
         onNavigate={() => {}}
@@ -41,6 +42,41 @@ describe("SecuritySection", () => {
 
     expect(screen.getByRole("link", { name: "watchtower" })).toHaveAttribute("href", "/dashboard/watchtower");
     expect(screen.getByRole("link", { name: "emergencyAccess" })).toHaveAttribute("href", "/dashboard/emergency-access");
+  });
+
+  it("routes watchtower to the selected team vault", () => {
+    render(
+      <SecuritySection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        vaultContext={{ type: "team", teamId: "team-1", teamRole: "MEMBER" }}
+        isWatchtower={true}
+        isEmergencyAccess={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "watchtower" })).toHaveAttribute(
+      "href",
+      "/dashboard/teams/team-1/watchtower"
+    );
+  });
+
+  it("hides watchtower for team viewers", () => {
+    render(
+      <SecuritySection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        vaultContext={{ type: "team", teamId: "team-1", teamRole: "VIEWER" }}
+        isWatchtower={false}
+        isEmergencyAccess={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.queryByRole("link", { name: "watchtower" })).toBeNull();
   });
 });
 

@@ -97,6 +97,16 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
     expect(res.status).toBe(403);
   });
 
+  it("rethrows unexpected permission errors", async () => {
+    mockRequireTeamPermission.mockRejectedValue(new Error("boom"));
+    await expect(
+      GET(
+        createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
+        createParams({ teamId: TEAM_ID }),
+      ),
+    ).rejects.toThrow("boom");
+  });
+
   it("returns 403 when export is disabled by policy", async () => {
     mockAssertPolicyAllowsExport.mockRejectedValue(new PolicyViolationError("Export is disabled by team policy"));
     const res = await GET(
@@ -104,6 +114,16 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
       createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(403);
+  });
+
+  it("rethrows unexpected policy errors", async () => {
+    mockAssertPolicyAllowsExport.mockRejectedValue(new Error("boom"));
+    await expect(
+      GET(
+        createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
+        createParams({ teamId: TEAM_ID }),
+      ),
+    ).rejects.toThrow("boom");
   });
 
   it("returns 429 when rate limit exceeded", async () => {
@@ -119,6 +139,36 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
         searchParams: { from: "2025-01-01", to: "2025-06-01" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for invalid date format", async () => {
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
+        searchParams: { from: "not-a-date" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when from is after to", async () => {
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
+        searchParams: { from: "2025-06-02", to: "2025-06-01" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for invalid action filters", async () => {
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
+        searchParams: { actions: "ENTRY_CREATE,NOT_REAL" },
       }),
       createParams({ teamId: TEAM_ID }),
     );
@@ -183,6 +233,38 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
     const lines = text.trim().split("\n");
     expect(lines).toHaveLength(2); // header + 1 data row
     expect(lines[0]).toContain("id,action");
+  });
+
+  it("paginates when a full batch is returned", async () => {
+    const batch = Array.from({ length: 500 }, (_, index) => ({
+      id: `log-${index}`,
+      action: "ENTRY_CREATE",
+      targetType: "password",
+      targetId: `pw-${index}`,
+      metadata: null,
+      ip: null,
+      userAgent: null,
+      createdAt: new Date("2025-06-01T00:00:00Z"),
+      user: null,
+    }));
+    mockPrismaAuditLog.findMany
+      .mockResolvedValueOnce(batch)
+      .mockResolvedValueOnce([]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    await streamToString(res);
+
+    expect(mockPrismaAuditLog.findMany).toHaveBeenCalledTimes(2);
+    expect(mockPrismaAuditLog.findMany.mock.calls[1][0]).toEqual(
+      expect.objectContaining({
+        cursor: { id: "log-499" },
+        skip: 1,
+      }),
+    );
   });
 
   it("logs audit event for download", async () => {

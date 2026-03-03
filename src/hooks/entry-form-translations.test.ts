@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { EntryFormTranslationsBundle } from "@/hooks/entry-form-translations";
 import {
-  toPersonalPasswordFormTranslations,
-  toTeamPasswordFormTranslations,
+  toPersonalLoginFormTranslations,
+  toTeamLoginFormTranslations,
 } from "@/hooks/entry-form-translations";
 
 function createBundle(): EntryFormTranslationsBundle {
@@ -19,10 +19,10 @@ function createBundle(): EntryFormTranslationsBundle {
   };
 }
 
-describe("toPersonalPasswordFormTranslations", () => {
+describe("toPersonalLoginFormTranslations", () => {
   it("picks t, tGen, tc from the bundle", () => {
     const bundle = createBundle();
-    const result = toPersonalPasswordFormTranslations(bundle);
+    const result = toPersonalLoginFormTranslations(bundle);
 
     expect(result.t).toBe(bundle.t);
     expect(result.tGen).toBe(bundle.tGen);
@@ -31,10 +31,10 @@ describe("toPersonalPasswordFormTranslations", () => {
   });
 });
 
-describe("toTeamPasswordFormTranslations", () => {
+describe("toTeamLoginFormTranslations", () => {
   it("picks t, tGen, tn, tcc, ti, tpk from the bundle", () => {
     const bundle = createBundle();
-    const result = toTeamPasswordFormTranslations(bundle);
+    const result = toTeamLoginFormTranslations(bundle);
 
     expect(result.t).toBe(bundle.t);
     expect(result.tGen).toBe(bundle.tGen);

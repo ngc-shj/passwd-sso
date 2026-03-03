@@ -126,6 +126,44 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     expect(json[0].username).toBeUndefined();
   });
 
+  it("includes encrypted blobs when include=blob is requested", async () => {
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([
+      {
+        id: "pw-1",
+        entryType: ENTRY_TYPE.LOGIN,
+        encryptedBlob: "enc-blob",
+        blobIv: "blob-iv",
+        blobAuthTag: "blob-auth-tag",
+        encryptedOverview: "enc-overview",
+        overviewIv: "aabbccdd11223344",
+        overviewAuthTag: "aabbccdd11223344aabbccdd11223344",
+        aadVersion: 1,
+        teamKeyVersion: 1,
+        isArchived: false,
+        favorites: [],
+        tags: [],
+        createdBy: { id: "u1", name: "User", email: "user@example.com", image: null },
+        updatedBy: { id: "u1", name: "User", email: "user@example.com" },
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      },
+    ]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
+        searchParams: { include: "blob" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json[0].encryptedBlob).toBe("enc-blob");
+    expect(json[0].blobIv).toBe("blob-iv");
+    expect(json[0].blobAuthTag).toBe("blob-auth-tag");
+  });
+
   it("filters by entryType when type query param is provided", async () => {
     mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([]);
 

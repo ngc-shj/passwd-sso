@@ -10,13 +10,13 @@ import type {
   SoftwareLicenseFormTranslator,
 } from "@/lib/translation-types";
 
-export interface PersonalPasswordFormTranslations {
+export interface PersonalLoginFormTranslations {
   t: PasswordFormTranslator;
   tGen: PasswordGeneratorTranslator;
   tc: CommonTranslator;
 }
 
-export interface TeamPasswordFormTranslations {
+export interface TeamLoginFormTranslations {
   t: PasswordFormTranslator;
   tGen: PasswordGeneratorTranslator;
   tn: SecureNoteFormTranslator;
@@ -39,9 +39,9 @@ export interface EntryFormTranslationsBundle {
   tsl: SoftwareLicenseFormTranslator;
 }
 
-export function toPersonalPasswordFormTranslations(
+export function toPersonalLoginFormTranslations(
   translations: EntryFormTranslationsBundle,
-): PersonalPasswordFormTranslations {
+): PersonalLoginFormTranslations {
   return {
     t: translations.t,
     tGen: translations.tGen,
@@ -49,9 +49,9 @@ export function toPersonalPasswordFormTranslations(
   };
 }
 
-export function toTeamPasswordFormTranslations(
+export function toTeamLoginFormTranslations(
   translations: EntryFormTranslationsBundle,
-): TeamPasswordFormTranslations {
+): TeamLoginFormTranslations {
   return {
     t: translations.t,
     tGen: translations.tGen,

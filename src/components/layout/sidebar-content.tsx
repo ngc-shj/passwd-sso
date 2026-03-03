@@ -196,6 +196,7 @@ export function SidebarContent({
         isOpen={isOpen("security")}
         onOpenChange={toggleSection("security")}
         t={t}
+        vaultContext={vaultContext}
         isWatchtower={isWatchtower}
         isEmergencyAccess={isEmergencyAccess}
         onNavigate={onNavigate}

@@ -5,15 +5,15 @@ interface RouterBackLike {
 }
 
 export function createFormNavigationHandlers({
-  onSaved,
+  onCancel,
   router,
 }: {
-  onSaved?: () => void;
+  onCancel?: () => void;
   router: RouterBackLike;
 }) {
   const handleCancel = () => {
-    if (onSaved) {
-      onSaved();
+    if (onCancel) {
+      onCancel();
       return;
     }
     router.back();

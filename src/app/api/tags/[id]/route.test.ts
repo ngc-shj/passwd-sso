@@ -90,6 +90,43 @@ describe("PUT /api/tags/[id]", () => {
     expect(json).toEqual({ id: TAG_ID, name: "New", color: "#ff0000", parentId: null });
   });
 
+  it("returns 400 on malformed JSON", async () => {
+    mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "test-user-id", name: "Old", parentId: null });
+    const { NextRequest } = await import("next/server");
+    const req = new NextRequest("http://localhost:3000/api/tags/tag-123", {
+      method: "PUT",
+      body: "{",
+      headers: { "content-type": "application/json" },
+    });
+
+    const res = await PUT(req, createParams({ id: TAG_ID }));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when parent chain is invalid", async () => {
+    mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "test-user-id", name: "Old", parentId: null });
+    mockPrismaTag.findMany.mockResolvedValue([{ id: "cparent123456789012345678", name: "Parent", parentId: TAG_ID }]);
+
+    const res = await PUT(
+      createRequest("PUT", "http://localhost:3000/api/tags/tag-123", { body: { parentId: "cparent123456789012345678" } }),
+      createParams({ id: TAG_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("updates parentId successfully when no duplicate exists", async () => {
+    mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "test-user-id", name: "Old", parentId: null });
+    mockPrismaTag.findMany.mockResolvedValue([{ id: "cparent123456789012345678", name: "Parent", parentId: null }]);
+    mockPrismaTag.findFirst.mockResolvedValue(null);
+    mockPrismaTag.update.mockResolvedValue({ id: TAG_ID, name: "Old", color: null, parentId: "cparent123456789012345678" });
+
+    const res = await PUT(
+      createRequest("PUT", "http://localhost:3000/api/tags/tag-123", { body: { parentId: "cparent123456789012345678" } }),
+      createParams({ id: TAG_ID }),
+    );
+    expect(res.status).toBe(200);
+  });
+
   it("accepts color: null to clear the tag color", async () => {
     mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "test-user-id", name: "Ops", parentId: null });
     mockPrismaTag.findFirst.mockResolvedValue(null); // no duplicate

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUser, mockPrismaTransaction, mockAuditCreate, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUser, mockPrismaFolder, mockPrismaTag, mockPrismaTransaction, mockAuditCreate, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockAuthOrToken: vi.fn(),
   mockPrismaPasswordEntry: {
@@ -16,6 +16,8 @@ const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockPrismaHistory, m
     deleteMany: vi.fn(),
   },
   mockPrismaUser: { findUnique: vi.fn() },
+  mockPrismaFolder: { findFirst: vi.fn() },
+  mockPrismaTag: { count: vi.fn() },
   mockPrismaTransaction: vi.fn(),
   mockAuditCreate: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
@@ -28,6 +30,8 @@ vi.mock("@/lib/prisma", () => ({
     passwordEntry: mockPrismaPasswordEntry,
     passwordEntryHistory: mockPrismaHistory,
     user: mockPrismaUser,
+    folder: mockPrismaFolder,
+    tag: mockPrismaTag,
     auditLog: { create: mockAuditCreate },
     $transaction: mockPrismaTransaction,
   },
@@ -236,6 +240,8 @@ describe("PUT /api/passwords/[id]", () => {
     vi.clearAllMocks();
     mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
     mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockPrismaFolder.findFirst.mockResolvedValue({ id: "folder-1" });
+    mockPrismaTag.count.mockResolvedValue(1);
     mockAuditCreate.mockResolvedValue({});
     mockPrismaTransaction.mockImplementation(async (fn: (tx: typeof txMock) => Promise<unknown>) => fn(txMock));
   });
@@ -293,6 +299,51 @@ describe("PUT /api/passwords/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.id).toBe(PW_ID);
+  });
+
+  it("returns 403 when write scope is insufficient", async () => {
+    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 400 on malformed JSON", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    const { NextRequest } = await import("next/server");
+    const req = new NextRequest(`http://localhost:3000/api/passwords/${PW_ID}`, {
+      method: "PUT",
+      body: "{",
+      headers: { "content-type": "application/json" },
+    });
+    const res = await PUT(req, createParams({ id: PW_ID }));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when folderId is invalid", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaFolder.findFirst.mockResolvedValue(null);
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { ...updateBody, folderId: "missing-folder" },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when tagIds are invalid", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaTag.count.mockResolvedValue(0);
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { ...updateBody, tagIds: ["tag-1"] },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(400);
   });
 
   it("stores aadVersion when provided in update body", async () => {
@@ -470,6 +521,64 @@ describe("PUT /api/passwords/[id]", () => {
         blobAuthTag: ownedEntry.blobAuthTag,
       }),
     });
+  });
+
+  it("trims history to the newest 20 snapshots", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    txMock.passwordEntryHistory.findMany.mockResolvedValue(
+      Array.from({ length: 21 }, (_, index) => ({ id: `hist-${index}` })),
+    );
+    mockPrismaPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "new-over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),
+      createParams({ id: PW_ID }),
+    );
+
+    expect(txMock.passwordEntryHistory.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["hist-0"] } },
+    });
+  });
+
+  it("updates tagIds with set semantics", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaTag.count.mockResolvedValue(2);
+    const tagIds = ["ctag123456789012345678901", "ctag223456789012345678901"];
+    mockPrismaPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "overview-cipher",
+      overviewIv: "overview-iv",
+      overviewAuthTag: "overview-tag",
+      keyVersion: 1,
+      tags: [{ id: tagIds[0] }, { id: tagIds[1] }],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { tagIds },
+      }),
+      createParams({ id: PW_ID }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockPrismaPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tags: { set: [{ id: tagIds[0] }, { id: tagIds[1] }] },
+        }),
+      }),
+    );
   });
 
   it("does not create history snapshot when only metadata changes", async () => {

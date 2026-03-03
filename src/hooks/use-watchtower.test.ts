@@ -17,16 +17,20 @@ vi.stubGlobal("localStorage", mockLocalStorage);
 
 const {
   mockUseVault,
+  mockUseTeamVaultOptional,
   mockDecryptData,
   mockBuildPersonalEntryAAD,
+  mockBuildTeamEntryAAD,
   mockAnalyzeStrength,
   mockCheckHIBP,
   mockDelay,
   mockGetCooldownState,
 } = vi.hoisted(() => ({
   mockUseVault: vi.fn(),
+  mockUseTeamVaultOptional: vi.fn(),
   mockDecryptData: vi.fn(),
   mockBuildPersonalEntryAAD: vi.fn(),
+  mockBuildTeamEntryAAD: vi.fn(),
   mockAnalyzeStrength: vi.fn(),
   mockCheckHIBP: vi.fn(),
   mockDelay: vi.fn().mockResolvedValue(undefined),
@@ -36,6 +40,7 @@ const {
 // ─── vi.mock declarations ────────────────────────────────────
 
 vi.mock("@/lib/vault-context", () => ({ useVault: mockUseVault }));
+vi.mock("@/lib/team-vault-context", () => ({ useTeamVaultOptional: mockUseTeamVaultOptional }));
 
 vi.mock("@/lib/crypto-client", () => ({
   decryptData: mockDecryptData,
@@ -43,6 +48,7 @@ vi.mock("@/lib/crypto-client", () => ({
 
 vi.mock("@/lib/crypto-aad", () => ({
   buildPersonalEntryAAD: mockBuildPersonalEntryAAD,
+  buildTeamEntryAAD: mockBuildTeamEntryAAD,
 }));
 
 vi.mock("@/lib/password-analyzer", () => ({
@@ -62,6 +68,9 @@ vi.mock("@/lib/constants", () => ({
   },
   ENTRY_TYPE: { LOGIN: "LOGIN" },
   LOCAL_STORAGE_KEY: { WATCHTOWER_LAST_ANALYZED_AT: "watchtower:lastAnalyzedAt" },
+  apiPath: {
+    teamPasswords: (teamId: string) => `/api/teams/${teamId}/passwords`,
+  },
 }));
 
 // ─── Import under test (after mocks) ────────────────────────
@@ -155,6 +164,8 @@ describe("useWatchtower", () => {
       encryptionKey: fakeKey,
       userId: "user-1",
     });
+    mockUseTeamVaultOptional.mockReturnValue(null);
+    mockBuildTeamEntryAAD.mockReturnValue("team-aad");
 
     // Default cooldown: no cooldown, can analyze
     mockGetCooldownState.mockReturnValue({
@@ -718,7 +729,7 @@ describe("useWatchtower", () => {
 
   // ─── Guard: no encryptionKey ─────────────────────────────
 
-  it("does nothing if encryptionKey is null", async () => {
+  it("marks analysis unavailable if the personal vault key is missing", async () => {
     mockUseVault.mockReturnValue({ encryptionKey: null, userId: "user-1" });
 
     const { result } = renderHook(() => useWatchtower());
@@ -729,6 +740,10 @@ describe("useWatchtower", () => {
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(result.current.report).toBeNull();
+    expect(result.current.unavailableReason).toBe("personalKeyUnavailable");
+    expect(
+      window.localStorage.getItem("watchtower:lastAnalyzedAt")
+    ).toBeNull();
   });
 
   // ─── Guard: cooldown active ──────────────────────────────
@@ -1343,5 +1358,75 @@ describe("useWatchtower", () => {
     });
 
     expect(result.current.loading).toBe(false);
+  });
+
+  it("analyzes only the selected team vault and preserves team scope in findings", async () => {
+    mockUseTeamVaultOptional.mockReturnValue({
+      getTeamEncryptionKey: vi.fn().mockResolvedValue(fakeKey),
+    });
+
+    const teamListEntry = {
+      id: "team-entry-1",
+      entryType: "LOGIN",
+      encryptedBlob: "cipher",
+      blobIv: "iv",
+      blobAuthTag: "tag",
+      updatedAt: new Date(Date.now() - (OLD_THRESHOLD_DAYS + 5) * 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt: null,
+    };
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([teamListEntry]));
+
+    mockAnalyzeStrength.mockReturnValueOnce(strongResult);
+
+    mockDecryptData
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          title: "Team Login",
+          username: "alice@team.test",
+          password: "TeamStr0ng!42",
+          url: "https://team.example.com",
+        }),
+      );
+
+    const { result } = renderHook(() =>
+      useWatchtower({ type: "team", teamId: "team-1" })
+    );
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report?.old).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "team-entry-1", scope: "team", teamId: "team-1" }),
+      ]),
+    );
+    expect(mockBuildTeamEntryAAD).toHaveBeenCalledWith("team-1", "team-entry-1", "blob");
+    expect(fetchSpy).not.toHaveBeenCalledWith("/api/passwords?include=blob");
+    expect(fetchSpy).toHaveBeenCalledWith("/api/teams/team-1/passwords?type=LOGIN&include=blob");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports team key unavailability without starting cooldown", async () => {
+    const getTeamEncryptionKey = vi.fn().mockResolvedValue(null);
+    mockUseTeamVaultOptional.mockReturnValue({
+      getTeamEncryptionKey,
+    });
+
+    const { result } = renderHook(() =>
+      useWatchtower({ type: "team", teamId: "team-1" })
+    );
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(result.current.report).toBeNull();
+    expect(result.current.unavailableReason).toBe("teamKeyUnavailable");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem("watchtower:lastAnalyzedAt")).toBeNull();
   });
 });

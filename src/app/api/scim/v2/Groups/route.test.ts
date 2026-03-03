@@ -87,6 +87,47 @@ describe("GET /api/scim/v2/Groups", () => {
     const body = await res.json();
     expect(body.totalResults).toBe(1);
   });
+
+  it("returns 400 for unsupported filter syntax", async () => {
+    const res = await GET(makeReq({ searchParams: { filter: 'members eq "user-1"' } }));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when filter exceeds max length", async () => {
+    const res = await GET(makeReq({ searchParams: { filter: "x".repeat(257) } }));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 401 when SCIM token validation fails", async () => {
+    mockValidateScimToken.mockResolvedValue({ ok: false, error: "SCIM_TOKEN_INVALID" });
+
+    const res = await GET(makeReq());
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 429 when GET is rate limited", async () => {
+    mockCheckScimRateLimit.mockResolvedValue(false);
+
+    const res = await GET(makeReq());
+    expect(res.status).toBe(429);
+  });
+
+  it("filters members without email from group resources", async () => {
+    mockScimGroupMapping.findMany.mockResolvedValue([
+      { externalGroupId: "grp-1", role: "ADMIN", teamId: "team-1", team: { slug: "core" } },
+    ]);
+    mockTeamMember.findMany.mockResolvedValue([
+      { userId: "user-1", user: { id: "user-1", email: null } },
+      { userId: "user-2", user: { id: "user-2", email: "u2@example.com" } },
+    ]);
+
+    const res = await GET(makeReq());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.Resources[0].members).toEqual([
+      expect.objectContaining({ value: "user-2", display: "u2@example.com" }),
+    ]);
+  });
 });
 
 describe("POST /api/scim/v2/Groups", () => {
@@ -143,5 +184,132 @@ describe("POST /api/scim/v2/Groups", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.detail).toContain("displayName");
+  });
+
+  it("returns 409 when externalId points at another group", async () => {
+    mockTeam.findUnique.mockResolvedValue({ slug: "core" });
+    mockScimGroupMapping.findUnique.mockResolvedValue({
+      id: "mapping-1",
+      teamId: "team-2",
+      role: "VIEWER",
+    });
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:ADMIN",
+          externalId: "grp-1",
+        },
+      }),
+    );
+
+    expect(res.status).toBe(409);
+  });
+
+  it("returns 401 when SCIM token validation fails on POST", async () => {
+    mockValidateScimToken.mockResolvedValue({ ok: false, error: "SCIM_TOKEN_INVALID" });
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:ADMIN",
+          externalId: "grp-1",
+        },
+      }),
+    );
+
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 429 when POST is rate limited", async () => {
+    mockCheckScimRateLimit.mockResolvedValue(false);
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:ADMIN",
+          externalId: "grp-1",
+        },
+      }),
+    );
+
+    expect(res.status).toBe(429);
+  });
+
+  it("returns 400 for invalid JSON on POST", async () => {
+    const req = new NextRequest("http://localhost/api/scim/v2/Groups", {
+      method: "POST",
+      body: "{",
+      headers: { "content-type": "application/json" },
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for schema validation failures on POST", async () => {
+    const res = await POST(
+      makeReq({
+        body: { schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"] },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+  });
+
+  it("treats blank externalId as invalid", async () => {
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:ADMIN",
+          externalId: "   ",
+        },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when the scoped team slug is missing", async () => {
+    mockTeam.findUnique.mockResolvedValue(null);
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:ADMIN",
+          externalId: "grp-1",
+        },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+  });
+
+  it("reuses an existing mapping for the same team and role", async () => {
+    mockTeam.findUnique.mockResolvedValue({ slug: "core" });
+    mockScimGroupMapping.findUnique.mockResolvedValue({
+      id: "mapping-1",
+      teamId: "team-1",
+      role: "ADMIN",
+    });
+    mockTeamMember.findMany.mockResolvedValue([]);
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:admin",
+          externalId: "grp-1",
+        },
+      }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(mockScimGroupMapping.create).not.toHaveBeenCalled();
   });
 });

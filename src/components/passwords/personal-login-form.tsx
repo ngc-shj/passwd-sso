@@ -1,0 +1,119 @@
+"use client";
+
+import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
+import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
+import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
+import {
+  EntryActionBar,
+  EntrySectionCard,
+  ENTRY_DIALOG_FLAT_SECTION_CLASS,
+} from "@/components/passwords/entry-form-ui";
+import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
+import { preventIMESubmit } from "@/lib/ime-guard";
+import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
+import { usePersonalLoginFormModel } from "@/hooks/use-personal-login-form-model";
+import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
+import { ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+export function PersonalLoginForm({ mode, initialData, variant = "page", onSaved, onCancel, defaultFolderId, defaultTags }: PersonalLoginFormProps) {
+  const {
+    t,
+    tc,
+    formState,
+    folders,
+    hasChanges,
+    loginMainFieldsProps,
+    handleSubmit,
+    handleCancel,
+    handleBack,
+  } = usePersonalLoginFormModel({
+    mode,
+    initialData,
+    variant,
+    onSaved,
+    onCancel,
+    defaultFolderId,
+    defaultTags,
+  });
+  const { values, setters } = formState;
+  const isDialogVariant = variant === "dialog";
+  const dialogSectionClass = isDialogVariant ? ENTRY_DIALOG_FLAT_SECTION_CLASS : "";
+  const {
+    tagsAndFolderProps,
+    customFieldsTotpProps,
+    repromptSectionProps,
+    expirationSectionProps,
+    actionBarProps,
+  } = buildPersonalFormSectionsProps({
+    tagsTitle: t("tags"),
+    tagsHint: t("tagsHint"),
+    folders,
+    sectionCardClass: dialogSectionClass,
+    repromptTitle: t("requireReprompt"),
+    repromptDescription: t("requireRepromptHelp"),
+    expirationTitle: t("expirationTitle"),
+    expirationDescription: t("expirationDescription"),
+    hasChanges,
+    submitting: values.submitting,
+    saveLabel: mode === "create" ? tc("save") : tc("update"),
+    cancelLabel: tc("cancel"),
+    statusUnsavedLabel: t("statusUnsaved"),
+    statusSavedLabel: t("statusSaved"),
+    onCancel: handleCancel,
+    values,
+    setters,
+  });
+
+  const loginMainFields = (
+    <EntryLoginMainFields {...loginMainFieldsProps} />
+  );
+
+  const formContent = (
+    <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-5">
+      {isDialogVariant ? (
+        loginMainFields
+      ) : (
+        <EntrySectionCard className="space-y-4 bg-gradient-to-b from-muted/30 to-background hover:bg-transparent">
+          {loginMainFields}
+        </EntrySectionCard>
+      )}
+
+      <EntryTagsAndFolderSection {...tagsAndFolderProps} />
+
+      <EntryCustomFieldsTotpSection {...customFieldsTotpProps} />
+
+      <EntryRepromptSection {...repromptSectionProps} />
+
+      <EntryExpirationSection {...expirationSectionProps} />
+
+      <EntryActionBar {...actionBarProps} />
+    </form>
+  );
+
+  if (variant === "dialog") {
+    return formContent;
+  }
+
+  return (
+    <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-4">
+        <Button variant="ghost" className="mb-4 gap-2" onClick={handleBack}>
+          <ArrowLeft className="h-4 w-4" />
+          {tc("back")}
+        </Button>
+
+        <Card className="rounded-xl border">
+          <CardHeader>
+            <CardTitle>
+              {mode === "create" ? t("newPassword") : t("editPassword")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>{formContent}</CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

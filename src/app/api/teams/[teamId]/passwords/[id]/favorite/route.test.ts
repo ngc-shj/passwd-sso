@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Prisma } from "@prisma/client";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamPasswordFavorite, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls } = vi.hoisted(() => {
@@ -101,6 +102,29 @@ describe("POST /api/teams/[teamId]/passwords/[id]/favorite", () => {
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.isFavorite).toBe(true);
+  });
+
+  it("treats duplicate favorite creation as already favorited", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
+      teamId: TEAM_ID,
+      tenantId: "tenant-1",
+    });
+    mockPrismaTeamPasswordFavorite.findUnique.mockResolvedValue(null);
+    mockPrismaTeamPasswordFavorite.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("duplicate", {
+        code: "P2002",
+        clientVersion: "test",
+      }),
+    );
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}/favorite`),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    const json = await res.json();
+
     expect(res.status).toBe(200);
     expect(json.isFavorite).toBe(true);
   });

@@ -3,12 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-vi.mock("@/i18n/navigation", () => ({
-  Link: ({ href, children }: { href: string; children: React.ReactNode }) => (
-    <a href={href}>{children}</a>
-  ),
-}));
-
 import { IssueSection, ReusedSection } from "./issue-section";
 import type { PasswordIssue, ReusedGroup } from "@/hooks/use-watchtower";
 
@@ -33,8 +27,8 @@ describe("IssueSection", () => {
 
   it("shows count badge with issue count", () => {
     const issues: PasswordIssue[] = [
-      { id: "1", title: "Gmail", username: "user@gmail.com", details: "found", severity: "critical" },
-      { id: "2", title: "Twitter", username: null, details: "found", severity: "high" },
+      { id: "1", title: "Gmail", username: "user@gmail.com", scope: "personal", details: "found", severity: "critical" },
+      { id: "2", title: "Twitter", username: null, scope: "personal", details: "found", severity: "high" },
     ];
     render(<IssueSection {...baseProps} issues={issues} />);
     expect(screen.getByText("2")).toBeInTheDocument();
@@ -42,7 +36,7 @@ describe("IssueSection", () => {
 
   it("renders issue list when expanded (default with issues)", () => {
     const issues: PasswordIssue[] = [
-      { id: "1", title: "Gmail", username: "user@gmail.com", details: "breached", severity: "critical" },
+      { id: "1", title: "Gmail", username: "user@gmail.com", scope: "personal", details: "breached", severity: "critical" },
     ];
     render(<IssueSection {...baseProps} issues={issues} />);
     expect(screen.getByText("Gmail")).toBeInTheDocument();
@@ -50,9 +44,29 @@ describe("IssueSection", () => {
     expect(screen.getByText("Detail: breached")).toBeInTheDocument();
   });
 
+  it("calls onSelectEntry when action button is clicked", () => {
+    const onSelectEntry = vi.fn();
+    const issues: PasswordIssue[] = [
+      { id: "1", title: "Gmail", username: "user@gmail.com", scope: "personal", details: "breached", severity: "critical" },
+    ];
+    render(
+      <IssueSection
+        {...baseProps}
+        issues={issues}
+        onSelectEntry={onSelectEntry}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button")[1]!);
+
+    expect(onSelectEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "1", scope: "personal" }),
+    );
+  });
+
   it("hides issue list when collapsed via click", () => {
     const issues: PasswordIssue[] = [
-      { id: "1", title: "Gmail", username: "u", details: "d", severity: "critical" },
+      { id: "1", title: "Gmail", username: "u", scope: "personal", details: "d", severity: "critical" },
     ];
     render(<IssueSection {...baseProps} issues={issues} />);
     // Click the toggle button to collapse
@@ -69,7 +83,7 @@ describe("IssueSection", () => {
 
   it("does not show username when it is null", () => {
     const issues: PasswordIssue[] = [
-      { id: "1", title: "Note", username: null, details: "d", severity: "low" },
+      { id: "1", title: "Note", username: null, scope: "personal", details: "d", severity: "low" },
     ];
     render(<IssueSection {...baseProps} issues={issues} />);
     expect(screen.getByText("Note")).toBeInTheDocument();
@@ -91,8 +105,8 @@ describe("ReusedSection", () => {
       {
 
         entries: [
-          { id: "1", title: "Gmail", username: "u1" },
-          { id: "2", title: "Twitter", username: "u2" },
+          { id: "1", title: "Gmail", username: "u1", scope: "personal" },
+          { id: "2", title: "Twitter", username: "u2", scope: "personal" },
         ],
       },
     ];
@@ -106,8 +120,8 @@ describe("ReusedSection", () => {
       {
 
         entries: [
-          { id: "1", title: "Gmail", username: "user1" },
-          { id: "2", title: "Twitter", username: null },
+          { id: "1", title: "Gmail", username: "user1", scope: "personal" },
+          { id: "2", title: "Twitter", username: null, scope: "personal" },
         ],
       },
     ];
@@ -118,9 +132,29 @@ describe("ReusedSection", () => {
     expect(screen.getByText("user1")).toBeInTheDocument();
   });
 
+  it("calls onSelectEntry for reused entries", () => {
+    const onSelectEntry = vi.fn();
+    const groups: ReusedGroup[] = [
+      { entries: [{ id: "1", title: "Gmail", username: "user1", scope: "personal" }] },
+    ];
+    render(
+      <ReusedSection
+        {...baseProps}
+        groups={groups}
+        onSelectEntry={onSelectEntry}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button")[1]!);
+
+    expect(onSelectEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "1", scope: "personal" }),
+    );
+  });
+
   it("collapses on click", () => {
     const groups: ReusedGroup[] = [
-      { entries: [{ id: "1", title: "Site", username: "u" }] },
+      { entries: [{ id: "1", title: "Site", username: "u", scope: "personal" }] },
     ];
     render(<ReusedSection {...baseProps} groups={groups} />);
     fireEvent.click(screen.getByText("Reused Passwords"));

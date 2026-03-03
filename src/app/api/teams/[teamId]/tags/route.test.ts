@@ -119,6 +119,27 @@ describe("GET /api/teams/[teamId]/tags", () => {
       }),
     );
   });
+
+  it("returns flattened tree when tree=true", async () => {
+    mockPrismaTeamTag.findMany.mockResolvedValue([
+      { id: "parent", name: "Parent", color: null, parentId: null, _count: { passwords: 1 } },
+      { id: "child", name: "Child", color: null, parentId: "parent", _count: { passwords: 2 } },
+    ]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/tags`, {
+        searchParams: { tree: "true" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json).toEqual([
+      expect.objectContaining({ id: "parent", depth: 0, count: 1 }),
+      expect.objectContaining({ id: "child", depth: 1, count: 2 }),
+    ]);
+  });
 });
 
 describe("POST /api/teams/[teamId]/tags", () => {
@@ -203,5 +224,34 @@ describe("POST /api/teams/[teamId]/tags", () => {
     expect(res.status).toBe(201);
     expect(json.name).toBe("Finance");
     expect(json.count).toBe(0);
+  });
+
+  it("returns 404 when team is missing", async () => {
+    mockPrismaTeam.findUnique.mockResolvedValue(null);
+    mockPrismaTeamTag.findFirst.mockResolvedValue(null);
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/tags`, { body: { name: "Finance" } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 400 when parent chain is invalid", async () => {
+    mockPrismaTeamTag.findMany.mockResolvedValue([
+      { id: "tag-1", name: "Loop", parentId: "tag-1" },
+    ]);
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/tags`, {
+        body: { name: "Finance", parentId: "tag-1" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 });
