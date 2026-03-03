@@ -581,25 +581,31 @@ async function fetchTeamWatchtowerEntries({
     return { status: "unavailable", reason: "teamKeyUnavailable" };
   }
 
-  const listRes = await fetch(`${apiPath.teamPasswords(teamId)}?type=${ENTRY_TYPE.LOGIN}`);
+  const listRes = await fetch(
+    `${apiPath.teamPasswords(teamId)}?type=${ENTRY_TYPE.LOGIN}&include=blob`,
+  );
   if (!listRes.ok) throw new Error("Failed to fetch team passwords");
   const listedEntries = await listRes.json();
   if (!Array.isArray(listedEntries) || listedEntries.length === 0) {
     return { status: "ok", entries };
   }
 
-  for (const listed of listedEntries) {
-    if (!listed || typeof listed !== "object" || typeof listed.id !== "string") continue;
+  for (const raw of listedEntries) {
+    if (!raw || typeof raw !== "object" || typeof raw.id !== "string") continue;
     try {
-      const detailRes = await fetch(apiPath.teamPasswordById(teamId, listed.id));
-      if (!detailRes.ok) continue;
-      const raw = await detailRes.json();
-      const aad = buildTeamEntryAAD(teamId, listed.id, "blob");
+      if (
+        typeof raw.encryptedBlob !== "string" ||
+        typeof raw.blobIv !== "string" ||
+        typeof raw.blobAuthTag !== "string"
+      ) {
+        continue;
+      }
+      const aad = buildTeamEntryAAD(teamId, raw.id, "blob");
       const plaintext = await decryptData(
         {
-          ciphertext: raw.encryptedBlob as string,
-          iv: raw.blobIv as string,
-          authTag: raw.blobAuthTag as string,
+          ciphertext: raw.encryptedBlob,
+          iv: raw.blobIv,
+          authTag: raw.blobAuthTag,
         },
         teamKey,
         aad,

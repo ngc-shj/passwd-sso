@@ -70,7 +70,6 @@ vi.mock("@/lib/constants", () => ({
   LOCAL_STORAGE_KEY: { WATCHTOWER_LAST_ANALYZED_AT: "watchtower:lastAnalyzedAt" },
   apiPath: {
     teamPasswords: (teamId: string) => `/api/teams/${teamId}/passwords`,
-    teamPasswordById: (teamId: string, entryId: string) => `/api/teams/${teamId}/passwords/${entryId}`,
   },
 }));
 
@@ -1366,9 +1365,9 @@ describe("useWatchtower", () => {
       getTeamEncryptionKey: vi.fn().mockResolvedValue(fakeKey),
     });
 
-    const teamListEntry = { id: "team-entry-1" };
-    const teamDetail = {
+    const teamListEntry = {
       id: "team-entry-1",
+      entryType: "LOGIN",
       encryptedBlob: "cipher",
       blobIv: "iv",
       blobAuthTag: "tag",
@@ -1378,8 +1377,7 @@ describe("useWatchtower", () => {
 
     fetchSpy
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
-      .mockResolvedValueOnce(jsonResponse([teamListEntry]))
-      .mockResolvedValueOnce(jsonResponse(teamDetail));
+      .mockResolvedValueOnce(jsonResponse([teamListEntry]));
 
     mockAnalyzeStrength.mockReturnValueOnce(strongResult);
 
@@ -1408,6 +1406,8 @@ describe("useWatchtower", () => {
     );
     expect(mockBuildTeamEntryAAD).toHaveBeenCalledWith("team-1", "team-entry-1", "blob");
     expect(fetchSpy).not.toHaveBeenCalledWith("/api/passwords?include=blob");
+    expect(fetchSpy).toHaveBeenCalledWith("/api/teams/team-1/passwords?type=LOGIN&include=blob");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("reports team key unavailability without starting cooldown", async () => {
