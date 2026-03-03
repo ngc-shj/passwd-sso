@@ -11,6 +11,11 @@ import { randomBytes } from "node:crypto";
 import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
 import authConfig from "./auth.config";
 
+function getAuthRouteBasePath(): string {
+  const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+  return `${basePath}/api/auth`;
+}
+
 export async function ensureTenantMembershipForSignIn(
   userId: string,
   account?: Account | null,
@@ -218,6 +223,7 @@ export async function ensureTenantMembershipForSignIn(
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  basePath: getAuthRouteBasePath(),
   adapter: createCustomAdapter(),
   session: {
     strategy: "database",

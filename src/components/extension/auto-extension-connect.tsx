@@ -13,6 +13,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
+import { fetchApi } from "@/lib/url-helpers";
 
 const SKIP_BEFOREUNLOAD_ONCE_KEY = "psso:skip-beforeunload-once";
 const ALLOW_BEFOREUNLOAD_WHILE_CONNECTED_KEY =
@@ -32,7 +33,7 @@ export function AutoExtensionConnect() {
   const connect = async () => {
     setStatus(CONNECT_STATUS.CONNECTING);
     try {
-      const res = await fetch(API_PATH.EXTENSION_TOKEN, { method: "POST" });
+      const res = await fetchApi(API_PATH.EXTENSION_TOKEN, { method: "POST" });
       if (!res.ok) {
         setStatus(CONNECT_STATUS.FAILED);
         return;

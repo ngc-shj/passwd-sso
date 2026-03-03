@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiPath } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 
 export interface TeamPolicyClient {
   minPasswordLength: number;
@@ -31,7 +32,7 @@ export function useTeamPolicy(open: boolean, teamId: string) {
   useEffect(() => {
     if (!open) return;
 
-    fetch(apiPath.teamPolicy(teamId))
+    fetchApi(apiPath.teamPolicy(teamId))
       .then((res) => {
         if (!res.ok) return;
         return res.json();

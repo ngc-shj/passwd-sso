@@ -2,6 +2,13 @@ import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 import { API_PATH } from "@/lib/constants";
 
+const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+
+// Auth.js resolves cookie name by URL scheme, not NODE_ENV.
+// npm start sets NODE_ENV=production even on localhost (HTTP),
+// so we mirror Auth.js's own logic: secure when AUTH_URL is HTTPS.
+const useSecureCookies = (process.env.AUTH_URL ?? "http://localhost:3000").startsWith("https://");
+
 export default {
   providers: [
     // Only register providers whose credentials are fully configured.
@@ -61,9 +68,26 @@ export default {
       : []),
   ],
 
+  cookies: {
+    sessionToken: {
+      name: useSecureCookies
+        ? "__Secure-authjs.session-token"
+        : "authjs.session-token",
+      options: {
+        path: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/`,
+        httpOnly: true,
+        sameSite: "lax" as const,
+        secure: useSecureCookies,
+      },
+    },
+  },
+
+  // Auth.js builds redirect URLs as `origin + pages.signIn`.
+  // basePath must be included here because Next.js strips it from route handlers,
+  // and withAuthBasePath restores it for Auth.js internal routing.
   pages: {
-    signIn: "/auth/signin",
-    error: "/auth/error",
+    signIn: `${basePath}/auth/signin`,
+    error: `${basePath}/auth/error`,
   },
 
   callbacks: {

@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Link } from "@/i18n/navigation";
 import { ArrowLeft, Loader2, AlertTriangle } from "lucide-react";
+import { fetchApi, withBasePath } from "@/lib/url-helpers";
 
 const CONFIRMATION_TOKEN = "DELETE MY VAULT";
 
@@ -33,7 +34,7 @@ export default function VaultResetPage() {
     setError("");
 
     try {
-      const res = await fetch(API_PATH.VAULT_RESET, {
+      const res = await fetchApi(API_PATH.VAULT_RESET, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirmation }),
@@ -50,7 +51,7 @@ export default function VaultResetPage() {
       }
 
       // Full reload to re-initialize VaultProvider (client-side nav keeps stale state)
-      window.location.href = `/${locale}/dashboard`;
+      window.location.href = withBasePath(`/${locale}/dashboard`);
     } catch {
       setError(tApi("unknownError"));
     } finally {

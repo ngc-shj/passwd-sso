@@ -56,7 +56,7 @@ function buildCspHeader(nonce: string): string {
     "upgrade-insecure-requests",
     "block-all-mixed-content",
     "report-to csp-endpoint",
-    "report-uri /api/csp-report",
+    `report-uri ${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/csp-report`,
   ];
 
   return directives.join("; ");

@@ -83,7 +83,8 @@ Edit `.env.local` and set the following values:
 | Variable | Description | How to Generate |
 |----------|-------------|-----------------|
 | `DATABASE_URL` | PostgreSQL connection string | Use default for development |
-| `AUTH_URL` | Application public URL | `http://localhost:3000` for dev |
+| `AUTH_URL` | Application public URL (include basePath if set) | `http://localhost:3000` for dev |
+| `NEXT_PUBLIC_BASE_PATH` | (Optional) Sub-path for reverse proxy deployment | e.g., `/passwd-sso` |
 | `AUTH_SECRET` | NextAuth session signing key | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` | Google OAuth Client ID | From Google Cloud Console |
 | `AUTH_GOOGLE_SECRET` | Google OAuth Client Secret | From Google Cloud Console |
@@ -136,7 +137,7 @@ Creates default categories: Web, Email, Server, Database, API, Other
 npm run dev
 ```
 
-Access at `http://localhost:3000`.
+Access at `http://localhost:3000` (or `http://localhost:3000/<basePath>` if `NEXT_PUBLIC_BASE_PATH` is set).
 Unauthenticated users are redirected to `/auth/signin`.
 
 ## IdP Configuration
@@ -172,6 +173,7 @@ Unauthenticated users are redirected to `/auth/signin`.
 4. **Authorized redirect URIs**:
    - Development: `http://localhost:3000/api/auth/callback/google`
    - Production: `https://<your-domain>/api/auth/callback/google`
+   - With basePath: `https://<your-domain>/<basePath>/api/auth/callback/google`
 5. Click "Create"
 6. Set the displayed **Client ID** and **Client Secret** in `.env.local`:
 
@@ -215,6 +217,17 @@ Three containers will start:
 - `jackson` — SAML Jackson (internal network only)
 
 In production, do NOT place `docker-compose.override.yml` (keeps DB/Jackson ports unexposed).
+
+### Sub-path Deployment (Reverse Proxy)
+
+To deploy at a sub-path (e.g., `https://example.com/passwd-sso`):
+
+1. Set `NEXT_PUBLIC_BASE_PATH=/passwd-sso` **before** building the image
+2. Set `AUTH_URL=https://example.com/passwd-sso` (include the basePath)
+3. Update OAuth redirect URIs to include the basePath (e.g., `https://example.com/passwd-sso/api/auth/callback/google`)
+4. Configure your reverse proxy to forward `/<basePath>/*` to the Next.js app
+
+`NEXT_PUBLIC_BASE_PATH` is a build-time variable. Changing it requires a rebuild.
 
 ### Manual Build
 

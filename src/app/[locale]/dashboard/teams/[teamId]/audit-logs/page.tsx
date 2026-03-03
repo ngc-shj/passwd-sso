@@ -45,6 +45,7 @@ import {
 } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format-datetime";
 import { normalizeAuditActionKey } from "@/lib/audit-action-key";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface TeamAuditLogItem {
   id: string;
@@ -140,7 +141,7 @@ export default function TeamAuditLogsPage({
       }
       if (cursor) params.set("cursor", cursor);
 
-      const res = await fetch(
+      const res = await fetchApi(
         `${apiPath.teamAuditLogs(teamId)}?${params.toString()}`
       );
       if (!res.ok) return null;
@@ -164,7 +165,7 @@ export default function TeamAuditLogsPage({
   }, [fetchLogs]);
 
   useEffect(() => {
-    fetch(apiPath.teamPolicy(teamId))
+    fetchApi(apiPath.teamPolicy(teamId))
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data && data.allowExport === false) setExportAllowed(false);
@@ -407,7 +408,7 @@ export default function TeamAuditLogsPage({
         endOfDay.setHours(23, 59, 59, 999);
         params.set("to", endOfDay.toISOString());
       }
-      const res = await fetch(
+      const res = await fetchApi(
         `${apiPath.teamAuditLogs(teamId)}/download?${params.toString()}`
       );
       if (!res.ok) return;

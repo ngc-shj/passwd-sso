@@ -23,6 +23,7 @@ import { decryptData } from "@/lib/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto-aad";
 import { buildFolderPath } from "@/lib/folder-path";
 import type { FolderItem } from "@/components/folders/folder-tree";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface TeamExportPanelContentProps {
   teamId?: string;
@@ -69,8 +70,8 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
     try {
       // Fetch list of all team passwords and folders in parallel
       const [listRes, foldersRes] = await Promise.all([
-        fetch(apiPath.teamPasswords(scopedTeamId)),
-        fetch(apiPath.teamFolders(scopedTeamId)),
+        fetchApi(apiPath.teamPasswords(scopedTeamId)),
+        fetchApi(apiPath.teamFolders(scopedTeamId)),
       ]);
       if (!listRes.ok) throw new Error("Failed to fetch list");
       const list: { id: string; entryType: string }[] = await listRes.json();
@@ -85,7 +86,7 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
       let skippedCount = 0;
       for (const item of list) {
         try {
-          const res = await fetch(apiPath.teamPasswordById(scopedTeamId, item.id));
+          const res = await fetchApi(apiPath.teamPasswordById(scopedTeamId, item.id));
           if (!res.ok) {
             skippedCount++;
             continue;
@@ -194,7 +195,7 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
       URL.revokeObjectURL(url);
 
       // Async nonblocking audit log
-      fetch(API_PATH.AUDIT_LOGS_EXPORT, {
+      fetchApi(API_PATH.AUDIT_LOGS_EXPORT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

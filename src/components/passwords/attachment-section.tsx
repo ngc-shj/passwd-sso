@@ -39,6 +39,7 @@ import {
   MAX_FILE_SIZE,
   MAX_ATTACHMENTS_PER_ENTRY,
 } from "@/lib/validations";
+import { fetchApi } from "@/lib/url-helpers";
 
 export interface AttachmentMeta {
   id: string;
@@ -145,7 +146,7 @@ export function AttachmentSection({
       formData.append("aadVersion", String(AAD_VERSION));
       if (keyVersion) formData.append("keyVersion", keyVersion.toString());
 
-      const res = await fetch(apiPath.passwordAttachments(entryId), {
+      const res = await fetchApi(apiPath.passwordAttachments(entryId), {
         method: "POST",
         body: formData,
       });
@@ -171,7 +172,7 @@ export function AttachmentSection({
 
     setDownloading(attachment.id);
     try {
-      const res = await fetch(
+      const res = await fetchApi(
         apiPath.passwordAttachmentById(entryId, attachment.id)
       );
       if (!res.ok) throw new Error("Download failed");
@@ -217,7 +218,7 @@ export function AttachmentSection({
 
     setDeleting(true);
     try {
-      const res = await fetch(
+      const res = await fetchApi(
         apiPath.passwordAttachmentById(entryId, deleteTarget.id),
         { method: "DELETE" }
       );

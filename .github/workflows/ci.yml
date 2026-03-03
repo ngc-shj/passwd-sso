@@ -91,6 +91,24 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      - name: Build with basePath
+        run: npm run build
+        env:
+          NEXT_PUBLIC_BASE_PATH: /passwd-sso
+
+      - name: Check fetch basePath compliance
+        run: |
+          if grep -rn --include='*.tsx' --include='*.ts' \
+            -E 'fetch\((API_PATH\.|apiPath\.|`/api/|"/api/)' \
+            src/ \
+            --exclude-dir='src/app/api' \
+            | grep -v 'fetchApi' | grep -v '\.test\.' \
+            | grep -v 'src/proxy.ts' | grep -v 'src/lib/webhook-dispatcher.ts' \
+            | grep -v 'src/lib/url-helpers.ts'; then
+            echo "ERROR: Found fetch() calls that should use fetchApi()"
+            exit 1
+          fi
+
   # ─── Chrome Extension: Test → Build ───────────────────────
   extension-ci:
     name: "Extension: Test → Build"

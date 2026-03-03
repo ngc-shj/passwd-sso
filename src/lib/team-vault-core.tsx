@@ -15,6 +15,7 @@ import {
   type TeamKeyWrapContext,
 } from "./crypto-team";
 import { apiPath, API_PATH } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -154,7 +155,7 @@ export function TeamVaultProvider({
       let stage = "fetch_member_key";
       try {
         // Fetch own TeamMemberKey
-        const res = await fetch(apiPath.teamMemberKey(teamId));
+        const res = await fetchApi(apiPath.teamMemberKey(teamId));
         if (!res.ok) {
           let errorCode: string | null = null;
           try {
@@ -258,7 +259,7 @@ export function TeamVaultProvider({
 
     try {
       // Fetch pending key distributions
-      const res = await fetch(API_PATH.TEAMS_PENDING_KEY_DISTRIBUTIONS);
+      const res = await fetchApi(API_PATH.TEAMS_PENDING_KEY_DISTRIBUTIONS);
       if (!res.ok) return;
 
       const pendingMembers = await res.json();
@@ -299,7 +300,7 @@ export function TeamVaultProvider({
         let teamKeyBytes: Uint8Array | undefined;
         try {
           // Get own team key first
-          const ownKeyRes = await fetch(apiPath.teamMemberKey(teamId));
+          const ownKeyRes = await fetchApi(apiPath.teamMemberKey(teamId));
           if (!ownKeyRes.ok) continue;
 
           const ownKeyData = await ownKeyRes.json();
@@ -339,7 +340,7 @@ export function TeamVaultProvider({
               );
 
               // Send to confirm-key endpoint
-              await fetch(
+              await fetchApi(
                 apiPath.teamMemberConfirmKey(teamId, member.memberId),
                 {
                   method: "POST",

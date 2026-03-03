@@ -22,6 +22,7 @@ import {
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto-aad";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface TeamArchivedEntry {
   id: string;
@@ -87,7 +88,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   const fetchArchived = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(API_PATH.TEAMS_ARCHIVED);
+      const res = await fetchApi(API_PATH.TEAMS_ARCHIVED);
       if (!res.ok) return;
       const data = await res.json();
       if (!Array.isArray(data)) return;
@@ -229,7 +230,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
       prev.map((e) => (e.id === id ? { ...e, isFavorite: !e.isFavorite } : e))
     );
     try {
-      await fetch(apiPath.teamPasswordFavorite(entry.teamId, id), {
+      await fetchApi(apiPath.teamPasswordFavorite(entry.teamId, id), {
         method: "POST",
       });
     } catch {
@@ -244,7 +245,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     // Unarchive: remove from this list
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(apiPath.teamPasswordById(entry.teamId, id), {
+      const res = await fetchApi(apiPath.teamPasswordById(entry.teamId, id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isArchived: false }),
@@ -260,7 +261,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     if (!entry) return;
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(apiPath.teamPasswordById(entry.teamId, id), {
+      const res = await fetchApi(apiPath.teamPasswordById(entry.teamId, id), {
         method: "DELETE",
       });
       if (!res.ok) fetchArchived();
@@ -299,7 +300,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   const createDetailFetcher = useCallback(
     (entry: TeamArchivedEntry) =>
       async (): Promise<InlineDetailData> => {
-        const res = await fetch(apiPath.teamPasswordById(entry.teamId, entry.id));
+        const res = await fetchApi(apiPath.teamPasswordById(entry.teamId, entry.id));
         if (!res.ok) throw new Error("Failed");
         const raw = await res.json();
         const blob = await decryptFullBlob(entry.teamId, entry.id, raw);
@@ -361,7 +362,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   const createPasswordFetcher = useCallback(
     (entry: TeamArchivedEntry) =>
       async (): Promise<string> => {
-        const res = await fetch(apiPath.teamPasswordById(entry.teamId, entry.id));
+        const res = await fetchApi(apiPath.teamPasswordById(entry.teamId, entry.id));
         if (!res.ok) throw new Error("Failed");
         const raw = await res.json();
         const blob = await decryptFullBlob(entry.teamId, entry.id, raw);
@@ -373,7 +374,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   const createUrlFetcher = useCallback(
     (entry: TeamArchivedEntry) =>
       async (): Promise<string | null> => {
-        const res = await fetch(apiPath.teamPasswordById(entry.teamId, entry.id));
+        const res = await fetchApi(apiPath.teamPasswordById(entry.teamId, entry.id));
         if (!res.ok) throw new Error("Failed");
         const raw = await res.json();
         const blob = await decryptFullBlob(entry.teamId, entry.id, raw);

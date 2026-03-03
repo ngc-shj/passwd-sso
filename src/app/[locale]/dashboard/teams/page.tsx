@@ -10,6 +10,7 @@ import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Plus, Building2, CalendarClock, Globe } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface TeamListItem {
   id: string;
@@ -31,7 +32,7 @@ export default function TeamsPage() {
 
   const fetchTeams = () => {
     setLoading(true);
-    fetch(API_PATH.TEAMS)
+    fetchApi(API_PATH.TEAMS)
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data)) setTeams(data);

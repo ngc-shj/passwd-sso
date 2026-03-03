@@ -40,6 +40,7 @@ import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, 
 import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
+import { fetchApi, appUrl } from "@/lib/url-helpers";
 
 interface TeamInfo {
   id: string;
@@ -98,14 +99,14 @@ export default function TeamSettingsPage({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(API_PATH.AUTH_SESSION)
+    fetchApi(API_PATH.AUTH_SESSION)
       .then((r) => r.json())
       .then((d) => setCurrentUserId(d?.user?.id ?? null))
       .catch(() => {});
   }, []);
 
   const fetchAll = () => {
-    fetch(apiPath.teamById(teamId))
+    fetchApi(apiPath.teamById(teamId))
       .then((r) => {
         if (!r.ok) throw new Error("Forbidden");
         return r.json();
@@ -121,14 +122,14 @@ export default function TeamSettingsPage({
         setLoadError(true);
       });
 
-    fetch(apiPath.teamMembers(teamId))
+    fetchApi(apiPath.teamMembers(teamId))
       .then((r) => r.json())
       .then((d) => {
         if (Array.isArray(d)) setMembers(d);
       })
       .catch(() => {});
 
-    fetch(apiPath.teamInvitations(teamId))
+    fetchApi(apiPath.teamInvitations(teamId))
       .then((r) => r.json())
       .then((d) => {
         if (Array.isArray(d)) setInvitations(d);
@@ -148,7 +149,7 @@ export default function TeamSettingsPage({
   const handleUpdateTeam = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiPath.teamById(teamId), {
+      const res = await fetchApi(apiPath.teamById(teamId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim(), description: description.trim() }),
@@ -166,7 +167,7 @@ export default function TeamSettingsPage({
 
   const handleDeleteTeam = async () => {
     try {
-      const res = await fetch(apiPath.teamById(teamId), { method: "DELETE" });
+      const res = await fetchApi(apiPath.teamById(teamId), { method: "DELETE" });
       if (!res.ok) throw new Error("Failed");
       toast.success(t("deleted"));
       window.dispatchEvent(new CustomEvent("team-data-changed"));
@@ -180,7 +181,7 @@ export default function TeamSettingsPage({
     if (!invEmail.trim()) return;
     setInviting(true);
     try {
-      const res = await fetch(apiPath.teamInvitations(teamId), {
+      const res = await fetchApi(apiPath.teamInvitations(teamId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: invEmail.trim(), role: invRole }),
@@ -197,7 +198,7 @@ export default function TeamSettingsPage({
       }
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
-      const inviteUrl = `${window.location.origin}/dashboard/teams/invite/${data.token}`;
+      const inviteUrl = appUrl(`/dashboard/teams/invite/${data.token}`);
       await navigator.clipboard.writeText(inviteUrl);
       toast.success(t("invitedWithLink"));
       setInvEmail("");
@@ -211,7 +212,7 @@ export default function TeamSettingsPage({
 
   const handleCancelInvitation = async (invId: string) => {
     try {
-      await fetch(apiPath.teamInvitationById(teamId, invId), {
+      await fetchApi(apiPath.teamInvitationById(teamId, invId), {
         method: "DELETE",
       });
       toast.success(t("invitationCancelled"));
@@ -223,7 +224,7 @@ export default function TeamSettingsPage({
 
   const handleChangeRole = async (memberId: string, role: string) => {
     try {
-      const res = await fetch(apiPath.teamMemberById(teamId, memberId), {
+      const res = await fetchApi(apiPath.teamMemberById(teamId, memberId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role }),
@@ -238,7 +239,7 @@ export default function TeamSettingsPage({
 
   const handleTransferOwnership = async (memberId: string) => {
     try {
-      const res = await fetch(apiPath.teamMemberById(teamId, memberId), {
+      const res = await fetchApi(apiPath.teamMemberById(teamId, memberId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: TEAM_ROLE.OWNER }),
@@ -254,7 +255,7 @@ export default function TeamSettingsPage({
 
   const handleRemoveMember = async (memberId: string) => {
     try {
-      const res = await fetch(apiPath.teamMemberById(teamId, memberId), {
+      const res = await fetchApi(apiPath.teamMemberById(teamId, memberId), {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed");
@@ -608,7 +609,7 @@ export default function TeamSettingsPage({
                             <TeamRoleBadge role={inv.role} />
                             <CopyButton
                               getValue={() =>
-                                `${window.location.origin}/dashboard/teams/invite/${inv.token}`
+                                appUrl(`/dashboard/teams/invite/${inv.token}`)
                               }
                             />
                             <Button

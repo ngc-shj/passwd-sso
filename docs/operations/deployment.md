@@ -100,6 +100,10 @@ Prisma Migrate does not support automatic down migrations. To roll back a schema
 2. Build a new image containing the rollback migration
 3. Deploy using the standard flow (`terraform apply` → `deploy.sh`)
 
+## Sub-path Deployment Note
+
+When deploying at a sub-path (e.g., `https://example.com/passwd-sso`), set `NEXT_PUBLIC_BASE_PATH=/passwd-sso` **before** building the image. This is a build-time variable baked into the client bundle. Also set `AUTH_URL` to include the basePath and update OAuth redirect URIs. See `docs/setup/docker/en.md` for details.
+
 ## Deploy Checklist
 
 - [ ] All tests pass (`npm test`)

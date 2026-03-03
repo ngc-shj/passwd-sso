@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { eaErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
+import { fetchApi, appUrl } from "@/lib/url-helpers";
 
 interface CreateGrantDialogProps {
   onCreated: () => void;
@@ -48,7 +49,7 @@ export function CreateGrantDialog({ onCreated }: CreateGrantDialogProps) {
     setLoading(true);
 
     try {
-      const res = await fetch(API_PATH.EMERGENCY_ACCESS, {
+      const res = await fetchApi(API_PATH.EMERGENCY_ACCESS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ granteeEmail: email, waitDays: Number(waitDays) }),
@@ -62,7 +63,7 @@ export function CreateGrantDialog({ onCreated }: CreateGrantDialogProps) {
 
       const data = await res.json();
       // Copy invite URL to clipboard
-      const inviteUrl = `${window.location.origin}/dashboard/emergency-access/invite/${data.token}`;
+      const inviteUrl = appUrl(`/dashboard/emergency-access/invite/${data.token}`);
       await navigator.clipboard.writeText(inviteUrl);
 
       toast.success(t("grantCreatedWithLink"));

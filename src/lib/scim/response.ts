@@ -4,10 +4,10 @@ const SCIM_CONTENT_TYPE = "application/scim+json";
 
 /**
  * Build the SCIM base URL from the environment.
- * Uses `NEXTAUTH_URL` to avoid trusting client-supplied Host/X-Forwarded-Proto headers.
+ * Prefers AUTH_URL (which includes basePath) over legacy NEXTAUTH_URL.
  */
 export function getScimBaseUrl(): string {
-  const base = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
+  const base = process.env.AUTH_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
   return `${base.replace(/\/$/, "")}/api/scim/v2`;
 }
 

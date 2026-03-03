@@ -1,6 +1,7 @@
 import { encryptData } from "@/lib/crypto-client";
 import { buildTeamEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { apiPath } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 import type { EntryTypeValue } from "@/lib/constants";
 
 interface SaveTeamEntryParams {
@@ -65,7 +66,7 @@ export async function saveTeamEntry({
     : apiPath.teamPasswordById(teamId, initialId!);
   const method = mode === "create" ? "POST" : "PUT";
 
-  return fetch(endpoint, {
+  return fetchApi(endpoint, {
     method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

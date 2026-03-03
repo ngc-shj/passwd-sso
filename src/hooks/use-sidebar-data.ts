@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 
 export interface SidebarTagItem {
   id: string;
@@ -54,7 +55,7 @@ async function fetchArray<T>(
   onError?: (message: string) => void,
 ): Promise<T[] | null> {
   try {
-    const res = await fetch(url);
+    const res = await fetchApi(url);
     if (!res.ok) {
       onError?.(`Failed to fetch ${url}: ${res.status}`);
       return null;

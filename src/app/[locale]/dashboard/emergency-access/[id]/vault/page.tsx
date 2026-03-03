@@ -19,6 +19,7 @@ import {
 } from "@/lib/crypto-emergency";
 import { deriveEncryptionKey, decryptData, hexDecode, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface VaultEntry {
   id: string;
@@ -67,7 +68,7 @@ export default function EmergencyVaultPage() {
 
     try {
       // 1. Fetch ECDH data
-      const vaultRes = await fetch(apiPath.emergencyGrantVault(grantId));
+      const vaultRes = await fetchApi(apiPath.emergencyGrantVault(grantId));
       if (!vaultRes.ok) {
         const data = await vaultRes.json().catch(() => null);
         setError(t(eaErrorToI18nKey(data?.error)));
@@ -114,7 +115,7 @@ export default function EmergencyVaultPage() {
       ownerSecretKey.fill(0);
 
       // 5. Fetch encrypted entries
-      const entriesRes = await fetch(apiPath.emergencyGrantVaultEntries(grantId));
+      const entriesRes = await fetchApi(apiPath.emergencyGrantVaultEntries(grantId));
       if (!entriesRes.ok) {
         setError(t("networkError"));
         setLoading(false);

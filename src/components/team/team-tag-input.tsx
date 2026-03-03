@@ -12,6 +12,7 @@ import { getTagColorClass } from "@/lib/dynamic-styles";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { apiPath } from "@/lib/constants";
 import { buildTagPath } from "@/lib/tag-tree";
+import { fetchApi } from "@/lib/url-helpers";
 
 export interface TeamTagData {
   id: string;
@@ -39,7 +40,7 @@ export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputPro
 
   const fetchTags = useCallback(async () => {
     try {
-      const res = await fetch(`${apiPath.teamTags(teamId)}?tree=true`);
+      const res = await fetchApi(`${apiPath.teamTags(teamId)}?tree=true`);
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data)) setAllTags(data);
@@ -93,7 +94,7 @@ export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputPro
     if (!inputValue.trim() || creating) return;
     setCreating(true);
     try {
-      const res = await fetch(apiPath.teamTags(teamId), {
+      const res = await fetchApi(apiPath.teamTags(teamId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: inputValue.trim() }),

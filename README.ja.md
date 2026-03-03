@@ -101,6 +101,7 @@ cp .env.example .env.local
 
 | 変数 | 説明 |
 |---|---|
+| `NEXT_PUBLIC_BASE_PATH` | （任意）リバースプロキシ配下のサブパス（例: `/passwd-sso`）。ビルド時変数 — `npm run build` 前に設定 |
 | `DATABASE_URL` | PostgreSQL 接続文字列 |
 | `AUTH_SECRET` | `openssl rand -base64 32` で生成 |
 | `AUTH_GOOGLE_ID` | Google OAuth クライアント ID |
@@ -141,7 +142,7 @@ npm run db:migrate
 npm run dev
 ```
 
-[http://localhost:3000](http://localhost:3000) を開きます。
+[http://localhost:3000](http://localhost:3000) を開きます（`NEXT_PUBLIC_BASE_PATH` 設定時は `http://localhost:3000/<basePath>`）。
 
 **本番環境**（Docker Compose 一括起動）:
 
@@ -325,10 +326,11 @@ extension/
 ## デプロイガイド
 
 - Setup ドキュメント方針: `docs/setup/README.md`（英語版のみ）
-- [Docker Compose セットアップ（English）](docs/setup/docker/en.md)
+- [Docker Compose セットアップ（English）](docs/setup/docker/en.md)（サブパスデプロイ含む）
 - [AWS デプロイ（English）](docs/setup/aws/en.md)
 - [Vercel デプロイ（English）](docs/setup/vercel/en.md)
 - [Terraform (AWS)（日本語）](infra/terraform/README.ja.md) / [English](infra/terraform/README.md)
+- [デプロイ運用](docs/operations/deployment.md)
 
 ## セキュリティドキュメント
 
