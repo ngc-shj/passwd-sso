@@ -61,7 +61,19 @@ describe("url-helpers (no basePath)", () => {
     expect(spy).toHaveBeenCalledWith("/api/passwords");
   });
 
+  it("withBasePath warns when path does not start with /", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { withBasePath } = await import("@/lib/url-helpers");
+
+    withBasePath("api/test");
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('path should start with "/"'),
+    );
+  });
+
   it("appUrl returns origin + path without basePath", async () => {
+    const originalLocation = window.location;
     Object.defineProperty(window, "location", {
       value: { origin: "https://example.com" },
       writable: true,
@@ -70,6 +82,12 @@ describe("url-helpers (no basePath)", () => {
     const { appUrl } = await import("@/lib/url-helpers");
 
     expect(appUrl("/dashboard")).toBe("https://example.com/dashboard");
+
+    Object.defineProperty(window, "location", {
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    });
   });
 });
 
@@ -123,6 +141,7 @@ describe("url-helpers (basePath=/passwd-sso)", () => {
   });
 
   it("appUrl returns origin + basePath + path", async () => {
+    const originalLocation = window.location;
     Object.defineProperty(window, "location", {
       value: { origin: "https://app.example.com" },
       writable: true,
@@ -133,9 +152,16 @@ describe("url-helpers (basePath=/passwd-sso)", () => {
     expect(appUrl("/dashboard")).toBe(
       "https://app.example.com/passwd-sso/dashboard",
     );
+
+    Object.defineProperty(window, "location", {
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    });
   });
 
   it("appUrl builds correct URL for root path", async () => {
+    const originalLocation = window.location;
     Object.defineProperty(window, "location", {
       value: { origin: "https://app.example.com" },
       writable: true,
@@ -144,5 +170,11 @@ describe("url-helpers (basePath=/passwd-sso)", () => {
     const { appUrl } = await import("@/lib/url-helpers");
 
     expect(appUrl("/")).toBe("https://app.example.com/passwd-sso/");
+
+    Object.defineProperty(window, "location", {
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    });
   });
 });

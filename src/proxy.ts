@@ -213,7 +213,7 @@ function clearAuthSessionCookies(response: NextResponse, basePath: string = ""):
     "__Secure-next-auth.session-token",
   ] as const;
 
-  const cookiePath = `${basePath}/` || "/";
+  const cookiePath = `${basePath}/`;
   for (const name of authSessionCookieNames) {
     response.cookies.delete({ name, path: cookiePath });
   }

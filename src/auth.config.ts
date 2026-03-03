@@ -77,6 +77,9 @@ export default {
     },
   },
 
+  // Auth.js builds redirect URLs as `origin + pages.signIn`.
+  // basePath must be included here because Next.js strips it from route handlers,
+  // and withAuthBasePath restores it for Auth.js internal routing.
   pages: {
     signIn: `${basePath}/auth/signin`,
     error: `${basePath}/auth/error`,

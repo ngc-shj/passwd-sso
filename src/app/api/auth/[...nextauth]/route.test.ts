@@ -74,6 +74,31 @@ describe("withAuthBasePath", () => {
     );
   });
 
+  it("transfers POST body to patched request", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    const { _withAuthBasePath } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+
+    let capturedBody: string | null = null;
+    const inner = vi.fn(async (req: NextRequest) => {
+      capturedBody = await req.text();
+      return new Response(capturedBody);
+    });
+    const wrapped = _withAuthBasePath(inner);
+
+    const payload = JSON.stringify({ csrfToken: "abc123" });
+    const req = new NextRequest("http://localhost:3000/api/auth/callback/google", {
+      method: "POST",
+      body: payload,
+      headers: { "Content-Type": "application/json" },
+    });
+    await wrapped(req);
+
+    expect(inner.mock.calls[0][0].method).toBe("POST");
+    expect(capturedBody).toBe(payload);
+  });
+
   it("preserves query parameters", async () => {
     vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
     const { _withAuthBasePath } = await import(

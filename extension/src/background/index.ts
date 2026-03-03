@@ -310,7 +310,8 @@ async function shouldSuppressInlineMatches(url: string): Promise<boolean> {
   if (pageUrl.origin !== base.origin) {
     return false;
   }
-  if (!pageUrl.pathname.startsWith(base.pathname || "/")) {
+  const bp = base.pathname || "/";
+  if (pageUrl.pathname !== bp && !pageUrl.pathname.startsWith(bp.endsWith("/") ? bp : `${bp}/`)) {
     return false;
   }
 
@@ -605,7 +606,8 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
     headers.set("Content-Type", "application/json");
   }
 
-  return fetch(`${serverUrl}${path}`, { ...init, headers });
+  const url = new URL(path, serverUrl);
+  return fetch(url.toString(), { ...init, headers });
 }
 
 type RawEntry = {

@@ -400,10 +400,12 @@ describe("NextAuth basePath", () => {
   });
 
   it("basePath defaults to /api/auth when NEXT_PUBLIC_BASE_PATH is empty", () => {
+    // nextAuthInitArgs was captured at module import time.
+    // In the standard test environment NEXT_PUBLIC_BASE_PATH is unset,
+    // so this assertion validates the default path. If a CI matrix sets
+    // the env var, the first test already covers the formula.
     const config = nextAuthInitArgs[0] as Record<string, unknown>;
-    // In test environment NEXT_PUBLIC_BASE_PATH is typically unset
-    if (!process.env.NEXT_PUBLIC_BASE_PATH) {
-      expect(config.basePath).toBe("/api/auth");
-    }
+    const envBasePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+    expect(config.basePath).toBe(`${envBasePath}/api/auth`);
   });
 });

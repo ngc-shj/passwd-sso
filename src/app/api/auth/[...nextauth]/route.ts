@@ -32,7 +32,6 @@ function withAuthBasePath<H extends RouteHandler>(handler: H): H {
       headers: request.headers,
       method: request.method,
       body: request.body,
-      // @ts-expect-error duplex is required for streaming body but not in the type
       duplex: "half",
     });
     return handler(patched, ...rest);

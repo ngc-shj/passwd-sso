@@ -38,16 +38,20 @@ describe("SessionProvider", () => {
   });
 
   it("defaults basePath to /api/auth when NEXT_PUBLIC_BASE_PATH is empty", () => {
-    if (!process.env.NEXT_PUBLIC_BASE_PATH) {
-      render(
-        <SessionProvider>
-          <div>child</div>
-        </SessionProvider>,
-      );
+    // getAuthBasePath reads env at call time, so vi.stubEnv is sufficient
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+    mockSessionProvider.mockClear();
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const props = (mockSessionProvider.mock.calls as any[])[0][0];
-      expect(props.basePath).toBe("/api/auth");
-    }
+    render(
+      <SessionProvider>
+        <div>child</div>
+      </SessionProvider>,
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const props = (mockSessionProvider.mock.calls as any[])[0][0];
+    expect(props.basePath).toBe("/api/auth");
+
+    vi.unstubAllEnvs();
   });
 });
