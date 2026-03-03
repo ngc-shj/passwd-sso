@@ -99,6 +99,27 @@ describe("withAuthBasePath", () => {
     expect(capturedBody).toBe(payload);
   });
 
+  it("preserves cookies in patched request", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    const { _withAuthBasePath } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+
+    let capturedCookie: string | null = null;
+    const inner = vi.fn(async (req: NextRequest) => {
+      capturedCookie = req.headers.get("cookie");
+      return new Response("ok");
+    });
+    const wrapped = _withAuthBasePath(inner);
+
+    const req = new NextRequest("http://localhost:3000/api/auth/session", {
+      headers: { Cookie: "authjs.session-token=abc123" },
+    });
+    await wrapped(req);
+
+    expect(capturedCookie).toBe("authjs.session-token=abc123");
+  });
+
   it("preserves query parameters", async () => {
     vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
     const { _withAuthBasePath } = await import(
