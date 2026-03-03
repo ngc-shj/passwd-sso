@@ -50,7 +50,7 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
     if (!hasSession) {
       const signInUrl = request.nextUrl.clone();
       signInUrl.pathname = `/${locale}/auth/signin`;
-      signInUrl.searchParams.set("callbackUrl", `${request.nextUrl.pathname}${request.nextUrl.search}`);
+      signInUrl.searchParams.set("callbackUrl", `${basePath}${request.nextUrl.pathname}${request.nextUrl.search}`);
       const redirectResponse = NextResponse.redirect(signInUrl);
       clearAuthSessionCookies(redirectResponse, basePath);
       return applySecurityHeaders(redirectResponse, options, basePath);

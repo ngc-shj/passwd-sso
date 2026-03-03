@@ -606,8 +606,7 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
     headers.set("Content-Type", "application/json");
   }
 
-  const url = new URL(path, serverUrl);
-  return fetch(url.toString(), { ...init, headers });
+  return fetch(`${serverUrl}${path}`, { ...init, headers });
 }
 
 type RawEntry = {
