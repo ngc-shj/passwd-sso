@@ -15,7 +15,12 @@ import {
   ChevronRight,
   ExternalLink,
 } from "lucide-react";
-import type { PasswordIssue, ReusedGroup, DuplicateGroup } from "@/hooks/use-watchtower";
+import type {
+  PasswordIssue,
+  ReusedGroup,
+  DuplicateGroup,
+  WatchtowerEntryRef,
+} from "@/hooks/use-watchtower";
 
 // ─── Issue Category Card ─────────────────────────────────────
 
@@ -39,7 +44,7 @@ interface IssueSectionProps {
   description: string;
   issues: PasswordIssue[];
   formatDetails: (details: string) => string;
-  onSelectEntry?: (entryId: string) => void;
+  onSelectEntry?: (entry: WatchtowerEntryRef) => void;
 }
 
 export function IssueSection({
@@ -99,7 +104,7 @@ export function IssueSection({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => onSelectEntry?.(issue.id)}
+                onClick={() => onSelectEntry?.(issue)}
                 disabled={!onSelectEntry}
               >
                   <ExternalLink className="h-3.5 w-3.5" />
@@ -119,7 +124,7 @@ interface ReusedSectionProps {
   description: string;
   groups: ReusedGroup[];
   formatCount: (count: number) => string;
-  onSelectEntry?: (entryId: string) => void;
+  onSelectEntry?: (entry: WatchtowerEntryRef) => void;
 }
 
 export function ReusedSection({
@@ -183,7 +188,7 @@ export function ReusedSection({
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => onSelectEntry?.(entry.id)}
+                      onClick={() => onSelectEntry?.(entry)}
                       disabled={!onSelectEntry}
                     >
                         <ExternalLink className="h-3.5 w-3.5" />
@@ -206,7 +211,7 @@ interface DuplicateSectionProps {
   description: string;
   groups: DuplicateGroup[];
   formatCount: (count: number, hostname: string) => string;
-  onSelectEntry?: (entryId: string) => void;
+  onSelectEntry?: (entry: WatchtowerEntryRef) => void;
 }
 
 export function DuplicateSection({
@@ -269,7 +274,7 @@ export function DuplicateSection({
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => onSelectEntry?.(entry.id)}
+                      onClick={() => onSelectEntry?.(entry)}
                       disabled={!onSelectEntry}
                     >
                         <ExternalLink className="h-3.5 w-3.5" />

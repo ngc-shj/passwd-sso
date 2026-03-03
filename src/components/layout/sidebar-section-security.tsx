@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
 import { TEAM_ROLE } from "@/lib/constants";
 import { CollapsibleSectionHeader } from "@/components/layout/sidebar-shared";
+import type { VaultContext } from "@/hooks/use-vault-context";
 import {
   Download,
   HeartPulse,
@@ -24,6 +25,7 @@ interface SecuritySectionProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
+  vaultContext: VaultContext;
   isWatchtower: boolean;
   isEmergencyAccess: boolean;
   onNavigate: () => void;
@@ -33,10 +35,16 @@ export function SecuritySection({
   isOpen,
   onOpenChange,
   t,
+  vaultContext,
   isWatchtower,
   isEmergencyAccess,
   onNavigate,
 }: SecuritySectionProps) {
+  const watchtowerHref =
+    vaultContext.type === "team"
+      ? `/dashboard/teams/${vaultContext.teamId}/watchtower`
+      : "/dashboard/watchtower";
+
   return (
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
       <CollapsibleSectionHeader isOpen={isOpen}>{t("security")}</CollapsibleSectionHeader>
@@ -47,7 +55,7 @@ export function SecuritySection({
             className="w-full justify-start gap-2"
             asChild
           >
-            <Link href="/dashboard/watchtower" onClick={onNavigate}>
+            <Link href={watchtowerHref} onClick={onNavigate}>
               <Shield className="h-4 w-4" />
               {t("watchtower")}
             </Link>

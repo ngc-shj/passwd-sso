@@ -5,20 +5,14 @@ import { describe, expect, it, vi } from "vitest";
 import { DuplicateSection } from "@/components/watchtower/issue-section";
 import type { DuplicateGroup } from "@/hooks/use-watchtower";
 
-vi.mock("@/i18n/navigation", () => ({
-  Link: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
-  ),
-}));
-
 describe("DuplicateSection", () => {
   const groups: DuplicateGroup[] = [
     {
       hostname: "example.com",
       username: "alice",
       entries: [
-        { id: "e1", title: "Work Login", username: "alice" },
-        { id: "e2", title: "Old Login", username: "alice" },
+        { id: "e1", title: "Work Login", username: "alice", scope: "personal" },
+        { id: "e2", title: "Old Login", username: "alice", scope: "personal" },
       ],
     },
   ];
@@ -115,16 +109,16 @@ describe("DuplicateSection", () => {
         hostname: "a.com",
         username: "u1",
         entries: [
-          { id: "1", title: "A1", username: "u1" },
-          { id: "2", title: "A2", username: "u1" },
+          { id: "1", title: "A1", username: "u1", scope: "personal" },
+          { id: "2", title: "A2", username: "u1", scope: "personal" },
         ],
       },
       {
         hostname: "b.com",
         username: "u2",
         entries: [
-          { id: "3", title: "B1", username: "u2" },
-          { id: "4", title: "B2", username: "u2" },
+          { id: "3", title: "B1", username: "u2", scope: "personal" },
+          { id: "4", title: "B2", username: "u2", scope: "personal" },
         ],
       },
     ];
@@ -147,7 +141,7 @@ describe("DuplicateSection", () => {
       {
         hostname: "example.com",
         username: "alice",
-        entries: [{ id: "e1", title: "No-User Login", username: null }],
+        entries: [{ id: "e1", title: "No-User Login", username: null, scope: "personal" }],
       },
     ];
     render(
