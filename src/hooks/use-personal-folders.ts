@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { API_PATH } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 import type { FolderItem } from "@/components/folders/folder-tree";
 
 export function usePersonalFolders() {
@@ -10,7 +11,7 @@ export function usePersonalFolders() {
 
   useEffect(() => {
     const url = API_PATH.FOLDERS;
-    fetch(url)
+    fetchApi(url)
       .then((res) => {
         if (!res.ok) throw new Error(`${res.status}`);
         return res.json();

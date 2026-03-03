@@ -39,6 +39,7 @@ import { useBulkSelection } from "@/hooks/use-bulk-selection";
 import { useBulkAction } from "@/hooks/use-bulk-action";
 import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
 import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface TeamInfo {
   id: string;
@@ -118,8 +119,8 @@ export default function TeamDashboardPage({
   const [teamTags, setTeamTags] = useState<{ id: string; name: string; color?: string | null; parentId?: string | null }[]>([]);
   useEffect(() => {
     Promise.all([
-      fetch(apiPath.teamFolders(teamId)).then((r) => r.ok ? r.json() : []),
-      fetch(apiPath.teamTags(teamId)).then((r) => r.ok ? r.json() : []),
+      fetchApi(apiPath.teamFolders(teamId)).then((r) => r.ok ? r.json() : []),
+      fetchApi(apiPath.teamTags(teamId)).then((r) => r.ok ? r.json() : []),
     ]).then(([f, tg]) => {
       if (Array.isArray(f)) setTeamFolders(f);
       if (Array.isArray(tg)) setTeamTags(tg);
@@ -136,7 +137,7 @@ export default function TeamDashboardPage({
 
   const fetchTeam = async (): Promise<boolean> => {
     try {
-      const res = await fetch(apiPath.teamById(teamId));
+      const res = await fetchApi(apiPath.teamById(teamId));
       if (!res.ok) {
         setTeam(null);
         setLoadError(true);
@@ -163,7 +164,7 @@ export default function TeamDashboardPage({
       if (isTeamFavorites) params.set("favorites", "true");
       const qs = params.toString();
       const url = `${apiPath.teamPasswords(teamId)}${qs ? `?${qs}` : ""}`;
-      const res = await fetch(url);
+      const res = await fetchApi(url);
       const data = await res.json();
       if (!Array.isArray(data)) return;
 
@@ -345,7 +346,7 @@ export default function TeamDashboardPage({
       );
     }
     try {
-      const res = await fetch(apiPath.teamPasswordFavorite(teamId, id), {
+      const res = await fetchApi(apiPath.teamPasswordFavorite(teamId, id), {
         method: "POST",
       });
       if (!res.ok) fetchPasswords();
@@ -357,7 +358,7 @@ export default function TeamDashboardPage({
   const handleToggleArchive = async (id: string, current: boolean) => {
     setPasswords((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(apiPath.teamPasswordById(teamId, id), {
+      const res = await fetchApi(apiPath.teamPasswordById(teamId, id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isArchived: !current }),
@@ -371,7 +372,7 @@ export default function TeamDashboardPage({
   const handleDelete = async (id: string) => {
     setPasswords((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(apiPath.teamPasswordById(teamId, id), {
+      const res = await fetchApi(apiPath.teamPasswordById(teamId, id), {
         method: "DELETE",
       });
       if (!res.ok) fetchPasswords();
@@ -407,7 +408,7 @@ export default function TeamDashboardPage({
 
   const createDetailFetcher = useCallback(
     (id: string, eType?: EntryTypeValue) => async (): Promise<InlineDetailData> => {
-      const res = await fetch(apiPath.teamPasswordById(teamId, id));
+      const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
       if (!res.ok) throw new Error("Failed");
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);
@@ -468,7 +469,7 @@ export default function TeamDashboardPage({
 
   const createPasswordFetcher = useCallback(
     (id: string) => async (): Promise<string> => {
-      const res = await fetch(apiPath.teamPasswordById(teamId, id));
+      const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
       if (!res.ok) throw new Error("Failed");
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);
@@ -479,7 +480,7 @@ export default function TeamDashboardPage({
 
   const createUrlFetcher = useCallback(
     (id: string) => async (): Promise<string | null> => {
-      const res = await fetch(apiPath.teamPasswordById(teamId, id));
+      const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
       if (!res.ok) throw new Error("Failed");
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);

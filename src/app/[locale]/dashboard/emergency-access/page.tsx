@@ -9,6 +9,7 @@ import { GrantCard } from "@/components/emergency-access/grant-card";
 import { Card } from "@/components/ui/card";
 import type { EaStatusValue } from "@/lib/constants";
 import { API_PATH } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface Grant {
   id: string;
@@ -33,7 +34,7 @@ export default function EmergencyAccessPage() {
 
   const fetchGrants = useCallback(async () => {
     try {
-      const res = await fetch(API_PATH.EMERGENCY_ACCESS);
+      const res = await fetchApi(API_PATH.EMERGENCY_ACCESS);
       if (res.ok) {
         setGrants(await res.json());
       }

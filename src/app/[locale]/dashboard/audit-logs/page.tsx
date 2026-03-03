@@ -53,6 +53,7 @@ import {
 } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format-datetime";
 import { normalizeAuditActionKey } from "@/lib/audit-action-key";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface AuditLogItem {
   id: string;
@@ -189,7 +190,7 @@ export default function AuditLogsPage() {
       }
       if (cursor) params.set("cursor", cursor);
 
-      const res = await fetch(`${API_PATH.AUDIT_LOGS}?${params.toString()}`);
+      const res = await fetchApi(`${API_PATH.AUDIT_LOGS}?${params.toString()}`);
       if (!res.ok) return null;
       return res.json();
     },
@@ -497,7 +498,7 @@ export default function AuditLogsPage() {
         endOfDay.setHours(23, 59, 59, 999);
         params.set("to", endOfDay.toISOString());
       }
-      const res = await fetch(`/api/audit-logs/download?${params.toString()}`);
+      const res = await fetchApi(`/api/audit-logs/download?${params.toString()}`);
       if (!res.ok) return;
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);

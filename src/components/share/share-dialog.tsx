@@ -39,6 +39,7 @@ import {
   applySharePermissions,
 } from "@/lib/constants/share-permission";
 import { formatDateTime } from "@/lib/format-datetime";
+import { fetchApi, appUrl } from "@/lib/url-helpers";
 
 interface ShareLink {
   id: string;
@@ -144,7 +145,7 @@ export function ShareDialog({
   const fetchLinks = useCallback(async () => {
     setLoadingLinks(true);
     try {
-      const res = await fetch(`${API_PATH.SHARE_LINKS}?${entryParam}`);
+      const res = await fetchApi(`${API_PATH.SHARE_LINKS}?${entryParam}`);
       if (res.ok) {
         const data = await res.json();
         setLinks(data.items);
@@ -166,7 +167,7 @@ export function ShareDialog({
 
   useEffect(() => {
     if (!open || !teamId) return;
-    fetch(apiPath.teamPolicy(teamId))
+    fetchApi(apiPath.teamPolicy(teamId))
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data && data.allowSharing === false) setSharingAllowed(false);
@@ -218,7 +219,7 @@ export function ShareDialog({
         if (mv >= 1 && mv <= 100) body.maxViews = mv;
       }
 
-      const res = await fetch(API_PATH.SHARE_LINKS, {
+      const res = await fetchApi(API_PATH.SHARE_LINKS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -231,7 +232,7 @@ export function ShareDialog({
       }
 
       const data = await res.json();
-      let fullUrl = `${window.location.origin}${data.url}`;
+      let fullUrl = appUrl(data.url);
       if (shareKeyForFragment) {
         fullUrl += `#key=${base64urlEncode(shareKeyForFragment)}`;
         shareKeyForFragment.fill(0);
@@ -259,7 +260,7 @@ export function ShareDialog({
       setLoadingLogs(true);
       try {
         const url = `${apiPath.shareLinkAccessLogs(shareId)}${cursor ? `?cursor=${cursor}` : ""}`;
-        const res = await fetch(url);
+        const res = await fetchApi(url);
         if (res.ok) {
           const data = await res.json();
           if (cursor) {
@@ -292,7 +293,7 @@ export function ShareDialog({
   const handleRevoke = async (id: string) => {
     setRevokingId(id);
     try {
-      const res = await fetch(apiPath.shareLinkById(id), { method: "DELETE" });
+      const res = await fetchApi(apiPath.shareLinkById(id), { method: "DELETE" });
       if (res.ok) {
         toast.success(t("revokeSuccess"));
         fetchLinks();

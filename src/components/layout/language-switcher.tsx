@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Globe } from "lucide-react";
+import { fetchApi } from "@/lib/url-helpers";
 
 export function LanguageSwitcher() {
   const t = useTranslations("LanguageSwitcher");
@@ -22,7 +23,7 @@ export function LanguageSwitcher() {
   const switchLocale = (newLocale: string) => {
     router.replace(pathname, { locale: newLocale });
     // Persist preference to DB (fire-and-forget; 401 on sign-in page is ignored)
-    void fetch(API_PATH.USER_LOCALE, {
+    void fetchApi(API_PATH.USER_LOCALE, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ locale: newLocale }),

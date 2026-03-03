@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface PolicyData {
   minPasswordLength: number;
@@ -46,7 +47,7 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
 
   const fetchPolicy = useCallback(async () => {
     try {
-      const res = await fetch(`/api/teams/${teamId}/policy`);
+      const res = await fetchApi(`/api/teams/${teamId}/policy`);
       if (res.ok) {
         setPolicy(await res.json());
       } else {
@@ -66,7 +67,7 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`/api/teams/${teamId}/policy`, {
+      const res = await fetchApi(`/api/teams/${teamId}/policy`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(policy),

@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 vi.mock("next-intl/middleware", () => ({
   default: () => () => new Response(null, { status: 200 }),
 }));
 
-import { proxy } from "../proxy";
+import { proxy, _applySecurityHeaders } from "../proxy";
 
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "test-nonce" };
 
@@ -244,5 +244,28 @@ describe("proxy — CORS preflight and headers", () => {
 
     expect(res.status).toBe(401);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe(APP_ORIGIN);
+  });
+});
+
+describe("proxy — applySecurityHeaders basePath", () => {
+  it("includes basePath in Report-To and csp-nonce cookie path", () => {
+    const response = new NextResponse();
+    _applySecurityHeaders(response, dummyOptions, "/passwd-sso");
+
+    const reportTo = JSON.parse(response.headers.get("Report-To")!);
+    expect(reportTo.endpoints[0].url).toBe("/passwd-sso/api/csp-report");
+    expect(response.headers.get("Reporting-Endpoints")).toBe(
+      'csp-endpoint="/passwd-sso/api/csp-report"',
+    );
+    expect(response.cookies.get("csp-nonce")?.path).toBe("/passwd-sso/");
+  });
+
+  it("defaults to root path when basePath is empty", () => {
+    const response = new NextResponse();
+    _applySecurityHeaders(response, dummyOptions);
+
+    const reportTo = JSON.parse(response.headers.get("Report-To")!);
+    expect(reportTo.endpoints[0].url).toBe("/api/csp-report");
+    expect(response.cookies.get("csp-nonce")?.path).toBe("/");
   });
 });

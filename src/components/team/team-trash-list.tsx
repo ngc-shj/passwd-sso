@@ -30,6 +30,7 @@ import {
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto-aad";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface TeamTrashEntry {
   id: string;
@@ -83,7 +84,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
   const fetchTrash = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(API_PATH.TEAMS_TRASH);
+      const res = await fetchApi(API_PATH.TEAMS_TRASH);
       if (!res.ok) return;
       const data = await res.json();
       if (!Array.isArray(data)) return;
@@ -199,7 +200,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
 
   const handleRestore = async (entry: TeamTrashEntry) => {
     try {
-      const res = await fetch(
+      const res = await fetchApi(
         apiPath.teamPasswordRestore(entry.teamId, entry.id),
         { method: "POST" }
       );
@@ -216,7 +217,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
 
   const handleDeletePermanently = async (entry: TeamTrashEntry) => {
     try {
-      const res = await fetch(
+      const res = await fetchApi(
         `${apiPath.teamPasswordById(entry.teamId, entry.id)}?permanent=true`,
         { method: "DELETE" }
       );

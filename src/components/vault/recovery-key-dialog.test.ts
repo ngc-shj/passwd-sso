@@ -35,6 +35,13 @@ vi.mock("@/lib/api-error-codes", () => ({
 vi.mock("@/lib/constants", () => ({
   API_PATH: { VAULT_RECOVERY_KEY_GENERATE: "/api/vault/recovery-key/generate" },
 }));
+// fetchApi has a `typeof window` guard — bypass it so node-env tests work
+vi.mock("@/lib/url-helpers", () => ({
+  fetchApi: (path: string, init?: RequestInit) =>
+    init !== undefined ? fetch(path, init) : fetch(path),
+  withBasePath: (p: string) => p,
+  BASE_PATH: "",
+}));
 // Unused by generateRecoveryKeyFlow but required for module import
 vi.mock("@/lib/vault-context", () => ({
   useVault: () => ({}),

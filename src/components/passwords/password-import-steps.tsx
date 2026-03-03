@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Upload, Loader2, FileUp, CheckCircle2, AlertCircle, Lock } from "lucide-react";
 import { formatLabels, type CsvFormat, type ParsedEntry } from "@/components/passwords/password-import-utils";
 import type { ImportTranslator } from "@/components/passwords/password-import-types";
+import { fetchApi } from "@/lib/url-helpers";
 
 function entryTypeLabel(t: ImportTranslator, entryType: string): string {
   if (entryType === ENTRY_TYPE.PASSKEY) return t("typePasskey");
@@ -264,7 +265,7 @@ export function fireImportAudit(
   sourceFilename: string,
   encryptedInput: boolean
 ) {
-  fetch(API_PATH.AUDIT_LOGS_IMPORT, {
+  fetchApi(API_PATH.AUDIT_LOGS_IMPORT, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(

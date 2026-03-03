@@ -17,6 +17,7 @@ import {
   encryptPrivateKey,
 } from "@/lib/crypto-emergency";
 import { API_ERROR, eaErrorToI18nKey } from "@/lib/api-error-codes";
+import { fetchApi } from "@/lib/url-helpers";
 
 export default function AcceptEmergencyInvitePage() {
   const t = useTranslations("EmergencyAccess");
@@ -54,7 +55,7 @@ export default function AcceptEmergencyInvitePage() {
       // Encrypt private key with grantee's vault encryption key
       const encryptedPrivKey = await encryptPrivateKey(privateKeyBytes, encryptionKey);
 
-      const res = await fetch(API_PATH.EMERGENCY_ACCESS_ACCEPT, {
+      const res = await fetchApi(API_PATH.EMERGENCY_ACCESS_ACCEPT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -91,7 +92,7 @@ export default function AcceptEmergencyInvitePage() {
   const handleDecline = async () => {
     setLoading(true);
     try {
-      const res = await fetch(API_PATH.EMERGENCY_ACCESS_REJECT, {
+      const res = await fetchApi(API_PATH.EMERGENCY_ACCESS_REJECT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),

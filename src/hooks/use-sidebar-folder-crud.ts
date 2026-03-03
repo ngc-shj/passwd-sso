@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { showSidebarCrudError } from "@/hooks/sidebar-crud-error";
+import { fetchApi } from "@/lib/url-helpers";
 import type { SidebarFolderItem, SidebarTeamFolderGroup } from "@/hooks/use-sidebar-data";
 
 interface UseSidebarFolderCrudParams {
@@ -60,7 +61,7 @@ export function useSidebarFolderCrud({
         : API_PATH.FOLDERS;
     const method = editingFolder ? "PUT" : "POST";
 
-    const res = await fetch(url, {
+    const res = await fetchApi(url, {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -77,7 +78,7 @@ export function useSidebarFolderCrud({
     const url = folderTeamId
       ? apiPath.teamFolderById(folderTeamId, deletingFolder.id)
       : apiPath.folderById(deletingFolder.id);
-    const res = await fetch(url, { method: "DELETE" });
+    const res = await fetchApi(url, { method: "DELETE" });
     if (!res.ok) {
       await showSidebarCrudError(res, tErrors);
       setDeletingFolder(null);

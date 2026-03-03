@@ -12,6 +12,7 @@ import { getTagColorClass } from "@/lib/dynamic-styles";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
 import { buildTagPath } from "@/lib/tag-tree";
+import { fetchApi } from "@/lib/url-helpers";
 
 export interface TagData {
   id: string;
@@ -38,7 +39,7 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
 
   const fetchTags = useCallback(async () => {
     try {
-      const res = await fetch(`${API_PATH.TAGS}?tree=true`);
+      const res = await fetchApi(`${API_PATH.TAGS}?tree=true`);
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data)) setAllTags(data);
@@ -93,7 +94,7 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
     if (!inputValue.trim() || creating) return;
     setCreating(true);
     try {
-      const res = await fetch(API_PATH.TAGS, {
+      const res = await fetchApi(API_PATH.TAGS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: inputValue.trim() }),

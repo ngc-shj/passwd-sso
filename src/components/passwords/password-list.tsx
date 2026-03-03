@@ -17,6 +17,7 @@ import { useBulkSelection, type BulkSelectionHandle } from "@/hooks/use-bulk-sel
 import { useBulkAction } from "@/hooks/use-bulk-action";
 import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
 import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface DecryptedOverview {
   title: string;
@@ -118,7 +119,7 @@ export function PasswordList({
       if (favoritesOnly) params.set("favorites", "true");
       if (archivedOnly) params.set("archived", "true");
 
-      const res = await fetch(`${API_PATH.PASSWORDS}?${params}`);
+      const res = await fetchApi(`${API_PATH.PASSWORDS}?${params}`);
       if (!res.ok) return;
       const data = await res.json();
 
@@ -239,7 +240,7 @@ export function PasswordList({
     );
 
     try {
-      const res = await fetch(apiPath.passwordById(id), {
+      const res = await fetchApi(apiPath.passwordById(id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isFavorite: !current }),
@@ -259,7 +260,7 @@ export function PasswordList({
   const handleToggleArchive = async (id: string, current: boolean) => {
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(apiPath.passwordById(id), {
+      const res = await fetchApi(apiPath.passwordById(id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isArchived: !current }),
@@ -274,7 +275,7 @@ export function PasswordList({
   const handleDelete = async (id: string) => {
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetch(apiPath.passwordById(id), { method: "DELETE" });
+      const res = await fetchApi(apiPath.passwordById(id), { method: "DELETE" });
       if (!res.ok) fetchPasswords();
     } catch {
       fetchPasswords();

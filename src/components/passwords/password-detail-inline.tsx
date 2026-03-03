@@ -20,6 +20,7 @@ import type {
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { apiPath } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 import { formatDateTime, formatDate } from "@/lib/format-datetime";
 import { useReprompt } from "@/hooks/use-reprompt";
 import {
@@ -130,7 +131,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
         const url = scopedTeamId
           ? apiPath.teamPasswordAttachments(scopedTeamId, data.id)
           : apiPath.passwordAttachments(data.id);
-        const res = await fetch(url);
+        const res = await fetchApi(url);
         if (res.ok && !cancelled) {
           const loaded = await res.json();
           if (scopedTeamId) {

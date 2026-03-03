@@ -13,6 +13,7 @@ import {
   delay,
   type StrengthResult,
 } from "@/lib/password-analyzer";
+import { fetchApi } from "@/lib/url-helpers";
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -213,7 +214,7 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
     }
 
     if (!skipRateLimit) {
-      const startRes = await fetch(API_PATH.WATCHTOWER_START, { method: "POST" });
+      const startRes = await fetchApi(API_PATH.WATCHTOWER_START, { method: "POST" });
       if (!startRes.ok) {
         if (startRes.status === 429) {
           const body = await startRes.json().catch(() => null) as { retryAt?: number } | null;
@@ -529,7 +530,7 @@ async function fetchPersonalWatchtowerEntries({
   userId?: string;
 }): Promise<DecryptedEntry[]> {
   if (!encryptionKey) return [];
-  const res = await fetch(`${API_PATH.PASSWORDS}?include=blob`);
+  const res = await fetchApi(`${API_PATH.PASSWORDS}?include=blob`);
   if (!res.ok) throw new Error("Failed to fetch passwords");
   const rawEntries = await res.json();
   const entries: DecryptedEntry[] = [];
@@ -581,7 +582,7 @@ async function fetchTeamWatchtowerEntries({
     return { status: "unavailable", reason: "teamKeyUnavailable" };
   }
 
-  const listRes = await fetch(
+  const listRes = await fetchApi(
     `${apiPath.teamPasswords(teamId)}?type=${ENTRY_TYPE.LOGIN}&include=blob`,
   );
   if (!listRes.ok) throw new Error("Failed to fetch team passwords");

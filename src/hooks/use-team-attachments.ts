@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiPath } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 import type { TeamAttachmentMeta } from "@/components/team/team-attachment-section";
 
 export function useTeamAttachments(open: boolean, teamId: string, entryId?: string) {
@@ -12,7 +13,7 @@ export function useTeamAttachments(open: boolean, teamId: string, entryId?: stri
     if (!open || !entryId) return;
 
     const url = apiPath.teamPasswordAttachments(teamId, entryId);
-    fetch(url)
+    fetchApi(url)
       .then((res) => {
         if (!res.ok) throw new Error(`${res.status}`);
         return res.json();

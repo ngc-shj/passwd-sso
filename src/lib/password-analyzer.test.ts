@@ -1,4 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+
+// fetchApi has a `typeof window` guard — bypass it so node-env tests work
+vi.mock("@/lib/url-helpers", () => ({
+  fetchApi: (path: string, init?: RequestInit) =>
+    init !== undefined ? fetch(path, init) : fetch(path),
+  withBasePath: (p: string) => p,
+  BASE_PATH: "",
+}));
+
 import {
   calculateEntropy,
   detectPatterns,

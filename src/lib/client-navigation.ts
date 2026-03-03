@@ -5,12 +5,17 @@ export interface NavigationTarget {
 }
 
 function normalizeForRouter(pathWithQueryHash: string, locale: string): string {
-  const localePrefix = `/${locale}`;
-  if (pathWithQueryHash === localePrefix) return "/";
-  if (pathWithQueryHash.startsWith(`${localePrefix}/`)) {
-    return pathWithQueryHash.slice(localePrefix.length);
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  let path = pathWithQueryHash;
+  if (basePath && path.startsWith(basePath)) {
+    path = path.slice(basePath.length) || "/";
   }
-  return pathWithQueryHash;
+  const localePrefix = `/${locale}`;
+  if (path === localePrefix) return "/";
+  if (path.startsWith(`${localePrefix}/`)) {
+    return path.slice(localePrefix.length);
+  }
+  return path;
 }
 
 export function resolveNavigationTarget(

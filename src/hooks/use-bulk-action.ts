@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants/api-path";
+import { fetchApi } from "@/lib/url-helpers";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -131,7 +132,7 @@ export function useBulkAction({
       const endpoint = resolveEndpoint(scope, pendingAction);
       const body = buildBody(pendingAction, ids);
 
-      const res = await fetch(endpoint, {
+      const res = await fetchApi(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

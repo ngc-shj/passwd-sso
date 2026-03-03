@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { showSidebarCrudError } from "@/hooks/sidebar-crud-error";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface SidebarTagItem {
   id: string;
@@ -56,7 +57,7 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
       : (tagTeamId ? apiPath.teamTags(tagTeamId) : API_PATH.TAGS);
     const method = isEdit ? "PUT" : "POST";
 
-    const res = await fetch(url, {
+    const res = await fetchApi(url, {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -78,7 +79,7 @@ export function useSidebarTagCrud({ refreshData, tErrors }: UseSidebarTagCrudPar
       ? `${apiPath.teamTags(tagTeamId)}/${deletingTag.id}`
       : `${API_PATH.TAGS}/${deletingTag.id}`;
 
-    const res = await fetch(url, { method: "DELETE" });
+    const res = await fetchApi(url, { method: "DELETE" });
     if (!res.ok) {
       await showSidebarCrudError(res, tErrors);
       setDeletingTag(null);

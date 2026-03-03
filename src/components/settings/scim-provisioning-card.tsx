@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { ScimTokenManager } from "@/components/team/team-scim-token-manager";
 import { API_PATH, TEAM_ROLE } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 
 type TeamSummary = {
   id: string;
@@ -34,7 +35,7 @@ export function ScimProvisioningCard() {
 
     const run = async () => {
       try {
-        const res = await fetch(API_PATH.TEAMS);
+        const res = await fetchApi(API_PATH.TEAMS);
         if (!res.ok) {
           toast.error(t("networkError"));
           return;
