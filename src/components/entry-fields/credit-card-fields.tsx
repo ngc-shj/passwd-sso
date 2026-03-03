@@ -11,6 +11,10 @@ import {
 } from "@/components/ui/select";
 import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/entry-fields/form-fields";
 
+const EXPIRY_YEARS = Array.from({ length: 15 }, (_, i) =>
+  String(new Date().getFullYear() + i)
+);
+
 interface CreditCardFieldsProps {
   cardholderName: string;
   onCardholderNameChange: (value: string) => void;
@@ -189,9 +193,7 @@ export function CreditCardFields({
                   <SelectValue placeholder={expiryYearPlaceholder} />
                 </SelectTrigger>
                 <SelectContent>
-                  {Array.from({ length: 15 }, (_, i) =>
-                    String(new Date().getFullYear() + i)
-                  ).map((y) => (
+                  {EXPIRY_YEARS.map((y) => (
                     <SelectItem key={y} value={y}>
                       {y}
                     </SelectItem>

@@ -188,4 +188,148 @@ describe("WatchtowerPage", () => {
 
     expect(analyze).not.toHaveBeenCalled();
   });
+
+  describe("team scope", () => {
+    const teamReport = {
+      totalPasswords: 2,
+      overallScore: 60,
+      breached: [
+        {
+          id: "team-entry-1",
+          title: "AWS Console",
+          username: "admin@corp.com",
+          scope: "team" as const,
+          teamId: "team-abc",
+          severity: "critical" as const,
+          details: "count:3",
+        },
+      ],
+      weak: [
+        {
+          id: "team-entry-2",
+          title: "Staging DB",
+          username: "root",
+          scope: "team" as const,
+          teamId: "team-abc",
+          severity: "medium" as const,
+          details: "entropy:25",
+        },
+      ],
+      reused: [],
+      old: [],
+      unsecured: [],
+      duplicate: [],
+      expiring: [],
+      analyzedAt: new Date("2026-03-03T00:00:00Z"),
+    };
+
+    it("renders with team scope and passes scope to useWatchtower", () => {
+      mockUseWatchtower.mockReturnValue({
+        report: teamReport,
+        loading: false,
+        progress: { current: 0, total: 0, step: "" },
+        analyze: vi.fn(),
+        canAnalyze: true,
+        cooldownRemainingMs: 0,
+        unavailableReason: null,
+      });
+
+      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} />);
+
+      expect(mockUseWatchtower).toHaveBeenCalledWith({
+        type: "team",
+        teamId: "team-abc",
+      });
+    });
+
+    it("passes correct teamId to TeamEditDialogLoader when a team entry is selected", () => {
+      mockUseWatchtower.mockReturnValue({
+        report: teamReport,
+        loading: false,
+        progress: { current: 0, total: 0, step: "" },
+        analyze: vi.fn(),
+        canAnalyze: true,
+        cooldownRemainingMs: 0,
+        unavailableReason: null,
+      });
+
+      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} />);
+
+      fireEvent.click(screen.getByText("select-team-entry-1"));
+
+      expect(teamDialogProps).toHaveBeenCalled();
+      const lastCall = teamDialogProps.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall.teamId).toBe("team-abc");
+      expect(lastCall.id).toBe("team-entry-1");
+      expect(lastCall.open).toBe(true);
+    });
+
+    it("does not render personal edit dialog when a team entry is selected", () => {
+      mockUseWatchtower.mockReturnValue({
+        report: teamReport,
+        loading: false,
+        progress: { current: 0, total: 0, step: "" },
+        analyze: vi.fn(),
+        canAnalyze: true,
+        cooldownRemainingMs: 0,
+        unavailableReason: null,
+      });
+
+      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} />);
+
+      fireEvent.click(screen.getByText("select-team-entry-1"));
+
+      expect(screen.getByTestId("team-edit-dialog")).toBeInTheDocument();
+      expect(screen.queryByTestId("personal-edit-dialog")).not.toBeInTheDocument();
+    });
+
+    it("does not rerun analysis after saving from the team edit dialog", () => {
+      const analyze = vi.fn();
+      mockUseWatchtower.mockReturnValue({
+        report: teamReport,
+        loading: false,
+        progress: { current: 0, total: 0, step: "" },
+        analyze,
+        canAnalyze: true,
+        cooldownRemainingMs: 0,
+        unavailableReason: null,
+      });
+
+      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} />);
+
+      fireEvent.click(screen.getByText("select-team-entry-1"));
+
+      const onSaved = teamDialogProps.mock.calls.at(-1)?.[0]?.onSaved as (() => void);
+      act(() => {
+        onSaved();
+      });
+
+      expect(analyze).not.toHaveBeenCalled();
+      expect(toastMessageMock).toHaveBeenCalledWith("refreshAfterEdit");
+    });
+
+    it("does not rerun analysis when the team edit dialog closes without saving", () => {
+      const analyze = vi.fn();
+      mockUseWatchtower.mockReturnValue({
+        report: teamReport,
+        loading: false,
+        progress: { current: 0, total: 0, step: "" },
+        analyze,
+        canAnalyze: true,
+        cooldownRemainingMs: 0,
+        unavailableReason: null,
+      });
+
+      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} />);
+
+      fireEvent.click(screen.getByText("select-team-entry-1"));
+
+      const onOpenChange = teamDialogProps.mock.calls.at(-1)?.[0]?.onOpenChange as ((open: boolean) => void);
+      act(() => {
+        onOpenChange(false);
+      });
+
+      expect(analyze).not.toHaveBeenCalled();
+    });
+  });
 });

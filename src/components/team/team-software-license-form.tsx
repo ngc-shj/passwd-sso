@@ -51,6 +51,7 @@ export function TeamSoftwareLicenseForm({
   const [purchaseDate, setPurchaseDate] = useState(editData?.purchaseDate ?? "");
   const [expirationDate, setExpirationDate] = useState(editData?.expirationDate ?? "");
   const [expiryError, setExpiryError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   // hasChanges
   const baselineSnapshot = useMemo(
@@ -166,6 +167,12 @@ export function TeamSoftwareLicenseForm({
     e.preventDefault();
     if (submitDisabled) return;
 
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setEmailError(tsl("invalidEmail"));
+      return;
+    }
+    setEmailError(null);
+
     if (purchaseDate && expirationDate && purchaseDate >= expirationDate) {
       setExpiryError(tsl("expirationBeforePurchase"));
       return;
@@ -258,10 +265,14 @@ export function TeamSoftwareLicenseForm({
               id="team-email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setEmailError(null);
+              }}
               placeholder={tsl("emailPlaceholder")}
               autoComplete="off"
             />
+            {emailError && <p className="text-destructive text-sm">{emailError}</p>}
           </div>
 
           <TeamTagsAndFolderSection {...tagsAndFolderProps} />
