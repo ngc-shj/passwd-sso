@@ -99,6 +99,25 @@ describe("useSidebarNavigationState", () => {
     expect(result.current.activeTeamId).toBeNull();
   });
 
+  it("marks team watchtower without selecting team vault all", () => {
+    const { result } = renderHook(() =>
+      useSidebarNavigationState({
+        pathname: "/ja/dashboard/teams/team-1/watchtower",
+        searchParams: new URLSearchParams(),
+        vaultContext: { type: "team", teamId: "team-1" },
+        teams,
+        folders,
+        tags,
+        teamFolderGroups,
+        teamTagGroups,
+      }),
+    );
+
+    expect(result.current.isWatchtower).toBe(true);
+    expect(result.current.isSelectedVaultAll).toBe(false);
+    expect(result.current.selectedTeamId).toBe("team-1");
+  });
+
   it("allows MEMBER to manage folders and tags in team context", () => {
     const { result } = renderHook(() =>
       useSidebarNavigationState({

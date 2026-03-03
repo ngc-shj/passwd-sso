@@ -5,6 +5,8 @@ import { ENTRY_TYPE } from "@/lib/constants";
 const {
   mockAuth,
   mockPrismaPasswordEntry,
+  mockPrismaFolder,
+  mockPrismaTag,
   mockExtTokenFindUnique,
   mockExtTokenUpdate,
   mockPrismaUser,
@@ -18,6 +20,8 @@ const {
     create: vi.fn(),
     deleteMany: vi.fn(),
   },
+  mockPrismaFolder: { findFirst: vi.fn() },
+  mockPrismaTag: { count: vi.fn() },
   mockExtTokenFindUnique: vi.fn(),
   mockExtTokenUpdate: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
@@ -29,6 +33,8 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: mockPrismaPasswordEntry,
+    folder: mockPrismaFolder,
+    tag: mockPrismaTag,
     user: mockPrismaUser,
     auditLog: { create: mockAuditCreate },
     extensionToken: { findUnique: mockExtTokenFindUnique, update: mockExtTokenUpdate },
@@ -83,6 +89,8 @@ describe("GET /api/passwords", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockPrismaFolder.findFirst.mockResolvedValue({ id: "folder-1" });
+    mockPrismaTag.count.mockResolvedValue(1);
     mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
     mockExtTokenUpdate.mockResolvedValue({});
   });
@@ -281,12 +289,27 @@ describe("GET /api/passwords", () => {
       })
     );
   });
+
+  it("filters by folder when folder query param is provided", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
+    await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      searchParams: { folder: "folder-123" },
+    }));
+    expect(mockPrismaPasswordEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ folderId: "folder-123" }),
+      })
+    );
+  });
 });
 
 describe("POST /api/passwords", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockPrismaFolder.findFirst.mockResolvedValue({ id: "folder-1" });
+    mockPrismaTag.count.mockResolvedValue(1);
+    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockAuditCreate.mockResolvedValue({});
   });
 
@@ -310,6 +333,34 @@ describe("POST /api/passwords", () => {
       body: { encryptedBlob: "not-an-object" },
     }));
     expect(res.status).toBe(400);
+  });
+
+  it("returns 400 on invalid JSON", async () => {
+    const { NextRequest } = await import("next/server");
+    const req = new NextRequest("http://localhost:3000/api/passwords", {
+      method: "POST",
+      body: "{",
+      headers: { "content-type": "application/json" },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 403 when extension token lacks write scope", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockExtTokenFindUnique.mockResolvedValue({
+      id: "tok-2",
+      userId: "token-user",
+      scope: "passwords:read",
+      expiresAt: new Date("2030-01-01"),
+      revokedAt: null,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: validBody,
+      headers: { Authorization: `Bearer ${"c".repeat(64)}` },
+    }));
+    expect(res.status).toBe(403);
   });
 
   it("creates password entry (201)", async () => {
@@ -545,6 +596,36 @@ describe("POST /api/passwords", () => {
         }),
       }),
     );
+  });
+
+  it("returns 400 when folderId is invalid", async () => {
+    mockPrismaFolder.findFirst.mockResolvedValue(null);
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: { ...validBody, folderId: "missing-folder" },
+    }));
+
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when tagIds contain tags owned by another user", async () => {
+    mockPrismaTag.count.mockResolvedValue(0);
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: { ...validBody, tagIds: ["tag-1"] },
+    }));
+
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 401 when actor cannot be resolved", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue(null);
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: validBody,
+    }));
+
+    expect(res.status).toBe(401);
   });
 
   it("strips null bytes and control chars from import filename", async () => {

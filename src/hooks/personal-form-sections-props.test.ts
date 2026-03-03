@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
-import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
+import type { PersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
 
 describe("buildPersonalFormSectionsProps", () => {
   it("maps personal section props from state and copy", () => {
@@ -37,7 +37,7 @@ describe("buildPersonalFormSectionsProps", () => {
   });
 });
 
-function createState(): Pick<PersonalPasswordFormState, "values" | "setters"> {
+function createState(): Pick<PersonalLoginFormState, "values" | "setters"> {
   return {
     values: {
       selectedTags: [],
@@ -47,7 +47,7 @@ function createState(): Pick<PersonalPasswordFormState, "values" | "setters"> {
       showTotpInput: false,
       requireReprompt: false,
       expiresAt: null,
-    } as unknown as PersonalPasswordFormState["values"],
+    } as unknown as PersonalLoginFormState["values"],
     setters: {
       setSelectedTags: vi.fn(),
       setFolderId: vi.fn(),
@@ -56,6 +56,6 @@ function createState(): Pick<PersonalPasswordFormState, "values" | "setters"> {
       setShowTotpInput: vi.fn(),
       setRequireReprompt: vi.fn(),
       setExpiresAt: vi.fn(),
-    } as unknown as PersonalPasswordFormState["setters"],
+    } as unknown as PersonalLoginFormState["setters"],
   };
 }

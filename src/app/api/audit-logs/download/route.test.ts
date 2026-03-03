@@ -157,6 +157,30 @@ describe("GET /api/audit-logs/download", () => {
     expect(json.details.range).toContain("90");
   });
 
+  it("returns 400 for invalid date format", async () => {
+    const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download", {
+      searchParams: { from: "bad-date" },
+    });
+    const res = await GET(req);
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when from is after to", async () => {
+    const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download", {
+      searchParams: { from: "2026-06-02T00:00:00Z", to: "2026-06-01T00:00:00Z" },
+    });
+    const res = await GET(req);
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for invalid action filters", async () => {
+    const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download", {
+      searchParams: { actions: "ENTRY_CREATE,NOT_REAL" },
+    });
+    const res = await GET(req);
+    expect(res.status).toBe(400);
+  });
+
   it("escapes CSV injection characters in output", async () => {
     mockPrismaAuditLog.findMany.mockResolvedValue([
       {
@@ -181,6 +205,35 @@ describe("GET /api/audit-logs/download", () => {
     const body = await parseStreamResponse(res);
     const lines = body.trim().split("\n");
     expect(lines[0]).toContain("metadata");
+  });
+
+  it("paginates when a full batch is returned", async () => {
+    const batch = Array.from({ length: 500 }, (_, index) => ({
+      id: `log-${index}`,
+      action: "ENTRY_CREATE",
+      targetType: "PASSWORD_ENTRY",
+      targetId: `entry-${index}`,
+      metadata: null,
+      ip: null,
+      userAgent: null,
+      createdAt: new Date("2026-01-15T10:00:00Z"),
+      user: { id: "user-1", name: "Test User", email: "test@example.com" },
+    }));
+    mockPrismaAuditLog.findMany
+      .mockResolvedValueOnce(batch)
+      .mockResolvedValueOnce([]);
+
+    const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download");
+    const res = await GET(req);
+    await parseStreamResponse(res);
+
+    expect(mockPrismaAuditLog.findMany).toHaveBeenCalledTimes(2);
+    expect(mockPrismaAuditLog.findMany.mock.calls[1][0]).toEqual(
+      expect.objectContaining({
+        cursor: { id: "log-499" },
+        skip: 1,
+      }),
+    );
   });
 
   it("records audit log download event", async () => {

@@ -6,7 +6,7 @@ import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custo
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
-import type { PersonalPasswordFormState } from "@/hooks/use-personal-password-form-state";
+import type { PersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
 import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";
 
 type EntryTagsAndFolderSectionProps = ComponentProps<typeof EntryTagsAndFolderSection>;
@@ -32,11 +32,11 @@ interface UsePersonalFormSectionsPropsArgs {
   statusSavedLabel: string;
   onCancel: () => void;
   values: Pick<
-    PersonalPasswordFormState["values"],
+    PersonalLoginFormState["values"],
     "selectedTags" | "folderId" | "customFields" | "totp" | "showTotpInput" | "requireReprompt" | "expiresAt"
   >;
   setters: Pick<
-    PersonalPasswordFormState["setters"],
+    PersonalLoginFormState["setters"],
     | "setSelectedTags"
     | "setFolderId"
     | "setCustomFields"

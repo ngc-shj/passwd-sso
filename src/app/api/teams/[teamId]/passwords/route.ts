@@ -14,7 +14,7 @@ type Params = { params: Promise<{ teamId: string }> };
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
-// GET /api/teams/[teamId]/passwords — List team passwords (encrypted overviews, client decrypts)
+// GET /api/teams/[teamId]/passwords — List team passwords (encrypted overviews, optionally blobs)
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -37,6 +37,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const folderId = searchParams.get("folder");
   const rawType = searchParams.get("type");
   const entryType = rawType && VALID_ENTRY_TYPES.has(rawType) ? (rawType as EntryType) : null;
+  const includeBlob = searchParams.get("include") === "blob";
   const favoritesOnly = searchParams.get("favorites") === "true";
   const trashOnly = searchParams.get("trash") === "true";
   const archivedOnly = searchParams.get("archived") === "true";
@@ -90,6 +91,13 @@ export async function GET(req: NextRequest, { params }: Params) {
     encryptedOverview: entry.encryptedOverview,
     overviewIv: entry.overviewIv,
     overviewAuthTag: entry.overviewAuthTag,
+    ...(includeBlob
+      ? {
+          encryptedBlob: entry.encryptedBlob,
+          blobIv: entry.blobIv,
+          blobAuthTag: entry.blobAuthTag,
+        }
+      : {}),
     aadVersion: entry.aadVersion,
     teamKeyVersion: entry.teamKeyVersion,
     isFavorite: entry.favorites.length > 0,

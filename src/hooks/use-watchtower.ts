@@ -2,9 +2,10 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useVault } from "@/lib/vault-context";
+import { useTeamVaultOptional } from "@/lib/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
-import { API_PATH, ENTRY_TYPE, LOCAL_STORAGE_KEY } from "@/lib/constants";
+import { buildPersonalEntryAAD, buildTeamEntryAAD } from "@/lib/crypto-aad";
+import { API_PATH, ENTRY_TYPE, LOCAL_STORAGE_KEY, apiPath } from "@/lib/constants";
 import { getCooldownState } from "@/lib/watchtower/state";
 import {
   analyzeStrength,
@@ -23,22 +24,38 @@ export const WATCHTOWER_COOLDOWN_MS = 5 * 60 * 1000;
 
 export type IssueSeverity = "critical" | "high" | "medium" | "low";
 
-export interface PasswordIssue {
+export interface PersonalWatchtowerEntryRef {
   id: string;
   title: string;
   username: string | null;
-  severity: IssueSeverity;
-  details: string;
+  scope: "personal";
 }
 
+export interface TeamWatchtowerEntryRef {
+  id: string;
+  title: string;
+  username: string | null;
+  scope: "team";
+  teamId: string;
+}
+
+export type WatchtowerEntryRef =
+  | PersonalWatchtowerEntryRef
+  | TeamWatchtowerEntryRef;
+
+export type PasswordIssue = WatchtowerEntryRef & {
+  severity: IssueSeverity;
+  details: string;
+};
+
 export interface ReusedGroup {
-  entries: { id: string; title: string; username: string | null }[];
+  entries: WatchtowerEntryRef[];
 }
 
 export interface DuplicateGroup {
   hostname: string;
   username: string;
-  entries: { id: string; title: string; username: string | null }[];
+  entries: WatchtowerEntryRef[];
 }
 
 export interface WatchtowerReport {
@@ -60,6 +77,14 @@ export interface WatchtowerProgress {
   step: string;
 }
 
+export type WatchtowerAnalysisUnavailableReason =
+  | "personalKeyUnavailable"
+  | "teamKeyUnavailable";
+
+export type WatchtowerScope =
+  | { type: "personal" }
+  | { type: "team"; teamId: string };
+
 interface DecryptedEntry {
   id: string;
   title: string;
@@ -68,14 +93,55 @@ interface DecryptedEntry {
   url: string | null;
   updatedAt: string;
   expiresAt: string | null;
+  scope: "personal" | "team";
+  teamId?: string;
+}
+
+interface FetchWatchtowerEntriesSuccess {
+  status: "ok";
+  entries: DecryptedEntry[];
+}
+
+interface FetchWatchtowerEntriesUnavailable {
+  status: "unavailable";
+  reason: WatchtowerAnalysisUnavailableReason;
+}
+
+type FetchWatchtowerEntriesResult =
+  | FetchWatchtowerEntriesSuccess
+  | FetchWatchtowerEntriesUnavailable;
+
+function toWatchtowerEntryRef(entry: DecryptedEntry): WatchtowerEntryRef {
+  if (entry.scope === "team") {
+    if (!entry.teamId) {
+      throw new Error("Missing teamId for team watchtower entry");
+    }
+    return {
+      id: entry.id,
+      title: entry.title,
+      username: entry.username,
+      scope: "team",
+      teamId: entry.teamId,
+    };
+  }
+
+  return {
+    id: entry.id,
+    title: entry.title,
+    username: entry.username,
+    scope: "personal",
+  };
 }
 
 // ─── Hook ────────────────────────────────────────────────────
 
-export function useWatchtower() {
+export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
   const { encryptionKey, userId } = useVault();
+  const teamVault = useTeamVaultOptional();
   const [report, setReport] = useState<WatchtowerReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const [unavailableReason, setUnavailableReason] =
+    useState<WatchtowerAnalysisUnavailableReason | null>(null);
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [progress, setProgress] = useState<WatchtowerProgress>({
@@ -105,49 +171,104 @@ export function useWatchtower() {
     WATCHTOWER_COOLDOWN_MS
   );
 
-  const analyze = useCallback(async () => {
-    if (!encryptionKey || loading || cooldownRemainingMs > 0) return;
+  const analyze = useCallback(async (
+    options?: {
+      bypassCooldown?: boolean;
+      skipRateLimit?: boolean;
+    },
+  ) => {
+    const bypassCooldown = options?.bypassCooldown === true;
+    const skipRateLimit = options?.skipRateLimit === true;
 
-    const startRes = await fetch(API_PATH.WATCHTOWER_START, { method: "POST" });
-    if (!startRes.ok) {
-      if (startRes.status === 429) {
-        const body = await startRes.json().catch(() => null) as { retryAt?: number } | null;
-        if (typeof body?.retryAt === "number") {
-          const startedAt = body.retryAt - WATCHTOWER_COOLDOWN_MS;
-          setLastAnalyzedAt(startedAt);
-          window.localStorage.setItem(
-            LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
-            String(startedAt)
-          );
-        } else {
-          const fallbackStartedAt = Date.now();
-          setLastAnalyzedAt(fallbackStartedAt);
-          window.localStorage.setItem(
-            LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
-            String(fallbackStartedAt)
-          );
-        }
-      }
+    if (loading || (!bypassCooldown && cooldownRemainingMs > 0)) return;
+    if (scope.type === "personal" && !encryptionKey) {
+      setReport(null);
+      setUnavailableReason("personalKeyUnavailable");
+      return;
+    }
+    if (
+      scope.type === "team" &&
+      (!teamVault || typeof teamVault.getTeamEncryptionKey !== "function")
+    ) {
+      setReport(null);
+      setUnavailableReason("teamKeyUnavailable");
       return;
     }
 
-    const startedAt = Date.now();
-    setLastAnalyzedAt(startedAt);
-    window.localStorage.setItem(
-      LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
-      String(startedAt)
-    );
+    let teamEncryptionKey: CryptoKey | undefined;
+    const getTeamEncryptionKey =
+      scope.type === "team" ? teamVault?.getTeamEncryptionKey : undefined;
+    if (scope.type === "team") {
+      if (!getTeamEncryptionKey) {
+        setReport(null);
+        setUnavailableReason("teamKeyUnavailable");
+        return;
+      }
+      teamEncryptionKey = await getTeamEncryptionKey(scope.teamId) ?? undefined;
+      if (!teamEncryptionKey) {
+        setReport(null);
+        setUnavailableReason("teamKeyUnavailable");
+        return;
+      }
+    }
+
+    if (!skipRateLimit) {
+      const startRes = await fetch(API_PATH.WATCHTOWER_START, { method: "POST" });
+      if (!startRes.ok) {
+        if (startRes.status === 429) {
+          const body = await startRes.json().catch(() => null) as { retryAt?: number } | null;
+          if (typeof body?.retryAt === "number") {
+            const startedAt = body.retryAt - WATCHTOWER_COOLDOWN_MS;
+            setLastAnalyzedAt(startedAt);
+            window.localStorage.setItem(
+              LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
+              String(startedAt)
+            );
+          } else {
+            const fallbackStartedAt = Date.now();
+            setLastAnalyzedAt(fallbackStartedAt);
+            window.localStorage.setItem(
+              LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
+              String(fallbackStartedAt)
+            );
+          }
+        }
+        return;
+      }
+    }
+
+    if (!bypassCooldown) {
+      const startedAt = Date.now();
+      setLastAnalyzedAt(startedAt);
+      window.localStorage.setItem(
+        LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
+        String(startedAt)
+      );
+    }
 
     setLoading(true);
+    setUnavailableReason(null);
 
     try {
-      // Step 1: Fetch all encrypted passwords (including blobs)
+      // Step 1: Fetch and decrypt the selected vault's login entries
       setProgress({ current: 0, total: 4, step: "fetching" });
-      const res = await fetch(`${API_PATH.PASSWORDS}?include=blob`);
-      if (!res.ok) throw new Error("Failed to fetch passwords");
-      const rawEntries = await res.json();
+      const entryResult = await fetchWatchtowerEntries({
+        scope,
+        encryptionKey: encryptionKey ?? undefined,
+        teamEncryptionKey,
+        userId: userId ?? undefined,
+        getTeamEncryptionKey,
+      });
 
-      if (rawEntries.length === 0) {
+      if (entryResult.status === "unavailable") {
+        setReport(null);
+        setUnavailableReason(entryResult.reason);
+        return;
+      }
+
+      const entries = entryResult.entries;
+
+      if (entries.length === 0) {
         setReport({
           totalPasswords: 0,
           overallScore: 100,
@@ -163,37 +284,7 @@ export function useWatchtower() {
         return;
       }
 
-      // Step 2: Decrypt all entries (skip non-LOGIN — no password to analyze)
-      setProgress({ current: 1, total: 4, step: "decrypting" });
-      const entries: DecryptedEntry[] = [];
-      for (const raw of rawEntries) {
-        if (!raw.encryptedBlob) continue;
-        if (raw.entryType && raw.entryType !== ENTRY_TYPE.LOGIN) continue;
-        try {
-          const aad = raw.aadVersion >= 1 && userId
-            ? buildPersonalEntryAAD(userId, raw.id)
-            : undefined;
-          const plaintext = await decryptData(
-            raw.encryptedBlob as EncryptedData,
-            encryptionKey,
-            aad
-          );
-          const parsed = JSON.parse(plaintext);
-          entries.push({
-            id: raw.id,
-            title: parsed.title,
-            username: parsed.username,
-            password: parsed.password,
-            url: parsed.url ?? null,
-            updatedAt: raw.updatedAt,
-            expiresAt: raw.expiresAt ?? null,
-          });
-        } catch {
-          // Skip entries that fail to decrypt
-        }
-      }
-
-      // Step 3: Local analysis (duplicates, strength, age)
+      // Step 2: Local analysis (duplicates, strength, age)
       setProgress({ current: 2, total: 4, step: "analyzing" });
 
       // Duplicate detection via hash comparison
@@ -216,11 +307,7 @@ export function useWatchtower() {
       for (const group of hashMap.values()) {
         if (group.length > 1) {
           reused.push({
-            entries: group.map((e) => ({
-              id: e.id,
-              title: e.title,
-              username: e.username,
-            })),
+            entries: group.map(toWatchtowerEntryRef),
           });
         }
       }
@@ -233,9 +320,7 @@ export function useWatchtower() {
         strengthMap.set(entry.id, result);
         if (result.score < 50) {
           weak.push({
-            id: entry.id,
-            title: entry.title,
-            username: entry.username,
+            ...toWatchtowerEntryRef(entry),
             severity: result.score < 25 ? "high" : "medium",
             details: `entropy:${result.entropy}`,
           });
@@ -250,9 +335,7 @@ export function useWatchtower() {
         const days = Math.floor((now - updatedAt) / (24 * 60 * 60 * 1000));
         if (days > OLD_THRESHOLD_DAYS) {
           old.push({
-            id: entry.id,
-            title: entry.title,
-            username: entry.username,
+            ...toWatchtowerEntryRef(entry),
             severity: days > 180 ? "medium" : "low",
             details: `days:${days}`,
           });
@@ -264,9 +347,7 @@ export function useWatchtower() {
       for (const entry of entries) {
         if (entry.url && entry.url.startsWith("http://")) {
           unsecured.push({
-            id: entry.id,
-            title: entry.title,
-            username: entry.username,
+            ...toWatchtowerEntryRef(entry),
             severity: "medium",
             details: `url:${entry.url}`,
           });
@@ -291,7 +372,7 @@ export function useWatchtower() {
         const [hostname, username] = key.split("\0");
         duplicate.push({
           hostname, username,
-          entries: group.map((e) => ({ id: e.id, title: e.title, username: e.username })),
+          entries: group.map(toWatchtowerEntryRef),
         });
       }
 
@@ -310,9 +391,7 @@ export function useWatchtower() {
         const todayMs = new Date(todayStr).getTime();
         const daysDiff = Math.round(Math.abs(expiresAtMs - todayMs) / (24 * 60 * 60 * 1000));
         expiring.push({
-          id: entry.id,
-          title: entry.title,
-          username: entry.username,
+          ...toWatchtowerEntryRef(entry),
           severity: isExpired ? "medium" : "low",
           details: isExpired
             ? `expired:${daysDiff}`
@@ -320,7 +399,7 @@ export function useWatchtower() {
         });
       }
 
-      // Step 4: HIBP breach check (rate-limited)
+      // Step 3: HIBP breach check (rate-limited)
       setProgress({ current: 3, total: 4, step: "hibp" });
       const breached: PasswordIssue[] = [];
       // Deduplicate passwords to avoid redundant HIBP calls
@@ -345,9 +424,7 @@ export function useWatchtower() {
         if (result.breached) {
           for (const entry of associatedEntries) {
             breached.push({
-              id: entry.id,
-              title: entry.title,
-              username: entry.username,
+              ...toWatchtowerEntryRef(entry),
               severity: "critical",
               details: `count:${result.count}`,
             });
@@ -386,7 +463,7 @@ export function useWatchtower() {
     } finally {
       setLoading(false);
     }
-  }, [encryptionKey, userId, loading, cooldownRemainingMs]);
+  }, [scope, encryptionKey, userId, loading, cooldownRemainingMs, teamVault]);
 
   return {
     report,
@@ -396,6 +473,7 @@ export function useWatchtower() {
     canAnalyze,
     cooldownRemainingMs,
     nextAllowedAt,
+    unavailableReason,
   };
 }
 
@@ -408,6 +486,148 @@ function normalizeHostname(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+async function fetchWatchtowerEntries({
+  scope,
+  encryptionKey,
+  teamEncryptionKey,
+  userId,
+  getTeamEncryptionKey,
+}: {
+  scope: WatchtowerScope;
+  encryptionKey?: CryptoKey;
+  teamEncryptionKey?: CryptoKey;
+  userId?: string;
+  getTeamEncryptionKey?: (teamId: string) => Promise<CryptoKey | null>;
+}): Promise<FetchWatchtowerEntriesResult> {
+  if (scope.type === "team") {
+    if (!getTeamEncryptionKey) {
+      return { status: "unavailable", reason: "teamKeyUnavailable" };
+    }
+    return fetchTeamWatchtowerEntries({
+      teamId: scope.teamId,
+      teamEncryptionKey,
+      getTeamEncryptionKey,
+    });
+  }
+
+  return {
+    status: "ok",
+    entries: await fetchPersonalWatchtowerEntries({
+      encryptionKey,
+      userId,
+    }),
+  };
+}
+
+async function fetchPersonalWatchtowerEntries({
+  encryptionKey,
+  userId,
+}: {
+  encryptionKey?: CryptoKey;
+  userId?: string;
+}): Promise<DecryptedEntry[]> {
+  if (!encryptionKey) return [];
+  const res = await fetch(`${API_PATH.PASSWORDS}?include=blob`);
+  if (!res.ok) throw new Error("Failed to fetch passwords");
+  const rawEntries = await res.json();
+  const entries: DecryptedEntry[] = [];
+
+  for (const raw of rawEntries) {
+    if (!raw.encryptedBlob) continue;
+    if (raw.entryType && raw.entryType !== ENTRY_TYPE.LOGIN) continue;
+    try {
+      const aad = raw.aadVersion >= 1 && userId
+        ? buildPersonalEntryAAD(userId, raw.id)
+        : undefined;
+      const plaintext = await decryptData(
+        raw.encryptedBlob as EncryptedData,
+        encryptionKey,
+        aad,
+      );
+      const parsed = JSON.parse(plaintext);
+      entries.push({
+        id: raw.id,
+        title: parsed.title,
+        username: parsed.username,
+        password: parsed.password,
+        url: parsed.url ?? null,
+        updatedAt: raw.updatedAt,
+        expiresAt: raw.expiresAt ?? null,
+        scope: "personal",
+      });
+    } catch {
+      // Skip entries that fail to decrypt
+    }
+  }
+
+  return entries;
+}
+
+async function fetchTeamWatchtowerEntries({
+  teamId,
+  teamEncryptionKey,
+  getTeamEncryptionKey,
+}: {
+  teamId: string;
+  teamEncryptionKey?: CryptoKey;
+  getTeamEncryptionKey: (teamId: string) => Promise<CryptoKey | null>;
+}): Promise<FetchWatchtowerEntriesResult> {
+  const entries: DecryptedEntry[] = [];
+
+  const teamKey = teamEncryptionKey ?? await getTeamEncryptionKey(teamId);
+  if (!teamKey) {
+    return { status: "unavailable", reason: "teamKeyUnavailable" };
+  }
+
+  const listRes = await fetch(
+    `${apiPath.teamPasswords(teamId)}?type=${ENTRY_TYPE.LOGIN}&include=blob`,
+  );
+  if (!listRes.ok) throw new Error("Failed to fetch team passwords");
+  const listedEntries = await listRes.json();
+  if (!Array.isArray(listedEntries) || listedEntries.length === 0) {
+    return { status: "ok", entries };
+  }
+
+  for (const raw of listedEntries) {
+    if (!raw || typeof raw !== "object" || typeof raw.id !== "string") continue;
+    try {
+      if (
+        typeof raw.encryptedBlob !== "string" ||
+        typeof raw.blobIv !== "string" ||
+        typeof raw.blobAuthTag !== "string"
+      ) {
+        continue;
+      }
+      const aad = buildTeamEntryAAD(teamId, raw.id, "blob");
+      const plaintext = await decryptData(
+        {
+          ciphertext: raw.encryptedBlob,
+          iv: raw.blobIv,
+          authTag: raw.blobAuthTag,
+        },
+        teamKey,
+        aad,
+      );
+      const parsed = JSON.parse(plaintext);
+      entries.push({
+        id: raw.id,
+        title: parsed.title,
+        username: parsed.username ?? null,
+        password: parsed.password,
+        url: parsed.url ?? null,
+        updatedAt: raw.updatedAt,
+        expiresAt: raw.expiresAt ?? null,
+        scope: "team",
+        teamId,
+      });
+    } catch {
+      // Skip team entries that fail to decrypt
+    }
+  }
+
+  return { status: "ok", entries };
 }
 
 // ─── Score Calculation ───────────────────────────────────────

@@ -52,7 +52,7 @@ describe("useVaultContext", () => {
   });
 
   it("uses last team context on cross-vault pages", () => {
-    mockPathname = "/dashboard/watchtower";
+    mockPathname = "/dashboard/share-links";
     mockLastContext = "team-1";
 
     const { result } = renderHook(() =>
@@ -117,7 +117,7 @@ describe("useVaultContext", () => {
   });
 
   it("persists personal context when returning to personal pages", () => {
-    mockPathname = "/dashboard/archive";
+    mockPathname = "/dashboard/watchtower";
     mockLastContext = "team-1";
 
     renderHook(() =>
@@ -125,5 +125,20 @@ describe("useVaultContext", () => {
     );
 
     expect(mockSetLastContext).toHaveBeenCalledWith("personal");
+  });
+
+  it("returns team context on team watchtower route", () => {
+    mockPathname = "/dashboard/teams/team-1/watchtower";
+
+    const { result } = renderHook(() =>
+      useVaultContext([{ id: "team-1", name: "Security", role: "ADMIN" }])
+    );
+
+    expect(result.current).toEqual({
+      type: "team",
+      teamId: "team-1",
+      teamName: "Security",
+      teamRole: "ADMIN",
+    });
   });
 });

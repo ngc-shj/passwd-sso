@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, forwardRef } from "react";
 import { useTranslations } from "next-intl";
 import { PasswordCard } from "@/components/passwords/password-card";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
-import { TeamPasswordForm } from "@/components/team/team-password-form";
+import { TeamEditDialogLoader } from "@/components/team/team-edit-dialog-loader";
 import { Building2, RotateCcw, Trash2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
@@ -80,17 +80,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editTeamId, setEditTeamId] = useState<string | null>(null);
-  const [editData, setEditData] = useState<{
-    id: string;
-    title: string;
-    username: string | null;
-    password: string;
-    url: string | null;
-    notes: string | null;
-    tags?: { id: string; name: string; color: string | null }[];
-    customFields?: EntryCustomField[];
-    totp?: EntryTotp | null;
-  } | null>(null);
+  const [editEntryId, setEditEntryId] = useState<string | null>(null);
 
   const effectiveSelectionMode = scopedTeamId ? (selectionMode ?? false) : false;
 
@@ -301,27 +291,9 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   const handleEdit = async (id: string) => {
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;
-    try {
-      const res = await fetch(apiPath.teamPasswordById(entry.teamId, id));
-      if (!res.ok) return;
-      const raw = await res.json();
-      const blob = await decryptFullBlob(entry.teamId, id, raw);
-      setEditTeamId(entry.teamId);
-      setEditData({
-        id: raw.id,
-        title: (blob.title as string) ?? "",
-        username: (blob.username as string) ?? null,
-        password: (blob.password as string) ?? "",
-        url: (blob.url as string) ?? null,
-        notes: (blob.notes as string) ?? null,
-        tags: raw.tags,
-        customFields: blob.customFields as EntryCustomField[] | undefined,
-        totp: blob.totp as EntryTotp | null | undefined,
-      });
-      setFormOpen(true);
-    } catch {
-      // ignore
-    }
+    setEditTeamId(entry.teamId);
+    setEditEntryId(id);
+    setFormOpen(true);
   };
 
   const createDetailFetcher = useCallback(
@@ -541,16 +513,16 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
         onConfirm={() => void executeAction()}
       />
 
-      {editTeamId && (
-        <TeamPasswordForm
+      {editTeamId && editEntryId && (
+        <TeamEditDialogLoader
           teamId={editTeamId}
+          id={editEntryId}
           open={formOpen}
           onOpenChange={setFormOpen}
           onSaved={() => {
             fetchArchived();
             setExpandedId(null);
           }}
-          editData={editData}
         />
       )}
     </div>

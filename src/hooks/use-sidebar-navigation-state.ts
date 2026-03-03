@@ -44,7 +44,6 @@ export function useSidebarNavigationState({
     const isVaultFavorites = cleanPath === "/dashboard/favorites";
     const isVaultArchive = cleanPath === "/dashboard/archive";
     const isVaultTrash = cleanPath === "/dashboard/trash";
-    const isWatchtower = cleanPath === "/dashboard/watchtower";
     const isAuditLog = cleanPath === "/dashboard/audit-logs" || cleanPath.endsWith("/audit-logs");
     const isPersonalAuditLog = cleanPath === "/dashboard/audit-logs";
     const auditTeamMatch = cleanPath.match(/^\/dashboard\/teams\/([^/]+)\/audit-logs$/);
@@ -59,6 +58,9 @@ export function useSidebarNavigationState({
     const activeTeamFolderId = activeTeamId ? searchParams.get("folder") : null;
     const activeTeamTypeFilter = activeTeamId ? searchParams.get("type") : null;
     const activeTeamScope = activeTeamId ? searchParams.get("scope") : null;
+    const isWatchtower = teamMatch
+      ? cleanPath === `/dashboard/teams/${teamMatch[1]}/watchtower`
+      : cleanPath === "/dashboard/watchtower";
     const isTeamsManage = cleanPath === "/dashboard/teams";
     const isTeamSettings = teamMatch
       ? cleanPath === `/dashboard/teams/${teamMatch[1]}/settings`
@@ -111,10 +113,11 @@ export function useSidebarNavigationState({
           !selectedTeamScope &&
           !selectedTeamTagId &&
           !selectedTeamFolderId &&
+          !isWatchtower &&
           !isTeamSettings &&
           !isExport &&
           !isImport
-        : isVaultAll;
+        : isVaultAll && !isWatchtower;
 
     const isSelectedVaultFavorites =
       vaultContext.type === "team"
