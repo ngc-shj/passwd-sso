@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
@@ -58,15 +59,25 @@ export async function POST(_req: NextRequest, { params }: Params) {
     );
     return NextResponse.json({ isFavorite: false });
   } else {
-    await withTeamTenantRls(teamId, async () =>
-      prisma.teamPasswordFavorite.create({
-        data: {
-          userId: session.user.id,
-          teamPasswordEntryId: id,
-          tenantId: entry.tenantId,
-        },
-      }),
-    );
+    try {
+      await withTeamTenantRls(teamId, async () =>
+        prisma.teamPasswordFavorite.create({
+          data: {
+            userId: session.user.id,
+            teamPasswordEntryId: id,
+            tenantId: entry.tenantId,
+          },
+        }),
+      );
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        return NextResponse.json({ isFavorite: true });
+      }
+      throw error;
+    }
     return NextResponse.json({ isFavorite: true });
   }
 }
