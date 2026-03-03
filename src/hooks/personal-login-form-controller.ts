@@ -11,6 +11,7 @@ import type { PasswordFormRouter } from "@/hooks/password-form-router";
 export interface PersonalLoginFormControllerArgs {
   mode: Pick<PersonalLoginFormProps, "mode">["mode"];
   initialData: Pick<PersonalLoginFormProps, "initialData">["initialData"];
+  variant?: Pick<PersonalLoginFormProps, "variant">["variant"];
   onSaved: Pick<PersonalLoginFormProps, "onSaved">["onSaved"];
   encryptionKey: CryptoKey | null;
   userId?: string | null;
@@ -23,6 +24,7 @@ export interface PersonalLoginFormControllerArgs {
 export function buildPersonalLoginFormController({
   mode,
   initialData,
+  variant,
   onSaved,
   encryptionKey,
   userId,
@@ -31,7 +33,10 @@ export function buildPersonalLoginFormController({
   translations,
   router,
 }: PersonalLoginFormControllerArgs) {
-  const { handleCancel, handleBack } = createFormNavigationHandlers({ onSaved, router });
+  const { handleCancel, handleBack } = createFormNavigationHandlers({
+    onCancel: variant === "dialog" ? onSaved : undefined,
+    router,
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

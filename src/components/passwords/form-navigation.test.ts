@@ -2,14 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
 
 describe("createFormNavigationHandlers", () => {
-  it("calls onSaved on cancel when provided", () => {
-    const onSaved = vi.fn();
+  it("calls onCancel on cancel when provided", () => {
+    const onCancel = vi.fn();
     const router = { back: vi.fn() };
-    const { handleCancel } = createFormNavigationHandlers({ onSaved, router });
+    const { handleCancel } = createFormNavigationHandlers({ onCancel, router });
 
     handleCancel();
 
-    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(onCancel).toHaveBeenCalledTimes(1);
     expect(router.back).not.toHaveBeenCalled();
   });
 

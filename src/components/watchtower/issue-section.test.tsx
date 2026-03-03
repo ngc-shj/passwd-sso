@@ -3,12 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-vi.mock("@/i18n/navigation", () => ({
-  Link: ({ href, children }: { href: string; children: React.ReactNode }) => (
-    <a href={href}>{children}</a>
-  ),
-}));
-
 import { IssueSection, ReusedSection } from "./issue-section";
 import type { PasswordIssue, ReusedGroup } from "@/hooks/use-watchtower";
 
@@ -48,6 +42,24 @@ describe("IssueSection", () => {
     expect(screen.getByText("Gmail")).toBeInTheDocument();
     expect(screen.getByText("user@gmail.com")).toBeInTheDocument();
     expect(screen.getByText("Detail: breached")).toBeInTheDocument();
+  });
+
+  it("calls onSelectEntry when action button is clicked", () => {
+    const onSelectEntry = vi.fn();
+    const issues: PasswordIssue[] = [
+      { id: "1", title: "Gmail", username: "user@gmail.com", details: "breached", severity: "critical" },
+    ];
+    render(
+      <IssueSection
+        {...baseProps}
+        issues={issues}
+        onSelectEntry={onSelectEntry}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button")[1]!);
+
+    expect(onSelectEntry).toHaveBeenCalledWith("1");
   });
 
   it("hides issue list when collapsed via click", () => {
@@ -116,6 +128,24 @@ describe("ReusedSection", () => {
     expect(screen.getByText("Gmail")).toBeInTheDocument();
     expect(screen.getByText("Twitter")).toBeInTheDocument();
     expect(screen.getByText("user1")).toBeInTheDocument();
+  });
+
+  it("calls onSelectEntry for reused entries", () => {
+    const onSelectEntry = vi.fn();
+    const groups: ReusedGroup[] = [
+      { entries: [{ id: "1", title: "Gmail", username: "user1" }] },
+    ];
+    render(
+      <ReusedSection
+        {...baseProps}
+        groups={groups}
+        onSelectEntry={onSelectEntry}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button")[1]!);
+
+    expect(onSelectEntry).toHaveBeenCalledWith("1");
   });
 
   it("collapses on click", () => {

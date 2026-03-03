@@ -32,6 +32,7 @@ export function PersonalLoginForm({ mode, initialData, variant = "page", onSaved
   } = usePersonalLoginFormModel({
     mode,
     initialData,
+    variant,
     onSaved,
     defaultFolderId,
     defaultTags,

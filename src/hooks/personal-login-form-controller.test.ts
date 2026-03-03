@@ -26,6 +26,7 @@ describe("buildPersonalLoginFormController", () => {
 
     const controller = buildPersonalLoginFormController({
       mode: "create",
+      variant: "dialog",
       onSaved,
       encryptionKey: {} as CryptoKey,
       userId: "user-1",
@@ -55,6 +56,7 @@ describe("buildPersonalLoginFormController", () => {
   it("normalizes null userId to undefined in submit args", async () => {
     const controller = buildPersonalLoginFormController({
       mode: "create",
+      variant: "page",
       onSaved: vi.fn(),
       encryptionKey: {} as CryptoKey,
       userId: null,
@@ -68,6 +70,28 @@ describe("buildPersonalLoginFormController", () => {
 
     expect(submitPersonalLoginFormMock).toHaveBeenCalledTimes(1);
     expect(submitPersonalLoginFormMock.mock.calls[0]?.[0]?.userId).toBeUndefined();
+  });
+
+  it("uses router.back for page cancel even when onSaved exists", () => {
+    const onSaved = vi.fn();
+    const back = vi.fn();
+
+    const controller = buildPersonalLoginFormController({
+      mode: "edit",
+      variant: "page",
+      onSaved,
+      encryptionKey: {} as CryptoKey,
+      userId: "user-1",
+      values: buildValues(),
+      setSubmitting: vi.fn(),
+      translations: buildTranslations(),
+      router: { push: vi.fn(), refresh: vi.fn(), back },
+    } as unknown as Parameters<typeof buildPersonalLoginFormController>[0]);
+
+    controller.handleCancel();
+
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(back).toHaveBeenCalledTimes(1);
   });
 });
 

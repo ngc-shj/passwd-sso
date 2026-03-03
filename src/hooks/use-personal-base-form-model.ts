@@ -64,7 +64,7 @@ export function usePersonalBaseFormModel({
   );
 
   const { handleCancel, handleBack } = createFormNavigationHandlers({
-    onSaved,
+    onCancel: variant === "dialog" ? onSaved : undefined,
     router,
   });
 

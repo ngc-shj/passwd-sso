@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
+import { PasswordEditDialogLoader } from "@/components/passwords/personal-password-edit-dialog-loader";
 import { useWatchtower, OLD_THRESHOLD_DAYS, EXPIRING_THRESHOLD_DAYS } from "@/hooks/use-watchtower";
 import { ScoreGauge } from "@/components/watchtower/score-gauge";
 import {
@@ -50,6 +51,7 @@ export default function WatchtowerPage() {
   } = useWatchtower();
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const [editEntryId, setEditEntryId] = useState<string | null>(null);
   const allowLeaveRef = useRef(false);
 
   useEffect(() => {
@@ -247,6 +249,7 @@ export default function WatchtowerPage() {
                   description={t("breachedDesc")}
                   issues={report.breached}
                   formatDetails={(d) => formatBreachDetails(d, t)}
+                  onSelectEntry={setEditEntryId}
                 />
                 <IssueSection
                   type="weak"
@@ -254,12 +257,14 @@ export default function WatchtowerPage() {
                   description={t("weakDesc")}
                   issues={report.weak}
                   formatDetails={(d) => formatWeakDetails(d, t)}
+                  onSelectEntry={setEditEntryId}
                 />
                 <ReusedSection
                   title={t("reused")}
                   description={t("reusedDesc")}
                   groups={report.reused}
                   formatCount={(count) => t("reusedCount", { count })}
+                  onSelectEntry={setEditEntryId}
                 />
                 <IssueSection
                   type="old"
@@ -267,6 +272,7 @@ export default function WatchtowerPage() {
                   description={t("oldDesc", { days: OLD_THRESHOLD_DAYS })}
                   issues={report.old}
                   formatDetails={(d) => formatOldDetails(d, t)}
+                  onSelectEntry={setEditEntryId}
                 />
                 <IssueSection
                   type="unsecured"
@@ -274,12 +280,14 @@ export default function WatchtowerPage() {
                   description={t("unsecuredDesc")}
                   issues={report.unsecured}
                   formatDetails={formatUnsecuredDetails}
+                  onSelectEntry={setEditEntryId}
                 />
                 <DuplicateSection
                   title={t("duplicate")}
                   description={t("duplicateDesc")}
                   groups={report.duplicate}
                   formatCount={(count, hostname) => t("duplicateCount", { count, hostname })}
+                  onSelectEntry={setEditEntryId}
                 />
                 <IssueSection
                   type="expiring"
@@ -287,6 +295,7 @@ export default function WatchtowerPage() {
                   description={t("expiringDesc", { days: EXPIRING_THRESHOLD_DAYS })}
                   issues={report.expiring}
                   formatDetails={(d) => formatExpiringDetails(d, locale, t)}
+                  onSelectEntry={setEditEntryId}
                 />
               </div>
             )}
@@ -305,6 +314,18 @@ export default function WatchtowerPage() {
           </>
         )}
       </div>
+      {editEntryId && (
+        <PasswordEditDialogLoader
+          id={editEntryId}
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setEditEntryId(null);
+          }}
+          onSaved={() => {
+            setEditEntryId(null);
+          }}
+        />
+      )}
     </div>
   );
 }

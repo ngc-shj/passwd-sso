@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Link } from "@/i18n/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +39,7 @@ interface IssueSectionProps {
   description: string;
   issues: PasswordIssue[];
   formatDetails: (details: string) => string;
+  onSelectEntry?: (entryId: string) => void;
 }
 
 export function IssueSection({
@@ -48,6 +48,7 @@ export function IssueSection({
   description,
   issues,
   formatDetails,
+  onSelectEntry,
 }: IssueSectionProps) {
   const [expanded, setExpanded] = useState(issues.length > 0);
   const config = issueConfig[type];
@@ -95,10 +96,13 @@ export function IssueSection({
                   {formatDetails(issue.details)}
                 </p>
               </div>
-              <Button variant="ghost" size="sm" asChild>
-                <Link href={`/dashboard/${issue.id}`}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onSelectEntry?.(issue.id)}
+                disabled={!onSelectEntry}
+              >
                   <ExternalLink className="h-3.5 w-3.5" />
-                </Link>
               </Button>
             </div>
           ))}
@@ -115,6 +119,7 @@ interface ReusedSectionProps {
   description: string;
   groups: ReusedGroup[];
   formatCount: (count: number) => string;
+  onSelectEntry?: (entryId: string) => void;
 }
 
 export function ReusedSection({
@@ -122,6 +127,7 @@ export function ReusedSection({
   description,
   groups,
   formatCount,
+  onSelectEntry,
 }: ReusedSectionProps) {
   const [expanded, setExpanded] = useState(groups.length > 0);
   const config = issueConfig.reused;
@@ -174,10 +180,13 @@ export function ReusedSection({
                         </span>
                       )}
                     </div>
-                    <Button variant="ghost" size="sm" asChild>
-                      <Link href={`/dashboard/${entry.id}`}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onSelectEntry?.(entry.id)}
+                      disabled={!onSelectEntry}
+                    >
                         <ExternalLink className="h-3.5 w-3.5" />
-                      </Link>
                     </Button>
                   </div>
                 ))}
@@ -197,6 +206,7 @@ interface DuplicateSectionProps {
   description: string;
   groups: DuplicateGroup[];
   formatCount: (count: number, hostname: string) => string;
+  onSelectEntry?: (entryId: string) => void;
 }
 
 export function DuplicateSection({
@@ -204,6 +214,7 @@ export function DuplicateSection({
   description,
   groups,
   formatCount,
+  onSelectEntry,
 }: DuplicateSectionProps) {
   const [expanded, setExpanded] = useState(groups.length > 0);
   const Icon = Files;
@@ -255,10 +266,13 @@ export function DuplicateSection({
                         </span>
                       )}
                     </div>
-                    <Button variant="ghost" size="sm" asChild>
-                      <Link href={`/dashboard/${entry.id}`}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onSelectEntry?.(entry.id)}
+                      disabled={!onSelectEntry}
+                    >
                         <ExternalLink className="h-3.5 w-3.5" />
-                      </Link>
                     </Button>
                   </div>
                 ))}
