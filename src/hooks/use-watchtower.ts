@@ -196,8 +196,15 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
     }
 
     let teamEncryptionKey: CryptoKey | undefined;
+    const getTeamEncryptionKey =
+      scope.type === "team" ? teamVault?.getTeamEncryptionKey : undefined;
     if (scope.type === "team") {
-      teamEncryptionKey = await teamVault.getTeamEncryptionKey(scope.teamId) ?? undefined;
+      if (!getTeamEncryptionKey) {
+        setReport(null);
+        setUnavailableReason("teamKeyUnavailable");
+        return;
+      }
+      teamEncryptionKey = await getTeamEncryptionKey(scope.teamId) ?? undefined;
       if (!teamEncryptionKey) {
         setReport(null);
         setUnavailableReason("teamKeyUnavailable");
@@ -247,10 +254,10 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
       setProgress({ current: 0, total: 4, step: "fetching" });
       const entryResult = await fetchWatchtowerEntries({
         scope,
-        encryptionKey,
+        encryptionKey: encryptionKey ?? undefined,
         teamEncryptionKey,
         userId: userId ?? undefined,
-        getTeamEncryptionKey: teamVault?.getTeamEncryptionKey,
+        getTeamEncryptionKey,
       });
 
       if (entryResult.status === "unavailable") {

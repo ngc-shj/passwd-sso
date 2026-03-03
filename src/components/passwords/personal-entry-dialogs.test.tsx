@@ -95,6 +95,7 @@ describe("personal entry dialogs", () => {
           title: "Entry",
           username: "alice",
           password: "secret",
+          content: "",
           url: "",
           notes: "",
           tags: [],

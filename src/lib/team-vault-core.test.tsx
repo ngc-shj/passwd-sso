@@ -89,7 +89,7 @@ describe("team-vault-core", () => {
     mockUnwrapTeamKey.mockResolvedValue(unwrappedKey);
     mockDeriveTeamEncryptionKey.mockResolvedValue(encryptionKey);
 
-    const fetchMock = vi.fn(async (url: string) => ({
+    const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({
         encryptedTeamKey: "cipher",

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DuplicateSection } from "@/components/watchtower/issue-section";
 import type { DuplicateGroup } from "@/hooks/use-watchtower";
 

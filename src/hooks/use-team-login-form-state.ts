@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
@@ -52,7 +52,7 @@ export function useTeamLoginFormState({
   const [url, setUrl] = useState(editData?.url ?? "");
   const [showPassword, setShowPassword] = useState(false);
   const [showGenerator, setShowGenerator] = useState(false);
-  const [generatorSettings, setGeneratorSettings] = useState<GeneratorSettings>(
+  const [rawGeneratorSettings, setRawGeneratorSettings] = useState<GeneratorSettings>(
     () => buildPolicyAwareGeneratorSettings(teamPolicy),
   );
   const [customFields, setCustomFields] = useState<EntryCustomField[]>(
@@ -60,11 +60,12 @@ export function useTeamLoginFormState({
   );
   const [totp, setTotp] = useState<EntryTotp | null>(editData?.totp ?? null);
   const [showTotpInput, setShowTotpInput] = useState(Boolean(editData?.totp));
-
-  useEffect(() => {
-    setGeneratorSettings((current) =>
-      applyPolicyToGeneratorSettings(current, teamPolicy),
-    );
+  const generatorSettings = applyPolicyToGeneratorSettings(
+    rawGeneratorSettings,
+    teamPolicy,
+  );
+  const setGeneratorSettings = useCallback((value: GeneratorSettings) => {
+    setRawGeneratorSettings(applyPolicyToGeneratorSettings(value, teamPolicy));
   }, [teamPolicy]);
 
   return {
