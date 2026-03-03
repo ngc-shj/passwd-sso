@@ -109,4 +109,9 @@ describe("getScimBaseUrl", () => {
     process.env.AUTH_URL = "https://example.com/passwd-sso";
     expect(getScimBaseUrl()).toBe("https://example.com/passwd-sso/api/scim/v2");
   });
+
+  it("strips trailing slash from AUTH_URL with basePath", () => {
+    process.env.AUTH_URL = "https://example.com/passwd-sso/";
+    expect(getScimBaseUrl()).toBe("https://example.com/passwd-sso/api/scim/v2");
+  });
 });

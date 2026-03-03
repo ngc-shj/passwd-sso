@@ -5,6 +5,9 @@ export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
  * Client-side only — do NOT use inside server-side route handlers.
  */
 export function withBasePath(path: string): string {
+  if (process.env.NODE_ENV !== "production" && path && !path.startsWith("/")) {
+    console.warn(`withBasePath: path should start with "/", got "${path}"`);
+  }
   return `${BASE_PATH}${path}`;
 }
 
@@ -13,6 +16,9 @@ export function withBasePath(path: string): string {
  * Client-side only — do NOT use inside server-side route handlers.
  */
 export function fetchApi(path: string, init?: RequestInit): Promise<Response> {
+  if (typeof window === "undefined") {
+    throw new Error("fetchApi is client-only. Use absolute URLs on the server.");
+  }
   const url = withBasePath(path);
   return init !== undefined ? fetch(url, init) : fetch(url);
 }

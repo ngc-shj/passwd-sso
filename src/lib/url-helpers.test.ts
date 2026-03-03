@@ -52,6 +52,15 @@ describe("url-helpers (no basePath)", () => {
     expect(spy).toHaveBeenCalledWith("/api/passwords", init);
   });
 
+  it("fetchApi calls fetch without init when init is omitted", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response());
+    const { fetchApi } = await import("@/lib/url-helpers");
+
+    await fetchApi("/api/passwords");
+
+    expect(spy).toHaveBeenCalledWith("/api/passwords");
+  });
+
   it("appUrl returns origin + path without basePath", async () => {
     Object.defineProperty(window, "location", {
       value: { origin: "https://example.com" },

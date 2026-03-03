@@ -60,6 +60,17 @@ describe("resolveNavigationTarget with basePath", () => {
     expect(result.internalPath).toBe("/dashboard/teams");
   });
 
+  it("strips basePath + locale and preserves query+hash", () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    const result = resolveNavigationTarget(
+      "https://example.com/passwd-sso/ja/dashboard/watchtower?x=1#top",
+      "https://example.com",
+      "ja"
+    );
+    expect(result.isInternal).toBe(true);
+    expect(result.internalPath).toBe("/dashboard/watchtower?x=1#top");
+  });
+
   it("still works without basePath (regression check)", () => {
     // No vi.stubEnv — NEXT_PUBLIC_BASE_PATH is unset
     const result = resolveNavigationTarget(

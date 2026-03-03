@@ -69,7 +69,7 @@ export default {
         ? "__Secure-authjs.session-token"
         : "authjs.session-token",
       options: {
-        path: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/` || "/",
+        path: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/`,
         httpOnly: true,
         sameSite: "lax" as const,
         secure: process.env.NODE_ENV === "production",

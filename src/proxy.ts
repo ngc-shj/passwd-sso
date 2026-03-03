@@ -50,7 +50,7 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
     if (!hasSession) {
       const signInUrl = request.nextUrl.clone();
       signInUrl.pathname = `/${locale}/auth/signin`;
-      signInUrl.searchParams.set("callbackUrl", request.url);
+      signInUrl.searchParams.set("callbackUrl", `${request.nextUrl.pathname}${request.nextUrl.search}`);
       const redirectResponse = NextResponse.redirect(signInUrl);
       clearAuthSessionCookies(redirectResponse, basePath);
       return applySecurityHeaders(redirectResponse, options, basePath);
@@ -199,7 +199,7 @@ function applySecurityHeaders(
   response.cookies.set("csp-nonce", nonce, {
     httpOnly: true,
     sameSite: "lax",
-    path: `${basePath}/` || "/",
+    path: `${basePath}/`,
   });
 
   return response;

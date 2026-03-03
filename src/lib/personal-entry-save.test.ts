@@ -1,10 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
-import { savePersonalEntry } from "@/lib/personal-entry-save";
+
+// fetchApi has a `typeof window` guard — bypass it so node-env tests work
+vi.mock("@/lib/url-helpers", () => ({
+  fetchApi: (path: string, init?: RequestInit) =>
+    init !== undefined ? fetch(path, init) : fetch(path),
+  withBasePath: (p: string) => p,
+  BASE_PATH: "",
+}));
 
 vi.mock("@/lib/crypto-client", () => ({
   encryptData: vi.fn(async (value: string) => `enc:${value}`),
 }));
+
+import { savePersonalEntry } from "@/lib/personal-entry-save";
 
 describe("savePersonalEntry", () => {
   beforeEach(() => {

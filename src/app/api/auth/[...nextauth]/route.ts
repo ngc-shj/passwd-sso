@@ -25,7 +25,9 @@ function withAuthBasePath<H extends RouteHandler>(handler: H): H {
 
   const wrapped = async (request: NextRequest, ...rest: unknown[]) => {
     const url = new URL(request.url);
-    url.pathname = `${basePath}${url.pathname}`;
+    if (!url.pathname.startsWith(basePath)) {
+      url.pathname = `${basePath}${url.pathname}`;
+    }
     const patched = new NextRequest(url.toString(), {
       headers: request.headers,
       method: request.method,
@@ -45,6 +47,9 @@ function withSessionMeta<H extends RouteHandler>(handler: H): H {
   };
   return wrapped as unknown as H;
 }
+
+// Exported for testing
+export { withAuthBasePath as _withAuthBasePath };
 
 export const GET = withRequestLog(withSessionMeta(withAuthBasePath(handlers.GET)));
 export const POST = withRequestLog(withSessionMeta(withAuthBasePath(handlers.POST)));

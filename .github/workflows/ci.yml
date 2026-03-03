@@ -100,9 +100,11 @@ jobs:
         run: |
           if grep -rn --include='*.tsx' --include='*.ts' \
             -E 'fetch\((API_PATH\.|apiPath\.|`/api/|"/api/)' \
-            src/lib/vault-context.tsx src/lib/team-vault-core.tsx \
-            src/hooks/ src/components/ src/app/\[locale\]/ src/lib/password-analyzer.ts \
-            | grep -v 'fetchApi' | grep -v '\.test\.' | grep -v 'node_modules'; then
+            src/ \
+            --exclude-dir='src/app/api' \
+            | grep -v 'fetchApi' | grep -v '\.test\.' \
+            | grep -v 'src/proxy.ts' | grep -v 'src/lib/webhook-dispatcher.ts' \
+            | grep -v 'src/lib/url-helpers.ts'; then
             echo "ERROR: Found fetch() calls that should use fetchApi()"
             exit 1
           fi

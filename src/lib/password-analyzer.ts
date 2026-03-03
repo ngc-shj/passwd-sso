@@ -3,6 +3,7 @@
 // HIBP uses k-Anonymity: only SHA-1 prefix (5 chars) is sent.
 
 import { fetchApi } from "@/lib/url-helpers";
+import { API_PATH } from "@/lib/constants";
 
 export interface StrengthResult {
   score: number; // 0-100
@@ -195,4 +196,3 @@ export async function checkHIBP(
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-import { API_PATH } from "@/lib/constants";
