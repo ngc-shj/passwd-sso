@@ -84,11 +84,13 @@ describe("getScimBaseUrl", () => {
   });
 
   it("uses NEXTAUTH_URL from env", () => {
+    delete process.env.AUTH_URL;
     process.env.NEXTAUTH_URL = "https://example.com";
     expect(getScimBaseUrl()).toBe("https://example.com/api/scim/v2");
   });
 
   it("strips trailing slash from NEXTAUTH_URL", () => {
+    delete process.env.AUTH_URL;
     process.env.NEXTAUTH_URL = "https://example.com/";
     expect(getScimBaseUrl()).toBe("https://example.com/api/scim/v2");
   });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 vi.mock("next-intl/middleware", () => ({
   default: () => () => new Response(null, { status: 200 }),
@@ -249,7 +249,6 @@ describe("proxy — CORS preflight and headers", () => {
 
 describe("proxy — applySecurityHeaders basePath", () => {
   it("includes basePath in Report-To and csp-nonce cookie path", () => {
-    const { NextResponse } = require("next/server");
     const response = new NextResponse();
     _applySecurityHeaders(response, dummyOptions, "/passwd-sso");
 
@@ -262,7 +261,6 @@ describe("proxy — applySecurityHeaders basePath", () => {
   });
 
   it("defaults to root path when basePath is empty", () => {
-    const { NextResponse } = require("next/server");
     const response = new NextResponse();
     _applySecurityHeaders(response, dummyOptions);
 

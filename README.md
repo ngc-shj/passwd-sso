@@ -101,6 +101,7 @@ Edit `.env.local` and fill in:
 
 | Variable | Description |
 |---|---|
+| `NEXT_PUBLIC_BASE_PATH` | (Optional) Sub-path for reverse proxy deployment (e.g., `/passwd-sso`). Build-time variable — set before `npm run build` |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` | Google OAuth client ID |
@@ -141,7 +142,7 @@ npm run db:migrate
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000) (or `http://localhost:3000/<basePath>` if `NEXT_PUBLIC_BASE_PATH` is set).
 
 **Production** (all-in-one Docker Compose):
 
@@ -325,10 +326,11 @@ extension/
 ## Deployment Guides
 
 - Setup docs policy: `docs/setup/README.md` (English-only)
-- [Docker Compose Setup](docs/setup/docker/en.md)
+- [Docker Compose Setup](docs/setup/docker/en.md) (includes sub-path deployment)
 - [AWS Deployment](docs/setup/aws/en.md)
 - [Vercel Deployment](docs/setup/vercel/en.md)
 - [Terraform (AWS) — English](infra/terraform/README.md) / [日本語](infra/terraform/README.ja.md)
+- [Deployment Operations](docs/operations/deployment.md)
 
 ## Security Documentation
 
