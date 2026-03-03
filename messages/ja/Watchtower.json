@@ -22,6 +22,7 @@
   "analysisUnavailable": "現在この保管庫は Watchtower で分析できません。",
   "personalKeyUnavailable": "Watchtower を分析するには、個人保管庫をアンロックしてください。",
   "teamKeyUnavailable": "このチーム保管庫を分析するには、保管庫をアンロックしてチーム鍵を利用可能にしてください。",
+  "refreshAfterEdit": "Watchtower の結果は再分析されていません。必要なら再分析を実行してください。",
   "scoreExcellent": "優秀",
   "scoreGood": "良好",
   "scoreFair": "普通",

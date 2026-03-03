@@ -22,6 +22,7 @@
   "analysisUnavailable": "Watchtower could not analyze this vault right now.",
   "personalKeyUnavailable": "Unlock your personal vault before analyzing Watchtower results.",
   "teamKeyUnavailable": "Unlock the vault and load the team key before analyzing this team vault.",
+  "refreshAfterEdit": "Watchtower results were not re-analyzed. Refresh to run a new scan.",
   "scoreExcellent": "Excellent",
   "scoreGood": "Good",
   "scoreFair": "Fair",

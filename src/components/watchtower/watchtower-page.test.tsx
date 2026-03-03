@@ -8,10 +8,12 @@ const {
   mockUseWatchtower,
   personalDialogProps,
   teamDialogProps,
+  toastMessageMock,
 } = vi.hoisted(() => ({
   mockUseWatchtower: vi.fn(),
   personalDialogProps: vi.fn(),
   teamDialogProps: vi.fn(),
+  toastMessageMock: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
@@ -22,6 +24,12 @@ vi.mock("next-intl", () => ({
 
 vi.mock("@/i18n/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    message: (...args: unknown[]) => toastMessageMock(...args),
+  },
 }));
 
 vi.mock("@/hooks/use-watchtower", () => ({
@@ -92,7 +100,7 @@ describe("WatchtowerPage", () => {
     });
   });
 
-  it("reruns analysis immediately after saving from the personal edit dialog", () => {
+  it("does not rerun analysis after saving from the personal edit dialog", () => {
     const analyze = vi.fn();
     mockUseWatchtower.mockReturnValue({
       report: {
@@ -133,10 +141,8 @@ describe("WatchtowerPage", () => {
       onSaved();
     });
 
-    expect(analyze).toHaveBeenCalledWith({
-      bypassCooldown: true,
-      skipRateLimit: true,
-    });
+    expect(analyze).not.toHaveBeenCalled();
+    expect(toastMessageMock).toHaveBeenCalledWith("refreshAfterEdit");
   });
 
   it("does not rerun analysis when the personal edit dialog closes without saving", () => {

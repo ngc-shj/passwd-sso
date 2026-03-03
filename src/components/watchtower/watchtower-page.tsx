@@ -43,6 +43,7 @@ import {
   formatUnsecuredDetails,
   formatExpiringDetails,
 } from "@/lib/watchtower/format-details";
+import { toast } from "sonner";
 
 interface WatchtowerPageProps {
   scope: WatchtowerScope;
@@ -351,7 +352,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
           }}
           onSaved={() => {
             setSelectedEntry(null);
-            void analyze({ bypassCooldown: true, skipRateLimit: true });
+            toast.message(t("refreshAfterEdit"));
           }}
         />
       )}
@@ -365,7 +366,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
           }}
           onSaved={() => {
             setSelectedEntry(null);
-            void analyze({ bypassCooldown: true, skipRateLimit: true });
+            toast.message(t("refreshAfterEdit"));
           }}
         />
       )}
