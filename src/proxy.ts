@@ -205,6 +205,9 @@ function applySecurityHeaders(
   return response;
 }
 
+// Exported for testing
+export { applySecurityHeaders as _applySecurityHeaders };
+
 function clearAuthSessionCookies(response: NextResponse, basePath: string = ""): void {
   const authSessionCookieNames = [
     "authjs.session-token",
