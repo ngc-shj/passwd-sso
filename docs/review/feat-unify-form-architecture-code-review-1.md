@@ -52,4 +52,31 @@
 - **推奨修正:** 複数シナリオのテスト追加。
 
 ## 対応状況
-（修正後に追記）
+
+### F-1: PersonalEntryDialogShellにDialogDescription追加
+- 対応: `DialogDescription` を `sr-only` で追加。TeamEntryDialogShellと同一パターン。
+- 修正ファイル: `src/components/passwords/personal-entry-dialog-shell.tsx`
+
+### F-2: TeamSoftwareLicenseFormにメール検証追加
+- 対応: 個人版と同じ正規表現チェック + `emailError` state + エラー表示 + 入力時クリアを追加。
+- 修正ファイル: `src/components/team/team-software-license-form.tsx`
+
+### F-4: CreditCardFieldsの年リストモジュール定数化
+- 対応: `EXPIRY_YEARS` をモジュールレベル定数として抽出。レンダリングごとの再計算を排除。
+- 修正ファイル: `src/components/entry-fields/credit-card-fields.tsx`
+
+### T-1: team login hooksテスト追加
+- 対応: 8テストファイル / 63テスト追加。personal側と対称的なカバレッジを実現。
+- 追加ファイル: `src/hooks/team-login-fields-{callbacks,props,text-props}.test.ts`, `src/hooks/team-login-form-{controller,derived,presenter}.test.ts`, `src/hooks/use-team-login-form-{model,state}.test.ts`
+
+### T-2: use-personal-base-form-modelテスト追加
+- 対応: 21テスト追加。variant分岐、defaultTags/defaultFolderIdフォールバック、submitEntry、state settersをカバー。
+- 追加ファイル: `src/hooks/use-personal-base-form-model.test.ts`
+
+### T-3: WatchtowerPage teamスコープテスト追加
+- 対応: 5テスト追加。teamスコープでのTeamEditDialogLoader使用分岐をカバー。
+- 修正ファイル: `src/components/watchtower/watchtower-page.test.tsx`
+
+### T-4: useTeamBaseFormModelテスト拡充
+- 対応: 11テスト追加（1→12テスト）。editData初期値、defaultフォールバック、entryCopyメモ化をカバー。
+- 修正ファイル: `src/hooks/use-team-base-form-model.test.ts`
