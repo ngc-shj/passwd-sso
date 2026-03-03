@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format-datetime";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface SessionItem {
   id: string;
@@ -65,7 +66,7 @@ export function SessionsCard() {
 
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch(API_PATH.SESSIONS);
+      const res = await fetchApi(API_PATH.SESSIONS);
       if (res.ok) {
         setSessions(await res.json());
       } else {
@@ -85,7 +86,7 @@ export function SessionsCard() {
   const handleRevoke = async (id: string) => {
     setRevoking(true);
     try {
-      const res = await fetch(apiPath.sessionById(id), { method: "DELETE" });
+      const res = await fetchApi(apiPath.sessionById(id), { method: "DELETE" });
       if (res.ok) {
         setSessions((prev) => prev.filter((s) => s.id !== id));
         toast.success(t("revokeSuccess"));
@@ -103,7 +104,7 @@ export function SessionsCard() {
   const handleRevokeAll = async () => {
     setRevoking(true);
     try {
-      const res = await fetch(API_PATH.SESSIONS, { method: "DELETE" });
+      const res = await fetchApi(API_PATH.SESSIONS, { method: "DELETE" });
       if (res.ok) {
         setSessions((prev) => prev.filter((s) => s.isCurrent));
         toast.success(t("revokeAllSuccess"));

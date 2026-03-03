@@ -2,6 +2,8 @@ import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 import { API_PATH } from "@/lib/constants";
 
+const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+
 export default {
   providers: [
     // Only register providers whose credentials are fully configured.
@@ -61,9 +63,23 @@ export default {
       : []),
   ],
 
+  cookies: {
+    sessionToken: {
+      name: process.env.NODE_ENV === "production"
+        ? "__Secure-authjs.session-token"
+        : "authjs.session-token",
+      options: {
+        path: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/` || "/",
+        httpOnly: true,
+        sameSite: "lax" as const,
+        secure: process.env.NODE_ENV === "production",
+      },
+    },
+  },
+
   pages: {
-    signIn: "/auth/signin",
-    error: "/auth/error",
+    signIn: `${basePath}/auth/signin`,
+    error: `${basePath}/auth/error`,
   },
 
   callbacks: {

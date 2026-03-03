@@ -15,6 +15,7 @@ import {
 import { formatRelativeTime } from "@/lib/format-datetime";
 import { API_PATH, apiPath } from "@/lib/constants";
 import type { NotificationType } from "@prisma/client";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface NotificationItem {
   id: string;
@@ -39,7 +40,7 @@ export function NotificationBell() {
 
   const fetchUnreadCount = useCallback(async () => {
     try {
-      const res = await fetch(API_PATH.NOTIFICATIONS_COUNT);
+      const res = await fetchApi(API_PATH.NOTIFICATIONS_COUNT);
       if (res.ok) {
         const data = await res.json();
         setUnreadCount(data.unreadCount);
@@ -52,7 +53,7 @@ export function NotificationBell() {
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(
+      const res = await fetchApi(
         `${API_PATH.NOTIFICATIONS}?limit=${PAGE_LIMIT}`,
       );
       if (res.ok) {
@@ -96,7 +97,7 @@ export function NotificationBell() {
 
   const markAllAsRead = useCallback(async () => {
     try {
-      const res = await fetch(API_PATH.NOTIFICATIONS, { method: "PATCH" });
+      const res = await fetchApi(API_PATH.NOTIFICATIONS, { method: "PATCH" });
       if (res.ok) {
         setUnreadCount(0);
         setNotifications((prev) =>
@@ -110,7 +111,7 @@ export function NotificationBell() {
 
   const markAsRead = useCallback(async (id: string) => {
     try {
-      const res = await fetch(apiPath.notificationById(id), {
+      const res = await fetchApi(apiPath.notificationById(id), {
         method: "PATCH",
       });
       if (res.ok) {
@@ -126,7 +127,7 @@ export function NotificationBell() {
 
   const deleteNotification = useCallback(async (id: string) => {
     try {
-      const res = await fetch(apiPath.notificationById(id), {
+      const res = await fetchApi(apiPath.notificationById(id), {
         method: "DELETE",
       });
       if (res.ok) {

@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { API_PATH } from "@/lib/constants";
 import { useVault } from "@/lib/vault-context";
 import { generateTeamSymmetricKey, createTeamKeyEscrow } from "@/lib/crypto-team";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface TeamCreateDialogProps {
   trigger: React.ReactNode;
@@ -86,7 +87,7 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
       teamKey.fill(0);
       }
 
-      const res = await fetch(API_PATH.TEAMS, {
+      const res = await fetchApi(API_PATH.TEAMS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

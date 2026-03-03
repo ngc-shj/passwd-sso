@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import { useReprompt } from "@/hooks/use-reprompt";
 import { formatDateTime, formatDate } from "@/lib/format-datetime";
 import { DISPLAY_KEYS, SENSITIVE_KEYS, DATE_KEYS, TRANSLATED_VALUE_KEYS } from "./entry-history-keys";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface HistoryEntry {
   id: string;
@@ -144,7 +145,7 @@ export function EntryHistorySection({
       const url = scopedTeamId
         ? apiPath.teamPasswordHistory(scopedTeamId, entryId)
         : apiPath.passwordHistory(entryId);
-      const res = await fetch(url);
+      const res = await fetchApi(url);
       if (res.ok) {
         const data = await res.json();
         setHistories(data);
@@ -165,7 +166,7 @@ export function EntryHistorySection({
       const url = scopedTeamId
         ? apiPath.teamPasswordHistoryRestore(scopedTeamId, entryId, restoreTarget.id)
         : apiPath.passwordHistoryRestore(entryId, restoreTarget.id);
-      const res = await fetch(url, { method: "POST" });
+      const res = await fetchApi(url, { method: "POST" });
       if (res.ok) {
         toast.success(t("restoreVersion"));
         setRestoreTarget(null);
@@ -186,7 +187,7 @@ export function EntryHistorySection({
         // GET /member-key?keyVersion=N for correct decryption.
         // Currently uses latest key only — history from before key rotation
         // will fail to decrypt until re-encryption is implemented.
-        const res = await fetch(apiPath.teamPasswordHistoryById(scopedTeamId, entryId, h.id));
+        const res = await fetchApi(apiPath.teamPasswordHistoryById(scopedTeamId, entryId, h.id));
         if (!res.ok) return;
         const data = await res.json();
         const teamKey = await getTeamEncryptionKey(scopedTeamId);

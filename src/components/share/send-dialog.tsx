@@ -36,6 +36,7 @@ import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
 import { SEND_MAX_FILE_SIZE, SEND_MAX_TEXT_LENGTH } from "@/lib/validations";
 import { formatFileSize } from "@/lib/format-file-size";
+import { fetchApi, appUrl } from "@/lib/url-helpers";
 
 interface SendDialogProps {
   open: boolean;
@@ -93,7 +94,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
         if (mv >= 1 && mv <= 100) body.maxViews = mv;
       }
 
-      const res = await fetch(API_PATH.SENDS, {
+      const res = await fetchApi(API_PATH.SENDS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -106,7 +107,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
       }
 
       const data = await res.json();
-      const fullUrl = `${window.location.origin}${data.url}`;
+      const fullUrl = appUrl(data.url);
       setCreatedUrl(fullUrl);
       onCreated?.();
       toast.success(t("sendCreateSuccess"));
@@ -130,7 +131,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
         if (mv >= 1 && mv <= 100) formData.append("maxViews", String(mv));
       }
 
-      const res = await fetch(API_PATH.SENDS_FILE, {
+      const res = await fetchApi(API_PATH.SENDS_FILE, {
         method: "POST",
         body: formData,
       });
@@ -142,7 +143,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
       }
 
       const data = await res.json();
-      const fullUrl = `${window.location.origin}${data.url}`;
+      const fullUrl = appUrl(data.url);
       setCreatedUrl(fullUrl);
       onCreated?.();
       toast.success(t("sendCreateSuccess"));

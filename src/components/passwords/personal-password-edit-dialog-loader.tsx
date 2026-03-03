@@ -19,6 +19,7 @@ import type { TagData } from "@/components/tags/tag-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface PasswordEditDialogLoaderProps {
   id: string;
@@ -100,7 +101,7 @@ export function PasswordEditDialogLoader({
 
     async function load() {
       try {
-        const res = await fetch(apiPath.passwordById(id));
+        const res = await fetchApi(apiPath.passwordById(id));
         if (!res.ok) throw new Error(td("notFound"));
         const raw = await res.json();
 
@@ -115,8 +116,8 @@ export function PasswordEditDialogLoader({
         const entry: VaultEntryFull = JSON.parse(plaintext);
 
         const [tagsRes, attachRes] = await Promise.all([
-          fetch(API_PATH.TAGS),
-          fetch(apiPath.passwordAttachments(id)),
+          fetchApi(API_PATH.TAGS),
+          fetchApi(apiPath.passwordAttachments(id)),
         ]);
         const allTags: TagData[] = tagsRes.ok ? await tagsRes.json() : [];
         const tagIdsSet = new Set<string>(raw.tagIds ?? []);

@@ -12,6 +12,7 @@ import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import { buildTeamEntryAAD } from "@/lib/crypto-aad";
 import { decryptData } from "@/lib/crypto-client";
 import { useTeamVault } from "@/lib/team-vault-context";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface TeamEditDialogLoaderProps {
   teamId: string;
@@ -49,7 +50,7 @@ export function TeamEditDialogLoader({
 
     async function load() {
       try {
-        const res = await fetch(apiPath.teamPasswordById(teamId, id));
+        const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
         if (!res.ok) throw new Error(td("notFound"));
         const raw = await res.json();
 

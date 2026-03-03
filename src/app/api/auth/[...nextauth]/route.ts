@@ -1,4 +1,4 @@
-import { type NextRequest } from "next/server";
+import { NextRequest } from "next/server";
 import { handlers } from "@/auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { extractRequestMeta } from "@/lib/audit";
@@ -11,6 +11,33 @@ type RouteHandler = (
   ...rest: unknown[]
 ) => Promise<Response>;
 
+/**
+ * Next.js strips basePath from the URL before delivering it to route handlers,
+ * but Auth.js needs the full URL (including basePath) to:
+ *   1. Parse actions correctly (basePath = `${NEXT_PUBLIC_BASE_PATH}/api/auth`)
+ *   2. Build OAuth callback URLs with the correct prefix
+ *
+ * This wrapper restores the basePath prefix that Next.js removed.
+ */
+function withAuthBasePath<H extends RouteHandler>(handler: H): H {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  if (!basePath) return handler;
+
+  const wrapped = async (request: NextRequest, ...rest: unknown[]) => {
+    const url = new URL(request.url);
+    url.pathname = `${basePath}${url.pathname}`;
+    const patched = new NextRequest(url.toString(), {
+      headers: request.headers,
+      method: request.method,
+      body: request.body,
+      // @ts-expect-error duplex is required for streaming body but not in the type
+      duplex: "half",
+    });
+    return handler(patched, ...rest);
+  };
+  return wrapped as unknown as H;
+}
+
 function withSessionMeta<H extends RouteHandler>(handler: H): H {
   const wrapped = async (request: NextRequest, ...rest: unknown[]) => {
     const meta = extractRequestMeta(request);
@@ -19,5 +46,5 @@ function withSessionMeta<H extends RouteHandler>(handler: H): H {
   return wrapped as unknown as H;
 }
 
-export const GET = withRequestLog(withSessionMeta(handlers.GET));
-export const POST = withRequestLog(withSessionMeta(handlers.POST));
+export const GET = withRequestLog(withSessionMeta(withAuthBasePath(handlers.GET)));
+export const POST = withRequestLog(withSessionMeta(withAuthBasePath(handlers.POST)));

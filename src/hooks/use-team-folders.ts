@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiPath } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 import type { TeamFolderItem } from "@/components/team/team-entry-form-types";
 
 export function useTeamFolders(open: boolean, teamId: string) {
@@ -12,7 +13,7 @@ export function useTeamFolders(open: boolean, teamId: string) {
     if (!open) return;
 
     const url = apiPath.teamFolders(teamId);
-    fetch(url)
+    fetchApi(url)
       .then((res) => {
         if (!res.ok) throw new Error(`${res.status}`);
         return res.json();

@@ -40,6 +40,7 @@ import { API_PATH, apiPath, ENTRY_TYPE } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format-datetime";
 import { formatFileSize } from "@/lib/format-file-size";
 import { SendDialog } from "@/components/share/send-dialog";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface ShareLinkItem {
   id: string;
@@ -108,7 +109,7 @@ export default function ShareLinksPage() {
       if (teamFilter) params.set("team", teamFilter);
       if (cursor) params.set("cursor", cursor);
 
-      const res = await fetch(`${API_PATH.SHARE_LINKS_MINE}?${params.toString()}`);
+      const res = await fetchApi(`${API_PATH.SHARE_LINKS_MINE}?${params.toString()}`);
       if (!res.ok) return null;
       return res.json();
     },
@@ -142,7 +143,7 @@ export default function ShareLinksPage() {
       setLoadingLogs(true);
       try {
         const url = `${apiPath.shareLinkAccessLogs(shareId)}${cursor ? `?cursor=${cursor}` : ""}`;
-        const res = await fetch(url);
+        const res = await fetchApi(url);
         if (res.ok) {
           const data = await res.json();
           if (cursor) {
@@ -175,7 +176,7 @@ export default function ShareLinksPage() {
   const handleRevoke = async (id: string) => {
     setRevokingId(id);
     try {
-      const res = await fetch(apiPath.shareLinkById(id), { method: "DELETE" });
+      const res = await fetchApi(apiPath.shareLinkById(id), { method: "DELETE" });
       if (res.ok) {
         toast.success(tShare("revokeSuccess"));
         // Update in-place

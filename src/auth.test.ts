@@ -78,13 +78,17 @@ const {
   };
 });
 
-vi.mock("next-auth", () => ({
-  default: vi.fn(() => ({
+const { mockNextAuth } = vi.hoisted(() => ({
+  mockNextAuth: vi.fn(() => ({
     handlers: {},
     auth: vi.fn(),
     signIn: vi.fn(),
     signOut: vi.fn(),
   })),
+}));
+
+vi.mock("next-auth", () => ({
+  default: mockNextAuth,
 }));
 
 vi.mock("@/lib/auth-adapter", () => ({
@@ -113,6 +117,10 @@ vi.mock("./auth.config", () => ({
 }));
 
 import { ensureTenantMembershipForSignIn } from "./auth";
+
+// Capture the NextAuth call args at import time, before beforeEach clears mocks
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const nextAuthInitArgs = (mockNextAuth.mock.calls as any[])[0];
 
 describe("ensureTenantMembershipForSignIn", () => {
   beforeEach(() => {
@@ -379,5 +387,23 @@ describe("ensureTenantMembershipForSignIn", () => {
 
     expect(ok).toBe(false);
     expect(mockWithBypassRls).not.toHaveBeenCalled();
+  });
+});
+
+describe("NextAuth basePath", () => {
+  it("passes basePath derived from NEXT_PUBLIC_BASE_PATH to NextAuth", () => {
+    // nextAuthInitArgs was captured at import time before clearAllMocks
+    expect(nextAuthInitArgs).toBeDefined();
+    const config = nextAuthInitArgs[0] as Record<string, unknown>;
+    const envBasePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+    expect(config).toHaveProperty("basePath", `${envBasePath}/api/auth`);
+  });
+
+  it("basePath defaults to /api/auth when NEXT_PUBLIC_BASE_PATH is empty", () => {
+    const config = nextAuthInitArgs[0] as Record<string, unknown>;
+    // In test environment NEXT_PUBLIC_BASE_PATH is typically unset
+    if (!process.env.NEXT_PUBLIC_BASE_PATH) {
+      expect(config.basePath).toBe("/api/auth");
+    }
   });
 });

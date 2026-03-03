@@ -225,14 +225,13 @@ async function attemptTokenRefresh(): Promise<void> {
 
   try {
     const { serverUrl } = await getSettings();
-    let origin: string;
     try {
-      origin = new URL(serverUrl).origin;
+      new URL(serverUrl);
     } catch {
       return;
     }
 
-    const res = await fetch(`${origin}${EXT_API_PATH.EXTENSION_TOKEN_REFRESH}`, {
+    const res = await fetch(`${serverUrl}${EXT_API_PATH.EXTENSION_TOKEN_REFRESH}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${currentToken}` },
     });
@@ -275,13 +274,12 @@ async function revokeCurrentTokenOnServer(): Promise<void> {
   if (!currentToken) return;
   try {
     const { serverUrl } = await getSettings();
-    let origin: string;
     try {
-      origin = new URL(serverUrl).origin;
+      new URL(serverUrl);
     } catch {
       return;
     }
-    await fetch(`${origin}${EXT_API_PATH.EXTENSION_TOKEN}`, {
+    await fetch(`${serverUrl}${EXT_API_PATH.EXTENSION_TOKEN}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${currentToken}` },
     });
@@ -303,17 +301,20 @@ async function shouldSuppressInlineMatches(url: string): Promise<boolean> {
   if (typeof serverUrl !== "string" || !serverUrl) {
     return false;
   }
-  let serverOrigin: string;
+  let base: URL;
   try {
-    serverOrigin = new URL(serverUrl).origin;
+    base = new URL(serverUrl);
   } catch {
     return false;
   }
-  if (pageUrl.origin !== serverOrigin) {
+  if (pageUrl.origin !== base.origin) {
+    return false;
+  }
+  if (!pageUrl.pathname.startsWith(base.pathname || "/")) {
     return false;
   }
 
-  // Suppress inline suggestions on the passwd-sso app origin.
+  // Suppress inline suggestions on the passwd-sso app pages.
   return true;
 }
 
@@ -585,14 +586,14 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
     throw new Error("NO_TOKEN");
   }
   const { serverUrl } = await getSettings();
-  let origin: string;
+  let parsed: URL;
   try {
-    origin = new URL(serverUrl).origin;
+    parsed = new URL(serverUrl);
   } catch {
     throw new Error("INVALID_SERVER_URL");
   }
   const allowed = await chrome.permissions.contains({
-    origins: [`${origin}/*`],
+    origins: [`${parsed.origin}/*`],
   });
   if (!allowed) {
     throw new Error("PERMISSION_DENIED");
@@ -604,7 +605,7 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
     headers.set("Content-Type", "application/json");
   }
 
-  return fetch(`${origin}${path}`, { ...init, headers });
+  return fetch(`${serverUrl}${path}`, { ...init, headers });
 }
 
 type RawEntry = {

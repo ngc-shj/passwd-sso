@@ -22,6 +22,7 @@ import {
   formatExportContent as formatExportContentShared,
   formatExportDate,
 } from "@/lib/export-format-common";
+import { fetchApi } from "@/lib/url-helpers";
 
 function ExportPanelContent() {
   const t = useTranslations("Export");
@@ -63,8 +64,8 @@ function ExportPanelContent() {
     try {
       // 1. Fetch personal entries and folders in parallel
       const [res, foldersRes] = await Promise.all([
-        fetch(`${API_PATH.PASSWORDS}?include=blob`),
-        fetch(API_PATH.FOLDERS),
+        fetchApi(`${API_PATH.PASSWORDS}?include=blob`),
+        fetchApi(API_PATH.FOLDERS),
       ]);
       if (!res.ok) throw new Error("Failed to fetch");
       const rawEntries = await res.json();
@@ -174,7 +175,7 @@ function ExportPanelContent() {
       URL.revokeObjectURL(url);
 
       // Async nonblocking audit log
-      fetch(API_PATH.AUDIT_LOGS_EXPORT, {
+      fetchApi(API_PATH.AUDIT_LOGS_EXPORT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

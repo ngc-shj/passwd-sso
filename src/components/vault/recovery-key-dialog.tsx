@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Loader2, Copy, AlertTriangle } from "lucide-react";
+import { fetchApi } from "@/lib/url-helpers";
 
 // ── Core logic (exported for testing) ───────────────────────────
 
@@ -56,7 +57,7 @@ export async function generateRecoveryKeyFlow(
     recoveryKey = generateRecoveryKey();
     const wrapped = await wrapSecretKeyWithRecovery(secretKey, recoveryKey);
 
-    const res = await fetch(API_PATH.VAULT_RECOVERY_KEY_GENERATE, {
+    const res = await fetchApi(API_PATH.VAULT_RECOVERY_KEY_GENERATE, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

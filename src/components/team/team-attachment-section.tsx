@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useTranslations } from "next-intl";
+import { fetchApi } from "@/lib/url-helpers";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -150,7 +151,7 @@ export function TeamAttachmentSection({
       formData.append("aadVersion", String(AAD_VERSION));
       formData.append("teamKeyVersion", keyInfo.keyVersion.toString());
 
-      const res = await fetch(
+      const res = await fetchApi(
         apiPath.teamPasswordAttachments(scopedId, entryId),
         { method: "POST", body: formData }
       );
@@ -177,7 +178,7 @@ export function TeamAttachmentSection({
       const teamKey = await getTeamEncryptionKey(scopedId);
       if (!teamKey) throw new Error("No team key");
 
-      const res = await fetch(
+      const res = await fetchApi(
         apiPath.teamPasswordAttachmentById(scopedId, entryId, attachment.id)
       );
       if (!res.ok) throw new Error("Download failed");
@@ -223,7 +224,7 @@ export function TeamAttachmentSection({
 
     setDeleting(true);
     try {
-      const res = await fetch(
+      const res = await fetchApi(
         apiPath.teamPasswordAttachmentById(scopedId, entryId, deleteTarget.id),
         { method: "DELETE" }
       );

@@ -15,7 +15,8 @@ function validateServerUrl(raw: string): { ok: boolean; value: string; error?: s
     if (url.protocol !== "https:" && !(isLocalhost && url.protocol === "http:")) {
       return { ok: false, value: trimmed, error: "HTTPS_REQUIRED" };
     }
-    return { ok: true, value: url.origin };
+    const path = url.pathname.replace(/\/+$/, "");
+    return { ok: true, value: `${url.origin}${path}` };
   } catch {
     return { ok: false, value: trimmed, error: "INVALID_URL" };
   }

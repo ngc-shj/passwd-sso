@@ -22,6 +22,7 @@ import {
 import { API_PATH } from "@/lib/constants";
 import type { TeamPolicyClient } from "@/hooks/use-team-policy";
 import { AlertTriangle } from "lucide-react";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface PasswordGeneratorProps {
   open: boolean;
@@ -136,7 +137,7 @@ export function PasswordGenerator({
             includeChars: settings.includeChars ?? "",
             excludeChars: settings.excludeChars ?? "",
           };
-    const res = await fetch(API_PATH.PASSWORDS_GENERATE, {
+    const res = await fetchApi(API_PATH.PASSWORDS_GENERATE, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

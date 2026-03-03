@@ -1,6 +1,7 @@
 import { encryptData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { API_PATH, apiPath } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 import type { EntryTypeValue } from "@/lib/constants";
 
 interface SavePersonalEntryParams {
@@ -57,7 +58,7 @@ export async function savePersonalEntry({
   const endpoint = mode === "create" ? API_PATH.PASSWORDS : apiPath.passwordById(initialId!);
   const method = mode === "create" ? "POST" : "PUT";
 
-  return fetch(endpoint, {
+  return fetchApi(endpoint, {
     method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

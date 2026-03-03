@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { API_PATH } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 import type { SidebarTagItem } from "@/hooks/use-sidebar-data";
 
 export function usePersonalTags() {
@@ -10,7 +11,7 @@ export function usePersonalTags() {
 
   useEffect(() => {
     const url = API_PATH.TAGS;
-    fetch(url)
+    fetchApi(url)
       .then((res) => {
         if (!res.ok) throw new Error(`${res.status}`);
         return res.json();

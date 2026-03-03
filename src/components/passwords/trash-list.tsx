@@ -25,6 +25,7 @@ import { useBulkSelection, type BulkSelectionHandle } from "@/hooks/use-bulk-sel
 import { useBulkAction } from "@/hooks/use-bulk-action";
 import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
 import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface TrashEntry {
   id: string;
@@ -59,7 +60,7 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
     if (!encryptionKey) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_PATH.PASSWORDS}?trash=true`);
+      const res = await fetchApi(`${API_PATH.PASSWORDS}?trash=true`);
       if (!res.ok) return;
       const data = await res.json();
 
@@ -131,7 +132,7 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
 
   const handleRestore = async (id: string) => {
     try {
-      const res = await fetch(apiPath.passwordRestore(id), { method: "POST" });
+      const res = await fetchApi(apiPath.passwordRestore(id), { method: "POST" });
       if (res.ok) {
         toast.success(t("restored"));
         setEntries((prev) => prev.filter((e) => e.id !== id));
@@ -145,7 +146,7 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
 
   const handleDeletePermanently = async (id: string) => {
     try {
-      const res = await fetch(`${apiPath.passwordById(id)}?permanent=true`, {
+      const res = await fetchApi(`${apiPath.passwordById(id)}?permanent=true`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -161,7 +162,7 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
 
   const handleEmptyTrash = async () => {
     try {
-      const res = await fetch(apiPath.passwordsEmptyTrash(), { method: "POST" });
+      const res = await fetchApi(apiPath.passwordsEmptyTrash(), { method: "POST" });
       if (!res.ok) {
         toast.error(t("failedAction"));
         return;

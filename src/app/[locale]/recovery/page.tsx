@@ -25,6 +25,7 @@ import { Label } from "@/components/ui/label";
 import { getStrength, STRENGTH_COLORS } from "@/components/vault/passphrase-strength";
 import { Link } from "@/i18n/navigation";
 import { ArrowLeft, Loader2, ShieldCheck } from "lucide-react";
+import { fetchApi, withBasePath } from "@/lib/url-helpers";
 
 type Step = "input" | "new-passphrase";
 
@@ -84,7 +85,7 @@ export default function RecoveryPage() {
       const verifierHash = await computeRecoveryVerifierHash(key);
 
       // 3. Verify with server
-      const res = await fetch(API_PATH.VAULT_RECOVERY_KEY_RECOVER, {
+      const res = await fetchApi(API_PATH.VAULT_RECOVERY_KEY_RECOVER, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ step: "verify", verifierHash }),
@@ -161,7 +162,7 @@ export default function RecoveryPage() {
       const verifierHash = await computeRecoveryVerifierHash(recoveryKeyBytes);
 
       // 5. Send reset request
-      const res = await fetch(API_PATH.VAULT_RECOVERY_KEY_RECOVER, {
+      const res = await fetchApi(API_PATH.VAULT_RECOVERY_KEY_RECOVER, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -195,7 +196,7 @@ export default function RecoveryPage() {
       setHasRecoveryKey(true);
 
       // Full reload to re-initialize VaultProvider (client-side nav keeps stale state)
-      window.location.href = `/${locale}/dashboard`;
+      window.location.href = withBasePath(`/${locale}/dashboard`);
     } catch {
       setError(tApi("unknownError"));
     } finally {

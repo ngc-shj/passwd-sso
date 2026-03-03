@@ -2,6 +2,8 @@
 // All analysis runs client-side (E2E encrypted vault).
 // HIBP uses k-Anonymity: only SHA-1 prefix (5 chars) is sent.
 
+import { fetchApi } from "@/lib/url-helpers";
+
 export interface StrengthResult {
   score: number; // 0-100
   entropy: number;
@@ -172,7 +174,7 @@ export async function checkHIBP(
   const suffix = hash.slice(5);
 
   try {
-    const res = await fetch(`${API_PATH.WATCHTOWER_HIBP}?prefix=${prefix}`);
+    const res = await fetchApi(`${API_PATH.WATCHTOWER_HIBP}?prefix=${prefix}`);
     if (!res.ok) return { breached: false, count: 0 };
 
     const text = await res.text();

@@ -25,9 +25,11 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
     return handleApiAuth(request);
   }
 
+  const basePath = request.nextUrl.basePath;
+
   // Public share pages — skip i18n and auth
   if (pathname.startsWith("/s/")) {
-    return applySecurityHeaders(NextResponse.next(), options);
+    return applySecurityHeaders(NextResponse.next(), options, basePath);
   }
 
   // Run next-intl middleware (locale detection, prefix redirect)
@@ -35,7 +37,7 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
 
   // If next-intl returned a redirect, let it through
   if (intlResponse.status !== 200) {
-    return applySecurityHeaders(intlResponse, options);
+    return applySecurityHeaders(intlResponse, options, basePath);
   }
 
   // Extract locale and path without locale prefix
@@ -46,15 +48,16 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
   if (pathWithoutLocale.startsWith("/dashboard")) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {
-      const signInUrl = new URL(`/${locale}/auth/signin`, request.url);
+      const signInUrl = request.nextUrl.clone();
+      signInUrl.pathname = `/${locale}/auth/signin`;
       signInUrl.searchParams.set("callbackUrl", request.url);
       const redirectResponse = NextResponse.redirect(signInUrl);
-      clearAuthSessionCookies(redirectResponse);
-      return applySecurityHeaders(redirectResponse, options);
+      clearAuthSessionCookies(redirectResponse, basePath);
+      return applySecurityHeaders(redirectResponse, options, basePath);
     }
   }
 
-  return applySecurityHeaders(intlResponse, options);
+  return applySecurityHeaders(intlResponse, options, basePath);
 }
 
 async function handleApiAuth(request: NextRequest) {
@@ -135,7 +138,10 @@ async function hasValidSession(request: NextRequest): Promise<boolean> {
   if (cached) sessionCache.delete(cacheKey);
 
   try {
-    const sessionUrl = new URL(API_PATH.AUTH_SESSION, request.url);
+    const sessionUrl = new URL(
+      `${request.nextUrl.basePath}${API_PATH.AUTH_SESSION}`,
+      request.url,
+    );
     const res = await fetch(sessionUrl, {
       headers: { cookie },
     });
@@ -171,33 +177,35 @@ async function hashCookie(cookie: string): Promise<string> {
 
 function applySecurityHeaders(
   response: NextResponse,
-  { cspHeader, nonce }: ProxyOptions
+  { cspHeader, nonce }: ProxyOptions,
+  basePath: string = "",
 ): NextResponse {
   response.headers.set("Content-Security-Policy", cspHeader);
+  const cspReportUrl = `${basePath}${API_PATH.CSP_REPORT}`;
   response.headers.set(
     "Report-To",
     JSON.stringify({
       group: "csp-endpoint",
       max_age: 10886400,
-      endpoints: [{ url: API_PATH.CSP_REPORT }],
+      endpoints: [{ url: cspReportUrl }],
       include_subdomains: true,
     })
   );
   response.headers.set(
     "Reporting-Endpoints",
-    `csp-endpoint="${API_PATH.CSP_REPORT}"`
+    `csp-endpoint="${cspReportUrl}"`
   );
 
   response.cookies.set("csp-nonce", nonce, {
     httpOnly: true,
     sameSite: "lax",
-    path: "/",
+    path: `${basePath}/` || "/",
   });
 
   return response;
 }
 
-function clearAuthSessionCookies(response: NextResponse): void {
+function clearAuthSessionCookies(response: NextResponse, basePath: string = ""): void {
   const authSessionCookieNames = [
     "authjs.session-token",
     "__Secure-authjs.session-token",
@@ -205,7 +213,8 @@ function clearAuthSessionCookies(response: NextResponse): void {
     "__Secure-next-auth.session-token",
   ] as const;
 
+  const cookiePath = `${basePath}/` || "/";
   for (const name of authSessionCookieNames) {
-    response.cookies.delete(name);
+    response.cookies.delete({ name, path: cookiePath });
   }
 }

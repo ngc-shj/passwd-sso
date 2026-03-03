@@ -11,6 +11,7 @@ import {
   resolveEntryFolderId,
 } from "@/components/passwords/password-import-folders";
 import { apiPath } from "@/lib/constants";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface RunImportParams {
   entries: ParsedEntry[];
@@ -84,7 +85,7 @@ export async function runImportEntries({
         const encryptedBlob = await encryptData(fullBlob, teamEncryptionKey!, blobAad);
         const encryptedOverview = await encryptData(overviewBlob, teamEncryptionKey!, overviewAad);
 
-        res = await fetch(passwordsPath, {
+        res = await fetchApi(passwordsPath, {
           method: "POST",
           headers,
           body: JSON.stringify({
@@ -108,7 +109,7 @@ export async function runImportEntries({
         // Failure is best-effort: the entry itself is already created and
         // the user can manually toggle the favorite later.
         if (res.ok && entry.isFavorite) {
-          await fetch(apiPath.teamPasswordFavorite(teamId!, entryId), {
+          await fetchApi(apiPath.teamPasswordFavorite(teamId!, entryId), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
           }).catch(() => {
@@ -122,7 +123,7 @@ export async function runImportEntries({
         const encryptedBlob = await encryptData(fullBlob, encryptionKey!, aad);
         const encryptedOverview = await encryptData(overviewBlob, encryptionKey!, aad);
 
-        res = await fetch(passwordsPath, {
+        res = await fetchApi(passwordsPath, {
           method: "POST",
           headers,
           body: JSON.stringify({

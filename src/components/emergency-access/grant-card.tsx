@@ -29,6 +29,7 @@ import {
   encryptPrivateKey,
 } from "@/lib/crypto-emergency";
 import { eaErrorToI18nKey } from "@/lib/api-error-codes";
+import { fetchApi, appUrl } from "@/lib/url-helpers";
 
 interface Grant {
   id: string;
@@ -87,14 +88,14 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
 
   const handleCopyLink = async () => {
     if (!grant.token) return;
-    const url = `${window.location.origin}/dashboard/emergency-access/invite/${grant.token}`;
+    const url = appUrl(`/dashboard/emergency-access/invite/${grant.token}`);
     await navigator.clipboard.writeText(url);
     toast.success(t("copyLink"));
   };
 
   const handleRevoke = async (permanent: boolean) => {
     try {
-      const res = await fetch(apiPath.emergencyGrantAction(grant.id, "revoke"), {
+      const res = await fetchApi(apiPath.emergencyGrantAction(grant.id, "revoke"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ permanent }),
@@ -113,7 +114,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
 
   const handleApprove = async () => {
     try {
-      const res = await fetch(apiPath.emergencyGrantAction(grant.id, "approve"), {
+      const res = await fetchApi(apiPath.emergencyGrantAction(grant.id, "approve"), {
         method: "POST",
       });
       if (res.ok) {
@@ -130,7 +131,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
 
   const handleRequest = async () => {
     try {
-      const res = await fetch(apiPath.emergencyGrantAction(grant.id, "request"), {
+      const res = await fetchApi(apiPath.emergencyGrantAction(grant.id, "request"), {
         method: "POST",
       });
       if (res.ok) {
@@ -157,7 +158,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
       const privateKeyBytes = await exportPrivateKey(keyPair.privateKey);
       const encryptedPrivKey = await encryptPrivateKey(privateKeyBytes, encryptionKey);
 
-      const res = await fetch(apiPath.emergencyGrantAction(grant.id, "accept"), {
+      const res = await fetchApi(apiPath.emergencyGrantAction(grant.id, "accept"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -186,7 +187,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
 
   const handleDeclineGrant = async () => {
     try {
-      const res = await fetch(apiPath.emergencyGrantAction(grant.id, "decline"), {
+      const res = await fetchApi(apiPath.emergencyGrantAction(grant.id, "decline"), {
         method: "POST",
       });
       if (res.ok) {
