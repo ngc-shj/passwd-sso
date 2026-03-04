@@ -198,6 +198,8 @@ function applySecurityHeaders(
     `csp-endpoint="${cspReportUrl}"`
   );
 
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+
   response.cookies.set("csp-nonce", nonce, {
     httpOnly: true,
     sameSite: "lax",

@@ -268,4 +268,13 @@ describe("proxy — applySecurityHeaders basePath", () => {
     expect(reportTo.endpoints[0].url).toBe("/api/csp-report");
     expect(response.cookies.get("csp-nonce")?.path).toBe("/");
   });
+
+  it("sets Referrer-Policy header", () => {
+    const response = new NextResponse();
+    _applySecurityHeaders(response, dummyOptions);
+
+    expect(response.headers.get("Referrer-Policy")).toBe(
+      "strict-origin-when-cross-origin",
+    );
+  });
 });
