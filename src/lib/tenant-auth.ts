@@ -2,8 +2,8 @@
  * Tenant authorization helpers (RBAC).
  *
  * Permissions are derived from tenant role:
- *   OWNER  — full control (manage members, vault reset)
- *   ADMIN  — full control (manage members, vault reset)
+ *   OWNER  — full control (manage members, vault reset, create teams)
+ *   ADMIN  — full control (manage members, vault reset, create teams)
  *   MEMBER — no admin permissions
  */
 
@@ -26,10 +26,12 @@ const ROLE_PERMISSIONS: Record<TenantRole, Set<TenantPermission>> = {
   OWNER: new Set([
     TENANT_PERMISSION.MEMBER_MANAGE,
     TENANT_PERMISSION.MEMBER_VAULT_RESET,
+    TENANT_PERMISSION.TEAM_CREATE,
   ]),
   ADMIN: new Set([
     TENANT_PERMISSION.MEMBER_MANAGE,
     TENANT_PERMISSION.MEMBER_VAULT_RESET,
+    TENANT_PERMISSION.TEAM_CREATE,
   ]),
   MEMBER: new Set(),
 };
@@ -81,7 +83,7 @@ export async function getTenantMembership(userId: string) {
 export async function requireTenantMember(userId: string) {
   const membership = await getTenantMembership(userId);
   if (!membership) {
-    throw new TenantAuthError(API_ERROR.NOT_FOUND, 404);
+    throw new TenantAuthError(API_ERROR.FORBIDDEN, 403);
   }
   return membership;
 }

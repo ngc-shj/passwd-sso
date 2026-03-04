@@ -11,6 +11,7 @@ import { Plus, Building2, CalendarClock, Globe } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
+import { useTenantRole } from "@/hooks/use-tenant-role";
 
 interface TeamListItem {
   id: string;
@@ -27,6 +28,7 @@ interface TeamListItem {
 export default function TeamsPage() {
   const t = useTranslations("Team");
   const locale = useLocale();
+  const { isAdmin } = useTenantRole();
   const [teams, setTeams] = useState<TeamListItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -63,15 +65,17 @@ export default function TeamsPage() {
               </div>
               <p className="text-sm text-muted-foreground">{t("manage")}</p>
             </div>
-            <TeamCreateDialog
-              trigger={
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  {t("createTeam")}
-                </Button>
-              }
-              onCreated={handleCreated}
-            />
+            {isAdmin && (
+              <TeamCreateDialog
+                trigger={
+                  <Button>
+                    <Plus className="mr-2 h-4 w-4" />
+                    {t("createTeam")}
+                  </Button>
+                }
+                onCreated={handleCreated}
+              />
+            )}
           </div>
         </Card>
 
