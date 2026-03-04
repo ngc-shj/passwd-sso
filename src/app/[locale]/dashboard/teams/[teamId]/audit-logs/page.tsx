@@ -6,13 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -30,6 +33,7 @@ import {
   UserPlus,
   UserMinus,
   ShieldCheck,
+  ChevronDown,
   ScrollText,
   Loader2,
   Link as LinkIcon,
@@ -124,6 +128,7 @@ export default function TeamAuditLogsPage({
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [downloading, setDownloading] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [exportAllowed, setExportAllowed] = useState(true);
   const td = useTranslations("AuditDownload");
 
@@ -447,121 +452,125 @@ export default function TeamAuditLogsPage({
       </Card>
 
       <Card className="rounded-xl border bg-card/80 p-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1">
-            <Label className="text-xs">{t("action")}</Label>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="w-[240px] justify-between">
-                  <span className="truncate">{actionSummary}</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-[280px] p-2" align="start">
-                <div className="px-2 pb-2">
-                  <Input
-                    placeholder={t("actionSearch")}
-                    value={actionSearch}
-                    onChange={(e) => setActionSearch(e.target.value)}
-                  />
-                </div>
-                <DropdownMenuCheckboxItem
-                  checked={selectedActions.size === 0}
-                  onCheckedChange={() => clearActions()}
-                >
-                  {t("allActions")}
-                </DropdownMenuCheckboxItem>
-                <DropdownMenuSeparator />
-                {ACTION_GROUPS.map((group) => {
-                  const actions = filteredActions(group.actions);
-                  if (actions.length === 0) return null;
-                  const allSelected = group.actions.every((a) => selectedActions.has(a));
-                  return (
-                    <div key={group.value}>
-                      <DropdownMenuLabel className="px-2 pt-2 text-xs">
-                        {t(group.label as never)}
-                      </DropdownMenuLabel>
-                      <DropdownMenuCheckboxItem
-                        checked={allSelected}
-                        onCheckedChange={(checked) => setGroupSelection(group.actions, !!checked)}
-                        className="font-medium"
-                      >
-                        {t("selectGroup")}
-                      </DropdownMenuCheckboxItem>
-                      {actions.map((action) => (
-                        <DropdownMenuCheckboxItem
-                          key={action}
-                          checked={isActionSelected(action)}
-                          onCheckedChange={(checked) => toggleAction(action, !!checked)}
-                          className="pl-6"
-                        >
-                          {actionLabel(action)}
-                        </DropdownMenuCheckboxItem>
-                      ))}
-                    </div>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">{t("dateFrom")}</Label>
-            <Input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="w-[160px]"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">{t("dateTo")}</Label>
-            <Input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="w-[160px]"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs invisible">&#8203;</Label>
-            {exportAllowed ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" disabled={downloading}>
-                    {downloading ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Download className="h-4 w-4 mr-2" />
-                    )}
-                    {downloading ? td("downloading") : td("download")}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuItem onClick={() => handleDownload("csv")}>
-                    {td("formatCsv")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
-                    {td("formatJsonl")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span tabIndex={0}>
-                      <Button variant="outline" disabled>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">{t("dateFrom")}</Label>
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="w-[160px]"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">{t("dateTo")}</Label>
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="w-[160px]"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs invisible">&#8203;</Label>
+              {exportAllowed ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" disabled={downloading}>
+                      {downloading ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
                         <Download className="h-4 w-4 mr-2" />
-                        {td("download")}
-                      </Button>
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>{td("exportDisabled")}</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
+                      )}
+                      {downloading ? td("downloading") : td("download")}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem onClick={() => handleDownload("csv")}>
+                      {td("formatCsv")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
+                      {td("formatJsonl")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span tabIndex={0}>
+                        <Button variant="outline" disabled>
+                          <Download className="h-4 w-4 mr-2" />
+                          {td("download")}
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>{td("exportDisabled")}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </div>
           </div>
+
+          <Collapsible open={filterOpen} onOpenChange={setFilterOpen}>
+            <div className="flex items-center gap-2">
+              <CollapsibleTrigger asChild>
+                <Button variant="outline" size="sm" className="justify-between gap-2">
+                  <span className="text-xs">{t("action")}: {actionSummary}</span>
+                  <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${filterOpen ? "rotate-180" : ""}`} />
+                </Button>
+              </CollapsibleTrigger>
+              {selectedActions.size > 0 && (
+                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={clearActions}>
+                  {t("allActions")}
+                </Button>
+              )}
+            </div>
+            <CollapsibleContent>
+              <div className="mt-2 space-y-2">
+                <Input
+                  placeholder={t("actionSearch")}
+                  value={actionSearch}
+                  onChange={(e) => setActionSearch(e.target.value)}
+                />
+                <div className="max-h-64 overflow-y-auto border rounded-md p-3 space-y-1">
+                  {ACTION_GROUPS.map((group) => {
+                    const actions = filteredActions(group.actions);
+                    if (actions.length === 0) return null;
+                    const allSelected = group.actions.every((a) => selectedActions.has(a));
+                    return (
+                      <Collapsible key={group.value}>
+                        <div className="flex items-center gap-2 py-1">
+                          <Checkbox
+                            checked={allSelected}
+                            onCheckedChange={(checked) => setGroupSelection(group.actions, !!checked)}
+                          />
+                          <CollapsibleTrigger className="flex items-center gap-1 text-sm font-medium hover:underline">
+                            {t(group.label as never)}
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </CollapsibleTrigger>
+                        </div>
+                        <CollapsibleContent className="pl-6 space-y-1">
+                          {actions.map((action) => (
+                            <label key={action} className="flex items-center gap-2 text-sm py-0.5">
+                              <Checkbox
+                                checked={isActionSelected(action)}
+                                onCheckedChange={(checked) => toggleAction(action, !!checked)}
+                              />
+                              {actionLabel(action)}
+                            </label>
+                          ))}
+                        </CollapsibleContent>
+                      </Collapsible>
+                    );
+                  })}
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </div>
       </Card>
 
