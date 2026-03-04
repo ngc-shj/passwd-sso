@@ -9,8 +9,10 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
 import { watchtowerAlertEmail } from "@/lib/email/templates/watchtower-alert";
+import { serverAppUrl } from "@/lib/url-helpers";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { notificationTitle, notificationBody } from "@/lib/notification-messages";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 
@@ -58,12 +60,21 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Resolve user locale for i18n (notification + email)
+  const user = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { email: true, locale: true },
+    }),
+  );
+  const locale = resolveUserLocale(user?.locale);
+
   // Create in-app notification
   createNotification({
     userId: session.user.id,
     type: NOTIFICATION_TYPE.WATCHTOWER_ALERT,
-    title: "Watchtower alert",
-    body: `${newBreachCount} new breach(es) detected in your vault.`,
+    title: notificationTitle("WATCHTOWER_ALERT", locale),
+    body: notificationBody("WATCHTOWER_ALERT", locale, String(newBreachCount)),
     metadata: { breachCount: newBreachCount },
   });
 
@@ -77,17 +88,8 @@ export async function POST(req: NextRequest) {
   });
 
   // Send email notification if configured
-  const user = await withUserTenantRls(session.user.id, async () =>
-    prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { email: true, locale: true },
-    }),
-  );
-
   if (user?.email) {
-    const locale = resolveUserLocale(user.locale);
-    const appUrl = process.env.APP_URL || process.env.AUTH_URL || "";
-    const { subject, html, text } = watchtowerAlertEmail(locale, newBreachCount, appUrl);
+    const { subject, html, text } = watchtowerAlertEmail(locale, newBreachCount, serverAppUrl(""));
     void sendEmail({ to: user.email, subject, html, text });
   }
 

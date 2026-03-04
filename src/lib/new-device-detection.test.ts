@@ -20,12 +20,12 @@ const {
       if (stored) return stored;
       if (accept) {
         const lower = accept.toLowerCase();
-        const enIdx = lower.search(/\ben/);
         const jaIdx = lower.search(/\bja/);
-        if (enIdx >= 0 && (jaIdx < 0 || enIdx < jaIdx)) return "en";
-        return "ja";
+        const enIdx = lower.search(/\ben/);
+        if (jaIdx >= 0 && (enIdx < 0 || jaIdx < enIdx)) return "ja";
+        return "en";
       }
-      return "ja";
+      return "en";
     },
   ),
 }));
@@ -109,7 +109,7 @@ describe("checkNewDeviceAndNotify", () => {
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "user@example.com",
-        subject: expect.stringContaining("ログイン"),
+        subject: expect.stringContaining("New device login"),
       }),
     );
 

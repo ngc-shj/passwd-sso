@@ -9,9 +9,11 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
 import { adminVaultResetEmail } from "@/lib/email/templates/admin-vault-reset";
+import { serverAppUrl } from "@/lib/url-helpers";
 import { resolveUserLocale } from "@/lib/locale";
 import { requireTeamPermission, isRoleAbove, TeamAuthError } from "@/lib/team-auth";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { notificationTitle, notificationBody } from "@/lib/notification-messages";
 import { TEAM_PERMISSION, AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 
@@ -158,20 +160,19 @@ export async function POST(
   });
 
   // In-app notification to target user
+  const locale = resolveUserLocale(targetMember.user.locale);
   createNotification({
     userId: targetMember.userId,
     tenantId: team.tenantId,
     type: NOTIFICATION_TYPE.ADMIN_VAULT_RESET,
-    title: "Vault reset initiated",
-    body: `A team admin has initiated a vault reset for your account.`,
+    title: notificationTitle("ADMIN_VAULT_RESET", locale),
+    body: notificationBody("ADMIN_VAULT_RESET", locale),
   });
 
   // Email notification to target user
   if (targetMember.user.email) {
-    const locale = resolveUserLocale(targetMember.user.locale);
-    const appUrl = process.env.APP_URL || process.env.AUTH_URL || "";
     // Token in URL fragment (not sent to server in logs)
-    const resetUrl = `${appUrl}/${locale}/dashboard/vault-reset#token=${token}`;
+    const resetUrl = `${serverAppUrl(`/${locale}/vault-reset/admin`)}#token=${token}`;
     const adminName = session.user.name ?? session.user.email ?? "";
     const { subject, html, text } = adminVaultResetEmail(
       locale,

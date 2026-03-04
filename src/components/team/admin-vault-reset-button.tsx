@@ -16,7 +16,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { RotateCcw, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchApi, apiPath } from "@/lib/url-helpers";
+import { fetchApi } from "@/lib/url-helpers";
+import { apiPath } from "@/lib/constants";
 
 interface AdminVaultResetButtonProps {
   teamId: string;
