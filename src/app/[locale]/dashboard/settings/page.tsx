@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Settings } from "lucide-react";
+import { useTenantRole } from "@/hooks/use-tenant-role";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SessionsCard } from "@/components/sessions/sessions-card";
@@ -11,6 +12,7 @@ import { TenantMembersCard } from "@/components/settings/tenant-members-card";
 
 export default function SettingsPage() {
   const t = useTranslations("Sessions");
+  const { isAdmin } = useTenantRole();
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
@@ -27,20 +29,27 @@ export default function SettingsPage() {
           </div>
         </Card>
 
-        <Tabs defaultValue="personal" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="personal">{t("tabPersonal")}</TabsTrigger>
-            <TabsTrigger value="tenant">{t("tabTenant")}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="personal" className="mt-0 space-y-4">
+        {isAdmin ? (
+          <Tabs defaultValue="personal" className="space-y-4">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="personal">{t("tabPersonal")}</TabsTrigger>
+              <TabsTrigger value="tenant">{t("tabTenant")}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="personal" className="mt-0 space-y-4">
+              <SessionsCard />
+              <CliTokenCard />
+            </TabsContent>
+            <TabsContent value="tenant" className="mt-0 space-y-4">
+              <TenantMembersCard />
+              <ScimProvisioningCard />
+            </TabsContent>
+          </Tabs>
+        ) : (
+          <div className="space-y-4">
             <SessionsCard />
             <CliTokenCard />
-          </TabsContent>
-          <TabsContent value="tenant" className="mt-0 space-y-4">
-            <TenantMembersCard />
-            <ScimProvisioningCard />
-          </TabsContent>
-        </Tabs>
+          </div>
+        )}
       </div>
     </div>
   );

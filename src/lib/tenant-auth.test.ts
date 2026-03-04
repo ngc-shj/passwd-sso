@@ -65,6 +65,24 @@ describe("hasTenantPermission", () => {
     ).toBe(true);
   });
 
+  it("OWNER has TEAM_CREATE permission", () => {
+    expect(
+      hasTenantPermission("OWNER", TENANT_PERMISSION.TEAM_CREATE),
+    ).toBe(true);
+  });
+
+  it("ADMIN has TEAM_CREATE permission", () => {
+    expect(
+      hasTenantPermission("ADMIN", TENANT_PERMISSION.TEAM_CREATE),
+    ).toBe(true);
+  });
+
+  it("MEMBER has no TEAM_CREATE permission", () => {
+    expect(
+      hasTenantPermission("MEMBER", TENANT_PERMISSION.TEAM_CREATE),
+    ).toBe(false);
+  });
+
   it("MEMBER has no MEMBER_MANAGE permission", () => {
     expect(
       hasTenantPermission("MEMBER", TENANT_PERMISSION.MEMBER_MANAGE),
@@ -179,7 +197,7 @@ describe("requireTenantMember", () => {
     expect(result).toEqual(membership);
   });
 
-  it("throws TenantAuthError with 404 when no active membership exists", async () => {
+  it("throws TenantAuthError with 403 when no active membership exists", async () => {
     mockFindFirst.mockResolvedValue(null);
 
     await expect(requireTenantMember("user-no-membership")).rejects.toThrow(
@@ -187,7 +205,7 @@ describe("requireTenantMember", () => {
     );
   });
 
-  it("throws TenantAuthError with status 404 when membership is absent", async () => {
+  it("throws TenantAuthError with status 403 when membership is absent", async () => {
     mockFindFirst.mockResolvedValue(null);
 
     const error = await requireTenantMember("user-deactivated").catch(
@@ -195,19 +213,19 @@ describe("requireTenantMember", () => {
     );
 
     expect(error).toBeInstanceOf(TenantAuthError);
-    expect(error.status).toBe(404);
-    expect(error.message).toBe(API_ERROR.NOT_FOUND);
+    expect(error.status).toBe(403);
+    expect(error.message).toBe(API_ERROR.FORBIDDEN);
   });
 
-  it("throws TenantAuthError with 404 when user is deactivated (findFirst returns null)", async () => {
+  it("throws TenantAuthError with 403 when user is deactivated (findFirst returns null)", async () => {
     // deactivatedAt filter is applied in the query itself; findFirst returns null
     mockFindFirst.mockResolvedValue(null);
 
     await expect(requireTenantMember("user-deactivated")).rejects.toMatchObject(
       {
         name: "TenantAuthError",
-        status: 404,
-        message: API_ERROR.NOT_FOUND,
+        status: 403,
+        message: API_ERROR.FORBIDDEN,
       },
     );
   });
@@ -280,7 +298,59 @@ describe("requireTenantPermission", () => {
     });
   });
 
-  it("propagates TenantAuthError with 404 when user has no membership", async () => {
+  it("returns membership when OWNER has TEAM_CREATE permission", async () => {
+    const membership = {
+      id: "member-owner",
+      userId: "user-owner",
+      tenantId: "tenant-1",
+      role: "OWNER" as const,
+      deactivatedAt: null,
+    };
+    mockFindFirst.mockResolvedValue(membership);
+
+    const result = await requireTenantPermission(
+      "user-owner",
+      TENANT_PERMISSION.TEAM_CREATE,
+    );
+    expect(result).toEqual(membership);
+  });
+
+  it("returns membership when ADMIN has TEAM_CREATE permission", async () => {
+    const membership = {
+      id: "member-4",
+      userId: "user-4",
+      tenantId: "tenant-1",
+      role: "ADMIN" as const,
+      deactivatedAt: null,
+    };
+    mockFindFirst.mockResolvedValue(membership);
+
+    const result = await requireTenantPermission(
+      "user-4",
+      TENANT_PERMISSION.TEAM_CREATE,
+    );
+    expect(result).toEqual(membership);
+  });
+
+  it("throws TenantAuthError with 403 when MEMBER lacks TEAM_CREATE", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "member-5",
+      userId: "user-5",
+      tenantId: "tenant-1",
+      role: "MEMBER" as const,
+      deactivatedAt: null,
+    });
+
+    await expect(
+      requireTenantPermission("user-5", TENANT_PERMISSION.TEAM_CREATE),
+    ).rejects.toMatchObject({
+      name: "TenantAuthError",
+      status: 403,
+      message: API_ERROR.FORBIDDEN,
+    });
+  });
+
+  it("propagates TenantAuthError with 403 when user has no membership", async () => {
     mockFindFirst.mockResolvedValue(null);
 
     const error = await requireTenantPermission(
@@ -289,7 +359,7 @@ describe("requireTenantPermission", () => {
     ).catch((e) => e);
 
     expect(error).toBeInstanceOf(TenantAuthError);
-    expect(error.status).toBe(404);
+    expect(error.status).toBe(403);
   });
 });
 
