@@ -75,6 +75,26 @@ describe("crypto", () => {
       await expect(decryptData(encrypted, encKey, wrongAad)).rejects.toThrow();
     });
 
+    it("decrypt without AAD fails when encrypted with AAD", async () => {
+      const secretKey = crypto.getRandomValues(new Uint8Array(32));
+      const encKey = await deriveEncryptionKey(secretKey);
+
+      const aad = new TextEncoder().encode("entry:123");
+      const encrypted = await encryptData("secret", encKey, aad);
+
+      await expect(decryptData(encrypted, encKey)).rejects.toThrow();
+    });
+
+    it("decrypt with AAD fails when encrypted without AAD", async () => {
+      const secretKey = crypto.getRandomValues(new Uint8Array(32));
+      const encKey = await deriveEncryptionKey(secretKey);
+
+      const encrypted = await encryptData("secret", encKey);
+      const aad = new TextEncoder().encode("entry:123");
+
+      await expect(decryptData(encrypted, encKey, aad)).rejects.toThrow();
+    });
+
     it("wrap and unwrap secret key", async () => {
       const wrappingKey = await deriveWrappingKey(passphrase, accountSalt);
       const secretKey = crypto.getRandomValues(new Uint8Array(32));
@@ -113,6 +133,19 @@ describe("crypto", () => {
       const artifact = await encryptData(plaintext, encKey);
       const result = await verifyKey(encKey, artifact);
       expect(result).toBe(true);
+    });
+
+    it("returns false for tampered authTag", async () => {
+      const secretKey = crypto.getRandomValues(new Uint8Array(32));
+      const encKey = await deriveEncryptionKey(secretKey);
+
+      const artifact = await encryptData("passwd-sso-vault-verification-v1", encKey);
+      const tampered = {
+        ...artifact,
+        authTag: ((parseInt(artifact.authTag.slice(0, 2), 16) ^ 0xff).toString(16).padStart(2, "0")) + artifact.authTag.slice(2),
+      };
+      const result = await verifyKey(encKey, tampered);
+      expect(result).toBe(false);
     });
 
     it("returns false for wrong key", async () => {

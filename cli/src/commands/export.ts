@@ -73,13 +73,11 @@ export async function exportCommand(options: {
     return;
   }
 
-  // Validate output path before processing
-  if (options.output) {
-    const resolvedPath = resolve(options.output);
-    if (existsSync(resolvedPath) && lstatSync(resolvedPath).isSymbolicLink()) {
-      output.error("Output path is a symlink — refusing to write.");
-      return;
-    }
+  // Validate and resolve output path before processing
+  const outputPath = options.output ? resolve(options.output) : undefined;
+  if (outputPath && existsSync(outputPath) && lstatSync(outputPath).isSymbolicLink()) {
+    output.error("Output path is a symlink — refusing to write.");
+    return;
   }
 
   const userId = getUserId();
@@ -108,10 +106,10 @@ export async function exportCommand(options: {
 
   if (format === "json") {
     const out = JSON.stringify(decrypted, null, 2);
-    if (options.output) {
+    if (outputPath) {
       const { writeFileSync } = await import("node:fs");
-      writeFileSync(options.output, out, { encoding: "utf-8", mode: 0o600 });
-      output.success(`Exported ${decrypted.length} entries to ${options.output}`);
+      writeFileSync(outputPath, out, { encoding: "utf-8", mode: 0o600 });
+      output.success(`Exported ${decrypted.length} entries to ${outputPath}`);
     } else {
       console.log(out);
     }
@@ -131,10 +129,10 @@ export async function exportCommand(options: {
     }
     const csvOut = csvRows.join("\n");
 
-    if (options.output) {
+    if (outputPath) {
       const { writeFileSync } = await import("node:fs");
-      writeFileSync(options.output, csvOut, { encoding: "utf-8", mode: 0o600 });
-      output.success(`Exported ${decrypted.length} entries to ${options.output}`);
+      writeFileSync(outputPath, csvOut, { encoding: "utf-8", mode: 0o600 });
+      output.success(`Exported ${decrypted.length} entries to ${outputPath}`);
     } else {
       console.log(csvOut);
     }

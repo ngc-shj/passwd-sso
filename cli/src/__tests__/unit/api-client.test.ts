@@ -90,6 +90,9 @@ describe("apiRequest", () => {
     const res = await apiRequest("/api/test");
     expect(res.ok).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(3);
+    // Verify the retry used the new token
+    const retryCall = mockFetch.mock.calls[2];
+    expect(retryCall[1].headers.Authorization).toBe("Bearer new-token");
   });
 
   it("returns 401 response when refresh also fails", async () => {
