@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SessionsCard } from "@/components/sessions/sessions-card";
 import { ScimProvisioningCard } from "@/components/settings/scim-provisioning-card";
 import { CliTokenCard } from "@/components/settings/cli-token-card";
+import { TenantMembersCard } from "@/components/settings/tenant-members-card";
 
 export default function SettingsPage() {
   const t = useTranslations("Sessions");
@@ -35,7 +36,8 @@ export default function SettingsPage() {
             <SessionsCard />
             <CliTokenCard />
           </TabsContent>
-          <TabsContent value="tenant" className="mt-0">
+          <TabsContent value="tenant" className="mt-0 space-y-4">
+            <TenantMembersCard />
             <ScimProvisioningCard />
           </TabsContent>
         </Tabs>

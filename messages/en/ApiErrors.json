@@ -5,6 +5,7 @@
   "validationError": "Please check the input values.",
   "notFound": "Not found.",
   "forbidden": "You do not have permission.",
+  "conflict": "The resource has already been modified.",
   "vaultAlreadySetup": "Vault is already set up.",
   "vaultNotSetup": "Vault is not set up.",
   "invalidPassphrase": "The passphrase is incorrect.",

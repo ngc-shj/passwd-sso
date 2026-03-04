@@ -128,12 +128,5 @@
   "scimNeverUsed": "Never used",
   "scimExpiresAt": "Expires {date}",
   "cancel": "Cancel",
-  "externalTenant": "External tenant",
-  "vaultResetTitle": "Reset Member Vault",
-  "vaultResetDescription": "This will permanently delete all vault data for {name}. The member will need to set up a new vault. This action cannot be undone.",
-  "vaultResetConfirmHint": "Type \"{text}\" to confirm",
-  "vaultResetConfirm": "Reset Vault",
-  "vaultResetInitiated": "Vault reset initiated. The member has been notified.",
-  "vaultResetRateLimited": "Too many reset requests. Please try again later.",
-  "vaultResetFailed": "Failed to initiate vault reset"
+  "externalTenant": "External tenant"
 }

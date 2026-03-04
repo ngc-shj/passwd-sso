@@ -128,12 +128,5 @@
   "scimNeverUsed": "未使用",
   "scimExpiresAt": "有効期限: {date}",
   "cancel": "キャンセル",
-  "externalTenant": "外部テナント",
-  "vaultResetTitle": "メンバーの保管庫をリセット",
-  "vaultResetDescription": "{name} の保管庫データがすべて完全に削除されます。メンバーは保管庫を再設定する必要があります。この操作は取り消せません。",
-  "vaultResetConfirmHint": "確認するには「{text}」と入力してください",
-  "vaultResetConfirm": "保管庫をリセット",
-  "vaultResetInitiated": "保管庫のリセットを開始しました。メンバーに通知されました。",
-  "vaultResetRateLimited": "リクエストが多すぎます。しばらくしてからもう一度お試しください。",
-  "vaultResetFailed": "保管庫のリセットの開始に失敗しました"
+  "externalTenant": "外部テナント"
 }

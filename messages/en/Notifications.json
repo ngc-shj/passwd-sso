@@ -18,5 +18,6 @@
   "type_ENTRY_EXPIRING": "Expiring entry",
   "type_WATCHTOWER_ALERT": "Watchtower alert",
   "type_POLICY_UPDATE": "Policy update",
-  "type_ADMIN_VAULT_RESET": "Admin vault reset"
+  "type_ADMIN_VAULT_RESET": "Admin vault reset",
+  "type_ADMIN_VAULT_RESET_REVOKED": "Vault reset cancelled"
 }

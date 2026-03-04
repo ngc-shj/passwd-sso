@@ -117,6 +117,7 @@
   "WATCHTOWER_ALERT_SENT": "Watchtower breach alert sent",
   "ADMIN_VAULT_RESET_INITIATE": "Admin vault reset initiated",
   "ADMIN_VAULT_RESET_EXECUTE": "Admin vault reset executed",
+  "ADMIN_VAULT_RESET_REVOKE": "Admin vault reset revoked",
   "yes": "yes",
   "no": "no",
   "included": "included",

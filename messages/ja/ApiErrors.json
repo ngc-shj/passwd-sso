@@ -5,6 +5,7 @@
   "validationError": "入力内容に誤りがあります。",
   "notFound": "見つかりませんでした。",
   "forbidden": "アクセス権がありません。",
+  "conflict": "リソースは既に変更されています。",
   "vaultAlreadySetup": "保管庫は既にセットアップ済みです。",
   "vaultNotSetup": "保管庫がセットアップされていません。",
   "invalidPassphrase": "パスフレーズが正しくありません。",

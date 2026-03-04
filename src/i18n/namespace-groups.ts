@@ -55,6 +55,7 @@ export const NS_DASHBOARD_CORE: readonly Namespace[] = [
   "TeamWebhook",
   "AuditDownload",
   "CliToken",
+  "TenantAdmin",
 ];
 
 /** Union of all dashboard namespaces (must be a superset of NS_GLOBAL). */
