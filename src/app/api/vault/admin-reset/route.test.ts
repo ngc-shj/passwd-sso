@@ -196,7 +196,7 @@ describe("POST /api/vault/admin-reset", () => {
           id: "reset-1",
           executedAt: null,
           revokedAt: null,
-          expiresAt: expect.objectContaining({ gt: expect.any(Date) }),
+          expiresAt: { gt: expect.any(Date) },
         }),
         data: expect.objectContaining({ executedAt: expect.any(Date) }),
       }),
