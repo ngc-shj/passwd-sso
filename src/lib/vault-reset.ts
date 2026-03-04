@@ -50,6 +50,8 @@ export async function executeVaultReset(
       prisma.vaultKey.deleteMany({ where: { userId: targetUserId } }),
       // Tags (all entries deleted, tags are now orphaned)
       prisma.tag.deleteMany({ where: { userId: targetUserId } }),
+      // Folders (user-owned, not cascade-deleted by PasswordEntry removal)
+      prisma.folder.deleteMany({ where: { userId: targetUserId } }),
       // Emergency access grants (revoke as owner)
       prisma.emergencyAccessGrant.updateMany({
         where: { ownerId: targetUserId },

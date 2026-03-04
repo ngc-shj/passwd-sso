@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
-  mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag,
+  mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag, mockPrismaFolder,
   mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
   mockPrismaTransaction, mockRateLimiter, mockLogAudit,
 } = vi.hoisted(() => ({
@@ -13,6 +13,7 @@ const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaPasswordShare: { deleteMany: vi.fn() },
   mockPrismaVaultKey: { deleteMany: vi.fn() },
   mockPrismaTag: { deleteMany: vi.fn() },
+  mockPrismaFolder: { deleteMany: vi.fn() },
   mockPrismaEmergencyGrant: { updateMany: vi.fn() },
   mockPrismaTeamMemberKey: { deleteMany: vi.fn() },
   mockPrismaTeamMember: { updateMany: vi.fn() },
@@ -30,6 +31,7 @@ vi.mock("@/lib/prisma", () => ({
     passwordShare: mockPrismaPasswordShare,
     vaultKey: mockPrismaVaultKey,
     tag: mockPrismaTag,
+    folder: mockPrismaFolder,
     emergencyAccessGrant: mockPrismaEmergencyGrant,
     teamMemberKey: mockPrismaTeamMemberKey,
     teamMember: mockPrismaTeamMember,
@@ -140,8 +142,8 @@ describe("POST /api/vault/reset", () => {
       data: { keyDistributed: false },
     });
 
-    // Transaction should have 9 operations (original 7 + 2 new)
+    // Transaction should have 10 operations (original 7 + 2 team E2E + 1 folder)
     const txArray = mockPrismaTransaction.mock.calls[0][0];
-    expect(txArray).toHaveLength(9);
+    expect(txArray).toHaveLength(10);
   });
 });

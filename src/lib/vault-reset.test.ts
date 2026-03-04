@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const {
   mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
-  mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag,
+  mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag, mockPrismaFolder,
   mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
   mockPrismaTransaction,
 } = vi.hoisted(() => ({
@@ -12,6 +12,7 @@ const {
   mockPrismaPasswordShare: { deleteMany: vi.fn() },
   mockPrismaVaultKey: { deleteMany: vi.fn() },
   mockPrismaTag: { deleteMany: vi.fn() },
+  mockPrismaFolder: { deleteMany: vi.fn() },
   mockPrismaEmergencyGrant: { updateMany: vi.fn() },
   mockPrismaTeamMemberKey: { deleteMany: vi.fn() },
   mockPrismaTeamMember: { updateMany: vi.fn() },
@@ -26,6 +27,7 @@ vi.mock("@/lib/prisma", () => ({
     passwordShare: mockPrismaPasswordShare,
     vaultKey: mockPrismaVaultKey,
     tag: mockPrismaTag,
+    folder: mockPrismaFolder,
     emergencyAccessGrant: mockPrismaEmergencyGrant,
     teamMemberKey: mockPrismaTeamMemberKey,
     teamMember: mockPrismaTeamMember,
@@ -56,11 +58,11 @@ describe("executeVaultReset", () => {
     expect(result).toEqual({ deletedEntries: 10, deletedAttachments: 3 });
   });
 
-  it("runs a transaction with all 9 expected operations", async () => {
+  it("runs a transaction with all 10 expected operations", async () => {
     await executeVaultReset("user-1");
     expect(mockPrismaTransaction).toHaveBeenCalledTimes(1);
     const txArray = mockPrismaTransaction.mock.calls[0][0];
-    expect(txArray).toHaveLength(9);
+    expect(txArray).toHaveLength(10);
   });
 
   it("deletes attachments for the target user", async () => {
@@ -147,6 +149,6 @@ describe("executeVaultReset", () => {
 
     // Same transaction structure
     const txA = mockPrismaTransaction.mock.calls[0][0];
-    expect(txA).toHaveLength(9);
+    expect(txA).toHaveLength(10);
   });
 });
