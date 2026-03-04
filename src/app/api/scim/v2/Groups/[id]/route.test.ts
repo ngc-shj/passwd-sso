@@ -235,6 +235,27 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     });
   });
 
+  it("returns 400 when adding a user not in the tenant", async () => {
+    mockTeamMember.findUnique.mockResolvedValue(null);
+    mockTenantMember.findUnique.mockResolvedValue(null);
+    mockTeamMember.findMany.mockResolvedValue([]);
+
+    const res = await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{ op: "add", path: "members", value: [{ value: "nonexistent-user" }] }],
+        },
+      }),
+      makeParams("grp-1"),
+    );
+
+    expect(res!.status).toBe(400);
+    const body = await res!.json();
+    expect(body.detail).toContain("Referenced member");
+  });
+
   it("returns 400 for invalid JSON on PATCH", async () => {
     const req = new NextRequest("http://localhost/api/scim/v2/Groups/grp-1", {
       method: "PATCH",
@@ -406,6 +427,8 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     );
 
     expect(res!.status).toBe(400);
+    const body = await res!.json();
+    expect(body.detail).toContain("Referenced member");
   });
 
   it("returns 403 when PUT targets an owner-mapped group", async () => {
