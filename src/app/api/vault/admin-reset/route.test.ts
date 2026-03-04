@@ -189,17 +189,23 @@ describe("POST /api/vault/admin-reset", () => {
     // Vault reset executed
     expect(mockExecuteVaultReset).toHaveBeenCalledWith("user-1");
 
-    // Token marked as executed via atomic updateMany
+    // Token marked as executed via atomic updateMany (TOCTOU prevention)
     expect(mockAdminVaultResetUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           id: "reset-1",
           executedAt: null,
           revokedAt: null,
+          expiresAt: expect.objectContaining({ gt: expect.any(Date) }),
         }),
         data: expect.objectContaining({ executedAt: expect.any(Date) }),
       }),
     );
+
+    // updateMany must be called BEFORE executeVaultReset (TOCTOU order)
+    const updateOrder = mockAdminVaultResetUpdateMany.mock.invocationCallOrder[0];
+    const resetOrder = mockExecuteVaultReset.mock.invocationCallOrder[0];
+    expect(updateOrder).toBeLessThan(resetOrder);
 
     // Audit log with TEAM scope (teamId is not null)
     expect(mockLogAudit).toHaveBeenCalledWith(
