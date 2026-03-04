@@ -268,4 +268,44 @@ describe("proxy — applySecurityHeaders basePath", () => {
     expect(reportTo.endpoints[0].url).toBe("/api/csp-report");
     expect(response.cookies.get("csp-nonce")?.path).toBe("/");
   });
+
+  it("sets Referrer-Policy header", () => {
+    const response = new NextResponse();
+    _applySecurityHeaders(response, dummyOptions);
+
+    expect(response.headers.get("Referrer-Policy")).toBe(
+      "strict-origin-when-cross-origin",
+    );
+  });
+
+  it("sets X-Content-Type-Options header", () => {
+    const response = new NextResponse();
+    _applySecurityHeaders(response, dummyOptions);
+
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  });
+
+  it("sets X-Frame-Options header", () => {
+    const response = new NextResponse();
+    _applySecurityHeaders(response, dummyOptions);
+
+    expect(response.headers.get("X-Frame-Options")).toBe("DENY");
+  });
+
+  it("omits Strict-Transport-Security when AUTH_URL is HTTP", () => {
+    const response = new NextResponse();
+    _applySecurityHeaders(response, dummyOptions);
+
+    // AUTH_URL is not set (defaults to http://localhost:3000) → no HSTS
+    expect(response.headers.get("Strict-Transport-Security")).toBeNull();
+  });
+
+  it("sets Permissions-Policy header", () => {
+    const response = new NextResponse();
+    _applySecurityHeaders(response, dummyOptions);
+
+    expect(response.headers.get("Permissions-Policy")).toBe(
+      "camera=(), microphone=(), geolocation=(), payment=()",
+    );
+  });
 });

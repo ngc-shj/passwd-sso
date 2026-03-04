@@ -47,5 +47,8 @@
   "expiring": "有効期限切れパスワード",
   "expiringDesc": "有効期限が切れたか、{days}日以内に切れるエントリー",
   "expiredDays": "{days} 日前に期限切れ",
-  "expiresOn": "{date} に期限切れ"
+  "expiresOn": "{date} に期限切れ",
+  "autoMonitorLabel": "自動監視",
+  "autoMonitorDescription": "保管庫がアンロック時に24時間ごとに新しいデータ漏洩を自動チェックします。",
+  "lastAutoCheck": "前回の自動チェック: {time}"
 }

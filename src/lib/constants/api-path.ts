@@ -33,18 +33,22 @@ export const API_PATH = {
   VAULT_RECOVERY_KEY_GENERATE: "/api/vault/recovery-key/generate",
   VAULT_RECOVERY_KEY_RECOVER: "/api/vault/recovery-key/recover",
   VAULT_RESET: "/api/vault/reset",
+  VAULT_ADMIN_RESET: "/api/vault/admin-reset",
   EMERGENCY_ACCESS: "/api/emergency-access",
   EMERGENCY_ACCESS_ACCEPT: "/api/emergency-access/accept",
   EMERGENCY_ACCESS_REJECT: "/api/emergency-access/reject",
   EMERGENCY_PENDING_CONFIRMATIONS: "/api/emergency-access/pending-confirmations",
   WATCHTOWER_START: "/api/watchtower/start",
   WATCHTOWER_HIBP: "/api/watchtower/hibp",
+  WATCHTOWER_ALERT: "/api/watchtower/alert",
   CSP_REPORT: "/api/csp-report",
   SESSIONS: "/api/sessions",
   USER_LOCALE: "/api/user/locale",
   NOTIFICATIONS: "/api/notifications",
   NOTIFICATIONS_COUNT: "/api/notifications/count",
   SCIM_V2: "/api/scim/v2",
+  TENANT_MEMBERS: "/api/tenant/members",
+  TENANT_ROLE: "/api/tenant/role",
   HEALTH_LIVE: "/api/health/live",
   HEALTH_READY: "/api/health/ready",
 } as const;
@@ -119,4 +123,11 @@ export const apiPath = {
   teamPasswordsBulkTrash: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-trash`,
   teamPasswordsBulkArchive: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-archive`,
   teamPasswordsBulkRestore: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-restore`,
+  tenantMemberResetVault: (userId: string) =>
+    `${API_PATH.TENANT_MEMBERS}/${userId}/reset-vault`,
+  tenantMemberResetVaultRevoke: (userId: string, resetId: string) =>
+    `${API_PATH.TENANT_MEMBERS}/${userId}/reset-vault/${resetId}/revoke`,
+  teamWebhooks: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/webhooks`,
+  teamWebhookById: (teamId: string, webhookId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/webhooks/${webhookId}`,
 } as const;

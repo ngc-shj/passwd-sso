@@ -242,4 +242,70 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
     const { status } = await parseResponse(await POST(req, teamParams()));
     expect(status).toBe(403);
   });
+
+  it("returns 400 when events array is empty", async () => {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+      body: {
+        url: "https://example.com/hook",
+        events: [],
+      },
+    });
+    const { status } = await parseResponse(await POST(req, teamParams()));
+    expect(status).toBe(400);
+  });
+
+  it("returns 400 for invalid event name", async () => {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+      body: {
+        url: "https://example.com/hook",
+        events: ["INVALID_EVENT"],
+      },
+    });
+    const { status } = await parseResponse(await POST(req, teamParams()));
+    expect(status).toBe(400);
+  });
+
+  it("returns 400 for group name used as event", async () => {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+      body: {
+        url: "https://example.com/hook",
+        events: ["group:webhook"],
+      },
+    });
+    const { status } = await parseResponse(await POST(req, teamParams()));
+    expect(status).toBe(400);
+  });
+});
+
+describe("GET /api/teams/[teamId]/webhooks — response shape", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuth.mockResolvedValue({ user: { id: "user-1" } });
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+  });
+
+  it("does not include secret fields in GET response", async () => {
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([
+      {
+        id: "wh-1",
+        url: "https://example.com/hook",
+        events: ["ENTRY_CREATE"],
+        isActive: true,
+        failCount: 0,
+        lastDeliveredAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        createdAt: new Date(),
+      },
+    ]);
+
+    const req = createRequest("GET", "http://localhost:3000/api/teams/team-1/webhooks");
+    const { json } = await parseResponse(await GET(req, teamParams()));
+    const webhook = json.webhooks[0];
+    expect(webhook).not.toHaveProperty("secret");
+    expect(webhook).not.toHaveProperty("secretEncrypted");
+    expect(webhook).not.toHaveProperty("secretIv");
+    expect(webhook).not.toHaveProperty("secretAuthTag");
+    expect(webhook).not.toHaveProperty("masterKeyVersion");
+  });
 });

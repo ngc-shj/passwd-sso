@@ -1,6 +1,13 @@
 export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 /**
+ * Whether the app is served over HTTPS.
+ * Determined by the AUTH_URL scheme — not NODE_ENV, which can be
+ * "production" even on http://localhost via `npm start`.
+ */
+export const isHttps = (process.env.AUTH_URL ?? "http://localhost:3000").startsWith("https://");
+
+/**
  * Prepend basePath to a path (for fetch, window.location.href, etc.).
  * Client-side only — do NOT use inside server-side route handlers.
  */
@@ -29,4 +36,13 @@ export function fetchApi(path: string, init?: RequestInit): Promise<Response> {
  */
 export function appUrl(path: string): string {
   return `${window.location.origin}${BASE_PATH}${path}`;
+}
+
+/**
+ * Build a full URL (APP_URL + basePath + path) for server-side use
+ * (e.g. email links). Uses APP_URL/AUTH_URL env vars instead of window.
+ */
+export function serverAppUrl(path: string): string {
+  const origin = process.env.APP_URL || process.env.AUTH_URL || "";
+  return `${origin}${BASE_PATH}${path}`;
 }

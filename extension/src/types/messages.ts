@@ -21,7 +21,9 @@ export type ExtensionMessage =
   | { type: "SAVE_LOGIN"; url: string; title: string; username: string; password: string }
   | { type: "UPDATE_LOGIN"; entryId: string; password: string }
   | { type: "DISMISS_SAVE_PROMPT" }
-  | { type: "CHECK_PENDING_SAVE" };
+  | { type: "CHECK_PENDING_SAVE" }
+  | { type: "AUTOFILL_CREDIT_CARD"; entryId: string; tabId: number }
+  | { type: "AUTOFILL_IDENTITY"; entryId: string; tabId: number };
 
 export interface DecryptedEntry {
   id: string;
@@ -62,7 +64,9 @@ export type ExtensionResponse =
       password?: string;
       existingEntryId?: string;
       existingTitle?: string;
-    };
+    }
+  | { type: "AUTOFILL_CREDIT_CARD"; ok: boolean; error?: string }
+  | { type: "AUTOFILL_IDENTITY"; ok: boolean; error?: string };
 
 export interface AutofillPayload {
   type: "AUTOFILL_FILL";
@@ -79,4 +83,29 @@ export interface AutofillTargetHint {
   name?: string;
   type?: string;
   autocomplete?: string;
+}
+
+// ── Credit Card autofill payload ──
+
+export interface CreditCardAutofillPayload {
+  type: "AUTOFILL_CC_FILL";
+  cardholderName: string;
+  cardNumber: string;
+  expiryMonth: string;
+  expiryYear: string;
+  cvv: string;
+}
+
+// ── Identity autofill payload ──
+
+export interface IdentityAutofillPayload {
+  type: "AUTOFILL_IDENTITY_FILL";
+  fullName: string;
+  address: string;
+  postalCode: string;
+  phone: string;
+  email: string;
+  dateOfBirth: string;
+  nationality: string;
+  idNumber: string;
 }

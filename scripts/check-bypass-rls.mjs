@@ -29,6 +29,9 @@ const ALLOWED_FILES = new Set([
   "src/lib/new-device-detection.ts", // fire-and-forget session lookup for device detection
   "src/lib/notification.ts", // fire-and-forget notification creation
   "src/lib/webhook-dispatcher.ts", // fire-and-forget webhook delivery
+  "src/lib/tenant-auth.ts", // tenant role authorization (cross-tenant member lookup)
+  "src/lib/vault-reset.ts", // admin vault reset execution (cross-tenant data deletion)
+  "src/app/api/vault/admin-reset/route.ts", // admin vault reset token verification
 ]);
 
 function getSourceFiles() {

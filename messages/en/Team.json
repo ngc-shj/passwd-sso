@@ -128,5 +128,7 @@
   "scimNeverUsed": "Never used",
   "scimExpiresAt": "Expires {date}",
   "cancel": "Cancel",
-  "externalTenant": "External tenant"
+  "externalTenant": "External tenant",
+  "searchMembers": "Search members...",
+  "noMatchingMembers": "No members match your search."
 }

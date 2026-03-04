@@ -679,6 +679,7 @@ async function performAutofillForEntry(
     encryptedOverview: { ciphertext: string; iv: string; authTag: string };
     aadVersion?: number;
     id: string;
+    entryType: string;
   };
 
   const aad =
@@ -700,8 +701,74 @@ async function performAutofillForEntry(
     email?: string | null;
     customFields?: Array<{ label?: string; value?: string; type?: string }>;
     totp?: { secret: string; algorithm?: string; digits?: number; period?: number };
+    // CREDIT_CARD fields
+    cardholderName?: string | null;
+    cardNumber?: string | null;
+    expiryMonth?: string | null;
+    expiryYear?: string | null;
+    cvv?: string | null;
+    // IDENTITY fields
+    fullName?: string | null;
+    address?: string | null;
+    postalCode?: string | null;
+    phone?: string | null;
+    dateOfBirth?: string | null;
+    nationality?: string | null;
+    idNumber?: string | null;
   };
   const overview = JSON.parse(overviewPlain) as { username?: string | null };
+
+  // ── Credit Card autofill path ──
+  if (data.entryType === EXT_ENTRY_TYPE.CREDIT_CARD) {
+    const cardNumber = blob.cardNumber ?? "";
+    if (!cardNumber) {
+      return { ok: false, error: "NO_CARD_NUMBER" };
+    }
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ["src/content/autofill-cc.js"],
+      });
+      await chrome.tabs.sendMessage(tabId, {
+        type: "AUTOFILL_CC_FILL",
+        cardholderName: blob.cardholderName ?? "",
+        cardNumber,
+        expiryMonth: blob.expiryMonth ?? "",
+        expiryYear: blob.expiryYear ?? "",
+        cvv: blob.cvv ?? "",
+      });
+    } catch {
+      // CC/Identity do not support direct fallback injection
+      return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+    }
+    return { ok: true };
+  }
+
+  // ── Identity autofill path ──
+  if (data.entryType === EXT_ENTRY_TYPE.IDENTITY) {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ["src/content/autofill-identity.js"],
+      });
+      await chrome.tabs.sendMessage(tabId, {
+        type: "AUTOFILL_IDENTITY_FILL",
+        fullName: blob.fullName ?? "",
+        address: blob.address ?? "",
+        postalCode: blob.postalCode ?? "",
+        phone: blob.phone ?? "",
+        email: blob.email ?? "",
+        dateOfBirth: blob.dateOfBirth ?? "",
+        nationality: blob.nationality ?? "",
+        idNumber: blob.idNumber ?? "",
+      });
+    } catch {
+      return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+    }
+    return { ok: true };
+  }
+
+  // ── LOGIN autofill path (original logic) ──
   const password = blob.password ?? null;
   const username =
     overview.username ??
@@ -1311,6 +1378,48 @@ async function handleMessage(
       return;
     }
 
+    case "AUTOFILL_CREDIT_CARD": {
+      try {
+        const result = await performAutofillForEntry(
+          message.entryId,
+          message.tabId,
+        );
+        sendResponse({
+          type: "AUTOFILL_CREDIT_CARD",
+          ok: result.ok,
+          error: result.error,
+        });
+      } catch (err) {
+        sendResponse({
+          type: "AUTOFILL_CREDIT_CARD",
+          ok: false,
+          error: err instanceof Error ? err.message : "AUTOFILL_FAILED",
+        });
+      }
+      return;
+    }
+
+    case "AUTOFILL_IDENTITY": {
+      try {
+        const result = await performAutofillForEntry(
+          message.entryId,
+          message.tabId,
+        );
+        sendResponse({
+          type: "AUTOFILL_IDENTITY",
+          ok: result.ok,
+          error: result.error,
+        });
+      } catch (err) {
+        sendResponse({
+          type: "AUTOFILL_IDENTITY",
+          ok: false,
+          error: err instanceof Error ? err.message : "AUTOFILL_FAILED",
+        });
+      }
+      return;
+    }
+
     case "GET_MATCHES_FOR_URL": {
       const effectiveUrl = message.topUrl ?? message.url;
       if (await shouldSuppressInlineMatches(effectiveUrl)) {
@@ -1595,6 +1704,12 @@ chrome.runtime.onMessage.addListener(
             break;
           case "CHECK_PENDING_SAVE":
             sendResponse({ type: "CHECK_PENDING_SAVE", action: "none" } as ExtensionResponse);
+            break;
+          case "AUTOFILL_CREDIT_CARD":
+            sendResponse({ type: "AUTOFILL_CREDIT_CARD", ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+            break;
+          case "AUTOFILL_IDENTITY":
+            sendResponse({ type: "AUTOFILL_IDENTITY", ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
             break;
           default:
             sendResponse({ type: message.type, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);

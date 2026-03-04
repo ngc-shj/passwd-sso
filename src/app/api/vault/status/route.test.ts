@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockAuth, mockPrismaUser, mockWithUserTenantRls } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
+const { mockAuthOrToken, mockPrismaUser, mockWithUserTenantRls } = vi.hoisted(() => ({
+  mockAuthOrToken: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
-vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { user: mockPrismaUser },
 }));
@@ -24,13 +24,19 @@ import { GET } from "./route";
 describe("GET /api/vault/status", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
   });
 
   it("returns 401 when unauthenticated", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuthOrToken.mockResolvedValue(null);
     const res = await GET(new NextRequest("http://localhost/api/vault/status"));
     expect(res.status).toBe(401);
+  });
+
+  it("returns 403 when scope insufficient", async () => {
+    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
+    const res = await GET(new NextRequest("http://localhost/api/vault/status"));
+    expect(res.status).toBe(403);
   });
 
   it("returns 404 when user not found", async () => {
@@ -83,5 +89,24 @@ describe("GET /api/vault/status", () => {
     const res = await GET(new NextRequest("http://localhost/api/vault/status"));
     const json = await res.json();
     expect(json.hasRecoveryKey).toBe(true);
+  });
+
+  it("works with Bearer token auth", async () => {
+    mockAuthOrToken.mockResolvedValue({
+      type: "token",
+      userId: "token-user-id",
+      scopes: ["vault:unlock-data"],
+    });
+    mockPrismaUser.findUnique.mockResolvedValue({
+      vaultSetupAt: new Date(),
+      accountSalt: "b".repeat(64),
+      keyVersion: 1,
+      recoveryKeySetAt: null,
+    });
+    const res = await GET(new NextRequest("http://localhost/api/vault/status"));
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.accountSalt).toBe("b".repeat(64));
+    expect(mockWithUserTenantRls).toHaveBeenCalledWith("token-user-id", expect.any(Function));
   });
 });

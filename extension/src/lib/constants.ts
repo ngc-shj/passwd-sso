@@ -28,4 +28,6 @@ export const EXT_CONNECT_PARAM = "ext_connect";
 // ── Entry types used in extension UI/logic ──
 export const EXT_ENTRY_TYPE = {
   LOGIN: "LOGIN",
+  CREDIT_CARD: "CREDIT_CARD",
+  IDENTITY: "IDENTITY",
 } as const;

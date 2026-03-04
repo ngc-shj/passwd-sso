@@ -12,6 +12,7 @@ import {
   type WatchtowerEntryRef,
   type WatchtowerScope,
 } from "@/hooks/use-watchtower";
+import { AutoMonitorToggle } from "@/components/watchtower/auto-monitor-toggle";
 import { ScoreGauge } from "@/components/watchtower/score-gauge";
 import {
   IssueSection,
@@ -61,6 +62,9 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
     canAnalyze,
     cooldownRemainingMs,
     unavailableReason,
+    autoMonitorEnabled,
+    setAutoMonitorEnabled,
+    lastBreachCheckAt,
   } = useWatchtower(scope);
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
@@ -174,6 +178,14 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
             </p>
           </div>
         </Card>
+
+        {scope.type === "personal" && (
+          <AutoMonitorToggle
+            enabled={autoMonitorEnabled}
+            onToggle={setAutoMonitorEnabled}
+            lastCheckAt={lastBreachCheckAt}
+          />
+        )}
 
         {visibility.showRunHint && (
           <Card className="rounded-xl border bg-card/80">

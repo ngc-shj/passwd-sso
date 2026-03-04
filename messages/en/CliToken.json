@@ -1,0 +1,11 @@
+{
+  "title": "CLI Token",
+  "description": "Generate a token to authenticate the passwd-sso CLI tool.",
+  "generate": "Generate Token",
+  "generated": "Token generated.",
+  "generateError": "Failed to generate token.",
+  "rateLimited": "Too many requests. Please wait a moment.",
+  "tokenReady": "Your CLI token (shown only once):",
+  "tokenOnce": "Copy this token and paste it into the CLI. The token expires in 15 minutes and will auto-refresh.",
+  "usage": "Run the following command in your terminal:"
+}

@@ -128,5 +128,7 @@
   "scimNeverUsed": "未使用",
   "scimExpiresAt": "有効期限: {date}",
   "cancel": "キャンセル",
-  "externalTenant": "外部テナント"
+  "externalTenant": "外部テナント",
+  "searchMembers": "メンバーを検索...",
+  "noMatchingMembers": "検索に一致するメンバーがいません。"
 }

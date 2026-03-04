@@ -9,6 +9,8 @@ export const NOTIFICATION_TYPE = {
   ENTRY_EXPIRING: "ENTRY_EXPIRING",
   WATCHTOWER_ALERT: "WATCHTOWER_ALERT",
   POLICY_UPDATE: "POLICY_UPDATE",
+  ADMIN_VAULT_RESET: "ADMIN_VAULT_RESET",
+  ADMIN_VAULT_RESET_REVOKED: "ADMIN_VAULT_RESET_REVOKED",
 } as const satisfies Record<NotificationType, NotificationType>;
 
 export type NotificationTypeValue =
