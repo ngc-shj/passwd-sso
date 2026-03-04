@@ -32,7 +32,7 @@ export async function copyToClipboard(content: string): Promise<void> {
   }
 
   // Schedule auto-clear
-  clearTimer = setTimeout(async () => {
+  const timer = setTimeout(async () => {
     try {
       const current = await clipboardy.read();
       if (copiedHash && hashContent(current) === copiedHash) {
@@ -44,6 +44,8 @@ export async function copyToClipboard(content: string): Promise<void> {
     copiedHash = null;
     clearTimer = null;
   }, CLEAR_TIMEOUT_MS);
+  timer.unref();
+  clearTimer = timer;
 }
 
 export function clearPendingClipboard(): void {

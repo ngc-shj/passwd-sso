@@ -44,6 +44,7 @@ async function readPassphrase(prompt: string): Promise<string> {
       const char = key.toString("utf-8");
       if (char === "\n" || char === "\r" || char === "\u0003") {
         process.stdin.removeListener("data", onData);
+        process.stdin.removeListener("end", onEnd);
         if (process.stdin.isTTY) {
           process.stdin.setRawMode?.(false);
         }
@@ -62,6 +63,7 @@ async function readPassphrase(prompt: string): Promise<string> {
 
     const onEnd = () => {
       process.stdin.removeListener("data", onData);
+      process.stdin.removeListener("end", onEnd);
       if (process.stdin.isTTY) {
         process.stdin.setRawMode?.(false);
       }

@@ -5,6 +5,7 @@ vi.mock("../../lib/config.js", () => ({
   loadConfig: () => ({ serverUrl: "https://test.example.com", locale: "en" }),
   loadToken: vi.fn(),
   saveToken: vi.fn(),
+  saveConfig: vi.fn(),
 }));
 
 const mockFetch = vi.fn();
@@ -77,7 +78,7 @@ describe("apiRequest", () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
-      json: async () => ({ token: "new-token" }),
+      json: async () => ({ token: "new-token", expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString() }),
     });
     // Retry call after refresh
     mockFetch.mockResolvedValueOnce({
@@ -89,5 +90,32 @@ describe("apiRequest", () => {
     const res = await apiRequest("/api/test");
     expect(res.ok).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("proactively refreshes when token is expiring soon", async () => {
+    clearTokenCache();
+    // Set token with expiresAt within the 2-min refresh buffer
+    const soonExpiry = new Date(Date.now() + 60 * 1000).toISOString();
+    setTokenCache("old-token", soonExpiry);
+
+    // Refresh call
+    const newExpiry = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ token: "refreshed-token", expiresAt: newExpiry }),
+    });
+    // Actual API call with refreshed token
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: "ok" }),
+    });
+
+    const res = await apiRequest("/api/test");
+    expect(res.ok).toBe(true);
+    // Verify the actual request used the refreshed token
+    const actualCall = mockFetch.mock.calls[1];
+    expect(actualCall[1].headers.Authorization).toBe("Bearer refreshed-token");
   });
 });

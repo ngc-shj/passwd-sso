@@ -72,7 +72,9 @@ export async function getCommand(
         output.error(`Field "${options.field}" not found.`);
         return;
       }
-      const str = String(value);
+      const str = typeof value === "object" && value !== null
+        ? JSON.stringify(value)
+        : String(value);
       if (options.copy) {
         await copyToClipboard(str);
         output.success(`Copied ${options.field} to clipboard (auto-clears in 30s).`);
