@@ -36,6 +36,9 @@ export function watchtowerAlertEmail(
   newBreachCount: number,
   appUrl: string,
 ): TemplateResult {
+  if (!/^https?:\/\//.test(appUrl)) {
+    throw new Error("Invalid appUrl scheme");
+  }
   const l = getLabels(locale);
   const watchtowerUrl = `${appUrl}/${locale}/dashboard/watchtower`;
   return {

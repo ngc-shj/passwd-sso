@@ -1,7 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { generateTOTPCode } from "../../lib/totp.js";
 
 describe("totp", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   // RFC 6238 test vector base32-encoded secret
   const secret = "JBSWY3DPEHPK3PXP"; // "Hello!" in Base32
 
@@ -40,6 +44,7 @@ describe("totp", () => {
   });
 
   it("produces consistent codes for same time window", () => {
+    vi.useFakeTimers({ now: new Date("2026-01-15T12:00:00Z") });
     const code1 = generateTOTPCode({ secret });
     const code2 = generateTOTPCode({ secret });
     // Within same 30s window, codes should match

@@ -29,9 +29,14 @@ export async function generateCommand(options: {
   if (!options.noDigits) charset += DIGITS;
   if (!options.noSymbols) charset += SYMBOLS;
 
+  // Rejection sampling to avoid modulo bias
+  const limit = Math.floor(0x100000000 / charset.length) * charset.length;
   const password = Array.from({ length }, () => {
-    const idx = randomBytes(4).readUInt32BE(0) % charset.length;
-    return charset[idx];
+    let val: number;
+    do {
+      val = randomBytes(4).readUInt32BE(0);
+    } while (val >= limit);
+    return charset[val % charset.length];
   }).join("");
 
   if (options.copy) {

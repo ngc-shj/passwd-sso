@@ -63,4 +63,12 @@ describe("watchtowerAlertEmail", () => {
       expect(result.html).toContain('lang="ja"');
     });
   });
+
+  describe("validation", () => {
+    it("throws on invalid appUrl scheme", () => {
+      expect(() => watchtowerAlertEmail("en", 1, "javascript:alert(1)")).toThrow(
+        "Invalid appUrl scheme",
+      );
+    });
+  });
 });
