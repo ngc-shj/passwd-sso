@@ -75,6 +75,7 @@ async function handleApiAuth(request: NextRequest) {
   // IMPROVE(#39): harden allowlist matching — add edge-case tests for child paths
   const extensionTokenRoutes = [
     API_PATH.PASSWORDS,
+    API_PATH.VAULT_STATUS,
     API_PATH.VAULT_UNLOCK_DATA,
     API_PATH.EXTENSION_TOKEN,         // DELETE (revoke) — validated by route handler
     API_PATH.EXTENSION_TOKEN_REFRESH, // POST (refresh) — validated by route handler
@@ -112,7 +113,8 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.SESSIONS) ||
     pathname.startsWith(API_PATH.NOTIFICATIONS) ||
     pathname.startsWith(API_PATH.USER_LOCALE) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/extension`)
+    pathname.startsWith(`${API_PATH.API_ROOT}/extension`) ||
+    pathname.startsWith(`${API_PATH.API_ROOT}/tenant`)
   ) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {
