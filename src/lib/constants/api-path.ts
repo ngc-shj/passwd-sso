@@ -47,6 +47,8 @@ export const API_PATH = {
   NOTIFICATIONS: "/api/notifications",
   NOTIFICATIONS_COUNT: "/api/notifications/count",
   SCIM_V2: "/api/scim/v2",
+  TENANT_MEMBERS: "/api/tenant/members",
+  TENANT_ROLE: "/api/tenant/role",
   HEALTH_LIVE: "/api/health/live",
   HEALTH_READY: "/api/health/ready",
 } as const;
@@ -121,6 +123,8 @@ export const apiPath = {
   teamPasswordsBulkTrash: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-trash`,
   teamPasswordsBulkArchive: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-archive`,
   teamPasswordsBulkRestore: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-restore`,
-  teamMemberResetVault: (teamId: string, memberId: string) =>
-    `${API_PATH.TEAMS}/${teamId}/members/${memberId}/reset-vault`,
+  tenantMemberResetVault: (userId: string) =>
+    `${API_PATH.TENANT_MEMBERS}/${userId}/reset-vault`,
+  tenantMemberResetVaultRevoke: (userId: string, resetId: string) =>
+    `${API_PATH.TENANT_MEMBERS}/${userId}/reset-vault/${resetId}/revoke`,
 } as const;

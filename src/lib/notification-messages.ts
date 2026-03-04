@@ -23,11 +23,21 @@ const MESSAGES = {
   ADMIN_VAULT_RESET: {
     ja: {
       title: "保管庫リセットが開始されました",
-      body: "チーム管理者があなたのアカウントの保管庫リセットを開始しました。",
+      body: "テナント管理者があなたのアカウントの保管庫リセットを開始しました。",
     },
     en: {
       title: "Vault reset initiated",
-      body: "A team admin has initiated a vault reset for your account.",
+      body: "A tenant admin has initiated a vault reset for your account.",
+    },
+  },
+  ADMIN_VAULT_RESET_REVOKED: {
+    ja: {
+      title: "保管庫リセットが取り消されました",
+      body: "テナント管理者がリセットを取り消しました。",
+    },
+    en: {
+      title: "Vault reset cancelled",
+      body: "A tenant admin has cancelled the vault reset.",
     },
   },
   WATCHTOWER_ALERT: {

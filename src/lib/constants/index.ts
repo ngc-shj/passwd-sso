@@ -20,6 +20,8 @@ export {
 export type { TeamRoleValue } from "./team-role";
 export { TEAM_PERMISSION } from "./team-permission";
 export type { TeamPermissionValue } from "./team-permission";
+export { TENANT_PERMISSION } from "./tenant-permission";
+export type { TenantPermissionValue } from "./tenant-permission";
 
 export { EA_STATUS } from "./emergency-access";
 export type { EaStatusValue } from "./emergency-access";
@@ -44,6 +46,7 @@ export {
   AUDIT_ACTION_GROUP,
   AUDIT_ACTION_GROUPS_PERSONAL,
   AUDIT_ACTION_GROUPS_TEAM,
+  AUDIT_ACTION_GROUPS_TENANT,
   AUDIT_ACTION_EMERGENCY_PREFIX,
   AUDIT_METADATA_KEY,
 } from "./audit";

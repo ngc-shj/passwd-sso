@@ -739,11 +739,13 @@ enum AuditAction {
   WATCHTOWER_ALERT_SENT
   ADMIN_VAULT_RESET_INITIATE
   ADMIN_VAULT_RESET_EXECUTE
+  ADMIN_VAULT_RESET_REVOKE
 }
 
 enum AuditScope {
   PERSONAL
   TEAM
+  TENANT
 }
 
 model AuditLog {
@@ -979,6 +981,7 @@ enum NotificationType {
   WATCHTOWER_ALERT
   POLICY_UPDATE
   ADMIN_VAULT_RESET
+  ADMIN_VAULT_RESET_REVOKED
 }
 
 model Notification {
@@ -1057,7 +1060,7 @@ model TeamWebhook {
 model AdminVaultReset {
   id            String    @id @default(cuid())
   tenantId      String    @map("tenant_id")
-  teamId        String    @map("team_id")
+  teamId        String?   @map("team_id")
   targetUserId  String    @map("target_user_id")
   initiatedById String    @map("initiated_by_id")
   tokenHash     String    @unique @map("token_hash") @db.VarChar(64)
@@ -1067,7 +1070,7 @@ model AdminVaultReset {
   createdAt     DateTime  @default(now()) @map("created_at")
 
   tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  team        Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team        Team?  @relation(fields: [teamId], references: [id], onDelete: SetNull)
   targetUser  User   @relation("adminVaultResetTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
   initiatedBy User   @relation("adminVaultResetInitiator", fields: [initiatedById], references: [id], onDelete: Cascade)
 

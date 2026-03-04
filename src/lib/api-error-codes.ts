@@ -24,6 +24,7 @@ export const API_ERROR = {
   VALIDATION_ERROR: "VALIDATION_ERROR",
   NOT_FOUND: "NOT_FOUND",
   FORBIDDEN: "FORBIDDEN",
+  CONFLICT: "CONFLICT",
 
   // ── Vault ─────────────────────────────────────────────────
   VAULT_ALREADY_SETUP: "VAULT_ALREADY_SETUP",
@@ -163,6 +164,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   VALIDATION_ERROR: "validationError",
   NOT_FOUND: "notFound",
   FORBIDDEN: "forbidden",
+  CONFLICT: "conflict",
   VAULT_ALREADY_SETUP: "vaultAlreadySetup",
   VAULT_NOT_SETUP: "vaultNotSetup",
   INVALID_PASSPHRASE: "invalidPassphrase",
