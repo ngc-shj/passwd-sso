@@ -25,5 +25,7 @@
   "revokeConflict": "This reset has already been processed or revoked.",
   "revokeFailed": "Failed to revoke reset.",
   "initiatedBy": "Initiated by",
-  "expiresAt": "Expires"
+  "expiresAt": "Expires",
+  "searchMembers": "Search members...",
+  "noMatchingMembers": "No members match your search."
 }

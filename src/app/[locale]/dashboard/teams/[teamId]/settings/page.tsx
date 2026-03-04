@@ -35,12 +35,14 @@ import {
 } from "@/components/ui/avatar";
 import { CopyButton } from "@/components/passwords/copy-button";
 import { TeamPolicySettings } from "@/components/team/team-policy-settings";
+import { TeamWebhookCard } from "@/components/team/team-webhook-card";
 import { Link } from "@/i18n/navigation";
-import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert, Globe } from "lucide-react";
+import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert, Globe, Search } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
+import { filterMembers } from "@/lib/filter-members";
 
 interface TeamInfo {
   id: string;
@@ -78,6 +80,7 @@ export default function TeamSettingsPage({
 }) {
   const { teamId } = use(params);
   const t = useTranslations("Team");
+  const tWebhook = useTranslations("TeamWebhook");
   const locale = useLocale();
   const router = useRouter();
 
@@ -97,6 +100,8 @@ export default function TeamSettingsPage({
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [memberSearch, setMemberSearch] = useState("");
+  const filteredMembers = filterMembers(members, memberSearch);
 
   useEffect(() => {
     fetchApi(API_PATH.AUTH_SESSION)
@@ -307,10 +312,11 @@ export default function TeamSettingsPage({
         </Card>
 
         <Tabs defaultValue={isAdmin ? "general" : "members"} className="space-y-4">
-          <TabsList className={`grid w-full ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}>
+          <TabsList className={`grid w-full ${isAdmin ? "grid-cols-4" : "grid-cols-2"}`}>
             <TabsTrigger value="general">{t("generalSettings")}</TabsTrigger>
             <TabsTrigger value="members">{t("members")}</TabsTrigger>
             {isAdmin && <TabsTrigger value="policy">{t("securityPolicy")}</TabsTrigger>}
+            {isAdmin && <TabsTrigger value="webhook">{tWebhook("title")}</TabsTrigger>}
           </TabsList>
 
           <TabsContent value="general" className="space-y-4 mt-0">
@@ -415,8 +421,24 @@ export default function TeamSettingsPage({
                   <Users className="h-5 w-5 text-muted-foreground" />
                   {t("members")}
                 </h2>
-                <div className="space-y-2">
-                  {members.map((m) => (
+                {members.length > 0 && (
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder={t("searchMembers")}
+                      value={memberSearch}
+                      onChange={(e) => setMemberSearch(e.target.value)}
+                      className="pl-9"
+                    />
+                  </div>
+                )}
+                {members.length > 0 && filteredMembers.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">
+                    {t("noMatchingMembers")}
+                  </p>
+                ) : (
+                <div className="max-h-96 space-y-2 overflow-y-auto">
+                  {filteredMembers.map((m) => (
                     <div
                       key={m.id}
                       className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent"
@@ -482,6 +504,7 @@ export default function TeamSettingsPage({
                     </div>
                   ))}
                 </div>
+                )}
               </section>
             </Card>
 
@@ -493,8 +516,8 @@ export default function TeamSettingsPage({
                     {t("transferOwnership")}
                   </h2>
                   <p className="text-sm text-muted-foreground">{t("transferOwnershipDesc")}</p>
-                  <div className="space-y-2">
-                    {members
+                  <div className="max-h-96 space-y-2 overflow-y-auto">
+                    {filteredMembers
                       .filter((m) => m.role !== TEAM_ROLE.OWNER)
                       .map((m) => (
                         <div
@@ -633,6 +656,12 @@ export default function TeamSettingsPage({
           {isAdmin && (
             <TabsContent value="policy" className="space-y-4 mt-0">
               <TeamPolicySettings teamId={teamId} />
+            </TabsContent>
+          )}
+
+          {isAdmin && (
+            <TabsContent value="webhook" className="space-y-4 mt-0">
+              <TeamWebhookCard teamId={teamId} locale={locale} />
             </TabsContent>
           )}
         </Tabs>

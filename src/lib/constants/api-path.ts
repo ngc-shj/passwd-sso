@@ -127,4 +127,7 @@ export const apiPath = {
     `${API_PATH.TENANT_MEMBERS}/${userId}/reset-vault`,
   tenantMemberResetVaultRevoke: (userId: string, resetId: string) =>
     `${API_PATH.TENANT_MEMBERS}/${userId}/reset-vault/${resetId}/revoke`,
+  teamWebhooks: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/webhooks`,
+  teamWebhookById: (teamId: string, webhookId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/webhooks/${webhookId}`,
 } as const;

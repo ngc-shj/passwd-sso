@@ -25,5 +25,7 @@
   "revokeConflict": "このリセットは既に処理済みまたは取り消し済みです。",
   "revokeFailed": "リセットの取り消しに失敗しました。",
   "initiatedBy": "開始者",
-  "expiresAt": "有効期限"
+  "expiresAt": "有効期限",
+  "searchMembers": "メンバーを検索...",
+  "noMatchingMembers": "検索に一致するメンバーがいません。"
 }

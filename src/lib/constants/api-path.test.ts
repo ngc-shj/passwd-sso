@@ -112,5 +112,11 @@ describe("API_PATH", () => {
     expect(apiPath.emergencyGrantVaultEntries("gr-1")).toBe(
       "/api/emergency-access/gr-1/vault/entries"
     );
+    expect(apiPath.teamWebhooks("team-1")).toBe(
+      "/api/teams/team-1/webhooks"
+    );
+    expect(apiPath.teamWebhookById("team-1", "wh-1")).toBe(
+      "/api/teams/team-1/webhooks/wh-1"
+    );
   });
 });

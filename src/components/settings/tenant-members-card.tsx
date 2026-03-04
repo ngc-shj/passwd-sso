@@ -9,8 +9,10 @@ import {
   AvatarFallback,
   AvatarImage,
 } from "@/components/ui/avatar";
-import { Loader2, Users } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Loader2, Search, Users } from "lucide-react";
 import { fetchApi } from "@/lib/url-helpers";
+import { filterMembers } from "@/lib/filter-members";
 import { API_PATH } from "@/lib/constants";
 import { useTenantRole } from "@/hooks/use-tenant-role";
 import { TenantVaultResetButton } from "./tenant-vault-reset-button";
@@ -64,6 +66,7 @@ export function TenantMembersCard() {
   const [members, setMembers] = useState<TenantMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     fetchApi(API_PATH.AUTH_SESSION)
@@ -107,6 +110,7 @@ export function TenantMembersCard() {
   if (!isAdmin) return null;
 
   const myLevel = ROLE_LEVEL[myRole ?? ""] ?? 0;
+  const filteredMembers = filterMembers(members, searchQuery);
 
   return (
     <Card>
@@ -125,8 +129,23 @@ export function TenantMembersCard() {
             {t("noMembers")}
           </p>
         ) : (
-          <div className="space-y-2">
-            {members.map((m) => {
+          <>
+            <div className="relative mb-3">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder={t("searchMembers")}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            {filteredMembers.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                {t("noMatchingMembers")}
+              </p>
+            ) : (
+          <div className="max-h-96 space-y-2 overflow-y-auto">
+            {filteredMembers.map((m) => {
               const isDeactivated = !!m.deactivatedAt;
               const isSelf = m.userId === currentUserId;
               const targetLevel = ROLE_LEVEL[m.role] ?? 0;
@@ -187,6 +206,8 @@ export function TenantMembersCard() {
               );
             })}
           </div>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
