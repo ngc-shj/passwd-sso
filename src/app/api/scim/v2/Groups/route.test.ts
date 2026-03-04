@@ -12,7 +12,7 @@ const {
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
   mockScimGroupMapping: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
-  mockTeam: { findUnique: vi.fn() },
+  mockTeam: { findUnique: vi.fn(), findFirst: vi.fn() },
   mockTeamMember: { findMany: vi.fn() },
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
 }));
@@ -33,7 +33,7 @@ import { GET, POST } from "./route";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
-  data: { tokenId: "t1", teamId: "team-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
+  data: { tokenId: "t1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
 };
 
 function makeReq(options: { searchParams?: Record<string, string>; body?: unknown } = {}) {
@@ -140,7 +140,7 @@ describe("POST /api/scim/v2/Groups", () => {
   it("creates a tenant group mapping", async () => {
     mockScimGroupMapping.findUnique.mockResolvedValue(null);
     mockScimGroupMapping.create.mockResolvedValue({});
-    mockTeam.findUnique.mockResolvedValue({ slug: "core" });
+    mockTeam.findFirst.mockResolvedValue({ id: "team-1", slug: "core" });
     mockTeamMember.findMany.mockResolvedValue([]);
 
     const res = await POST(
@@ -169,7 +169,7 @@ describe("POST /api/scim/v2/Groups", () => {
   });
 
   it("returns 400 when displayName format is invalid on POST", async () => {
-    mockTeam.findUnique.mockResolvedValue({ slug: "core" });
+    mockTeam.findFirst.mockResolvedValue({ id: "team-1", slug: "core" });
 
     const res = await POST(
       makeReq({
@@ -187,7 +187,7 @@ describe("POST /api/scim/v2/Groups", () => {
   });
 
   it("returns 409 when externalId points at another group", async () => {
-    mockTeam.findUnique.mockResolvedValue({ slug: "core" });
+    mockTeam.findFirst.mockResolvedValue({ id: "team-1", slug: "core" });
     mockScimGroupMapping.findUnique.mockResolvedValue({
       id: "mapping-1",
       teamId: "team-2",
@@ -274,8 +274,8 @@ describe("POST /api/scim/v2/Groups", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 400 when the scoped team slug is missing", async () => {
-    mockTeam.findUnique.mockResolvedValue(null);
+  it("returns 400 when team slug in displayName is not found in tenant", async () => {
+    mockTeam.findFirst.mockResolvedValue(null);
 
     const res = await POST(
       makeReq({
@@ -291,7 +291,7 @@ describe("POST /api/scim/v2/Groups", () => {
   });
 
   it("reuses an existing mapping for the same team and role", async () => {
-    mockTeam.findUnique.mockResolvedValue({ slug: "core" });
+    mockTeam.findFirst.mockResolvedValue({ id: "team-1", slug: "core" });
     mockScimGroupMapping.findUnique.mockResolvedValue({
       id: "mapping-1",
       teamId: "team-1",

@@ -348,6 +348,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
       teamId: TEAM_ID,
+      tenantId: "tenant-1",
       userId: "target-user",
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
@@ -363,7 +364,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(json.success).toBe(true);
     expect(mockTransaction).toHaveBeenCalledWith([
       mockPrismaTeamMemberKey.deleteMany({ where: { teamId: TEAM_ID, userId: "target-user" } }),
-      mockPrismaScimExternalMapping.deleteMany({ where: { teamId: TEAM_ID, internalId: "target-user", resourceType: "User" } }),
+      mockPrismaScimExternalMapping.deleteMany({ where: { tenantId: "tenant-1", internalId: "target-user", resourceType: "User" } }),
       mockPrismaTeamMember.delete({ where: { id: MEMBER_ID } }),
     ]);
   });

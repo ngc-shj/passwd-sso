@@ -119,4 +119,12 @@ describe("API_PATH", () => {
       "/api/teams/team-1/webhooks/wh-1"
     );
   });
+
+  it("builds tenant SCIM token paths", () => {
+    expect(API_PATH.TENANT_SCIM_TOKENS).toBe("/api/tenant/scim-tokens");
+    expect(apiPath.tenantScimTokens()).toBe("/api/tenant/scim-tokens");
+    expect(apiPath.tenantScimTokenById("tok-1")).toBe(
+      "/api/tenant/scim-tokens/tok-1"
+    );
+  });
 });
