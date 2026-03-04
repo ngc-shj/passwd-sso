@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -44,5 +44,7 @@ describe("config", () => {
     const configPath = join(testDir, ".passwd-sso", "config.json");
     const content = readFileSync(configPath, "utf-8");
     expect(JSON.parse(content).serverUrl).toBe("https://test.com");
+    const stat = statSync(configPath);
+    expect(stat.mode & 0o777).toBe(0o600);
   });
 });

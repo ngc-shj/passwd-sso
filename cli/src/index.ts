@@ -110,10 +110,16 @@ async function interactiveMode(): Promise<void> {
             output.error("Usage: get <id> [--copy] [--json] [--field <name>]");
           } else {
             const fieldIdx = args.indexOf("--field");
+            const fieldArg = fieldIdx !== -1 ? args[fieldIdx + 1] : undefined;
+            const field = fieldArg && !fieldArg.startsWith("-") ? fieldArg : undefined;
+            if (fieldIdx !== -1 && !field) {
+              output.error("Usage: get <id> --field <name>");
+              break;
+            }
             await getCommand(args[1], {
               copy: args.includes("--copy") || args.includes("-c"),
               json: args.includes("--json"),
-              field: fieldIdx !== -1 ? args[fieldIdx + 1] : undefined,
+              field,
             });
           }
           break;
@@ -142,7 +148,9 @@ async function interactiveMode(): Promise<void> {
 
         case "export": {
           const fmtIdx = args.indexOf("--format");
-          const outIdx = args.indexOf("-o");
+          const outLong = args.indexOf("--output");
+          const outShort = args.indexOf("-o");
+          const outIdx = outLong !== -1 ? outLong : outShort;
           await exportCommand({
             format: fmtIdx !== -1 ? args[fmtIdx + 1] : "json",
             output: outIdx !== -1 ? args[outIdx + 1] : undefined,

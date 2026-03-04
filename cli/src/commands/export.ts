@@ -2,6 +2,8 @@
  * `passwd-sso export` — Export vault entries to JSON or CSV.
  */
 
+import { resolve } from "node:path";
+import { existsSync, lstatSync } from "node:fs";
 import { apiRequest } from "../lib/api-client.js";
 import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { decryptData } from "../lib/crypto.js";
@@ -71,8 +73,18 @@ export async function exportCommand(options: {
     return;
   }
 
+  // Validate output path before processing
+  if (options.output) {
+    const resolvedPath = resolve(options.output);
+    if (existsSync(resolvedPath) && lstatSync(resolvedPath).isSymbolicLink()) {
+      output.error("Output path is a symlink — refusing to write.");
+      return;
+    }
+  }
+
   const userId = getUserId();
   const decrypted: EntryBlob[] = [];
+  let failedCount = 0;
 
   for (const entry of entries) {
     try {
@@ -86,8 +98,12 @@ export async function exportCommand(options: {
       );
       decrypted.push(JSON.parse(plaintext));
     } catch {
-      decrypted.push({ title: "(decryption failed)" });
+      failedCount++;
     }
+  }
+
+  if (failedCount > 0) {
+    output.warn(`${failedCount} entries failed to decrypt and were skipped.`);
   }
 
   if (format === "json") {

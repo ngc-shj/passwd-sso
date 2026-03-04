@@ -92,6 +92,26 @@ describe("apiRequest", () => {
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
+  it("returns 401 response when refresh also fails", async () => {
+    // First call: 401
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "UNAUTHORIZED" }),
+    });
+    // Refresh call: also fails
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "REFRESH_FAILED" }),
+    });
+
+    const res = await apiRequest("/api/test");
+    expect(res.ok).toBe(false);
+    expect(res.status).toBe(401);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
   it("proactively refreshes when token is expiring soon", async () => {
     clearTokenCache();
     // Set token with expiresAt within the 2-min refresh buffer

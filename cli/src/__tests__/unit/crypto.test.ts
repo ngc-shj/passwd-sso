@@ -25,6 +25,10 @@ describe("crypto", () => {
       expect(hexEncode(new Uint8Array([]))).toBe("");
       expect(hexDecode("")).toEqual(new Uint8Array([]));
     });
+
+    it("throws on odd-length hex string", () => {
+      expect(() => hexDecode("abc")).toThrow("Invalid hex string: odd length");
+    });
   });
 
   describe("key derivation and encryption", () => {
