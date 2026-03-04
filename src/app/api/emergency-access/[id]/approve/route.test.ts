@@ -110,7 +110,7 @@ describe("POST /api/emergency-access/[id]/approve", () => {
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "grantee@test.com",
-        subject: expect.stringContaining("承認"),
+        subject: expect.stringContaining("approved"),
       })
     );
   });
