@@ -30,3 +30,12 @@ export function fetchApi(path: string, init?: RequestInit): Promise<Response> {
 export function appUrl(path: string): string {
   return `${window.location.origin}${BASE_PATH}${path}`;
 }
+
+/**
+ * Build a full URL (APP_URL + basePath + path) for server-side use
+ * (e.g. email links). Uses APP_URL/AUTH_URL env vars instead of window.
+ */
+export function serverAppUrl(path: string): string {
+  const origin = process.env.APP_URL || process.env.AUTH_URL || "";
+  return `${origin}${BASE_PATH}${path}`;
+}
