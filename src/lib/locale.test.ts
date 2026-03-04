@@ -35,13 +35,13 @@ describe("resolveUserLocale", () => {
     expect(resolveUserLocale(null, "en")).toBe("en");
   });
 
-  it("returns ja (default) when Accept-Language has neither en nor ja", () => {
-    expect(resolveUserLocale(null, "fr-FR,de;q=0.5")).toBe("ja");
+  it("returns en (default) when Accept-Language has neither en nor ja", () => {
+    expect(resolveUserLocale(null, "fr-FR,de;q=0.5")).toBe("en");
   });
 
-  it("returns defaultLocale when no stored locale and no Accept-Language", () => {
-    expect(resolveUserLocale(null, null)).toBe("ja");
-    expect(resolveUserLocale(undefined, undefined)).toBe("ja");
+  it("returns en (default) when no stored locale and no Accept-Language", () => {
+    expect(resolveUserLocale(null, null)).toBe("en");
+    expect(resolveUserLocale(undefined, undefined)).toBe("en");
   });
 
   it("stored locale takes priority over Accept-Language", () => {

@@ -6,7 +6,7 @@ import { routing } from "@/i18n/routing";
  * Priority:
  *  1. Stored user preference (DB `User.locale`)
  *  2. Accept-Language header
- *  3. routing.defaultLocale ("ja")
+ *  3. Fallback: "en"
  */
 export function resolveUserLocale(
   storedLocale?: string | null,
@@ -18,11 +18,11 @@ export function resolveUserLocale(
 
   if (acceptLanguage) {
     const lower = acceptLanguage.toLowerCase();
-    const enIdx = lower.search(/\ben/);
     const jaIdx = lower.search(/\bja/);
-    if (enIdx >= 0 && (jaIdx < 0 || enIdx < jaIdx)) return "en";
-    return "ja";
+    const enIdx = lower.search(/\ben/);
+    if (jaIdx >= 0 && (enIdx < 0 || jaIdx < enIdx)) return "ja";
+    return "en";
   }
 
-  return routing.defaultLocale;
+  return "en";
 }
