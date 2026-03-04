@@ -1,10 +1,17 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
 import { mkdtempSync, rmSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-// Override the config dir for testing
+const origEnv = { ...process.env };
+
+// Override dirs for testing
 const testDir = mkdtempSync(join(tmpdir(), "psso-test-"));
+const testXdgConfig = join(testDir, "xdg-config");
+const testXdgData = join(testDir, "xdg-data");
+
+process.env.XDG_CONFIG_HOME = testXdgConfig;
+process.env.XDG_DATA_HOME = testXdgData;
 
 vi.mock("node:os", async () => {
   const actual = await vi.importActual<typeof import("node:os")>("node:os");
@@ -16,14 +23,23 @@ vi.mock("node:os", async () => {
 
 // Must import AFTER mock is set up
 const { loadConfig, saveConfig } = await import("../../lib/config.js");
+const { _resetMigrationState } = await import("../../lib/migrate.js");
 
 describe("config", () => {
   afterEach(() => {
+    _resetMigrationState();
     try {
+      rmSync(testXdgConfig, { recursive: true, force: true });
+      rmSync(testXdgData, { recursive: true, force: true });
       rmSync(join(testDir, ".passwd-sso"), { recursive: true, force: true });
     } catch {
       // ok
     }
+  });
+
+  afterAll(() => {
+    rmSync(testDir, { recursive: true, force: true });
+    process.env = { ...origEnv };
   });
 
   it("returns defaults when no config file exists", () => {
@@ -34,6 +50,7 @@ describe("config", () => {
 
   it("saves and loads config", () => {
     saveConfig({ serverUrl: "https://example.com", locale: "ja" });
+    _resetMigrationState();
     const config = loadConfig();
     expect(config.serverUrl).toBe("https://example.com");
     expect(config.locale).toBe("ja");
@@ -41,7 +58,7 @@ describe("config", () => {
 
   it("creates config file with restricted permissions", () => {
     saveConfig({ serverUrl: "https://test.com", locale: "en" });
-    const configPath = join(testDir, ".passwd-sso", "config.json");
+    const configPath = join(testXdgConfig, "passwd-sso", "config.json");
     const content = readFileSync(configPath, "utf-8");
     expect(JSON.parse(content).serverUrl).toBe("https://test.com");
     const stat = statSync(configPath);

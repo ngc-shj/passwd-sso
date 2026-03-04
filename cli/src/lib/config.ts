@@ -1,17 +1,20 @@
 /**
  * Configuration management for the CLI tool.
  *
- * Config file: ~/.passwd-sso/config.json (non-sensitive settings only)
- * Credentials: OS keychain (via keytar) or ~/.passwd-sso/credentials (fallback)
+ * Config file: $XDG_CONFIG_HOME/passwd-sso/config.json
+ * Credentials: OS keychain (via keytar) or $XDG_DATA_HOME/passwd-sso/credentials
+ *
+ * Legacy ~/.passwd-sso/ is auto-migrated on first access.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, lstatSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-
-const CONFIG_DIR = join(homedir(), ".passwd-sso");
-const CONFIG_FILE = join(CONFIG_DIR, "config.json");
-const CREDENTIALS_FILE = join(CONFIG_DIR, "credentials");
+import {
+  getConfigDir,
+  getDataDir,
+  getConfigFilePath,
+  getCredentialsFilePath,
+} from "./paths.js";
+import { migrateIfNeeded } from "./migrate.js";
 
 const KEYCHAIN_SERVICE = "passwd-sso-cli";
 const KEYCHAIN_ACCOUNT = "bearer-token";
@@ -28,14 +31,23 @@ const DEFAULT_CONFIG: CliConfig = {
 };
 
 function ensureConfigDir(): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { mode: 0o700, recursive: true });
+  const dir = getConfigDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { mode: 0o700, recursive: true });
+  }
+}
+
+function ensureDataDir(): void {
+  const dir = getDataDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { mode: 0o700, recursive: true });
   }
 }
 
 export function loadConfig(): CliConfig {
+  migrateIfNeeded();
   try {
-    const raw = readFileSync(CONFIG_FILE, "utf-8");
+    const raw = readFileSync(getConfigFilePath(), "utf-8");
     const parsed = JSON.parse(raw) as Partial<CliConfig>;
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch {
@@ -45,7 +57,7 @@ export function loadConfig(): CliConfig {
 
 export function saveConfig(config: CliConfig): void {
   ensureConfigDir();
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), { mode: 0o600 });
+  writeFileSync(getConfigFilePath(), JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
 // ─── Credential Storage ───────────────────────────────────────
@@ -69,17 +81,19 @@ export async function saveToken(token: string): Promise<"keychain" | "file"> {
   }
 
   // File fallback
-  ensureConfigDir();
-  // Verify config dir is not a symlink
-  const stat = lstatSync(CONFIG_DIR);
+  ensureDataDir();
+  // Verify data dir is not a symlink
+  const dataDir = getDataDir();
+  const stat = lstatSync(dataDir);
   if (stat.isSymbolicLink()) {
-    throw new Error("Config directory is a symlink — refusing to write credentials.");
+    throw new Error("Data directory is a symlink — refusing to write credentials.");
   }
-  writeFileSync(CREDENTIALS_FILE, token, { mode: 0o600 });
+  writeFileSync(getCredentialsFilePath(), token, { mode: 0o600 });
   return "file";
 }
 
 export async function loadToken(): Promise<string | null> {
+  migrateIfNeeded();
   const kt = await tryKeytar();
   if (kt) {
     const token = await kt.getPassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
@@ -88,7 +102,7 @@ export async function loadToken(): Promise<string | null> {
 
   // File fallback
   try {
-    return readFileSync(CREDENTIALS_FILE, "utf-8").trim();
+    return readFileSync(getCredentialsFilePath(), "utf-8").trim();
   } catch {
     return null;
   }
@@ -101,7 +115,7 @@ export async function deleteToken(): Promise<void> {
   }
   try {
     const { unlinkSync } = await import("node:fs");
-    unlinkSync(CREDENTIALS_FILE);
+    unlinkSync(getCredentialsFilePath());
   } catch {
     // file may not exist
   }
