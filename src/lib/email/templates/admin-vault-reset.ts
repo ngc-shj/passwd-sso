@@ -40,6 +40,9 @@ export function adminVaultResetEmail(
   adminName: string,
   resetUrl: string,
 ): TemplateResult {
+  if (!/^https?:\/\//.test(resetUrl)) {
+    throw new Error("Invalid resetUrl scheme");
+  }
   const l = getLabels(locale);
   return {
     subject: l.subject,

@@ -6,6 +6,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { execSync } from "node:child_process";
 
 const CLEAR_TIMEOUT_MS = 30_000;
 
@@ -59,7 +60,17 @@ export function clearPendingClipboard(): void {
 // Signal handlers to clear clipboard on exit
 function onExit(): void {
   if (copiedHash) {
-    // Best-effort synchronous clear — cannot await in exit handler
+    // Best-effort synchronous clipboard clear — cannot await in exit handler.
+    // Use platform-specific commands to actually clear the clipboard content.
+    try {
+      if (process.platform === "darwin") {
+        execSync("pbcopy < /dev/null", { stdio: "ignore", timeout: 1000 });
+      } else if (process.platform === "linux") {
+        execSync("xclip -selection clipboard < /dev/null 2>/dev/null || xsel --clipboard --delete 2>/dev/null", { stdio: "ignore", timeout: 1000, shell: "/bin/sh" });
+      }
+    } catch {
+      // Ignore — best effort only
+    }
     clearPendingClipboard();
   }
 }

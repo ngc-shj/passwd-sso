@@ -12,7 +12,7 @@ const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 const { apiRequest, setTokenCache, clearTokenCache } = await import("../../lib/api-client.js");
-const { loadToken } = await import("../../lib/config.js");
+const { loadToken, saveToken, saveConfig } = await import("../../lib/config.js");
 
 describe("apiRequest", () => {
   beforeEach(() => {
@@ -93,6 +93,12 @@ describe("apiRequest", () => {
     // Verify the retry used the new token
     const retryCall = mockFetch.mock.calls[2];
     expect(retryCall[1].headers.Authorization).toBe("Bearer new-token");
+
+    // Verify token and config were persisted
+    expect(saveToken).toHaveBeenCalledWith("new-token");
+    expect(saveConfig).toHaveBeenCalledWith(expect.objectContaining({
+      tokenExpiresAt: expect.any(String),
+    }));
   });
 
   it("returns 401 response when refresh also fails", async () => {
@@ -140,5 +146,11 @@ describe("apiRequest", () => {
     // Verify the actual request used the refreshed token
     const actualCall = mockFetch.mock.calls[1];
     expect(actualCall[1].headers.Authorization).toBe("Bearer refreshed-token");
+
+    // Verify token and config were persisted
+    expect(saveToken).toHaveBeenCalledWith("refreshed-token");
+    expect(saveConfig).toHaveBeenCalledWith(expect.objectContaining({
+      tokenExpiresAt: expect.any(String),
+    }));
   });
 });

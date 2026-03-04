@@ -18,6 +18,10 @@ import type { TenantRole } from "@prisma/client";
 export type TenantPermission =
   (typeof TENANT_PERMISSION)[keyof typeof TENANT_PERMISSION];
 
+// OWNER and ADMIN share the same permissions intentionally.
+// The role hierarchy (OWNER > ADMIN > MEMBER) is enforced via
+// isTenantRoleAbove() — e.g., ADMIN cannot reset another ADMIN's vault,
+// only OWNER can. OWNER-to-OWNER resets are also blocked (strict-above).
 const ROLE_PERMISSIONS: Record<TenantRole, Set<TenantPermission>> = {
   OWNER: new Set([
     TENANT_PERMISSION.MEMBER_MANAGE,

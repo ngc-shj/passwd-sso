@@ -55,6 +55,11 @@ describe("adminVaultResetEmail", () => {
     expect(result.html).toContain("&lt;script&gt;");
   });
 
+  it("includes raw admin name in text body (no HTML escaping)", () => {
+    const result = adminVaultResetEmail("en", "<script>xss</script>", "https://example.com/reset#token=abc");
+    expect(result.text).toContain("<script>xss</script>");
+  });
+
   it("falls back to English for unknown locale", () => {
     const result = adminVaultResetEmail("fr", adminName, resetUrl);
     expect(result.subject).toBe("Vault reset initiated by an admin");

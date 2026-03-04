@@ -710,6 +710,7 @@ async function performAutofillForEntry(
     // IDENTITY fields
     fullName?: string | null;
     address?: string | null;
+    postalCode?: string | null;
     phone?: string | null;
     dateOfBirth?: string | null;
     nationality?: string | null;
@@ -754,6 +755,7 @@ async function performAutofillForEntry(
         type: "AUTOFILL_IDENTITY_FILL",
         fullName: blob.fullName ?? "",
         address: blob.address ?? "",
+        postalCode: blob.postalCode ?? "",
         phone: blob.phone ?? "",
         email: blob.email ?? "",
         dateOfBirth: blob.dateOfBirth ?? "",

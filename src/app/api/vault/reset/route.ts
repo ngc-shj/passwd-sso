@@ -7,7 +7,7 @@ import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { executeVaultReset } from "@/lib/vault-reset";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 export const runtime = "nodejs";
 

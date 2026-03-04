@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
@@ -44,6 +45,7 @@ import { POST } from "./route";
 
 const URL = "http://localhost/api/vault/admin-reset";
 const TOKEN = "a".repeat(64);
+const TOKEN_HASH = createHash("sha256").update(TOKEN).digest("hex");
 
 const RESET_RECORD = {
   id: "reset-1",
@@ -51,7 +53,7 @@ const RESET_RECORD = {
   teamId: "team-1",
   targetUserId: "user-1",
   initiatedById: "admin-1",
-  tokenHash: "expected-hash",
+  tokenHash: TOKEN_HASH,
   expiresAt: new Date(Date.now() + 3600_000),
   executedAt: null,
   revokedAt: null,
@@ -181,6 +183,9 @@ describe("POST /api/vault/admin-reset", () => {
     const json = await res.json();
     expect(json.success).toBe(true);
 
+    // Token looked up by SHA-256 hash
+    expect(mockAdminVaultResetFindUnique).toHaveBeenCalledWith({ where: { tokenHash: TOKEN_HASH } });
+
     // Vault reset executed
     expect(mockExecuteVaultReset).toHaveBeenCalledWith("user-1");
 
@@ -235,6 +240,27 @@ describe("POST /api/vault/admin-reset", () => {
   it("confirmation must be English regardless of locale", async () => {
     const res = await POST(createRequest("POST", URL, {
       body: { token: TOKEN, confirmation: "保管庫を削除する" },
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for uppercase hex token", async () => {
+    const res = await POST(createRequest("POST", URL, {
+      body: { token: "A".repeat(64), confirmation: "DELETE MY VAULT" },
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for token shorter than 64 chars", async () => {
+    const res = await POST(createRequest("POST", URL, {
+      body: { token: "a".repeat(63), confirmation: "DELETE MY VAULT" },
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for token with non-hex characters", async () => {
+    const res = await POST(createRequest("POST", URL, {
+      body: { token: "g".repeat(64), confirmation: "DELETE MY VAULT" },
     }));
     expect(res.status).toBe(400);
   });

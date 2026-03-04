@@ -178,3 +178,53 @@ describe("url-helpers (basePath=/passwd-sso)", () => {
     });
   });
 });
+
+// ─── serverAppUrl ────────────────────────────────────────────
+
+describe("serverAppUrl", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("returns APP_URL + path when APP_URL is set", async () => {
+    vi.stubEnv("APP_URL", "https://app.example.com");
+    const { serverAppUrl } = await import("@/lib/url-helpers");
+    expect(serverAppUrl("/reset")).toBe("https://app.example.com/reset");
+  });
+
+  it("falls back to AUTH_URL when APP_URL is not set", async () => {
+    delete process.env.APP_URL;
+    vi.stubEnv("AUTH_URL", "https://auth.example.com");
+    const { serverAppUrl } = await import("@/lib/url-helpers");
+    expect(serverAppUrl("/reset")).toBe("https://auth.example.com/reset");
+  });
+
+  it("returns empty origin when both APP_URL and AUTH_URL are unset", async () => {
+    delete process.env.APP_URL;
+    delete process.env.AUTH_URL;
+    const { serverAppUrl } = await import("@/lib/url-helpers");
+    expect(serverAppUrl("/reset")).toBe("/reset");
+  });
+
+  it("combines APP_URL with NEXT_PUBLIC_BASE_PATH", async () => {
+    vi.stubEnv("APP_URL", "https://app.example.com");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    const { serverAppUrl } = await import("@/lib/url-helpers");
+    expect(serverAppUrl("/dashboard")).toBe(
+      "https://app.example.com/passwd-sso/dashboard",
+    );
+  });
+
+  it("prefers APP_URL over AUTH_URL when both are set", async () => {
+    vi.stubEnv("APP_URL", "https://app.example.com");
+    vi.stubEnv("AUTH_URL", "https://auth.example.com");
+    const { serverAppUrl } = await import("@/lib/url-helpers");
+    expect(serverAppUrl("/reset")).toBe("https://app.example.com/reset");
+  });
+});

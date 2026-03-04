@@ -134,6 +134,26 @@ describe("executeVaultReset", () => {
     );
   });
 
+  it("resets exactly 23 vault/recovery/lockout/ECDH fields on User", async () => {
+    await executeVaultReset("user-1");
+    const updateData = mockPrismaUser.update.mock.calls[0][0].data;
+    expect(Object.keys(updateData)).toHaveLength(23);
+  });
+
+  it("deletes password shares for the target user", async () => {
+    await executeVaultReset("user-1");
+    expect(mockPrismaPasswordShare.deleteMany).toHaveBeenCalledWith({
+      where: { createdById: "user-1" },
+    });
+  });
+
+  it("deletes folders for the target user", async () => {
+    await executeVaultReset("user-1");
+    expect(mockPrismaFolder.deleteMany).toHaveBeenCalledWith({
+      where: { userId: "user-1" },
+    });
+  });
+
   it("works identically regardless of the caller (self-reset or admin)", async () => {
     // The function takes only targetUserId — no caller context
     const resultA = await executeVaultReset("self-user");

@@ -75,6 +75,9 @@ export async function exportCommand(options: {
 
   // Validate and resolve output path before processing
   const outputPath = options.output ? resolve(options.output) : undefined;
+  if (!outputPath) {
+    output.warn("Decrypted passwords will be printed to stdout.");
+  }
   if (outputPath && existsSync(outputPath) && lstatSync(outputPath).isSymbolicLink()) {
     output.error("Output path is a symlink — refusing to write.");
     return;

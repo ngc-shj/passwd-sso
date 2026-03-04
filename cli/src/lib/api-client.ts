@@ -12,17 +12,9 @@ let cachedExpiresAt: number | null = null;
 
 export function setInsecure(enabled: boolean): void {
   if (enabled) {
-    // Suppress the NODE_TLS warning before setting the env var
-    const origEmit = process.emit.bind(process);
-    process.emit = function (event: string, ...args: unknown[]) {
-      if (
-        event === "warning" &&
-        String((args[0] as { message?: string })?.message ?? "").includes("NODE_TLS_REJECT_UNAUTHORIZED")
-      ) {
-        return false;
-      }
-      return origEmit(event, ...args);
-    } as typeof process.emit;
+    process.stderr.write(
+      "WARNING: TLS certificate verification is disabled. Your credentials may be intercepted.\n",
+    );
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
   }
 }

@@ -154,6 +154,9 @@ function performIdentityAutofill(payload) {
   if (address && payload.address && address instanceof HTMLInputElement) {
     setInputValue(address, payload.address);
   }
+  if (postalCode && payload.postalCode && postalCode instanceof HTMLInputElement) {
+    setInputValue(postalCode, payload.postalCode);
+  }
   if (phone && payload.phone && phone instanceof HTMLInputElement) {
     setInputValue(phone, payload.phone);
   }

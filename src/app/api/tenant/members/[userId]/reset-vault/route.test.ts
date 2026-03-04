@@ -268,7 +268,7 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
           teamId: null,
           targetUserId: TARGET_USER_ID,
           initiatedById: ACTOR_USER_ID,
-          tokenHash: expect.any(String),
+          tokenHash: expect.stringMatching(/^[0-9a-f]{64}$/),
           expiresAt: expect.any(Date),
         }),
       }),

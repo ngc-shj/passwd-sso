@@ -7,7 +7,7 @@
  * Legacy ~/.passwd-sso/ is auto-migrated on first access.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, lstatSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, lstatSync, openSync, writeSync, closeSync, constants as fsConstants } from "node:fs";
 import {
   getConfigDir,
   getDataDir,
@@ -80,15 +80,24 @@ export async function saveToken(token: string): Promise<"keychain" | "file"> {
     return "keychain";
   }
 
-  // File fallback
+  // File fallback — use O_NOFOLLOW to prevent symlink attacks (TOCTOU-safe)
   ensureDataDir();
-  // Verify data dir is not a symlink
   const dataDir = getDataDir();
   const stat = lstatSync(dataDir);
   if (stat.isSymbolicLink()) {
     throw new Error("Data directory is a symlink — refusing to write credentials.");
   }
-  writeFileSync(getCredentialsFilePath(), token, { mode: 0o600 });
+  const credPath = getCredentialsFilePath();
+  const fd = openSync(
+    credPath,
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | (fsConstants.O_NOFOLLOW ?? 0),
+    0o600,
+  );
+  try {
+    writeSync(fd, token);
+  } finally {
+    closeSync(fd);
+  }
   return "file";
 }
 

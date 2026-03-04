@@ -26,7 +26,7 @@ export default function AdminVaultResetPage() {
   // Extract token from URL fragment and immediately remove it
   useEffect(() => {
     const hash = window.location.hash;
-    const match = hash.match(/token=([a-f0-9]+)/);
+    const match = hash.match(/token=([a-f0-9]{64})(?:$|&)/);
     if (match) {
       setToken(match[1]);
       // Remove token from URL and browser history

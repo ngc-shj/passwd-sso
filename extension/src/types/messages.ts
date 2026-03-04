@@ -102,6 +102,7 @@ export interface IdentityAutofillPayload {
   type: "AUTOFILL_IDENTITY_FILL";
   fullName: string;
   address: string;
+  postalCode: string;
   phone: string;
   email: string;
   dateOfBirth: string;

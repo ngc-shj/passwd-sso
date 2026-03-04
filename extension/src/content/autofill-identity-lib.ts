@@ -78,6 +78,10 @@ export function performIdentityAutofill(payload: IdentityAutofillPayload): void 
     setInputValue(fields.address, payload.address);
   }
 
+  if (fields.postalCode && payload.postalCode) {
+    setInputValue(fields.postalCode, payload.postalCode);
+  }
+
   if (fields.phone && payload.phone) {
     setInputValue(fields.phone, payload.phone);
   }
