@@ -15,7 +15,10 @@ export function setInsecure(enabled: boolean): void {
     // Suppress the NODE_TLS warning before setting the env var
     const origEmit = process.emit.bind(process);
     process.emit = function (event: string, ...args: unknown[]) {
-      if (event === "warning" && (args[0] as { name?: string })?.name === "Warning") {
+      if (
+        event === "warning" &&
+        String((args[0] as { message?: string })?.message ?? "").includes("NODE_TLS_REJECT_UNAUTHORIZED")
+      ) {
         return false;
       }
       return origEmit(event, ...args);
@@ -39,6 +42,7 @@ export function setTokenCache(token: string, expiresAt?: string): void {
 
 export function clearTokenCache(): void {
   cachedToken = null;
+  cachedExpiresAt = null;
 }
 
 function getBaseUrl(): string {
@@ -86,7 +90,8 @@ async function refreshToken(): Promise<boolean> {
     if (!res.ok) return false;
 
     const data = (await res.json()) as { token: string; expiresAt: string };
-    if (!data.token) return false;
+    if (typeof data.token !== "string" || !data.token) return false;
+    if (typeof data.expiresAt !== "string" || isNaN(new Date(data.expiresAt).getTime())) return false;
 
     await saveToken(data.token);
     setTokenCache(data.token, data.expiresAt);

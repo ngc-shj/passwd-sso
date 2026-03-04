@@ -27,7 +27,12 @@ interface EntryBlob {
   password?: string;
   url?: string;
   notes?: string;
-  totp?: string;
+  totp?: {
+    secret: string;
+    algorithm?: string;
+    digits?: number;
+    period?: number;
+  };
   [key: string]: unknown;
 }
 
@@ -89,7 +94,7 @@ export async function exportCommand(options: {
     const out = JSON.stringify(decrypted, null, 2);
     if (options.output) {
       const { writeFileSync } = await import("node:fs");
-      writeFileSync(options.output, out, "utf-8");
+      writeFileSync(options.output, out, { encoding: "utf-8", mode: 0o600 });
       output.success(`Exported ${decrypted.length} entries to ${options.output}`);
     } else {
       console.log(out);
@@ -99,14 +104,20 @@ export async function exportCommand(options: {
     const csvRows = [headers.join(",")];
     for (const entry of decrypted) {
       csvRows.push(
-        headers.map((h) => escapeCSV(String(entry[h] ?? ""))).join(","),
+        headers.map((h) => {
+          const val = entry[h];
+          if (h === "totp" && val && typeof val === "object") {
+            return escapeCSV((val as { secret: string }).secret ?? "");
+          }
+          return escapeCSV(String(val ?? ""));
+        }).join(","),
       );
     }
     const csvOut = csvRows.join("\n");
 
     if (options.output) {
       const { writeFileSync } = await import("node:fs");
-      writeFileSync(options.output, csvOut, "utf-8");
+      writeFileSync(options.output, csvOut, { encoding: "utf-8", mode: 0o600 });
       output.success(`Exported ${decrypted.length} entries to ${options.output}`);
     } else {
       console.log(csvOut);

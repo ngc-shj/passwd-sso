@@ -60,7 +60,18 @@ async function readPassphrase(prompt: string): Promise<string> {
       }
     };
 
+    const onEnd = () => {
+      process.stdin.removeListener("data", onData);
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode?.(false);
+      }
+      process.stdin.pause();
+      console.log();
+      resolve(passphrase);
+    };
+
     process.stdin.on("data", onData);
+    process.stdin.on("end", onEnd);
   });
 }
 

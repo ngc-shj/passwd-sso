@@ -44,6 +44,9 @@ function buildAADBytes(
   offset += 1;
 
   for (const encoded of encodedFields) {
+    if (encoded.length > 0xffff) {
+      throw new Error(`AAD field too long: ${encoded.length} bytes (max 65535)`);
+    }
     view.setUint16(offset, encoded.length, false);
     offset += 2;
     bytes.set(encoded, offset);

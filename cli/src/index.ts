@@ -19,7 +19,7 @@ import { totpCommand } from "./commands/totp.js";
 import { exportCommand } from "./commands/export.js";
 import { isUnlocked, lockVault } from "./lib/vault-state.js";
 import { clearPendingClipboard } from "./lib/clipboard.js";
-import { setInsecure, startBackgroundRefresh, stopBackgroundRefresh } from "./lib/api-client.js";
+import { setInsecure, clearTokenCache, startBackgroundRefresh, stopBackgroundRefresh } from "./lib/api-client.js";
 import * as output from "./lib/output.js";
 
 const program = new Command();
@@ -159,6 +159,7 @@ async function interactiveMode(): Promise<void> {
         case "quit":
           stopBackgroundRefresh();
           lockVault();
+          clearTokenCache();
           clearPendingClipboard();
           output.success("Vault locked.");
           rl.close();
@@ -188,4 +189,11 @@ Commands:
 
     rl.prompt();
   }
+
+  // EOF (Ctrl+D) — cleanup
+  stopBackgroundRefresh();
+  lockVault();
+  clearTokenCache();
+  clearPendingClipboard();
+  output.success("Vault locked.");
 }
